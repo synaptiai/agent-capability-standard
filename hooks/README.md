@@ -9,7 +9,7 @@ These hooks directly implement capabilities defined in the standard's VERIFY lay
 | Hook | Capability | Purpose |
 |------|------------|---------|
 | `pretooluse_require_checkpoint.sh` | `checkpoint` | Require checkpoint marker before mutation operations |
-| `posttooluse_log_tool.sh` | `audit` | Log tool usage for audit trail and provenance |
+| `posttooluse_log_tool.sh` | `audit` | Log every tool call for audit trail and provenance |
 
 ## How Hooks Work
 
@@ -18,7 +18,7 @@ These hooks directly implement capabilities defined in the standard's VERIFY lay
 title: One tool call through the two hooks
 ---
 flowchart TB
-  accDescr: Claude Code passes each tool call as JSON on stdin to the pre-tool-use hook; exit 0 lets the tool run, exit 2 blocks it with the reason shown to Claude, and any other non-zero exit is a non-blocking error after which the tool still runs; after the tool runs, the post-tool-use hook logs it.
+  accDescr: Claude Code passes each tool call as JSON on stdin to the pre-tool-use hook; exit 0 lets the tool run, exit 2 blocks it with the reason shown to Claude, and any other non-zero exit is a non-blocking error after which the tool still runs; after the tool runs, whether it succeeded or failed, the post-tool-use hook logs it.
   call[Tool call from Claude Code] -->|JSON on stdin| pre[Pre-tool-use hook]
   pre -->|exit 0| run[The tool runs]
   pre -->|other non-zero exit: non-blocking error| run
@@ -32,7 +32,8 @@ flowchart TB
 Run **before** a tool executes and can block operations. Claude Code passes
 the tool call as JSON on stdin; exit 0 allows the call, and exit 2 blocks it,
 with the reason on stderr shown to Claude (any other non-zero exit is a
-non-blocking error, so the tool would still run).
+non-blocking error, so the tool would still run). The reason opens with the
+Standard's code and name for the refusal, `F501 CHECKPOINT_REQUIRED:`.
 
 ```bash
 echo '{"tool_name": "Write", "tool_input": {"file_path": "a.py"}}' \
@@ -42,11 +43,13 @@ echo '{"tool_name": "Write", "tool_input": {"file_path": "a.py"}}' \
 
 ### Post-Tool-Use Hooks
 
-Run **after** a tool executes for logging and audit. The tool call arrives as
-JSON on stdin.
+Run **after** a tool executes for logging and audit. Claude Code fires
+`PostToolUse` after a call that succeeded and `PostToolUseFailure` after one
+that failed; the audit hook is registered for both, for every tool. The tool
+call arrives as JSON on stdin.
 
 ```bash
-echo '{"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}' \
+echo '{"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}' \
   | ./posttooluse_log_tool.sh
 ```
 
@@ -70,7 +73,18 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
     ],
     "PostToolUse": [
       {
-        "matcher": "Skill",
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -84,7 +98,7 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
 ```
 
 Each hook entry specifies:
-- **matcher**: Regex pattern matching tool names that trigger the hook
+- **matcher**: Regex pattern matching tool names that trigger the hook (`*` matches every tool)
 - **hooks**: Array of hook commands to execute
 - **type**: Hook type (`command` for shell scripts)
 - **command**: Path to the hook script (`${CLAUDE_PLUGIN_ROOT}` resolves to the plugin directory)
@@ -93,7 +107,7 @@ Each hook entry specifies:
 
 The `pretooluse_require_checkpoint.sh` hook enforces the `checkpoint` capability requirement:
 - Expects a marker file at `.claude/checkpoint.ok` before allowing mutation operations: every `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` call (it fails closed: a shell command is not trusted to be read-only). The marker is written outside these tools, by `CheckpointTracker` or by a person
-- Blocks with exit code 2 and the reason on stderr
+- Blocks with exit code 2 and the reason on stderr, which opens with `F501 CHECKPOINT_REQUIRED:` (the code and name the Standard gives a mutation without a checkpoint)
 - Validates marker contains JSON with checkpoint ID, creation time, and expiry (SEC-001)
 - Rejects stale markers that have expired (default: 30 minutes)
 - Rejects symlinks to prevent bypass attacks (SEC-006)
@@ -126,11 +140,43 @@ manages this marker file, bridging the shell and Python safety layers.
 ## Audit Trail
 
 The `posttooluse_log_tool.sh` hook implements the `audit` capability:
-- Logs each Skill invocation (the PostToolUse matcher is `Skill`) as JSON with timestamps
+- Logs every tool call that ran, one JSON line per call in `.claude/audit.log` (the `PostToolUse` and `PostToolUseFailure` matchers are `*`). A call that a pre-tool-use hook or a permission rule refused did not run and is not logged
+- Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
 - Each entry includes the HMAC of the previous entry, creating a hash chain
-- Records what was executed for provenance tracking
-- Enables post-hoc analysis of agent behavior
+- Serializes concurrent runs (tool calls made in parallel) with `flock`, or with a lock directory where `flock` is not installed, so the chain stays in order
+- Needs `jq` to read the tool call; without it nothing is logged and the hook exits 0, so no error is reported
+
+Each entry holds these fields:
+
+| Field | Value |
+|-------|-------|
+| `ts` | Time of the entry, ISO 8601 in UTC |
+| `event` | `PostToolUse` (the call succeeded) or `PostToolUseFailure` (it failed) |
+| `tool` | Tool name |
+| `skill` | Skill name, on a `Skill` call only |
+| `input_sha256` | SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (none of `sha256sum`, `shasum` and `openssl` is installed, or the one used fails); the entry is written either way |
+| `prev_hmac` | HMAC of the previous entry, empty on the first |
+| `hmac` | HMAC of this entry's other fields |
+
+A `Skill` call with the input `{"skill": "checkpoint"}`, logged with `AUDIT_HMAC_KEY=example-key`:
+
+```json
+{"ts":"2026-01-30T12:00:00Z","event":"PostToolUse","tool":"Skill","skill":"checkpoint","input_sha256":"a69e8f80ec2830e5006e68ce275a5077f299455c58def8f4d12762083815e11a","prev_hmac":"","hmac":"c8e3958eb21f82334d55b1c9c6d7d4a887ea8857fdd925573a67ca083203e19c"}
+```
+
+A reader who holds a tool input can confirm it against `input_sha256`. The
+digest is not a way to keep a short or guessable input secret: such an input
+can be found by trying candidates. The digest is taken over the text jq
+prints, and jq 1.6 and 1.7 print some numbers differently (jq 1.7 keeps
+`1.000` as written, jq 1.6 prints `1`), so an input that holds such a number
+is confirmed with the jq version that wrote the log.
+
+A log begun before the hook logged every tool call opens with entries of the
+earlier form (`ts`, `skill`, `args`, `prev_hmac`, `hmac`, for `Skill` calls
+only). The chain continues across the change and the verifier accepts both
+forms; the earlier entries still hold the skill arguments they were written
+with.
 
 
 ```mermaid
@@ -149,6 +195,17 @@ python tools/verify_audit_log.py
 ```
 
 Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable.
+
+## Hooks in Skill Frontmatter
+
+Six skills (`audit`, `checkpoint`, `persist`, `rollback`, `send`, `transform`)
+declare hooks of their own in the frontmatter of their `SKILL.md`. Claude Code
+registers them when the skill is invoked. Their command hooks follow the same
+contract as the hooks here: the tool call as JSON on stdin, exit 2 to block
+with the reason on stderr, and a digest in place of the tool input in what
+they log. [SECURITY.md §5.4](../spec/SECURITY.md#54-checks-enforced-by-code-and-checks-a-model-judges)
+lists which of the plugin's and the skills' checks are enforced by code and
+which are prompts a model judges.
 
 ## Relationship to Spec
 

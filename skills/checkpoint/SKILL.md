@@ -15,7 +15,7 @@ hooks:
           prompt: |
             CHECKPOINT CREATION VALIDATION
 
-            Checkpoint command: {{tool_input.command}}
+            The tool call follows this prompt as JSON; the checkpoint command is tool_input.command.
 
             Verify checkpoint creation is appropriate:
             1. Scope includes all files that will be mutated
@@ -23,8 +23,8 @@ hooks:
             3. Checkpoint reason is documented
             4. Checkpoint type matches the operation (git_stash, file_backup, etc.)
 
-            Reply ALLOW to create checkpoint.
-            Reply BLOCK if:
+            Return ok: true to create checkpoint.
+            Return ok: false, with the reason, if:
             - Scope is incomplete (missing files)
             - Sensitive data would be captured
             - Checkpoint storage location is invalid
@@ -34,18 +34,24 @@ hooks:
       hooks:
         - type: command
           command: |
-            # Log checkpoint creation for audit trail
-            mkdir -p .checkpoints .audit 2>/dev/null || true
-            echo "[CHECKPOINT] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Command: {{tool_input.command}} | Exit: {{tool_output.exit_code}}" >> .audit/checkpoint-operations.log
-            # Record checkpoint metadata
-            if [ "{{tool_output.exit_code}}" = "0" ]; then
-              echo "$(date -u +%Y-%m-%dT%H:%M:%SZ): Checkpoint created successfully" >> .checkpoints/checkpoint-manifest.log
-            fi
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
+            mkdir -p .audit 2>/dev/null || true
+            echo "[CHECKPOINT] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Bash | input_sha256: ${DIGEST:-unavailable}" >> .audit/checkpoint-operations.log 2>/dev/null || true
     - matcher: "Edit"
       hooks:
         - type: command
           command: |
-            echo "[CHECKPOINT] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Manifest updated: {{tool_input.file_path}}" >> .audit/checkpoint-operations.log 2>/dev/null || true
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
+            mkdir -p .audit 2>/dev/null || true
+            echo "[CHECKPOINT] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Edit | input_sha256: ${DIGEST:-unavailable}" >> .audit/checkpoint-operations.log 2>/dev/null || true
 ---
 
 ## Intent

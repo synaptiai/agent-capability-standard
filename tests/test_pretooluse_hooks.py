@@ -513,6 +513,7 @@ class TestShellPreToolUseHookStdin:
             {"tool_name": tool, "tool_input": {"file_path": "a.py"}}, tmp_path
         )
         assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
         assert "missing checkpoint marker" in result.stderr.lower()
         assert result.stdout == ""
 
@@ -522,7 +523,7 @@ class TestShellPreToolUseHookStdin:
             tmp_path,
         )
         assert result.returncode == 2
-        assert "blocked" in result.stderr.lower()
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
 
     def test_blocks_every_bash_call_without_marker(self, tmp_path: Path):
         """A command is not trusted to be read-only: the hook fails closed."""
@@ -544,6 +545,7 @@ class TestShellPreToolUseHookStdin:
             {"tool_name": "Edit", "tool_input": {"file_path": "a.py"}}, tmp_path
         )
         assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
         assert "expired" in result.stderr.lower()
         assert not (tmp_path / ".claude" / "checkpoint.ok").exists()
 

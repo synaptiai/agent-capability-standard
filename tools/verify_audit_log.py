@@ -6,6 +6,12 @@ Reads .claude/audit.log and verifies that:
 2. Each entry's HMAC matches its content
 3. Each entry's prev_hmac matches the previous entry's HMAC (chain integrity)
 
+The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call:
+ts, event, tool, skill (on a Skill call), input_sha256, prev_hmac, hmac. Before
+the hook logged every tool call it wrote ts, skill, args, prev_hmac, hmac for
+Skill calls only; a log that begins with such entries still verifies, because
+the HMAC is taken over every field but ``hmac`` in the order recorded.
+
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
 
@@ -23,7 +29,12 @@ import socket
 import sys
 from pathlib import Path
 
-REQUIRED_FIELDS = {"ts", "skill", "args", "prev_hmac", "hmac"}
+# Every entry carries the chain fields. An entry names either a tool call
+# (what the hook writes) or, in a log begun before the hook logged every tool
+# call, a skill and its arguments.
+CHAIN_FIELDS = {"ts", "prev_hmac", "hmac"}
+CALL_FIELDS = {"event", "tool", "input_sha256"}
+LEGACY_FIELDS = {"skill", "args"}
 
 
 def get_default_hmac_key() -> str:
@@ -52,9 +63,12 @@ def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[st
     errors: list[str] = []
 
     # Check required fields
-    missing = REQUIRED_FIELDS - set(entry.keys())
+    keys = set(entry.keys())
+    missing = CHAIN_FIELDS - keys
+    if (CALL_FIELDS - keys) and (LEGACY_FIELDS - keys):
+        missing |= CALL_FIELDS - keys
     if missing:
-        errors.append(f"Missing fields: {missing}")
+        errors.append(f"Missing fields: {sorted(missing)}")
         return errors
 
     # Check chain linkage
@@ -64,14 +78,13 @@ def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[st
             f"but expected={expected_prev_hmac!r}"
         )
 
-    # Reconstruct content in compact format matching jq -c output
-    content_dict = {
-        "ts": entry["ts"],
-        "skill": entry["skill"],
-        "args": entry["args"],
-        "prev_hmac": entry["prev_hmac"],
-    }
-    content = json.dumps(content_dict, separators=(",", ":"), sort_keys=False)
+    # Reconstruct the content the hook signed: every field but `hmac`, in the
+    # order recorded, as jq -c prints it: compact, non-ASCII text as is, and
+    # DEL (U+007F) escaped, which json.dumps leaves as is
+    content_dict = {key: value for key, value in entry.items() if key != "hmac"}
+    content = json.dumps(
+        content_dict, separators=(",", ":"), sort_keys=False, ensure_ascii=False
+    ).replace("\x7f", "\\u007f")
 
     # Verify HMAC
     expected_hmac = compute_hmac(content, hmac_key)

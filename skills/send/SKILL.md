@@ -15,7 +15,7 @@ hooks:
           prompt: |
             OUTBOUND COMMUNICATION SAFETY CHECK
 
-            Command: {{tool_input.command}}
+            The tool call follows this prompt as JSON; the command is tool_input.command.
 
             This skill sends data to external systems. Verify:
             1. Destination is in the approved allowlist
@@ -26,16 +26,19 @@ hooks:
 
             CRITICAL: External sends are IRREVERSIBLE.
 
-            Reply ALLOW only if ALL conditions are verified.
-            Reply BLOCK with specific violation if any check fails.
+            Return ok: true only if ALL conditions are verified.
+            Return ok: false, with the specific violation as the reason, if any check fails.
           once: false
         - type: command
           command: |
-            # Block if trying to send to localhost or internal networks without approval
-            CMD="{{tool_input.command}}"
-            if echo "$CMD" | grep -qE "(curl|wget|http)" && echo "$CMD" | grep -qE "(127\.0\.0\.1|localhost|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01]))"; then
-              echo "BLOCK: Internal network access requires explicit approval"
-              exit 1
+            # Block a request to localhost or a private IPv4 address. Claude Code
+            # passes the tool call as JSON on stdin; exit 2 blocks the call and the
+            # reason on stderr is shown to Claude. A call that cannot be read is blocked.
+            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "BLOCK: cannot read the tool call (jq is required)" >&2; exit 2; }
+            ADDR='(localhost|127\.0\.0\.1|10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)'
+            if printf '%s\n' "$CMD" | grep -qE "(curl|wget|http)" && printf '%s\n' "$CMD" | grep -qE "(^|[^0-9A-Za-z.-])${ADDR}([^0-9A-Za-z.-]|\$)"; then
+              echo "BLOCK: Internal network access requires explicit approval" >&2
+              exit 2
             fi
             exit 0
   PostToolUse:
@@ -43,7 +46,13 @@ hooks:
       hooks:
         - type: command
           command: |
-            echo "[SEND] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Command: {{tool_input.command}} | Status: {{tool_output.exit_code}}" >> .audit/send-operations.log 2>/dev/null || true
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
+            mkdir -p .audit 2>/dev/null || true
+            echo "[SEND] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Bash | input_sha256: ${DIGEST:-unavailable}" >> .audit/send-operations.log 2>/dev/null || true
 ---
 
 ## Intent

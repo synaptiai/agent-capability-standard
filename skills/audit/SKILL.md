@@ -13,16 +13,24 @@ hooks:
       hooks:
         - type: command
           command: |
-            # Record audit data access for meta-audit
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
             mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-READ] $(date -u +%Y-%m-%dT%H:%M:%SZ) | File: {{tool_input.file_path}} | Accessed for audit" >> .audit/audit-meta.log
+            echo "[AUDIT-READ] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Read | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
     - matcher: "Grep"
       hooks:
         - type: command
           command: |
-            # Record audit search operations
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
             mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-SEARCH] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Pattern: {{tool_input.pattern}} | Searched for audit" >> .audit/audit-meta.log
+            echo "[AUDIT-SEARCH] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Grep | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
 ---
 
 ## Live Context

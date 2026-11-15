@@ -10,6 +10,10 @@
 #   0  allow the tool call
 #   2  block it; the reason on stderr is shown to Claude
 #
+# The reason opens with the Standard's code and name for the refusal,
+# "F501 CHECKPOINT_REQUIRED:" (STANDARD §9.6), so a reader of the text alone
+# can tell which rule refused the call.
+#
 # The marker file (.claude/checkpoint.ok) must contain a JSON object with:
 #   { "checkpoint_id": "...", "created_at": <unix_timestamp>, "expires_at": <unix_timestamp> }
 #
@@ -29,7 +33,7 @@ else
 fi
 
 block() {
-  echo "Blocked: $1" >&2
+  echo "F501 CHECKPOINT_REQUIRED: $1" >&2
   exit 2
 }
 

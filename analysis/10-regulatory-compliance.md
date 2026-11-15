@@ -87,7 +87,7 @@ The framework implements a multi-layered audit and provenance system:
 
 1. **EvidenceStore** (`grounded_agency/state/evidence_store.py`): Captures every tool execution as an `EvidenceAnchor` with structured metadata including reference strings, evidence kind (`tool_output`, `file`, `command`, `mutation`), ISO-8601 timestamps, and sanitized metadata with injection protection.
 
-2. **Audit Log Hook** (`hooks/hooks.json`): A `PostToolUse` hook on all `Skill` invocations routes through `posttooluse_log_tool.sh`, creating a persistent audit trail in `.claude/audit.log` with timestamps for every skill invocation.
+2. **Audit Log Hook** (`hooks/hooks.json`): A `PostToolUse` and a `PostToolUseFailure` hook on every tool call route through `posttooluse_log_tool.sh`, creating a persistent audit trail in `.claude/audit.log` with a timestamp for every tool call.
 
 3. **ProvenanceRecord** (defined in `schemas/world_state_schema.yaml`): A first-class schema type that links every claim to:
    - `claim_id`: Unique identifier for the assertion
@@ -105,7 +105,7 @@ The framework implements a multi-layered audit and provenance system:
 | Feature | EU AI Act | NIST AI RMF | ISO 42001 |
 |---------|-----------|-------------|-----------|
 | EvidenceStore with timestamped anchors | Art. 12 (record-keeping) | Measure (quantify through evidence) | Clause 9 (performance evaluation) |
-| Audit log of skill invocations | Art. 12 (automatic logging) | Govern (accountability structures) | Clause 9.2 (internal audit) |
+| Audit log of tool calls | Art. 12 (automatic logging) | Govern (accountability structures) | Clause 9.2 (internal audit) |
 | ProvenanceRecord linking claims to agents | Art. 13 (transparency) | Map (identify system components) | Clause 7.5 (documented information) |
 | Immutable observations (append-only) | Art. 15 (robustness) | Manage (maintain integrity) | Clause 8 (operational control) |
 

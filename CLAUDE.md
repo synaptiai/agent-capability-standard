@@ -259,7 +259,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 
 Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by category). Each skill has:
 
-- YAML frontmatter with `name`, `description`, `allowed-tools`, `agent` type, and `layer`
+- YAML frontmatter with `name`, `description`, `allowed-tools` and `agent` type (`layer` is in 13 of the 42 skills; the ontology gives every capability's layer, see `skills/README.md`)
 - Intent and success criteria
 - Input/output contracts with `domain` parameter for specialization
 - Procedure steps with evidence grounding
@@ -279,7 +279,7 @@ The 36-capability model uses **domain parameters** instead of domain-specific va
 
 The plugin enforces safety through Claude Code hooks:
 - **PreToolUse (Write|Edit|MultiEdit|NotebookEdit|Bash)**: Requires checkpoint marker before mutations
-- **PostToolUse (Skill)**: Logs skill invocations to `.claude/audit.log`
+- **PostToolUse and PostToolUseFailure (every tool)**: Log every tool call to `.claude/audit.log`: time, event, tool, the skill name on a `Skill` call, and a SHA-256 digest of the input in place of the input; each line is HMAC-chained (`tools/verify_audit_log.py` checks the chain)
 
 ### Ontology Edge Types
 

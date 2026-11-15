@@ -12,6 +12,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add tools/ to import path for the verifier module
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from verify_audit_log import compute_hmac, verify_entry, verify_log  # noqa: E402
@@ -19,28 +21,74 @@ from verify_audit_log import compute_hmac, verify_entry, verify_log  # noqa: E40
 HMAC_KEY = "test-key-for-verification"
 
 
+def sign(content_dict: dict, hmac_key: str = HMAC_KEY) -> dict:
+    """Add the HMAC the hook computes: over the compact JSON of the content."""
+    content = json.dumps(
+        content_dict, separators=(",", ":"), sort_keys=False, ensure_ascii=False
+    )
+    return {**content_dict, "hmac": compute_hmac(content, hmac_key)}
+
+
 def make_entry(
     skill: str = "test-skill",
-    args: str = "",
+    tool_input: dict | None = None,
     prev_hmac: str = "",
     hmac_key: str = HMAC_KEY,
     ts: str = "2026-01-30T12:00:00Z",
 ) -> dict:
-    """Create a valid audit log entry with correct HMAC."""
+    """Create a valid audit log entry for a Skill call, as the hook writes it."""
+    canonical = json.dumps(
+        tool_input if tool_input is not None else {"skill": skill},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    content_dict = {
+        "ts": ts,
+        "event": "PostToolUse",
+        "tool": "Skill",
+        "skill": skill,
+        "input_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        "prev_hmac": prev_hmac,
+    }
+    return sign(content_dict, hmac_key)
+
+
+def make_tool_entry(
+    tool: str = "Bash",
+    event: str = "PostToolUse",
+    prev_hmac: str = "",
+    ts: str = "2026-01-30T12:00:00Z",
+) -> dict:
+    """Create a valid entry for a call of a tool other than Skill."""
+    content_dict = {
+        "ts": ts,
+        "event": event,
+        "tool": tool,
+        "input_sha256": hashlib.sha256(b'{"command":"ls"}').hexdigest(),
+        "prev_hmac": prev_hmac,
+    }
+    return sign(content_dict)
+
+
+def make_legacy_entry(
+    skill: str = "test-skill",
+    args: str = "",
+    prev_hmac: str = "",
+    ts: str = "2026-01-30T12:00:00Z",
+) -> dict:
+    """An entry as the hook wrote it when it logged Skill calls only."""
     content_dict = {
         "ts": ts,
         "skill": skill,
         "args": args,
         "prev_hmac": prev_hmac,
     }
-    content = json.dumps(content_dict, separators=(",", ":"), sort_keys=False)
-    entry_hmac = compute_hmac(content, hmac_key)
-    return {**content_dict, "hmac": entry_hmac}
+    return sign(content_dict)
 
 
 def write_log(log_path: Path, entries: list[dict]) -> None:
     """Write entries as JSONL to the log file."""
-    lines = [json.dumps(e, separators=(",", ":")) for e in entries]
+    lines = [json.dumps(e, separators=(",", ":"), ensure_ascii=False) for e in entries]
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -71,12 +119,39 @@ class TestVerifyEntry:
         errors = verify_entry(entry, "", HMAC_KEY)
         assert errors == []
 
-    def test_missing_field_detected(self) -> None:
+    def test_tool_entry_passes(self) -> None:
+        """An entry for a tool other than Skill carries no skill name."""
+        entry = make_tool_entry(tool="Bash", event="PostToolUseFailure")
+        assert "skill" not in entry
+        assert verify_entry(entry, "", HMAC_KEY) == []
+
+    @pytest.mark.parametrize(
+        "field", ["ts", "event", "tool", "input_sha256", "prev_hmac", "hmac"]
+    )
+    def test_missing_field_detected(self, field: str) -> None:
         entry = make_entry()
-        del entry["skill"]
+        del entry[field]
         errors = verify_entry(entry, "", HMAC_KEY)
         assert len(errors) == 1
         assert "Missing fields" in errors[0]
+        assert field in errors[0]
+
+    def test_legacy_entry_passes(self) -> None:
+        """An entry written before the hook logged every tool call verifies."""
+        entry = make_legacy_entry(skill="checkpoint", args="--scope *.py")
+        assert verify_entry(entry, "", HMAC_KEY) == []
+
+    def test_legacy_entry_missing_field_detected(self) -> None:
+        entry = make_legacy_entry()
+        del entry["args"]
+        errors = verify_entry(entry, "", HMAC_KEY)
+        assert len(errors) == 1
+        assert "Missing fields" in errors[0]
+
+    def test_non_ascii_name_passes(self) -> None:
+        """The hook signs names as jq prints them: non-ASCII text as is."""
+        entry = make_entry(skill="prüfen")
+        assert verify_entry(entry, "", HMAC_KEY) == []
 
     def test_chain_break_detected(self) -> None:
         entry = make_entry(prev_hmac="")
@@ -92,6 +167,34 @@ class TestVerifyEntry:
     def test_tampered_content_detected(self) -> None:
         entry = make_entry(skill="original")
         entry["skill"] = "tampered"
+        errors = verify_entry(entry, "", HMAC_KEY)
+        assert any("HMAC mismatch" in e for e in errors)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("tool", "Read"),
+            ("event", "PostToolUseFailure"),
+            ("input_sha256", "0" * 64),
+            ("ts", "2026-01-31T00:00:00Z"),
+        ],
+    )
+    def test_tampered_call_fields_detected(self, field: str, value: str) -> None:
+        entry = make_tool_entry()
+        entry[field] = value
+        errors = verify_entry(entry, "", HMAC_KEY)
+        assert any("HMAC mismatch" in e for e in errors)
+
+    def test_added_field_detected(self) -> None:
+        """Every field but hmac is signed, so an added one breaks the HMAC."""
+        entry = make_tool_entry()
+        tampered = {"note": "approved", **entry}
+        errors = verify_entry(tampered, "", HMAC_KEY)
+        assert any("HMAC mismatch" in e for e in errors)
+
+    def test_removed_skill_name_detected(self) -> None:
+        entry = make_entry(skill="send")
+        del entry["skill"]
         errors = verify_entry(entry, "", HMAC_KEY)
         assert any("HMAC mismatch" in e for e in errors)
 
@@ -112,6 +215,39 @@ class TestVerifyLog:
         assert total == 2
         assert valid == 2
         assert errors == []
+
+    def test_mixed_tools_chain_passes(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "audit.log"
+        e1 = make_tool_entry(tool="Bash")
+        e2 = make_entry(skill="checkpoint", prev_hmac=e1["hmac"])
+        e3 = make_tool_entry(
+            tool="Read", event="PostToolUseFailure", prev_hmac=e2["hmac"]
+        )
+        write_log(log_path, [e1, e2, e3])
+        assert verify_log(log_path, HMAC_KEY) == (3, 3, [])
+
+    def test_chain_continues_from_legacy_entries(self, tmp_path: Path) -> None:
+        """A log begun in the earlier format and continued in this one verifies."""
+        log_path = tmp_path / "audit.log"
+        e1 = make_legacy_entry(skill="first")
+        e2 = make_legacy_entry(skill="second", prev_hmac=e1["hmac"])
+        e3 = make_tool_entry(tool="Bash", prev_hmac=e2["hmac"])
+        e4 = make_entry(skill="verify", prev_hmac=e3["hmac"])
+        write_log(log_path, [e1, e2, e3, e4])
+        assert verify_log(log_path, HMAC_KEY) == (4, 4, [])
+
+    def test_readme_example_entry_verifies(self, tmp_path: Path) -> None:
+        """The entry hooks/README.md shows is one the hook would write."""
+        readme = Path(__file__).resolve().parents[1] / "hooks" / "README.md"
+        lines = readme.read_text(encoding="utf-8").splitlines()
+        (example,) = [line for line in lines if line.startswith('{"ts":')]
+        log_path = tmp_path / "audit.log"
+        log_path.write_text(example + "\n", encoding="utf-8")
+        assert verify_log(log_path, "example-key") == (1, 1, [])
+
+        entry = json.loads(example)
+        canonical = json.dumps({"skill": "checkpoint"}, separators=(",", ":"))
+        assert entry["input_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
 
     def test_missing_file_returns_error(self, tmp_path: Path) -> None:
         log_path = tmp_path / "nonexistent.log"
