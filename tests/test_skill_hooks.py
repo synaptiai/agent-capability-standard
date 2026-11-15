@@ -136,29 +136,45 @@ class TestFrontmatterHooks:
         )
         assert declared == SKILLS_WITH_HOOKS
 
-    def test_security_md_says_what_enforces_each_check(self) -> None:
-        """SECURITY.md §5.4 has one row for each hook that can refuse a call.
+    def test_security_md_maps_every_hook(self) -> None:
+        """SECURITY.md §5.4 maps every condition of the skills' hooks to the
+        Standard's check it implements, or marks it a model-judged addition
+        (STANDARD 1.2.0 §5.18.10).
 
-        The row says whether code or a model decides: a command hook is code,
-        a prompt hook is a model's judgement.
+        Every pre-tool-use hook has at least one row, and each row of a
+        command hook says code enforces it; every row cites a section of
+        the Standard or says it is a model-judged addition.
         """
         text = SECURITY_MD.read_text(encoding="utf-8")
         start = text.index("### 5.4 ")
-        section = text[start : text.index("\n## 6. ", start)]
-        rows = [line for line in section.splitlines() if line.startswith("| ")]
-        kinds = {
-            "command": ("command hook", "Code: blocks the call"),
-            "prompt": ("prompt hook", "A model judges"),
-        }
-
+        section = text[start : text.index("### 5.5 ", start)]
+        rows = [
+            [cell.strip() for cell in line.strip("|").split("|")]
+            for line in section.splitlines()
+            if line.startswith("| `skills/")
+        ]
+        assert rows
+        for hook, condition, standard, enforced_by in rows:
+            assert condition and enforced_by, hook
+            assert "§5.18" in standard or standard.startswith(
+                "Model-judged addition"
+            ), (
+                hook,
+                condition,
+            )
+        kinds = {"command": "command hook", "prompt": "prompt hook"}
         for skill in SKILLS_WITH_HOOKS:
             for group in frontmatter(skill)["hooks"].get("PreToolUse", []):
                 for hook in group["hooks"]:
-                    kind, enforced_by = kinds[hook["type"]]
-                    where = f"`skills/{skill}/SKILL.md`, {kind} on `{group['matcher']}`"
-                    matching = [row for row in rows if where in row]
-                    assert len(matching) == 1, f"SECURITY.md §5.4: no row for {where}"
-                    assert matching[0].rstrip(" |").endswith(enforced_by), where
+                    where = (
+                        f"`skills/{skill}/SKILL.md`, {kinds[hook['type']]} on "
+                        f"`{group['matcher']}`"
+                    )
+                    matching = [row for row in rows if row[0].startswith(where)]
+                    assert matching, f"SECURITY.md §5.4: no row for {where}"
+                    if hook["type"] == "command":
+                        for row in matching:
+                            assert row[3].startswith("Code"), where
 
     @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
     @pytest.mark.parametrize(
@@ -567,3 +583,41 @@ def test_skill_log_digest_matches_the_plugin_audit_log(tmp_path: Path) -> None:
 
     assert entry["input_sha256"] == input_digest(TOOL_INPUTS["Bash"])
     assert f"input_sha256: {entry['input_sha256']}" in skill_line
+
+
+class TestPromptHooksAreModelJudgedAdditions:
+    """STANDARD 1.2.0 §5.18.10: a check the Standard requires is decided by
+    code; a prompt hook keeps only model-judged additions."""
+
+    OPENING = "Model-judged additions (STANDARD 1.2.0 §5.18.10)"
+
+    @pytest.mark.parametrize("skill", SKILLS_WITH_HOOKS)
+    def test_every_prompt_hook_opens_with_the_model_judged_line(
+        self, skill: str
+    ) -> None:
+        for event in ("PreToolUse", "PostToolUse"):
+            for hook in hooks_of(skill, event, "prompt"):
+                assert hook["prompt"].startswith(self.OPENING), skill
+
+    @pytest.mark.parametrize(
+        ("skill", "removed"),
+        [
+            ("send", ["explicitly approved", "Checkpoint exists", "Rate limits"]),
+            ("rollback", ["has not expired", "exists and is valid"]),
+        ],
+    )
+    def test_code_decided_conditions_are_gone(
+        self, skill: str, removed: list[str]
+    ) -> None:
+        (hook,) = hooks_of(skill, "PreToolUse", "prompt")
+        conditions = hook["prompt"].split("\n\n", 1)[1]
+        for phrase in removed:
+            assert phrase.lower() not in conditions.lower(), (skill, phrase)
+
+    def test_no_skill_writes_the_checkpoint_marker(self) -> None:
+        """The marker is the safety layer's own record: a skill takes a
+        checkpoint with a state-saving command (§5.18.6) instead."""
+        for path in SKILLS_DIR.glob("*/SKILL.md"):
+            text = path.read_text(encoding="utf-8")
+            assert "Create `.claude/checkpoint.ok`" not in text, path
+            assert "Create checkpoint marker" not in text, path

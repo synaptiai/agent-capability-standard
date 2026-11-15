@@ -1,35 +1,65 @@
 #!/usr/bin/env bash
-# Require a valid, non-stale checkpoint marker before mutation commands.
+# Apply the checkpoint and approval rules of STANDARD 1.2.0 §5.18 to the tool
+# calls Claude Code routes here (hooks.json: Write, Edit, MultiEdit,
+# NotebookEdit and Bash), as a PreToolUse command hook.
 #
-# Claude Code runs this as a PreToolUse command hook (see hooks.json) and
-# passes the tool call as JSON on stdin: {"tool_name": ..., "tool_input": ...}.
-# For manual use and older callers, a payload given as the first argument is
-# read instead of stdin.
+# Claude Code passes the tool call as a JSON object on stdin:
+# {"tool_name", "tool_input", "permission_mode", "tool_use_id", ...}. For manual
+# use, a payload given as the first argument is read instead. Only that JSON
+# object is read: anything else, or a system without jq, is blocked with
+# R407 SAFETY_CHECK_FAILED.
 #
 # Exit codes follow Claude Code's hook contract:
-#   0  allow the tool call
+#   0  allow the tool call (with an "ask" decision on stdout for a gated call)
 #   2  block it; the reason on stderr is shown to Claude
 #
-# The reason opens with the Standard's code and name for the refusal,
-# "F501 CHECKPOINT_REQUIRED:" (STANDARD §9.6), so a reader of the text alone
-# can tell which rule refused the call.
+# Each reason opens with the Standard's code and name (§9.8), for example
+# "F501 CHECKPOINT_REQUIRED: ...".
 #
-# The marker file (.claude/checkpoint.ok) must contain a JSON object with:
-#   { "checkpoint_id": "...", "created_at": <unix_timestamp>, "expires_at": <unix_timestamp> }
+# Classification (§5.18.3). The read-only list and the git stash table are a
+# subset of the SDK mapper's (grounded_agency/capabilities/mapper.py:
+# _READ_ONLY_COMMANDS, _GIT_STASH_CLASSES, _writes); a test keeps them so.
+#   - Write, Edit, MultiEdit, NotebookEdit: mutate.
+#   - Bash: a command with any of ; & | < > $ ` ( ) { } \ or a line break may
+#     be more than one simple command or expand something: mutate. Otherwise
+#     its words are read as exactly one simple command:
+#       - an option that writes (git --output..., file -C / --compile): mutate;
+#       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
+#         writes the marker once it succeeded); git stash list|show: observe;
+#         git stash pop|apply: rollback; any other git stash form: mutate;
+#       - a command on READ_ONLY: observe (allowed, nothing used);
+#       - anything else: mutate.
 #
-# This hook validates:
-#   1. The marker file exists and is a regular file (not a symlink)
-#   2. The marker is a JSON object with a checkpoint_id and a numeric expires_at
-#   3. The checkpoint has not expired
-# Without jq it checks only that the marker is under 30 minutes old.
+# Rules.
+#   - rollback: allowed when a checkpoint was ever taken in the project (the
+#     marker exists, or .claude/checkpoints/used/ holds one); otherwise
+#     F503 ROLLBACK_FAILED. A rollback uses no checkpoint.
+#   - mutate: the marker (.claude/checkpoint.ok, a JSON object with
+#     checkpoint_id, created_at, expires_at) must exist, be a regular file and
+#     not have expired (F501 CHECKPOINT_REQUIRED). Unless ACS_HOOK_APPROVAL is
+#     "off", the permission mode must be one that puts the call to a person,
+#     default, acceptEdits or plan (F502 APPROVAL_REQUIRED otherwise, with the
+#     marker left in place). Then the call takes the marker: it is renamed
+#     into .claude/checkpoints/used/, atomically, so two calls never both pass
+#     on one marker (F501 for the one that loses). Unless ACS_HOOK_APPROVAL is
+#     "off", the hook then answers permissionDecision "ask" with an F502
+#     reason, so Claude Code puts the call to the person.
 #
 # It fails closed: Claude Code treats any exit code other than 2 as a
-# non-blocking error and runs the call, so an unexpected failure of a command
-# here blocks the call instead of exiting with that command's status.
+# non-blocking error and runs the call, so an unexpected failure here blocks
+# the call with R407 instead of exiting with that command's status.
+#
+# The plugin's hooks do not claim class SL (spec/SECURITY.md §5.5).
 #
 # SEC-001: Prevents stale checkpoint.ok bypass
 # SEC-006: Uses CLAUDE_PROJECT_DIR for absolute path resolution
 set -euo pipefail
+
+block() {
+  echo "$1" >&2
+  exit 2
+}
+trap 'block "R407 SAFETY_CHECK_FAILED: the checkpoint hook failed at line $LINENO, so the call is blocked."' ERR
 
 if [ "$#" -gt 0 ]; then
   payload="$1"
@@ -37,95 +67,191 @@ else
   payload="$(cat)"
 fi
 
-block() {
-  echo "F501 CHECKPOINT_REQUIRED: $1" >&2
-  exit 2
+unreadable="R407 SAFETY_CHECK_FAILED: cannot read the tool call (a JSON payload and jq are required)"
+if ! command -v jq > /dev/null 2>&1; then
+  block "$unreadable"
+fi
+tool_name=$(printf '%s' "$payload" | jq -r 'if type == "object" then (.tool_name | strings) else error("not an object") end' 2>/dev/null) || tool_name=""
+if [ -z "$tool_name" ]; then
+  block "$unreadable"
+fi
+
+# Commands that only read, unless given an option that writes (writes below).
+# A subset of the SDK mapper's _READ_ONLY_COMMANDS.
+READ_ONLY=(ls cat head tail wc pwd grep stat file du df which whoami uname echo printf "git status" "git log" "git diff" "git show" "git rev-parse" "git ls-files")
+
+# git stash <sub>=<class>, for a line of exactly one command: the mapper's
+# _GIT_STASH_CLASSES. (A plain array: bash 3.2, as macOS ships it, has no
+# associative arrays.)
+GIT_STASH_CLASSES=(create=checkpoint list=observe show=observe pop=rollback apply=rollback)
+
+# Whether one simple command, given as its words, has an option that writes:
+# the mapper's _writes rules for the commands on READ_ONLY.
+writes() {
+  local word
+  if [ "$1" = "git" ]; then
+    for word in "$@"; do
+      if [[ "$word" == --output* ]]; then return 0; fi
+    done
+  elif [ "$1" = "file" ]; then
+    for word in "${@:2}"; do
+      if [ "$word" = "--compile" ]; then return 0; fi
+      if [[ "$word" == -* && "$word" != --* && "${word:1}" == *C* ]]; then return 0; fi
+    done
+  fi
+  return 1
 }
-trap 'block "the checkpoint hook failed at line $LINENO, so the call is blocked."' ERR
 
-# Mutation patterns: tool names, and commands that change files, push data or
-# install software. Matched against the whole payload, so every call of the
-# tools hooks.json routes here (Write, Edit, MultiEdit, NotebookEdit, Bash)
-# needs a checkpoint: a Bash command cannot be shown to be read-only, so it
-# is not trusted to be. The marker itself is written outside these tools
-# (CheckpointTracker, or by a person).
-mutation_re='(Write\b|Edit\b|MultiEdit\b|NotebookEdit\b|Bash\b|Git\b|rm\b|mv\b|sed\b|perl\b|curl\b|docker\b|kubectl\b|scp\b|rsync\b|npm\b|pip\b|chmod\b|chown\b|shred\b|unlink\b|ln\b)'
+classify_bash() {
+  local command="$1" entry
+  local -a words
+  # Trim, then any character that can join or expand commands: mutate.
+  command="${command#"${command%%[![:space:]]*}"}"
+  command="${command%"${command##*[![:space:]]}"}"
+  if [ -z "$command" ] || [[ "$command" == *[\;\&\|\<\>\$\`\(\)\{\}\\]* ]] || [[ "$command" == *$'\n'* ]] || [[ "$command" == *$'\r'* ]]; then
+    echo mutate
+    return
+  fi
+  read -r -a words <<< "$command"
+  if writes "${words[@]}"; then
+    echo mutate
+    return
+  fi
+  if [ "${words[0]}" = "git" ] && [ "${words[1]:-}" = "stash" ]; then
+    for entry in "${GIT_STASH_CLASSES[@]}"; do
+      if [ "${entry%%=*}" = "${words[2]:-}" ]; then
+        echo "${entry#*=}"
+        return
+      fi
+    done
+    echo mutate
+    return
+  fi
+  for entry in "${READ_ONLY[@]}"; do
+    if [ "$entry" = "${words[0]}" ] || [ "$entry" = "${words[0]} ${words[1]:-}" ]; then
+      echo observe
+      return
+    fi
+  done
+  echo mutate
+}
 
-# Only check for mutation commands
-if ! printf '%s' "$payload" | grep -E -i "$mutation_re" >/dev/null 2>&1; then
+case "$tool_name" in
+  Write | Edit | MultiEdit | NotebookEdit)
+    capability=mutate
+    ;;
+  Bash)
+    command=$(printf '%s' "$payload" | jq -r '.tool_input.command | strings' 2>/dev/null) || command=""
+    capability=$(classify_bash "$command")
+    ;;
+  *)
+    # Not routed here by hooks.json: nothing this hook gates.
+    exit 0
+    ;;
+esac
+
+if [ "$capability" = "observe" ] || [ "$capability" = "checkpoint" ]; then
   exit 0
 fi
 
 # SEC-006: Use absolute path via CLAUDE_PROJECT_DIR, fall back to CLAUDE_PLUGIN_ROOT, then pwd
 if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-  marker="${CLAUDE_PROJECT_DIR}/.claude/checkpoint.ok"
+  claude_dir="${CLAUDE_PROJECT_DIR}/.claude"
 elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-  marker="${CLAUDE_PLUGIN_ROOT}/.claude/checkpoint.ok"
+  claude_dir="${CLAUDE_PLUGIN_ROOT}/.claude"
 else
-  marker="$(pwd)/.claude/checkpoint.ok"
+  claude_dir="$(pwd)/.claude"
+fi
+marker="${claude_dir}/checkpoint.ok"
+used_dir="${claude_dir}/checkpoints/used"
+
+if [ "$capability" = "rollback" ]; then
+  if [ -e "$marker" ] || { [ -d "$used_dir" ] && [ -n "$(ls "$used_dir" 2>/dev/null)" ]; }; then
+    exit 0
+  fi
+  block "F503 ROLLBACK_FAILED: no checkpoint was taken in this project; there is nothing to roll back to."
 fi
 
-# Check marker exists
+# mutate: a valid marker for this call alone.
+f501() {
+  block "F501 CHECKPOINT_REQUIRED: $1"
+}
+
 if [ ! -e "$marker" ]; then
-  block "missing checkpoint marker ($marker). Create a checkpoint first."
+  f501 "missing checkpoint marker ($marker). Take a checkpoint first (git stash create); each gated call needs its own."
 fi
 
 # SEC-006: Reject symlinks to prevent bypass via symlink to always-existing file
 if [ -L "$marker" ]; then
-  block "checkpoint marker is a symlink. Remove it and create a proper checkpoint."
+  f501 "checkpoint marker is a symlink. Remove it and take a proper checkpoint."
 fi
 
-# Ensure it is a regular file
 if [ ! -f "$marker" ]; then
-  block "checkpoint marker is not a regular file."
+  f501 "checkpoint marker is not a regular file."
 fi
 
 # SEC-001: Validate timestamp freshness
-# Read marker content — must be valid JSON with expires_at
 content=$(cat "$marker" 2>/dev/null || echo "")
 if [ -z "$content" ]; then
   rm -f "$marker"
-  block "checkpoint marker is empty. Create a new checkpoint."
+  f501 "checkpoint marker is empty. Take a new checkpoint."
 fi
 
-# Check if jq is available for JSON parsing
-if command -v jq &> /dev/null; then
-  # A marker that is not a JSON object (plain text, a string, an array) makes
-  # jq fail: that is a block, like a marker without the fields.
-  if ! checkpoint_id=$(printf '%s' "$content" | jq -r 'if type == "object" then .checkpoint_id // empty else error("not an object") end' 2>/dev/null) \
-    || ! expires_at=$(printf '%s' "$content" | jq -r '.expires_at // empty' 2>/dev/null); then
-    rm -f "$marker"
-    block "checkpoint marker is not a JSON object. Create a new checkpoint."
-  fi
-  if [ -z "$checkpoint_id" ] || [ -z "$expires_at" ]; then
-    rm -f "$marker"
-    block "checkpoint marker missing required fields. Create a new checkpoint."
-  fi
-
-  # Validate expires_at is numeric
-  if ! [[ "$expires_at" =~ ^[0-9]+$ ]]; then
-    rm -f "$marker"
-    block "checkpoint marker has invalid expiry. Create a new checkpoint."
-  fi
-
-  # Compare expiry against current time
-  now=$(date +%s)
-  if [ "$now" -gt "$expires_at" ]; then
-    rm -f "$marker"
-    block "checkpoint has expired. Create a new checkpoint."
-  fi
-else
-  # Fallback: without jq, check file age (max 30 minutes = 1800 seconds)
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    file_age=$(( $(date +%s) - $(stat -f %m "$marker") ))
-  else
-    file_age=$(( $(date +%s) - $(stat -c %Y "$marker") ))
-  fi
-
-  if [ "$file_age" -gt 1800 ]; then
-    rm -f "$marker"
-    block "checkpoint marker is stale (${file_age}s old, max 1800s). Create a new checkpoint."
-  fi
+# A marker that is not a JSON object (plain text, a string, an array) makes jq
+# fail: that is a block, like a marker without the fields.
+if ! checkpoint_id=$(printf '%s' "$content" | jq -r 'if type == "object" then (.checkpoint_id // empty | tostring) else error("not an object") end' 2>/dev/null) \
+  || ! expires_at=$(printf '%s' "$content" | jq -r '.expires_at // empty' 2>/dev/null); then
+  rm -f "$marker"
+  f501 "checkpoint marker is not a JSON object. Take a new checkpoint."
+fi
+if [ -z "$checkpoint_id" ] || [ -z "$expires_at" ]; then
+  rm -f "$marker"
+  f501 "checkpoint marker missing required fields. Take a new checkpoint."
+fi
+if ! [[ "$expires_at" =~ ^[0-9]+$ ]]; then
+  rm -f "$marker"
+  f501 "checkpoint marker has invalid expiry. Take a new checkpoint."
+fi
+now=$(date +%s)
+if [ "$now" -gt "$expires_at" ]; then
+  rm -f "$marker"
+  f501 "checkpoint has expired. Take a new checkpoint."
 fi
 
+# Approval needs a person (§5.18.7): checked before the marker is taken, so a
+# block here uses nothing.
+approval="${ACS_HOOK_APPROVAL:-ask}"
+if [ "$approval" != "off" ]; then
+  mode=$(printf '%s' "$payload" | jq -r '.permission_mode // "default" | if type == "string" then . else "(not a string)" end' 2>/dev/null) || mode="(unreadable)"
+  case "$mode" in
+    default | acceptEdits | plan) ;;
+    *)
+      block "F502 APPROVAL_REQUIRED: permission mode '$mode' does not put this call to a person; set ACS_HOOK_APPROVAL=off to leave approval to Claude Code's permission rules."
+      ;;
+  esac
+fi
+
+# Take the marker: one rename into a directory this run alone created, atomic
+# on one filesystem, so of two calls that both read the marker only one can
+# move it. Then it is filed under used/ (the rollback history). Names are kept
+# to a safe character set, so a marker cannot name a path elsewhere.
+safe() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-120
+}
+call_id=$(printf '%s' "$payload" | jq -r '.tool_use_id // empty | strings' 2>/dev/null) || call_id=""
+call_id="${call_id:-$(date +%s)-$$}"
+mkdir -p "$used_dir"
+claim=$(mktemp -d "${used_dir}/.claim.XXXXXX")
+if ! mv "$marker" "${claim}/marker" 2>/dev/null || [ ! -e "${claim}/marker" ]; then
+  rmdir "$claim" 2>/dev/null || true
+  f501 "the checkpoint marker was taken by another call. Take a new checkpoint."
+fi
+mv "${claim}/marker" "${used_dir}/$(safe "$checkpoint_id").$(safe "$call_id").${claim##*.}"
+rmdir "$claim"
+
+if [ "$approval" != "off" ]; then
+  reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate') requires approval; it runs only if this call is approved."
+  jq -c -n --arg reason "$reason" \
+    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $reason}}'
+fi
 exit 0

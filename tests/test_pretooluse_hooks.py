@@ -554,12 +554,15 @@ class TestShellPreToolUseHookStdin:
         assert result.returncode == 2
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
 
-    def test_blocks_every_bash_call_without_marker(self, tmp_path: Path):
-        """A command is not trusted to be read-only: the hook fails closed."""
+    def test_read_only_bash_needs_no_marker(self, tmp_path: Path):
+        """A command on the read-only list, a subset of the SDK mapper's,
+        is an observe call: allowed without a marker (STANDARD 1.2.0
+        §5.18.3)."""
         result = _run_shell_hook(
             {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}, tmp_path
         )
-        assert result.returncode == 2
+        assert result.returncode == 0
+        assert result.stdout == ""
 
     def test_allows_write_with_valid_marker(self, tmp_path: Path):
         _write_marker(tmp_path)
@@ -597,3 +600,161 @@ class TestShellPreToolUseHookStdin:
             timeout=30,
         )
         assert result.returncode == 2
+
+
+def _gated_hook(
+    tool_call: dict,
+    project_dir: Path,
+    approval: str | None = None,
+    path: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = str(project_dir)
+    env.pop("ACS_HOOK_APPROVAL", None)
+    if approval is not None:
+        env["ACS_HOOK_APPROVAL"] = approval
+    if path is not None:
+        env["PATH"] = path
+    return subprocess.run(
+        ["bash", str(SHELL_HOOK)],
+        input=json.dumps(tool_call),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def _bash(command: str, mode: str = "default", call: str = "b1") -> dict:
+    return {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "permission_mode": mode,
+        "tool_use_id": call,
+    }
+
+
+def _write_call(mode: str = "default", call: str = "w1") -> dict:
+    return {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "a.py"},
+        "permission_mode": mode,
+        "tool_use_id": call,
+    }
+
+
+@needs_bash_and_jq
+class TestShellHookSection518:
+    """The plugin's PreToolUse hook under STANDARD 1.2.0 §5.18: one marker
+    per gated call, approval asked in the modes that reach a person, the
+    single-command git stash classes, rollback history."""
+
+    def test_the_marker_is_used_up_by_one_write(self, tmp_path: Path):
+        _write_marker(tmp_path)
+        first = _gated_hook(_write_call(call="w1"), tmp_path, approval="off")
+        second = _gated_hook(_write_call(call="w2"), tmp_path, approval="off")
+        assert first.returncode == 0
+        assert second.returncode == 2
+        assert second.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        used = list((tmp_path / ".claude" / "checkpoints" / "used").iterdir())
+        assert [p.name.rsplit(".", 1)[0] for p in used] == ["chk_stdin_test.w1"]
+
+    def test_read_only_bash_leaves_the_marker(self, tmp_path: Path):
+        _write_marker(tmp_path)
+        assert _gated_hook(_bash("git status"), tmp_path).returncode == 0
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    def test_git_stash_create_needs_no_marker(self, tmp_path: Path):
+        result = _gated_hook(_bash('git stash create "checkpoint:x"'), tmp_path)
+        assert result.returncode == 0
+        assert result.stdout == ""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git stash store -m m 0123456789abcdef0123456789abcdef01234567",
+            "git stash pop && rm -rf x",
+            "rg --pre cat x",
+            "tree -R -H . -o out",
+            "file -C x",
+            "file -bC x",
+            "git stash show --output=f",
+            "git stash list --output=f",
+            "git log --output=f",
+            "git -C d stash list",
+        ],
+    )
+    def test_these_need_the_marker(self, tmp_path: Path, command: str):
+        result = _gated_hook(_bash(command), tmp_path)
+        assert result.returncode == 2, command
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+    def test_rollback_needs_a_checkpoint_taken_earlier(self, tmp_path: Path):
+        refused = _gated_hook(_bash("git stash pop"), tmp_path)
+        assert refused.returncode == 2
+        assert refused.stderr.startswith("F503 ROLLBACK_FAILED: ")
+
+        _write_marker(tmp_path)
+        assert _gated_hook(_write_call(), tmp_path, approval="off").returncode == 0
+        # The marker was used; a used checkpoint can still be restored.
+        assert not (tmp_path / ".claude" / "checkpoint.ok").exists()
+        allowed = _gated_hook(_bash("git stash apply abc"), tmp_path)
+        assert allowed.returncode == 0
+        assert allowed.stdout == ""
+
+    @pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan"])
+    def test_a_gated_call_asks_in_a_prompting_mode(self, tmp_path: Path, mode: str):
+        _write_marker(tmp_path)
+        result = _gated_hook(_write_call(mode), tmp_path)
+        assert result.returncode == 0
+        decision = json.loads(result.stdout)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "ask"
+        assert decision["permissionDecisionReason"].startswith(
+            "F502 APPROVAL_REQUIRED: Write (capability 'mutate') requires approval"
+        )
+
+    @pytest.mark.parametrize("mode", ["bypassPermissions", "auto", "dontAsk"])
+    def test_another_mode_is_f502_and_keeps_the_marker(self, tmp_path: Path, mode: str):
+        _write_marker(tmp_path)
+        result = _gated_hook(_write_call(mode), tmp_path)
+        assert result.returncode == 2
+        assert result.stderr.startswith(
+            f"F502 APPROVAL_REQUIRED: permission mode '{mode}' does not put this call to a person"
+        )
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    def test_approval_off_prints_nothing(self, tmp_path: Path):
+        _write_marker(tmp_path)
+        result = _gated_hook(_write_call("bypassPermissions"), tmp_path, approval="off")
+        assert result.returncode == 0
+        assert result.stdout == ""
+
+    def test_no_jq_is_r407(self, tmp_path: Path):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for tool in ("bash", "cat", "date", "printf"):
+            found = shutil.which(tool)
+            if found:
+                (bin_dir / tool).symlink_to(found)
+        result = _gated_hook(_write_call(), tmp_path, path=str(bin_dir))
+        assert result.returncode == 2
+        assert result.stderr.startswith(
+            "R407 SAFETY_CHECK_FAILED: cannot read the tool call"
+        )
+
+    def test_two_concurrent_writes_on_one_marker(self, tmp_path: Path):
+        """The marker is taken by one rename: exactly one call passes."""
+        import concurrent.futures
+
+        for _ in range(5):
+            _write_marker(tmp_path)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(
+                    pool.map(
+                        lambda n: _gated_hook(
+                            _write_call(call=f"c{n}"), tmp_path, approval="off"
+                        ),
+                        range(4),
+                    )
+                )
+            assert sorted(r.returncode for r in results) == [0, 2, 2, 2]

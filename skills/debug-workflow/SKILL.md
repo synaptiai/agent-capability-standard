@@ -32,8 +32,7 @@ Run the composed workflow **debug_code_change** (`reference/workflow_catalog.yam
 
 ## Procedure
 
-0) **Create checkpoint marker** if mutation might occur:
-   - Create `.claude/checkpoint.ok` after confirming rollback strategy
+0) **Take a checkpoint** if mutation might occur: invoke `/checkpoint` with the scope the later steps change; its state-saving command is what the safety layer counts (STANDARD 1.2.0 §5.18.6). Each gated call needs its own.
 
 1) **Invoke `/observe`** on `bug.component` and store output as `observe_out`
    - Observe failing behavior, logs, and relevant code paths

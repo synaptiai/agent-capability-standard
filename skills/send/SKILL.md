@@ -13,16 +13,20 @@ hooks:
       hooks:
         - type: prompt
           prompt: |
+            Model-judged additions (STANDARD 1.2.0 §5.18.10): these may refuse
+            the call; the checks the Standard requires (approval, the checkpoint,
+            rollback history, the destination policy, secrets) are made by code,
+            not here.
+
             OUTBOUND COMMUNICATION SAFETY CHECK
 
             The tool call follows this prompt as JSON; the command is tool_input.command.
 
             This skill sends data to external systems. Verify:
-            1. Destination is in the approved allowlist
+            1. The destination is one the destination policy allows (checked by
+               code where a policy is in force, STANDARD 1.2.0 §4.4.2); judge it
+               here only when none is.
             2. No sensitive data (API keys, passwords, PII) in payload
-            3. User has explicitly approved this send operation
-            4. Checkpoint exists for state recovery
-            5. Rate limits are not being exceeded
 
             CRITICAL: External sends are IRREVERSIBLE.
 
