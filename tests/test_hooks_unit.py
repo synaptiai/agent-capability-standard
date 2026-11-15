@@ -457,11 +457,11 @@ class TestPostToolUseExitCodes:
         # Should not crash, but should log a warning
         assert result.returncode == 0
 
-    @pytest.mark.skipif(shutil.which("flock") is None, reason="flock not installed")
-    def test_symlinked_lock_file_truncates_nothing(
+    def test_a_lock_file_left_by_an_earlier_version_is_not_touched(
         self, log_env: dict[str, str], tmp_path: Path
     ) -> None:
-        """The lock file is opened for append: a symlink there empties no file."""
+        """The hook locks the log itself and never opens audit.log.lock, so a
+        symlink planted there changes no file."""
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         target = tmp_path / "unrelated.txt"
@@ -531,9 +531,9 @@ def _run_concurrently(
 class TestAuditLogConcurrency:
     """Tool calls made in parallel run the hook concurrently; the chain holds.
 
-    The hook takes flock(2) on <log>.lock with flock(1) where installed and
-    with perl elsewhere (macOS), so the kernel releases a lock whose holder
-    exits, and a run waits at most AUDIT_LOCK_WAIT seconds."""
+    The hook takes flock(2) on the log file with flock(1) where installed
+    and with perl elsewhere (macOS), so the kernel releases a lock whose
+    holder exits, and a run waits at most AUDIT_LOCK_WAIT seconds."""
 
     PAYLOADS = [
         {"tool_name": "Read", "tool_input": {"file_path": f"file_{i}.py"}}
@@ -645,44 +645,84 @@ class TestAuditLogConcurrency:
     def test_a_held_lock_delays_but_cannot_silence_the_log(
         self, tmp_path: Path, locker: str
     ) -> None:
-        """A lock someone holds (or planted) only delays a run, for at most
+        """A lock someone holds only delays a run, for at most
         AUDIT_LOCK_WAIT seconds: the entry is then written."""
         if shutil.which(locker) is None:
             pytest.skip(f"{locker} not installed")
         bin_dir = self._bin(tmp_path, "bin", [*_AUDIT_HOOK_TOOLS, locker])
-        lock_file = tmp_path / ".claude" / "audit.log.lock"
-        lock_file.parent.mkdir()
-        with open(lock_file, "a") as held:
+        log_file = tmp_path / ".claude" / "audit.log"
+        log_file.parent.mkdir()
+        log_file.touch()
+        with open(log_file) as held:
             fcntl.flock(held, fcntl.LOCK_EX)
             start = time.monotonic()
             _run_concurrently(
                 self.PAYLOADS[:1],
-                self._env(tmp_path, str(bin_dir), AUDIT_LOCK_WAIT="2"),
+                self._env(tmp_path, str(bin_dir), AUDIT_LOCK_WAIT="3"),
             )
             waited = time.monotonic() - start
-        assert 1.5 <= waited < 10
+        assert 1.9 <= waited < 10
         self._assert_chain(tmp_path, self.PAYLOADS[:1])
 
-    def test_a_planted_fifo_cannot_block_the_hook(self, tmp_path: Path) -> None:
-        """Opening a FIFO for writing blocks until a reader comes, so a lock
-        file that is not a regular file is not opened."""
-        bin_dir = self._bin(tmp_path, "bin", [*_AUDIT_HOOK_TOOLS, "perl"])
-        lock_file = tmp_path / ".claude" / "audit.log.lock"
-        lock_file.parent.mkdir()
-        os.mkfifo(lock_file)
+    def test_a_flock_without_a_wait_option_serialises(self, tmp_path: Path) -> None:
+        """BusyBox and toybox flock(1) take -x and -n but not -w; the hook
+        uses only those."""
+        if shutil.which("flock") is None:
+            pytest.skip("flock not installed")
+        bin_dir = self._bin(tmp_path, "bin", _AUDIT_HOOK_TOOLS)
+        limited = bin_dir / "flock"
+        limited.write_text(
+            f"#!{shutil.which('bash')}\n"
+            'for a in "$@"; do case "$a" in -x|-n|[0-9]*) ;; *) exit 1 ;; esac; done\n'
+            f'exec {shutil.which("flock")} "$@"\n'
+        )
+        limited.chmod(0o755)
+        self._slow_openssl(bin_dir, 0.3)
+        _run_concurrently(self.PAYLOADS, self._env(tmp_path, str(bin_dir)))
+        self._assert_chain(tmp_path, self.PAYLOADS)
+
+    def test_a_lock_that_cannot_be_taken_does_not_delay(self, tmp_path: Path) -> None:
+        """Where flock(2) fails for a reason other than another holder (a
+        filesystem without it), the run appends at once instead of waiting."""
+        bin_dir = self._bin(tmp_path, "bin", _AUDIT_HOOK_TOOLS)
+        broken = bin_dir / "flock"
+        broken.write_text(f"#!{shutil.which('bash')}\nexit 64\n")
+        broken.chmod(0o755)
+        start = time.monotonic()
         _run_concurrently(self.PAYLOADS[:1], self._env(tmp_path, str(bin_dir)))
+        assert time.monotonic() - start < 3
         self._assert_chain(tmp_path, self.PAYLOADS[:1])
 
-    def test_a_symlinked_lock_file_is_not_followed(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("value", ["99999999999999999999", "-1", "x", "1e3"])
+    def test_an_unusable_lock_wait_keeps_the_lock(
+        self, tmp_path: Path, value: str
+    ) -> None:
         bin_dir = self._bin(tmp_path, "bin", [*_AUDIT_HOOK_TOOLS, "perl"])
-        target = tmp_path / "elsewhere" / "created-by-the-hook"
-        target.parent.mkdir()
-        lock_file = tmp_path / ".claude" / "audit.log.lock"
-        lock_file.parent.mkdir()
-        lock_file.symlink_to(target)
-        _run_concurrently(self.PAYLOADS[:1], self._env(tmp_path, str(bin_dir)))
+        self._slow_openssl(bin_dir, 0.3)
+        _run_concurrently(
+            self.PAYLOADS, self._env(tmp_path, str(bin_dir), AUDIT_LOCK_WAIT=value)
+        )
+        self._assert_chain(tmp_path, self.PAYLOADS)
+
+    def test_a_low_open_file_limit_still_logs(self, tmp_path: Path) -> None:
+        """The lock uses descriptor 9, below any open-file limit."""
+        bin_dir = self._bin(tmp_path, "bin", [*_AUDIT_HOOK_TOOLS, "perl"])
+        env = self._env(tmp_path, str(bin_dir))
+        result = subprocess.run(
+            [
+                env["HOOK_BASH"],
+                "-c",
+                f'ulimit -n 32 && exec "$0" "{POSTTOOLUSE_HOOK}"',
+                env["HOOK_BASH"],
+            ],
+            input=json.dumps(self.PAYLOADS[0]),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
         self._assert_chain(tmp_path, self.PAYLOADS[:1])
-        assert not target.exists()
 
     def test_without_flock_or_perl_the_entry_is_still_written(
         self, tmp_path: Path

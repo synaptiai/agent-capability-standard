@@ -42,7 +42,7 @@ set -euo pipefail
 
 # Read JSON from stdin (Claude Code hooks receive data via stdin), with a
 # builtin so that the hook does not need cat
-IFS= read -r -d '' input || true
+input=$(</dev/stdin)
 
 # Without jq the tool call cannot be read, so nothing is logged
 if ! command -v jq &> /dev/null; then
@@ -179,44 +179,56 @@ _do_append() {
 # Serialize read + append, so that concurrent hook runs (tool calls made in
 # parallel) do not read the same prev_hmac and break the HMAC chain.
 #
-# The lock is flock(2) on "<log>.lock", taken on file descriptor 200 of the
-# subshell that appends, so the kernel releases it when that subshell exits,
-# however it exits: there is no stale lock to detect or break. flock(1) takes
-# it where installed; elsewhere (macOS ships perl, not flock) perl does, on
-# the same descriptor. Both are flock(2), so sessions with and without
-# flock(1) exclude each other. A run waits for the lock for at most
-# AUDIT_LOCK_WAIT seconds (default 40; Claude Code stops a hook after 60),
-# then appends without it, as it does where neither tool exists or the lock
-# file is not a regular file (one planted as a FIFO would block the open):
-# an entry out of chain order is reported by the verifier, a missing one is
-# not, so a held or planted lock cannot silence the log.
-lock_file="${log_file}.lock"
+# The lock is flock(2) on the log file itself, opened read-only as file
+# descriptor 9 of the subshell that appends. There is no lock file to plant,
+# replace or make unwritable, and the kernel releases the lock when that
+# subshell exits, however it exits. flock(1) takes it where installed (any
+# flock(1): only -x and -n are used); elsewhere (macOS ships perl, not flock)
+# perl does. Both are flock(2), so sessions with and without flock(1) exclude
+# each other. A run tries every 0.05 s for at most AUDIT_LOCK_WAIT seconds
+# (default 40, at most 55: Claude Code stops a hook after 60), then appends
+# without the lock, as it does at once where the lock cannot be taken at all.
+# An entry out of chain order is reported by the verifier, a missing one is
+# not, so a held lock cannot silence the log.
 lock_wait="${AUDIT_LOCK_WAIT:-40}"
-[[ "$lock_wait" =~ ^[0-9]+$ ]] || lock_wait=40
+[[ "$lock_wait" =~ ^[0-9]{1,2}$ ]] || lock_wait=40
+(( 10#$lock_wait <= 55 )) || lock_wait=55
 
-# Take flock(2) on descriptor 200, waiting at most $lock_wait seconds.
-_lock_fd200() {
+# One attempt at flock(2) on descriptor 9. Returns 0 when taken, 1 when
+# another run holds it, 2 when it cannot be taken here.
+_try_lock_fd9() {
+  local rc=0
   if command -v flock &> /dev/null; then
-    flock -x -w "$lock_wait" 200
+    flock -x -n 9 2>/dev/null || rc=$?
+    (( rc <= 1 )) || rc=2
   elif command -v perl &> /dev/null; then
-    perl -MFcntl=:flock -MTime::HiRes=time -e '
-      open(my $fd, ">>&=", 200) or exit 1;
-      my $end = time + $ARGV[0];
-      until (flock($fd, LOCK_EX | LOCK_NB)) {
-        exit 1 if time >= $end;
-        select(undef, undef, undef, 0.05);
-      }
-      exit 0;
-    ' "$lock_wait"
+    perl -MFcntl=:flock -e '
+      open(my $fd, "<&=", 9) or exit 2;
+      exit 0 if flock($fd, LOCK_EX | LOCK_NB);
+      exit(($!{EWOULDBLOCK} || $!{EAGAIN} || $!{EINTR}) ? 1 : 2);
+    ' 2>/dev/null || rc=$?
   else
-    return 1
+    rc=2
   fi
+  return "$rc"
 }
 
-if [[ -L "$lock_file" || ( -e "$lock_file" && ! -f "$lock_file" ) ]]; then
-  _do_append
+_lock_fd9() {
+  local deadline=$((SECONDS + 10#$lock_wait)) rc
+  while true; do
+    rc=0
+    _try_lock_fd9 || rc=$?
+    (( rc == 1 )) || return "$rc"
+    (( SECONDS < deadline )) || return 1
+    sleep 0.05 2>/dev/null || sleep 1 2>/dev/null || true
+  done
+}
+
+[[ -e "$log_file" ]] || : >> "$log_file"
+if [[ -f "$log_file" && -r "$log_file" ]]; then
+  (_lock_fd9 || true; _do_append) 9<"$log_file"
 else
-  (_lock_fd200 || true; _do_append) 200>>"$lock_file"
+  _do_append
 fi
 
 exit 0

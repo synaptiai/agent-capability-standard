@@ -145,7 +145,7 @@ The `posttooluse_log_tool.sh` hook implements the `audit` capability:
 - Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
 - Each entry includes the HMAC of the previous entry, creating a hash chain
-- Serializes concurrent runs (tool calls made in parallel) with flock(2) on `.claude/audit.log.lock`, taken by `flock` or, where it is not installed (macOS), by `perl`, so the chain stays in order and sessions with and without `flock` exclude each other. The kernel releases the lock when its holder exits, however it exits. A run waits at most `AUDIT_LOCK_WAIT` seconds (default 40) and then appends without the lock, as it does where neither tool exists or the lock file is not a regular file: the verifier reports an entry out of chain order, and a held or planted lock cannot silence the log
+- Serializes concurrent runs (tool calls made in parallel) with flock(2) on the log file itself, taken by `flock` or, where it is not installed (macOS), by `perl`, so the chain stays in order and sessions with and without `flock` exclude each other. There is no separate lock file, and the kernel releases the lock when its holder exits, however it exits. A run tries for at most `AUDIT_LOCK_WAIT` seconds (default 40, at most 55) and then appends without the lock, at once where the lock cannot be taken at all: the verifier reports an entry out of chain order, and a held lock cannot silence the log
 - Needs `jq` to read the tool call; without it nothing is logged and the hook exits 0, so no error is reported
 
 Each entry holds these fields:

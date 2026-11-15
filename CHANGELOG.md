@@ -168,11 +168,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   names in any case, and an address only where a host stands.
 - Plugin audit hook: where `flock` is not installed (macOS), concurrent runs
   appended without a lock and could break the HMAC chain. Every run now takes
-  flock(2) on `.claude/audit.log.lock`, through `flock` or else `perl`, so
-  the two kinds of session exclude each other and the kernel releases the
-  lock of a run that dies. A held or planted lock delays a run by at most
-  `AUDIT_LOCK_WAIT` seconds (default 40); the entry is then written, and the
-  verifier reports it if it is out of chain order.
+  flock(2) on the log file itself, through `flock` (any implementation) or
+  else `perl`, so the two kinds of session exclude each other and the kernel
+  releases the lock of a run that dies; `.claude/audit.log.lock` is no longer
+  used. A held lock delays a run by at most `AUDIT_LOCK_WAIT` seconds
+  (default 40, at most 55); the entry is then written, and the verifier
+  reports it if it is out of chain order.
 - `tools/verify_audit_log.py` split lines on U+0085, U+2028 and U+2029 as well
   as newlines, so a log with such a character in a logged name failed
   verification. It splits on newlines only.
