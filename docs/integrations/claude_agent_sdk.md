@@ -192,7 +192,7 @@ Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.
 
 The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line is a mutation when it redirects output to anything but `/dev/null`, opens a subshell or a here-document, has an unbalanced quote, or uses command substitution, `${...}`, `eval` or `source`. An allow-listed command given an option that writes is a mutation too: `find -delete` or `-exec`, `sort -o`, `uniq IN OUT`, `git diff --output`, `git branch NAME`, `git remote set-url`, `file -C`. `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
 
-**`git stash`**, only when the line is exactly one simple command with no option that writes: `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, and `git stash pop` and `git stash apply` are `rollback` (they need a checkpoint taken earlier, F503). Any other form (`store`, `push`, `drop`, none) is a gated mutation, as is `git -C dir stash ...`.
+**`git stash`**, only when the line is exactly one simple command with no option that writes: `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, and `git stash pop <commit>` and `git stash apply <commit>` are `rollback` when `<commit>` is the full id of a commit a checkpoint of this adapter's scope recorded (the commit `git stash create` printed, kept as the checkpoint's `metadata["commit"]`). git applies any merge commit as if it were a stash, so any other revision, an abbreviated id, an option, and a bare `pop` or `apply` (which read `refs/stash`, where `git stash create` writes nothing) are a gated mutation. Any other form (`store`, `push`, `drop`, none) is a gated mutation, as is `git -C dir stash ...`.
 
 **A line of several commands** takes the strictest flags and every prerequisite of all the commands that are not read-only, with their capabilities in order: `curl -X POST u -d x; rm f` is `send` and `mutate`. So `git stash pop && rm -rf x` is a gated `mutate`, never a `rollback`.
 
@@ -201,7 +201,8 @@ The command line is read with the shell's quoting rules and split into simple co
 | `ls`, `cat`, `head`, `pwd` | observe | low | No | No |
 | `git status`, `git log`, `git rev-parse`, `git ls-files` | observe | low | No | No |
 | `git stash create` | checkpoint | low | No | No |
-| `git stash pop`, `git stash apply` | rollback | medium | No (one taken earlier) | No |
+| `git stash pop <commit>`, `git stash apply <commit>`, a commit a checkpoint recorded | rollback | medium | No (one taken earlier) | No |
+| `git stash pop`, `git stash apply` of anything else | mutate | high | Yes | Yes |
 | `rm`, `mv`, `chmod` | mutate | high | Yes | Yes |
 | `sed`, `awk`, `env`, `git push` | mutate | high | Yes | Yes |
 | `curl -X POST`, `ssh` | send | high | Yes | Yes |
@@ -305,7 +306,8 @@ checkpoint_id = adapter.create_checkpoint(
     reason="Before refactoring authentication"
 )
 
-# Method 2: Via CheckpointTracker (expiry at most 30 minutes)
+# Method 2: Via CheckpointTracker. The adapter's maximum age,
+# expiry_minutes, bounds it whatever expiry_minutes it is given here.
 checkpoint_id = adapter.checkpoint_tracker.create_checkpoint(
     scope=["*"],
     reason="Full backup before changes",
@@ -477,7 +479,7 @@ except CapabilityOutputError as e:
 
 ## Conformance (class SL)
 
-The adapter is a safety layer of class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; and it names its host gaps. It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False` and `approval="off"` are outside the class.
+The adapter is a safety layer of class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it lists the checks of §5.18.10 it does not apply yet (the secret checks of `persist` and `audit`, and the destination policy of `send`). It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False` and `approval="off"` are outside the class.
 
 ## Structured Output
 
@@ -966,9 +968,14 @@ class CheckpointTracker:
         marker_dir: str | Path | None = None,
         reservation_seconds: float | None = None,  # None: until expiry
         clock: Callable[[], datetime] | None = None,
+        # No checkpoint authorises a call later than this after it was
+        # taken: more than 0, at most 30 (default 30); the adapter passes
+        # its expiry_minutes.
+        max_age_minutes: float | None = None,
     ) -> None: ...
 
-    # expiry_minutes: more than 0, at most 30 (default 30)
+    # expiry_minutes: more than 0, at most 30 (default: the maximum age);
+    # the expiry stored is never later than the maximum age allows
     def create_checkpoint(
         self,
         scope: list[str],
@@ -977,8 +984,14 @@ class CheckpointTracker:
         metadata: dict[str, Any] | None = None,
     ) -> str: ...
 
+    # Any valid checkpoint, active or in history, held or not
     def has_valid_checkpoint(self) -> bool: ...
+    # The checkpoint validate_and_reserve would hold now, without holding it
+    def valid_checkpoint_id(self) -> str | None: ...
     def has_taken_since(self, when: datetime) -> bool: ...
+    # Whether a checkpoint (since `since`) recorded this commit as its
+    # restore point: what makes `git stash apply <commit>` a rollback
+    def has_commit(self, commit: str, since: datetime | None = None) -> bool: ...
 
     # Hold the newest valid checkpoint no other call holds.
     # (True, id): held for holder (idempotent for the same holder)

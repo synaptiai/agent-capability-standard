@@ -148,8 +148,11 @@ table equal to it):
   break may be more than one command or expand something, so it is `mutate`.
   Otherwise it is read as one simple command: an option that writes
   (`git ... --output`, `file -C`) is `mutate`; `git stash create` takes a
-  checkpoint; `git stash list` and `git stash show` only read; `git stash pop`
-  and `git stash apply` restore one (`rollback`); any other `git stash` form
+  checkpoint; `git stash list` and `git stash show` only read; `git stash pop
+  <commit>` and `git stash apply <commit>` restore one (`rollback`) when
+  `<commit>` is the full id of a commit a checkpoint marker recorded; any
+  other `pop` or `apply`, a bare one included, is `mutate`, since git applies
+  any merge commit as if it were a stash; any other `git stash` form
   is `mutate`; a command on the read-only list (`ls`, `cat`, `head`, `tail`,
   `wc`, `pwd`, `grep`, `stat`, `file`, `du`, `df`, `which`, `whoami`,
   `uname`, `echo`, `printf`, `git status`, `git log`, `git diff`, `git show`,
@@ -158,14 +161,17 @@ table equal to it):
 
 Then:
 
-- **Rollback** (`git stash pop|apply`): allowed when a checkpoint was ever
-  taken in the project (the marker exists, or `.claude/checkpoints/used/`
-  holds one); otherwise blocked with `F503 ROLLBACK_FAILED:`. It uses no
-  checkpoint: an expired or used one can still be restored.
+- **Rollback** (`git stash pop|apply <commit>`): allowed when the marker,
+  or a marker filed under `.claude/checkpoints/used/`, recorded `<commit>` as
+  its `commit`, so the checkpoint was taken in the project. It uses no
+  checkpoint: an expired or used one can still be restored. Restoring
+  anything else is a `mutate`.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
-  file (not a symlink, SEC-006), be a JSON object with a `checkpoint_id` and a
-  numeric `expires_at`, and not have expired (SEC-001); otherwise the call is
-  blocked with `F501 CHECKPOINT_REQUIRED:`. Unless `ACS_HOOK_APPROVAL=off`,
+  file (not a symlink, SEC-006), be a JSON object with a `checkpoint_id`, a
+  `created_at` and an `expires_at` in whole seconds of at most 12 digits, the
+  first not in the future and the second at most 1800 seconds (30 minutes)
+  after it, and not have expired (SEC-001); otherwise the call is blocked
+  with `F501 CHECKPOINT_REQUIRED:` and the marker is removed. Unless `ACS_HOOK_APPROVAL=off`,
   the permission mode must put the call to a person (`default`,
   `acceptEdits` or `plan`); in any other mode the call is blocked with `F502
   APPROVAL_REQUIRED:` and the marker is left in place. The call then **uses
@@ -203,8 +209,10 @@ flowchart TB
   stop["The turn ends"] -->|removes| m
 ```
 
-The marker file holds a JSON object (`created_at`, `commit` and `source` are
-written for the reader and not checked):
+The marker file holds a JSON object. `checkpoint_id`, `created_at` and
+`expires_at` are checked; `commit` is what a rollback may restore (a full
+commit id, or `HEAD` for a clean tree, which no rollback names); `source` is
+written for the reader:
 
 ```json
 {"checkpoint_id": "3f2a...", "commit": "3f2a...", "created_at": 1706000000, "expires_at": 1706001800, "source": "git stash create"}
@@ -293,7 +301,7 @@ These hooks implement runtime enforcement of VERIFY layer requirements:
 |------------|---------------------|
 | `requires_checkpoint: true` | `pretooluse_require_checkpoint.sh` blocks without a valid marker and uses one up per call (F501) |
 | `requires_approval: true` | `pretooluse_require_checkpoint.sh` asks for approval in modes that reach a person, and blocks in others (F502) |
-| `checkpoint` → `rollback` (`requires`) | `pretooluse_require_checkpoint.sh` blocks a rollback with no checkpoint history (F503) |
+| `checkpoint` → `rollback` (`requires`) | `pretooluse_require_checkpoint.sh` counts a restore as a rollback only for a commit a marker recorded, so a checkpoint was taken before it; any other restore is a `mutate` (F501) |
 | Taking a checkpoint (§5.18.6) | `posttooluse_take_checkpoint.sh` writes the marker after a successful `git stash create` |
 | Execution boundary (§5.18.6) | `stop_end_checkpoints.sh` removes the marker when a turn ends |
 | `audit` capability, records (§5.18.8) | `posttooluse_log_tool.sh` records every call and the configuration that decided it |

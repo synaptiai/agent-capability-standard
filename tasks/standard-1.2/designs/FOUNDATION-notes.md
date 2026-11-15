@@ -483,3 +483,29 @@ the foundation, axe passed and the sweep failed on two enforced pages:
 Workstreams should run `npm run check:axe` (or at least
 `node scripts/check-runs.mjs`, with `ACS_CHROMIUM` naming a Chromium) after
 `npm run build` whenever they change the Standard or the site, since CI does.
+
+## 2026-11-15 — S1 review round 1 (affects S4 and S5)
+
+- §10.4 now requires the capability checks of §5.18.10 of a class SL layer
+  (a bullet beside §5.18.5–§5.18.9), and a conformance statement names any
+  §5.18.10 check its layer does not apply. The statement schema
+  (`tests/conformance/calls/schema/statement.schema.json`) gains
+  `not_applied` for that.
+- Both reference statements (`grounded_agency_adapter.json`,
+  `standard_agents_binding.json`) list two rows there: the `persist` and
+  `audit` secret checks (F504, §6.7) and the `send` destination policy
+  (F504, §4.4.2). The Standard's header says the two layers claim class SL
+  "except the secret and destination checks of §5.18.10, which their
+  conformance statements list as not applied".
+  - **S4**, when the adapter and the binding check `persist` data and
+    `audit` records for secrets: remove the first `not_applied` line from
+    both statements, and the word "secret" from the header's exception.
+  - **S5**, when both layers apply a destination policy to `send` calls
+    (reading the binding's `destination`): remove the second line, and
+    "destination" from the exception. When both are gone, the header
+    clause ends at "claim class SL (§10.4)" and `not_applied` is dropped
+    from the statements (the member stays in the schema).
+- A tool binding record with a member that has no I-JSON form is S303 in
+  both loaders (`iJsonProblem` in `packages/acs-core/src/ijson.ts`; the
+  core's canonical JSON in Python). `iJsonProblem` is the TypeScript
+  package's one I-JSON check: S4 or S5 code that needs one should use it.

@@ -437,7 +437,8 @@ The rules, and where each comes from:
 | A refused call uses nothing ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)) | Nothing is used up until every check has passed |
 | A capability output carried as a string is the I-JSON text of the output object, with every required field ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)) | The return type of `execute` is the capability's output contract. At run time the wrapper checks that every required field is present, that `evidence_anchors` is an array, that a required `confidence` is a number from 0 to 1, and that the output is I-JSON; it returns the text, or R402 |
 | A binding cannot weaken a capability's flags (W602) | The `requires_*` flags can only be declared `true`; a weaker `risk` or `mutation` fails the definition |
-| A layer that cannot complete its checks refuses the call, and every call is recorded with the layer that decided it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)) | A store write that fails, or arguments with no canonical JSON, refuse the call with R407. A call that ran but whose record cannot be completed returns R407 in place of its result. Each trace entry names the layer (`recorded_by`: the binding's name, the Standard version and a digest of the tool's annotation) |
+| The arguments of a call that requires approval are I-JSON ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)) | A call that needs approval whose arguments are not I-JSON (a lone surrogate, a number written as an integer beyond ±2^53) is refused with F502 before anything is asked or used: no decision can bind to them |
+| A layer that cannot complete its checks refuses the call, and every call is recorded with the layer that decided it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)) | A store write that fails, or the arguments of a call that needs no approval with no canonical JSON, refuse the call with R407. A call that ran but whose record cannot be completed returns R407 in place of its result. Each entry a grounded or control tool writes, refusals and the layer's own failures included, names the layer (`recorded_by`: the binding's name, the Standard version and a digest of the tool's annotation); only the audit hook's entry for a call no grounded tool recorded has none |
 
 As [§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency) states, `precedes` and
 `conflicts_with` edges are not enforced over calls. `precedes` orders the
@@ -710,13 +711,16 @@ endpoints), its scope (one thread) and boundaries (a new execution), a
 checkpoint's maximum age (ten minutes), how it obtains approval (recorded
 through the endpoint) and how it keeps a check and its use atomic (the
 runtime's order, and `serially` within a realm). It lists its host gaps, the
-rows of the table above that rest on SA behaviour the text does not state.
+rows of the table above that rest on SA behaviour the text does not state, and
+the checks of §5.18.10 it does not apply yet: the secret checks of `persist`
+and `audit` and the destination policy of `send`.
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 24 binding fixtures in the package's `test/bindings.test.ts`, and the 20
+the 26 binding fixtures in the package's `test/bindings.test.ts`, and the 21
 call-sequence fixtures, played against the in-memory thread, in the binding's
-`test/calls.test.ts`. The one fixture it skips needs a call of an unbound
+`test/calls.test.ts`, which also compares the statement with the binding's
+constants (its maximum age, `MAX_APPROVERS`). The one fixture it skips needs a call of an unbound
 tool, which a Standard Agents tool without the binding's wrapper never
 brings to the binding.
 

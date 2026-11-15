@@ -34,12 +34,13 @@ findings:
     spec/CONFORMANCE.md lines 71-82. Ran the greps listed under searched.
   status: fixed
   resolution: 'Standard 1.2.0 §5.18 (Tool-Calling Hosts), accepted from RFC-0005. §2 defines
-    tool-calling host, call, tool binding, safety layer, scope and execution boundary. §5.18.5 fixes the
+    tool-calling host, call, tool binding, safety layer, layer scope and execution boundary. §5.18.5 fixes the
     scope, applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102), leaves
     `soft_requires` a warning at most and `precedes` and `conflicts_with` unenforced and unreported,
     with reasons, and makes check-and-use atomic. §5.18.8 makes a layer fail closed (R407). §10.4 adds
-    the safety-layer class SL, whose statement names the calls a layer covers. Fixtures:
-    tests/conformance/bindings/ (24) and tests/conformance/calls/ (20), from
+    the safety-layer class SL, which requires §5.18.5–§5.18.10 and whose statement names the calls a
+    layer covers and any §5.18.10 check it does not apply yet. Fixtures:
+    tests/conformance/bindings/ (26) and tests/conformance/calls/ (21), from
     scripts/gen_call_fixtures.py, with the statements in tests/conformance/calls/statements/; the Python
     adapter runs them in tests/test_binding_fixtures.py and tests/test_call_fixtures.py, the Standard
     Agents binding in packages/acs-core/test/bindings.test.ts and
@@ -88,7 +89,8 @@ findings:
     boundary and, for a call, at a stated maximum age of at most 30 minutes; with none valid the
     executor has its host take one and a layer refuses (F501); a rollback needs a checkpoint taken
     earlier and uses none (F503). grounded_agency/state/checkpoint_tracker.py (holds, consume_if_valid,
-    end_validity, the cap) and grounded_agency/adapter.py follow it; the plugin''s hooks use the marker
+    end_validity, the cap, a maximum age applied to every checkpoint) and grounded_agency/adapter.py
+    follow it; the plugin''s hooks use the marker
     up per gated call, take it on a successful `git stash create`, end it at Stop and refuse a rollback
     with no history; skills/rollback/SKILL.md restores an expired or used checkpoint. Tests:
     tests/test_checkpoint_holds.py, tests/test_hook_checkpoint_lifecycle.py and the call fixtures
@@ -136,7 +138,8 @@ findings:
     with the §5.14 digest; one decision per call, used up when the call is allowed; `min_approvers` and
     expiry from the binding''s `approval`; a host prompt that shows the call and decides it alone is a
     one-approver decision, relied on only where it reaches a person (F502 otherwise); changed arguments
-    are classified again; with no one to ask, F502. The Python adapter records the digest, asks only in
+    are classified again; with no one to ask, or arguments that are not I-JSON, F502 (both layers, and
+    the call fixture approval_args_not_i_json). The Python adapter records the digest, asks only in
     the permission modes default, acceptEdits and plan, refuses `min_approvers` above 1 and `role`, and
     re-classifies changed arguments (tests/test_permission_modes.py, tests/test_permission_callback.py);
     the plugin hook answers `ask` with an F502 reason in those modes and blocks F502 in the others
@@ -1554,7 +1557,8 @@ findings:
     grounded_agency/capabilities/bindings.py (`load_bindings`, the MCP `metadata` carrier in
     grounded_agency/mcp.py) and packages/acs-core/src/binding.ts (`checkBindings`, the `acs`
     annotation). The generated schemas/interop/standard_agents_annotation.schema.json makes the
-    annotation a carrier and refuses a copy inconsistent with the capability. Fixtures: the 24 in
+    annotation a carrier and refuses a copy inconsistent with the capability. A record with a member that
+    has no I-JSON form is S303; diagnostics name members by dotted path. Fixtures: the 26 in
     tests/conformance/bindings/; tests/test_tool_bindings.py and tests/test_standard_agents_binding.py.'
   concerns:
   - tools-contracts
@@ -1599,14 +1603,16 @@ findings:
   resolution: 'Standard 1.2.0 §5.18.3 classifies a call by its effect, with a table that answers which
     capability a remote write, a write to the agent''s own store, a message to a delegate and a stop
     tool are; `additional_capabilities` takes the strictest flags and every prerequisite; a `classifier`
-    may narrow a call to what its arguments do, never below each returned capability''s flags; a
-    control-only tool is never refused and is recorded, and a host action tied to a tool that can be
-    refused is F506. The Python mapper classifies Bash by command (a compound line takes the strictest
-    of its commands; `git stash` forms by class) and binds `Skill` as `invoke`; the Standard Agents
+    may narrow a call to what its arguments do, never below each returned capability''s flags; a call
+    is `rollback` only when it restores a checkpoint taken in the scope; a control-only tool is never
+    refused and is recorded, and a host action tied to a tool that can be refused is F506. The Python
+    mapper classifies Bash by command (a compound line takes the strictest of its commands; `git stash`
+    forms by class, `pop|apply <commit>` a rollback only for a commit a checkpoint recorded) and binds
+    `Skill` as `invoke`; a grounded MCP server serves a control-only tool unguarded; the Standard Agents
     binding has `additional_capabilities` and `controlTool`, and its lint reports F506. Tests:
-    tests/test_bash_classification.py, examples/standard_agents/test/tools.test.ts; fixtures
-    additional_strictest, gated_control_action, control_action_ok, additional_capability_strictest and
-    control_tool_ungated.'
+    tests/test_bash_classification.py, tests/test_mcp_integration.py (TestGroundedServerGuard),
+    examples/standard_agents/test/tools.test.ts; fixtures additional_strictest, gated_control_action,
+    control_action_ok, additional_capability_strictest and control_tool_ungated.'
   concerns:
   - tools-contracts
   related:
@@ -1682,7 +1688,8 @@ findings:
     grounded_agency/capabilities/output.py (`encode_capability_output`, `decode_capability_output`) and
     packages/acs-core/src/output.ts (`encodeCapabilityOutput`, `decodeCapabilityOutput`); `groundedTool`
     returns the encoded text. docs/guides/RUNNING_WORKFLOWS.md and docs/integrations/standard_agents.md
-    tell a host to decode before it answers. Tests: tests/test_capability_output.py,
+    tell a host to decode before it answers. The I-JSON limits apply to the text, so the two codecs
+    agree: both pass tests/conformance/output/vectors.json. Tests: tests/test_capability_output.py,
     packages/acs-core/test/output.test.ts.'
   concerns:
   - tools-contracts
@@ -2182,12 +2189,15 @@ findings:
     without the layer''s decision, and a missing, failing or silent layer means refusal (R407); every
     record names the layer and its configuration (`recorded_by`). §5.18.10 makes the checks a skill''s
     hooks implement requirements of the capability on every host. §5.18.5 makes check-and-use atomic,
-    and each statement says how. `create_grounded_mcp_server(..., require_layer=True)` refuses a call
-    the adapter''s layer did not allow (R407); adapter records, the plugin''s audit lines (`recorded_by`
-    with the digest of hooks/hooks.json and the effective settings) and the binding''s trace entries
-    carry `recorded_by`; one adapter is one scope. Tests: tests/test_mcp_integration.py,
+    and each statement says how. `create_grounded_mcp_server()` (`require_layer=True` by default)
+    serves tools that refuse a call the adapter''s layer did not allow (R407), a control-only tool
+    excepted; adapter records (digest computed once per change of settings or bindings, every loaded
+    binding I-JSON), the plugin''s audit lines (`recorded_by` with the digest of hooks/hooks.json and the
+    effective settings) and every entry a grounded or control tool writes in the binding''s trace,
+    refusals and the layer''s own failures included, carry `recorded_by`; one adapter is one scope.
+    Tests: tests/test_mcp_integration.py, tests/test_tool_bindings.py (TestRecordedBy),
     tests/test_verify_audit_log.py, tests/test_toctou_race.py,
-    examples/standard_agents/test/tools.test.ts.'
+    examples/standard_agents/test/tools.test.ts, grounded.test.ts and nesting.test.ts.'
   concerns:
   - safety-enforcement
 - id: ACS-56

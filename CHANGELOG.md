@@ -44,6 +44,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
     must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
     set, at most the expiry. `GroundedAgentConfig` gains `call_record_limit`.
+  - `CheckpointTracker(max_age_minutes=...)` (default 30; the adapter passes
+    its `expiry_minutes`) bounds every checkpoint: one taken through
+    `adapter.checkpoint_tracker.create_checkpoint()` with a longer
+    `expiry_minutes` is stored with the maximum age as its expiry, and one
+    read back from a state file stops authorising a call at its
+    `created_at` plus the maximum age.
+  - `CheckpointTracker`: `can_reserve()` and `release_reservation_in_scope()`
+    are removed. `resolve_holds_in_scope(scope)` replaces the latter, and
+    counts the holds it ends as used instead of releasing them.
+    `DEFAULT_RESERVATION_SECONDS` is `None` (was 600.0): a hold lasts until
+    its checkpoint expires unless `reservation_seconds` is set.
+    `has_valid_checkpoint()` now counts every valid checkpoint, those in the
+    history included, whether or not a call holds it: use
+    `valid_checkpoint_id()` for the one a call would hold, or
+    `get_active_checkpoint_id()` for the active one.
+  - `WorkflowEngine.ensure_checkpoint_before_step()` returns the valid
+    checkpoint a step can use, one in the history included, and takes a new
+    one only when every valid checkpoint is held; before, it took a new one
+    whenever the active checkpoint had been used.
   - Approval is asked only in the permission modes `default`, `acceptEdits`
     and `plan`. In `bypassPermissions`, `auto`, `dontAsk` or any other mode,
     a call that requires approval is refused (F502), since nothing puts it to
@@ -62,23 +81,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     (`create_skill_tracker` stays as an alias) records one when a call
     classified `checkpoint`, such as `git stash create`, succeeds.
   - Bash: `git stash create` is `checkpoint`, `git stash list|show` only
-    read, `git stash pop|apply` is `rollback`, and a line of several commands
-    takes the strictest flags and every prerequisite of all of them.
+    read, and a line of several commands takes the strictest flags and every
+    prerequisite of all of them. `git stash pop|apply <commit>` is `rollback`
+    only when `<commit>` is the full id of a commit a checkpoint of the
+    adapter's scope recorded (`metadata["commit"]`); git applies any merge
+    commit as if it were a stash, so any other `pop` or `apply`, a bare one
+    included, is a gated mutation that needs a checkpoint and approval.
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
     (`capability`, `flags`, `additional_capabilities`, `invokes`,
     `approval`, `control`); the flat keys still work, and `capability` and
     `capability_id` that disagree are S303.
-    `create_grounded_mcp_server(..., require_layer=True)` makes each tool
-    refuse (R407) a call the adapter's layer did not allow.
+    `create_grounded_mcp_server()` now defaults to `require_layer=True`:
+    each tool it serves refuses (R407) a call the adapter's layer did not
+    allow, so a session whose options were not wrapped with
+    `adapter.wrap_options()` cannot run them. Pass `require_layer=False`
+    for the earlier behaviour (outside class SL). A control-only tool
+    (`control: true`) is served as it is: it is never refused.
+  - Tool binding records: a record with a member that has no I-JSON form
+    (an `x-` member holding an integer beyond 2^53, a lone surrogate or an
+    object that is not JSON) is S303 and not loaded, and its tool stays
+    unbound. `approval.min_approvers` written as `1.0` loads. A diagnostic's
+    `location.field` is the member's path with keys joined by a dot
+    (`approval.min_approvers`, `flags.risk`); W602 names `flags.<flag>`.
 - Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
   Claude Code's JSON payload and needs `jq`; anything else is blocked with
   R407, as is a failure of the hook. The checkpoint marker is used up by the
   gated call it authorises, so each such call needs its own; a successful
   `git stash create` writes the marker and the new Stop hook removes it when
   the turn ends. A read-only Bash command and `git stash list|show` need no
-  marker, and `git stash pop|apply` needs a checkpoint taken earlier (F503). A
+  marker, and `git stash pop|apply <commit>` needs none when a marker
+  recorded `<commit>`; any other restore needs a marker like any write. The
+  marker's `created_at` and `expires_at` must be whole seconds of at most 12
+  digits, the first not in the future and the second at most 1800 seconds
+  after it; otherwise the call is blocked with F501 and the marker removed. A
   gated call is answered `ask` with an F502 reason in the permission modes
   default, acceptEdits and plan, and blocked with F502 in the others;
   `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules.
@@ -96,7 +133,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   output's I-JSON text, and an output with an integer beyond 2^53, a
   non-finite number or a lone surrogate is refused with R402. A composite
   lists the tools it invokes in `invokes`, which also becomes its `uses`; an
-  invocation outside the list is refused (F504).
+  invocation outside the list is refused (F504). A call that needs approval
+  whose arguments are not I-JSON is refused with F502 before anything is
+  asked or used. An approval policy's `min_approvers` is at most
+  `MAX_APPROVERS` (1000).
+- TypeScript package: `decodeCapabilityOutput` accepts a number written in
+  exponent form (1.8e16, 1e300), which it used to refuse, and checks integer
+  literals in the text itself; `encodeCapabilityOutput` accepts a value it
+  writes in exponent form (1e21 and above) and refuses one it would write as
+  an integer literal beyond ±2^53 (1.8e16). A tool binding record's
+  `location.field` follows the Python loader's dotted paths.
+- Conformance statement schema: `approval.expires` is a duration or null;
+  the new `not_applied` lists the §5.18.10 checks a layer does not apply.
 
 ### Added
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
@@ -155,8 +203,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   §9.8 diagnostics, records that name the layer, and capability outputs on a
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
-- Safety-layer conformance fixtures: 24 binding fixtures in
-  `tests/conformance/bindings/` and 20 call-sequence fixtures in
+- Safety-layer conformance fixtures: 26 binding fixtures in
+  `tests/conformance/bindings/` and 21 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
   two reference layers, generated by `scripts/gen_call_fixtures.py`
   (`--check` in CI). The Python SDK adapter and the Standard Agents binding
@@ -170,6 +218,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
   `additional_capabilities` and `invokes` with one-shot nesting tokens.
 - Approval digest vectors of kind `tool_call` for a call's shown values.
+- Capability output vectors (informative), `tests/conformance/output/vectors.json`,
+  which the Python and TypeScript codecs of §5.18.9 both pass. TypeScript
+  package: `iJsonProblem`. Python SDK: `CheckpointTracker.valid_checkpoint_id()`,
+  `has_commit()` and `max_age_minutes`.
 
 ### Changed
 - Direct dependencies are at their latest releases. Python: the dev ranges are

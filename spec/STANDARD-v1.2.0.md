@@ -12,7 +12,8 @@ validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); they check §3.1's grounding where a grounding policy applies
 (§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does;
 the Python SDK adapter and the Standard Agents binding implement §5.18 and
-claim class SL (§10.4); `grounded_agency` implements §7.1's entity ids and
+claim class SL (§10.4), except the secret and destination checks of
+§5.18.10, which their conformance statements list as not applied; `grounded_agency` implements §7.1's entity ids and
 §8's arithmetic; §7.2 and §7.3 are not implemented
 **Date:** 2026-11-15
 **Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported; see §11.5)
@@ -1316,6 +1317,7 @@ A binding classifies a tool by its effect, not by its transport or its name:
 | Delivers a message, notification or event to a recipient outside the scope: an e-mail, a chat or issue comment, a webhook, a published event; and any request to another system whose effect the binding does not know | `send` |
 | Both of the above in one call | `capability` the primary effect, the other in `additional_capabilities` |
 | Writes the store the host provides for the agent's own memory, which `recall` reads | `persist`; a write anywhere else is `mutate` |
+| Restores a checkpoint taken in the scope, which the call names | `rollback`; a call that restores any other state, even with the same command, is `mutate` |
 | Gives an agent a task, or further instructions on a task already delegated to it | `delegate` |
 | Only signals the host (ends a turn or a session, reports a status) and has no other effect | Control-only (`control: true`) |
 | Carries only the values of an executor's host-protocol action to the party that performs or decides it (§5.19.6) | Not a `send`: protocol traffic, covered by the step whose action it performs |
@@ -2100,6 +2102,7 @@ A safety layer conforms to class SL when, for every call it covers, it:
   and passes every binding fixture whose `needs` it supports;
 - applies §5.18.5–§5.18.9 and passes every call-sequence fixture whose
   `needs` it supports;
+- applies the capability checks of §5.18.10;
 - runs in a mode that fails closed (§5.18.8).
 
 Its **conformance statement** names: the host, and the layer's name and
@@ -2110,8 +2113,9 @@ decisions, or both), the host configurations in which it relies on a
 prompt, its decision expiry, the most approvers it can obtain for one call,
 and whether it can verify an approver's role; how it makes a check and its
 use atomic (a lock or reservation, or its host's order); the fixture
-features it supports; and its host gaps, the cases in which its host can run
-a covered call without the layer's decision. The statements of the
+features it supports; its host gaps, the cases in which its host can run
+a covered call without the layer's decision; and any check of §5.18.10 it
+does not apply, which a conforming layer has none of. The statements of the
 reference layers follow `tests/conformance/calls/schema/statement.schema.json`.
 
 **Binding fixtures.** Each fixture holds an `ontology` version, `records`,
@@ -2606,8 +2610,8 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   classification by effect, composite tools, `requires`, checkpoints and
   approval over calls, refusals, records and fail-closed loading, text-only
   results (binding every host that carries an output as a string, workflow
-  hosts included) and capability checks; class SL with binding and
-  call-sequence fixtures (§10.4)
+  hosts included) and capability checks; class SL, whose layers apply
+  §5.18.5–§5.18.10, with binding and call-sequence fixtures (§10.4)
 - The terms tool-calling host, call, tool binding, safety layer, layer
   scope and execution boundary (§2)
 - Codes V110, V111, R407, F506, W617; V101, V102, V105, V107, V109, R402,
