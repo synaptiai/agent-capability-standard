@@ -13,7 +13,10 @@ The standard is designed so **unsafe actions are hard by construction**.
 Any `mutate`, `send` or `rollback` step MUST be preceded by a `checkpoint` step. The requirement follows the ontology's `requires_checkpoint` flag (`mutate`, `send`) and its `requires` edges from `checkpoint` (`mutate`, `send`, `rollback`), not the `mutation` flag: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint. A step cannot weaken these flags; a weaker declaration is ignored (W602). This ensures:
 - State can be restored if the mutation fails
 - Partial execution can be recovered
-- Audit trail exists for all changes
+- An audit trail can cover every change: a run started with `records:
+  actions` records every step that ran ([STANDARD v1.2 §6.4](STANDARD-v1.2.0.md#64-audit-records)),
+  every host keeps every run's run record ([§5.19.8](STANDARD-v1.2.0.md#5198-the-runs-record)),
+  and the plugin's hook logs every tool call it can, reporting any it cannot
 
 ### 1.2 Actions Are Ordered
 

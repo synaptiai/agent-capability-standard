@@ -1,5 +1,5 @@
 // Text equivalents, in the current Standard's Markdown copy, of the figures
-// from §1 to §5.17 that show more than the table, list or fence they sit
+// from §1 to §5.19 that show more than the table, list or fence they sit
 // beside (visual spec 3.9 "twin block", 6.1). Each block uses the same
 // caption function as the page's <figcaption>; specFigureBlocks() appends
 // them, in page order, to its "Figures on this page" section.
@@ -22,6 +22,12 @@ const REPLAY_TITLES: Record<string, string> = {
   'deferral-replay': 'What a deferral reaches, from §5.14',
   'resume-replay': 'What a resumption runs again, from §5.14.1',
   'resume-skip-replay': 'A queued step that no longer runs, from §5.14.1',
+  'protocol-replay': "A run's actions and the host's answers, from §5.19.1",
+  'wake-replay': "A retry's wait, ended by a tick, from §5.19.3",
+  'cancel-replay': 'A run cancelled while its mutation is pending, from §5.19.5',
+  'reason-replay': 'An error that says why, retried, from §5.19.7',
+  'response-replay': 'Responses with members this version does not define, from §5.19.1',
+  'audit-replay': 'An audit step whose record was not written, from §6.4',
 };
 
 function replayBlock(slot: string): string {
@@ -65,7 +71,7 @@ export function specEarlyBlocks(): string[] {
   ];
 }
 
-/** The blocks for §5.9 to §5.17, in page order. */
+/** The blocks for §5.9 to §5.19, in page order. */
 export function specLateBlocks(): string[] {
   const { source, text } = currentStandardText();
   const ext = D.extensionTiles(text, source);
@@ -112,6 +118,11 @@ export function specLateBlocks(): string[] {
       D.approverCaption(approvers),
       table(['Approver', 'Kind', 'Role', 'Counts', 'Why'], approvers.rows.map((r) => [code(r.principal), r.kind, r.role ?? '', r.counts ? 'Yes' : 'No', cell(r.why)])),
     ),
+    replayBlock('protocol-replay'),
+    replayBlock('response-replay'),
+    replayBlock('wake-replay'),
+    replayBlock('cancel-replay'),
+    replayBlock('reason-replay'),
   ];
 }
 
@@ -124,6 +135,7 @@ export function specTailBlocks(): string[] {
   const suite = T.conformanceSuite(text, source);
   const digests = T.digestVectors(text, source);
   return [
+    replayBlock('audit-replay'),
     figure(
       'Merge thresholds, from §7.3',
       T.thresholdsCaption(),

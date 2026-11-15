@@ -300,23 +300,73 @@ flowchart TB
 ```
 
 ### Parallel Group
-Steps that can execute concurrently. Parallel groups define:
+Steps that are not ordered relative to each other: an executor may run them
+in any order or at the same time, and the reference executor runs them one
+after another, in list order ([STANDARD v1.2 §5.2.3](../spec/STANDARD-v1.2.0.md#523-parallel-groups)).
+Parallel groups define:
 - `parallel_group`: Group identifier
-- `join`: How to wait for completion (all_complete, any_complete)
+- `join`: When the group is complete: `all_complete`, when every member has
+  finished, is the one value defined; any other is W618 and ignored
+
+A member that reads a group mate's store is W619: the mate need not have run
+first.
 
 ```mermaid
 ---
 title: A parallel group
 ---
 flowchart TB
-  accDescr: Steps in one parallel_group run concurrently, and the join, all_complete or any_complete, says when the group is complete.
+  accDescr: The steps of one parallel_group are not ordered relative to each other, and the group joins, all_complete, when every member has finished.
   subgraph pg [parallel_group]
     a[Step A]
     b[Step B]
   end
-  a --> j{"join: all_complete or any_complete"}
+  a --> j{"join: all_complete"}
   b --> j
 ```
+
+---
+
+## Runs and Hosts
+
+### Executor
+What runs a workflow step by step, with no input or output of its own: it
+says what it needs next and acts on the answer
+([STANDARD v1.2 §5.19](../spec/STANDARD-v1.2.0.md#519-host-protocol)).
+
+### Host
+What performs the actions an executor asks for and gives it the time: a
+process, a queue worker, a Standard Agents thread.
+
+### Run
+One execution of a workflow, from its start to its terminal action
+(`Completed` or `Failed`). A run has a `run_id`, unique among the runs whose
+records the host keeps.
+
+### Action
+What a run asks its host to do next (`InvokeCapability`, `RequestApproval`,
+`Sleep`, ...), or how it ended; the host answers with a response.
+
+### Host Protocol
+The actions, responses and run operations (start, next, submit, tick, wake
+at, cancel, save and restore, resume) between an executor and its host,
+with the host's obligations
+([§5.19](../spec/STANDARD-v1.2.0.md#519-host-protocol)).
+
+### Wake-up Time
+The earliest time at which giving a run the time changes it: a `Sleep`'s
+`until`, or one millisecond after a deadline or an approval's expiry
+(`run.wake_at()`).
+
+### Audit Record
+An action record or a canonical event that says what happened
+([§6.4](../spec/STANDARD-v1.2.0.md#64-audit-records)). The executor, safety
+layers, the `audit` capability and hosts' logs write them, or export them.
+
+### Run Record
+The audit record every run leaves, derived from how it ended, failed and
+cancelled runs included; every host keeps it with the run's records
+([§5.19.8](../spec/STANDARD-v1.2.0.md#5198-the-runs-record)).
 
 ---
 

@@ -1,6 +1,6 @@
 # Modality Handling via Domain Parameters
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2026-11-15
 **Status:** Guide
 
@@ -64,24 +64,25 @@ Note that `transform` uses its native `source_format`/`target_format` input para
 
 ### 1.3 Handling Unsupported Modalities
 
-A host that has no processing pipeline for a step's `domain` cannot run the step. Today it says so in the one way the host protocol offers: it answers the `InvokeCapability` action with an `Error`, whose only members are `code` and `message` ([Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)). The step then fails with R402 (`EXECUTION_FAILED`, [STANDARD-v1.1.0 §9.5](../../spec/STANDARD-v1.1.0.md#95-runtime-errors)), and its `retry` and failure modes apply as for any failed step:
+A host that has no processing pipeline for a step's `domain` cannot run the step. It says so by answering the `InvokeCapability` action with an `Error` whose `reason` is `unsupported_domain` ([STANDARD-v1.2.0 §5.19.7](../../spec/STANDARD-v1.2.0.md#5197-error-reasons); [Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)). A host that does not perform the capability at all says `unsupported_capability`. The step then fails with R402 (`EXECUTION_FAILED`, [STANDARD-v1.2.0 §9.5](../../spec/STANDARD-v1.2.0.md#95-runtime-errors)), and its `retry` and failure modes apply as for any failed step:
 
 ```yaml
 kind: Error
 code: R402
+reason: unsupported_domain
 message: "No processing pipeline available for domain 'haptic.pressure'"
 ```
 
-The Standard defines no code, field or reason for an unsupported domain, and this guide defines none either. The reference executor reads any code a host reports for a capability call, other than R401, as R402, so a host that answered with a code of its own, such as `unsupported_domain`, would still fail the step with R402. The reason is whatever the host writes in `message`, which is free text. A failure mode can match the code (`on_error: R402`) but cannot tell an unsupported domain from any other failed execution.
+The code still decides what the run does: the reference executor reads any code a host reports for a capability call, other than R401, as R402, and the step's retries and failure modes apply. The `reason` is what a reader can rely on without parsing the `message`, which stays free text: the step's trace event carries it, the run's `Failed` action carries it as `reason` when the run ends with that failure, and the step's action record as `reason_code`. A Python host can raise `HostCannotServe("unsupported_domain", message)` from `invoke_capability`, and the runner sends that `Error`. A failure mode matches the code (`on_error: R402`), not the reason.
 
 ```mermaid
 ---
 title: A domain the host does not support
 ---
 flowchart TB
-  accDescr: When the host has no processing pipeline for the step's domain value, it answers the capability call with an Error, the step fails with R402, and the message names the domain.
+  accDescr: When the host has no processing pipeline for the step's domain value, it answers the capability call with an Error with reason unsupported_domain, and the step fails with R402, keeping the reason.
   step["Step with domain: haptic.pressure"] --> has{"Pipeline for this domain?"}
-  has -->|no| err["Error: the step fails with R402, the message names the domain"]
+  has -->|no| err["Error, reason unsupported_domain: the step fails with R402"]
 ```
 
 The gap is found when the step runs, not when the workflow is validated: the validator does not know which domains a host serves.

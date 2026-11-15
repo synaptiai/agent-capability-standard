@@ -47,8 +47,90 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   a state with deferrals that an earlier version saved still restores, but
   cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
   new one. The state of a run that never deferred is unchanged.
+- Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
+  version 2. The terminal action is derived from the state rather than
+  stored with copies of the records and outputs, every action carries
+  `run_id`, and the state may hold the record mode and the chain heads of
+  what a host took; version-1 snapshots still restore (a finished run's
+  stored terminal action must equal the one derived). Actions and records
+  gain members (`run_id`; on records `run_id`, `frame`, `step`,
+  `capability`, `checkpoint_id`, `code`, `approval.decision_id`); code that
+  compares whole actions or records must allow them. `_core.Run.next()`
+  returns a fresh dict each time, `Run.tick` returns whether it changed the
+  run, and `Run::next` in Rust returns an owned `Action`.
+- `WorkflowRunner`: `run` and `start` take `attendance=None` (the trigger's
+  attendance, else attended, as before) and refuse a caller-given `run_id`
+  the runner has already started (`RunStartError`): a `run_id` must be
+  unique among the runs whose records or keys the host keeps (§5.19.2).
+  `drive` is now a loop of `advance` turns: it sleeps until the run's
+  wake-up time (`run.wake_at()`) instead of a deadline it computed, and
+  calls `Host.withdraw` for an action the run timed out. `RunResult` gains
+  `run_id`, `reason`, `checkpoint_id` and `run_record`.
+- Coordination: the orchestrator's `audit` step returns the `audit`
+  contract's output (`recorded`, `audit_id`, `record`, `timestamp`,
+  `evidence_anchors`) instead of `{"audited": true}`, and records only the
+  step's `event`, `context` and `retention`, the event under
+  `details.event` of a record of the log's own (Standard 1.2.0 §6.4).
+- Plugin audit log: each line of `.claude/audit.log` is now an action
+  record (Standard 1.2.0 §6.4): `action_id`, `timestamp`, `actor`,
+  `intent`, `status`, `tool`, `call_id`, `details` (`event`, `skill`,
+  `input_sha256`), `recorded_by`, `prev_hmac`, `hmac`. Logs that mix old and
+  new lines still verify. The hook now reports, as a non-blocking error
+  (exit 1, the reason on standard error), every call it does not log or
+  cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
+  line with `hmac: "no-hmac-available"`, which broke the chain), a line that
+  could not be built, an unreadable last line, an unavailable digest.
 
 ### Added
+- Standard 1.2.0, host protocol, runs and audit records
+  ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part B;
+  findings ACS-14, ACS-15, ACS-20, ACS-30, ACS-31, ACS-32, ACS-33, ACS-34,
+  ACS-37, ACS-45, ACS-62):
+  - §5.19 Host Protocol: every action and response, the members the
+    executor computes and the outputs it composes, the run operations, the
+    tick boundaries and wake-up time, the host's obligations (one writer,
+    save before acting, at-least-once delivery keyed by `run_id` and `id`,
+    a unique `run_id`, integrity and a key where others can change stored
+    states), cancellation (R408), protocol traffic, error reasons and the
+    run record every host keeps; `schemas/host_protocol.schema.json`
+    requires `run_id` on every action. Class EX (§10.5): the runtime
+    fixtures are normative for executors, after an audit of every member
+    they pin (the generator refuses a fixture that pins an unlisted one).
+  - Reference executor: `Run::cancel`, `wake_at`, `take_trace`,
+    `take_records`, `taken_heads` (SHA-256 chain heads over what was taken)
+    and `run_record`; record mode `actions` (`StartOptions.records`,
+    `records="actions"`), with a record for every step that runs, every
+    failure-mode checkpoint and every rollback; an `audit` step that binds
+    `require_record: true` fails R402, reason `not_recorded`, when it did not
+    record. Python: `_core.Run` gains the same operations, `_core.next_fire`;
+    `WorkflowRunner.advance`, `cancel`, `archive=`, `save=`/`key=`,
+    `start(records=, trigger=, event=)`; `Host.withdraw`, `HostCannotServe`,
+    `RunArchiveError`, `Turn`; `grounded_agency.workflows.protocol` (typed
+    actions and responses) and `grounded_agency.workflows.triggers`
+    (`OverlapGate`, `EventGate`, `trigger_attendance`, `next_fire`).
+  - §5.10.2 Evaluating Triggers: the host's duties, event acceptance with
+    one run per `event_id`, fire times in the schedule's time zone (RFC 5545
+    for clock changes), `every` anchored at the Unix epoch, `overlap` and
+    missed fire times; normative trigger vectors
+    (`tests/conformance/triggers/`, from `scripts/gen_trigger_vectors.py`).
+  - §5.2.3 Parallel Groups: members are unordered and the reference executor
+    runs them in list order; W618 (`UNKNOWN_JOIN`) and W619
+    (`GROUP_MATE_READ`).
+  - §6.4 Audit Records and §8.4 Manual Overrides: the action record and the
+    canonical event are the audit records; `CoordinationEvent.to_action_record`,
+    `CoordinationAuditLog.export_action_records`,
+    `grounded_agency.trust.manual_override` and
+    `TrustModel.manual_override`; the evidence collector's `required=True`
+    reports a capture that failed; the audit skill writes a record of its own
+    with the event under `details.event`; the Standard Agents binding exports
+    its trace entries as action records (`actionRecord`).
+  - 38 runtime fixtures (`cancel_*`, `wake_at_*`, `records_*`,
+    `run_record_*`, `parallel_group_*`, `audit_*`, `error_reason_*`,
+    `response_extra_members_ignored`, `action_has_run_id`,
+    `approval_record_decision_id`), whose script may hold `tick` with
+    `changed`, `wake_at` and `cancel` entries and whose fixture may state
+    `records` and `run_record`; four validator fixtures (W618, W619,
+    `require_record`).
 - Standard 1.2.0, approval, deferral and run identity
   ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part A;
   findings ACS-10, ACS-11, ACS-12, ACS-13, ACS-35, ACS-44):

@@ -374,7 +374,10 @@ def _cancel(add):
         {"w": wf([CP, POLICY, mutate()])},
         [
             *CHECKPOINTED,
-            {"expect": {"kind": "RequestApproval"}, "respond": approve("d1")},
+            {
+                "expect": {"kind": "RequestApproval", "step": 2},
+                "respond": approve("d1"),
+            },
             {"expect": inv("mutate")},
             cancel("operator stop"),
         ],
@@ -639,11 +642,15 @@ def _records(add):
             {"expect": inv("retrieve"), "respond": found()},
             {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
             {"expect": inv("constrain"), "respond": out(compliant=True)},
-            {"expect": {"kind": "RequestApproval"}, "respond": approve("d1")},
+            {
+                "expect": {"kind": "RequestApproval", "step": 3},
+                "respond": approve("d1"),
+            },
             {"expect": inv("mutate"), "respond": out(success=True)},
         ],
         {
             "kind": "Completed",
+            "outcome": "completed",
             "action_records": [
                 _record("retrieve", 0, status="executed"),
                 _record("checkpoint", 1, status="executed", checkpoint_id="cp1"),

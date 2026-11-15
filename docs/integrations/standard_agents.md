@@ -641,11 +641,11 @@ With a handler as host, each executor action has a Standard Agents mechanism:
 |---|---|
 | `InvokeCapability` | `state.invokeTool(name, inputs)`, or a child agent for `delegate`. The result string is parsed and checked against the capability's output contract |
 | `CreateCheckpoint`, `Rollback` | A grounded `checkpoint` or `rollback` tool |
-| `RequestApproval` | An approval record and an authenticated endpoint, as in the binding. The executor supplies the shown values and the digest |
+| `RequestApproval` | An approval record and an authenticated endpoint, as in the binding. The executor supplies the shown values and the digest. The prompt to the approvers is protocol traffic, not a `send` step, when it carries only the action's values ([STANDARD §5.19.6](../../spec/STANDARD-v1.2.0.md#5196-protocol-traffic)) |
 | `AwaitEvent` | The handler returns. An inbound message, a child's completion, or an authenticated endpoint that queues the event wakes it |
-| `Sleep`, deadlines | `scheduleEffect(name, args, delay)` with an effect that queues a message. SA requires only that an effect is enqueued and its arguments kept, so the handler also calls `run.tick(now)` on every inbound message |
-| `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code |
-| The run between turns | `run.snapshot()` in the key-value store or a file, restored at the start of the next turn |
+| `Sleep`, deadlines | `scheduleEffect(name, args, run.wake_at() - now)` with an effect that queues a message: `wake_at` is the earliest time a tick changes the run ([STANDARD §5.19.3](../../spec/STANDARD-v1.2.0.md#5193-time)). SA requires only that an effect is enqueued and its arguments kept, so the handler also calls `run.tick(now)` on every inbound message |
+| `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code. Delivering the result is protocol traffic (§5.19.6). The run's record (§5.19.8) and its action records go where the handler keeps its audit records |
+| The run between turns | `run.snapshot()` in the key-value store, restored at the start of the next turn. The runtime runs one execution per thread, which gives the one writer a run needs ([§5.19.4](../../spec/STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)); the handler saves after every change, before it acts. A client that stops an execution leaves an interrupted turn: the next turn restores the latest state, unless the handler cancels the run. To stay within the store's value-size cap, the handler moves `run.take_trace()` into thread storage and `run.take_records()` into its audit records each turn |
 
 What stands in the way is the language, not the design. The reference core is
 a Rust crate with Python bindings. It compiles for `wasm32-unknown-unknown`
@@ -915,7 +915,11 @@ this repository. The rules a binding needs are proposed in
 - **What applying a domain profile changes**, and **a rule that keeps
   secrets out of evidence, audit records and stored data**, both normative.
 - **The host protocol as a published schema**, with a conformance class for
-  executors; today it is described in a guide and defined in Rust types.
+  executors: Standard 1.2.0 gives it, as
+  [§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol),
+  `schemas/host_protocol.schema.json` and class EX (§10.5), with
+  cancellation, wake-up times and a run record every host keeps; what stays
+  open is a JavaScript build to run it in a thread.
 
 Standard Agents also does several things ACS could learn from: numbered,
 testable runtime rules for storage; `uses`, a declared and enforced list of

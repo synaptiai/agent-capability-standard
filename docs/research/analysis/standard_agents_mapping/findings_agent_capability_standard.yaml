@@ -626,9 +626,17 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md lines 562-595, docs/guides/ORCHESTRATION_EXTENSIONS.md lines
     57-122 and the function list of core/src/cron.rs; read grounded_agency/workflows/runner.py lines 235-269,
     where `start` passes its `attendance` argument, default `attended`, to the core.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.10.2 (Evaluating Triggers) assigns trigger evaluation to the host, which
+    applies the trigger''s attendance, starts one run per event it accepts under its sender policy and at
+    most one per `event_id`, and starts schedule runs at their fire times as `overlap` allows; it defines
+    fire times in the declared time zone (RFC 5545 §3.3.5 for clock changes), the `every` anchor (the Unix
+    epoch), the three `overlap` values (a resumed run counts as in progress) and missed fire times.
+    core/src/trigger.rs next_fire, exposed as _core.next_fire; grounded_agency/workflows/triggers.py
+    (trigger_attendance, OverlapGate, EventGate); WorkflowRunner.start(trigger=, event=). Normative vectors
+    tests/conformance/triggers/ (fire times, overlap, attendance, events), computed by
+    scripts/gen_trigger_vectors.py with zoneinfo and run by core/tests/triggers.rs and
+    tests/test_triggers.py. RFC-0006 Part B, decision B7.'
   concerns:
   - workflow-execution
 - id: ACS-15
@@ -664,9 +672,15 @@ findings:
     W615) with `join` set to `all_complete`, `any_complete` and `no-such-join-value`; run with `any_complete`,
     the executor issued `InvokeCapability` for steps 0, 1 and 2 in order, one at a time, and completed.
     Read spec/STANDARD-v1.1.0.md lines 153-172, 250-260, 398-406, 778-802.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.2.3 (Parallel Groups): the members are not ordered, an executor may run them
+    in any order or concurrently and a §5.19 executor runs them in list order; the group is complete when
+    every member has finished; unfinished members are abandoned when a recovery escalates or ends the run,
+    and a loop continues from its target. `join` has one defined value, `all_complete`; any other, or a
+    `join` without a group, is W618 (UNKNOWN_JOIN, ignored); a read of a group mate''s store is W619
+    (GROUP_MATE_READ). §4.3, §5.2 and §5.6 reworded. core/src/validate/groups.rs; validator fixtures
+    pass_join_unknown_warns and pass_group_mate_read_warns; runtime fixtures parallel_group_list_order,
+    parallel_group_unknown_join and parallel_group_member_fails. RFC-0006 Part B, decision B8.'
   concerns:
   - workflow-execution
   - multi-agent
@@ -848,9 +862,16 @@ findings:
     `recorded: false` on the reference executor: the run completed. Read skills/audit/SKILL.md line 95
     and SA hooks.md line 5 (a hook''s failures are non-fatal) and lines 430-442 (`tool_call_done` fires
     for failed calls too).'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §6.4 separates required from best-effort capture and requires that no capture
+    fails silently; an `audit` step that binds `require_record: true` fails R402, reason not_recorded,
+    unless its output''s `recorded` is true (ontology 2.2.0 input); §5.19.8 gives every run a run record, an
+    ActionRecord derived from its terminal action, that every host keeps with the run''s records (failed and
+    cancelled runs included); §8.4 defines allow_manual_override, requires_anchors and audit_required.
+    Run::run_record, RunResult.run_record, WorkflowRunner(archive=); grounded_agency.trust.manual_override;
+    create_evidence_collector(required=True); hooks/posttooluse_log_tool.sh reports every call it does not
+    log or cannot sign (exit 1). Fixtures audit_require_record_*, audit_recorded_false_*, run_record_*;
+    tests/test_audit_records.py, tests/test_hooks_unit.py. RFC-0006 Part B, decision B10.'
   concerns:
   - evidence-audit-observability
   related:
@@ -1250,9 +1271,16 @@ findings:
     record and accepted an arbitrary object as `event`; a run with an approved `send` produced one `ActionRecord`.
     Trace events had the keys `seq`, `at`, `kind`, `frame`, `step`, `detail`. §10.3 (lines 1427-1431)
     calls the runtime fixtures, which include the trace, informative.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §6.4 (Audit Records): an audit record is an ActionRecord or a canonical event,
+    written in or exported as those shapes; world_state_schema.yaml 1.2.0 adds the correlation and integrity
+    members, `cancelled`, a `rejected` that covers executor and safety-layer refusals and
+    `approval.decision_id`; the executor''s record mode `actions` records every step that runs, every
+    failure-mode checkpoint and every rollback; `audit` records its event under details.event of a record of
+    its own; the trace is not an audit record. The plugin hook''s line is an ActionRecord, the audit skill
+    writes one, CoordinationEvent.to_action_record and the TypeScript actionRecord export them. Fixtures
+    records_actions_*, records_default_unchanged; tests/test_audit_records.py validates every writer''s
+    records against ActionRecord. RFC-0006 Part B, decision B9.'
   concerns:
   - evidence-audit-observability
   related:
@@ -1292,9 +1320,16 @@ findings:
     and 637-644, and machine.rs lines 184-211, 240-250 and 2113-2170. Replayed the 175 runtime fixtures
     with a snapshot and restore before every scripted step (probe measure.py): the restored run returned
     the identical pending action, id included, at 968 of 968 points.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.4 states the host''s obligations (one writer, save after every change and
+    before acting, at-least-once delivery idempotent under the delivery key (`run_id`, `id`), interrupted
+    turns) and integrity (the executor detects corruption and, given a key, refuses a state whose MAC fails;
+    a host whose stored states others can change uses a key); §5.19.2 makes `run_id` unique among the runs
+    whose records or keys the host keeps. Every action carries `run_id` (host_protocol.schema.json requires
+    it); Run.tick returns whether it changed the run; Host.withdraw; WorkflowRunner drive/advance/run take
+    save= and key= and refuse a reused run_id. Tests test_restore_reissues_same_id_and_run_id,
+    test_run_id_reuse_refused, test_drive_saves_after_every_change, test_withdraw_on_timeout; fixture
+    action_has_run_id. RFC-0006 Part B, decision B3.'
   concerns:
   - workflow-execution
   related:
@@ -1330,9 +1365,14 @@ findings:
   verified: 'Read core/src/exec/mod.rs lines 82-89, 100-238 and 638-660 and core/src/exec/machine.rs lines
     1923-1968. Listed the operations of `Run` in core/src/exec/mod.rs and grounded_agency/_core.pyi: start,
     restore, next, submit, tick, finished, trace, action_records, snapshot.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.5 (Cancelling a Run): `cancel(reason, now)` ends a run, or one that ended
+    deferred, with Failed R408 (CANCELLED, §9.5) naming the latest checkpoint; no retry, failure mode,
+    recovery, handler or rollback runs; the pending action is withdrawn; approved and planned records become
+    `cancelled`; in record mode `actions` every started step of every frame, and a pending failure-mode
+    checkpoint or rollback, gets a cancelled record. Run::cancel, _core.Run.cancel, WorkflowRunner.cancel.
+    Fixtures cancel_* (pending call, approval, delay, backoff, waiting delegate, failure-mode checkpoint,
+    nested runs, a deferred run); core/tests/host_protocol.rs. RFC-0006 Part B, decision B4.'
   concerns:
   - workflow-execution
   related:
@@ -1368,10 +1408,15 @@ findings:
     final snapshot state 1,269 to 40,895 bytes, median 3,343; the trace is 43% of all bytes (median 39%
     per fixture). Read core/src/exec/mod.rs lines 414-420 and 494-517. Grepped core/src/exec for uses
     of `st.trace`: `len()` for `seq` and `push` only (machine.rs lines 169, 176).'
-  status: open
-  resolution: 'Not changed in this round. Needs implementation work, not new normative text: documenting
-    the snapshot size model, and letting a host move the trace out of the run state, in the reference
-    core.'
+  status: fixed
+  resolution: 'Run::take_trace and take_records shed the trace and the settled records from a run''s state while
+    `seq`, record indices and action ids stay sound, and the state keeps SHA-256 chain heads over everything
+    taken (Run::taken_heads, _core.Run.taken_sha256), which spec/STANDARD-v1.2.0.md §5.19.4 makes a MUST for
+    any executor that offers taking; the terminal action is derived from the state, not stored with copies
+    of the records and outputs (snapshot version 2; version-1 snapshots restore,
+    core/tests/data/snapshots_v1.json). Every runtime fixture is replayed with the trace and records taken
+    before every entry and checked against the chain heads (core/tests/runtime.rs); the size model and
+    measured figures are in docs/guides/RUNNING_WORKFLOWS.md. RFC-0006 Part B, decision B6.'
   concerns:
   - workflow-execution
 - id: ACS-34
@@ -1404,9 +1449,14 @@ findings:
     2113-2170. Probe boundary.py restored a snapshot at the first deadline-bearing action of each kind
     and ticked at the deadline and one millisecond later: `InvokeCapability`, `AwaitEvent` and `RequestApproval`
     were unchanged at the deadline and changed after it; `Sleep` changed at `until`.'
-  status: open
-  resolution: 'Not changed in this round. Needs implementation work, not new normative text: a `Run.wake_at()`
-    call in the reference core and an event-driven host recipe in the guide.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.3 (Time) states the tick boundaries (a Sleep ends at `until`; an action
+    times out after its deadline, an answer at the deadline is in time), the wake-up time, and that liveness
+    is the host''s to watch. Run::wake_at and _core.Run.wake_at; WorkflowRunner.advance (one turn of an
+    event-driven host, a Turn with the wake-up time) and drive as a loop of turns; the event-driven recipe
+    in docs/guides/RUNNING_WORKFLOWS.md. Fixtures wake_at_* with `wake_at` and `tick`/`changed` entries;
+    every harness checks at every tick of every fixture that it changed the run exactly when its time
+    reached the wake-up time. RFC-0006 Part B, decision B5.'
   concerns:
   - workflow-execution
   related:
@@ -1533,9 +1583,16 @@ findings:
     in full, schemas/world_state_schema.yaml lines 360-415 (the `decision` enum holds `expired`, which
     no host response carries), spec/CONFORMANCE.md lines 1-82, spec/RFC-0002-agent-reliability-profile.md
     line 207 and Standard Agent Specification runtime.md §16 (lines 382-395).
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19 (Host Protocol) names every action, response and run operation, the
+    members the executor computes, the outputs it composes and Completed.outputs; §5.2 states the retry
+    backoff; schemas/host_protocol.schema.json (supporting, required for class EX) defines each action and
+    response, tested against every action, response, trace event and snapshot of a replay of all runtime
+    fixtures (tests/test_host_protocol_schema.py); unknown response members are ignored. Class EX (§10.5)
+    makes the runtime fixtures normative except `trace_kinds`, after an audit of every pinned member
+    (scripts/gen_runtime_fixtures.py NORMATIVE_MEMBERS refuses an unlisted one);
+    tests/conformance/runtime/schema/fixture.schema.json; ActionRecord.approval.decision_id. RFC-0006 Part
+    B, decisions B1 and B2.'
   concerns:
   - published-api-extension-points
   - approval-human
@@ -1876,9 +1933,13 @@ findings:
     declared outputs). Anything else a workflow wants transmitted is a `send` or `inquire` step.'
   verified: Read schemas/capability_ontology.yaml lines 1133-1142, spec/STANDARD-v1.1.0.md lines 84-88,
     182-190 and 815-825, and the action table of docs/guides/RUNNING_WORKFLOWS.md (lines 83-92).
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.6 (Protocol Traffic): what a host transmits to perform an approval
+    request, a recheck, a wait or a terminal action is protocol traffic, not a `send` step, and needs no
+    checkpoint or approval, provided it carries only the action''s values; a host must not add other values
+    of the run, and a tool that delivers it is a host action under §5.18.3. Appendix D.3 lists it;
+    docs/guides/RUNNING_WORKFLOWS.md and docs/integrations/standard_agents.md apply it. RFC-0006 Part B,
+    decision B11.'
   concerns:
   - workflow-execution
 - id: ACS-46
@@ -2492,15 +2553,15 @@ findings:
     lines 260 and 1306-1315, core/src/exec/mod.rs lines 209-213 (`Error` has `code` and `message`) and
     core/src/exec/machine.rs lines 2020-2026 (R401 is kept, R406 is kept on a wait, any other code becomes
     R402).
-  status: partly_fixed
-  resolution: 'docs/guides/MODALITY_HANDLING.md (now 1.1.0) cites STANDARD §5.2 for the step field domain:
-    the validator checks only that it is a string (S303), and the executor passes it on InvokeCapability.
-    §1.3 says a host without a pipeline answers Error, the step fails with R402, and the Standard defines
-    no code or field for an unsupported domain. Every anchor now uses an Anchor.kind of schemas/event_schema.yaml
-    (file), and the modality forms are ref conventions. composite and nested_anchors are removed. The
-    RUNNING_WORKFLOWS InvokeCapability row now names domain. Remaining: A machine-readable place for the
-    reason unsupported_domain (a reason field on Error or a fixed message prefix) needs normative text
-    in §9.5 or the host protocol.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.19.7 (Error Reasons): an `Error` may carry a `reason` token
+    (unsupported_capability, unsupported_domain, not_recorded and the other defined tokens, or an `x-`
+    vendor token); any other value is ignored, as 1.1 ignored the member; the reason travels to the step''s
+    trace, the run''s Failed action and the record''s `reason_code`. The core reads it (exec Reason), the
+    runner''s HostCannotServe sends it, and docs/guides/MODALITY_HANDLING.md §1.3 uses `unsupported_domain`.
+    Fixtures error_reason_unsupported_domain, error_reason_with_retry, error_reason_outside_grammar_ignored;
+    core/tests/runtime.rs reason_grammar and reason_outside_grammar_is_ignored. RFC-0006 Part B, decision
+    B12.'
   concerns:
   - models-context-memory-security
   related:

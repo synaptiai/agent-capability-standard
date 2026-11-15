@@ -69,10 +69,13 @@ the Rust core in `core/`).
   diagnostics). `tools/cel_differential` runs them against cel-go to check
   CEL compatibility.
 - Runtime fixtures, language-neutral: `tests/conformance/runtime/*.json`,
-  scripted runs of the reference executor (catalog, inputs, the expected
-  actions and the responses to them, the expected end and trace). Run by
+  scripted runs (catalog, inputs, the expected actions and the responses to
+  them, the expected end and trace), normative for an executor of class EX
+  except their `trace_kinds` (§10.3, §10.5; see
+  [Executor conformance](#executor-conformance-class-ex)). Run by
   `cargo test --test runtime` (each also replayed through a snapshot and
-  restore before every step) and `tests/test_runner.py`. Fifteen of them
+  restore before every step, and with the trace and records taken out
+  before every step) and `tests/test_runner.py`. Fifteen of them
   (`orchestrator_*`) script runs of the workflows an adopter ported to the
   candidate (reduced from production, generic names; revision 1.1e), kept
   as contributed
@@ -83,7 +86,19 @@ the Rust core in `core/`).
   `approval_*`, `approver_*` and `resume_*` ones pin the approval request
   for a step with no or a partial `approval` field, the digest comparison,
   approver identities, and the resumption of a deferred run (§5.14,
-  §5.14.1, §5.17); a script's `resume` entry resumes the run.
+  §5.14.1, §5.17); a script's `resume` entry resumes the run. The
+  `cancel_*`, `wake_at_*`, `records_*`, `run_record_*`, `parallel_group_*`,
+  `audit_*` and `error_reason_*` ones pin cancellation, the tick boundaries,
+  record mode `actions`, run records, parallel groups, `require_record` and
+  error reasons (§5.2.3, §5.19, §6.4).
+- Trigger vectors, normative (§10.3): `tests/conformance/triggers/`
+  (`fire_times.json`, `overlap.json`, `attendance.json`, `events.json`), the
+  §5.10.2 fire times, overlap decisions (resumed runs included), the
+  attendance of a run a trigger starts and which events start runs (a
+  redelivered event included). `scripts/gen_trigger_vectors.py` computes
+  them with Python's zoneinfo, independently of the core; `fire_times.json`
+  names the tzdata release it was computed with, and the vectors are
+  normative with it or any release that agrees on their dates.
 - Approval digest vectors, normative (§10.3):
   `tests/conformance/approval/digests.json`. Each vector has a `kind`. A
   `step` vector is one approval request of a workflow step (§5.14): the
@@ -130,9 +145,56 @@ Running the suite:
 | Runtime fixtures | `cargo test --test runtime` (in `core/`), `pytest tests/test_runner.py` |
 | Expression fixtures | `cargo test --test expressions` (in `core/`); `tools/cel_differential` against cel-go |
 | Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `packages/acs-core/` |
+| Trigger vectors | `cargo test --test triggers` (in `core/`), `pytest tests/test_triggers.py` |
 | Trust vectors | `pytest tests/test_trust.py` |
 
 `scripts/run_conformance.py` runs only the workflow fixtures.
+
+## Executor conformance (class EX)
+
+An executor claims class EX (STANDARD-v1.2.0 §10.5) when it starts only
+catalogs that validate, implements the extensions it accepts, offers the run
+operations of §5.19.2, issues exactly the actions of
+`schemas/host_protocol.schema.json`, keeps time, saves, restores, cancels and
+records as §5.19.3 to §6.4 say, and passes every runtime fixture whose
+extensions it implements.
+
+A fixture (`tests/conformance/runtime/schema/fixture.schema.json`) gives the
+catalog, its header's version (`header`, or null), the workflow, its inputs
+and attendance and, optionally, the actor, the record mode (`records`) and
+the other start members, all passed to start with `run_id` `"run-1"`. Its
+`script` is a list of entries:
+
+| Entry | What the harness does |
+|-------|-----------------------|
+| `{"expect": A, "respond": R, "at": T}` | The pending action must match `A`; then `R`, when given, is submitted at `T` (`"{{digest}}"` and `"{{digest_upper}}"` stand for the action's digest) |
+| `{"tick": T, "changed": C}` | The time `T` is given; when `changed` is there, the tick must change the run exactly when `C` |
+| `{"wake_at": W}` | The run's wake-up time must be `W` (null: none) |
+| `{"cancel": {"reason": S, "at": T}}` | The run is cancelled |
+| `{"resume": {...}}` | The run is saved, restored and resumed (§5.14.1) |
+
+After the script the run's next action must match `end`, and its run record
+`run_record` when the fixture gives one. An actual value matches an expected
+one when they are equal, when it is an object with every member the expected
+one names, each matching, or when both are arrays of the same length whose
+elements match in order. Text the executor composes is not compared: a
+`message` (except `ended.message`), the `reason` of an action record or a
+deferral, and the `ignored`, `note` and `quorum` texts of a quorum's
+`violations`. A `Failed` action's `reason` is a token and is compared.
+
+An executor passes a fixture when every expectation matches, both when it
+plays the script as it is and when it saves and restores its state before
+every entry. The reference harnesses also replay each fixture with the trace
+and the settled records taken out before every entry, checking the state's
+chain heads against what was taken, and check at every `tick` that it
+changed the run exactly when its time reached the run's wake-up time.
+`scripts/gen_runtime_fixtures.py` refuses a fixture that pins a member the
+Standard does not define (its `NORMATIVE_MEMBERS` table names the section of
+each). Another executor runs the fixtures with a harness of its own built
+from the fixture schema; its conformance statement names its version, the
+Standard version it implements, the extensions it implements, how its
+binding names the run operations, and whether it restores states saved by
+its earlier versions.
 
 Coverage gaps: no conformance fixture yet exercises V103, S301, S302, W607
 or W612; the reference implementation's unit tests cover them. F505 is

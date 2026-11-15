@@ -22,6 +22,12 @@ export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
   'deferral-replay': 'deferral_defers_effects',
   'resume-replay': 'resume_reruns_read_ahead',
   'resume-skip-replay': 'resume_skipped_supersedes',
+  'protocol-replay': 'records_actions_steps',
+  'wake-replay': 'wake_at_backoff',
+  'cancel-replay': 'cancel_after_checkpoint_names_it',
+  'reason-replay': 'error_reason_with_retry',
+  'response-replay': 'response_extra_members_ignored',
+  'audit-replay': 'audit_require_record_fails',
 };
 
 export type ReplayStatus = 'ran' | 'deferred' | 'skipped' | 'not-reached';
@@ -222,6 +228,7 @@ export const ANSWER_WORDS: Readonly<Record<string, string>> = {
   LivenessLost: 'the source stopped answering',
   Decision: 'an approver decided',
   Checkpoint: 'took a checkpoint',
+  Error: 'reported an error',
 };
 
 

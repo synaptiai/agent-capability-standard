@@ -536,6 +536,17 @@ adapter = GroundedAgentAdapter(GroundedAgentConfig(evidence_include_tool_input=T
 
 The same switch exists where anchors are built directly: `EvidenceAnchor.from_tool_output(..., include_tool_input=True)`, `create_evidence_collector(store, mapper, include_tool_input=True)` and `DiscoveryPipeline(..., evidence_include_tool_input=True)`, which then keeps the task description. `EvidenceAnchor.from_command(None, exit_code)` records a command without its text. The adapter does not redact: with the switch on, inputs are stored as given, except that in a metadata object over 1 KB the largest values are replaced with `[truncated]`.
 
+Evidence capture is best-effort by default
+([STANDARD v1.2 §6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)): an
+anchor that cannot be stored is logged as a warning, and the call goes on. A
+host that requires the capture builds the hook with
+`create_evidence_collector(store, mapper, required=True)`: a call whose
+evidence was not recorded is then reported to the model in the hook's result
+(`R402 EXECUTION_FAILED: the call ran, but its evidence was not recorded
+(not_recorded): ...`), logged at error level and handed to the store's
+`record_capture_failure(tool_use_id, error)` when it has one. Either way no
+capture fails silently.
+
 ## Multi-Agent Coordination
 
 Bridge the orchestration runtime to SDK subagents. The example registers two agents and exports them:

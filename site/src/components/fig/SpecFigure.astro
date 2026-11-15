@@ -43,6 +43,7 @@ import RunReplay from './RunReplay.astro';
 import SafetyDefaults from './SafetyDefaults.astro';
 import TableWrap from '../TableWrap.astro';
 import * as T from '../../lib/spec-tail-figures';
+import * as H from '../../lib/spec-host-figures';
 import { heatRanges, heatStep } from '../../lib/edge-figures';
 import { loadIdentityPolicy } from '../../data/spec-sources';
 import { githubBlobUrl, githubTreeUrl } from '../../lib/repo';
@@ -76,15 +77,15 @@ const def = slots.find((s) => s.key === slot);
 if (!def) throw new Error(`SpecFigure: no slot ${slot}`);
 const text = readRepoFile(source);
 const where = source;
-// "{figure title}, from §{n}" (visual spec 3.9).
-const titled = (name: string) => `${name}, from §${def.section.trim()}`;
+// "{figure title}, from §{n}" (visual spec 3.9); a chapter's "2." is §2.
+const titled = (name: string) => `${name}, from §${def.section.trim().replace(/\.$/, '')}`;
 const idOf = (name: string) => refSlugger()(`Figure: ${name}`);
 const o = loadOntology();
 const schema = loadCatalogSchema();
 const KNOWN = ['layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
 const OLDER = ['categories', ...Object.keys(T.TABLE_FIGURES)];
 const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'digest-vectors', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
-const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter', 'approver-count'];
+const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter', 'approver-count', 'host-loop', 'overlap', 'protocol-actions', 'run-records', 'fixture-entries'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
   'recovery-replay': 'A recovery that runs out',
@@ -93,6 +94,12 @@ const REPLAY_TITLES: Record<string, string> = {
   'deferral-replay': 'What a deferral reaches',
   'resume-replay': 'What a resumption runs again',
   'resume-skip-replay': 'A queued step that no longer runs',
+  'protocol-replay': "A run's actions and the host's answers",
+  'wake-replay': "A retry's wait, ended by a tick",
+  'cancel-replay': 'A run cancelled while its mutation is pending',
+  'reason-replay': 'An error that says why, retried',
+  'response-replay': 'Responses with members this version does not define',
+  'audit-replay': 'An audit step whose record was not written',
 };
 // A link to a numbered section of this page's own Standard (1.0.0's links stay on 1.0.0).
 const sectionLink = (sec: string) => {
@@ -145,6 +152,10 @@ const quorum = slot === 'quorum' ? D.quorumExample(text, where) : null;
 const trust = slot === 'trust-classes' ? D.trustClassBars(text, where) : [];
 const sender = slot === 'sender-filter' ? D.senderFilter(text, where) : [];
 const approvers = slot === 'approver-count' ? D.approverCount(text, where) : null;
+const loop = slot === 'host-loop' ? H.hostLoop(text, where) : null;
+const overlap = slot === 'overlap' ? H.overlapRows(text, where) : [];
+const runEnds = slot === 'run-records' ? H.runRecordRows(text, where) : [];
+const entries = slot === 'fixture-entries' ? H.fixtureEntries(text, where) : null;
 const shelf = slot === 'schema-shelf' ? T.schemaShelf(text, where) : [];
 const policy = slot === 'merge-thresholds' ? loadIdentityPolicy() : null;
 const mergeBands = policy ? T.mergeBands(policy) : [];
@@ -572,6 +583,62 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
   <Figure id={idOf('quorum fields and their codes')} n={n} title={titled('Quorum fields and the codes they raise')} caption={D.quorumFieldsCaption(D.quorumFieldCodes(text, where))} kind="quorum-fields">
     <Fragment set:html={inner} />
     <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
+  </Figure>
+)}
+
+{slot === 'host-loop' && loop && (
+  <Figure id={idOf('a run between an executor and its host')} n={n} title={titled('A run, between an executor and its host')} caption={H.hostLoopCaption(loop)} kind="host-loop">
+    <ol class="host-loop">
+      <li class="host-loop__party"><strong>Executor</strong><span class="host-loop__note">runs the workflow, with no input or output of its own</span></li>
+      <li class="host-loop__msg"><FlowArrow /><span><span>an <strong>action</strong>:</span>{loop.requests.map((k) => <code class="chip chip--inner">{k}</code>)}<span>or</span>{loop.waits.map((k) => <code class="chip chip--inner">{k}</code>)}</span></li>
+      <li class="host-loop__party"><strong>Host</strong><span class="host-loop__note">performs it</span></li>
+      <li class="host-loop__msg"><FlowArrow /><span><span>a <strong>response</strong>:</span>{loop.responses.map((k) => <code class="chip chip--inner">{k}</code>)}<span>or the time</span></span></li>
+      <li class="host-loop__party"><strong>Executor</strong><span class="host-loop__note">the next action, until the <strong>run</strong> ends</span></li>
+      <li class="host-loop__msg"><FlowArrow /><span><span>a terminal action:</span>{loop.terminal.map((k) => <code class="chip chip--inner">{k}</code>)}<span>with the run's action records (<strong>audit records</strong>)</span></span></li>
+    </ol>
+  </Figure>
+)}
+{slot === 'overlap' && overlap.length > 0 && (
+  <Figure id={idOf('overlap fire time by fire time')} n={n} title={titled('Overlap, fire time by fire time')} caption={H.overlapCaption(overlap)} kind="overlap">
+    <ul class="overlap">
+      {overlap.map((r) => (
+        <li class="overlap__row" data-policy={r.policy}>
+          <span class="overlap__policy"><code>{r.policy}</code>{r.isDefault && ' (default)'}</span>
+          <ol class="overlap__events">
+            {r.events.map((e) => (
+              <li class="overlap__event" data-event={e.event} data-outcome={e.outcome}><span class="overlap__what">{e.event === 'fire' ? 'fire time' : 'a run ends'}</span><span class="overlap__then">{H.overlapWords(e)}</span></li>
+            ))}
+          </ol>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'protocol-actions' && inner && (
+  <Figure id={idOf('actions and the responses that answer them')} n={n} title={titled('Actions, and the responses that answer them')} caption={H.protocolActionsCaption(H.hostLoop(text, where))} kind="protocol-actions">
+    <Fragment set:html={inner} />
+    <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span></p>
+  </Figure>
+)}
+{slot === 'run-records' && runEnds.length > 0 && (
+  <Figure id={idOf('the run record each end leaves')} n={n} title={titled('The run record each end leaves')} caption={H.runRecordCaption(runEnds)} kind="run-records">
+    <ul class="run-ends">
+      {runEnds.map((r) => (
+        <li class="run-ends__row" data-status={r.status}>
+          <span class="run-ends__end"><code>{r.kind}</code>{r.code ? <DiagnosticTile code={r.code} /> : <span>outcome <code>{r.outcome}</code></span>}</span>
+          <span class="run-ends__to"><FlowArrow dir="right" /><span class="chip"><code>{r.status}</code></span>{r.records !== null && <span class="run-ends__n">{H.recordsWords(r.records)}</span>}</span>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'fixture-entries' && entries && (
+  <Figure id={idOf('runtime fixtures by script entry')} n={n} title={titled('Runtime fixtures by script entry')} caption={H.fixtureEntriesCaption(entries)} kind="fixture-entries">
+    <ul class="trust-bars suite">
+      {entries.entries.map((e) => (
+        <li class="trust-bars__row"><a class="suite__label" href={githubBlobUrl(H.FIXTURE_SCHEMA)}><code>{e.key}</code></a><PixelBar value={e.count} max={entries.fixtures} /></li>
+      ))}
+    </ul>
   </Figure>
 )}
 

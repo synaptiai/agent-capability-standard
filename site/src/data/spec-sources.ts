@@ -233,6 +233,8 @@ export interface RuntimeFixture {
   end: { kind: string; code?: string; outcome?: string; deferred?: { step: number; reason?: string }[] } & Obj;
   /** The trace record kinds the run must emit, in order (empty when the fixture lists none). */
   traceKinds: string[];
+  /** The run was cancelled (a `cancel` entry, §5.19.5): the reason given. */
+  cancelled: string | null;
 }
 
 export function loadRuntimeFixture(name: string): RuntimeFixture {
@@ -249,13 +251,26 @@ export function loadRuntimeFixture(name: string): RuntimeFixture {
   if (!isObj(doc.catalog[doc.workflow])) throw new Error(`runtime fixture ${file}: its catalog has no workflow ${doc.workflow}`);
   const script: ScriptEntry[] = [];
   const resumedAt: number[] = [];
-  for (const [i, s] of doc.script.entries()) {
+  let cancelled: string | null = null;
+  const entries = doc.script;
+  for (const [i, s] of entries.entries()) {
     if (isObj(s) && isObj(s.resume)) {
       resumedAt.push(script.length);
       continue;
     }
-    // The end a run reached before it was resumed: expected, not answered.
+    // The time given, or the wake-up time checked (§5.19.3): no request.
+    if (isObj(s) && ('tick' in s || 'wake_at' in s)) continue;
+    if (isObj(s) && isObj(s.cancel)) {
+      cancelled = typeof s.cancel.reason === 'string' ? s.cancel.reason : '';
+      continue;
+    }
+    // The end a run reached before it was resumed or cancelled: expected, not answered.
     if (isObj(s) && isObj(s.expect) && (s.expect.kind === 'Completed' || s.expect.kind === 'Failed') && !('respond' in s)) continue;
+    // A Sleep is waited out, not answered.
+    if (isObj(s) && isObj(s.expect) && s.expect.kind === 'Sleep' && !('respond' in s)) continue;
+    // The action pending when the run was cancelled: asked, never answered,
+    // so not a request the host answered.
+    if (isObj(s) && isObj(s.expect) && !('respond' in s) && entries.slice(i + 1).some((x: unknown) => isObj(x) && isObj(x.cancel))) continue;
     if (!isObj(s) || !isObj(s.expect) || typeof s.expect.kind !== 'string' || !isObj(s.respond) || typeof s.respond.kind !== 'string') {
       throw new Error(`runtime fixture ${file}: script entry ${i} needs expect.kind and respond.kind`);
     }
@@ -273,5 +288,6 @@ export function loadRuntimeFixture(name: string): RuntimeFixture {
     resumedAt,
     end: doc.end as RuntimeFixture['end'],
     traceKinds: Array.isArray(doc.trace_kinds) ? doc.trace_kinds.map(String) : [],
+    cancelled,
   };
 }

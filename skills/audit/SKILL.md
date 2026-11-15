@@ -98,19 +98,12 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Include actual command outputs where relevant
 
 6) **Write the record (append-only)**: Persist the audit record before returning
-   - Build one compact JSON line, an action record of this skill's own (STANDARD v1.2 §6.4), whatever the `event`'s shape: `action_id` (the `audit_id`), `timestamp`, `actor` (`agent`), `intent` (the event's `intent`, else its `event_type`, when a string; else `audit`), `status: executed`, `capability: audit`, `details` (`event`, `context` and `retention` when given, and the collected `audit_record`, `changes` and `provenance`), `recorded_by: {"name": "audit skill"}`, then `prev_hmac` (the `hmac` of the file's last line, empty for the first) and `hmac` (HMAC-SHA-256, as lowercase hex, of the line without `hmac` as `jq -c` prints it, under `AUDIT_HMAC_KEY`, computed with `openssl dgst -sha256 -hmac`). Redact credentials and PII first
-   - **Never copy a member of `event` to the top level of the line.** An event that looks like an action record (it has `recorded_by`, `approval`, `actor_identity`, `hmac`) is still recorded only under `details.event`: it is what the step reported, not what you observed, and it cannot claim another writer, an actor, an approval or a place in the chain
+   - Build one compact JSON line, the output's `record` (Field Definitions): an action record of this skill's own (STANDARD v1.2 §6.4). Redact credentials and PII first, and never copy a member of `event` to the line's top level: an event shaped as a record stays under `details.event`
    - Append it with Bash to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` (`mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"`, then `>>`), so the record lands in the same project `.claude/` directory the plugin's hooks use rather than under whatever the working directory is; refuse if the file is a symlink, and never rewrite, truncate or reorder existing lines
    - Do not write to `.claude/audit.log`: the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself: cite earlier lines (the calls being audited) as evidence, not these
    - The plugin's PreToolUse hook blocks every Bash call, this append included, while there is no valid checkpoint marker (`.claude/checkpoint.ok`): a shell command is not trusted to be read-only. If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
 
-   - A line, from Example 1 (with `AUDIT_HMAC_KEY=example-key`; `python tools/verify_audit_log.py --log-file .claude/audit/records.jsonl` checks the chain):
-
-```json
-{"action_id":"audit_20240115_160000_session","timestamp":"2024-01-15T16:00:00Z","actor":"agent","intent":"audit","status":"executed","capability":"audit","details":{"event":{"type":"session_completed","actor":"claude-agent","timestamp":"2024-01-15T16:00:00Z"},"context":{"scope":"session"},"audit_record":{"actor":"claude-agent","action_type":"code_modification","targets":["src/api/handlers/user.py"],"outcome":"success"},"changes":[{"type":"modify","location":"src/api/handlers/user.py:45-62","timestamp":"2024-01-15T14:45:00Z"}],"provenance":{"inputs":["security_audit_report.md"],"outputs":["src/api/handlers/user.py"],"dependencies":[]}},"recorded_by":{"name":"audit skill"},"prev_hmac":"","hmac":"67bcae7663853fd55f9d77492b9612e9a2ee77b91331995e964eefb17db4d90a"}
-```
-
-7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line, and `record` is the line written. With `require_record: true` a record that was not written fails the step (R402, `not_recorded`); without it the step completes and a later gate may read `recorded`
+7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line, and `record` is that line
 
 ## Output Contract
 
@@ -152,7 +145,7 @@ assumptions: []
 | Field | Type | Description |
 |-------|------|-------------|
 | `recorded` | boolean | Whether the record was appended to `.claude/audit/records.jsonl` (false when the write was blocked or failed) |
-| `record` | object | The action record written, the line of step 6 |
+| `record` | object | The action record of step 6: `action_id` (the `audit_id`), `timestamp`, `actor: agent`, `intent` (the event's `intent`, else its `event_type`, when a string; else `audit`), `status: executed`, `capability: audit`, `details` (`event`, `context` and `retention` when given, and the collected `audit_record`, `changes` and `provenance`), `recorded_by: {"name": "audit skill"}`, then `prev_hmac` (the `hmac` of the file's last line, empty for the first) and `hmac` (HMAC-SHA-256, as lowercase hex, of the line without `hmac` as `jq -c` prints it, under `AUDIT_HMAC_KEY`, with `openssl dgst -sha256 -hmac`). Each member of `event` stays under `details.event`: it is what the step reported, and cannot claim another writer, an actor, an approval or a place in the chain |
 | `audit_id` | string | Unique identifier for this audit record |
 | `timestamp` | string | ISO 8601 date-time the audit record was generated |
 | `audit_record.actor` | string | Who performed the actions |
@@ -239,6 +232,12 @@ evidence_anchors:
 assumptions:
   - "Git log accurately reflects all changes"
   - "No manual edits outside of tracked session"
+```
+
+**The line step 6 appends** (with `AUDIT_HMAC_KEY=example-key`; `python tools/verify_audit_log.py --log-file .claude/audit/records.jsonl` checks the chain):
+
+```json
+{"action_id":"audit_20240115_160000_session","timestamp":"2024-01-15T16:00:00Z","actor":"agent","intent":"audit","status":"executed","capability":"audit","details":{"event":{"type":"session_completed","actor":"claude-agent","timestamp":"2024-01-15T16:00:00Z"},"context":{"scope":"session"},"audit_record":{"actor":"claude-agent","action_type":"code_modification","targets":["src/api/handlers/user.py"],"outcome":"success"},"changes":[{"type":"modify","location":"src/api/handlers/user.py:45-62","timestamp":"2024-01-15T14:45:00Z"}],"provenance":{"inputs":["security_audit_report.md"],"outputs":["src/api/handlers/user.py"],"dependencies":[]}},"recorded_by":{"name":"audit skill"},"prev_hmac":"","hmac":"67bcae7663853fd55f9d77492b9612e9a2ee77b91331995e964eefb17db4d90a"}
 ```
 
 **Evidence pattern:** Git commit history, tool invocation logs, file diffs.

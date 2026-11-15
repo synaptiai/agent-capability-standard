@@ -75,7 +75,8 @@
     },
     {
       "expect": {
-        "kind": "RequestApproval"
+        "kind": "RequestApproval",
+        "step": 2
       },
       "respond": {
         "kind": "Decision",

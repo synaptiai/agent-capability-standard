@@ -529,3 +529,65 @@ Workstreams should run `npm run check:axe` (or at least
   does. S2b's `cancel` of a resumed run may stamp its `cancelled` records
   the same way. `exec::read_json` refuses a member name twice in one
   object.
+
+## 2026-11-15 — S2b (host protocol, runs and audit records), for the streams after it
+
+- **Snapshot version 2 (C34).** `SNAPSHOT_VERSION` is 2. `restore` reads
+  version 1 too: its `finished` held the whole terminal action, which is
+  converted to the head and must equal the action derived from the state.
+  `State.finished` is now a `Terminal { id, frame, end: End }`, and
+  `State::terminal_action()` derives the records, outputs and deferrals;
+  `Run::next()` returns an owned `Action`, which carries `run_id`. New
+  optional state members: `StepState.checkpoint_id`, `StepState.started`,
+  `State.trace_base`, `records_base`, `records_taken_sha256`,
+  `trace_taken_sha256` (each left out while it has its default). A member a
+  later stream adds stays optional with a default that gives 1.1 behaviour.
+- **Record indices.** Records can be taken out of the state (`take_records`),
+  so read and write them through `st.rec(r)` / `st.rec_mut(r)`, count them
+  with `st.records_written()`, and write a new one with
+  `Machine::push_record(frame_index, status, approval)` (or `record()` for
+  the current step); every record carries `run_id`, `frame`, `step`,
+  `capability` and the step's `checkpoint_id`. S6's `person_required` on
+  records and S5's `idempotency_key` go there.
+- **Record mode `actions`** is implemented (`StartOptions::unimplemented`
+  no longer refuses it; both harnesses pass `records`). A failure-mode
+  checkpoint or a rollback gets its own record through
+  `Machine::side_record(capability, status, checkpoint_id, code)`: S5 adds
+  `details.not_covered` to the rollback record there (FOUNDATION F4).
+- **Runs end through `Machine::finish(End)`**: `End::Completed { outcome,
+  cause, ended }` or `End::Failed { code, step, message, reason,
+  checkpoint_id }`. `cancel` clears S2a's frame members (`parked`,
+  `resume`, `pending_escalation`, `queued`).
+- **`schemas/host_protocol.schema.json`** requires `run_id` in `head`, as
+  the notes above planned. `tests/test_host_protocol_schema.py` validates
+  every action, response (also against a strict copy: a new response member
+  goes in the schema), trace event, snapshot, record and run record of a
+  replay of all runtime fixtures, and checks `grounded_agency/workflows/
+  protocol.py`'s typed dicts key for key against the schema: a stream that
+  adds a member to an action or a response adds it to both.
+- **Pinned members.** `scripts/gen_runtime_fixtures.py` refuses a fixture
+  that pins a member outside `NORMATIVE_MEMBERS` (by action kind, plus
+  `action_records[]`, `approval`, `deferred[]`, `ended` and `run_record`);
+  below `outputs`, `inputs`, `shown`, `correlate`, `event`, `details`,
+  `approver`, `liveness`, `actor_identity` and `approver_identities` any
+  member is allowed. A stream whose fixtures pin a new member adds it there,
+  with the section that defines it (`idempotency_key` is already listed).
+- **Fixture script entries**: `{"tick": T, "changed": C}`, `{"wake_at": W}`
+  and `{"cancel": {"reason", "at"}}` (helpers `tick`, `wake`, `cancel`,
+  `err` in `scripts/runtime_fixtures/helpers.py`), and the fixture members
+  `records` and `run_record`. At every `tick` the harnesses check that it
+  changed the run exactly when it reached `run.wake_at()`; every fixture is
+  also replayed with the trace and records taken before every entry.
+- **The trace detail `reason`** (and `reason_ignored`) on `step_failed`,
+  `retry` and `run_failed`, and the kind `run_cancelled`, are documented in
+  `docs/guides/RUNNING_WORKFLOWS.md`, as the F1.8 note asked.
+- **W616's FEATURES** gains `the audit input 'require_record'` (C12). W618
+  and W619 live in `core/src/validate/groups.rs`, called once from
+  `validate/mod.rs` after the groups are built.
+- **Site.** §5.19 is written: its `unwritten` entry left `EXEMPT_RUNS`, and
+  four replay slots draw S2b fixtures (`protocol-replay` in §5.19.1,
+  `wake-replay` §5.19.3, `cancel-replay` §5.19.5, `reason-replay` §5.19.7).
+  The site's fixture reader (`loadRuntimeFixture`) skips `tick`, `wake_at`
+  and `cancel` entries, a `Sleep` expectation and the action pending at a
+  cancel. S2b split a §5.13 paragraph, which moved the `wait-replay` slot to
+  paragraph index 7.

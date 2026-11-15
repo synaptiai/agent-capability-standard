@@ -68,6 +68,15 @@ flowchart TB
 `attendance: attended | unattended` overrides the default. It matters for
 approval steps: an unattended run cannot wait for a person in the session.
 
+The host evaluates triggers, not the executor
+([STANDARD v1.2 §5.10.2](../../spec/STANDARD-v1.2.0.md#5102-evaluating-triggers)):
+it starts each run with the trigger's attendance, a schedule's runs at its
+fire times as `overlap` allows, and one run per event it accepts. The Python
+runner does this with `WorkflowRunner.start(workflow, trigger=i, event=...)`
+and the helpers of `grounded_agency.workflows.triggers` (`next_fire`,
+`OverlapGate`, `EventGate`); see
+[Running Workflows](RUNNING_WORKFLOWS.md#triggers).
+
 ### Schedules
 
 ```yaml
@@ -85,9 +94,22 @@ approval steps: an unattended run cannot wait for a person in the session.
 - Put the time zone in `timezone`, not as a `CRON_TZ=` prefix.
 - `every` is an interval instead of a cron expression; give one or the
   other.
-- `overlap` says what happens when a run is still going at the next fire
-  time: `skip` it, keep at most one queued run (`buffer_one`), or start
-  runs concurrently (`allow_all`).
+- `overlap` says what happens when a run this trigger started is still in
+  progress at the next fire time: `skip` it (the default), keep at most one
+  waiting run that starts as soon as none is in progress (`buffer_one`), or
+  start runs beside it (`allow_all`). A run that ended `deferred` and is
+  resumed is in progress again. Fire times that passed while the host was
+  stopped count, together, as one fire time when it resumes.
+- Fire times are local times of `timezone`, at second 0. Where a clock
+  change repeats a local time, it fires once, at the first occurrence; where
+  a change skips one, it fires at that time read with the offset before the
+  change (RFC 5545 §3.3.5). So `30 2 * * *` in `America/New_York` fires at
+  07:30 UTC on the day clocks go forward (02:30 does not occur), and `30 1 *
+  * *` fires once on the day they go back.
+- `every` counts from the Unix epoch, in whole milliseconds (rounded up), not
+  from when the trigger was set up: `every: 7m` fires at 00:07, 00:14, ...
+  UTC from midnight of 1 January 1970, whatever the `timezone`. For a
+  local-time grid, use `cron`. `next_fire(schedule, after_ms)` computes both.
 
 
 ```mermaid
@@ -119,6 +141,15 @@ inputs:
 The triggering event is delivered into the workflow input named by
 `delivers_to`, which must hold a canonical event (its `ref` ends in
 `event_schema.yaml#/event`); anything else is V107.
+
+A host starts one run for each event it accepts: its `event_type` equals the
+trigger's, its `source.kind` the trigger's `source_kind` when there is one,
+and its sender passes the host's sender policy (where the workflow declares
+`identity@1`, a sender authenticated as [§5.17](#sender-identity-identity1)
+says). It may drop an event its policy does not admit, and should record the
+drop. At most one run starts per `event_id`: an event delivered again starts
+nothing new (`EventGate` keeps the ids; give it a store that survives a
+restart).
 
 ## Recovery and escalation (`recovery@1`)
 
