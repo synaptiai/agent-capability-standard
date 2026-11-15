@@ -32,6 +32,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   verifies old and new lines in one chain.
 - `schemas/interop/oasf_mapping.yaml`: `meta.grounded_agency_version` is
   replaced by `meta.agent_capability_standard.standard` and `.ontology`.
+- Python SDK, tool calls (Standard 1.2.0 §5.18):
+  - A checkpoint is used up when its call is allowed (at the permission
+    callback's allow, or at PostToolUse for a call that did not pass the
+    callback), and a call that fails uses it too. The newest valid checkpoint
+    no other call holds is used, the earlier ones included. A hold that
+    lapses, is found on reload or is unresolved when the turn ends counts as
+    used. The Stop of any session the adapter serves ends every checkpoint's
+    validity: take a checkpoint in the turn that needs it, and serve sessions
+    that must not share this with separate adapters.
+  - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
+    must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
+    set, at most the expiry. `GroundedAgentConfig` gains `call_record_limit`.
+  - Approval is asked only in the permission modes `default`, `acceptEdits`
+    and `plan`. In `bypassPermissions`, `auto`, `dontAsk` or any other mode,
+    a call that requires approval is refused (F502), since nothing puts it to
+    a person. A binding whose `approval` asks for more than one approver or a
+    `role` is refused F502. Arguments the permission callback changes are
+    classified again.
+  - Every refusal reason is the text form `CODE NAME: message` (F501, F502,
+    F503, F504, R407, V102), and the diagnostics are kept in
+    `adapter.call_records`. A rate limit is F504; a failure of the safety
+    check itself is R407.
+  - A `rollback` call is refused (F503) unless a checkpoint was taken since
+    the adapter started; it uses no checkpoint, and no longer invalidates
+    the others.
+  - `Skill` is always `invoke`, so `Skill(checkpoint)` takes no checkpoint:
+    the call that saves the state does. `create_checkpoint_recorder`
+    (`create_skill_tracker` stays as an alias) records one when a call
+    classified `checkpoint`, such as `git stash create`, succeeds.
+  - Bash: `git stash create` is `checkpoint`, `git stash list|show` only
+    read, `git stash pop|apply` is `rollback`, and a line of several commands
+    takes the strictest flags and every prerequisite of all of them.
+  - MCP: a tool registered or served with no capability is no longer
+    `execute`: it is unbound, the strictest case, and reported as W617 in
+    `mapper.warnings`. Tool `metadata` may be a tool binding record
+    (`capability`, `flags`, `additional_capabilities`, `invokes`,
+    `approval`, `control`); the flat keys still work, and `capability` and
+    `capability_id` that disagree are S303.
+    `create_grounded_mcp_server(..., require_layer=True)` makes each tool
+    refuse (R407) a call the adapter's layer did not allow.
+- Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
+  Claude Code's JSON payload and needs `jq`; anything else is blocked with
+  R407, as is a failure of the hook. The checkpoint marker is used up by the
+  gated call it authorises, so each such call needs its own; a successful
+  `git stash create` writes the marker and the new Stop hook removes it when
+  the turn ends. A read-only Bash command and `git stash list|show` need no
+  marker, and `git stash pop|apply` needs a checkpoint taken earlier (F503). A
+  gated call is answered `ask` with an F502 reason in the permission modes
+  default, acceptEdits and plan, and blocked with F502 in the others;
+  `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules.
+  `ACS_CHECKPOINT_MAX_AGE` (seconds, at most 1800) sets the marker's expiry.
+  Each audit line gains `recorded_by`. The composed skills take a checkpoint
+  with `/checkpoint` instead of writing `.claude/checkpoint.ok`.
+- Standard Agents binding: `STANDARD_VERSION` is 1.2.0 and the `acs`
+  annotation carries the tool binding record (`tool`, declared `flags`,
+  `additional_capabilities`, `invokes`, `approval`); the copies of the layer
+  and flags are informative. `lintPromptTools` and `lintAgentBindings` report
+  `W617`, `V111`, `V102` and `F506` in place of `unclassified`,
+  `misnamed_tool` and `bound_gated_tool`. A prerequisite other than a
+  checkpoint that has not run is refused with V102, and a check or record
+  the binding cannot complete with R407. A tool's success result is the
+  output's I-JSON text, and an output with an integer beyond 2^53, a
+  non-finite number or a lone surrogate is refused with R402. A composite
+  lists the tools it invokes in `invokes`, which also becomes its `uses`; an
+  invocation outside the list is refused (F504).
 
 ### Added
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
@@ -66,7 +131,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `tasks/standard-agents-upstream/`: nine issue texts for the Standard Agent
   Specification, and `file-issues.sh`, which files them in order with the
   GitHub CLI.
-- [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) (Draft, target Standard
+- [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) (Accepted, Standard
   1.2.0): how the Standard applies to a host where a model chooses tool
   calls, with a tool binding record, checkpoint and approval rules for a
   sequence of calls, a conformance class and call-sequence fixtures.
@@ -83,6 +148,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `tests/test_version_lines.py` keeps them in agreement.
 - `docs/guides/RUNNING_WORKFLOWS.md` lists the executor's trace event fields
   and kinds, tested against the core.
+- Standard 1.2.0 §5.18, Tool-Calling Hosts: the tool binding record
+  (`schemas/interop/tool_binding.schema.json`), unbound tools, classification
+  by effect, composite and control-only tools, the scope, order and
+  concurrency of calls, one checkpoint and one decision per call, refusals as
+  §9.8 diagnostics, records that name the layer, and capability outputs on a
+  text-only channel; §5.2.2 states the executor's checkpoint use for steps.
+  §10.4 adds the safety-layer conformance class SL.
+- Safety-layer conformance fixtures: 24 binding fixtures in
+  `tests/conformance/bindings/` and 20 call-sequence fixtures in
+  `tests/conformance/calls/`, with their schemas and the statements of the
+  two reference layers, generated by `scripts/gen_call_fixtures.py`
+  (`--check` in CI). The Python SDK adapter and the Standard Agents binding
+  run them.
+- Python SDK: `load_bindings`, `check_offered` and `ToolBinding` (binding
+  records, W617, V111, V102, F506); `encode_capability_output`,
+  `decode_capability_output` and `CapabilityOutputError` (§5.18.9);
+  `grounded_agency.errors.text_form`.
+- TypeScript package: `checkBindings`, `annotationRecord`,
+  `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
+  `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
+  `additional_capabilities` and `invokes` with one-shot nesting tokens.
+- Approval digest vectors of kind `tool_call` for a call's shown values.
 
 ### Changed
 - Direct dependencies are at their latest releases. Python: the dev ranges are
@@ -111,16 +198,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   high-risk mutation (rate-limited, needs a checkpoint) in both modes; any
   other error denies the call in strict mode and is logged in non-strict
   mode. Deny reasons are generic; the detail and traceback go to the log.
-- `wrap_options()` adds Stop and SubagentStop hooks that release a
-  checkpoint reservation left behind by a call another PreToolUse hook
-  denied. Such a call never runs, so its reservation used to block every
-  other mutation for up to 10 minutes; now it lasts until the end of the
-  turn. Only reservations taken in the finishing session, by the finishing
-  agent, are released.
+- `wrap_options()` adds Stop and SubagentStop hooks. A checkpoint hold left
+  behind by a call another PreToolUse hook denied used to block every other
+  mutation for up to 10 minutes; now it counts as used when the turn ends,
+  and the Stop of any session the adapter serves ends every checkpoint's
+  validity (Standard 1.2.0 §5.18.6).
 - `wrap_options()` no longer adds `Skill` to `allowed_tools`, so `Skill`
   calls reach the permission callback (the SDK warned that it was shadowed).
 - `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s, so `str()` of
   a member is its value.
+- `schemas/interop/standard_agents_annotation.schema.json` describes the
+  annotation as a carrier of the tool binding record: `standard` and
+  `ontology` are required, the copies of the layer and flags optional, and a
+  copy that names another layer or a weaker flag than the capability's is
+  invalid.
+- `schemas/interop/standard_agents_mapping.yaml` cites Standard 1.2.0 and
+  ontology 2.2.0.
+- The `send`, `rollback`, `checkpoint`, `persist` and `transform` skills'
+  prompt hooks no longer judge what code decides (approval, a checkpoint,
+  rate limits, expiry); what they still judge is labelled a model-judged
+  addition (Standard 1.2.0 §5.18.10). `spec/SECURITY.md` §5.4 maps every
+  condition of the skills' hooks, and §5.5 says why the plugin's hooks do
+  not claim class SL.
 
 ### Fixed
 - Python SDK: `register_mcp_tool` accepted an unknown capability and a
