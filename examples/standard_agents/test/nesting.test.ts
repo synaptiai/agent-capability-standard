@@ -144,7 +144,12 @@ describe('nesting tokens', () => {
     expect(nestedResults[0]?.error_code).toBe('F504');
     expect(t.invoked).toEqual([]);
     const refused = (await readTrace(t.state)).find((e) => e.code === 'F504');
-    expect(refused).toMatchObject({ action: 'write', status: 'refused' });
+    // A bound tool: the refusal and its record name its capability, and the
+    // record names the layer that decided it (§5.18.8).
+    expect(refused).toMatchObject({ action: 'write', capability: 'mutate', status: 'refused' });
+    expect(refused?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding', version: '1.2.0' });
+    expect(refused?.recorded_by?.config_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(nestedResults[0]?.error_data).toMatchObject({ location: { tool: 'write', capability: 'mutate' } });
   });
 
   it('(f) leaves no token once the composite returns', async () => {

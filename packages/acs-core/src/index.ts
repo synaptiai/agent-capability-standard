@@ -8,6 +8,7 @@
 export * from './binding.js';
 export * from './canonical.js';
 export * from './flags.js';
+export * from './ijson.js';
 export * from './ontology.js';
 export * from './output.js';
 export * from './redact.js';

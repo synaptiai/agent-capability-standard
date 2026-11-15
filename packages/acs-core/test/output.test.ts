@@ -1,6 +1,19 @@
 /** A capability output over a text-only channel (STANDARD 1.2.0 §5.18.9). */
 import { describe, expect, it } from 'vitest';
 import { CapabilityOutputError, decodeCapabilityOutput, encodeCapabilityOutput } from '../src/output.js';
+import vectors from '../../../tests/conformance/output/vectors.json' with { type: 'json' };
+
+type Expect = 'ok' | { refuse: string };
+
+function outcome(run: () => unknown): Expect {
+  try {
+    run();
+  } catch (e) {
+    if (e instanceof CapabilityOutputError) return { refuse: e.code };
+    throw e;
+  }
+  return 'ok';
+}
 
 const GOOD = {
   observation: { files: 3 },
@@ -59,3 +72,33 @@ describe('encode and decode', () => {
     expect(decodeCapabilityOutput('observe', '{"observation": "a\\"{b", "evidence_anchors": [], "confidence": 1}')).toBeTruthy();
   });
 });
+
+describe('the shared vectors (tests/conformance/output/vectors.json)', () => {
+  it.each(vectors.decode.map((v) => [v.name, v] as const))('decode %s', (_name, v) => {
+    expect(outcome(() => decodeCapabilityOutput('observe', v.text))).toEqual(v.expect as Expect);
+  });
+
+  it.each(vectors.encode.map((v) => [v.name, v] as const))('encode %s', (_name, v) => {
+    const value: unknown = JSON.parse(v.value_text);
+    // What a producer sends, a consumer accepts.
+    const run = () => decodeCapabilityOutput('observe', encodeCapabilityOutput('observe', value));
+    expect(outcome(run)).toEqual(v.expect as Expect);
+  });
+});
+
+describe('numbers as the text writes them', () => {
+  it('decodes a large double written in exponent form', () => {
+    for (const x of ['1.8e16', '1e300', '-1.8E+16']) {
+      const text = `{"observation": ${x}, "evidence_anchors": [], "confidence": 1}`;
+      expect(decodeCapabilityOutput('observe', text)['observation']).toBe(Number(x));
+    }
+  });
+
+  it('refuses to encode a double it would write as an integer literal beyond 2^53', () => {
+    // JSON.stringify(1.8e16) is "18000000000000000", which a consumer reads
+    // as an integer it cannot hold; Python writes 1.8e+16 instead.
+    expect(() => encodeCapabilityOutput('observe', { ...GOOD, observation: 1.8e16 })).toThrow(/outside ±2\^53/);
+    expect(encodeCapabilityOutput('observe', { ...GOOD, observation: 1e21 })).toContain('1e+21');
+  });
+});
+

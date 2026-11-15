@@ -225,6 +225,7 @@ class CheckpointTracker:
         marker_dir: str | Path | None = None,
         reservation_seconds: float | None = None,
         clock: Callable[[], datetime] | None = None,
+        max_age_minutes: float | None = None,
     ) -> None:
         """
         Initialize the tracker.
@@ -243,11 +244,34 @@ class CheckpointTracker:
                        it. A hold that lapses counts as used.
             clock: Returns the current time (timezone-aware); defaults to
                        ``datetime.now(UTC)``.
+            max_age_minutes: The layer's maximum age (section 5.18.6): no
+                       checkpoint authorises a call later than this after it
+                       was taken, whatever its own ``expires_at`` (one taken
+                       directly through this tracker, or read back from its
+                       state file, included). More than 0 and at most 30
+                       (default: 30); it is also the default expiry of
+                       :meth:`create_checkpoint`.
+
+        Raises:
+            ValueError: If ``reservation_seconds`` is not more than 0, or
+                ``max_age_minutes`` is not more than 0 or is more than 30.
         """
         if reservation_seconds is not None and not reservation_seconds > 0:
             raise ValueError(
                 f"reservation_seconds must be more than 0, got {reservation_seconds!r}"
             )
+        max_age = self.MAX_AGE_MINUTES if max_age_minutes is None else max_age_minutes
+        if (
+            isinstance(max_age, bool)
+            or not isinstance(max_age, (int, float))
+            or not 0 < max_age <= self.MAX_AGE_MINUTES
+        ):
+            raise ValueError(
+                f"max_age_minutes must be more than 0 and at most "
+                f"{self.MAX_AGE_MINUTES}, got {max_age_minutes!r}: STANDARD "
+                f"1.2.0 §5.18.6 caps a checkpoint's maximum age at 30 minutes"
+            )
+        self._max_age_minutes: float = max_age
         self._checkpoint_dir = Path(checkpoint_dir)
         self._max_history = (
             max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
@@ -266,6 +290,18 @@ class CheckpointTracker:
 
     def _now(self) -> datetime:
         return self._clock()
+
+    @property
+    def max_age_minutes(self) -> float:
+        """The maximum age of a checkpoint, in minutes (section 5.18.6)."""
+        return self._max_age_minutes
+
+    def _valid(self, checkpoint: Checkpoint, now: datetime) -> bool:
+        """Whether ``checkpoint`` can authorise a call at ``now``: valid by
+        its own record, and taken no longer ago than the maximum age."""
+        return checkpoint.is_valid(now) and now <= checkpoint.created_at + timedelta(
+            minutes=self._max_age_minutes
+        )
 
     # ------------------------------------------------------------------
     # Persistence (TD-011)
@@ -467,6 +503,8 @@ class CheckpointTracker:
             return True
         if checkpoint.expires_at is not None and now > checkpoint.expires_at:
             return True
+        if now > checkpoint.created_at + timedelta(minutes=self._max_age_minutes):
+            return True
         return (
             self._reservation_seconds is not None
             and (now - r.reserved_at).total_seconds() > self._reservation_seconds
@@ -512,7 +550,8 @@ class CheckpointTracker:
             scope: List of file patterns or "*" for all
             reason: Human-readable reason for checkpoint
             expiry_minutes: Minutes until checkpoint expires: more than 0
-                and at most 30 (default: 30)
+                and at most 30 (default: the tracker's maximum age). The
+                expiry stored is never later than the maximum age allows.
             metadata: Additional metadata to attach
 
         Returns:
@@ -523,9 +562,7 @@ class CheckpointTracker:
                 than 30: STANDARD 1.2.0 section 5.18.6 caps a checkpoint's
                 maximum age at 30 minutes.
         """
-        minutes = (
-            self.DEFAULT_EXPIRY_MINUTES if expiry_minutes is None else expiry_minutes
-        )
+        minutes = self._max_age_minutes if expiry_minutes is None else expiry_minutes
         if (
             isinstance(minutes, bool)
             or not isinstance(minutes, (int, float))
@@ -543,7 +580,7 @@ class CheckpointTracker:
             scope=scope,
             reason=reason,
             created_at=now,
-            expires_at=now + timedelta(minutes=minutes),
+            expires_at=now + timedelta(minutes=min(minutes, self._max_age_minutes)),
             metadata=metadata or {},
         )
 
@@ -570,6 +607,19 @@ class CheckpointTracker:
         timestamp = self._now().strftime("%Y%m%d_%H%M%S")
         random_suffix = os.urandom(16).hex()
         return f"chk_{timestamp}_{random_suffix}"
+
+    def has_commit(self, commit: str, since: datetime | None = None) -> bool:
+        """Whether a checkpoint taken at or after ``since`` (any time when
+        omitted), valid or not, recorded ``commit`` as its restore point
+        (``metadata["commit"]``, as ``git stash create`` printed it): what
+        lets ``git stash pop|apply <commit>`` count as a rollback (section
+        5.18.3). A checkpoint pruned from the history is not found."""
+        with self._lock:
+            return any(
+                c.metadata.get("commit") == commit
+                and (since is None or c.created_at >= since)
+                for c in self._all()
+            )
 
     def has_taken_since(self, when: datetime) -> bool:
         """Whether a checkpoint was taken at or after ``when``: what a
@@ -708,10 +758,29 @@ class CheckpointTracker:
 
     def has_valid_checkpoint(self) -> bool:
         """Whether any checkpoint, active or in history, can still authorise
-        a call (unconsumed, not invalidated, unexpired)."""
+        a call (unconsumed, not invalidated, unexpired, within the maximum
+        age), whether or not a call holds it."""
         with self._lock:
             now = self._now()
-            return any(c.is_valid(now) for c in self._all())
+            return any(self._valid(c, now) for c in self._all())
+
+    def valid_checkpoint_id(self) -> str | None:
+        """The checkpoint :meth:`validate_and_reserve` would hold now, without
+        holding it: the newest valid one, active or in history, that no call
+        holds. ``None`` when there is none."""
+        with self._lock:
+            self._sweep_lapsed()
+            now = self._now()
+            free = [
+                c
+                for c in self._all()
+                if self._valid(c, now) and c.id not in self._reservations
+            ]
+            if not free:
+                return None
+            # validate_and_reserve's order: by time taken, later first among
+            # equals.
+            return sorted(free, key=lambda c: c.created_at)[-1].id
 
     def validate_and_reserve(
         self,
@@ -757,10 +826,10 @@ class CheckpointTracker:
                 existing = self._hold_of(holder)
                 if existing is not None:
                     checkpoint = self._find(existing.checkpoint_id)
-                    if checkpoint is not None and checkpoint.is_valid(now):
+                    if checkpoint is not None and self._valid(checkpoint, now):
                         return True, checkpoint.id
                     return False, None
-            valid = [c for c in self._all() if c.is_valid(now)]
+            valid = [c for c in self._all() if self._valid(c, now)]
             if not valid:
                 return False, None
             valid.sort(key=lambda c: c.created_at)
@@ -849,7 +918,7 @@ class CheckpointTracker:
             if checkpoint is None:
                 self._persist_state()
                 return None
-            valid = checkpoint.is_valid(self._now())
+            valid = self._valid(checkpoint, self._now())
             self._mark_used(checkpoint, None if valid else f"ended hold of {holder}")
             self._persist_state()
             return checkpoint.id if valid else None
@@ -901,7 +970,7 @@ class CheckpointTracker:
             now = self._now()
             ended: list[str] = []
             for checkpoint in self._all():
-                if checkpoint.is_valid(now):
+                if self._valid(checkpoint, now):
                     checkpoint.invalidated_at = now
                     checkpoint.metadata["invalidated_by"] = reason
                     ended.append(checkpoint.id)
@@ -926,15 +995,15 @@ class CheckpointTracker:
         with self._lock:
             if self._active_checkpoint is None:
                 return False
-            if not self._active_checkpoint.is_valid(self._now()):
+            if not self._valid(self._active_checkpoint, self._now()):
                 return False
             return self._active_checkpoint.matches_scope(target)
 
     def get_active_checkpoint(self) -> Checkpoint | None:
         """Get the currently active checkpoint, if any."""
         with self._lock:
-            if self._active_checkpoint and self._active_checkpoint.is_valid(
-                self._now()
+            if self._active_checkpoint and self._valid(
+                self._active_checkpoint, self._now()
             ):
                 return self._active_checkpoint
             return None

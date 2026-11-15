@@ -1,0 +1,270 @@
+{
+  "standard": "1.2.0",
+  "section": "5.18.9",
+  "status": "informative",
+  "description": "Capability outputs on a text-only channel (Agent Capability Standard 1.2.0, section 5.18.9): what the reference codecs, grounded_agency/capabilities/output.py and packages/acs-core/src/output.ts, accept and refuse, so they agree. Every vector uses the capability `observe`. A `decode` vector reads `text` as the string a consumer received: `expect` is \"ok\" or a refusal with R402. An `encode` vector parses `value_text` with the language's own JSON parser and encodes the value: `expect` is \"ok\", and the encoded text then decodes, or a refusal with R402. The I-JSON limits of section 5.14 apply to the text a producer sends: a number written as an integer literal beyond ±2^53 is refused, one written in exponent form is a double and is not. How a value is written is the producer's serializer's: a JavaScript producer writes the double 1.8e16 as 18000000000000000, which it therefore refuses, where Python writes 1.8e+16; such cases, where the languages' serializers differ, are left out of `encode`.",
+  "decode": [
+    {
+      "name": "object",
+      "about": "The output object's text.",
+      "text": "{\"observation\": {\"files\": 3}, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "whitespace_around",
+      "about": "Insignificant whitespace around the value is still the value.",
+      "text": " \n{\"observation\": 1, \"evidence_anchors\": [], \"confidence\": 0.5}\n",
+      "expect": "ok"
+    },
+    {
+      "name": "integer_at_limit",
+      "about": "2^53, the bound §5.14 writes as \"within ±2^53\".",
+      "text": "{\"observation\": 9007199254740992, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "negative_integer_at_limit",
+      "about": "-2^53.",
+      "text": "{\"observation\": -9007199254740992, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "integer_beyond_limit",
+      "about": "An integer literal beyond 2^53: a receiver cannot hold it exactly.",
+      "text": "{\"observation\": 9007199254740993, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "negative_integer_beyond_limit",
+      "about": "An integer literal below -2^53.",
+      "text": "{\"observation\": -9007199254740993, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "integer_literal_1_8e16",
+      "about": "18000000000000000 written as an integer literal.",
+      "text": "{\"observation\": 18000000000000000, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "exponent_1_8e16",
+      "about": "The same number in exponent form is a double, which I-JSON allows.",
+      "text": "{\"observation\": 1.8e16, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "exponent_1e300",
+      "about": "A large double in exponent form.",
+      "text": "{\"observation\": 1e300, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "fraction_beyond_limit",
+      "about": "A number with a fraction is not an integer literal, whatever its size.",
+      "text": "{\"observation\": 9007199254740993.0, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "overflow",
+      "about": "A number no double holds is not a JSON number a receiver can read.",
+      "text": "{\"observation\": 1e400, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "nan",
+      "about": "NaN is not JSON.",
+      "text": "{\"observation\": NaN, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "lone_surrogate",
+      "about": "A string with a lone surrogate is not I-JSON.",
+      "text": "{\"observation\": \"\\ud800\", \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "paired_surrogates",
+      "about": "An escaped surrogate pair is one character.",
+      "text": "{\"observation\": \"\\ud83d\\ude00\", \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "duplicate_member",
+      "about": "A member named twice: the last would silently win.",
+      "text": "{\"observation\": 1, \"observation\": 2, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "duplicate_nested_member",
+      "about": "A member named twice in a nested object.",
+      "text": "{\"observation\": {\"a\": 1, \"a\": 2}, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "prose_before",
+      "about": "Prose before the value.",
+      "text": "Here it is: {\"observation\": 1, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "prose_after",
+      "about": "Text after the value.",
+      "text": "{\"observation\": 1, \"evidence_anchors\": [], \"confidence\": 0.5}\nDone.",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "fenced",
+      "about": "A Markdown fence around the value.",
+      "text": "```json\n{\"observation\": 1, \"evidence_anchors\": [], \"confidence\": 0.5}\n```",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "array",
+      "about": "An array is not an output object.",
+      "text": "[{\"observation\": 1, \"evidence_anchors\": [], \"confidence\": 0.5}]",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "missing_field",
+      "about": "A field the output contract requires is missing (confidence).",
+      "text": "{\"observation\": 1, \"evidence_anchors\": []}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "anchors_not_array",
+      "about": "evidence_anchors is not an array.",
+      "text": "{\"observation\": 1, \"evidence_anchors\": {}, \"confidence\": 1}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "confidence_out_of_range",
+      "about": "confidence above 1.",
+      "text": "{\"observation\": 1, \"evidence_anchors\": [], \"confidence\": 2}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "nested_100_levels",
+      "about": "Values nested 100 levels below the output object (its observation at level 1).",
+      "text": "{\"observation\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]], \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "nested_101_levels",
+      "about": "Values nested 101 levels below the output object.",
+      "text": "{\"observation\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]], \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    }
+  ],
+  "encode": [
+    {
+      "name": "object",
+      "about": "An output object.",
+      "value_text": "{\"observation\": {\"files\": 3}, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "integer_at_limit",
+      "about": "2^53.",
+      "value_text": "{\"observation\": 9007199254740992, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "integer_2_60",
+      "about": "2^60: every serializer writes it as an integer literal beyond 2^53.",
+      "value_text": "{\"observation\": 1152921504606846976, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "negative_integer_2_60",
+      "about": "-2^60.",
+      "value_text": "{\"observation\": -1152921504606846976, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "double_1e300",
+      "about": "A double that every serializer writes in exponent form.",
+      "value_text": "{\"observation\": 1e300, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "double_1e21",
+      "about": "1e21, from which ECMAScript writes numbers in exponent form.",
+      "value_text": "{\"observation\": 1e21, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "fraction",
+      "about": "A number with a fraction.",
+      "value_text": "{\"observation\": 2.5, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": "ok"
+    },
+    {
+      "name": "lone_surrogate",
+      "about": "A string with a lone surrogate.",
+      "value_text": "{\"observation\": \"\\ud800\", \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "array",
+      "about": "An array is not an output object.",
+      "value_text": "[{\"observation\": 1, \"evidence_anchors\": [], \"confidence\": 0.5}]",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "missing_field",
+      "about": "A field the output contract requires is missing.",
+      "value_text": "{\"observation\": 1, \"evidence_anchors\": []}",
+      "expect": {
+        "refuse": "R402"
+      }
+    },
+    {
+      "name": "nested_101_levels",
+      "about": "Values nested 101 levels below the output object.",
+      "value_text": "{\"observation\": [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]], \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      }
+    }
+  ]
+}

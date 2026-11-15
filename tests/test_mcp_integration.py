@@ -260,6 +260,93 @@ class TestAdapterMCPIntegration:
 
 
 # =============================================================================
+# create_grounded_mcp_server(require_layer=True): the guard (STANDARD 1.2.0
+# sections 5.18.3 and 5.18.8)
+# =============================================================================
+
+
+class TestGroundedServerGuard:
+    """Each served tool runs only on the adapter's decision for this exact
+    call (R407 otherwise), except a control-only tool, which is never
+    refused."""
+
+    @staticmethod
+    def _served(
+        adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> dict[str, object]:
+        import claude_agent_sdk
+        from claude_agent_sdk import tool
+
+        from grounded_agency.mcp import create_grounded_mcp_server
+
+        @tool("done", "Ends the turn.", {})
+        async def done(args: dict[str, object]) -> dict[str, object]:
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+        @tool("find", "Searches.", {"q": str})
+        async def find(args: dict[str, object]) -> dict[str, object]:
+            return {"content": [{"type": "text", "text": "found"}]}
+
+        done.metadata = {"control": True}  # type: ignore[attr-defined]
+        find.metadata = {"capability": "search"}  # type: ignore[attr-defined]
+
+        captured: dict[str, object] = {}
+
+        def capture(*, name: str, version: str, tools: list[object]) -> object:
+            captured.update({t.name: t for t in tools})  # type: ignore[attr-defined]
+            return {"name": name}
+
+        monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", capture)
+        create_grounded_mcp_server(
+            name="srv", version="1.0.0", tools=[done, find], adapter=adapter
+        )
+        return captured
+
+    @staticmethod
+    async def _pre(adapter: GroundedAgentAdapter, tool: str, args: dict) -> dict:
+        hook = adapter._make_pretooluse_safety_hook()
+        payload = {"tool_name": tool, "tool_input": args, "tool_use_id": "c1"}
+        result: dict = await hook(payload, "c1", None)
+        return result
+
+    @pytest.mark.asyncio
+    async def test_control_only_tool_runs_after_pretooluse(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        served = self._served(asking_adapter, monkeypatch)
+        assert await self._pre(asking_adapter, "mcp__srv__done", {}) == {}
+        result = await served["done"].handler({})  # type: ignore[attr-defined]
+        assert result == {"content": [{"type": "text", "text": "ok"}]}
+
+    @pytest.mark.asyncio
+    async def test_control_only_tool_runs_without_pretooluse(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        served = self._served(asking_adapter, monkeypatch)
+        for _ in range(2):
+            result = await served["done"].handler({})  # type: ignore[attr-defined]
+            assert result == {"content": [{"type": "text", "text": "ok"}]}
+
+    @pytest.mark.asyncio
+    async def test_bound_tool_runs_once_per_decision(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        served = self._served(asking_adapter, monkeypatch)
+        handler = served["find"].handler  # type: ignore[attr-defined]
+        refused = await handler({"q": "x"})
+        assert refused["is_error"] is True
+        assert refused["content"][0]["text"].startswith("R407 SAFETY_CHECK_FAILED: ")
+
+        assert await self._pre(asking_adapter, "mcp__srv__find", {"q": "x"}) == {}
+        assert await handler({"q": "x"}) == {
+            "content": [{"type": "text", "text": "found"}]
+        }
+        # The decision was for one call: a second needs its own.
+        again = await handler({"q": "x"})
+        assert again["is_error"] is True
+
+
+# =============================================================================
 # to_sdk_agents() Tests (Issue 8)
 # =============================================================================
 

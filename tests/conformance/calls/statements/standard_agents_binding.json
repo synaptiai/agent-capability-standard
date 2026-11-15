@@ -10,7 +10,7 @@
   "checkpoint_max_age": "PT10M",
   "approval": {
     "how": "recorded",
-    "expires": "the tool's approval policy (expires_ms); none by default",
+    "expires": null,
     "max_approvers": 1000,
     "roles": true
   },
@@ -22,5 +22,9 @@
     "A nested call is covered only when it consumes the composite's nesting token: a runtime that parses the arguments before the nested tool sees them, or runs it in a new execution, makes the call be checked on its own",
     "Other code that calls a listed tool with exactly the arguments of a pending invocation, at the same moment, can take that invocation's one covered call",
     "The thread's key-value store is writable by any code in the thread"
+  ],
+  "not_applied": [
+    "§5.18.10 persist and audit rows (F504): the data a persist tool writes and the record an audit tool appends are not checked for a secret the layer recognises (§6.7); such a call is decided by the other checks alone",
+    "§5.18.10 send row (F504): no destination policy (§4.4.2) is applied, and a binding's destination member is loaded but not read; a send call is decided by the other checks alone"
   ]
 }

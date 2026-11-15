@@ -36,7 +36,7 @@ def registry() -> CapabilityRegistry:
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 24
+    assert len(CASES) == 26
 
 
 @pytest.mark.parametrize("path", CASES, ids=[p.stem for p in CASES])

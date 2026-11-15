@@ -22,11 +22,13 @@ hooks:
 
             The tool call follows this prompt as JSON; the rollback command is tool_input.command.
 
-            The safety layer checks the restore command: `git stash apply <sha>`
-            is a `rollback` call (a checkpoint taken earlier, F503); the skill's
-            own restore, a `git restore --source=<sha> ...` line, is a `mutate`
-            call (a fresh checkpoint, F501, and approval, F502). An expired or
-            used checkpoint can still be restored (STANDARD 1.2.0 §5.2.2).
+            The safety layer checks the restore command: `git stash apply <sha>`,
+            with the full id of the commit a checkpoint recorded, is a
+            `rollback` call (a checkpoint taken earlier, F503); applying any
+            other commit, and the skill's own restore, a `git restore
+            --source=<sha> ...` line, is a `mutate` call (a fresh checkpoint,
+            F501, and approval, F502). An expired or used checkpoint can still
+            be restored (STANDARD 1.2.0 §5.2.2).
 
             Before executing rollback, verify:
             1. Current state has been captured (for audit)

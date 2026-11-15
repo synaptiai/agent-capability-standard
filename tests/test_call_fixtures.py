@@ -60,10 +60,15 @@ def test_the_statement_matches_the_adapter() -> None:
     configurations = " ".join(statement["approval"]["prompt_configurations"])
     for mode in PROMPTING_PERMISSION_MODES:
         assert mode in configurations
+    # A prompt decides alone: one approver, no role, no expiry of its own
+    # (a binding needing more is refused with F502, tests/test_permission_callback.py).
+    assert statement["approval"]["max_approvers"] == 1
+    assert statement["approval"]["roles"] is False
+    assert statement["approval"]["expires"] is None
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 20
+    assert len(CASES) == 21
 
 
 class _Runner:

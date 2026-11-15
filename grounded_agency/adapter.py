@@ -195,7 +195,9 @@ class GroundedAgentConfig:
         audit_log_path: Path for audit log file
         checkpoint_dir: Directory for checkpoint storage
         expiry_minutes: The layer's checkpoint maximum age, in minutes:
-            more than 0 and at most 30 (STANDARD 1.2.0 section 5.18.6).
+            more than 0 and at most 30 (STANDARD 1.2.0 section 5.18.6). The
+            checkpoint tracker applies it to every checkpoint, one taken
+            through ``adapter.checkpoint_tracker`` directly included.
         rate_limit: Per-risk-level rate limit configuration (SEC-010).
         ontology_hash: Expected SHA-256 hash for ontology integrity check (SEC-012).
                       If None, checks for a .sha256 sidecar file.
@@ -305,7 +307,7 @@ def _checkpoint_message(
         f"{_subject(mapping, tool_name)} requires checkpoint, and no valid "
         f"checkpoint is left: each gated call needs its own, and a turn's end "
         f"or its maximum age ends one. Take a checkpoint (git stash create, a "
-        f"checkpoint tool, or adapter.checkpoint_tracker.create_checkpoint()) "
+        f"checkpoint tool, or adapter.create_checkpoint()) "
         f"before using {tool_name}."
     )
 
@@ -375,10 +377,7 @@ class GroundedAgentAdapter:
         adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=True))
 
         # Create checkpoint before mutations
-        adapter.checkpoint_tracker.create_checkpoint(
-            scope=["*.py"],
-            reason="Before refactoring"
-        )
+        adapter.create_checkpoint(["*.py"], "Before refactoring")
 
         # Wrap SDK options. base_options carries the host's can_use_tool
         # callback, which decides the calls that require approval.
@@ -416,16 +415,26 @@ class GroundedAgentAdapter:
         self.mapper = ToolCapabilityMapper(self.registry)
         now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
         self._now = now
+        # The tracker enforces the layer's maximum age on every checkpoint,
+        # one taken through its own API or read back from its state file
+        # included (STANDARD 1.2.0 section 5.18.6).
         self.checkpoint_tracker = CheckpointTracker(
             self.config.checkpoint_dir,
             reservation_seconds=self.config.checkpoint_reservation_seconds,
             clock=now,
+            max_age_minutes=self.config.expiry_minutes,
         )
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
         # The layer's records (STANDARD 1.2.0 section 5.18.8). History
         # counts from the adapter's start: one adapter is one scope.
         self._started_at = now()
+        started_at = self._started_at
+        # `git stash pop|apply <commit>` is a rollback only for a commit a
+        # checkpoint of this scope recorded (section 5.18.3).
+        self.mapper.is_checkpoint_commit = lambda commit: (
+            self.checkpoint_tracker.has_commit(commit, since=started_at)
+        )
         self._state_lock = threading.Lock()
         self._executed: set[str] = set()
         # Calls this layer allowed, by (tool, digest of the arguments), not
@@ -437,6 +446,9 @@ class GroundedAgentAdapter:
         self.diagnostics: deque[ValidationError] = deque(
             maxlen=self.config.call_record_limit
         )
+
+        # recorded_by's digest, by what it was computed from.
+        self._config_digest: tuple[tuple[int, str], str] | None = None
 
         # Lazy-initialized by _get_or_create_workflow_engine
         self._workflow_engine: Any = None
@@ -454,21 +466,32 @@ class GroundedAgentAdapter:
     def recorded_by(self) -> dict[str, Any]:
         """The layer and its configuration, as every record names it: name,
         version and ``config_sha256``, the SHA-256 of the canonical JSON of
-        the settings and bindings that decide a call."""
+        the settings and bindings that decide a call.
+
+        The digest is computed again only when a setting or a binding
+        changed, not for every record."""
         from . import __version__, _core
 
-        config = {
+        settings = {
             "strict_mode": self.config.strict_mode,
             "approval": self.config.approval,
             "expiry_minutes": self.config.expiry_minutes,
             "checkpoint_reservation_seconds": self.config.checkpoint_reservation_seconds,
             "ontology_version": self.registry.version,
             "prompting_modes": sorted(PROMPTING_PERMISSION_MODES),
-            "bindings": self.mapper.records,
         }
-        digest = hashlib.sha256(
-            _core.canonical_json(config).encode("utf-8")
-        ).hexdigest()
+        key = (self.mapper.records_revision, _core.canonical_json(settings))
+        cached = self._config_digest
+        if cached is not None and cached[0] == key:
+            digest = cached[1]
+        else:
+            # Every loaded binding is I-JSON (section 5.14): a record that is
+            # not does not load (S303), so this cannot fail on one.
+            config = {**settings, "bindings": self.mapper.records}
+            digest = hashlib.sha256(
+                _core.canonical_json(config).encode("utf-8")
+            ).hexdigest()
+            self._config_digest = (key, digest)
         return {
             "name": "grounded_agency.adapter",
             "version": __version__,

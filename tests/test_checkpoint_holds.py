@@ -224,3 +224,116 @@ class TestRecorder:
             )
         assert tracker.checkpoint_count == 1
         assert tracker.get_active_checkpoint_id() == c1
+
+
+class TestMaximumAge:
+    """The layer's maximum age (``expiry_minutes``) bounds every checkpoint,
+    however it was taken (STANDARD 1.2.0 section 5.18.6)."""
+
+    @pytest.mark.asyncio
+    async def test_a_checkpoint_taken_through_the_tracker_obeys_the_layer(
+        self, ontology_path: str, tmp_path: Path, fake_clock: FakeClock
+    ) -> None:
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                approval="off",
+                expiry_minutes=5,
+            ),
+            clock=fake_clock,
+        )
+        # The tracker's own API, which defaults to the tracker's maximum age.
+        adapter.checkpoint_tracker.create_checkpoint(["*"], "host")
+        fake_clock.advance(minutes=20)
+        hook = adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {"tool_name": "Write", "tool_input": {"file_path": "a"}}, "w1", None
+        )
+        assert _decision(result) == "deny"
+        assert _reason(result).startswith("F501 CHECKPOINT_REQUIRED: ")
+
+    def test_an_explicit_longer_expiry_is_cut_to_the_maximum_age(
+        self, tmp_path: Path, fake_clock: FakeClock
+    ) -> None:
+        tracker = CheckpointTracker(
+            checkpoint_dir=str(tmp_path), clock=fake_clock, max_age_minutes=5
+        )
+        checkpoint_id = tracker.create_checkpoint(["*"], "x", expiry_minutes=30)
+        checkpoint = tracker.get_checkpoint_by_id(checkpoint_id)
+        assert checkpoint is not None and checkpoint.expires_at is not None
+        assert (checkpoint.expires_at - checkpoint.created_at).total_seconds() == 300
+        fake_clock.advance(minutes=4)
+        assert tracker.has_valid_checkpoint()
+        fake_clock.advance(minutes=2)
+        assert not tracker.has_valid_checkpoint()
+
+    def test_a_checkpoint_read_back_from_state_obeys_the_maximum_age(
+        self, tmp_path: Path, fake_clock: FakeClock
+    ) -> None:
+        CheckpointTracker(
+            checkpoint_dir=str(tmp_path), clock=fake_clock
+        ).create_checkpoint(["*"], "thirty minutes")
+        later = CheckpointTracker(
+            checkpoint_dir=str(tmp_path), clock=fake_clock, max_age_minutes=5
+        )
+        fake_clock.advance(minutes=6)
+        assert later.validate_and_reserve("A") == (False, None)
+
+    @pytest.mark.parametrize("minutes", [0, -1, 31, True, "5"])
+    def test_a_maximum_age_beyond_the_cap_is_refused(
+        self, tmp_path: Path, minutes: Any
+    ) -> None:
+        with pytest.raises(ValueError, match="max_age_minutes"):
+            CheckpointTracker(checkpoint_dir=str(tmp_path), max_age_minutes=minutes)
+
+
+class TestCheckpointLookups:
+    def test_valid_checkpoint_id_is_what_a_hold_would_take(
+        self, tracker: CheckpointTracker
+    ) -> None:
+        assert tracker.valid_checkpoint_id() is None
+        c1 = tracker.create_checkpoint(["*"], "one")
+        c2 = tracker.create_checkpoint(["*"], "two")
+        assert tracker.valid_checkpoint_id() == c2
+        assert tracker.validate_and_reserve("A") == (True, c2)
+        assert tracker.valid_checkpoint_id() == c1
+        assert tracker.validate_and_reserve("B") == (True, c1)
+        assert tracker.valid_checkpoint_id() is None
+
+    def test_has_commit_reads_any_checkpoint_of_the_scope(
+        self, tracker: CheckpointTracker, fake_clock: FakeClock
+    ) -> None:
+        sha = "a" * 40
+        start = fake_clock()
+        tracker.create_checkpoint(["*"], "stash", metadata={"commit": sha})
+        tracker.validate_and_reserve("A")
+        tracker.consume_checkpoint("A")
+        # Used, then expired: still the restore point it recorded.
+        fake_clock.advance(minutes=60)
+        assert tracker.has_commit(sha)
+        assert tracker.has_commit(sha, since=start)
+        fake_clock.advance(seconds=1)
+        assert not tracker.has_commit(sha, since=fake_clock())
+        assert not tracker.has_commit("b" * 40)
+
+
+def test_the_engine_reuses_a_valid_checkpoint_from_the_history(
+    ontology_path: str, tmp_path: Path, fake_clock: FakeClock
+) -> None:
+    """ensure_checkpoint_before_step returns the checkpoint a mutation step
+    can use, not None, when the only valid one is in the history."""
+    from grounded_agency.workflows.engine import WorkflowEngine, WorkflowStep
+
+    tracker = CheckpointTracker(checkpoint_dir=str(tmp_path), clock=fake_clock)
+    engine = WorkflowEngine(ontology_path=ontology_path, checkpoint_tracker=tracker)
+    first = tracker.create_checkpoint(["*"], "A")
+    tracker.create_checkpoint(["*"], "B")
+    tracker.consume_checkpoint()  # B, the active one
+    assert tracker.get_active_checkpoint_id() is None
+    step = WorkflowStep(capability="mutate", purpose="x")
+    assert engine.ensure_checkpoint_before_step(step, "wf") == first
+    # With every valid checkpoint held, a new one is taken.
+    assert tracker.validate_and_reserve("A") == (True, first)
+    created = engine.ensure_checkpoint_before_step(step, "wf")
+    assert created not in (None, first)

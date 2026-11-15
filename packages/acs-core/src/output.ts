@@ -11,15 +11,15 @@
  *
  * The Python package's `encode_capability_output` and
  * `decode_capability_output` (`grounded_agency.capabilities.output`) apply
- * the same rules.
+ * the same rules; both pass the shared vectors,
+ * `tests/conformance/output/vectors.json`. The I-JSON limits apply to the
+ * text: the decoder checks integer literals in the text itself, and the
+ * encoder refuses a number it would write as an integer literal beyond
+ * ±2^53 (see `ijson.ts`).
  */
 import type { Json } from './canonical.js';
+import { INT_LIMIT, iJsonProblem } from './ijson.js';
 import { CAPABILITIES, type CapabilityId } from './ontology.js';
-
-/** I-JSON limits, as the reference executor applies them: |n| ≤ 2^53, at most 100 levels. */
-const INT_LIMIT = 2 ** 53;
-const MAX_DEPTH = 100;
-const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /** The §9.8 diagnostic of a capability output that breaks §5.18.9. */
 export interface OutputDiagnostic {
@@ -50,36 +50,13 @@ export class CapabilityOutputError extends Error {
   }
 }
 
-function checkIJson(capability: string, value: unknown): void {
-  const stack: [unknown, string, number][] = [[value, '$', 0]];
-  while (stack.length > 0) {
-    const [v, at, depth] = stack.pop()!;
-    if (depth > MAX_DEPTH) throw new CapabilityOutputError(capability, `nests deeper than ${MAX_DEPTH} levels at ${at}`);
-    if (v === null || typeof v === 'boolean') continue;
-    if (typeof v === 'number') {
-      if (!Number.isFinite(v)) throw new CapabilityOutputError(capability, `holds ${v} at ${at}, which is not a JSON number`);
-      if (Number.isInteger(v) && Math.abs(v) > INT_LIMIT) {
-        throw new CapabilityOutputError(capability, `holds the integer ${v} at ${at}, outside ±2^53, which has no exact I-JSON form`);
-      }
-    } else if (typeof v === 'string') {
-      if (UNPAIRED_SURROGATE.test(v)) throw new CapabilityOutputError(capability, `holds a string with a lone surrogate at ${at}`);
-    } else if (Array.isArray(v)) {
-      for (let i = 0; i < v.length; i += 1) {
-        if (!(i in v)) throw new CapabilityOutputError(capability, `holds an array with a hole at ${at}`);
-        stack.push([v[i], `${at}[${i}]`, depth + 1]);
-      }
-    } else if (typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) {
-      for (const [key, x] of Object.entries(v as Record<string, unknown>)) {
-        if (UNPAIRED_SURROGATE.test(key)) throw new CapabilityOutputError(capability, `holds a key with a lone surrogate at ${at}`);
-        stack.push([x, `${at}.${key}`, depth + 1]);
-      }
-    } else {
-      throw new CapabilityOutputError(capability, `holds a ${typeof v} at ${at}, not JSON`);
-    }
-  }
-}
-
-function checkContract(capability: CapabilityId, output: unknown): Record<string, Json> {
+/**
+ * Check `output` against the capability's output contract and the I-JSON
+ * limits. `integers: false` when `output` was parsed from text whose
+ * integer literals `scan` already checked: a parsed number no longer shows
+ * how it was written (1.8e16 and 18000000000000000 parse the same).
+ */
+function checkContract(capability: CapabilityId, output: unknown, integers = true): Record<string, Json> {
   if (typeof output !== 'object' || output === null || Array.isArray(output)) {
     throw new CapabilityOutputError(capability, 'is not a JSON object');
   }
@@ -96,7 +73,8 @@ function checkContract(capability: CapabilityId, output: unknown): Record<string
       throw new CapabilityOutputError(capability, "'s confidence is not a number from 0 to 1", 'confidence');
     }
   }
-  checkIJson(capability, record);
+  const problem = iJsonProblem(record, { integers });
+  if (problem !== null) throw new CapabilityOutputError(capability, problem);
   return record as Record<string, Json>;
 }
 
@@ -105,7 +83,10 @@ function checkContract(capability: CapabilityId, output: unknown): Record<string
  * text of the object, nothing around it.
  *
  * @throws CapabilityOutputError (R402) if `output` is not an object, lacks a
- *   required field, or is not I-JSON.
+ *   required field, or is not I-JSON: a number this text would write as an
+ *   integer literal beyond ±2^53 (an integral value below 1e21, such as
+ *   1.8e16) included, since a consumer would read it as an integer it
+ *   cannot hold.
  */
 export function encodeCapabilityOutput(capability: CapabilityId, output: unknown): string {
   return JSON.stringify(checkContract(capability, output));
@@ -181,5 +162,5 @@ export function decodeCapabilityOutput(capability: CapabilityId, text: string): 
     throw new CapabilityOutputError(capability, `is not the JSON text of one object and nothing else: ${why}`);
   }
   scan(capability, text);
-  return checkContract(capability, value);
+  return checkContract(capability, value, false);
 }

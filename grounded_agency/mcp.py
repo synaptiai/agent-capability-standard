@@ -141,8 +141,10 @@ def create_grounded_mcp_server(
     ``R407 SAFETY_CHECK_FAILED``, unless the adapter's safety layer allowed
     this exact call (tool name and arguments), so a session whose options
     were not wrapped with :meth:`GroundedAgentAdapter.wrap_options` cannot
-    run it (section 5.18.8). ``require_layer=False`` restores the earlier
-    behaviour and is outside class SL.
+    run it (section 5.18.8). A control-only tool (``control: true``) is
+    served as it is: it is never refused (section 5.18.3).
+    ``require_layer=False`` restores the earlier behaviour and is outside
+    class SL.
 
     Args:
         name: MCP server name.
@@ -237,10 +239,13 @@ def create_grounded_mcp_server(
     if require_layer:
         served = []
         for t in tools:
-            if isinstance(t, SdkMcpTool):
-                served.append(
-                    _guarded(t, f"mcp__{name}__{t.name}", adapter, SdkMcpTool)
-                )
+            full_name = f"mcp__{name}__{_get_tool_name(t)}"
+            if adapter.mapper.map_tool(full_name, {}).control:
+                # A control-only tool is never refused (section 5.18.3): no
+                # check applies, so there is no decision to wait for.
+                served.append(t)
+            elif isinstance(t, SdkMcpTool):
+                served.append(_guarded(t, full_name, adapter, SdkMcpTool))
             else:
                 logger.warning(
                     "MCP tool %r is not an SdkMcpTool and cannot be guarded; a "

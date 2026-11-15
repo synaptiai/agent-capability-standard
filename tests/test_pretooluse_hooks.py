@@ -517,19 +517,20 @@ def _run_shell_hook(
     )
 
 
-def _write_marker(project_dir: Path, expires_in: int = 1800) -> None:
+def _write_marker(
+    project_dir: Path, expires_in: int = 1800, commit: str | None = None
+) -> None:
     marker_dir = project_dir / ".claude"
     marker_dir.mkdir(exist_ok=True)
     now = int(time.time())
-    (marker_dir / "checkpoint.ok").write_text(
-        json.dumps(
-            {
-                "checkpoint_id": "chk_stdin_test",
-                "created_at": now,
-                "expires_at": now + expires_in,
-            }
-        )
-    )
+    marker: dict[str, object] = {
+        "checkpoint_id": "chk_stdin_test",
+        "created_at": now,
+        "expires_at": now + expires_in,
+    }
+    if commit is not None:
+        marker["commit"] = commit
+    (marker_dir / "checkpoint.ok").write_text(json.dumps(marker))
 
 
 @needs_bash_and_jq
@@ -689,18 +690,37 @@ class TestShellHookSection518:
         assert result.returncode == 2, command
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
 
-    def test_rollback_needs_a_checkpoint_taken_earlier(self, tmp_path: Path):
-        refused = _gated_hook(_bash("git stash pop"), tmp_path)
-        assert refused.returncode == 2
-        assert refused.stderr.startswith("F503 ROLLBACK_FAILED: ")
+    def test_rollback_restores_only_a_recorded_checkpoint(self, tmp_path: Path):
+        """`git stash pop|apply <commit>` is a rollback only for the full id
+        of a commit a marker recorded: git applies any merge commit as if it
+        were a stash, so anything else is a gated mutation."""
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        other = "89abcdef0123456789abcdef0123456789abcdef"
+        for command in (f"git stash apply {sha}", "git stash pop"):
+            refused = _gated_hook(_bash(command), tmp_path)
+            assert refused.returncode == 2, command
+            assert refused.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
 
-        _write_marker(tmp_path)
+        _write_marker(tmp_path, commit=sha)
+        # The marker's own commit: a rollback that uses nothing.
+        kept = _gated_hook(_bash(f"git stash apply {sha}"), tmp_path)
+        assert (kept.returncode, kept.stdout) == (0, "")
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
         assert _gated_hook(_write_call(), tmp_path, approval="off").returncode == 0
         # The marker was used; a used checkpoint can still be restored.
         assert not (tmp_path / ".claude" / "checkpoint.ok").exists()
-        allowed = _gated_hook(_bash("git stash apply abc"), tmp_path)
-        assert allowed.returncode == 0
-        assert allowed.stdout == ""
+        allowed = _gated_hook(_bash(f"git stash pop {sha}"), tmp_path)
+        assert (allowed.returncode, allowed.stdout) == (0, "")
+        for command in (
+            f"git stash apply {other}",
+            f"git stash apply {sha[:12]}",
+            f"git stash apply --index {sha}",
+            "git stash apply",
+            "git stash apply stash@{0}",
+        ):
+            gated = _gated_hook(_bash(command), tmp_path)
+            assert gated.returncode == 2, command
+            assert gated.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
 
     @pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan"])
     def test_a_gated_call_asks_in_a_prompting_mode(self, tmp_path: Path, mode: str):

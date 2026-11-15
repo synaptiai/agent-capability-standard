@@ -62,6 +62,7 @@ import {
   checkBindings,
   digest as digestOf,
   encodeCapabilityOutput,
+  iJsonProblem,
   joinFlags,
   type Json,
 } from '@synaptiai/acs-core';
@@ -232,6 +233,20 @@ const STATED_NAMES = new WeakMap<object, string>();
 const EFFECTIVE = new WeakMap<object, SafetyFlags>();
 
 /**
+ * What each name a tool defined here states for itself is bound to: its
+ * capability, or `control`; `null` once two definitions of the name
+ * disagree. A refusal that knows a tool only by name (a composite's call to
+ * a tool it does not list) names the capability from here (§5.18.8: only an
+ * unbound tool's refusal has none).
+ */
+const BOUND_NAMES = new Map<string, CapabilityId | 'control' | null>();
+
+function noteBound(name: string, as: CapabilityId | 'control'): void {
+  const known = BOUND_NAMES.get(name);
+  BOUND_NAMES.set(name, known === undefined || known === as ? as : null);
+}
+
+/**
  * The name a tool defined with `groundedTool` or `controlTool` states for
  * itself: what an approver is shown and the trace records. A tool cannot
  * see the name it is registered under, so `lintPromptTools` compares the
@@ -296,20 +311,31 @@ function takeToken(thread: string, flow: string | null, tool: string, argsDigest
  */
 function nestingState(
   state: ThreadState,
-  composite: { name: string; seq: number; flow: string | null; invokes: readonly string[] },
+  composite: {
+    name: string;
+    seq: number;
+    flow: string | null;
+    invokes: readonly string[];
+    recorded_by: RecordedBy;
+    now: () => number;
+  },
   record: (entry: Omit<TraceEntry, 'seq'>) => Promise<unknown>,
 ): ThreadState {
   const invokeTool = async (tool: string, args: Record<string, unknown> = {}): Promise<ToolResult> => {
     if (!composite.invokes.includes(tool)) {
+      const bound = BOUND_NAMES.get(tool) ?? null;
+      const capability = bound === null || bound === 'control' ? null : bound;
       const message = `${composite.name} does not list ${tool} in invokes.`;
-      const result = refusal('F504', tool, null, message, `Add ${tool} to the invokes of ${composite.name}.`);
+      const result = refusal('F504', tool, capability, message, `Add ${tool} to the invokes of ${composite.name}.`);
       await record({
-        at: Date.now(),
+        at: composite.now(),
         action: tool,
-        capability: null,
+        capability,
+        ...(bound === 'control' ? { control: true as const } : {}),
         status: 'refused',
         code: 'F504',
         covered_by: composite.seq,
+        recorded_by: composite.recorded_by,
         error: result.error ?? message,
       }).catch(() => undefined);
       return result;
@@ -347,7 +373,7 @@ function nestingState(
 /** What the checks before a call decided. */
 type Claim =
   | { outcome: ToolResult }
-  | { outcome?: undefined; started: TraceEntry; call: GroundedCall; flow: string | null };
+  | { outcome?: undefined; started: TraceEntry; call: GroundedCall; flow: string | null; recorded_by: RecordedBy };
 
 /** The duration text (§5.10.1) of a policy's expiry, in its largest exact unit, for the annotation. */
 function durationText(ms: number): string {
@@ -439,10 +465,24 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     const identity = { action: name, capability, ...(domain !== undefined ? { domain } : {}), ...position };
     // What is known of the call so far, for the record if a write fails.
     const used: Pick<TraceEntry, 'args_digest' | 'approval' | 'checkpoint_id' | 'covered_by'> = {};
+    let layerRecord: RecordedBy | undefined;
     try {
       const recorded_by = await recordedBy();
-      used.args_digest = await digestOf(argsJson);
-      const base = { ...identity, args_digest: used.args_digest, recorded_by };
+      layerRecord = recorded_by;
+      // §5.18.7: no decision can bind to arguments that are not I-JSON
+      // (§5.14), so a call that needs approval with such arguments is
+      // refused with F502, not left to fail as the layer's own error.
+      const argsProblem = flags.requires_approval ? iJsonProblem(argsJson) : null;
+      try {
+        used.args_digest = await digestOf(argsJson);
+      } catch (cause) {
+        if (argsProblem === null) throw cause;
+      }
+      const base = {
+        ...identity,
+        ...(used.args_digest !== undefined ? { args_digest: used.args_digest } : {}),
+        recorded_by,
+      };
       const refuse = async (result: ToolResult, code: RefusalCode): Promise<Claim> => {
         await appendTrace(state, {
           ...base,
@@ -458,13 +498,25 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // A nested call the running composite's own code made, with these
       // exact arguments in this execution, is covered by the composite's
       // approval and checkpoint (§5.18.4): only those two checks are skipped.
-      const token = takeToken(state.threadId, flow, name, used.args_digest);
+      const token = used.args_digest === undefined ? undefined : takeToken(state.threadId, flow, name, used.args_digest);
       if (token) used.covered_by = token.seq;
       const covered = token !== undefined;
 
       // 1. Approval, bound to the digest of exactly what is about to run.
       let request: ApprovalRecord | undefined;
       if (flags.requires_approval && !covered) {
+        if (argsProblem !== null) {
+          return await refuse(
+            refusal(
+              'F502',
+              name,
+              capability,
+              `The arguments of ${name} are not I-JSON (STANDARD 1.2.0 §5.14), so no decision can bind to them: the value ${argsProblem}.`,
+              'Call the tool again with arguments that are I-JSON: integers within ±2^53, strings with no lone surrogate.',
+            ),
+            'F502',
+          );
+        }
         if (flow === null) {
           return await refuse(
             refusal(
@@ -589,6 +641,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       return {
         started,
         flow,
+        recorded_by,
         call: {
           seq: started.seq,
           ...(used.checkpoint_id !== undefined ? { checkpoint_id: used.checkpoint_id } : {}),
@@ -597,15 +650,21 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         },
       };
     } catch (cause) {
-      // A write failed, or the arguments have no canonical JSON: the layer
-      // could not complete its checks, so the call is refused (R407,
-      // §5.18.8). Record what the call used, so no approval or checkpoint is
-      // spent without a trace entry; if the store refuses that too, there
-      // is nothing more to do.
+      // A write failed, or the arguments of a call that needs no approval
+      // have no canonical JSON: the layer could not complete its checks, so
+      // the call is refused (R407, §5.18.8). Record what the call used, so
+      // no approval or checkpoint is spent without a trace entry; if the
+      // store refuses that too, there is nothing more to do.
       const message = cause instanceof Error ? cause.message : String(cause);
-      await appendTrace(state, { ...identity, ...used, at: now(), status: 'failed', code: 'R407', error: message }).catch(
-        () => undefined,
-      );
+      await appendTrace(state, {
+        ...identity,
+        ...used,
+        ...(layerRecord !== undefined ? { recorded_by: layerRecord } : {}),
+        at: now(),
+        status: 'failed',
+        code: 'R407',
+        error: message,
+      }).catch(() => undefined);
       return {
         outcome: refusal(
           'R407',
@@ -621,15 +680,17 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   const execute = async (state: ThreadState, args: z.infer<Args>): Promise<ToolResult> => {
     const claim = await serially(state.threadId, () => check(state, args as Json));
     if (claim.outcome) return claim.outcome;
-    const { started, call, flow } = claim;
+    const { started, call, flow, recorded_by } = claim;
 
     // Run with the nesting state, check the output contract (§5.18.9),
     // record the outcome.
     let text: string;
     let output: CapabilityOutput<C>;
     try {
-      const composite = nestingState(state, { name, seq: call.seq, flow, invokes: invokeNames }, (entry) =>
-        serially(state.threadId, () => appendTrace(state, entry)),
+      const composite = nestingState(
+        state,
+        { name, seq: call.seq, flow, invokes: invokeNames, recorded_by, now },
+        (entry) => serially(state.threadId, () => appendTrace(state, entry)),
       );
       output = await options.execute(composite, args, call);
       text = encodeCapabilityOutput(capability, output);
@@ -708,6 +769,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   });
   STATED_NAMES.set(definition, name);
   EFFECTIVE.set(definition, flags);
+  noteBound(name, capability);
   return definition;
 }
 
@@ -781,6 +843,7 @@ export function controlTool<Args extends ToolArgs>(options: ControlToolOptions<A
   });
   STATED_NAMES.set(definition, name);
   EFFECTIVE.set(definition, { risk: 'low', mutation: false, requires_checkpoint: false, requires_approval: false });
+  noteBound(name, 'control');
   return definition;
 }
 

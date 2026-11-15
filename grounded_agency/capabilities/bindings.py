@@ -135,8 +135,17 @@ def duration_seconds(text: str) -> float:
     return float(_core.duration_ms(text)) / 1000.0
 
 
-def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+def _as_int(value: Any) -> int | None:
+    """``value`` as an integer, as JSON Schema's ``integer`` reads it: an
+    int, or a float with no fractional part (``1.0``, as a JSON text may
+    write one). None for anything else."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
 
 
 def parse_record(
@@ -180,11 +189,24 @@ def parse_record(
             )
         )
 
+    from .. import _core
+
     for key in record:
         if not isinstance(key, str):
             wrong("", f"member name {key!r} is not a string")
-        elif key not in _MEMBERS and not key.startswith("x-"):
+            continue
+        if key not in _MEMBERS and not key.startswith("x-"):
             wrong(key, f"unknown member '{key}' (vendor data starts with 'x-')")
+        # A record is JSON data: a member with no I-JSON form (section 5.14),
+        # such as an integer beyond 2^53 under an `x-` key, could not be
+        # recorded or digested, so the record does not load.
+        try:
+            _core.canonical_json({key: record[key]})
+        except (ValueError, TypeError) as e:
+            # The name itself may hold the lone surrogate: report it escaped.
+            name = key.encode("utf-8", "backslashreplace").decode("utf-8")
+            reason = str(e).encode("utf-8", "backslashreplace").decode("utf-8")
+            wrong(name, f"'{name}' is not I-JSON (STANDARD 1.2.0 §5.14): {reason}")
 
     if "tool" not in record:
         missing("tool")
@@ -228,7 +250,7 @@ def parse_record(
             wrong("flags", "'flags' must be an object")
         else:
             for key, flag in value.items():
-                path = f"flags/{key}"
+                path = f"flags.{key}"
                 if key == "risk":
                     if not isinstance(flag, str) or flag not in _RISK_ORDER:
                         wrong(path, f"'risk' must be one of {', '.join(RISK_LEVELS)}")
@@ -280,34 +302,34 @@ def parse_record(
             ok = True
             for key in value:
                 if key not in ("min_approvers", "role", "expires"):
-                    wrong(f"approval/{key}", f"unknown member 'approval.{key}'")
+                    wrong(f"approval.{key}", f"unknown member 'approval.{key}'")
                     ok = False
-            min_approvers = value.get("min_approvers", 1)
-            if not _is_int(min_approvers) or min_approvers < 1:
+            min_approvers = _as_int(value.get("min_approvers", 1))
+            if min_approvers is None or min_approvers < 1:
                 wrong(
-                    "approval/min_approvers",
+                    "approval.min_approvers",
                     "'approval.min_approvers' must be an integer of at least 1",
                 )
                 ok = False
             role = value.get("role")
             if role is not None and (not isinstance(role, str) or not role):
-                wrong("approval/role", "'approval.role' must be a non-empty string")
+                wrong("approval.role", "'approval.role' must be a non-empty string")
                 ok = False
             expires: float | None = None
             if "expires" in value:
                 try:
                     expires = duration_seconds(value["expires"])
                 except ValueError as e:
-                    wrong("approval/expires", f"'approval.expires': {e}")
+                    wrong("approval.expires", f"'approval.expires': {e}")
                     ok = False
                 else:
                     if expires <= 0:
                         wrong(
-                            "approval/expires",
+                            "approval.expires",
                             "'approval.expires' must be a duration longer than zero",
                         )
                         ok = False
-            if ok:
+            if ok and min_approvers is not None:
                 approval = ApprovalPolicy(
                     min_approvers=min_approvers, role=role, expires_seconds=expires
                 )
@@ -401,7 +423,7 @@ def _own_flags(
             ValidationError(
                 ErrorCode.SAFETY_FLAG_DOWNGRADE,
                 f"tool '{binding.tool}': {message}",
-                {"tool": binding.tool, "capability": caps[0], "field": flag},
+                {"tool": binding.tool, "capability": caps[0], "field": f"flags.{flag}"},
             )
         )
 

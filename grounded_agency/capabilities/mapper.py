@@ -23,11 +23,12 @@ state-saving call the skill leads to is classified on its own
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import shlex
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -187,10 +188,14 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
 # `git stash <sub>` forms that the Bash classifier recognises when the line is
 # exactly one simple command with no option that writes (STANDARD 1.2.0
 # section 5.18.3): `create` saves the current tracked state and takes a
-# checkpoint; `list` and `show` only read; `pop` and `apply` restore one.
-# Every other form (`store`, `push`, `save`, `drop`, `clear`, none) is a
-# gated mutation. The plugin's PreToolUse hook keeps the same table, and a
-# test compares the two.
+# checkpoint; `list` and `show` only read; `pop` and `apply` restore one,
+# but only as `git stash pop|apply <commit>` where <commit> is the full id of
+# a commit the layer recorded as a checkpoint (`_RESTORES_CHECKPOINT`): git
+# applies any merge commit as if it were a stash, so any other revision, and
+# a bare `pop`/`apply` (refs/stash, which `git stash create` never writes),
+# is a gated mutation. Every other form (`store`, `push`, `save`, `drop`,
+# `clear`, none) is a gated mutation. The plugin's PreToolUse hook keeps the
+# same table, and a test compares the two.
 _GIT_STASH_CLASSES: dict[str, str] = {
     "create": "checkpoint",
     "list": "observe",
@@ -198,6 +203,9 @@ _GIT_STASH_CLASSES: dict[str, str] = {
     "pop": "rollback",
     "apply": "rollback",
 }
+# A commit id as `git stash create` prints it (SHA-1 or SHA-256). A full id
+# names an object, never a ref, so no branch or tag can stand in for it.
+_COMMIT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 # find actions that delete, run a command or write a file.
 _FIND_WRITES: frozenset[str] = frozenset(
@@ -550,8 +558,14 @@ class ToolCapabilityMapper:
         # Diagnostics of the bindings registered, per tool name.
         self._diagnostics: dict[str, list[ValidationError]] = {}
         # The records registered, per tool name, for the layer's
-        # configuration digest.
+        # configuration digest; `records_revision` counts their changes.
         self._records: dict[str, dict[str, Any]] = {}
+        self.records_revision = 0
+        # Whether a commit id is one the layer recorded as a checkpoint: a
+        # `git stash pop|apply <commit>` restores a checkpoint (`rollback`)
+        # only then. The adapter sets it from its checkpoint tracker; with
+        # None, every such command is a gated mutation.
+        self.is_checkpoint_commit: Callable[[str], bool] | None = None
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -572,7 +586,8 @@ class ToolCapabilityMapper:
 
     @property
     def records(self) -> list[dict[str, Any]]:
-        """The binding records registered, in tool-name order."""
+        """The binding records registered, in tool-name order. Each loaded
+        record is I-JSON (section 5.14): one that is not does not load."""
         return [self._records[name] for name in sorted(self._records)]
 
     @property
@@ -714,6 +729,7 @@ class ToolCapabilityMapper:
         for name in names:
             self._diagnostics[name] = []
             self._records.pop(name, None)
+        self.records_revision += 1
         for d in diagnostics:
             self._diagnostics.setdefault(str(d.location.get("tool", "")), []).append(d)
             if d.severity is Severity.WARNING:
@@ -726,7 +742,8 @@ class ToolCapabilityMapper:
                 self._dynamic_mappings[name] = mapping
         for r in records:
             if isinstance(r, Mapping) and r.get("tool") in loaded:
-                self._records[r["tool"]] = dict(r)
+                # A copy the caller cannot change under the digest.
+                self._records[r["tool"]] = copy.deepcopy(dict(r))
         return diagnostics
 
     def register_binding(self, record: Mapping[str, Any]) -> ToolMapping:
@@ -813,6 +830,7 @@ class ToolCapabilityMapper:
         if capability_id is None and not control:
             self._dynamic_mappings[tool_name] = UNCLASSIFIED_TOOL
             self._records.pop(tool_name, None)
+            self.records_revision += 1
             report = ValidationError(
                 code=ErrorCode.UNBOUND_TOOL,
                 message=(
@@ -911,8 +929,12 @@ class ToolCapabilityMapper:
         2. Only when the line is exactly one simple command with no option
            that writes (`_writes`), a `git stash <sub>` form is classified
            by `_GIT_STASH_CLASSES`: `create` takes a checkpoint, `list` and
-           `show` observe, `pop` and `apply` roll back. A git option before
-           `stash` (`git -C dir stash ...`) is not recognised.
+           `show` observe, and `pop <commit>` and `apply <commit>` roll back
+           when <commit> is the full id of a commit the layer recorded as a
+           checkpoint (:attr:`is_checkpoint_commit`); any other `pop` or
+           `apply` is a gated mutation, since git applies any merge commit
+           as if it were a stash. A git option before `stash` (`git -C dir
+           stash ...`) is not recognised.
         3. Otherwise each simple command is classified on its own. A line
            whose every command is allow-listed as read-only is an
            observation; any other line takes the strictest flags and every
@@ -954,13 +976,31 @@ class ToolCapabilityMapper:
                 and words[2] in _GIT_STASH_CLASSES
                 and not _writes(words)
             ):
-                return self._builtin("Bash", _GIT_STASH_CLASSES[words[2]])
+                capability = _GIT_STASH_CLASSES[words[2]]
+                if capability != "rollback" or self._restores_checkpoint(words):
+                    return self._builtin("Bash", capability)
+                return mutation
 
         results = [self._classify_single_command(words) for words in commands]
         gated = [r for r in results if r.risk != "low"]
         if not gated:
             return self._builtin("Bash", "observe")
         return self._combine(gated)
+
+    def _restores_checkpoint(self, words: list[str]) -> bool:
+        """Whether `git stash pop|apply <commit>` (``words``) names, as its
+        only argument, the full id of a commit the layer recorded as a
+        checkpoint. A lookup that fails is a no."""
+        if len(words) != 4 or not _COMMIT_ID.match(words[3]):
+            return False
+        recorded = self.is_checkpoint_commit
+        if recorded is None:
+            return False
+        try:
+            return bool(recorded(words[3]))
+        except Exception:
+            logger.exception("Could not look up checkpoint commit %s", words[3])
+            return False
 
     def _combine(self, results: list[ToolMapping]) -> ToolMapping:
         """One mapping for a line of several actions (section 5.18.3): every

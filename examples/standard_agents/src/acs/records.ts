@@ -198,7 +198,13 @@ export interface TraceEntry {
    * checkpoint, which the composite's call used.
    */
   covered_by?: number;
-  /** The layer and configuration that decided the call (§5.18.8). */
+  /**
+   * The layer and configuration that decided the call (§5.18.8): on every
+   * entry a grounded or control tool writes, refusals and failures of the
+   * layer's own checks included. Absent only on an entry the audit hook
+   * writes for a call no grounded tool recorded, which the layer did not
+   * decide.
+   */
   recorded_by?: RecordedBy;
   /** The checkpoint this call used (`requires_checkpoint`) or took (`checkpoint`). */
   checkpoint_id?: string;

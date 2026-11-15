@@ -25,5 +25,9 @@
     "The permission mode is read from the hook input, else from the wrapped options: a host that changes the mode during a session and omits it from hook input is checked against the mode the session started in",
     "That Claude Code puts an ask to can_use_tool in modes default, acceptEdits and plan rests on its documentation; the tests call the hook and the callback directly",
     "strict_mode=False or approval='off' is outside class SL"
+  ],
+  "not_applied": [
+    "§5.18.10 persist and audit rows (F504): the data a persist call writes and the record an audit call appends are not checked for a secret the layer recognises (§6.7); such a call is decided by the other checks alone",
+    "§5.18.10 send row (F504): no destination policy (§4.4.2) is applied, and a binding's destination member is loaded but not read; a send call is decided by the other checks alone"
   ]
 }

@@ -98,14 +98,14 @@ class TestParseRecord:
             (
                 _rec(capability="mutate", flags={"risk": "extreme"}),
                 "S303",
-                "flags/risk",
+                "flags.risk",
             ),
             (
                 _rec(capability="mutate", flags={"mutation": "no"}),
                 "S303",
-                "flags/mutation",
+                "flags.mutation",
             ),
-            (_rec(capability="mutate", flags={"other": True}), "S303", "flags/other"),
+            (_rec(capability="mutate", flags={"other": True}), "S303", "flags.other"),
             (
                 _rec(capability="plan", additional_capabilities=[]),
                 "S303",
@@ -120,33 +120,39 @@ class TestParseRecord:
             (
                 _rec(capability="mutate", approval={"min_approvers": 0}),
                 "S303",
-                "approval/min_approvers",
+                "approval.min_approvers",
             ),
             (
                 _rec(capability="mutate", approval={"min_approvers": True}),
                 "S303",
-                "approval/min_approvers",
+                "approval.min_approvers",
             ),
             (
                 _rec(capability="mutate", approval={"expires": "1w"}),
                 "S303",
-                "approval/expires",
+                "approval.expires",
             ),
             (
                 _rec(capability="mutate", approval={"expires": "P"}),
                 "S303",
-                "approval/expires",
+                "approval.expires",
             ),
             (
                 _rec(capability="mutate", approval={"expires": "PT"}),
                 "S303",
-                "approval/expires",
+                "approval.expires",
             ),
             (
                 _rec(capability="mutate", approval={"expires": "0s"}),
                 "S303",
-                "approval/expires",
+                "approval.expires",
             ),
+            # A member with no I-JSON form (STANDARD 1.2.0 §5.14), vendor
+            # data included: the record could not be recorded or digested.
+            (_rec(capability="search", **{"x-build": 2**60}), "S303", "x-build"),
+            (_rec(capability="search", **{"x-note": "a\ud800"}), "S303", "x-note"),
+            (_rec(capability="search", **{"x-obj": object()}), "S303", "x-obj"),
+            (_rec(capability="search", tool="t\udc00"), "S303", "tool"),
             (_rec(capability="send", destination="to"), "S303", "destination"),
             (_rec(capability="send", destination="/a~2"), "S303", "destination"),
         ],
@@ -157,6 +163,23 @@ class TestParseRecord:
         binding, errors = parse_record(record)
         assert binding is None
         assert (code, field) in [(e.code_str, e.location["field"]) for e in errors]
+
+    def test_min_approvers_written_as_a_whole_float_reads(self) -> None:
+        # JSON Schema's `integer` accepts 1.0, and so does every loader
+        # (binding fixture approval_integral_float).
+        binding, errors = parse_record(
+            _rec(capability="mutate", approval={"min_approvers": 2.0})
+        )
+        assert errors == []
+        assert binding is not None and binding.approval is not None
+        assert binding.approval.min_approvers == 2
+        assert isinstance(binding.approval.min_approvers, int)
+        _, errors = parse_record(
+            _rec(capability="mutate", approval={"min_approvers": 1.5})
+        )
+        assert [(e.code_str, e.location["field"]) for e in errors] == [
+            ("S303", "approval.min_approvers")
+        ]
 
     def test_not_an_object(self) -> None:
         binding, errors = parse_record(["tool"])
@@ -402,3 +425,65 @@ class TestRecordedBy:
         assert len(before["config_sha256"]) == 64
         adapter.mapper.register_mcp_tool("mcp__s__t", capability_id="observe")
         assert adapter.recorded_by["config_sha256"] != before["config_sha256"]
+
+    def test_the_digest_is_computed_once_per_change(
+        self, adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        import grounded_agency.adapter as adapter_module
+
+        first = adapter.recorded_by
+        calls: list[bytes] = []
+        real = hashlib.sha256
+
+        def counting(data: bytes = b"") -> Any:
+            calls.append(data)
+            return real(data)
+
+        monkeypatch.setattr(adapter_module.hashlib, "sha256", counting)
+        assert adapter.recorded_by == first
+        assert calls == []
+        adapter.mapper.register_mcp_tool("mcp__s__t", capability_id="observe")
+        changed = adapter.recorded_by
+        assert len(calls) == 1 and changed != first
+        assert adapter.recorded_by == changed and len(calls) == 1
+
+    def test_the_stored_record_is_a_copy(self, adapter: GroundedAgentAdapter) -> None:
+        record: dict[str, Any] = {
+            "tool": "mcp__s__t",
+            "ontology": adapter.mapper.ontology_version,
+            "capability": "observe",
+            "x-tags": ["a"],
+        }
+        adapter.mapper.load_bindings([record])
+        before = adapter.recorded_by
+        record["x-tags"].append("b")
+        assert adapter.recorded_by == before
+
+    @pytest.mark.asyncio
+    async def test_a_binding_with_no_i_json_form_does_not_load(
+        self, adapter: GroundedAgentAdapter
+    ) -> None:
+        """A schema-valid record whose `x-` member has no I-JSON form is S303
+        and leaves its tool unbound; every other call is still decided."""
+        diagnostics = adapter.mapper.load_bindings(
+            [
+                {
+                    "tool": "mcp__s__lookup",
+                    "ontology": adapter.mapper.ontology_version,
+                    "capability": "search",
+                    "x-build": 2**60,
+                }
+            ]
+        )
+        assert [(d.code_str, d.location["field"]) for d in diagnostics] == [
+            ("S303", "x-build")
+        ]
+        assert adapter.mapper.map_tool("mcp__s__lookup", {}) is UNCLASSIFIED_TOOL
+        hook = adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {"tool_name": "Read", "tool_input": {"file_path": "a"}}, "r1", None
+        )
+        assert result == {}
+        assert adapter.call_records[-1]["decision"] == "allowed"

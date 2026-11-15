@@ -14,9 +14,19 @@ import type { ThreadState, ToolResult } from '@standardagents/spec';
 import { CAPABILITIES, type CapabilityId, parseDuration } from '@synaptiai/acs-core';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ApprovalError, decideApproval, requestApproval, type ApprovalPolicy } from '../src/acs/approval.js';
-import { controlTool, groundedTool } from '../src/acs/grounded.js';
+import { Ajv2020 } from 'ajv/dist/2020.js';
+import {
+  ApprovalError,
+  MAX_APPROVERS,
+  decideApproval,
+  policyProblems,
+  requestApproval,
+  type ApprovalPolicy,
+} from '../src/acs/approval.js';
+import { CHECKPOINT_MAX_AGE_MS, LAYER_NAME, controlTool, groundedTool } from '../src/acs/grounded.js';
+import { ONTOLOGY_VERSION, STANDARD_VERSION } from '../src/acs/ontology.js';
 import statement from '../../../tests/conformance/calls/statements/standard_agents_binding.json' with { type: 'json' };
+import statementSchema from '../../../tests/conformance/calls/schema/statement.schema.json' with { type: 'json' };
 import { memoryThread, user, type Invocable, type MemoryThread } from './memory_thread.js';
 
 interface Binding {
@@ -146,9 +156,30 @@ function outcome(result: ToolResult): string {
   return result.error_code ?? 'run';
 }
 
+describe("the binding's conformance statement", () => {
+  it('follows the statement schema', () => {
+    const validate = new Ajv2020({ strict: false }).compile(statementSchema);
+    expect(validate(statement), JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it('states what the binding does', () => {
+    expect(statement.layer).toEqual({ name: LAYER_NAME, version: STANDARD_VERSION });
+    expect(statement.standard).toBe(STANDARD_VERSION);
+    expect(statement.ontology).toBe(ONTOLOGY_VERSION);
+    expect(parseDuration(statement.checkpoint_max_age)).toBe(CHECKPOINT_MAX_AGE_MS);
+    // A policy without expires_ms sets no expiry.
+    expect(statement.approval.expires).toBeNull();
+    expect(statement.approval.how).toBe('recorded');
+    expect(statement.approval.roles).toBe(true);
+    expect(statement.approval.max_approvers).toBe(MAX_APPROVERS);
+    expect(policyProblems({ min_approvers: MAX_APPROVERS })).toEqual([]);
+    expect(policyProblems({ min_approvers: MAX_APPROVERS + 1 })).toHaveLength(1);
+  });
+});
+
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(20);
+    expect(CASES).toHaveLength(21);
   });
 
   it.for(CASES)('%s', async ([_name, fixture], { skip }) => {

@@ -146,10 +146,10 @@ class TestRegistrationFollowsTheOntology:
         reports = mapper.warnings
         assert {r.code for r in reports} == {ErrorCode.SAFETY_FLAG_DOWNGRADE}
         assert [r.location["field"] for r in reports] == [
-            "risk",
-            "mutation",
-            "requires_checkpoint",
-            "requires_approval",
+            "flags.risk",
+            "flags.mutation",
+            "flags.requires_checkpoint",
+            "flags.requires_approval",
         ]
         for report in reports:
             assert report.severity.value == "warning"
@@ -586,6 +586,61 @@ class TestHookApprovalRule:
         # The call holds the checkpoint while the host decides.
         assert not asking_adapter.checkpoint_tracker.validate_and_reserve("other")[0]
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("c1")[0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "x\ud83d",  # a lone surrogate
+            2**60,  # an integer beyond ±2^53
+            -(2**53) - 1,
+        ],
+    )
+    async def test_arguments_that_are_not_i_json_are_f502(
+        self, asking_adapter: GroundedAgentAdapter, content: Any
+    ) -> None:
+        """STANDARD 1.2.0 §5.18.7: no decision can bind to arguments with no
+        canonical JSON, so the call is refused with F502, and it keeps
+        nothing: the checkpoint stays valid for the next call."""
+        checkpoint = asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+
+        result = await hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt", "content": content},
+                "permission_mode": "default",
+            },
+            "c1",
+            None,
+        )
+
+        assert _decision(result) == "deny"
+        assert _reason(result).startswith(
+            F502 + "the arguments of Write are not I-JSON"
+        )
+        assert asking_adapter.diagnostics[-1].code is ErrorCode.APPROVAL_REQUIRED
+        assert asking_adapter.checkpoint_tracker.validate_and_reserve("c2") == (
+            True,
+            checkpoint,
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_limit_itself_is_i_json(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        asking_adapter.create_checkpoint(["*"], "Test")
+        hook = asking_adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "a.txt", "content": 2**53},
+                "permission_mode": "default",
+            },
+            "c1",
+            None,
+        )
+        assert _decision(result) == "ask"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

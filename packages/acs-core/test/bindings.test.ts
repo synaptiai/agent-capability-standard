@@ -33,7 +33,7 @@ const pairs = (list: { code: string; location?: { tool: string }; tool?: string 
 
 describe('binding fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(24);
+    expect(CASES).toHaveLength(26);
   });
 
   it.each(CASES)('%s', (_name, fixture) => {
@@ -83,13 +83,32 @@ describe('parseRecord', () => {
     [{ tool: 't', ontology: '2.2.0' }, 'S304', 'capability'],
     [{ tool: 't', ontology: '2.2.0', capability: 'mutate', surprise: 1 }, 'S303', 'surprise'],
     [{ tool: 't', ontology: '2.2.0', capability: 'mutate', control: true }, 'S303', 'capability'],
-    [{ tool: 't', ontology: '2.2.0', capability: 'mutate', approval: { expires: '0s' } }, 'S303', 'approval/expires'],
-    [{ tool: 't', ontology: '2.2.0', capability: 'mutate', approval: { min_approvers: 0 } }, 'S303', 'approval/min_approvers'],
+    [{ tool: 't', ontology: '2.2.0', capability: 'mutate', approval: { expires: '0s' } }, 'S303', 'approval.expires'],
+    [{ tool: 't', ontology: '2.2.0', capability: 'mutate', approval: { min_approvers: 0 } }, 'S303', 'approval.min_approvers'],
+    [{ tool: 't', ontology: '2.2.0', capability: 'mutate', approval: { min_approvers: 1.5 } }, 'S303', 'approval.min_approvers'],
+    [{ tool: 't', ontology: '2.2.0', capability: 'mutate', flags: { risk: 'extreme' } }, 'S303', 'flags.risk'],
     [{ tool: 't', ontology: '2.2.0', capability: 'send', destination: 'to' }, 'S303', 'destination'],
+    // A member with no I-JSON form (§5.14), vendor data included.
+    [{ tool: 't', ontology: '2.2.0', capability: 'search', 'x-build': 2 ** 60 }, 'S303', 'x-build'],
+    [{ tool: 't', ontology: '2.2.0', capability: 'search', 'x-note': 'a\ud800' }, 'S303', 'x-note'],
+    [{ tool: 't', ontology: '2.2.0', capability: 'search', 'x-when': new Date(0) }, 'S303', 'x-when'],
+    [{ tool: 't\udc00', ontology: '2.2.0', capability: 'search' }, 'S303', 'tool'],
   ])('refuses %j', (record, code, field) => {
     const { binding, errors } = parseRecord(record);
     expect(binding).toBeNull();
     expect(errors.map((e) => [e.code, e.location.field])).toContainEqual([code, field]);
+  });
+});
+
+describe('diagnostic fields (§9.8: keys joined by a dot)', () => {
+  it('names a weaker flag by its path in the record', () => {
+    const { diagnostics } = checkBindings([
+      { tool: 'w', ontology: '2.2.0', capability: 'mutate', flags: { risk: 'low', requires_approval: false } },
+    ]);
+    expect(diagnostics.map((d) => [d.code, d.location.field])).toEqual([
+      ['W602', 'flags.risk'],
+      ['W602', 'flags.requires_approval'],
+    ]);
   });
 });
 

@@ -30,6 +30,7 @@
  *    record names (not of its invokes).
  */
 import { joinFlags, NO_FLAGS, RISK_LEVELS } from './flags.js';
+import { iJsonProblem } from './ijson.js';
 import {
   CAPABILITIES,
   isCapability,
@@ -201,6 +202,14 @@ export function parseRecord(record: unknown): { binding: Parsed | null; errors: 
 
   for (const key of Object.keys(record)) {
     if (!MEMBERS.has(key) && !key.startsWith('x-')) wrong(key, `unknown member '${key}' (vendor data starts with 'x-')`);
+    // A record is JSON data: a member with no I-JSON form (§5.14), such as
+    // an integer beyond 2^53 under an `x-` key, could not be recorded or
+    // digested, so the record does not load.
+    const problem = iJsonProblem({ [key]: record[key] });
+    if (problem !== null) {
+      const name = JSON.stringify(key).slice(1, -1);
+      wrong(name, `'${name}' is not I-JSON (STANDARD 1.2.0 §5.14): the member ${problem}`);
+    }
   }
   if (!has('tool')) missing('tool');
   else if (typeof rawTool !== 'string' || rawTool === '') wrong('tool', "'tool' must be a non-empty string");
@@ -236,7 +245,7 @@ export function parseRecord(record: unknown): { binding: Parsed | null; errors: 
     if (!isObject(value)) wrong('flags', "'flags' must be an object");
     else {
       for (const [key, flag] of Object.entries(value)) {
-        const path = `flags/${key}`;
+        const path = `flags.${key}`;
         if (key === 'risk') {
           if (typeof flag !== 'string' || !(RISK_LEVELS as readonly string[]).includes(flag)) {
             wrong(path, `'risk' must be one of ${RISK_LEVELS.join(', ')}`);
@@ -277,28 +286,28 @@ export function parseRecord(record: unknown): { binding: Parsed | null; errors: 
       let ok = true;
       for (const key of Object.keys(value)) {
         if (!['min_approvers', 'role', 'expires'].includes(key)) {
-          wrong(`approval/${key}`, `unknown member 'approval.${key}'`);
+          wrong(`approval.${key}`, `unknown member 'approval.${key}'`);
           ok = false;
         }
       }
       const min = Object.hasOwn(value, 'min_approvers') ? value['min_approvers'] : 1;
       if (typeof min !== 'number' || !Number.isInteger(min) || min < 1) {
-        wrong('approval/min_approvers', "'approval.min_approvers' must be an integer of at least 1");
+        wrong('approval.min_approvers', "'approval.min_approvers' must be an integer of at least 1");
         ok = false;
       }
       const role = value['role'];
       if (role !== undefined && (typeof role !== 'string' || role === '')) {
-        wrong('approval/role', "'approval.role' must be a non-empty string");
+        wrong('approval.role', "'approval.role' must be a non-empty string");
         ok = false;
       }
       let expires: number | undefined;
       if (Object.hasOwn(value, 'expires')) {
         const ms = parseDuration(value['expires']);
         if (ms === null) {
-          wrong('approval/expires', `'approval.expires': ${JSON.stringify(value['expires'])} is not a duration`);
+          wrong('approval.expires', `'approval.expires': ${JSON.stringify(value['expires'])} is not a duration`);
           ok = false;
         } else if (ms <= 0) {
-          wrong('approval/expires', "'approval.expires' must be a duration longer than zero");
+          wrong('approval.expires', "'approval.expires' must be a duration longer than zero");
           ok = false;
         } else expires = ms;
       }
@@ -402,7 +411,11 @@ function ownFlags(binding: Parsed): { flags: SafetyFlags; warnings: BindingDiagn
   const warnings: BindingDiagnostic[] = [];
   const downgrade = (field: string, message: string) =>
     warnings.push(
-      diagnostic('W602', `tool '${binding.tool}': ${message}`, { tool: binding.tool, capability: caps[0]!, field }),
+      diagnostic('W602', `tool '${binding.tool}': ${message}`, {
+        tool: binding.tool,
+        capability: caps[0]!,
+        field: `flags.${field}`,
+      }),
     );
 
   let risk = base.risk;

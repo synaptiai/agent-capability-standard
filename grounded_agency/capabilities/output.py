@@ -12,7 +12,11 @@ sends. Either failure is R402 EXECUTION_FAILED.
 :func:`encode_capability_output` is the producer's side and
 :func:`decode_capability_output` the consumer's. The TypeScript package's
 ``encodeCapabilityOutput`` and ``decodeCapabilityOutput``
-(``packages/acs-core/src/output.ts``) apply the same rules.
+(``packages/acs-core/src/output.ts``) apply the same rules; both pass the
+shared vectors, ``tests/conformance/output/vectors.json``. The I-JSON limits
+apply to the text: an integer literal beyond ±2^53 is refused, a number in
+exponent form is a double and is not (Python writes a ``float`` such as
+1.8e16 in that form).
 """
 
 from __future__ import annotations

@@ -17,7 +17,7 @@ import { digest } from '@synaptiai/acs-core';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
 import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags } from '../src/acs/ontology.js';
-import { readCheckpoints, readTrace } from '../src/acs/records.js';
+import { KEYS, readCheckpoints, readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH } from '../src/example/settings.js';
 import annotationSchema from '../../../schemas/interop/standard_agents_annotation.schema.json' with { type: 'json' };
 import manifest from '../package.json' with { type: 'json' };
@@ -687,10 +687,38 @@ describe('evidence and audit trail', () => {
     const t = thread();
     // Half of a surrogate pair: JSON.parse and z.string() accept it; RFC 8785 does not.
     const result = await tool.execute(t.state, { text: 'ok \ud83d' });
-    expect(result).toMatchObject({ status: 'error' });
+    expect(result).toMatchObject({ status: 'error', error_code: 'R407' });
     expect(result.error).toMatch(/unpaired surrogate/);
     expect(runs).toBe(0);
-    expect((await readTrace(t.state)).at(-1)).toMatchObject({ action: 'note', status: 'failed' });
+    const entry = (await readTrace(t.state)).at(-1);
+    expect(entry).toMatchObject({ action: 'note', status: 'failed', code: 'R407' });
+    // The layer's own failure names the layer too (§5.18.8).
+    expect(entry?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding' });
+  });
+
+  it.each([
+    ['a lone surrogate', { key: 'retries', value: 'ok \ud83d' }],
+    ['an integer beyond 2^53', { key: 'retries', value: '5', n: 2 ** 60 }],
+  ])('refuses a call that needs approval with arguments that are not I-JSON (%s): F502', async (_why, args) => {
+    // §5.18.7: no decision can bind to them. Nothing is asked or used.
+    const loose = groundedTool({
+      name: 'write_config',
+      capability: 'mutate',
+      description: 'x',
+      args: z.object({ key: z.string(), value: z.string() }).passthrough(),
+      execute: async () => ({ success: true, evidence_anchors: [] }),
+    });
+    const t = thread();
+    data(await checkpointConfig.execute(t.state, { label: 'one' }));
+    const result = await loose.execute(t.state, args);
+    expect(result).toMatchObject({ status: 'error', error_code: 'F502' });
+    expect(result.error).toMatch(/^F502 APPROVAL_REQUIRED: The arguments of write_config are not I-JSON/);
+    expect(await t.state.getValue(KEYS.pendingApprovals)).toBeNull();
+    const entry = (await readTrace(t.state)).at(-1);
+    expect(entry).toMatchObject({ action: 'write_config', capability: 'mutate', status: 'refused', code: 'F502' });
+    expect(entry?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding' });
+    // The checkpoint is still there for a call with I-JSON arguments.
+    expect((await readCheckpoints(t.state)).filter((c) => c.valid)).toHaveLength(1);
   });
 
   it('records every call, including refusals, with its evidence', async () => {

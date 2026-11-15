@@ -230,6 +230,18 @@ binding(
     errors=[diag("S303", "write")],
 )
 binding(
+    "approval_integral_float",
+    "An approval.min_approvers written 1.0 is the integer 1, as JSON Schema's integer reads it: the record loads.",
+    [rec("write", "mutate", approval={"min_approvers": 1.0})],
+    effective={"write": GATED},
+)
+binding(
+    "vendor_member_not_i_json",
+    "A member with no I-JSON form (section 5.14), here an integer beyond 2^53 under an x- key, is S303: the record could not be recorded or digested, and is not loaded.",
+    [rec("look", "observe", **{"x-build": 2**60})],
+    errors=[diag("S303", "look")],
+)
+binding(
     "offered_unbound",
     "An offered tool with no binding is W617.",
     [rec("save", "checkpoint")],
@@ -447,6 +459,15 @@ calls(
     "rollback_after_use",
     "A used checkpoint can still be restored.",
     [call("save", RUN), call("write", RUN, A, approve=ALICE), call("undo", RUN)],
+)
+calls(
+    "approval_args_not_i_json",
+    "A call that needs approval with arguments that are not I-JSON (an integer beyond 2^53) is F502: no decision can bind to them. It uses nothing.",
+    [
+        call("save", RUN),
+        call("write", refuse("F502"), {"path": "a", "n": 2**60}, approve=ALICE),
+        call("write", RUN, A, approve=ALICE),
+    ],
 )
 calls(
     "decision_single_use",

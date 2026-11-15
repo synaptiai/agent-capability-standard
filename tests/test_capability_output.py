@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,6 +13,12 @@ from grounded_agency import (
     CapabilityOutputError,
     decode_capability_output,
     encode_capability_output,
+)
+
+VECTORS = json.loads(
+    (
+        Path(__file__).resolve().parent / "conformance" / "output" / "vectors.json"
+    ).read_text(encoding="utf-8")
 )
 
 GOOD: dict[str, Any] = {
@@ -96,3 +103,46 @@ def test_100_levels_deep_is_accepted() -> None:
     assert decode_capability_output(
         "observe", encode_capability_output("observe", output)
     )
+
+
+def _outcome(run: Any) -> Any:
+    try:
+        run()
+    except CapabilityOutputError as e:
+        return {"refuse": e.error.code_str}
+    return "ok"
+
+
+@pytest.mark.parametrize(
+    "vector", VECTORS["decode"], ids=[v["name"] for v in VECTORS["decode"]]
+)
+def test_shared_decode_vectors(vector: dict[str, Any]) -> None:
+    """tests/conformance/output/vectors.json, which the TypeScript package
+    reads too, so the two codecs agree."""
+    assert (
+        _outcome(lambda: decode_capability_output("observe", vector["text"]))
+        == vector["expect"]
+    )
+
+
+@pytest.mark.parametrize(
+    "vector", VECTORS["encode"], ids=[v["name"] for v in VECTORS["encode"]]
+)
+def test_shared_encode_vectors(vector: dict[str, Any]) -> None:
+    value = json.loads(vector["value_text"])
+
+    def encode_then_decode() -> None:
+        text = encode_capability_output("observe", value)
+        # What a producer sends, a consumer accepts.
+        decode_capability_output("observe", text)
+
+    assert _outcome(encode_then_decode) == vector["expect"]
+
+
+def test_python_writes_a_large_double_in_exponent_form() -> None:
+    """The case the shared vectors leave out: Python writes the double 1.8e16
+    as 1.8e+16, a double in any reader; JavaScript writes it as an integer
+    literal and so refuses it (packages/acs-core/test/output.test.ts)."""
+    text = encode_capability_output("observe", {**GOOD, "observation": 1.8e16})
+    assert '"observation":1.8e+16' in text
+    assert decode_capability_output("observe", text)["observation"] == 1.8e16

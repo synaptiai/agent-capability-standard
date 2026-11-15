@@ -26,17 +26,24 @@
 #       - an option that writes (git --output..., file -C / --compile): mutate;
 #       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
 #         writes the marker once it succeeded); git stash list|show: observe;
-#         git stash pop|apply: rollback; any other git stash form: mutate;
+#         git stash pop|apply <commit>: rollback when <commit> is the full id
+#         of a commit a checkpoint marker recorded (the marker, or one under
+#         .claude/checkpoints/used/); any other pop or apply, a bare one
+#         included, is mutate, since git applies any merge commit as if it
+#         were a stash; any other git stash form: mutate;
 #       - a command on READ_ONLY: observe (allowed, nothing used);
 #       - anything else: mutate.
 #
 # Rules.
-#   - rollback: allowed when a checkpoint was ever taken in the project (the
-#     marker exists, or .claude/checkpoints/used/ holds one); otherwise
-#     F503 ROLLBACK_FAILED. A rollback uses no checkpoint.
+#   - rollback: restores a checkpoint this project recorded, so a checkpoint
+#     was taken; allowed, and it uses none. (F503 ROLLBACK_FAILED cannot
+#     arise: a restore of anything else is mutate.)
 #   - mutate: the marker (.claude/checkpoint.ok, a JSON object with
-#     checkpoint_id, created_at, expires_at) must exist, be a regular file and
-#     not have expired (F501 CHECKPOINT_REQUIRED). Unless ACS_HOOK_APPROVAL is
+#     checkpoint_id, created_at, expires_at) must exist, be a regular file,
+#     have times that are whole seconds of at most 12 digits, a created_at
+#     not in the future and an expires_at at most 1800 seconds (30 minutes,
+#     the Standard's cap) after it, and not have expired (F501
+#     CHECKPOINT_REQUIRED). Unless ACS_HOOK_APPROVAL is
 #     "off", the permission mode must be one that puts the call to a person,
 #     default, acceptEdits or plan (F502 APPROVAL_REQUIRED otherwise, with the
 #     marker left in place). Then the call takes the marker: it is renamed
@@ -81,8 +88,10 @@ fi
 READ_ONLY=(ls cat head tail wc pwd grep stat file du df which whoami uname echo printf "git status" "git log" "git diff" "git show" "git rev-parse" "git ls-files")
 
 # git stash <sub>=<class>, for a line of exactly one command: the mapper's
-# _GIT_STASH_CLASSES. (A plain array: bash 3.2, as macOS ships it, has no
-# associative arrays.)
+# _GIT_STASH_CLASSES. A rollback form counts only as `git stash pop|apply
+# <commit>` with a full commit id (classify_bash), and only for a commit a
+# marker recorded (recorded_commit). (A plain array: bash 3.2, as macOS ships
+# it, has no associative arrays.)
 GIT_STASH_CLASSES=(create=checkpoint list=observe show=observe pop=rollback apply=rollback)
 
 # Whether one simple command, given as its words, has an option that writes:
@@ -120,7 +129,13 @@ classify_bash() {
   if [ "${words[0]}" = "git" ] && [ "${words[1]:-}" = "stash" ]; then
     for entry in "${GIT_STASH_CLASSES[@]}"; do
       if [ "${entry%%=*}" = "${words[2]:-}" ]; then
-        echo "${entry#*=}"
+        if [ "${entry#*=}" != "rollback" ]; then
+          echo "${entry#*=}"
+        elif [ "${#words[@]}" -eq 4 ] && [[ "${words[3]}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+          echo "rollback ${words[3]}"
+        else
+          echo mutate
+        fi
         return
       fi
     done
@@ -165,11 +180,26 @@ fi
 marker="${claude_dir}/checkpoint.ok"
 used_dir="${claude_dir}/checkpoints/used"
 
-if [ "$capability" = "rollback" ]; then
-  if [ -e "$marker" ] || { [ -d "$used_dir" ] && [ -n "$(ls "$used_dir" 2>/dev/null)" ]; }; then
+# Whether a checkpoint marker of this project, the current one or one under
+# used/, recorded the commit $1 as its restore point (its "commit").
+recorded_commit() {
+  local file
+  for file in "$marker" "$used_dir"/*; do
+    if [ -f "$file" ] && [ ! -L "$file" ] \
+      && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$file" 2>/dev/null)" = "$1" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ "$capability" == "rollback "* ]]; then
+  # Restoring a recorded checkpoint uses none. Applying any other commit
+  # changes the tree like any write.
+  if recorded_commit "${capability#rollback }"; then
     exit 0
   fi
-  block "F503 ROLLBACK_FAILED: no checkpoint was taken in this project; there is nothing to roll back to."
+  capability=mutate
 fi
 
 # mutate: a valid marker for this call alone.
@@ -200,20 +230,32 @@ fi
 # A marker that is not a JSON object (plain text, a string, an array) makes jq
 # fail: that is a block, like a marker without the fields.
 if ! checkpoint_id=$(printf '%s' "$content" | jq -r 'if type == "object" then (.checkpoint_id // empty | tostring) else error("not an object") end' 2>/dev/null) \
+  || ! created_at=$(printf '%s' "$content" | jq -r '.created_at // empty' 2>/dev/null) \
   || ! expires_at=$(printf '%s' "$content" | jq -r '.expires_at // empty' 2>/dev/null); then
   rm -f "$marker"
   f501 "checkpoint marker is not a JSON object. Take a new checkpoint."
 fi
-if [ -z "$checkpoint_id" ] || [ -z "$expires_at" ]; then
+if [ -z "$checkpoint_id" ] || [ -z "$created_at" ] || [ -z "$expires_at" ]; then
   rm -f "$marker"
   f501 "checkpoint marker missing required fields. Take a new checkpoint."
 fi
-if ! [[ "$expires_at" =~ ^[0-9]+$ ]]; then
+# Whole seconds of at most 12 digits, so the arithmetic below cannot
+# overflow: a value it cannot compare must not pass as unexpired.
+if ! [[ "$created_at" =~ ^[0-9]{1,12}$ ]] || ! [[ "$expires_at" =~ ^[0-9]{1,12}$ ]]; then
   rm -f "$marker"
-  f501 "checkpoint marker has invalid expiry. Take a new checkpoint."
+  f501 "checkpoint marker has invalid times. Take a new checkpoint."
 fi
 now=$(date +%s)
-if [ "$now" -gt "$expires_at" ]; then
+if ! [[ "$now" =~ ^[0-9]{1,12}$ ]]; then
+  block "R407 SAFETY_CHECK_FAILED: the checkpoint hook could not read the clock, so the call is blocked."
+fi
+created_at=$((10#$created_at))
+expires_at=$((10#$expires_at))
+if ((created_at > now || expires_at > created_at + 1800)); then
+  rm -f "$marker"
+  f501 "checkpoint marker's times are not possible: taken in the future, or valid for more than 30 minutes (STANDARD 1.2.0 §5.18.6). Take a new checkpoint."
+fi
+if ((now > expires_at)); then
   rm -f "$marker"
   f501 "checkpoint has expired. Take a new checkpoint."
 fi

@@ -195,6 +195,68 @@ class TestPreToolUseExitCodes:
         assert "expired" in result.stderr.lower()
 
     @pytest.mark.parametrize(
+        ("times", "why"),
+        [
+            # An expiry no shell integer holds once failed open.
+            ({"created_at": "NOW", "expires_at": 99999999999999999999}, "invalid"),
+            ({"created_at": "NOW", "expires_at": "1e10"}, "invalid"),
+            ({"created_at": -1, "expires_at": "LATER"}, "invalid"),
+            ({"expires_at": "LATER"}, "missing"),
+            # Valid for longer than the Standard's 30-minute cap.
+            ({"created_at": "NOW", "expires_at": "NOW+1801"}, "not possible"),
+            # Taken in the future.
+            ({"created_at": "NOW+600", "expires_at": "NOW+900"}, "not possible"),
+        ],
+    )
+    def test_exit_2_marker_with_impossible_times(
+        self, tmp_path: Path, times: dict[str, object], why: str
+    ) -> None:
+        """A marker whose times cannot be read or cannot be true blocks with
+        F501 and is removed: it never fails open."""
+        if shutil.which("jq") is None:
+            pytest.skip("jq not installed")
+        import time
+
+        now = int(time.time())
+
+        def resolve(value: object) -> object:
+            # "NOW", "NOW+<seconds>" and "LATER" (ten minutes on) are times
+            # relative to now; anything else is written as it is.
+            if value == "NOW":
+                return now
+            if value == "LATER":
+                return now + 600
+            if isinstance(value, str) and value.startswith("NOW+"):
+                return now + int(value[4:])
+            return value
+
+        resolved = {key: resolve(value) for key, value in times.items()}
+        marker = tmp_path / ".claude" / "checkpoint.ok"
+        marker.parent.mkdir()
+        marker.write_text(json.dumps({"checkpoint_id": "chk", **resolved}))
+
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        assert why in result.stderr
+        assert not marker.exists()
+
+    def test_a_marker_valid_for_exactly_30_minutes_passes(self, tmp_path: Path) -> None:
+        import time
+
+        now = int(time.time())
+        marker = tmp_path / ".claude" / "checkpoint.ok"
+        marker.parent.mkdir()
+        marker.write_text(
+            json.dumps(
+                {"checkpoint_id": "c", "created_at": now, "expires_at": now + 1800}
+            )
+        )
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "ACS_HOOK_APPROVAL": "off"}
+        assert run_hook(PRETOOLUSE_HOOK, WRITE, env).returncode == 0
+
+    @pytest.mark.parametrize(
         "content", ["ok", '"just a string"', "[1, 2]", "5", "null"]
     )
     def test_exit_2_marker_not_a_json_object(
@@ -225,7 +287,13 @@ class TestPreToolUseExitCodes:
         marker = tmp_path / ".claude" / "checkpoint.ok"
         marker.parent.mkdir()
         marker.write_text(
-            json.dumps({"checkpoint_id": "chk", "expires_at": int(time.time()) + 600})
+            json.dumps(
+                {
+                    "checkpoint_id": "chk",
+                    "created_at": int(time.time()),
+                    "expires_at": int(time.time()) + 600,
+                }
+            )
         )
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
