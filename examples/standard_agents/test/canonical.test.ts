@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize, digest, NotCanonicalizableError } from '../src/acs/canonical.js';
-// Digests the reference executor computed for these shown values; see
-// tools/gen_standard_agents_ontology.py --digests.
+// The reference executor's approval digest vectors: a generated copy of
+// tests/conformance/approval/digests.json, written by
+// scripts/gen_standard_agents_binding.py.
 import fixture from './fixtures/approval-digests.json' with { type: 'json' };
 
 describe('canonical JSON (RFC 8785)', () => {
@@ -26,9 +27,10 @@ describe('approval digest (STANDARD v1.1.0 §5.14)', () => {
     expect(fixture.vectors.length).toBeGreaterThanOrEqual(10);
   });
 
-  it.each(fixture.vectors.map((v, i) => [i, v] as const))(
-    'matches the reference executor on vector %i',
-    async (_i, vector) => {
+  it.each(fixture.vectors.map((v) => [v.name, v] as const))(
+    'matches the reference executor on vector %s',
+    async (_name, vector) => {
+      expect(canonicalize(vector.shown)).toBe(vector.canonical);
       expect(await digest(vector.shown)).toBe(vector.digest);
     },
   );

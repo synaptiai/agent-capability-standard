@@ -1,0 +1,380 @@
+{
+  "generated_by": "scripts/gen_standard_agents_binding.py",
+  "standard": "1.1.0",
+  "section": "5.14",
+  "status": "informative",
+  "description": "Approval digests computed by the reference executor (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each vector is one approval request. STANDARD v1.1.0 section 5.14 states that a decision is valid only if the SHA-256 digest of the canonical JSON (RFC 8785) of the shown values matches. What is shown when a step declares no `shows`, and the object added when a step asks again after a recheck, are the reference executor's behaviour; the Standard does not state them. This file is printable ASCII: any other character is written as a JSON \\u escape, so no tool that normalises or transcodes text can change a vector.",
+  "fields": {
+    "name": "The vector's name, unique in this file.",
+    "about": "What the vector covers.",
+    "approval": "The `approval` field of the step that asks, as the workflow declares it; null when the step has none.",
+    "inputs": "The step's resolved inputs. Present where the step declares no `shows`, so that `shown` is built from them.",
+    "shown": "The JSON array of shown values that the approval request carries.",
+    "canonical": "The RFC 8785 (JCS) serialization of `shown`. It is held here as a JSON string: the canonical text is the value a JSON parser returns for it.",
+    "digest": "The SHA-256 of the UTF-8 encoding of the canonical text, in lowercase hexadecimal: the digest the request carries and a decision repeats."
+  },
+  "vectors": [
+    {
+      "name": "object",
+      "about": "An object with a nested object. Members are written in the order of their names, whatever order the value had.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        {
+          "action": "write_config",
+          "capability": "mutate",
+          "args": {
+            "key": "a",
+            "value": "b"
+          }
+        }
+      ],
+      "canonical": "[{\"action\":\"write_config\",\"args\":{\"key\":\"a\",\"value\":\"b\"},\"capability\":\"mutate\"}]",
+      "digest": "e3cf33cccce568634c5c6dab7d7988d66f94b8b9cc34ed4eec1006edfd88879b"
+    },
+    {
+      "name": "member_order",
+      "about": "Member names sort by UTF-16 code unit: the empty name first, an uppercase letter before a lowercase one, a name before a longer name that begins with it. Array elements keep their order.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        {
+          "b": 2,
+          "a": 1,
+          "A": 0,
+          "aa": [
+            3,
+            2,
+            1
+          ],
+          "": null
+        }
+      ],
+      "canonical": "[{\"\":null,\"A\":0,\"a\":1,\"aa\":[3,2,1],\"b\":2}]",
+      "digest": "ba72be80f186532cf68ce09c44f22b0ece7348aa2dea09b4bcb0d77b41d747a4"
+    },
+    {
+      "name": "numbers",
+      "about": "Numbers are written as ECMAScript writes the binary64 value, so -0.0, 1.0, 1e+21 and 1e-07 in the JSON text of `shown` become 0, 1, 1e+21 and 1e-7. 9007199254740992 is 2^53, the bound that section 5.14 gives for integers.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        {
+          "numbers": [
+            0,
+            -0.0,
+            1,
+            -1,
+            1.5,
+            1e+21,
+            1e-07,
+            123456789012,
+            0.1,
+            100,
+            1.0,
+            4.5e-10,
+            9007199254740992
+          ]
+        }
+      ],
+      "canonical": "[{\"numbers\":[0,0,1,-1,1.5,1e+21,1e-7,123456789012,0.1,100,1,4.5e-10,9007199254740992]}]",
+      "digest": "78533df9a65308cfc734f548ae90057fa7ca82b43c76b8217733ef905ba98ebf"
+    },
+    {
+      "name": "string_escapes",
+      "about": "A string with a line feed, a tab, quotation marks, a backslash, U+0001, U+007F, U+00E9, U+20AC and U+1F600. The canonical text escapes the first five (U+0001 as `\\u0001`, in lowercase) and holds the other four as themselves.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        {
+          "text": "line\nbreak\ttab \"quote\" back\\slash \u0001 \u007f \u00e9 \u20ac \ud83d\ude00"
+        }
+      ],
+      "canonical": "[{\"text\":\"line\\nbreak\\ttab \\\"quote\\\" back\\\\slash \\u0001 \u007f \u00e9 \u20ac \ud83d\ude00\"}]",
+      "digest": "113d69a0f6d95d5856507c62eccade92298f5972f5ce8ccdbce030dcb0350da5"
+    },
+    {
+      "name": "member_order_non_ascii",
+      "about": "The member names of the sorting example in RFC 8785 section 3.2.3. U+1F600 is the surrogate pair D83D DE00 in UTF-16, so it sorts before U+FB33, although its code point is higher.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        {
+          "\u20ac": "Euro",
+          "\r": "CR",
+          "\ufb33": "Dalet",
+          "1": "One",
+          "\ud83d\ude00": "Emoji",
+          "\u0080": "Control",
+          "\u00f6": "o umlaut"
+        }
+      ],
+      "canonical": "[{\"\\r\":\"CR\",\"1\":\"One\",\"\u0080\":\"Control\",\"\u00f6\":\"o umlaut\",\"\u20ac\":\"Euro\",\"\ud83d\ude00\":\"Emoji\",\"\ufb33\":\"Dalet\"}]",
+      "digest": "3ce06065920bb0bcbd8c5cba67c42b621b54547f03c5d5ec80c887fe4221bbe7"
+    },
+    {
+      "name": "nesting",
+      "about": "Objects and arrays nested, with true, false, null, an empty array and an empty object.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        {
+          "nested": {
+            "z": {
+              "y": {
+                "x": [
+                  true,
+                  false,
+                  null,
+                  {
+                    "k": []
+                  },
+                  {}
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "canonical": "[{\"nested\":{\"z\":{\"y\":{\"x\":[true,false,null,{\"k\":[]},{}]}}}}]",
+      "digest": "672adc2e63eae0d913f1109f4a289685a45c3db6603e162ef516d20edc308055"
+    },
+    {
+      "name": "string_value",
+      "about": "The shown value is a string.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        "a bare string"
+      ],
+      "canonical": "[\"a bare string\"]",
+      "digest": "6fc99d8b15b09678b8215ca48e6ec992689b2a26098f3225c8c05084f4bbffd6"
+    },
+    {
+      "name": "array_value",
+      "about": "The shown value is an array: it is one element of `shown`, not spliced into it.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        [
+          1,
+          "two",
+          {
+            "three": 3
+          }
+        ]
+      ],
+      "canonical": "[[1,\"two\",{\"three\":3}]]",
+      "digest": "96dc417b7147e64da749a70ba9e3ffc93561680a2a94d733dc2c06af5671d9a2"
+    },
+    {
+      "name": "number_value",
+      "about": "The shown value is a number.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        42
+      ],
+      "canonical": "[42]",
+      "digest": "b86b1ea11b28136fe5224b9d1e3017b7efb68d4fae0b90c4940e0c0f89b3907a"
+    },
+    {
+      "name": "null_value",
+      "about": "The shown value is null.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        null
+      ],
+      "canonical": "[null]",
+      "digest": "1d8fc6ceb1f94c6326d6d5483d258fcb2e179e9869325b245d105c2219bf69fd"
+    },
+    {
+      "name": "empty_list_value",
+      "about": "The shown value is an empty array.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        []
+      ],
+      "canonical": "[[]]",
+      "digest": "cf1cbb66a638b4860a516671fb74850e6ccf787fe6c4c8d29e9c04efe880bd05"
+    },
+    {
+      "name": "two_values_in_order",
+      "about": "Two references: `shown` keeps the order of `shows`.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${setting}",
+          "${current.data}"
+        ]
+      },
+      "shown": [
+        "x",
+        "a"
+      ],
+      "canonical": "[\"x\",\"a\"]",
+      "digest": "a95a521a53d30c11d42f491fa7e9fd1447da08c4630d6d4f1befe7a9bd5a4330"
+    },
+    {
+      "name": "empty_shows",
+      "about": "`shows` is an empty list: `shown` is the empty array.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": []
+      },
+      "shown": [],
+      "canonical": "[]",
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "no_shows",
+      "about": "The `approval` field has no `shows`: the reference executor shows the step's resolved inputs, wrapped in an array.",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        }
+      },
+      "inputs": {
+        "target": "x",
+        "operation": {
+          "set": true
+        }
+      },
+      "shown": [
+        {
+          "target": "x",
+          "operation": {
+            "set": true
+          }
+        }
+      ],
+      "canonical": "[{\"operation\":{\"set\":true},\"target\":\"x\"}]",
+      "digest": "b84b510e24298cb8d46b01b62a8f884a08f4831ea606485f80e63f575fb06d12"
+    },
+    {
+      "name": "no_approval_field",
+      "about": "The step has no `approval` field and needs approval by the ontology: the reference executor shows the step's resolved inputs, wrapped in an array, as for `no_shows`.",
+      "approval": null,
+      "inputs": {
+        "target": "x",
+        "operation": {
+          "set": true
+        }
+      },
+      "shown": [
+        {
+          "target": "x",
+          "operation": {
+            "set": true
+          }
+        }
+      ],
+      "canonical": "[{\"operation\":{\"set\":true},\"target\":\"x\"}]",
+      "digest": "b84b510e24298cb8d46b01b62a8f884a08f4831ea606485f80e63f575fb06d12"
+    },
+    {
+      "name": "asked_again_after_recheck",
+      "about": "The recheck read a changed source, so the reference executor asks again (`on_change: reask`, the default). `shown` gains one object whose `recheck` member holds the value approved before (`previous`) and the value read now (`current`).",
+      "approval": {
+        "approver": {
+          "kind": "human"
+        },
+        "shows": [
+          "${current.data}"
+        ],
+        "recheck": {
+          "source": "${current.data}"
+        }
+      },
+      "shown": [
+        {
+          "version": 1
+        },
+        {
+          "recheck": {
+            "previous": {
+              "version": 1
+            },
+            "current": {
+              "version": 2
+            }
+          }
+        }
+      ],
+      "canonical": "[{\"version\":1},{\"recheck\":{\"current\":{\"version\":2},\"previous\":{\"version\":1}}}]",
+      "digest": "d9efbc9d6b1b077d74f38f9e2d3ef28f7d0990341300e363e46f2c3e8a88cc99"
+    }
+  ]
+}

@@ -101,6 +101,8 @@ Running the suite:
 | Workflow fixtures (`tests/fixtures/`) | `python scripts/run_conformance.py` |
 | Runtime fixtures | `cargo test --test runtime` (in `core/`), `pytest tests/test_runner.py` |
 | Expression fixtures | `cargo test --test expressions` (in `core/`); `tools/cel_differential` against cel-go |
+| Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `examples/standard_agents/` |
+| Trust vectors | `pytest tests/test_trust.py` |
 
 `scripts/run_conformance.py` runs only the workflow fixtures.
 
@@ -108,3 +110,55 @@ Coverage gaps: no conformance fixture yet exercises V103, S301, S302, W607
 or W612; the reference implementation's unit tests cover them. F505 is
 reserved and not checked by the reference implementation, so nothing
 tests it.
+
+## Informative vectors
+
+These files are language-neutral and informative: STANDARD-v1.1.0 §10.3 does
+not name them. Each is JSON, describes its own fields, and has one named
+entry per case.
+
+- Approval digests: `tests/conformance/approval/digests.json`. Each vector
+  is one approval request of the reference executor (§5.14): the shown
+  values, their canonical JSON (RFC 8785) and the SHA-256 digest of that
+  text in lowercase hexadecimal. The vectors cover member order, nesting,
+  number forms, text outside ASCII, an empty list, a step that declares no
+  `shows`, and a step asked again after a recheck. Three things the vectors
+  pin are the reference executor's behaviour and are not stated in the
+  Standard: a step with no `shows` shows its resolved inputs wrapped in an
+  array, a step asked again shows one more object, whose `recheck` member
+  holds the previous and the current value of the source, and the digest is
+  written in lowercase hexadecimal. The `numbers` vector holds 2^53
+  (9007199254740992), the bound §5.14 writes as "within ±2^53"; RFC 7493
+  §2.2 gives the range of integers a receiver can treat as exact as
+  ±(2^53 - 1).
+  `scripts/gen_standard_agents_binding.py` writes the file from runs of the
+  executor, and CI fails when it is out of date.
+  `tests/test_approval_vectors.py` replays each vector on the executor and
+  recomputes the canonical JSON and the digest with a serializer of its
+  own. The Standard Agents binding tests its digest against a copy,
+  `examples/standard_agents/test/fixtures/approval-digests.json`.
+- Trust: `tests/conformance/trust/decay.json` (the decay factor of §8.1:
+  0.5 at one half-life, which §8.1 requires, `0.5 ** (age / half_life)` at
+  other ages, which it recommends, and not below `decay_model.min_trust`),
+  `tests/conformance/trust/weight.json` (the static weight of §8.3: the lower
+  of the class weight and the source weight, with a domain profile's
+  `trust_weights` overrides) and `tests/conformance/trust/score.json` (the
+  product that `conflict_resolution_function.formula` in
+  `schemas/authority_trust_model.yaml` names). Each file states the absolute
+  tolerance its expected values are given to. §8.3 states the profile
+  override of a class weight only; the vectors in which a profile key
+  replaces or adds a source weight rest on a comment in the schema and say
+  so. Each file lists under `not_covered` the cases whose result the
+  Standard does not state, such as a `min_trust` above 0.5, where §8.1
+  requires 0.5 at one half-life and also floors the factor at `min_trust`;
+  no vector covers them, and each entry says what the reference
+  implementation does. `tests/test_trust.py` runs the reference
+  implementation, `grounded_agency/trust.py`, against the vectors.
+
+Among the runtime fixtures, `checkpoint_per_mutation` pins what the
+reference executor asks for a step that needs approval and has no `approval`
+field: approver `{kind: human}`, mode `in_session`, the step's resolved
+inputs wrapped in an array, and no expiry. §5.14 does not state this
+request. A fixture's expectation matches by subset, so
+`tests/test_approval_vectors.py` also checks that the approver has no other
+member.
