@@ -5,15 +5,16 @@
 // never from the code under test.
 import { describe, expect, it } from 'vitest';
 import { renderRepoFile } from './pipeline';
-import { repoText } from './independent';
-import { cutAtSlots, SLOTS_BY_VERSION, SPEC_SLOTS, SPEC_SLOTS_100 } from '../src/lib/spec-slots';
+import { repoText, standardFileVersions } from './independent';
+import { cutAtSlots, SLOTS_BY_VERSION, SPEC_SLOTS, SPEC_SLOTS_100, SPEC_SLOTS_110 } from '../src/lib/spec-slots';
 import { placeSlots } from '../src/plugins/rehype-spec-slots';
 import { REPLAY_FIXTURES, replay } from '../src/lib/run-replay';
 import * as D from '../src/lib/spec-dsl-figures';
 import * as T from '../src/lib/spec-tail-figures';
 import { loadOntology } from '../src/data/ontology';
 
-const STD = 'spec/STANDARD-v1.1.0.md';
+// The current Standard: the newest spec/STANDARD-v*.md, whose page draws SPEC_SLOTS.
+const STD = `spec/STANDARD-v${standardFileVersions()[0]}.md`;
 const text = repoText(STD);
 
 /** The lines of a `### n ` section of the Standard, up to the next ### or ##. */
@@ -57,7 +58,7 @@ describe('figure slots', () => {
       const heads = [...src.matchAll(/^#{2,4} (\S+)/gm)].map((m) => m[1]!);
       return slots.map((s) => heads.indexOf(s.section.trim()));
     };
-    for (const [slots, src] of [[SPEC_SLOTS, text], [SPEC_SLOTS_100, repoText('spec/STANDARD-v1.0.0.md')]] as const) {
+    for (const [slots, src] of [[SPEC_SLOTS, text], [SPEC_SLOTS_110, repoText('spec/STANDARD-v1.1.0.md')], [SPEC_SLOTS_100, repoText('spec/STANDARD-v1.0.0.md')]] as const) {
       const idx = order(slots, src);
       expect(idx.every((x) => x >= 0)).toBe(true);
       expect([...idx].sort((a, b) => a - b)).toEqual(idx);

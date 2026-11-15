@@ -299,7 +299,7 @@ describe('diagnostics', () => {
 
   it('has the codes of the current Standard §9.2-§9.7, each section with its §9.1 severity', () => {
     // Table rows counted per section of the newest spec/STANDARD-v*.md
-    // (9, 6, 4, 6, 5 and 16, so 46 codes, in 1.1.0).
+    // (9, 6, 4, 6, 5 and 16, so 46 codes, in 1.1.0; 11, 6, 4, 8, 6 and 26, so 61, in 1.2.0).
     const rows = diagnosticRowsPerSection(repoText(`spec/STANDARD-v${standardFileVersions()[0]}.md`));
     const perSection = Object.fromEntries(Object.keys(rows).map((n) => [n, d.filter((x) => x.section === n).length]));
     expect(perSection).toEqual(rows);
@@ -316,7 +316,8 @@ describe('diagnostics', () => {
       category: 'Validation Errors',
       sectionAnchor: '92-validation-errors',
       anchor: 'v101',
-      descriptionMd: 'Capability ID not found in ontology',
+      // From 1.2.0 the row goes on to list where else an id is checked (§5.18.1, §5.20, ...).
+      descriptionMd: expect.stringMatching(/^Capability ID not found in ontology: a step's; .* \(§11\.6\)$/),
     });
     expect(d.find((x) => x.code === 'W602')).toMatchObject({ name: 'SAFETY_FLAG_DOWNGRADE', severity: 'warning' });
     expect(d.find((x) => x.code === 'F505')!.severity).toBe('error');

@@ -11,7 +11,7 @@ ontology and with the reference executor, so two of its files are generated:
   vectors, which the binding's own digest is tested against
 
 The approval digest vectors are tests/conformance/approval/digests.json:
-approval requests of the reference executor (STANDARD v1.1.0 §5.14), each
+approval requests of the reference executor (STANDARD v1.2.0 §5.14), each
 with the shown values, their RFC 8785 canonical JSON and the SHA-256 digest
 of it. They are conformance data for any implementation; the binding's
 fixture is the same text.
@@ -180,7 +180,7 @@ def render_annotation_schema(ontology: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Approval digest vectors (STANDARD v1.1.0 §5.14)
+# Approval digest vectors (STANDARD v1.2.0 §5.14)
 # ---------------------------------------------------------------------------
 
 HUMAN = {"kind": "human"}

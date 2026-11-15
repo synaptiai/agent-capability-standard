@@ -121,13 +121,37 @@ def test_roadmap_table_links_each_declaring_file(
 def test_roadmap_introduction_names_the_same_pair(
     declared: dict[str, tuple[str, Path]],
 ) -> None:
-    """The opening paragraph says which Standard the plugin implements."""
+    """The opening paragraph says which Standard the plugin implements.
+
+    Between releases the current Standard can be ahead of the released
+    plugin: the work on main implements a Candidate that no plugin release
+    does yet. The pair then names an earlier Standard that has its own text,
+    and the introduction names the current Standard in a sentence of its own.
+    """
     intro = ROADMAP.read_text("utf-8").split("\n## ", 1)[0]
-    pairs = re.findall(rf"Plugin ({SEMVER}) implements\s+Standard ({SEMVER})", intro)
-    assert pairs == [(declared["Plugin"][0], declared["Standard"][0])], (
+    pair = rf"Plugin ({SEMVER}) implements\s+Standard ({SEMVER})"
+    pairs = re.findall(pair, intro)
+    message = (
         "the introduction of spec/ROADMAP.md must say once "
-        "'Plugin X.Y.Z implements Standard X.Y.Z', with the declared versions"
+        "'Plugin X.Y.Z implements Standard X.Y.Z', with the declared plugin "
+        "version and a Standard no later than the current one"
     )
+    assert len(pairs) == 1, message
+    plugin, implemented = pairs[0]
+    current = declared["Standard"][0]
+    assert plugin == declared["Plugin"][0], message
+
+    def key(version: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in version.split("."))
+
+    assert key(implemented) <= key(current), message
+    assert (ROADMAP.parent / f"STANDARD-v{implemented}.md").is_file(), message
+    if implemented != current:
+        rest = re.sub(pair, "", intro)
+        assert re.search(rf"\bStandard\s+{re.escape(current)}\b", rest), (
+            f"the introduction of spec/ROADMAP.md names Standard {implemented} "
+            f"for the plugin, so it must also name the current Standard {current}"
+        )
 
 
 def test_package_module_repeats_the_declared_version() -> None:

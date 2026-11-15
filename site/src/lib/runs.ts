@@ -70,6 +70,7 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
   { page: CURRENT_STANDARD, anchor: 'appendix-a-layer-reference', category: 'c', run: 'Appendix A' },
   { page: CURRENT_STANDARD, anchor: 'appendix-b-reserved-identifiers', category: 'c', run: 'Appendix B' },
   { page: CURRENT_STANDARD, anchor: 'appendix-c-changes-from-100', category: 'c', run: 'Appendix C' },
+  { page: CURRENT_STANDARD, anchor: 'appendix-d-changes-from-110', category: 'c', run: 'Appendix D' },
   { page: '/start/overview/', anchor: 'why-this-matters', category: 'a', run: 'Why This Matters' },
   { page: '/start/overview/', anchor: 'quick-start', category: 'b', run: 'Quick Start' },
   { page: '/start/overview/', anchor: 'claude-agent-sdk-integration', category: 'b', run: 'Claude Agent SDK Integration' },

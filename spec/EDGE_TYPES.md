@@ -1,7 +1,7 @@
 # Edge Types in the Capability Ontology
 
 **Version:** 1.1.0
-**Status:** Standard (accompanies [STANDARD-v1.1.0](STANDARD-v1.1.0.md) §4.3)
+**Status:** Standard (accompanies [STANDARD-v1.2.0](STANDARD-v1.2.0.md) §4.3)
 **Date:** 2026-10-27
 
 ---

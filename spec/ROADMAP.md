@@ -3,7 +3,8 @@
 The Standard and the plugin have separate version numbers. The Standard is the
 specification. The plugin is the reference implementation: the validator, the
 executor, the skills, the hooks and the Python package. Plugin 2.0.0 implements
-Standard 1.1.0.
+Standard 1.1.0. The unreleased work on `main` implements the Standard 1.2.0
+Candidate.
 
 For the full list of changes, see the [specification changelog](CHANGELOG.md)
 and the [project changelog](../CHANGELOG.md).
@@ -15,7 +16,7 @@ Four version numbers are in use. Each is declared in one file, and
 
 | Version line | Current | Declared in |
 |--------------|---------|-------------|
-| Standard | 1.1.0 | The `**Version:**` line of [STANDARD-v1.1.0.md](STANDARD-v1.1.0.md) |
+| Standard | 1.2.0 | The `**Version:**` line of [STANDARD-v1.2.0.md](STANDARD-v1.2.0.md) |
 | Capability ontology | 2.2.0 | `meta.version` in [capability_ontology.yaml](../schemas/capability_ontology.yaml) |
 | Plugin | 2.0.0 | `version` in [plugin.json](../.claude-plugin/plugin.json) |
 | Python package `grounded-agency` | 0.1.0 | `version` under `[project]` in [pyproject.toml](../pyproject.toml); `grounded_agency.__version__` repeats it |
@@ -24,9 +25,35 @@ Four version numbers are in use. Each is declared in one file, and
 
 | Version | Date | Status |
 |---------|------|--------|
-| [1.1.0](STANDARD-v1.1.0.md) | 2026-10-28 | Candidate Standard, current |
+| [1.2.0](STANDARD-v1.2.0.md) | Unreleased | Candidate Standard, current |
+| [1.1.0](STANDARD-v1.1.0.md) | 2026-10-28 | Supported |
 | [1.0.0](STANDARD-v1.0.0.md) | 2026-01-24 | Supported |
-| 1.2.0 | Not scheduled | Planned |
+
+Standard 1.2.0 is accepted by
+[RFC-0005](RFC-0005-tool-calling-hosts.md),
+[RFC-0006](RFC-0006-host-protocol-approval-and-runs.md),
+[RFC-0007](RFC-0007-delegation-catalogs-and-diagnostics.md),
+[RFC-0008](RFC-0008-evidence-grounding-and-secrets.md),
+[RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md) and
+[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md). It adds:
+
+- rules for a safety layer over the tool calls a model chooses, with a
+  host-neutral tool binding record and a conformance class for safety layers;
+- the approval request and digest stated in full, attested approvers, and the
+  resumption of a deferred run;
+- the host protocol between an executor and its host, the run operations,
+  audit records and a conformance class for executors;
+- agent manifests and delegation targets, catalog manifests with qualified
+  names, and the keys of a diagnostic's location;
+- one evidence anchor, grounding policies, evidence stores, and secrets kept
+  out of records;
+- what a checkpoint holds and a rollback restores, transmissions and
+  destination policies, and memory scopes;
+- domain profiles applied by validators and executors, the trust arithmetic,
+  ontology versions and the schema dialect of capability contracts.
+
+[Appendix D](STANDARD-v1.2.0.md#appendix-d-changes-from-110) of the 1.2.0 text
+lists every change from 1.1.0.
 
 Standard 1.1.0 was accepted by [RFC-0003](RFC-0003-orchestration-extensions.md)
 and [RFC-0004](RFC-0004-agent-identity.md). It adds:
@@ -42,19 +69,17 @@ and [RFC-0004](RFC-0004-agent-identity.md). It adds:
 [Appendix C](STANDARD-v1.1.0.md#appendix-c-changes-from-100) of the 1.1.0 text
 lists every change from 1.0.0.
 
-Standard 1.2.0 has two proposals so far, both Draft:
 [RFC-0002](RFC-0002-agent-reliability-profile.md), which adds cross-session
-behavioural reliability for agents, and
-[RFC-0005](RFC-0005-tool-calling-hosts.md), which says how the Standard
-applies to a host where a model chooses tool calls and no workflow runs.
+behavioural reliability for agents, stays a Draft. It is not part of 1.2.0
+and targets a later 1.x version.
 
 ```mermaid
 ---
 title: The Standard's versions
 ---
 flowchart LR
-  accDescr: Standard 1.0.0 is supported; 1.1.0, accepted through RFC-0003 and RFC-0004, is the current candidate; 1.2.0 is planned, with RFC-0002 and RFC-0005 as its draft proposals so far.
-  v10["1.0.0: supported"] --> v11["1.1.0: current, via RFC-0003 and RFC-0004"] --> v12["1.2.0: planned, two RFCs in draft"]
+  accDescr: Standards 1.0.0 and 1.1.0 are supported; 1.1.0 was accepted through RFC-0003 and RFC-0004; 1.2.0, accepted through RFC-0005 to RFC-0010, is the current candidate; RFC-0002 is a draft for a later 1.x version.
+  v10["1.0.0: supported"] --> v11["1.1.0: supported, via RFC-0003 and RFC-0004"] --> v12["1.2.0: current, via RFC-0005 to RFC-0010"] --> v1x["Later 1.x: RFC-0002 in draft"]
 ```
 
 ## Plugin and tools

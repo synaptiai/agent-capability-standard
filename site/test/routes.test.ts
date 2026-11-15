@@ -202,7 +202,7 @@ describe('directory map', () => {
     ['docs/domains', '/domains/'],
     ['docs/domains/healthcare', '/domains/healthcare/'],
     ['skills/detect', '/capabilities/detect/'],
-    ['spec', '/spec/1.1.0/'],
+    ['spec', '/spec/1.2.0/'],
   ])('maps %s to %s', (dir, url) => {
     expect(DIRECTORY_MAP[dir]).toBe(url);
   });

@@ -434,13 +434,15 @@ describe('design system on the built site', () => {
 describe('Standard, edge types and diagnostics figures on the built site', () => {
   const page = (rel: string) => readFileSync(path.join(dist, rel), 'utf8');
   const figures = (h: string) => [...h.matchAll(/<figure\b([^>]*)>([\s\S]*?)<\/figure>/g)].map((m) => ({ attrs: m[1]!, body: m[2]! }));
-  const SPEC_PAGES = ['spec/1.1.0/index.html', 'spec/1.0.0/index.html', 'spec/edge-types/index.html', 'spec/diagnostics/index.html'];
+  const SPEC_PAGES = [...standardFileVersions().map((v) => `spec/${v}/index.html`), 'spec/edge-types/index.html', 'spec/diagnostics/index.html'];
 
   it('draws where codes are raised with a row per family and a column per §5 section, and its transpose for narrow frames (F-S27)', () => {
-    const std = repoText('spec/STANDARD-v1.1.0.md');
+    // The current Standard's page: the newest spec/STANDARD-v*.md.
+    const v = standardFileVersions()[0]!;
+    const std = repoText(`spec/STANDARD-v${v}.md`);
     const sections = std.split('\n').filter((l) => /^### 5\.\d+ /.test(l)).length;
     const families = sectionLines(std, /^### 9\.1 /).filter((l) => /^\| [A-Z]/.test(l) && !/^\| Category/.test(l)).length;
-    const fig = figures(page('spec/1.1.0/index.html')).find((x) => x.attrs.includes('data-fig-kind="code-heat"'))!;
+    const fig = figures(page(`spec/${v}/index.html`)).find((x) => x.attrs.includes('data-fig-kind="code-heat"'))!;
     const wide = /<table class="heat heat--wide">([\s\S]*?)<\/table>/.exec(fig.body)![1]!;
     const rows = [...wide.matchAll(/<tr data-family=/g)].length;
     expect(rows).toBe(families);

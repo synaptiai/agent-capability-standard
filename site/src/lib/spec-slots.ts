@@ -98,9 +98,46 @@ export const SPEC_SLOTS_100: readonly SpecSlot[] = [
   // Its Recovery Loop fence holds one step, which a strip would not add to.
 ];
 
+/**
+ * Standard 1.1.0, an older version since 1.2.0: the figures of SPEC_SLOTS that
+ * draw only from its own text (its tables, fences and lists), in the same
+ * places, and §9.1's categories in place of the code families, as on 1.0.0.
+ * The figures drawn from the ontology, the schemas, the diagnostics (§9.2 to
+ * §9.7's code tables are checked against core/src/diag.rs) or the runtime
+ * fixtures show current data, so they stay on the current Standard.
+ */
+const TEXT_FIGURES_110: ReadonlySet<string> = new Set([
+  'requirements',
+  'table-4.1',
+  'reference',
+  'annotations',
+  'failures',
+  'precedence',
+  'static-checks',
+  'triggers',
+  'recovery-loop',
+  'wait-timeline',
+  'silent-source',
+  'quorum',
+  'quorum-fields',
+  'sender-filter',
+  'schema-shelf',
+  'table-6.3',
+  'levels',
+  'bumps',
+  'checkpoint-tree',
+  'pattern-0',
+  'pattern-1',
+  'pattern-2',
+]);
+export const SPEC_SLOTS_110: readonly SpecSlot[] = SPEC_SLOTS.flatMap((s): SpecSlot[] =>
+  s.key === 'families' ? [{ key: 'categories', level: 3, section: '9.1 ', at: 'heading' }] : TEXT_FIGURES_110.has(s.key) ? [s] : [],
+);
+
 /** The slot map of each Standard version that has one, by version. */
 export const SLOTS_BY_VERSION: Readonly<Record<string, readonly SpecSlot[]>> = {
-  '1.1.0': SPEC_SLOTS,
+  '1.2.0': SPEC_SLOTS,
+  '1.1.0': SPEC_SLOTS_110,
   '1.0.0': SPEC_SLOTS_100,
 };
 

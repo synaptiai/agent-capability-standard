@@ -53,6 +53,8 @@ codes! {
     UnresolvedTarget = "V107", "UNRESOLVED_TARGET", Error;
     InvalidExpression = "V108", "INVALID_EXPRESSION", Error;
     UnsupportedSpecVersion = "V109", "UNSUPPORTED_SPEC_VERSION", Error;
+    DuplicateBinding = "V110", "DUPLICATE_BINDING", Error;
+    ToolNameMismatch = "V111", "TOOL_NAME_MISMATCH", Error;
 
     InvalidBindingPath = "B201", "INVALID_BINDING_PATH", Error;
     MissingProducer = "B202", "MISSING_PRODUCER", Error;
@@ -72,12 +74,15 @@ codes! {
     RecoveryExhausted = "R404", "RECOVERY_EXHAUSTED", Error;
     ExpressionError = "R405", "EXPRESSION_ERROR", Error;
     LivenessLost = "R406", "LIVENESS_LOST", Error;
+    SafetyCheckFailed = "R407", "SAFETY_CHECK_FAILED", Error;
+    Cancelled = "R408", "CANCELLED", Error;
 
     CheckpointRequired = "F501", "CHECKPOINT_REQUIRED", Error;
     ApprovalRequired = "F502", "APPROVAL_REQUIRED", Error;
     RollbackFailed = "F503", "ROLLBACK_FAILED", Error;
     ConstraintViolated = "F504", "CONSTRAINT_VIOLATED", Error;
     ProvenanceMissing = "F505", "PROVENANCE_MISSING", Error;
+    GatedControlAction = "F506", "GATED_CONTROL_ACTION", Error;
 
     SoftRequirementUnmet = "W601", "SOFT_REQUIREMENT_UNMET", Warning;
     SafetyFlagDowngrade = "W602", "SAFETY_FLAG_DOWNGRADE", Warning;
@@ -95,6 +100,16 @@ codes! {
     InvalidDuration = "W614", "INVALID_DURATION", Warning;
     MissingInput = "W615", "MISSING_INPUT", Warning;
     VersionFeatureMismatch = "W616", "VERSION_FEATURE_MISMATCH", Warning;
+    UnboundTool = "W617", "UNBOUND_TOOL", Warning;
+    UnknownJoin = "W618", "UNKNOWN_JOIN", Warning;
+    GroupMateRead = "W619", "GROUP_MATE_READ", Warning;
+    NoncanonicalName = "W620", "NONCANONICAL_NAME", Warning;
+    UnboundedDelegation = "W621", "UNBOUNDED_DELEGATION", Warning;
+    UndeclaredDelegate = "W622", "UNDECLARED_DELEGATE", Warning;
+    ConcurrentRunConflict = "W623", "CONCURRENT_RUN_CONFLICT", Warning;
+    UncheckedRollback = "W624", "UNCHECKED_ROLLBACK", Warning;
+    DestinationNotShown = "W625", "DESTINATION_NOT_SHOWN", Warning;
+    UnknownMemoryScope = "W626", "UNKNOWN_MEMORY_SCOPE", Warning;
 }
 
 impl Serialize for Code {

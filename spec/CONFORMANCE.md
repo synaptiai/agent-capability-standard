@@ -1,6 +1,6 @@
 # Conformance
 
-Normative requirements are in [STANDARD-v1.1.0 §10](STANDARD-v1.1.0.md#10-conformance);
+Normative requirements are in [STANDARD-v1.2.0 §10](STANDARD-v1.2.0.md#10-conformance);
 this page summarises them.
 
 ## Conformance levels

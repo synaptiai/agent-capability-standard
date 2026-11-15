@@ -19,7 +19,7 @@ meta:
   description: "Bidirectional mapping between OASF skill categories and Grounded Agency capabilities"
   oasf_version: "0.8.0"
   agent_capability_standard:
-    standard: "1.1.0"
+    standard: "1.2.0"
     ontology: "2.2.0"
   generated_from: "docs/research/analysis/OASF_comparison.md"
 

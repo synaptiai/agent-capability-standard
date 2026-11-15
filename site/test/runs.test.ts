@@ -90,6 +90,7 @@ describe('exempt runs and scope', () => {
       'appendix-a-layer-reference:c',
       'appendix-b-reserved-identifiers:c',
       'appendix-c-changes-from-100:c',
+      'appendix-d-changes-from-110:c',
     ]);
     expect(rows('/start/overview/')).toEqual([
       'why-this-matters:a',

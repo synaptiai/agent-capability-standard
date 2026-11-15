@@ -371,7 +371,11 @@ export function levelParts(text: string): LevelPart[] {
   return out;
 }
 
-/** §10.2's lists: a "**Ln (Name)**" paragraph and the list after it. */
+/**
+ * §10.2's lists: a "**Ln (Name)**" paragraph and the list after it. They must
+ * be §10.1's levels L1, L2, ... in order; §10.1's other rows (from 1.2.0 the
+ * classes SL and EX) have their requirements in sections of their own.
+ */
 export function conformanceLevels(text: string, where: string): LevelColumn[] {
   const blocks = sectionBlocks(text, '10.2 ', where);
   const out: LevelColumn[] = [];
@@ -387,7 +391,7 @@ export function conformanceLevels(text: string, where: string): LevelColumn[] {
     });
     out.push({ level: m[1]!, name: m[2]!, items });
   });
-  const table = tableRows(sectionTable(text, '10.1 ', 0, where)).slice(1).map((r) => r[0]!);
+  const table = tableRows(sectionTable(text, '10.1 ', 0, where)).slice(1).map((r) => r[0]!).filter((l) => /^L\d+$/.test(l));
   if (table.join() !== out.map((c) => c.level).join()) throw new Error(`${where}: §10.1 lists ${table.join(', ')}, §10.2 ${out.map((c) => c.level).join(', ')}`);
   return out;
 }

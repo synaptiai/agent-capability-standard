@@ -1,6 +1,6 @@
 """Reference arithmetic for the authority trust model.
 
-STANDARD v1.1.0 §8.1 to §8.3 and ``schemas/authority_trust_model.yaml``
+STANDARD v1.2.0 §8.1 to §8.3 and ``schemas/authority_trust_model.yaml``
 state how evidence is weighed. This module computes those values and nothing
 else, with the standard library only:
 

@@ -2,7 +2,7 @@
 Grounded Agency -- Standard Error Model
 
 Implements the diagnostic codes and formatting defined in Section 9 of the
-Standard (v1.1.0): error codes in five categories (Validation, Binding,
+Standard (v1.2.0): error codes in five categories (Validation, Binding,
 Schema, Runtime, Safety) and warning codes (W6xx), with a structured JSON
 response format. The list mirrors the Rust core's (``_core.CODES``); a test
 keeps the two identical.
@@ -46,6 +46,8 @@ class ErrorCode(Enum):
     UNRESOLVED_TARGET = "V107"
     INVALID_EXPRESSION = "V108"
     UNSUPPORTED_SPEC_VERSION = "V109"
+    DUPLICATE_BINDING = "V110"
+    TOOL_NAME_MISMATCH = "V111"
 
     # -- 9.3 Binding errors (B2xx) ------------------------------------------
     INVALID_BINDING_PATH = "B201"
@@ -68,6 +70,8 @@ class ErrorCode(Enum):
     RECOVERY_EXHAUSTED = "R404"
     EXPRESSION_ERROR = "R405"
     LIVENESS_LOST = "R406"
+    SAFETY_CHECK_FAILED = "R407"
+    CANCELLED = "R408"
 
     # -- 9.6 Safety errors (F5xx) -------------------------------------------
     CHECKPOINT_REQUIRED = "F501"
@@ -75,6 +79,7 @@ class ErrorCode(Enum):
     ROLLBACK_FAILED = "F503"
     CONSTRAINT_VIOLATED = "F504"
     PROVENANCE_MISSING = "F505"
+    GATED_CONTROL_ACTION = "F506"
 
     # -- Warnings (W6xx) ----------------------------------------------------
     SOFT_REQUIREMENT_UNMET = "W601"
@@ -93,6 +98,16 @@ class ErrorCode(Enum):
     INVALID_DURATION = "W614"
     MISSING_INPUT = "W615"
     VERSION_FEATURE_MISMATCH = "W616"
+    UNBOUND_TOOL = "W617"
+    UNKNOWN_JOIN = "W618"
+    GROUP_MATE_READ = "W619"
+    NONCANONICAL_NAME = "W620"
+    UNBOUNDED_DELEGATION = "W621"
+    UNDECLARED_DELEGATE = "W622"
+    CONCURRENT_RUN_CONFLICT = "W623"
+    UNCHECKED_ROLLBACK = "W624"
+    DESTINATION_NOT_SHOWN = "W625"
+    UNKNOWN_MEMORY_SCOPE = "W626"
 
     @property
     def severity(self) -> Severity:
