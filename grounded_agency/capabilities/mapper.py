@@ -5,10 +5,20 @@ Maps Claude Agent SDK tool invocations to capability metadata,
 enabling safety enforcement based on the Grounded Agency ontology.
 
 A mapping's safety flags are its capability's ontology flags combined with
-any stricter declaration (STANDARD v1.1 section 5.2.1): booleans are OR-ed
+any stricter declaration (STANDARD 1.2.0 section 5.2.1): booleans are OR-ed
 and ``risk`` is the higher level. A declaration weaker than the ontology
-has no effect and is reported as W602. A tool the mapper does not know is
-given the strictest flags (:data:`UNCLASSIFIED_TOOL`).
+has no effect and is reported as W602. A tool the mapper does not know, or
+whose binding did not load, is unbound and given the strictest flags
+(:data:`UNCLASSIFIED_TOOL`, section 5.18.2).
+
+Tools are bound by tool binding records (section 5.18.1, see
+:mod:`grounded_agency.capabilities.bindings`); the static mappings below bind
+Claude Code's own tools, and Bash is classified by its command
+(section 5.18.3): a line of several commands takes the strictest flags and
+every prerequisite of all of them. ``Skill`` is ``invoke`` whatever the
+skill: loading a skill's instructions saves and restores nothing; the
+state-saving call the skill leads to is classified on its own
+(section 5.18.6).
 """
 
 from __future__ import annotations
@@ -17,11 +27,15 @@ import logging
 import re
 import shlex
 import threading
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..errors import ErrorCode, ValidationError
+from ..errors import ErrorCode, Severity, ValidationError, text_form
 from .registry import CapabilityNode, CapabilityRegistry
+
+if TYPE_CHECKING:
+    from .bindings import ApprovalPolicy
 
 logger = logging.getLogger("grounded_agency.capabilities.mapper")
 
@@ -153,6 +167,8 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "git log",
         "git show",
         "git diff",
+        "git rev-parse",
+        "git ls-files",
         "git branch",
         "git remote",
         "npm list",
@@ -167,6 +183,21 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "kubectl logs",
     }
 )
+
+# `git stash <sub>` forms that the Bash classifier recognises when the line is
+# exactly one simple command with no option that writes (STANDARD 1.2.0
+# section 5.18.3): `create` saves the current tracked state and takes a
+# checkpoint; `list` and `show` only read; `pop` and `apply` restore one.
+# Every other form (`store`, `push`, `save`, `drop`, `clear`, none) is a
+# gated mutation. The plugin's PreToolUse hook keeps the same table, and a
+# test compares the two.
+_GIT_STASH_CLASSES: dict[str, str] = {
+    "create": "checkpoint",
+    "list": "observe",
+    "show": "observe",
+    "pop": "rollback",
+    "apply": "rollback",
+}
 
 # find actions that delete, run a command or write a file.
 _FIND_WRITES: frozenset[str] = frozenset(
@@ -261,7 +292,9 @@ def _writes(words: list[str]) -> bool:
     if name == "hostname":
         return any(not a.startswith("-") for a in args)
     if name == "file":
-        return any(a in ("-C", "--compile") for a in args)
+        # -C, or C inside a short-option cluster such as -bC, compiles a
+        # magic file and writes it.
+        return "--compile" in args or any("C" in a[1:] for a in short)
     if name in ("less", "more"):
         return any(a.startswith("+") for a in args)  # runs a pager command
     if name == "git":
@@ -291,17 +324,35 @@ class ToolMapping:
     """
     Maps a tool invocation to its Grounded Agency capability.
 
-    The flags are effective flags (STANDARD v1.1 section 5.2.1): never
-    weaker than the ontology's for ``capability_id``.
+    The flags are effective flags (STANDARD 1.2.0 sections 5.2.1 and
+    5.18.1): never weaker than the ontology's for any capability the
+    mapping names, nor than those of the bindings it invokes.
 
     Attributes:
-        capability_id: The ontology capability ID (e.g., "mutate", "retrieve")
+        capability_id: The ontology capability ID (e.g., "mutate", "retrieve");
+            the primary one when the call performs several; ``""`` for a
+            control-only tool
         risk: Risk level ("low", "medium", "high")
         mutation: Whether this tool modifies persistent state
         requires_checkpoint: Whether a checkpoint is required before use
         requires_approval: Whether the call needs approval before it runs
         domain: The capability's domain parameter (e.g., "config"), if the
             registration declared one
+        capabilities: Every capability the call performs, primary first
+            (``additional_capabilities``, section 5.18.3). Defaults to
+            ``(capability_id,)``; empty for a control-only tool.
+        invokes: The bindings a composite may call while it runs
+            (section 5.18.4)
+        prerequisites: The ``from`` capabilities of the ``requires`` edges
+            into every capability in ``capabilities`` (section 5.18.5)
+        approval: How approval of a call is counted (the binding's
+            ``approval`` member, section 5.18.7)
+        control: The tool only signals the host and is never refused
+            (section 5.18.3)
+        classifier: The classifier the binding names (section 5.18.3); this
+            mapper applies the worst case to such a tool's calls
+        destination: For a ``send`` tool, the RFC 6901 pointer to the
+            argument that holds the destination (section 4.4.2)
     """
 
     capability_id: str
@@ -310,8 +361,21 @@ class ToolMapping:
     requires_checkpoint: bool
     requires_approval: bool
     domain: str | None = None
+    capabilities: tuple[str, ...] = ()
+    invokes: tuple[str, ...] = ()
+    prerequisites: frozenset[str] = frozenset()
+    approval: ApprovalPolicy | None = None
+    control: bool = False
+    classifier: str | None = None
+    destination: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.capabilities and not self.control and self.capability_id:
+            object.__setattr__(self, "capabilities", (self.capability_id,))
 
     def __str__(self) -> str:
+        if self.control:
+            return "control-only"
         checkpoint_marker = " [CHECKPOINT REQUIRED]" if self.requires_checkpoint else ""
         approval_marker = " [APPROVAL REQUIRED]" if self.requires_approval else ""
         return (
@@ -320,18 +384,30 @@ class ToolMapping:
         )
 
 
-# What a safety layer assumes about a tool that has no classification: an
-# unknown mutation, so the rate limit, the checkpoint rule and the approval
-# rule all apply. The mapper returns it for a tool name it does not know,
-# and the adapter's PreToolUse hook uses it when classification fails.
-# Callers that need to tell "unclassified" from a real ``mutate`` mapping
-# compare by identity (``mapping is UNCLASSIFIED_TOOL``).
+# What a safety layer assumes about an unbound tool (STANDARD 1.2.0 section
+# 5.18.2): an unknown mutation, so the rate limit, the checkpoint rule and
+# the approval rule all apply. The mapper returns it for a tool name it does
+# not know or whose binding did not load, and the adapter's PreToolUse hook
+# uses it when classification fails. It has no prerequisites. Callers that
+# need to tell "unbound" from a real ``mutate`` mapping compare by identity
+# (``mapping is UNCLASSIFIED_TOOL``).
 UNCLASSIFIED_TOOL = ToolMapping(
     capability_id="mutate",
     risk="high",
     mutation=True,
     requires_checkpoint=True,
     requires_approval=True,
+)
+
+# The mapping of a control-only tool (section 5.18.3): no capability, never
+# refused, recorded.
+CONTROL_TOOL = ToolMapping(
+    capability_id="",
+    risk="low",
+    mutation=False,
+    requires_checkpoint=False,
+    requires_approval=False,
+    control=True,
 )
 
 
@@ -354,7 +430,9 @@ _TOOL_MAPPINGS: dict[str, str] = {
     # Claude Code names of the tools once called "Task" and "AskUser".
     "Task": "delegate",
     "Agent": "delegate",
-    "Skill": "invoke",  # a skill may mutate; that is checked at skill level
+    # A skill's instructions save and restore nothing: the calls the skill
+    # leads to are classified on their own (STANDARD 1.2.0 section 5.18.6).
+    "Skill": "invoke",
     "AskUser": "inquire",
     "AskUserQuestion": "inquire",
     # REMEMBER layer
@@ -411,14 +489,16 @@ class ToolCapabilityMapper:
     - Whether approval is required
 
     Every flag is the stricter of the ontology's value for the capability
-    and the declaration's (STANDARD v1.1 section 5.2.1). A tool the mapper
-    does not know maps to :data:`UNCLASSIFIED_TOOL`.
+    and the declaration's (STANDARD 1.2.0 section 5.2.1). A tool the mapper
+    does not know, or whose binding did not load, maps to
+    :data:`UNCLASSIFIED_TOOL` (unbound, section 5.18.2).
 
     For Bash commands, performs additional analysis to determine
     if the command is read-only or mutating.
 
-    Supports dynamic registration of MCP tool mappings via
-    :meth:`register_mcp_tool`.
+    Tools are bound by tool binding records (:meth:`register_binding`,
+    :meth:`load_bindings`, section 5.18.1); :meth:`register_mcp_tool` builds
+    a record from its arguments.
 
     Example:
         mapper = ToolCapabilityMapper(registry)
@@ -446,6 +526,8 @@ class ToolCapabilityMapper:
         """
         self._registry: CapabilityRegistry | None = None
         self._nodes: dict[str, CapabilityNode] | None = None
+        self._raw_requires: list[tuple[str, str]] | None = None
+        self._raw_version: str = "unknown"
         if isinstance(ontology, CapabilityRegistry):
             self._registry = ontology
         elif ontology is not None:
@@ -453,30 +535,82 @@ class ToolCapabilityMapper:
                 node["id"]: CapabilityNode.from_dict(node)
                 for node in ontology.get("nodes", [])
             }
+            self._raw_requires = [
+                (edge["from"], edge["to"])
+                for edge in ontology.get("edges", [])
+                if edge.get("type") == "requires"
+            ]
+            meta = ontology.get("meta") or {}
+            self._raw_version = str(meta.get("version", "unknown"))
         self._dynamic_mappings: dict[str, ToolMapping] = {}
         # Effective mappings of the static and Bash classifications, built
         # on first use (ToolMapping is immutable, so they can be shared).
         self._builtin_mappings: dict[tuple[str, bool], ToolMapping] = {}
-        # W602 reports of register_mcp_tool, per tool name.
-        self._warnings: dict[str, list[ValidationError]] = {}
+        self._combined_mappings: dict[tuple[ToolMapping, ...], ToolMapping] = {}
+        # Diagnostics of the bindings registered, per tool name.
+        self._diagnostics: dict[str, list[ValidationError]] = {}
+        # The records registered, per tool name, for the layer's
+        # configuration digest.
+        self._records: dict[str, dict[str, Any]] = {}
 
     @property
     def warnings(self) -> list[ValidationError]:
-        """W602 reports for the registered tools: each declaration weaker
-        than the ontology, which had no effect.
+        """Warnings for the registered tools: W602 for each declaration
+        weaker than the ontology, which had no effect, and W617 for each
+        tool registered with no capability (unbound).
 
-        ``location`` holds ``tool``, ``capability`` and ``field``.
-        Registering a tool again replaces its reports.
+        ``location`` holds ``tool`` and, for W602, ``capability`` and
+        ``field``. Registering a tool again replaces its reports.
         """
-        return [w for reports in self._warnings.values() for w in reports]
+        return [d for d in self.diagnostics if d.severity is Severity.WARNING]
+
+    @property
+    def diagnostics(self) -> list[ValidationError]:
+        """Every diagnostic of the bindings registered or loaded: errors for
+        records that were not loaded, warnings for the rest."""
+        return [d for reports in self._diagnostics.values() for d in reports]
+
+    @property
+    def records(self) -> list[dict[str, Any]]:
+        """The binding records registered, in tool-name order."""
+        return [self._records[name] for name in sorted(self._records)]
+
+    @property
+    def ontology_version(self) -> str:
+        """The ``meta.version`` of the ontology this mapper reads."""
+        if self._nodes is not None:
+            return self._raw_version
+        return self._get_registry().version
+
+    def _get_registry(self) -> CapabilityRegistry:
+        if self._registry is None:
+            self._registry = _get_default_registry()
+        return self._registry
+
+    def _all_nodes(self) -> Mapping[str, CapabilityNode]:
+        if self._nodes is not None:
+            return self._nodes
+        return {node.id: node for node in self._get_registry().all_capabilities()}
+
+    def _requires(self) -> list[tuple[str, str]]:
+        """The ontology's ``requires`` edges as ``(from, to)``."""
+        if self._raw_requires is not None:
+            return self._raw_requires
+        return [
+            (edge.from_cap, edge.to_cap)
+            for edge in self._get_registry().all_edges()
+            if edge.edge_type == "requires"
+        ]
+
+    def _prerequisites(self, capabilities: Iterable[str]) -> frozenset[str]:
+        caps = set(capabilities)
+        return frozenset(src for src, dst in self._requires() if dst in caps)
 
     def _capability(self, capability_id: str) -> CapabilityNode | None:
         """The ontology node for a capability ID, or None."""
         if self._nodes is not None:
             return self._nodes.get(capability_id)
-        if self._registry is None:
-            self._registry = _get_default_registry()
-        return self._registry.get_capability(capability_id)
+        return self._get_registry().get_capability(capability_id)
 
     def _effective_mapping(
         self,
@@ -488,16 +622,15 @@ class ToolCapabilityMapper:
         requires_checkpoint: bool | None = None,
         requires_approval: bool | None = None,
         domain: str | None = None,
-    ) -> tuple[ToolMapping, list[ValidationError]]:
-        """Combine a declaration with the ontology (section 5.2.1).
+    ) -> ToolMapping:
+        """Combine a built-in declaration with the ontology (section 5.2.1).
 
-        Returns the effective mapping and one W602 report per declared flag
-        that is weaker than the ontology's. ``None`` declares nothing.
+        ``None`` declares nothing. Built-in declarations are never weaker
+        than the ontology, so no W602 can arise here.
 
         Raises:
             ValueError: For a capability ID the ontology does not define
-                (V101), a risk level outside :data:`RISK_LEVELS`, a flag
-                that is not a boolean, or a domain that is not a string.
+                (V101), or one whose ontology risk is not a risk level.
         """
         node = (
             self._capability(capability_id) if isinstance(capability_id, str) else None
@@ -509,96 +642,23 @@ class ToolCapabilityMapper:
                 f"declares capability {capability_id!r}, which the ontology "
                 f"does not define"
             )
-        # Declarations can come from tool metadata, so their types are
-        # checked: a flag that is neither true nor false declares nothing
-        # that can be combined with the ontology.
-        if risk is not None and (not isinstance(risk, str) or risk not in _RISK_ORDER):
-            raise ValueError(
-                f"tool '{tool_name}' declares risk {risk!r}; "
-                f"expected one of {', '.join(RISK_LEVELS)}"
-            )
-        for flag, value in (
-            ("mutation", mutation),
-            ("requires_checkpoint", requires_checkpoint),
-            ("requires_approval", requires_approval),
-        ):
-            if value is not None and not isinstance(value, bool):
-                raise ValueError(
-                    f"tool '{tool_name}' declares {flag}={value!r}; "
-                    f"expected true or false"
-                )
-        if domain is not None and not isinstance(domain, str):
-            raise ValueError(
-                f"tool '{tool_name}' declares domain {domain!r}; expected a string"
-            )
         if node.risk not in _RISK_ORDER:
             raise ValueError(
                 f"capability '{capability_id}' has risk {node.risk!r} in the "
                 f"ontology; expected one of {', '.join(RISK_LEVELS)}"
             )
-
-        reports: list[ValidationError] = []
-
-        def downgrade(flag: str, message: str) -> None:
-            reports.append(
-                ValidationError(
-                    code=ErrorCode.SAFETY_FLAG_DOWNGRADE,
-                    message=message,
-                    location={
-                        "tool": tool_name,
-                        "capability": capability_id,
-                        "field": flag,
-                    },
-                )
-            )
-
-        def boolean(flag: str, declared: bool | None, ontology: bool, why: str) -> bool:
-            if declared is False and ontology:
-                downgrade(
-                    flag,
-                    f"ontology declares {flag}=true but the tool declares "
-                    f"{flag}=false; the ontology value applies ({why})",
-                )
-            return ontology or declared is True
-
         effective_risk = node.risk
-        if risk is not None:
-            if _RISK_ORDER[risk] > _RISK_ORDER[node.risk]:
-                effective_risk = risk
-            elif _RISK_ORDER[risk] < _RISK_ORDER[node.risk]:
-                downgrade(
-                    "risk",
-                    f"ontology declares risk={node.risk} but the tool declares "
-                    f"risk={risk}; the ontology value applies",
-                )
-
-        if mutation is False and node.mutation and node.mutation_overridable:
-            # The one weaker declaration that is honoured (section 4.4).
-            effective_mutation = False
-        else:
-            effective_mutation = boolean(
-                "mutation", mutation, node.mutation, "the call is treated as a mutation"
-            )
-
-        mapping = ToolMapping(
+        if risk is not None and _RISK_ORDER[risk] > _RISK_ORDER[node.risk]:
+            effective_risk = risk
+        return ToolMapping(
             capability_id=capability_id,
             risk=effective_risk,
-            mutation=effective_mutation,
-            requires_checkpoint=boolean(
-                "requires_checkpoint",
-                requires_checkpoint,
-                node.requires_checkpoint,
-                "F501 if no checkpoint precedes it",
-            ),
-            requires_approval=boolean(
-                "requires_approval",
-                requires_approval,
-                node.requires_approval,
-                "F502 if it is not approved",
-            ),
+            mutation=node.mutation or mutation is True,
+            requires_checkpoint=node.requires_checkpoint or requires_checkpoint is True,
+            requires_approval=node.requires_approval or requires_approval is True,
             domain=domain,
+            prerequisites=self._prerequisites((capability_id,)),
         )
-        return mapping, reports
 
     def _builtin(
         self, tool_name: str, capability_id: str, checkpoint_gated: bool = False
@@ -613,7 +673,7 @@ class ToolCapabilityMapper:
         mapping = self._builtin_mappings.get(key)
         if mapping is None:
             if checkpoint_gated:
-                mapping, _ = self._effective_mapping(
+                mapping = self._effective_mapping(
                     tool_name,
                     capability_id,
                     risk="high",
@@ -621,36 +681,107 @@ class ToolCapabilityMapper:
                     requires_checkpoint=True,
                 )
             else:
-                mapping, _ = self._effective_mapping(tool_name, capability_id)
+                mapping = self._effective_mapping(tool_name, capability_id)
             self._builtin_mappings[key] = mapping
         return mapping
+
+    def load_bindings(
+        self, records: Iterable[Mapping[str, Any]]
+    ) -> list[ValidationError]:
+        """Load a set of tool binding records (STANDARD 1.2.0 section 5.18.1).
+
+        Each record that loads is stored under its ``tool``; ``invokes``
+        names resolve within the set and among the tools registered before.
+        A tool whose record does not load is unbound (:data:`UNCLASSIFIED_TOOL`).
+        Nothing is raised: every diagnostic is returned and kept in
+        :attr:`diagnostics` (warnings also in :attr:`warnings`).
+        """
+        from .bindings import load_bindings
+
+        records = [dict(r) if isinstance(r, Mapping) else r for r in records]
+        loaded, diagnostics = load_bindings(
+            records,
+            self._all_nodes(),
+            self._requires(),
+            self.ontology_version,
+            known=self._dynamic_mappings,
+        )
+        names = {
+            r["tool"]
+            for r in records
+            if isinstance(r, Mapping) and isinstance(r.get("tool"), str) and r["tool"]
+        }
+        for name in names:
+            self._diagnostics[name] = []
+            self._records.pop(name, None)
+        for d in diagnostics:
+            self._diagnostics.setdefault(str(d.location.get("tool", "")), []).append(d)
+            if d.severity is Severity.WARNING:
+                logger.warning("%s: %s", d.code_str, text_form(d))
+        for name in names:
+            mapping = loaded.get(name)
+            if mapping is None:
+                self._dynamic_mappings[name] = UNCLASSIFIED_TOOL
+            else:
+                self._dynamic_mappings[name] = mapping
+        for r in records:
+            if isinstance(r, Mapping) and r.get("tool") in loaded:
+                self._records[r["tool"]] = dict(r)
+        return diagnostics
+
+    def register_binding(self, record: Mapping[str, Any]) -> ToolMapping:
+        """Load one tool binding record and return its effective mapping.
+
+        Raises:
+            ValueError: If the record does not load (S303, S304, V101, V105,
+                V107, V109, V110). The message opens with each error's code
+                and name; the tool stays unbound.
+        """
+        diagnostics = self.load_bindings([record])
+        errors = [d for d in diagnostics if d.severity is Severity.ERROR]
+        if errors:
+            raise ValueError("; ".join(text_form(e) for e in errors))
+        return self._dynamic_mappings[record["tool"]]
 
     def register_mcp_tool(
         self,
         tool_name: str,
-        capability_id: str = "execute",
+        capability_id: str | None = None,
         risk: str | None = None,
         mutation: bool | None = None,
         requires_checkpoint: bool | None = None,
         requires_approval: bool | None = None,
         domain: str | None = None,
+        *,
+        additional_capabilities: list[str] | None = None,
+        invokes: list[str] | None = None,
+        approval: Mapping[str, Any] | None = None,
+        control: bool = False,
     ) -> ToolMapping:
         """Register a dynamic tool-to-capability mapping.
 
         Used by :func:`grounded_agency.mcp.create_grounded_mcp_server`
         to register MCP-provided tools so that safety enforcement
-        applies to them.
+        applies to them. The arguments are a tool binding record
+        (STANDARD 1.2.0 section 5.18.1) with ``tool=tool_name`` and the
+        ontology's version, loaded by :meth:`register_binding`.
 
-        The stored flags are the stricter of the ontology's flags for
-        ``capability_id`` and the declared ones (STANDARD v1.1 section
-        5.2.1). A declared flag weaker than the ontology's has no effect:
-        it is logged and kept in :attr:`warnings` as W602
-        (SAFETY_FLAG_DOWNGRADE). The one exception is ``mutation=False`` on
-        a capability the ontology marks ``mutation_overridable``.
+        The stored flags are the stricter of the ontology's flags for every
+        capability named and the declared ones (section 5.2.1). A declared
+        flag weaker than the ontology's has no effect: it is logged and kept
+        in :attr:`warnings` as W602 (SAFETY_FLAG_DOWNGRADE). The one
+        exception is ``mutation=False`` on a capability the ontology marks
+        ``mutation_overridable``, when no other capability is named.
+
+        A tool registered with no ``capability_id`` and not ``control`` is
+        unbound (section 5.18.2): it is the strictest case
+        (:data:`UNCLASSIFIED_TOOL`), and a W617 (UNBOUND_TOOL) is kept in
+        :attr:`warnings`.
 
         Args:
             tool_name: The tool identifier (e.g., ``mcp__server__tool``).
-            capability_id: Ontology capability ID.
+            capability_id: Ontology capability ID; ``None`` leaves the tool
+                unbound.
             risk: Risk level — ``"low"``, ``"medium"``, or ``"high"``.
                 Defaults to the capability's.
             mutation: Whether the tool mutates state. When omitted, the
@@ -661,50 +792,85 @@ class ToolCapabilityMapper:
             requires_approval: Whether the call needs approval. Defaults
                 to the capability's.
             domain: The capability's domain parameter, e.g. ``"config"``.
+            additional_capabilities: Other capabilities the same call
+                performs (section 5.18.3).
+            invokes: Names of the bindings the tool may call while it runs
+                (section 5.18.4).
+            approval: The binding's ``approval`` member: ``min_approvers``,
+                ``role``, ``expires`` (section 5.18.7).
+            control: The tool only signals the host (section 5.18.3).
 
         Returns:
             The effective mapping that was stored.
 
         Raises:
-            ValueError: If the ontology does not define ``capability_id``
-                (V101 UNKNOWN_CAPABILITY), ``risk`` is not a risk level, a
-                flag is not a boolean, or ``domain`` is not a string.
-                Nothing is registered.
+            ValueError: If the record does not load: the ontology does not
+                define a capability (V101 UNKNOWN_CAPABILITY), ``risk`` is
+                not a risk level or a flag not a boolean (S303), an
+                ``invokes`` name does not resolve (V107) or forms a cycle
+                (V105). Nothing is registered.
         """
+        if capability_id is None and not control:
+            self._dynamic_mappings[tool_name] = UNCLASSIFIED_TOOL
+            self._records.pop(tool_name, None)
+            report = ValidationError(
+                code=ErrorCode.UNBOUND_TOOL,
+                message=(
+                    f"tool '{tool_name}' was registered with no capability; "
+                    f"its calls are treated as the strictest case (high "
+                    f"risk, mutation, checkpoint and approval). Bind it to "
+                    f"the capability it performs."
+                ),
+                location={"tool": tool_name},
+            )
+            logger.warning("%s", text_form(report))
+            self._diagnostics[tool_name] = [report]
+            return UNCLASSIFIED_TOOL
+
         if mutation is None and risk == "high":
             mutation = True
         if requires_checkpoint is None and risk == "high":
             requires_checkpoint = True
-
-        mapping, reports = self._effective_mapping(
-            tool_name,
-            capability_id,
-            risk=risk,
-            mutation=mutation,
-            requires_checkpoint=requires_checkpoint,
-            requires_approval=requires_approval,
-            domain=domain,
-        )
-        for report in reports:
-            logger.warning(
-                "%s %s: tool '%s': %s",
-                report.code_str,
-                report.name,
-                tool_name,
-                report.message,
+        record: dict[str, Any] = {
+            "tool": tool_name,
+            "ontology": self.ontology_version,
+        }
+        if control:
+            record["control"] = True
+        if capability_id is not None:
+            record["capability"] = capability_id
+        if domain is not None:
+            record["domain"] = domain
+        flags = {
+            name: value
+            for name, value in (
+                ("risk", risk),
+                ("mutation", mutation),
+                ("requires_checkpoint", requires_checkpoint),
+                ("requires_approval", requires_approval),
             )
-        self._dynamic_mappings[tool_name] = mapping
-        self._warnings[tool_name] = reports
-        return mapping
+            if value is not None
+        }
+        if flags:
+            record["flags"] = flags
+        if additional_capabilities is not None:
+            record["additional_capabilities"] = list(additional_capabilities)
+        if invokes is not None:
+            record["invokes"] = list(invokes)
+        if approval is not None:
+            record["approval"] = dict(approval)
+        return self.register_binding(record)
 
     def map_tool(self, tool_name: str, tool_input: dict[str, Any]) -> ToolMapping:
         """
         Map a tool invocation to its capability metadata.
 
         Bash is classified by its command. Any other name is looked up in
-        the dynamic mappings (registered via :meth:`register_mcp_tool`),
-        then the static mappings. A name found in neither is unclassified
-        and maps to :data:`UNCLASSIFIED_TOOL`.
+        the dynamic mappings (registered via :meth:`register_mcp_tool` or
+        :meth:`load_bindings`), then the static mappings. A name found in
+        neither is unbound and maps to :data:`UNCLASSIFIED_TOOL`. A bound
+        tool's mapping is its worst case; this mapper applies no classifier
+        to it.
 
         Args:
             tool_name: SDK tool name (e.g., "Write", "Bash", "Read")
@@ -735,16 +901,23 @@ class ToolCapabilityMapper:
 
     def _classify_bash_command(self, tool_input: dict[str, Any]) -> ToolMapping:
         """
-        Classify a Bash command based on its content.
+        Classify a Bash command based on its content (STANDARD 1.2.0
+        section 5.18.3).
 
         1. Always-dangerous patterns (command substitution, backticks,
            variable expansion, eval, exec, source, control characters) and
-           process substitution make the command a mutation at once.
-        2. The line is split into simple commands (`_simple_commands`); one
-           it cannot read is a mutation.
-        3. Each simple command is classified; the first that is not low risk
-           decides. Only a line whose every command is allow-listed as
-           read-only is an observation.
+           process substitution make the command a gated mutation at once.
+           So does a line `_simple_commands` cannot read.
+        2. Only when the line is exactly one simple command with no option
+           that writes (`_writes`), a `git stash <sub>` form is classified
+           by `_GIT_STASH_CLASSES`: `create` takes a checkpoint, `list` and
+           `show` observe, `pop` and `apply` roll back. A git option before
+           `stash` (`git -C dir stash ...`) is not recognised.
+        3. Otherwise each simple command is classified on its own. A line
+           whose every command is allow-listed as read-only is an
+           observation; any other line takes the strictest flags and every
+           prerequisite of all the commands that are not read-only, with
+           their capabilities in order (`_combine`).
 
         Security principle: fail-safe defaults. A command is high-risk until
         it is shown to be on the read-only allow-list.
@@ -771,18 +944,61 @@ class ToolCapabilityMapper:
         commands = _simple_commands(command)
         if not commands:
             return mutation
-        for words in commands:
-            result = self._classify_single_command(words)
-            if result.risk != "low":
-                return result
-        return self._builtin("Bash", "observe")
+
+        if len(commands) == 1:
+            words = commands[0]
+            if (
+                len(words) >= 3
+                and words[0] == "git"
+                and words[1] == "stash"
+                and words[2] in _GIT_STASH_CLASSES
+                and not _writes(words)
+            ):
+                return self._builtin("Bash", _GIT_STASH_CLASSES[words[2]])
+
+        results = [self._classify_single_command(words) for words in commands]
+        gated = [r for r in results if r.risk != "low"]
+        if not gated:
+            return self._builtin("Bash", "observe")
+        return self._combine(gated)
+
+    def _combine(self, results: list[ToolMapping]) -> ToolMapping:
+        """One mapping for a line of several actions (section 5.18.3): every
+        distinct capability in order, the strictest flags, and the union of
+        the prerequisites."""
+        distinct: list[ToolMapping] = []
+        for r in results:
+            if r not in distinct:
+                distinct.append(r)
+        if len(distinct) == 1:
+            return distinct[0]
+        key = tuple(distinct)
+        combined = self._combined_mappings.get(key)
+        if combined is None:
+            capabilities: list[str] = []
+            for r in distinct:
+                for cap in r.capabilities:
+                    if cap not in capabilities:
+                        capabilities.append(cap)
+            combined = ToolMapping(
+                capability_id=capabilities[0],
+                risk=max((r.risk for r in distinct), key=_RISK_ORDER.__getitem__),
+                mutation=any(r.mutation for r in distinct),
+                requires_checkpoint=any(r.requires_checkpoint for r in distinct),
+                requires_approval=any(r.requires_approval for r in distinct),
+                capabilities=tuple(capabilities),
+                prerequisites=frozenset().union(*(r.prerequisites for r in distinct)),
+            )
+            self._combined_mappings[key] = combined
+        return combined
 
     def _classify_single_command(self, words: list[str]) -> ToolMapping:
         """
         Classify one simple command, given as its words.
 
         Checks in order: interpreter → network → destructive → read-only
-        allowlist → secure default-deny.
+        allowlist → secure default-deny. It never returns a `git stash`
+        class: those need a line of one command (`_classify_bash_command`).
         """
         text = " ".join(words)
         # SEC-002: Check for interpreter invocations (python -c, node -e, etc.)

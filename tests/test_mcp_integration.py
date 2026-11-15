@@ -10,6 +10,7 @@ Since claude_agent_sdk may not be installed, these tests focus on:
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -235,8 +236,12 @@ class TestAdapterMCPIntegration:
 
         callback = adapter._make_permission_callback()
 
-        # Without checkpoint, should be blocked
-        result = await callback("mcp__deploy__push", {}, None)
+        # Without checkpoint, should be blocked. A gated call needs its
+        # tool_use_id, under which the layer holds its checkpoint (STANDARD
+        # 1.2.0 §5.18.6); without one it is refused with R407.
+        result = await callback(
+            "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="t1")
+        )
         # Fallback types use `allowed`; SDK types use `behavior`
         if hasattr(result, "allowed"):
             assert result.allowed is False
@@ -245,7 +250,9 @@ class TestAdapterMCPIntegration:
 
         # With checkpoint, should be allowed
         adapter.create_checkpoint(["*"], "Test")
-        result = await callback("mcp__deploy__push", {}, None)
+        result = await callback(
+            "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="t2")
+        )
         if hasattr(result, "allowed"):
             assert result.allowed is True
         elif hasattr(result, "behavior"):

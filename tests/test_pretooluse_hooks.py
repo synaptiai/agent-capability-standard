@@ -230,9 +230,11 @@ class TestTurnEndReleasesLeftoverReservation:
         assert not adapter.checkpoint_tracker.validate_and_reserve("probe")[0]
 
     @pytest.mark.asyncio
-    async def test_stop_releases_its_sessions_reservation(
+    async def test_stop_uses_its_sessions_hold_and_ends_validity(
         self, strict_adapter: GroundedAgentAdapter
     ):
+        """STANDARD 1.2.0 §5.18.6: a hold the layer cannot resolve counts as
+        used, and the end of a turn is an execution boundary."""
         stop_calls: list[str] = []
 
         async def caller_stop(input_data, tool_use_id, context):
@@ -245,10 +247,17 @@ class TestTurnEndReleasesLeftoverReservation:
         strict_adapter.create_checkpoint(["*"], "Test")
         await self._reserve(strict_adapter, wrapped, self._write("s1"), "denied")
 
+        tracker = strict_adapter.checkpoint_tracker
+        held = tracker.held_by("denied")
+        assert held is not None
+
         await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
 
         assert stop_calls == ["s1"]
-        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+        assert tracker.validate_and_reserve("next") == (False, None)
+        used = tracker.get_checkpoint_by_id(held)
+        assert used is not None and used.consumed
+        assert used.metadata["consumed_by"] == "unresolved hold at turn end"
 
     @pytest.mark.asyncio
     async def test_stop_of_another_session_keeps_the_reservation(
@@ -257,33 +266,45 @@ class TestTurnEndReleasesLeftoverReservation:
         wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
         strict_adapter.create_checkpoint(["*"], "Test")
         await self._reserve(strict_adapter, wrapped, self._write("s2"), "in_flight")
+        tracker = strict_adapter.checkpoint_tracker
+        held = tracker.held_by("in_flight")
 
         await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
 
-        assert not strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+        # One adapter is one scope: s1's Stop ends the validity of every
+        # checkpoint, but s2's call keeps its hold, and is refused (F501)
+        # when it is allowed.
+        assert not tracker.validate_and_reserve("next")[0]
+        assert tracker.held_by("in_flight") == held
+        assert tracker.consume_if_valid("in_flight") is None
 
     @pytest.mark.asyncio
     async def test_main_stop_keeps_a_subagents_reservation(
         self, strict_adapter: GroundedAgentAdapter
     ):
         """A background subagent can still be mid-call when the main turn
-        ends; its own SubagentStop releases what it left."""
+        ends; its own SubagentStop resolves what it left: the hold counts as
+        used (STANDARD 1.2.0 §5.18.6)."""
         wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
         strict_adapter.create_checkpoint(["*"], "Test")
         await self._reserve(
             strict_adapter, wrapped, self._write("s1", agent="sub1"), "sub_call"
         )
         tracker = strict_adapter.checkpoint_tracker
+        held = tracker.held_by("sub_call")
 
         await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
         assert not tracker.validate_and_reserve("next")[0]
+        assert tracker.held_by("sub_call") == held
 
         await _fire(
             wrapped,
             "SubagentStop",
             {"hook_event_name": "SubagentStop", "session_id": "s1", "agent_id": "sub1"},
         )
-        assert tracker.validate_and_reserve("next")[0]
+        assert tracker.held_by("sub_call") is None
+        used = tracker.get_checkpoint_by_id(held)
+        assert used is not None and used.consumed
 
     @pytest.mark.asyncio
     @pytest.mark.asyncio
@@ -298,16 +319,19 @@ class TestTurnEndReleasesLeftoverReservation:
         call = {**self._write("s1"), "tool_use_id": "w1"}
         assert await pre(call, None, None) == {}
         tracker = strict_adapter.checkpoint_tracker
-        assert tracker.validate_and_reserve("w1")[0]  # same holder
-        assert tracker.release_reservation_in_scope(("s1", None)) == "w1"
+        held = tracker.held_by("w1")
+        assert tracker.validate_and_reserve("w1") == (True, held)  # same holder
+        assert tracker.resolve_holds_in_scope(("s1", None)) == ["w1"]
+        used = tracker.get_checkpoint_by_id(held)
+        assert used is not None and used.consumed
 
     @pytest.mark.asyncio
-    async def test_post_hook_releases_when_the_run_input_is_not_gated(
+    async def test_post_hook_consumes_when_the_run_input_is_not_gated(
         self, strict_adapter: GroundedAgentAdapter
     ):
-        """Another hook rewrote a destructive command to a read-only one:
-        PostToolUse sees the read-only input and still gives back the
-        reservation PreToolUse took for the original."""
+        """Another hook rewrote a destructive command to a read-only one: a
+        call that ran uses the hold it took, whatever input it ran with
+        (STANDARD 1.2.0 §5.18.6)."""
         wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
         strict_adapter.create_checkpoint(["*"], "Test")
         (pre,) = _hooks(wrapped.hooks["PreToolUse"][-1])
@@ -320,7 +344,10 @@ class TestTurnEndReleasesLeftoverReservation:
             for hook in _hooks(entry):
                 await hook(ran, "b1", None)
 
-        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next") == (
+            False,
+            None,
+        )
 
     @pytest.mark.asyncio
     async def test_stop_leaves_a_later_holders_reservation(
@@ -455,7 +482,9 @@ class TestPreToolUseExceptionHandling:
         result = await hook({"tool_name": "Read", "tool_input": {}}, "r1", None)
 
         assert _decision(result) == "deny"
-        assert "Rate limit check failed" in _reason(result)
+        assert _reason(result).startswith(
+            "R407 SAFETY_CHECK_FAILED: the rate limit check"
+        )
 
 
 # =============================================================================

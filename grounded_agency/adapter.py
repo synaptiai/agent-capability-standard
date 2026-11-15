@@ -2,14 +2,26 @@
 Grounded Agent Adapter
 
 Main entry point for integrating Grounded Agency safety patterns
-with the Claude Agent SDK. Wraps SDK options to inject:
+with the Claude Agent SDK. The adapter is a safety layer on a tool-calling
+host (STANDARD 1.2.0 section 5.18, class SL in section 10.4). Wraps SDK
+options to inject:
 
-- A PreToolUse hook that applies the rate limit, the checkpoint rule
-  (F501) and the approval rule (F502) to every tool call
-- A permission callback that repeats the checkpoint check and passes the
-  decision on to the host's own ``can_use_tool`` callback
-- PostToolUse hooks for evidence collection
-- Skill tracking for autonomous checkpoint creation
+- A PreToolUse hook that applies the rate limit, the prerequisites, the
+  checkpoint rule (F501, F503) and the approval rule (F502) to every tool
+  call, and refuses with R407 when it cannot complete a check
+- A permission callback that re-checks the call (arguments the host
+  changed are classified again) and uses its checkpoint up when the call is
+  allowed, after passing the decision to the host's own ``can_use_tool``
+- PostToolUse hooks for evidence collection, the checkpoint recorder (a
+  successful state-saving call takes a checkpoint) and the use of a held
+  checkpoint by a call that ran
+- A Stop hook: the end of a turn is an execution boundary
+
+The layer's scope is the adapter instance: every session and subagent it
+serves shares one set of records, and the Stop of any of them ends the
+validity of every checkpoint the adapter holds. Serve sessions that must not
+share boundaries with separate adapters. The conformance statement is
+``tests/conformance/calls/statements/grounded_agency_adapter.json``.
 
 Example:
     from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
@@ -26,19 +38,23 @@ from __future__ import annotations
 import hashlib
 import hmac
 import inspect
+import json
 import logging
 import threading
+from collections import Counter, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
-from .errors import ErrorCode
+from .errors import ErrorCode, ValidationError, text_form
 from .hooks.evidence_collector import create_evidence_collector
-from .hooks.skill_tracker import create_skill_tracker
-from .state.checkpoint_tracker import CheckpointTracker
+from .hooks.skill_tracker import create_checkpoint_recorder
+from .state.checkpoint_tracker import MAX_AGE_MINUTES, CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
 
@@ -47,6 +63,18 @@ if TYPE_CHECKING:
     from .query import CostSummary
 
 logger = logging.getLogger("grounded_agency.adapter")
+
+# The Claude Code permission modes in which this adapter relies on a
+# PreToolUse "ask" reaching a person through can_use_tool (or the
+# permission prompt tool), STANDARD 1.2.0 section 5.18.7. Not configurable:
+# adding a mode would let a call that requires approval run on a decision no
+# person made. `dontAsk` denies the call anyway (the adapter's F502 says
+# why); in `bypassPermissions` the documentation does not say that an ask
+# reaches the callback; in `auto` a classifier, not a person, can answer
+# the prompt; and a mode the adapter does not know is not relied on.
+PROMPTING_PERMISSION_MODES: frozenset[str] = frozenset(
+    {"default", "acceptEdits", "plan"}
+)
 
 
 def _find_ontology_path() -> str:
@@ -161,11 +189,13 @@ class GroundedAgentConfig:
 
     Attributes:
         ontology_path: Path to capability_ontology.yaml (auto-detected if not specified)
-        strict_mode: If True, block mutations without checkpoint.
-                    If False, log warning but allow.
+        strict_mode: If True, refuse a call that fails a check. If False,
+            log a warning and let the checkpoint, prerequisite and internal
+            checks pass (outside class SL; approval still applies).
         audit_log_path: Path for audit log file
         checkpoint_dir: Directory for checkpoint storage
-        expiry_minutes: Default checkpoint expiry in minutes
+        expiry_minutes: The layer's checkpoint maximum age, in minutes:
+            more than 0 and at most 30 (STANDARD 1.2.0 section 5.18.6).
         rate_limit: Per-risk-level rate limit configuration (SEC-010).
         ontology_hash: Expected SHA-256 hash for ontology integrity check (SEC-012).
                       If None, checks for a .sha256 sidecar file.
@@ -175,28 +205,32 @@ class GroundedAgentConfig:
         max_turns: Maximum agent turns (SDK ``max_turns``).
         enable_discovery: If True, inject a PreToolUse hook that runs
             capability discovery on user prompts automatically.
-        checkpoint_reservation_seconds: How long a tool call holds the
-            checkpoint it reserved if it never reports back (default: the
-            tracker's, 600). See CheckpointTracker.validate_and_reserve.
-        approval: What happens to a tool call whose capability requires
-            approval (``requires_approval``; in the reference ontology:
-            ``execute``, ``mutate`` and ``send``), once the checkpoint rule
-            is satisfied. ``"ask"`` (default): the PreToolUse hook answers
+        checkpoint_reservation_seconds: How long a call holds the checkpoint
+            it reserved if it never reports back. ``None`` (default): until
+            the checkpoint expires. A value must be more than 0 and at most
+            ``expiry_minutes * 60``. A hold that lapses counts as used.
+        approval: What happens to a tool call whose effective
+            ``requires_approval`` is true (in the reference ontology:
+            ``execute``, ``mutate``, ``send`` and unbound tools), once the
+            other checks pass. ``"ask"`` (default): in the permission modes
+            of :data:`PROMPTING_PERMISSION_MODES` the PreToolUse hook answers
             ``permissionDecision: "ask"`` with a reason that begins
-            ``F502 APPROVAL_REQUIRED:``, so the host's permission flow
-            decides the call; with no ``can_use_tool`` callback on the
-            wrapped options, the call is denied. ``"off"``: the adapter
-            asks for no approval.
+            ``F502 APPROVAL_REQUIRED:``, so a person decides the call through
+            the host's permission flow; in any other mode, and with no
+            ``can_use_tool`` callback, the call is refused with F502.
+            ``"off"``: the adapter asks for no approval (outside class SL).
         evidence_include_tool_input: If True, evidence anchors keep each
             tool call's input, and a Bash command's text, in their
             metadata. Off by default: inputs can hold credentials.
+        call_record_limit: How many call records (and refusals) the adapter
+            keeps in memory (``call_records``, ``diagnostics``).
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
     strict_mode: bool = True
     audit_log_path: str = ".claude/audit.log"
     checkpoint_dir: str = ".checkpoints"
-    expiry_minutes: int = 30
+    expiry_minutes: int = MAX_AGE_MINUTES
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     ontology_hash: str | None = None
     output_format: dict[str, Any] | None = None
@@ -207,22 +241,43 @@ class GroundedAgentConfig:
     checkpoint_reservation_seconds: float | None = None
     approval: Literal["ask", "off"] = "ask"
     evidence_include_tool_input: bool = False
+    call_record_limit: int = 10000
 
     def __post_init__(self) -> None:
-        """Refuse an approval mode this adapter does not know."""
+        """Refuse a setting this adapter cannot honour."""
         if self.approval not in ("ask", "off"):
             raise ValueError(f"approval must be 'ask' or 'off', got {self.approval!r}")
+        minutes = self.expiry_minutes
+        if (
+            isinstance(minutes, bool)
+            or not isinstance(minutes, (int, float))
+            or not 0 < minutes <= MAX_AGE_MINUTES
+        ):
+            raise ValueError(
+                f"expiry_minutes must be more than 0 and at most {MAX_AGE_MINUTES}, "
+                f"got {minutes!r}: STANDARD 1.2.0 §5.18.6 caps a checkpoint's "
+                f"maximum age at 30 minutes"
+            )
+        seconds = self.checkpoint_reservation_seconds
+        if seconds is not None and not 0 < seconds <= minutes * 60:
+            raise ValueError(
+                f"checkpoint_reservation_seconds must be more than 0 and at most "
+                f"expiry_minutes * 60 ({minutes * 60}), got {seconds!r}"
+            )
+        if not isinstance(self.call_record_limit, int) or self.call_record_limit < 1:
+            raise ValueError(
+                f"call_record_limit must be a positive integer, got "
+                f"{self.call_record_limit!r}"
+            )
 
 
-def _coded(code: ErrorCode, message: str) -> str:
-    """A refusal reason for a channel that carries only text: the
-    diagnostic's code and name (STANDARD v1.1 section 9), then the message."""
-    return f"{code.value} {code.name}: {message}"
+def _error(code: ErrorCode, message: str, location: dict[str, Any]) -> ValidationError:
+    return ValidationError(code=code, message=message, location=location)
 
 
 def _subject(mapping: ToolMapping, tool_name: str) -> str:
     """What a rule applies to: the tool and the capability it performs, or,
-    for a tool with no classification, the capability it is treated as.
+    for an unbound tool, the case it is treated as.
 
     The tool is the subject because a flag can come from the tool's
     declaration and not from the capability (an ``execute`` tool declared
@@ -230,50 +285,40 @@ def _subject(mapping: ToolMapping, tool_name: str) -> str:
     """
     if mapping is UNCLASSIFIED_TOOL:
         return (
-            f"{tool_name} has no capability mapping and is treated as "
-            f"'{mapping.capability_id}', which"
+            f"{tool_name} has no binding (STANDARD 1.2.0 §5.18.2) and is treated "
+            f"as the strictest case, which"
         )
     return f"{tool_name} (capability '{mapping.capability_id}')"
 
 
-def _checkpoint_denial(
-    mapping: ToolMapping, tool_name: str, reserved_checkpoint: str | None
+def _checkpoint_message(
+    mapping: ToolMapping, tool_name: str, held_checkpoint: str | None
 ) -> str:
     """Why a checkpoint-gated tool call may not proceed (F501)."""
-    if reserved_checkpoint is not None:
-        message = (
+    if held_checkpoint is not None:
+        return (
             f"{_subject(mapping, tool_name)} requires checkpoint, and checkpoint "
-            f"{reserved_checkpoint} is reserved by another in-flight mutation. "
-            f"Retry {tool_name} after it completes, or create a new checkpoint."
+            f"{held_checkpoint} is held by another call in flight. "
+            f"Retry {tool_name} after it completes, or take a new checkpoint."
         )
-    else:
-        message = (
-            f"{_subject(mapping, tool_name)} requires checkpoint. "
-            f"Create checkpoint before using {tool_name}. "
-            f"Use the 'checkpoint' skill or call "
-            f"adapter.checkpoint_tracker.create_checkpoint()."
-        )
-    return _coded(ErrorCode.CHECKPOINT_REQUIRED, message)
+    return (
+        f"{_subject(mapping, tool_name)} requires checkpoint, and no valid "
+        f"checkpoint is left: each gated call needs its own, and a turn's end "
+        f"or its maximum age ends one. Take a checkpoint (git stash create, a "
+        f"checkpoint tool, or adapter.checkpoint_tracker.create_checkpoint()) "
+        f"before using {tool_name}."
+    )
 
 
 def _approval_request(mapping: ToolMapping, tool_name: str) -> str:
     """Why a tool call is put to the host's permission flow (F502)."""
-    return _coded(
-        ErrorCode.APPROVAL_REQUIRED,
-        f"{_subject(mapping, tool_name)} requires approval. "
-        f"It runs only if this call is approved.",
-    )
-
-
-def _approval_unavailable(mapping: ToolMapping, tool_name: str) -> str:
-    """Why a call that requires approval is refused when no one can give
-    it (F502): STANDARD v1.1 section 5.14 treats an approval no one could
-    decide as a refusal."""
-    return _coded(
-        ErrorCode.APPROVAL_REQUIRED,
-        f"{_subject(mapping, tool_name)} requires approval, and no one can "
-        f"give it: the options this session was started with have no "
-        f"can_use_tool callback. {tool_name} did not run.",
+    return text_form(
+        _error(
+            ErrorCode.APPROVAL_REQUIRED,
+            f"{_subject(mapping, tool_name)} requires approval. "
+            f"It runs only if this call is approved.",
+            {},
+        )
     )
 
 
@@ -287,23 +332,44 @@ def _is_allow(result: Any) -> bool:
     )
 
 
+def _args_key(args: Any) -> str:
+    """A digest of a call's arguments: SHA-256 of their RFC 8785 canonical
+    JSON, or, for arguments that are not I-JSON, of a sorted JSON text."""
+    from . import _core
+
+    try:
+        text = _core.canonical_json(args)
+    except ValueError, TypeError:
+        text = json.dumps(args, sort_keys=True, default=repr)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _now_iso(clock: Callable[[], datetime]) -> str:
+    return clock().isoformat()
+
+
 @dataclass
 class GroundedAgentAdapter:
     """
     Adapts Claude Agent SDK to use Grounded Agency safety patterns.
 
-    The adapter wraps SDK options to inject:
-    1. A PreToolUse hook and a permission callback that enforce
-       checkpoint-before-mutation (F501) and put calls that require
-       approval to the host's permission flow (F502)
-    2. PostToolUse hooks that collect evidence anchors
-    3. Skill tracking that updates checkpoint state
+    The adapter is a safety layer (STANDARD 1.2.0 section 5.18). It wraps
+    SDK options to inject:
+    1. A PreToolUse hook and a permission callback that apply the rate
+       limit (F504), prerequisites (F501, F503, V102), the checkpoint rule
+       (F501, one checkpoint per gated call) and approval (F502) to every
+       call, and refuse with R407 when a check cannot complete
+    2. PostToolUse hooks that collect evidence anchors, record the
+       checkpoint a successful state-saving call took, and use up a
+       checkpoint a call that ran still held
+    3. A Stop hook: the end of any served session's turn is an execution
+       boundary
 
-    This enables SDK-based agents to operate with:
-    - Evidence-grounded decisions
-    - Checkpoint-before-mutation safety
-    - Typed capability contracts
-    - Audit trails
+    Every call the layer allows or refuses is recorded in ``call_records``
+    with ``recorded_by`` (the layer's name, version and a digest of its
+    configuration and bindings); every refusal is a §9.8 diagnostic in
+    ``diagnostics`` and reaches the model as its text form,
+    ``F501 CHECKPOINT_REQUIRED: ...``.
 
     Example:
         adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=True))
@@ -325,6 +391,7 @@ class GroundedAgentAdapter:
 
     config: GroundedAgentConfig = field(default_factory=GroundedAgentConfig)
     orchestrator: OrchestrationRuntime | None = None
+    clock: Callable[[], datetime] | None = None
     registry: CapabilityRegistry = field(init=False)
     mapper: ToolCapabilityMapper = field(init=False)
     checkpoint_tracker: CheckpointTracker = field(init=False)
@@ -347,17 +414,29 @@ class GroundedAgentAdapter:
         # at the first tool call.
         _ = self.registry.ontology
         self.mapper = ToolCapabilityMapper(self.registry)
+        now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
+        self._now = now
         self.checkpoint_tracker = CheckpointTracker(
             self.config.checkpoint_dir,
             reservation_seconds=self.config.checkpoint_reservation_seconds,
+            clock=now,
         )
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
-        # Calls the PreToolUse hook asked about without reserving the
-        # checkpoint (a permission prompt tool decides them), by tool_use_id,
-        # with their (session_id, agent_id). See _make_pretooluse_safety_hook.
-        self._unreserved_asks: dict[str, tuple[Any, Any]] = {}
-        self._unreserved_lock = threading.Lock()
+        # The layer's records (STANDARD 1.2.0 section 5.18.8). History
+        # counts from the adapter's start: one adapter is one scope.
+        self._started_at = now()
+        self._state_lock = threading.Lock()
+        self._executed: set[str] = set()
+        # Calls this layer allowed, by (tool, digest of the arguments), not
+        # yet run: what a grounded MCP tool checks (take_allowed).
+        self._allowed: Counter[tuple[str, str]] = Counter()
+        self.call_records: deque[dict[str, Any]] = deque(
+            maxlen=self.config.call_record_limit
+        )
+        self.diagnostics: deque[ValidationError] = deque(
+            maxlen=self.config.call_record_limit
+        )
 
         # Lazy-initialized by _get_or_create_workflow_engine
         self._workflow_engine: Any = None
@@ -366,6 +445,186 @@ class GroundedAgentAdapter:
         from .query import CostSummary
 
         self.cost_summary = CostSummary()
+
+    # ------------------------------------------------------------------
+    # Records (STANDARD 1.2.0 section 5.18.8)
+    # ------------------------------------------------------------------
+
+    @property
+    def recorded_by(self) -> dict[str, Any]:
+        """The layer and its configuration, as every record names it: name,
+        version and ``config_sha256``, the SHA-256 of the canonical JSON of
+        the settings and bindings that decide a call."""
+        from . import __version__, _core
+
+        config = {
+            "strict_mode": self.config.strict_mode,
+            "approval": self.config.approval,
+            "expiry_minutes": self.config.expiry_minutes,
+            "checkpoint_reservation_seconds": self.config.checkpoint_reservation_seconds,
+            "ontology_version": self.registry.version,
+            "prompting_modes": sorted(PROMPTING_PERMISSION_MODES),
+            "bindings": self.mapper.records,
+        }
+        digest = hashlib.sha256(
+            _core.canonical_json(config).encode("utf-8")
+        ).hexdigest()
+        return {
+            "name": "grounded_agency.adapter",
+            "version": __version__,
+            "config_sha256": digest,
+        }
+
+    def _record(
+        self,
+        decision: str,
+        tool: str,
+        mapping: ToolMapping | None,
+        call: str | None,
+        **details: Any,
+    ) -> None:
+        """Append one call record."""
+        entry: dict[str, Any] = {"at": _now_iso(self._now), "tool": tool}
+        if mapping is not None and mapping is not UNCLASSIFIED_TOOL:
+            entry["capability"] = mapping.capability_id or None
+            if mapping.control:
+                entry["control"] = True
+        else:
+            entry["capability"] = None
+        if call is not None:
+            entry["call"] = call
+        entry["decision"] = decision
+        entry.update({k: v for k, v in details.items() if v is not None})
+        entry["recorded_by"] = self.recorded_by
+        with self._state_lock:
+            self.call_records.append(entry)
+
+    def _refuse(
+        self,
+        code: ErrorCode,
+        mapping: ToolMapping,
+        tool: str,
+        call: str | None,
+        message: str,
+        **details: Any,
+    ) -> str:
+        """A refusal (section 5.18.8): the §9.8 diagnostic, kept in
+        ``diagnostics`` and a call record; returns its text form."""
+        location: dict[str, Any] = {"tool": tool}
+        if mapping is not UNCLASSIFIED_TOOL and mapping.capability_id:
+            location["capability"] = mapping.capability_id
+        if call is not None:
+            location["call"] = call
+        error = _error(code, message, location)
+        with self._state_lock:
+            self.diagnostics.append(error)
+        try:
+            self._record(
+                "refused",
+                tool,
+                mapping,
+                call,
+                diagnostic={
+                    "code": error.code_str,
+                    "name": error.name,
+                    "severity": error.severity.value,
+                    "message": error.message,
+                    "location": error.location,
+                },
+                **details,
+            )
+        except Exception:
+            logger.exception("Could not record the refusal of %s", tool)
+        text = text_form(error)
+        logger.warning("Refused: %s", text)
+        return text
+
+    def _shown_digest(self, tool: str, mapping: ToolMapping, args: Any) -> str:
+        """The §5.14 digest of what a call's approvers are shown
+        (section 5.18.7): ``[{"action", "capability", "args"}]``.
+
+        Raises:
+            ValueError: If the arguments are not I-JSON.
+        """
+        from . import _core
+
+        capability = (
+            None
+            if mapping is UNCLASSIFIED_TOOL or not mapping.capability_id
+            else mapping.capability_id
+        )
+        return str(
+            _core.approval_digest(
+                [{"action": tool, "capability": capability, "args": args}]
+            )
+        )
+
+    def _prerequisite_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None
+    ) -> str | None:
+        """The refusal for a prerequisite that has not run in this scope
+        (section 5.18.5), or None: a missing checkpoint is F501, or F503 for
+        a call of ``rollback``; any other prerequisite V102."""
+        for needed in sorted(mapping.prerequisites):
+            if needed == "checkpoint":
+                if self.checkpoint_tracker.has_taken_since(self._started_at):
+                    continue
+                if "rollback" in mapping.capabilities:
+                    return self._refuse(
+                        ErrorCode.ROLLBACK_FAILED,
+                        mapping,
+                        tool,
+                        call,
+                        f"{_subject(mapping, tool)} restores a checkpoint, and "
+                        f"no checkpoint was taken in this scope; there is "
+                        f"nothing to roll back to.",
+                    )
+                return self._refuse(
+                    ErrorCode.CHECKPOINT_REQUIRED,
+                    mapping,
+                    tool,
+                    call,
+                    f"{_subject(mapping, tool)} requires checkpoint, and no "
+                    f"checkpoint was taken in this scope. Take a checkpoint, "
+                    f"then call {tool} again.",
+                )
+            with self._state_lock:
+                ran = needed in self._executed
+            if not ran:
+                return self._refuse(
+                    ErrorCode.MISSING_PREREQUISITE,
+                    mapping,
+                    tool,
+                    call,
+                    f"{_subject(mapping, tool)} requires a '{needed}' call to "
+                    f"have completed first in this scope. Call a '{needed}' "
+                    f"tool, then call {tool} again.",
+                )
+        return None
+
+    def _allow_token(self, tool: str, args: Any, delta: int = 1) -> None:
+        key = (tool, _args_key(args))
+        with self._state_lock:
+            self._allowed[key] += delta
+            if self._allowed[key] <= 0:
+                del self._allowed[key]
+
+    def take_allowed(self, tool: str, args: Any) -> bool:
+        """Use up this layer's decision for a call of ``tool`` with ``args``.
+
+        A grounded MCP tool calls this before it runs
+        (``create_grounded_mcp_server(require_layer=True)``): False means
+        the call reached the tool without the layer allowing it, and the
+        tool refuses with R407 (section 5.18.8).
+        """
+        key = (tool, _args_key(args))
+        with self._state_lock:
+            if self._allowed.get(key, 0) <= 0:
+                return False
+            self._allowed[key] -= 1
+            if self._allowed[key] <= 0:
+                del self._allowed[key]
+            return True
 
     def _get_or_create_workflow_engine(self) -> Any:
         """Lazy-create a WorkflowEngine for discovery integration."""
@@ -384,24 +643,37 @@ class GroundedAgentAdapter:
 
         Injects:
         - enable_file_checkpointing=True for SDK-level rollback
-        - a PreToolUse hook for the rate limit, the checkpoint rule and
-          the approval rule
-        - a can_use_tool callback that repeats the checkpoint check and
-          then calls the ``can_use_tool`` callback of ``base``, if it has
-          one, so the host's callback keeps deciding the calls it is asked
-          about
-        - PostToolUse hooks for evidence collection
+        - a PreToolUse hook for the rate limit, the prerequisites, the
+          checkpoint rule and the approval rule
+        - a can_use_tool callback that passes the decision to the
+          ``can_use_tool`` callback of ``base``, if it has one, re-checks the
+          call (arguments the host changed are classified again) and uses
+          its checkpoint up when the call is allowed
+        - PostToolUse hooks for evidence collection, the checkpoint recorder
+          (registered for every tool) and the use of a held checkpoint by a
+          call that ran; a PostToolUseFailure hook that uses it too
+        - a Stop hook (the end of a turn is an execution boundary) and a
+          SubagentStop hook (a finished subagent's holds count as used)
+
+        The layer's scope is this adapter: every session and subagent it
+        serves, ordered by its lock. The Stop of any of them ends the
+        validity of every checkpoint it holds; serve sessions that must not
+        share boundaries with separate adapters. Its maximum age is
+        ``config.expiry_minutes``; it relies on a permission prompt only in
+        the permission modes of :data:`PROMPTING_PERMISSION_MODES`, read
+        from the hook input, else from ``base.permission_mode``.
 
         ``allowed_tools`` is passed through unchanged; ``Skill`` is not
         added. The SDK approves a tool listed there without consulting
         ``can_use_tool`` (and warns that the callback is shadowed). The
-        rate limit, checkpoint and approval checks run in the PreToolUse
-        hook, so they apply to listed tools too.
+        checks run in the PreToolUse hook, so they apply to listed tools too.
 
         Where ``base`` names a ``permission_prompt_tool_name``, no
         ``can_use_tool`` callback is installed: the SDK refuses the two
         together, and that tool is then the permission flow that answers
-        the hook's ``"ask"``.
+        the hook's ``"ask"``. The PreToolUse hook holds the call's
+        checkpoint; a call the prompt tool refuses is never reported, so its
+        hold counts as used when it lapses or the turn ends.
 
         Args:
             base: ClaudeAgentOptions instance
@@ -429,33 +701,37 @@ class GroundedAgentAdapter:
         )
         post_hooks.append(self._wrap_hook(evidence_hook))
 
-        # Add skill tracker
-        skill_hook = create_skill_tracker(self.checkpoint_tracker)
-        post_hooks.append(self._wrap_hook(skill_hook, matcher="Skill"))
+        # The checkpoint recorder: every tool, since any call classified
+        # checkpoint takes one (STANDARD 1.2.0 section 5.18.6).
+        recorder = create_checkpoint_recorder(
+            self.checkpoint_tracker,
+            self.mapper,
+            expiry_minutes=self.config.expiry_minutes,
+        )
+        post_hooks.append(self._wrap_hook(recorder))
 
-        # Add mutation consumer to auto-consume checkpoints after mutations
-        mutation_hook = self._make_mutation_consumer()
-        post_hooks.append(self._wrap_hook(mutation_hook))
+        # A call that ran uses the checkpoint it still holds.
+        post_hooks.append(self._wrap_hook(self._make_mutation_consumer()))
 
-        # PostToolUse only follows a successful call; a failed or
-        # interrupted one must give back the checkpoint it reserved.
+        # A failed or interrupted call uses it too: it may have changed
+        # something before it failed.
         failure_hooks = list(existing_hooks.get("PostToolUseFailure", []))
-        failure_hooks.append(self._wrap_hook(self._make_failure_releaser()))
+        failure_hooks.append(self._wrap_hook(self._make_failure_recorder()))
 
-        # PreToolUse hook: rate limit, checkpoint and approval enforcement
+        # PreToolUse hook: every check of section 5.18
         pre_hooks = list(existing_hooks.get("PreToolUse", []))
         safety_pre_hook = self._make_pretooluse_safety_hook(
-            reserve_asked=not getattr(base, "permission_prompt_tool_name", None)
+            options_mode=getattr(base, "permission_mode", None)
         )
         safety_pre_hook._grounded_adapter = self  # see _already_wrapped
         pre_hooks.append(self._wrap_hook(safety_pre_hook))
 
-        # Stop / SubagentStop: release a reservation left by a call that
-        # another hook denied (see _make_turn_end_releaser).
+        # Stop: an execution boundary. SubagentStop: that agent's holds are
+        # unresolved and count as used.
         stop_hooks = list(existing_hooks.get("Stop", []))
-        stop_hooks.append(self._wrap_hook(self._make_turn_end_releaser()))
+        stop_hooks.append(self._wrap_hook(self._make_boundary()))
         subagent_stop_hooks = list(existing_hooks.get("SubagentStop", []))
-        subagent_stop_hooks.append(self._wrap_hook(self._make_turn_end_releaser()))
+        subagent_stop_hooks.append(self._wrap_hook(self._make_subagent_end()))
 
         # Add discovery injector if enabled
         if self.config.enable_discovery:
@@ -590,103 +866,112 @@ class GroundedAgentAdapter:
                 config["matcher"] = matcher
             return config
 
-    def _make_turn_end_releaser(self) -> Any:
+    def _make_boundary(self) -> Any:
         """
-        Create the Stop / SubagentStop hook that releases a checkpoint
-        reservation still held by a call of the session (and agent) that
-        just finished.
+        Create the Stop hook: the end of a turn is an execution boundary
+        (STANDARD 1.2.0 section 5.18.6).
 
-        A reservation ends when the call it was taken for finishes
-        (PostToolUse / PostToolUseFailure) or is denied by ``can_use_tool``.
-        A call another PreToolUse hook denies after the safety hook reserved
-        for it never runs, so nothing ends its reservation. When a session's
-        turn ends (Stop), or a subagent finishes (SubagentStop), none of its
-        calls is in flight, so a reservation one of them holds is released.
-        Other sessions sharing the adapter, and background subagents still
-        running, keep theirs.
+        A hold still kept by a call of the stopping session is unresolved
+        (the call never reported back), so its checkpoint counts as used.
+        Then every checkpoint the adapter holds stops authorising anything,
+        whatever session took it: one adapter is one scope. Holds of other
+        sessions' calls in flight stay with them; one still waiting at a
+        prompt is refused with F501 when it is allowed. The calls this layer
+        allowed and that did not run are forgotten.
 
         Returns:
             Async hook callback function
         """
         tracker = self.checkpoint_tracker
 
-        async def release_at_turn_end(
+        async def end_of_turn(
+            input_data: dict[str, Any],
+            tool_use_id: str | None,
+            context: HookContext | None,
+        ) -> dict[str, Any]:
+            try:
+                session = input_data.get("session_id")
+                scope = (session, input_data.get("agent_id"))
+                holders = tracker.resolve_holds_in_scope(scope)
+                if holders:
+                    logger.info("Turn ended: unresolved holds of %s used", holders)
+                ended = tracker.end_validity(f"turn ended in session {session}")
+                with self._state_lock:
+                    self._allowed.clear()
+                self._record(
+                    "boundary",
+                    "",
+                    None,
+                    None,
+                    session=session,
+                    ended=ended or None,
+                    unresolved=holders or None,
+                )
+            except Exception as e:
+                logger.error("Turn-end boundary failed: %s", e)
+            return {}
+
+        return end_of_turn
+
+    def _make_subagent_end(self) -> Any:
+        """Create the SubagentStop hook: a hold the finished subagent's calls
+        still keep is unresolved and counts as used. Not a boundary."""
+        tracker = self.checkpoint_tracker
+
+        async def subagent_end(
             input_data: dict[str, Any],
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
             try:
                 scope = (input_data.get("session_id"), input_data.get("agent_id"))
-                with self._unreserved_lock:
-                    for held, held_scope in list(self._unreserved_asks.items()):
-                        if held_scope == scope:
-                            del self._unreserved_asks[held]
-                holder = tracker.release_reservation_in_scope(scope)
-                if holder is not None:
-                    logger.info(
-                        "Turn ended: released the reservation left by %s", holder
-                    )
+                holders = tracker.resolve_holds_in_scope(scope)
+                if holders:
+                    logger.info("Subagent ended: unresolved holds of %s used", holders)
             except Exception as e:
-                logger.warning("Turn-end releaser failed: %s", e)
+                logger.warning("Subagent-end resolver failed: %s", e)
             return {}
 
-        return release_at_turn_end
+        return subagent_end
 
-    def _make_pretooluse_safety_hook(self, reserve_asked: bool = True) -> Any:
+    def _make_pretooluse_safety_hook(self, options_mode: str | None = None) -> Any:
         """
-        Create the PreToolUse hook that enforces the rate limit,
-        checkpoint-before-mutation and approval.
-
-        The checkpoint check is the Python-layer equivalent of the shell
-        hook ``pretooluse_require_checkpoint.sh``, providing defense-in-depth
-        for environments where shell hooks are not active (e.g., when
-        using the SDK programmatically).
+        Create the PreToolUse hook that applies STANDARD 1.2.0 section 5.18
+        to every tool call.
 
         PreToolUse runs for every tool call, including pre-approved ones in
         ``allowed_tools`` that never reach ``can_use_tool``, so the checks
-        live here:
+        live here, in this order:
 
-        - Rate limit (SEC-010): a call over its risk level's limit, or one
-          whose limit check raises, is denied in strict and non-strict mode
-          alike. This runs first, so a call this check denies reserves
-          nothing.
-        - Checkpoint (SEC-007, F501): a checkpoint-gated call reserves the
-          active checkpoint, keyed by its ``tool_use_id``. In strict mode
-          the call is denied when there is no valid checkpoint or another
-          call holds it.
-        - Approval (F502): with ``approval="ask"``, a call whose mapping
-          requires approval, and which the checks above did not deny, is
-          answered with ``permissionDecision: "ask"``. Claude Code then
-          puts the call to the host's permission flow (the ``can_use_tool``
-          callback, or a permission prompt tool) with the reason, and
-          denies it where there is none. ``strict_mode`` does not switch
-          this rule off. A mapping that requires no approval, such as a
-          read-only Bash command, is not asked about.
-        - With ``reserve_asked=False`` (the options name a permission prompt
-          tool, so the adapter installs no ``can_use_tool``), a call the hook
-          asks about is not reserved for: if the prompt tool denies it,
-          nothing tells the adapter, and the reservation would refuse the
-          next mutation. The hook checks that a checkpoint is free, and the
-          PostToolUse hook takes and consumes it once the call has run.
-        - A tool the mapper does not know, or fails to classify, is treated
-          as a high-risk mutation that requires approval, so every check
-          above applies to it. Any other error (for example in the
-          reservation) denies the call in strict mode and is logged in
-          non-strict mode. For a tool in ``allowed_tools`` this hook is the
-          only check that runs.
+        1. Classify (a tool the mapper cannot classify is unbound: the
+           strictest case).
+        2. A control-only tool is allowed and recorded: no check applies.
+        3. Rate limit (SEC-010): a call over its risk level's limit is
+           refused with F504; a limiter failure with R407.
+        4. Prerequisites (section 5.18.5): a checkpoint never taken in this
+           scope is F501 (F503 for a ``rollback`` call); any other missing
+           prerequisite V102.
+        5. Checkpoint (F501): a gated call holds the newest valid checkpoint
+           no other call holds, keyed by its ``tool_use_id`` (a call with
+           none cannot hold one: R407).
+        6. Approval (F502), with ``approval="ask"``: a binding that needs
+           more than one approver or an approver's role is refused; in a
+           permission mode outside :data:`PROMPTING_PERMISSION_MODES` the
+           call is refused; otherwise the digest of the shown value is
+           recorded and the hook answers ``permissionDecision: "ask"``.
+           Each refusal releases the hold step 5 took.
 
-        They share one hook so the rate check is guaranteed to run before
-        the reservation. With two hooks nothing fixes their order, and a
-        call denied by the rate limit could keep a reservation that no
-        later hook releases.
+        With ``strict_mode=False`` the checks of steps 4 and 5 log instead
+        of refusing (outside class SL); approval still applies. Any other
+        error refuses with R407 in strict mode.
 
-        A denial is ``hookSpecificOutput`` with
-        ``permissionDecision: "deny"``. A checkpoint denial's reason begins
-        ``F501 CHECKPOINT_REQUIRED:`` and an approval request's
-        ``F502 APPROVAL_REQUIRED:``: the reason is the only channel to the
-        model and the host, so the diagnostic's code and name come first.
-        The Standard has no code for a rate limit or for a failure of this
-        hook itself; those reasons carry none.
+        A refusal is ``hookSpecificOutput`` with ``permissionDecision:
+        "deny"``, whose reason is the diagnostic's text form
+        (``F501 CHECKPOINT_REQUIRED: ...``).
+
+        Args:
+            options_mode: The wrapped options' ``permission_mode``: used
+                when the hook input carries none.
 
         Returns:
             Async hook callback function
@@ -697,8 +982,6 @@ class GroundedAgentAdapter:
         limiter = self.rate_limiter
         # Anything but an explicit "off" asks.
         asks = self.config.approval != "off"
-        unreserved_asks = self._unreserved_asks
-        unreserved_lock = self._unreserved_lock
 
         def decide(decision: str, message: str) -> dict[str, Any]:
             return {
@@ -710,7 +993,6 @@ class GroundedAgentAdapter:
             }
 
         def deny(message: str) -> dict[str, Any]:
-            logger.warning("PreToolUse denied: %s", message)
             return decide("deny", message)
 
         async def check_before_tool(
@@ -718,93 +1000,233 @@ class GroundedAgentAdapter:
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
-            """PreToolUse hook: rate limit, checkpoint before mutations,
-            then approval."""
+            """PreToolUse hook: every check of section 5.18, in order."""
             tool_name = ""
             # Until the call is classified, assume the strictest case.
             mapping = UNCLASSIFIED_TOOL
+            call: str | None = None
+            held = False
+            tool_input: Any = {}
+
+            def release() -> None:
+                if held and call is not None:
+                    try:
+                        tracker.release_reservation(call)
+                    except Exception as e:
+                        logger.error("Could not release the hold of %s: %s", call, e)
+
             try:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
+                call = tool_use_id or input_data.get("tool_use_id")
 
                 try:
                     mapping = mapper.map_tool(tool_name, tool_input)
                 except Exception:
                     logger.exception(
-                        "Could not classify %s; treating it as a high-risk mutation",
-                        tool_name,
+                        "Could not classify %s; treating it as unbound", tool_name
                     )
                     mapping = UNCLASSIFIED_TOOL
+
+                if mapping.control:
+                    try:
+                        self._record("allowed", tool_name, mapping, call)
+                    except Exception:
+                        logger.exception(
+                            "Could not record control-only call %s", tool_name
+                        )
+                    return {}
 
                 try:
                     within_limit = limiter.allow(mapping.risk)
                 except Exception:
-                    # The rate limit used to sit in can_use_tool, which
-                    # denies on error; keep it fail-closed here.
                     logger.exception("PreToolUse rate limit check failed")
-                    return deny("Rate limit check failed")
+                    return deny(
+                        self._refuse(
+                            ErrorCode.SAFETY_CHECK_FAILED,
+                            mapping,
+                            tool_name,
+                            call,
+                            f"the rate limit check of {tool_name} failed, so "
+                            f"the call is refused",
+                        )
+                    )
                 if not within_limit:
                     return deny(
-                        f"Rate limited: {mapping.risk}-risk capability "
-                        f"'{mapping.capability_id}' via {tool_name}. "
-                        f"Too many invocations — please wait."
+                        self._refuse(
+                            ErrorCode.CONSTRAINT_VIOLATED,
+                            mapping,
+                            tool_name,
+                            call,
+                            f"rate limit: {mapping.risk}-risk capability "
+                            f"'{mapping.capability_id}' via {tool_name}. "
+                            f"Too many invocations — please wait.",
+                        )
                     )
 
+                refusal = self._prerequisite_refusal(mapping, tool_name, call)
+                if refusal is not None:
+                    if strict:
+                        return deny(refusal)
+                    logger.warning("PreToolUse warning (non-strict): %s", refusal)
+
                 if mapping.requires_checkpoint:
-                    holder = tool_use_id or input_data.get("tool_use_id")
                     scope = (input_data.get("session_id"), input_data.get("agent_id"))
-                    unreserved = (
-                        not reserve_asked
-                        and asks
-                        and mapping.requires_approval
-                        and holder is not None
-                    )
-                    if unreserved:
-                        reserved, checkpoint_id = tracker.can_reserve(holder)
-                    else:
-                        reserved, checkpoint_id = tracker.validate_and_reserve(
-                            holder, scope=scope
+                    if call is None:
+                        message = self._refuse(
+                            ErrorCode.SAFETY_CHECK_FAILED,
+                            mapping,
+                            tool_name,
+                            call,
+                            f"{tool_name} has no tool_use_id, so this layer "
+                            f"cannot hold a checkpoint for it",
                         )
-                    if not reserved:
-                        message = _checkpoint_denial(mapping, tool_name, checkpoint_id)
                         if strict:
                             return deny(message)
                         logger.warning("PreToolUse warning (non-strict): %s", message)
-                    elif unreserved:
-                        with unreserved_lock:
-                            unreserved_asks[str(holder)] = scope
+                    else:
+                        held, checkpoint_id = tracker.validate_and_reserve(
+                            call, scope=scope
+                        )
+                        if not held:
+                            message = self._refuse(
+                                ErrorCode.CHECKPOINT_REQUIRED,
+                                mapping,
+                                tool_name,
+                                call,
+                                _checkpoint_message(mapping, tool_name, checkpoint_id),
+                            )
+                            if strict:
+                                return deny(message)
+                            logger.warning(
+                                "PreToolUse warning (non-strict): %s", message
+                            )
+
+                if asks and mapping.requires_approval:
+                    policy = mapping.approval
+                    if policy is not None and policy.min_approvers > 1:
+                        release()
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping,
+                                tool_name,
+                                call,
+                                f"{_subject(mapping, tool_name)} needs "
+                                f"{policy.min_approvers} approvers; this layer "
+                                f"obtains one per call",
+                            )
+                        )
+                    if policy is not None and policy.role is not None:
+                        release()
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping,
+                                tool_name,
+                                call,
+                                f"{_subject(mapping, tool_name)} needs an "
+                                f"approver with role '{policy.role}'; a "
+                                f"permission prompt cannot show this layer the "
+                                f"person's role",
+                            )
+                        )
+                    mode = (
+                        input_data.get("permission_mode") or options_mode or "default"
+                    )
+                    if mode not in PROMPTING_PERMISSION_MODES:
+                        release()
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping,
+                                tool_name,
+                                call,
+                                f"permission mode '{mode}' does not put this "
+                                f"call to a person; STANDARD 1.2.0 §5.18.7. "
+                                f"{tool_name} did not run.",
+                                permission_mode=mode,
+                            )
+                        )
+                    try:
+                        digest = self._shown_digest(tool_name, mapping, tool_input)
+                    except (ValueError, TypeError) as e:
+                        release()
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping,
+                                tool_name,
+                                call,
+                                f"the arguments of {tool_name} are not I-JSON, "
+                                f"so no decision can bind to them: {e}",
+                            )
+                        )
+                    message = _approval_request(mapping, tool_name)
+                    self._allow_token(tool_name, tool_input)
+                    self._record(
+                        "asked",
+                        tool_name,
+                        mapping,
+                        call,
+                        digest=digest,
+                        permission_mode=mode,
+                        checkpoint_id=tracker.held_by(call) if held and call else None,
+                    )
+                    logger.info("PreToolUse asks: %s", message)
+                    return decide("ask", message)
+
+                self._allow_token(tool_name, tool_input)
+                self._record(
+                    "allowed",
+                    tool_name,
+                    mapping,
+                    call,
+                    checkpoint_id=tracker.held_by(call) if held and call else None,
+                )
+                return {}
 
             except Exception:
                 # The detail stays in the log: the deny reason goes back to
                 # the model.
                 logger.exception("PreToolUse safety check failed")
                 if strict:
-                    return deny("PreToolUse safety check failed")
+                    release()
+                    try:
+                        return deny(
+                            self._refuse(
+                                ErrorCode.SAFETY_CHECK_FAILED,
+                                mapping,
+                                tool_name,
+                                call,
+                                "the PreToolUse safety check failed, so the "
+                                "call is refused",
+                            )
+                        )
+                    except Exception:
+                        return deny(
+                            "R407 SAFETY_CHECK_FAILED: the PreToolUse safety "
+                            "check failed, so the call is refused"
+                        )
 
-            # Approval is a rule of its own: non-strict mode does not
-            # switch it off, and neither does an error it let through.
+            # Non-strict, after an error: approval is a rule of its own and
+            # still applies.
             if asks and mapping.requires_approval:
-                message = _approval_request(mapping, tool_name)
-                logger.info("PreToolUse asks: %s", message)
-                return decide("ask", message)
-
+                return decide("ask", _approval_request(mapping, tool_name))
             return {}
 
         return check_before_tool
 
     def _make_mutation_consumer(self) -> Any:
         """
-        Create PostToolUse hook that consumes the checkpoint a successful
-        checkpoint-gated call reserved.
+        Create the PostToolUse hook for a call that ran.
 
-        This enforces one-checkpoint-per-mutation semantics: after the
-        mutation completes, its checkpoint is consumed, requiring a new
-        checkpoint for subsequent mutations. Only the checkpoint reserved
-        under the call's ``tool_use_id`` is touched, so a call that held no
-        reservation cannot consume another call's checkpoint. The exception
-        is a call the PreToolUse hook asked about without reserving (a
-        permission prompt tool decided it): having run, it takes the active
-        checkpoint now and consumes it, unless another call holds it.
+        A call that still holds a checkpoint ran without its use passing
+        the permission callback (a tool in ``allowed_tools``, a call that
+        needed no approval, or a permission prompt tool's decision): it
+        uses the checkpoint now, whatever the call's outcome (STANDARD
+        1.2.0 section 5.18.6). A call that succeeded counts each of its
+        capabilities as run, for the prerequisites of later calls.
 
         Returns:
             Async hook callback function
@@ -812,90 +1234,84 @@ class GroundedAgentAdapter:
         tracker = self.checkpoint_tracker
         mapper = self.mapper
 
-        async def consume_after_mutation(
+        async def record_after_call(
             input_data: dict[str, Any],
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
-            """PostToolUse hook: consume the call's reserved checkpoint, or
-            release it if the tool reported an error."""
-            with self._unreserved_lock:
-                unreserved_scope = self._unreserved_asks.pop(tool_use_id or "", None)
+            """PostToolUse hook: use the call's hold, record that it ran."""
+            holder = tool_use_id or input_data.get("tool_use_id")
+            tool_name = input_data.get("tool_name", "")
             try:
-                tool_name = input_data.get("tool_name", "")
-                tool_input = input_data.get("tool_input", {})
-
-                mapping = mapper.map_tool(tool_name, tool_input)
-                if not mapping.requires_checkpoint:
-                    # The input it ran with (possibly rewritten by another
-                    # hook) is not checkpoint-gated, but PreToolUse may have
-                    # reserved for the original: give back only this call's.
-                    if tool_use_id is not None:
-                        tracker.release_reservation(tool_use_id)
-                    return {}
-
-                # Check if the call was successful (no error in response)
+                checkpoint_id = None
+                if holder:
+                    checkpoint_id = tracker.consume_checkpoint(holder)
+                    if checkpoint_id is not None:
+                        logger.info(
+                            "Checkpoint %s used by %s", checkpoint_id, tool_name
+                        )
+                mapping = mapper.map_tool(tool_name, input_data.get("tool_input", {}))
                 tool_response = input_data.get("tool_response")
                 is_error = False
                 if isinstance(tool_response, dict):
-                    is_error = tool_response.get("is_error", False)
+                    is_error = bool(tool_response.get("is_error", False))
                 elif tool_response is not None and hasattr(tool_response, "is_error"):
-                    is_error = getattr(tool_response, "is_error", False)
-
-                if is_error or not mapping.mutation:
-                    # Nothing changed - keep the checkpoint for a retry
-                    tracker.release_reservation(tool_use_id)
-                    logger.info("%s changed nothing, checkpoint preserved", tool_name)
-                    return {}
-
-                if unreserved_scope is not None:
-                    # Asked about without a reservation; it ran, so take
-                    # the checkpoint now.
-                    tracker.validate_and_reserve(tool_use_id, scope=unreserved_scope)
-                consumed_id = tracker.consume_checkpoint(tool_use_id)
-                if consumed_id is not None:
-                    logger.info(
-                        "Checkpoint %s consumed after %s", consumed_id, tool_name
-                    )
-
+                    is_error = bool(getattr(tool_response, "is_error", False))
+                if not is_error and mapping is not UNCLASSIFIED_TOOL:
+                    with self._state_lock:
+                        self._executed.update(mapping.capabilities)
+                self._record(
+                    "failed" if is_error else "ran",
+                    tool_name,
+                    mapping,
+                    holder,
+                    checkpoint_id=checkpoint_id,
+                )
             except Exception as e:
-                # Log but don't fail - this is observational
-                logger.warning("Mutation consumer failed: %s", e)
-
+                logger.warning("Post-call recorder failed: %s", e)
             return {}
 
-        return consume_after_mutation
+        return record_after_call
 
-    def _make_failure_releaser(self) -> Any:
+    def _make_failure_recorder(self) -> Any:
         """
-        Create PostToolUseFailure hook that releases the checkpoint a failed
-        or interrupted call reserved, so it can cover a retry.
+        Create the PostToolUseFailure hook: a failed or interrupted call
+        started, so it uses the checkpoint it held (it may have changed
+        something before it failed), and its failure is recorded.
 
         Returns:
             Async hook callback function
         """
         tracker = self.checkpoint_tracker
 
-        async def release_after_failure(
+        async def record_failure(
             input_data: dict[str, Any],
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
-            """PostToolUseFailure hook: release the call's reservation."""
+            """PostToolUseFailure hook: use the call's hold."""
+            holder = tool_use_id or input_data.get("tool_use_id")
+            tool_name = input_data.get("tool_name", "")
             try:
-                holder = tool_use_id or input_data.get("tool_use_id")
-                with self._unreserved_lock:
-                    self._unreserved_asks.pop(holder or "", None)
-                if holder and tracker.release_reservation(holder):
+                checkpoint_id = tracker.consume_checkpoint(holder) if holder else None
+                if checkpoint_id is not None:
                     logger.info(
-                        "%s failed, checkpoint reservation released",
-                        input_data.get("tool_name", ""),
+                        "%s failed; checkpoint %s is used all the same",
+                        tool_name,
+                        checkpoint_id,
                     )
+                self._record(
+                    "failed",
+                    tool_name,
+                    None,
+                    holder,
+                    checkpoint_id=checkpoint_id,
+                )
             except Exception as e:
-                logger.warning("Failure releaser failed: %s", e)
+                logger.warning("Failure recorder failed: %s", e)
             return {}
 
-        return release_after_failure
+        return record_failure
 
     def _make_permission_callback(self, host_can_use_tool: Any = None) -> Any:
         """
@@ -905,18 +1321,25 @@ class GroundedAgentAdapter:
         settle, and for one a PreToolUse hook answered with ``"ask"``. The
         callback:
 
-        1. Repeats the checkpoint check (F501). Mutations are blocked
-           unless a valid checkpoint exists.
-        2. Hands the decision to ``host_can_use_tool`` when there is one,
-           and returns its result unchanged. A result that is not an allow
-           releases the call's checkpoint reservation.
-        3. With no host callback: denies a call whose mapping requires
-           approval (F502) when ``approval`` is ``"ask"``, because no one
-           can give that approval, and allows every other call.
-
-        The rate limit is enforced in the PreToolUse hook instead, which
-        also sees tools in ``allowed_tools`` that never reach this
-        callback; checking it here as well would charge a call twice.
+        1. Allows a control-only call.
+        2. For a gated call, holds its checkpoint (the same hold as the
+           PreToolUse hook's; F501 when none is left; R407 when the call has
+           no ``tool_use_id``). The checkpoint is checked before a person is
+           asked.
+        3. Hands the decision to ``host_can_use_tool`` when there is one.
+           A result that is not an allow releases the hold; for a call that
+           requires approval it becomes ``F502 APPROVAL_REQUIRED: <tool> was
+           not approved: <the host's message>``. An allow whose
+           ``updated_input`` differs from the input is classified again
+           (STANDARD 1.2.0 section 5.18.7): refused if the new arguments need
+           a prerequisite (F501, F503, V102) or a checkpoint (F501) the call
+           does not hold, or approval (F502: the decision was on other
+           arguments).
+        4. With no host callback: refuses a call that requires approval
+           (F502), since no one can give it.
+        5. Uses the held checkpoint when the call is allowed, re-checking in
+           one atomic step that it is still valid (F501 otherwise: it
+           expired, or a boundary passed, while the call waited).
 
         Args:
             host_can_use_tool: The ``can_use_tool`` callback of the options
@@ -927,7 +1350,6 @@ class GroundedAgentAdapter:
         Returns:
             Async permission callback function
         """
-        # Capture state in closure
         tracker = self.checkpoint_tracker
         mapper = self.mapper
         strict = self.config.strict_mode
@@ -943,22 +1365,46 @@ class GroundedAgentAdapter:
             has_sdk_types = False
 
         def release(holder: str | None) -> None:
-            # A denied call never runs, so neither PostToolUse nor
-            # PostToolUseFailure ends the reservation its PreToolUse hook
-            # took: release it here, or the checkpoint stays blocked for
-            # reservation_seconds. Only the call's own reservation is
-            # touched; without a holder there is none to identify.
+            # A refused call never runs: the layer learns of the refusal
+            # here, so the checkpoint stays valid for another call.
             if holder is not None:
                 try:
                     tracker.release_reservation(holder)
-                except Exception as e:  # deny regardless; the hold lapses
-                    logger.error("Could not release reservation: %s", e)
+                except Exception as e:  # refuse regardless; the hold lapses
+                    logger.error("Could not release the hold of %s: %s", holder, e)
 
-        def deny(message: str, holder: str | None) -> Any:
+        def deny(message: str, holder: str | None, interrupt: bool = False) -> Any:
             release(holder)
             if has_sdk_types:
-                return PermissionResultDeny(message=message)
+                return PermissionResultDeny(message=message, interrupt=interrupt)
             return FallbackPermissionDeny(message=message)
+
+        def allow(updated_input: dict[str, Any]) -> Any:
+            if has_sdk_types:
+                return PermissionResultAllow(updated_input=updated_input)
+            return FallbackPermissionAllow(updated_input=updated_input)
+
+        def use_checkpoint(
+            mapping: ToolMapping, tool_name: str, holder: str | None
+        ) -> tuple[str | None, str | None]:
+            """Use the held checkpoint: (checkpoint id, refusal text)."""
+            if not mapping.requires_checkpoint or holder is None:
+                return None, None
+            checkpoint_id = tracker.consume_if_valid(holder)
+            if checkpoint_id is None:
+                refusal = self._refuse(
+                    ErrorCode.CHECKPOINT_REQUIRED,
+                    mapping,
+                    tool_name,
+                    holder,
+                    f"the checkpoint {tool_name} held expired, or an execution "
+                    f"boundary passed, while the call waited; take a new "
+                    f"checkpoint",
+                )
+                if strict:
+                    return None, refusal
+                logger.warning("Permission warning (non-strict): %s", refusal)
+            return checkpoint_id, None
 
         async def check_permission(
             tool_name: str,
@@ -966,7 +1412,9 @@ class GroundedAgentAdapter:
             context: HookContext | None,
         ) -> Any:
             """
-            Permission callback: checkpoint check, then the host's decision.
+            Permission callback: the checkpoint check, the host's decision,
+            the re-check of changed arguments, then the use of the
+            checkpoint.
 
             Args:
                 tool_name: Name of tool being invoked
@@ -979,72 +1427,175 @@ class GroundedAgentAdapter:
             """
             holder = getattr(context, "tool_use_id", None)
             try:
-                # Map tool to capability
-                mapping = mapper.map_tool(tool_name, input_data)
+                mapping0 = mapper.map_tool(tool_name, input_data)
+                if mapping0.control:
+                    return allow(input_data)
 
-                # Check if checkpoint required
-                if mapping.requires_checkpoint:
-                    # SEC-007: Use atomic validate_and_reserve to prevent
-                    # TOCTOU. Keyed by the call's tool_use_id, this repeats
-                    # the PreToolUse reservation idempotently; the
-                    # reservation ends in consume_after_mutation or
-                    # release_after_failure. A context without tool_use_id
-                    # (an SDK older than 0.1.52, or a direct call) cannot
-                    # name the PreToolUse reservation, so reserving would
-                    # see it as foreign: only check that a checkpoint is
-                    # valid and leave the reservation to the PreToolUse hook.
+                if mapping0.requires_checkpoint:
                     if holder is None:
-                        checkpoint_id = tracker.get_active_checkpoint_id()
-                        is_valid = checkpoint_id is not None
-                    else:
-                        is_valid, checkpoint_id = tracker.validate_and_reserve(holder)
-                    if not is_valid:
-                        message = _checkpoint_denial(mapping, tool_name, checkpoint_id)
-
-                        if strict:
-                            return deny(message, holder)
-
-                        # Non-strict: warn but allow
-                        logger.warning("%s executing without checkpoint", tool_name)
-
-                    else:
-                        # Log checkpoint usage
-                        logger.info(
-                            "%s allowed with checkpoint %s", tool_name, checkpoint_id
+                        message = self._refuse(
+                            ErrorCode.SAFETY_CHECK_FAILED,
+                            mapping0,
+                            tool_name,
+                            None,
+                            f"{tool_name} has no tool_use_id, so this layer "
+                            f"cannot hold a checkpoint for it",
                         )
+                        if strict:
+                            return deny(message, None)
+                    else:
+                        ok, checkpoint_id = tracker.validate_and_reserve(holder)
+                        if not ok:
+                            message = self._refuse(
+                                ErrorCode.CHECKPOINT_REQUIRED,
+                                mapping0,
+                                tool_name,
+                                holder,
+                                _checkpoint_message(mapping0, tool_name, checkpoint_id),
+                            )
+                            if strict:
+                                return deny(message, holder)
+                            logger.warning("%s executing without checkpoint", tool_name)
+
+                if host_can_use_tool is None:
+                    # No one to ask. An approval no one can give is a
+                    # refusal (STANDARD 1.2.0 section 5.18.7, F502).
+                    if asks and mapping0.requires_approval:
+                        logger.warning(
+                            "%s requires approval and the wrapped options have "
+                            "no can_use_tool callback; denying. Pass one, or "
+                            "set GroundedAgentConfig(approval='off').",
+                            tool_name,
+                        )
+                        self._allow_token(tool_name, input_data, -1)
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping0,
+                                tool_name,
+                                holder,
+                                f"{_subject(mapping0, tool_name)} requires "
+                                f"approval, and no one can give it: the options "
+                                f"this session was started with have no "
+                                f"can_use_tool callback. {tool_name} did not run.",
+                            ),
+                            holder,
+                        )
+                    checkpoint_id, refusal = use_checkpoint(mapping0, tool_name, holder)
+                    if refusal is not None:
+                        self._allow_token(tool_name, input_data, -1)
+                        return deny(refusal, None)
+                    self._record(
+                        "allowed",
+                        tool_name,
+                        mapping0,
+                        holder,
+                        checkpoint_id=checkpoint_id,
+                    )
+                    return allow(input_data)
 
                 # The host's permission flow decides what it is asked.
-                if host_can_use_tool is not None:
-                    result = host_can_use_tool(tool_name, input_data, context)
-                    if inspect.isawaitable(result):
-                        result = await result
-                    if not _is_allow(result):
-                        release(holder)
+                result = host_can_use_tool(tool_name, input_data, context)
+                if inspect.isawaitable(result):
+                    result = await result
+                if not _is_allow(result):
+                    self._allow_token(tool_name, input_data, -1)
+                    if asks and mapping0.requires_approval:
+                        reason = getattr(result, "message", "") or "denied"
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping0,
+                                tool_name,
+                                holder,
+                                f"{tool_name} was not approved: {reason}",
+                            ),
+                            holder,
+                            interrupt=bool(getattr(result, "interrupt", False)),
+                        )
+                    release(holder)
                     return result
 
-                # No one to ask. An approval no one can give is a refusal
-                # (STANDARD v1.1 section 5.14, F502).
-                if asks and mapping.requires_approval:
-                    logger.warning(
-                        "%s requires approval and the wrapped options have no "
-                        "can_use_tool callback; denying. Pass one, or set "
-                        "GroundedAgentConfig(approval='off').",
-                        tool_name,
-                    )
-                    return deny(_approval_unavailable(mapping, tool_name), holder)
+                updated = getattr(result, "updated_input", None)
+                args1 = updated if isinstance(updated, dict) else input_data
+                mapping1 = mapping0
+                if _args_key(args1) != _args_key(input_data):
+                    # Section 5.18.7, changed arguments: classify again.
+                    mapping1 = mapper.map_tool(tool_name, args1)
+                    refusal = self._prerequisite_refusal(mapping1, tool_name, holder)
+                    if refusal is None and (
+                        mapping1.requires_checkpoint
+                        and not mapping0.requires_checkpoint
+                    ):
+                        refusal = self._refuse(
+                            ErrorCode.CHECKPOINT_REQUIRED,
+                            mapping1,
+                            tool_name,
+                            holder,
+                            f"the host changed the arguments of {tool_name}, and "
+                            f"the call they make requires a checkpoint the call "
+                            f"does not hold",
+                        )
+                    if refusal is None and asks and mapping1.requires_approval:
+                        refusal = self._refuse(
+                            ErrorCode.APPROVAL_REQUIRED,
+                            mapping1,
+                            tool_name,
+                            holder,
+                            f"the host changed the arguments of {tool_name}, and "
+                            f"the decision was on other arguments",
+                        )
+                    if refusal is not None:
+                        self._allow_token(tool_name, input_data, -1)
+                        return deny(refusal, holder)
+                    self._allow_token(tool_name, input_data, -1)
+                    self._allow_token(tool_name, args1)
+                    if (
+                        mapping0.requires_checkpoint
+                        and not mapping1.requires_checkpoint
+                    ):
+                        release(holder)
 
-                # Allow the tool
-                if has_sdk_types:
-                    return PermissionResultAllow(updated_input=input_data)
-                return FallbackPermissionAllow(updated_input=input_data)
+                checkpoint_id, refusal = use_checkpoint(mapping1, tool_name, holder)
+                if refusal is not None:
+                    self._allow_token(tool_name, args1, -1)
+                    return deny(refusal, None)
+                digest = None
+                if mapping1.requires_approval:
+                    try:
+                        digest = self._shown_digest(tool_name, mapping1, args1)
+                    except ValueError, TypeError:
+                        digest = None
+                self._record(
+                    "allowed",
+                    tool_name,
+                    mapping1,
+                    holder,
+                    digest=digest,
+                    approvers=(
+                        ["in_session"] if asks and mapping1.requires_approval else None
+                    ),
+                    checkpoint_id=checkpoint_id,
+                )
+                return result
 
             except Exception as e:
-                # Fail-closed: deny access on error (secure default)
-                # In security-critical code, unknown states should deny access
+                # Fail-closed: refuse on error (secure default)
                 logger.error("Permission check failed: %s", e)
-                return deny(
-                    f"Permission check failed due to internal error: {e}", holder
-                )
+                try:
+                    message = self._refuse(
+                        ErrorCode.SAFETY_CHECK_FAILED,
+                        UNCLASSIFIED_TOOL,
+                        tool_name,
+                        holder,
+                        f"the permission check failed due to an internal error: {e}",
+                    )
+                except Exception:
+                    message = (
+                        "R407 SAFETY_CHECK_FAILED: the permission check failed "
+                        f"due to an internal error: {e}"
+                    )
+                return deny(message, holder)
 
         return check_permission
 
@@ -1054,7 +1605,8 @@ class GroundedAgentAdapter:
         reason: str = "Pre-mutation checkpoint",
     ) -> str:
         """
-        Convenience method to create a checkpoint.
+        Convenience method to create a checkpoint: the host's own checkpoint
+        operation, which counts as taken in the layer's scope.
 
         Args:
             scope: Files/patterns to checkpoint ("*" for all)
@@ -1074,9 +1626,6 @@ class GroundedAgentAdapter:
     def consume_checkpoint(self) -> str | None:
         """
         Mark the active checkpoint as consumed.
-
-        Call after successful mutation to require a new checkpoint
-        for subsequent mutations.
 
         Returns:
             ID of consumed checkpoint, or None

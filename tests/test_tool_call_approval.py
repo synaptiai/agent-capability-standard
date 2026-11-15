@@ -41,6 +41,7 @@ from grounded_agency import (
     RateLimitConfig,
     ToolCapabilityMapper,
     ToolMapping,
+    _core,
 )
 from grounded_agency.capabilities import mapper as mapper_module
 from grounded_agency.capabilities.mapper import UNCLASSIFIED_TOOL
@@ -297,6 +298,11 @@ class TestMapperOntologySources:
                 mutation=node.mutation,
                 requires_checkpoint=node.requires_checkpoint,
                 requires_approval=node.requires_approval,
+                # STANDARD 1.2.0 section 5.18.1: a mapping carries the
+                # capability's `requires` prerequisites.
+                prerequisites=frozenset(
+                    registry.get_required_capabilities(capability_id)
+                ),
             ), tool
 
     def test_a_stricter_ontology_makes_a_static_tool_stricter(
@@ -454,7 +460,7 @@ class TestHookCheckpointRule:
 
         assert _decision(denied) == "deny"
         assert _reason(denied).startswith(F501)
-        assert "mcp__unknown__tool has no capability mapping" in _reason(denied)
+        assert "mcp__unknown__tool has no binding" in _reason(denied)
 
         asking_adapter.create_checkpoint(["*"], "Test")
         assert _decision(await hook(call, "u2", None)) == "ask"
@@ -515,7 +521,7 @@ class TestHookCheckpointRule:
         assert _decision(first) == "ask"
         assert _decision(second) == "deny"
         assert _reason(second).startswith(F501)
-        assert f"checkpoint {checkpoint_id} is reserved" in _reason(second)
+        assert f"checkpoint {checkpoint_id} is held by another call" in _reason(second)
 
     @pytest.mark.asyncio
     async def test_rate_limited_call_is_denied_not_asked(
@@ -535,7 +541,7 @@ class TestHookCheckpointRule:
         result = await hook({"tool_name": "Write", "tool_input": {}}, "w1", None)
 
         assert _decision(result) == "deny"
-        assert "Rate limited" in _reason(result)
+        assert _reason(result).startswith("F504 CONSTRAINT_VIOLATED: rate limit")
 
 
 class TestHookApprovalRule:
@@ -789,13 +795,27 @@ class TestPermissionCallbackApproval:
 
         assert _allowed(result)
         assert host.calls == [("Write", {"file_path": "a.txt"}, context)]
-        # Still reserved for this call, to be consumed after it runs.
+        # Used up when the call was allowed (STANDARD 1.2.0 §5.18.6).
         assert not asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
+        record = asking_adapter.call_records[-1]
+        assert record["decision"] == "allowed"
+        assert record["approvers"] == ["in_session"]
+        assert record["digest"] == _core.approval_digest(
+            [
+                {
+                    "action": "Write",
+                    "capability": "mutate",
+                    "args": {"file_path": "a.txt"},
+                }
+            ]
+        )
 
     @pytest.mark.asyncio
-    async def test_host_rejection_is_returned_and_releases_the_reservation(
+    async def test_host_rejection_is_f502_and_releases_the_reservation(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
+        """A host's denial of a call that requires approval is the layer's
+        F502 refusal (STANDARD 1.2.0 §5.18.8), with the host's message."""
         host = _Host(allow=False)
         asking_adapter.create_checkpoint(["*"], "Test")
         callback = asking_adapter._make_permission_callback(host)
@@ -803,7 +823,9 @@ class TestPermissionCallbackApproval:
         result = await callback("Write", {}, _ctx("w1"))
 
         assert _denied(result)
-        assert result.message == "the reviewer said no"
+        assert result.message == (
+            "F502 APPROVAL_REQUIRED: Write was not approved: the reviewer said no"
+        )
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
     @pytest.mark.asyncio
@@ -861,7 +883,10 @@ class TestPermissionCallbackApproval:
 
         result = await callback("Write", {}, _ctx("w1"))
 
-        assert result == {"behavior": "allow"}  # the SDK refuses this type
+        # Not an allow, so, for a call that requires approval, the layer's
+        # F502 refusal.
+        assert _denied(result)
+        assert result.message.startswith(F502 + "Write was not approved")
         assert asking_adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
     @pytest.mark.asyncio
@@ -957,13 +982,15 @@ class TestWrapOptionsApproval:
         assert _configure_can_use_tool(wrapped) is wrapped  # no ValueError
 
     @pytest.mark.asyncio
-    async def test_prompt_tool_denial_leaves_no_reservation(
+    async def test_prompt_tool_holds_the_checkpoint(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
         """With a permission prompt tool the adapter never hears of a
-        denial, so an asked call reserves nothing: after the prompt tool
-        denies call 1, call 2 is asked about, not refused with F501. A call
-        that then runs takes and uses up the checkpoint."""
+        denial, but an asked call holds its checkpoint all the same (the
+        check and its use are one atomic step, STANDARD 1.2.0 §5.18.5): call
+        2 is refused with F501 while call 1 holds it. When the turn ends with
+        call 1 unreported, its hold is unresolved and counts as used, so a
+        new checkpoint is needed."""
         base = ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
         wrapped = asking_adapter.wrap_options(base)
         asking_adapter.create_checkpoint(["*"], "Test")
@@ -978,12 +1005,15 @@ class TestWrapOptionsApproval:
         assert _decision(first) == "ask"
         assert _reason(first).startswith(F502)
 
-        # Call 2 is asked about too, and this time approved and run.
+        # Call 2 is refused: call 1 holds the only checkpoint.
         second = await _pre(wrapped)(call, "w2", None)
-        assert _decision(second) == "ask"
-        for entry in wrapped.hooks["PostToolUse"]:
+        assert _decision(second) == "deny"
+        assert _reason(second).startswith(F501)
+
+        # The turn ends; call 1's hold is unresolved, so it counts as used.
+        for entry in wrapped.hooks["Stop"]:
             for hook in entry.hooks:
-                await hook({**call, "tool_response": {}}, "w2", None)
+                await hook({"hook_event_name": "Stop", "session_id": "s1"}, None, None)
         assert not asking_adapter.has_valid_checkpoint()
 
         # Call 3 needs a new checkpoint.
@@ -992,10 +1022,12 @@ class TestWrapOptionsApproval:
         assert _reason(third).startswith(F501)
 
     @pytest.mark.asyncio
-    async def test_prompt_tool_failed_call_keeps_the_checkpoint(
+    async def test_prompt_tool_failed_call_uses_the_checkpoint(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
-        """A call the prompt tool approved that then fails uses up nothing."""
+        """A call the prompt tool approved that then fails uses its
+        checkpoint all the same: a call that started uses it whatever its
+        outcome (STANDARD 1.2.0 §5.18.6)."""
         wrapped = asking_adapter.wrap_options(
             ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
         )
@@ -1009,8 +1041,7 @@ class TestWrapOptionsApproval:
         for entry in wrapped.hooks["PostToolUseFailure"]:
             for hook in entry.hooks:
                 await hook({**call, "error": "disk full"}, "w1", None)
-        assert asking_adapter.has_valid_checkpoint()
-        assert not asking_adapter._unreserved_asks
+        assert not asking_adapter.has_valid_checkpoint()
 
     @pytest.mark.asyncio
     async def test_asked_approved_run_and_consumed(
@@ -1165,6 +1196,7 @@ class TestMcpFactoryDeclarations:
                 self._tool("insert", {"capability_id": "mutate", "risk": "low"}),
                 self._tool("find", {"capability_id": "search", "domain": "orders"}),
                 self._tool("run", None),
+                self._tool("exec", {"capability_id": "execute"}),
             ],
             adapter=asking_adapter,
         )
@@ -1182,14 +1214,19 @@ class TestMcpFactoryDeclarations:
             "low",
             "orders",
         )
-        # No metadata: an execute tool, which requires approval.
-        run = mapper.map_tool("mcp__db__run", {})
-        assert (run.capability_id, run.risk, run.requires_approval) == (
+        # No metadata: unbound (STANDARD 1.2.0 §5.18.2), the strictest case,
+        # reported as W617.
+        assert mapper.map_tool("mcp__db__run", {}) is UNCLASSIFIED_TOOL
+        run_exec = mapper.map_tool("mcp__db__exec", {})
+        assert (run_exec.capability_id, run_exec.risk, run_exec.requires_approval) == (
             "execute",
             "medium",
             True,
         )
-        assert [w.location["tool"] for w in mapper.warnings] == ["mcp__db__insert"]
+        assert sorted((w.code_str, w.location["tool"]) for w in mapper.warnings) == [
+            ("W602", "mcp__db__insert"),
+            ("W617", "mcp__db__run"),
+        ]
 
     def test_stricter_metadata_flags_reach_the_mapping(
         self, asking_adapter: GroundedAgentAdapter

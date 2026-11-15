@@ -115,9 +115,9 @@ class TestMarkerFileRemoval:
     def test_clear_expired_removes_marker_for_expired_active(
         self, tracker: CheckpointTracker, marker_dir: Path
     ) -> None:
-        # Create checkpoint with already-expired time
-        tracker.create_checkpoint(scope=["*"], reason="test", expiry_minutes=0)
-        # Force expiry by manipulating the checkpoint
+        # STANDARD 1.2.0 section 5.18.6: an expiry must be more than zero, so
+        # the checkpoint is made to expire by moving its expiry into the past.
+        tracker.create_checkpoint(scope=["*"], reason="test")
         active = tracker._active_checkpoint
         assert active is not None
         active.expires_at = datetime.now(UTC) - timedelta(minutes=1)
