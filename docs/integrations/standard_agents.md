@@ -154,7 +154,7 @@ requirement of the other.
 | The decision binds to a digest of the shown values | Nothing comparable | ACS only | Computed by the tool from its own arguments |
 | The approver, by role and number | `auth.caller` in a thread endpoint, with application `roles` ([Thread Endpoints §4](https://standardagentspec.org/0.2.0/specification/threads/endpoints#4-access-and-authentication)) | Fits | The endpoint records the authenticated caller |
 | A person's answer in the conversation | A message with `role: 'user'`, which a parent or package code can also create | Partial | Not usable as proof of a decision. [Proposed to SA](#changes-proposed-to-the-standard-agent-specification) |
-| `expires`; an unanswered request | A parked human turn has no deadline | ACS only | Expiry is checked by the tool when it runs |
+| `expires`; an unanswered request | A parked human turn has no deadline | ACS only | Expiry is checked by the tool when it runs and by the approval endpoint when a decision arrives |
 | `standing_mandate`: pre-approval with nobody present | Nothing comparable for actions | ACS only | Not implemented in the binding |
 | Agent identity and trust class ([§5.17](../../spec/STANDARD-v1.1.0.md#517-sender-identity), [RFC-0004](../../spec/RFC-0004-agent-identity.md)) | `ThreadUser`: id, role, optional application roles; the Users page is a Draft | Partial | A caller maps to a principal; trust classes have no SA counterpart |
 
@@ -409,7 +409,7 @@ The rules, and where each comes from:
 | A checkpoint taken before a wait "no longer authorises the step" ([§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events), W608) | A checkpoint counts only in the execution it was taken in (`state.execution.flowId`), and for ten minutes at most. A thread that went idle, for instance to wait for a person, needs a new one |
 | An action that requires approval runs only on a valid decision ([§5.14](../../spec/STANDARD-v1.1.0.md#514-approval)) | See [Approval](#approval) |
 | A refused or skipped step leaves the checkpoint valid | Nothing is used up until every check has passed |
-| A capability's output has the fields its contract requires | The return type of `execute` is the capability's output contract, checked again at run time |
+| A capability's output has the fields its contract requires | The return type of `execute` is the capability's output contract. At run time the wrapper checks that every required field is present, that `evidence_anchors` is an array and that a required `confidence` is a number from 0 to 1 |
 | A step cannot weaken a capability's flags (W602) | The `requires_*` flags can only be declared `true`; a weaker `risk` or `mutation` fails the definition |
 
 `precedes` and `conflicts_with` edges are not enforced at run time.
@@ -431,8 +431,9 @@ at most. The time limit is the rule the binding guarantees. The execution rule
 rests on each execution of a thread having its own `flowId`; the 0.2.0 text
 calls it the "Unique execution ID" and says no more, so that rule holds as far
 as a runtime issues a new id when an idle thread runs again. A call made
-outside an execution, as from a thread endpoint, has no `flowId`, and no
-checkpoint authorises it. Where the executor
+outside an execution, as from a thread endpoint, has no `flowId`, and
+neither a checkpoint nor an approval authorises it: SA runs one execution of a
+thread at a time and does not serialise endpoint requests with it. Where the executor
 finds no valid checkpoint it asks its host to take one; a tool has nobody to
 ask, so it refuses and names what is missing. The order that works is
 therefore: ask, wait for the approval, then take the restore point and make
@@ -466,12 +467,12 @@ The binding records the decision without a model in between:
 title: How an approval reaches a grounded tool
 ---
 flowchart TB
-  accDescr: The tool stores what must be approved under its digest and is refused; the person's client reads the pending request from an authenticated endpoint and posts a decision; the runtime authenticates the caller, the endpoint records the decision under the same digest and wakes the thread; the model calls the tool again and the tool finds the decision by recomputing the digest from its own arguments.
+  accDescr: The tool stores what must be approved under its digest and is refused; the person's client reads the pending request and its round from an authenticated endpoint and posts a decision on that round; the runtime authenticates the caller, the endpoint records the decision under the same digest and wakes the thread; the model calls the tool again and the tool finds the decision by recomputing the digest from its own arguments.
   t1["Tool call: write_config"] --> rec[("Thread key-value store: request, keyed by digest")]
   t1 --> refused["Refused: F502"]
-  rec --> get["GET acs/approvals: what is pending, and exactly what it covers"]
+  rec --> get["GET acs/approvals: what is pending, what it covers, its round"]
   get --> person([A person decides])
-  person --> post["POST acs/approvals: digest and decision"]
+  person --> post["POST acs/approvals: digest, round and decision"]
   post --> auth{"Runtime authenticates the caller"}
   auth -->|caller identity| dec[("Decision recorded under the digest")]
   dec --> wake["Thread woken by a queued message"]
@@ -503,31 +504,43 @@ flowchart TB
 - **Single use, expiry, several approvers, roles.** As in §5.14, a decision is
   used once, may expire and may need several distinct approvers. The binding
   also checks `approver.role`, which §5.14 names without saying how it is
-  checked, against the caller's application roles.
+  checked, against the caller's application roles. A decision is made on one
+  round of a request. Once a round is rejected, expired or used, a call with the
+  same values opens the next round, and a decision sent for a closed round (one
+  made on a list loaded before another approver rejected, or a client's retry
+  after the approval was used) is refused with 409. The same decision sent
+  again for its own round is answered as the first was.
 - **The settings are part of the tool.** The role, the number of approvers
   and the expiry are fixed in the tool's definition. They are not read from
-  `state.env()`, which code in the thread can set.
+  `state.env()`, which code in the thread can set. `groundedTool` refuses,
+  when the tool is defined, a `min_approvers` that is not an integer of at
+  least 1 and an `expires_ms` that is not a number of milliseconds above zero.
 - **Decisions that arrive together.** Nothing serialises two endpoint
   requests, and the key-value store has no conditional write. A decision
   therefore never rewrites the request: a rejection sets one fixed key, and
   each approval is stored under the approver's own key. A request can lose an
-  approval that way, and never a rejection.
+  approval that way, and never a rejection. A rejection can also arrive while a
+  call that read the request as approved is starting. The tool marks the
+  approval used and then looks for a rejection; the endpoint stores the
+  rejection and then looks for that mark. At least one of the two sees the
+  other, so a rejection the endpoint answers as recorded always stops the
+  call, and one that arrives after the call used the approval is answered 409.
 
 | §5.14 field | In the binding |
 |---|---|
 | `approver.kind: human` | The authenticated caller of the endpoint. That the caller is a person is the deployment's assertion |
 | `approver.role` | `approval.role`, checked against the caller's `roles` |
-| `approver.min_approvers` | `approval.min_approvers`, counting distinct callers |
+| `approver.min_approvers` | `approval.min_approvers`, an integer of at least 1, counting distinct callers whose approval has not expired |
 | `mode` | Not distinguished: the Standard names `in_session` and `out_of_band` without defining them. The decision always arrives through the endpoint, not the conversation |
 | `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON |
 | `recheck` | Implicit: the digest is recomputed from the arguments at the moment the tool runs |
-| `expires` | `approval.expires_ms`, counted from the last decision |
+| `expires` | `approval.expires_ms`. As in the reference executor, no decision is accepted later than `expires_ms` after the request. Each approval then counts for `expires_ms` after it was given: the executor uses a decision when it arrives, a tool when the model calls again, so a request can be used up to twice `expires_ms` after it was made |
 | `approver.kind: standing_mandate`, `when_unattended` | Not implemented: an unapproved call is refused, which is `when_unattended: fail` |
 
 ### Evidence and audit trail
 
 Every ACS capability returns `evidence_anchors`. A grounded tool's `execute`
-must return them, and the wrapper refuses an output without them. The result
+must return them as an array, and the wrapper refuses an output without them. The result
 the model sees is the capability's output as JSON, anchors included.
 
 Each call, refused ones too, becomes an entry in a trace kept in the thread's
@@ -545,7 +558,11 @@ Two SA limits shape this part:
   which is ambiguous for two identical calls and has nothing for `invokeTool`
   or `queueTool`. The binding's `tool_call_done` hook therefore joins the two,
   giving each trace entry the id of the call that produced it, and adding an
-  entry for any call it is told about that no grounded tool recorded.
+  entry for any call it is told about that no grounded tool recorded. It
+  matches by tool name among the entries of its own execution and model step,
+  oldest first. An entry of an earlier step or execution, whose hook did not
+  run, keeps no id; within one step, the next call of the same tool gives its
+  id to such an entry.
 - **A tool result has no metadata slot.** `HookToolResult` is `status`,
   `result`, `error`, `stack` and `attachments`. Evidence has to travel inside
   `result`, as text the model also reads.
@@ -555,7 +572,9 @@ Two SA limits shape this part:
 The ACS validator checks a workflow against the ontology before anything
 runs. A prompt has no steps, but it has a fixed list of tools, and
 `lintPromptTools` checks what can be checked from that list: every tool is
-classified, and no tool needs a capability the prompt never offers. A prompt
+classified, each grounded tool states the name the prompt offers it under (the
+name an approver is shown and the trace records), and no tool needs a
+capability the prompt never offers. A prompt
 with a `mutate` tool and no `checkpoint` tool is an error, because the model
 could never get the call accepted.
 
@@ -573,14 +592,14 @@ gated one has succeeded.
 | It holds | It does not hold |
 |---|---|
 | A grounded tool never runs its side effect without the checkpoint and approval its capability requires | A tool defined with plain `defineTool` is not covered. No hook lets the binding, a runtime or a composing agent add the check from outside, and the [indirect routes](#enforce-inside-the-tool) each reshape the agent or rest on behaviour the text does not state |
-| An approval applies to exactly the arguments shown, once | The trace, the checkpoint records and the approval decisions are as trustworthy as the thread's key-value store. Any code running in the thread can write them, including a hook that a composed child requires of it. The binding stops a model from skipping a checkpoint or an approval; it is not a boundary against other code in the thread |
+| An approval applies to exactly the arguments shown, once, and only to a call made in an execution | The trace, the checkpoint records and the approval decisions are as trustworthy as the thread's key-value store. Any code running in the thread can write them, including a hook that a composed child requires of it. The binding stops a model from skipping a checkpoint or an approval; it is not a boundary against other code in the thread. Two calls that a tool's own code starts together through `state.invokeTool()` are taken one at a time only where the runtime runs them in one JavaScript realm; the 0.2.0 text does not say where an invoked tool runs |
 | The approver's identity is the one the runtime authenticated | Identity is as strong as the runtime's authentication, which SA leaves "implementation-defined", and an authenticated caller need not be a person |
-| Every grounded call is recorded, including refusals. A call cut off while its tool runs stays recorded as `started`, with the approval and checkpoint it used | The audit hook is best effort: a hook failure is "non-fatal", and a runtime "**SHOULD**" time hooks out |
+| Every grounded call is recorded, including refusals. A call cut off while its tool runs stays recorded as `started`, with the approval and checkpoint it used. A store write that fails after an approval or checkpoint was used leaves a `failed` entry naming them, if the store accepts that entry | The audit hook is best effort: a hook failure is "non-fatal", and a runtime "**SHOULD**" time hooks out. A call whose hook did not run keeps no call id, and within one model step the next call of the same tool takes its entry |
 | A checkpoint older than ten minutes is not accepted, and none is accepted outside an execution | That a checkpoint taken before the thread last went idle is refused sooner than that rests on each execution having its own `flowId`, which the 0.2.0 text does not state |
 | The classification survives packaging and any conforming runtime | No runtime acts on it |
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
-| | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint refuses there, so a deferred write is checked when it is scheduled |
-| A rejection is never lost to an approval made at the same moment | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again |
+| | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint or an approval refuses there, so a deferred write is checked when it is scheduled |
+| A rejection is never lost to an approval made at the same moment, and a rejection the endpoint answers as recorded stops a call that is starting on that approval | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again. A rejection that arrives after the call used the approval is answered 409, and the change runs |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and
 its rules are tested against an in-memory `ThreadState`. It has not been run
@@ -945,7 +964,13 @@ continued instead of restarted.
   the ACS reference executor. Three of its rules changed because of the
   mapping: a rejection can no longer be lost to an approval made at the same
   moment, a call is recorded before its tool runs, and a checkpoint is valid
-  for ten minutes at most and never outside an execution.
+  for ten minutes at most and never outside an execution. A later review of
+  its code changed more: a decision applies only to the round it was made on, a
+  rejection the endpoint records while a call is starting stops that call, a
+  call that needs an approval is refused outside an execution, an approval
+  counts for `expires` after it was given and none is accepted after the
+  request expired, the audit hook links a call id only within its own
+  execution and model step, and canonical JSON refuses unpaired surrogates.
 - **What was not done.** The example was not run in a Standard Agents runtime,
   so nothing here is a statement about how any runtime behaves beyond what the
   specification requires of it. No runtime's source and no conformance suite

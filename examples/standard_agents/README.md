@@ -55,12 +55,13 @@ code enforces its rules, not how a particular runtime behaves.
 | `src/acs/ontology.gen.ts` | Each capability's flags and required output fields, generated from `schemas/capability_ontology.yaml` |
 | `src/acs/approval.ts` | Approval requests and decisions, bound to a digest of what the approver was shown |
 | `src/acs/audit.ts` | Joins tool call ids to the trace from a `tool_call_done` hook, and records calls no grounded tool recorded |
-| `src/acs/lint.ts` | Checks before anything runs. A prompt's tool list: every tool classified, no requirement the prompt can never meet. An agent's stop and session bindings: none names a tool that can be refused |
+| `src/acs/lint.ts` | Checks before anything runs. A prompt's tool list: every tool classified, each stating the name the prompt offers it under, no requirement the prompt can never meet. An agent's stop and session bindings: none names a tool that can be refused |
 | `src/acs/canonical.ts` | RFC 8785 canonical JSON and the SHA-256 digest, equal to the reference executor's |
 | `src/acs/records.ts` | The records kept in the thread's key-value store |
+| `src/acs/serial.ts` | Takes one thread's checks and record writes one at a time, for calls in one JavaScript realm |
 | `src/package.ts` | The example as a packed agent: the entry point exports that Packaging describes |
 | `agents/tools/` | The example's five tools: `retrieve`, `checkpoint`, `mutate`, `verify`, `rollback` |
-| `agents/api/acs/` | Thread endpoints a person's client calls to list and decide approvals |
+| `agents/api/acs/` | Thread endpoints a person's client calls to list pending approvals, each with the round a decision applies to, and to decide one (`digest`, `round`, `decision`) |
 | `agents/hooks/` | The audit hook |
 | `agents/prompts/`, `agents/agents/`, `agents/models/` | The prompt, the agent and its model |
 
@@ -93,12 +94,19 @@ annotation
 ([schema](../../schemas/interop/standard_agents_annotation.schema.json)), and
 wraps `execute` so that the call is refused until the capability's rules are
 met. The return type of `execute` is the capability's output contract: leaving
-out `evidence_anchors` is a compile error, and an error result at run time.
+out `evidence_anchors`, or returning one that is not an array, is a compile
+error, and an error result at run time. A required `confidence` outside 0 to
+1 is an error result at run time. `name` must be the name the tool is
+registered under: a tool cannot see that name, the approver is shown the one
+stated here, and `lintPromptTools` reports a difference.
 
 A restore point counts only in the execution it was taken in, and for ten
 minutes at most, so the order that works is: ask, wait for the approval, then
 take the restore point and make the change. The example's prompt tells the model so, and a tool that is
-refused says what is missing.
+refused says what is missing. A call that needs an approval or a restore
+point is refused outside an execution, as when a thread endpoint invokes the
+tool: the runtime runs a thread's executions one at a time, but does not
+serialise endpoint requests with them.
 
 ## Deploying one
 

@@ -40,9 +40,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   rules inside the tool; approvals are recorded through an authenticated
   thread endpoint and bound to the §5.14 digest, which is tested against the
   reference executor's. A rejection cannot be lost to an approval made at the
-  same moment, a call is recorded before its tool runs, and a checkpoint
-  authorises a call for ten minutes at most and only inside the execution it
-  was taken in. `lintPromptTools` and `lintAgentBindings` check a prompt's
+  same moment and stops a call that is starting on that approval, a decision
+  applies only to the round of the request it was made on (`POST
+  acs/approvals` takes `{ digest, round, decision }`), a call is recorded
+  before its tool runs, a checkpoint or an approval authorises a call only
+  inside an execution and a checkpoint for ten minutes at most, and canonical
+  JSON refuses unpaired surrogates. `lintPromptTools` and `lintAgentBindings` check a prompt's
   tools and an agent's stop and session bindings before anything runs. CI
   type-checks it against the published `@standardagents/spec` types and runs
   its tests.

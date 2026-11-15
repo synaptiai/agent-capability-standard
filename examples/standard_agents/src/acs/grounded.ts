@@ -22,7 +22,8 @@
  * guarantees: the specification calls `flowId` the "Unique execution ID" and
  * does not say when it changes (see `flowOf` in records.ts). A call made
  * outside an execution, from an endpoint or an effect, has no `flowId`, and
- * no checkpoint authorises it.
+ * neither a checkpoint nor an approval authorises it: the runtime runs one
+ * execution of a thread at a time, and nothing else (see serial.ts).
  */
 import {
   defineTool,
@@ -34,7 +35,14 @@ import {
   type VariableDefinition,
 } from '@standardagents/spec';
 import type { z } from 'zod';
-import { approvalState, consumeApproval, requestApproval, type ApprovalPolicy } from './approval.js';
+import {
+  approvalRound,
+  approvalState,
+  consumeApproval,
+  policyProblems,
+  requestApproval,
+  type ApprovalPolicy,
+} from './approval.js';
 import { digest as digestOf, type Json } from './canonical.js';
 import {
   CAPABILITIES,
@@ -56,12 +64,14 @@ import {
   flowOf,
   readCheckpoints,
   readExecuted,
+  stepOf,
   type CheckpointRecord,
   type Diagnostic,
   type ApprovalRecord,
   type RefusalCode,
   type TraceEntry,
 } from './records.js';
+import { serially } from './serial.js';
 
 /** The key this binding owns in a tool's `annotations`. */
 export const ANNOTATION_KEY = 'acs';
@@ -111,8 +121,9 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   /** Other owners' annotation keys. The `acs` key is set by the wrapper. */
   annotations?: Record<string, unknown>;
   /**
-   * How long a checkpoint can authorise this tool's call, in milliseconds
-   * (default `CHECKPOINT_MAX_AGE_MS`). Only for a tool that requires one.
+   * How long a checkpoint can authorise this tool's call, in milliseconds:
+   * more than zero and at most `CHECKPOINT_MAX_AGE_MS`, the default. Only
+   * for a tool that requires one.
    */
   checkpoint_max_age_ms?: number;
   /** Milliseconds since the Unix epoch; defaults to `Date.now`. */
@@ -151,10 +162,49 @@ function refusal(
   };
 }
 
-function missingOutputFields(capability: CapabilityId, output: Record<string, unknown>): string[] {
+/**
+ * How `output` breaks the capability's output contract: a required field
+ * that is missing, or `evidence_anchors` or a required `confidence` of the
+ * wrong type. The ontology types those two fields the same way wherever it
+ * declares them: an array, and a number from 0 to 1.
+ */
+function outputProblems(capability: CapabilityId, output: unknown): string[] {
+  if (typeof output !== 'object' || output === null || Array.isArray(output)) {
+    return [`the '${capability}' output is not a JSON object`];
+  }
+  const record = output as Record<string, unknown>;
   const required: readonly string[] = CAPABILITIES[capability].output_required;
-  return required.filter((field) => !(field in output));
+  const problems: string[] = [];
+  const missing = required.filter((field) => !(field in record));
+  if (missing.length > 0) problems.push(`the '${capability}' output is missing ${missing.join(', ')}`);
+  if ('evidence_anchors' in record && !Array.isArray(record['evidence_anchors'])) {
+    problems.push(`the '${capability}' output's evidence_anchors is not an array`);
+  }
+  if (required.includes('confidence') && 'confidence' in record) {
+    const confidence = record['confidence'];
+    if (typeof confidence !== 'number' || !(confidence >= 0 && confidence <= 1)) {
+      problems.push(`the '${capability}' output's confidence is not a number from 0 to 1`);
+    }
+  }
+  return problems;
 }
+
+/** The name each tool defined here states for itself; see `statedName`. */
+const STATED_NAMES = new WeakMap<object, string>();
+
+/**
+ * The name a tool defined with `groundedTool` states for itself: what an
+ * approver is shown and the trace records. A tool cannot see the name it is
+ * registered under, so `lintPromptTools` compares the two.
+ */
+export function statedName(tool: object): string | undefined {
+  return STATED_NAMES.get(tool);
+}
+
+/** What the checks before a call decided. */
+type Claim =
+  | { outcome: ToolResult }
+  | { outcome?: undefined; started: TraceEntry; call: GroundedCall; flow: string | null };
 
 /**
  * Define a function tool that performs one ontology capability and enforces
@@ -169,6 +219,17 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   if (warnings.length > 0) {
     throw new Error(`groundedTool '${name}': ${warnings.join('; ')}`);
   }
+  const policy = options.approval ?? {};
+  const problems = policyProblems(policy);
+  if (problems.length > 0) {
+    throw new Error(`groundedTool '${name}': ${problems.join('; ')} (STANDARD v1.1.0 §5.14)`);
+  }
+  const maxAge = options.checkpoint_max_age_ms ?? CHECKPOINT_MAX_AGE_MS;
+  if (!(maxAge > 0 && maxAge <= CHECKPOINT_MAX_AGE_MS)) {
+    throw new Error(
+      `groundedTool '${name}': checkpoint_max_age_ms must be more than zero and at most ${CHECKPOINT_MAX_AGE_MS}, not ${maxAge}`,
+    );
+  }
   const now = options.now ?? (() => Date.now());
 
   const annotation: AcsAnnotation = {
@@ -180,161 +241,204 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     ...flags,
   };
 
-  const execute = async (state: ThreadState, args: z.infer<Args>): Promise<ToolResult> => {
-    const argsJson = args as Json;
-    const argsDigest = await digestOf(argsJson);
+  /**
+   * Everything before the tool's own code runs: the checks, then using up
+   * what the call needs, then the `started` entry. It runs under `serially`,
+   * so two calls in this realm cannot both pass on one approval or one
+   * checkpoint.
+   */
+  const check = async (state: ThreadState, argsJson: Json): Promise<Claim> => {
     const flow = flowOf(state);
-    const base = {
-      action: name,
-      capability,
-      args_digest: argsDigest,
-      ...(domain !== undefined ? { domain } : {}),
-      ...(flow !== null ? { flow_id: flow } : {}),
-    };
-
-    const refuse = async (result: ToolResult, code: RefusalCode): Promise<ToolResult> => {
-      await appendTrace(state, { ...base, at: now(), status: 'refused', code, error: result.error ?? code });
-      return result;
-    };
-
-    // 1. Approval, bound to the digest of exactly what is about to run.
-    let request: ApprovalRecord | undefined;
-    if (flags.requires_approval) {
-      const shown: Json[] = [{ action: name, capability, args: argsJson }];
-      request = await requestApproval(state, shown, options.approval ?? {}, now());
-      const standing = approvalState(request, now());
-      if (standing !== 'approved') {
-        return refuse(
-          refusal(
-            'F502',
-            name,
-            capability,
-            `This call needs approval and the request is ${standing}.`,
-            'Tell the person what you intend to do and wait for them to decide; then call the tool again with the same arguments.',
-            { digest: request.digest, shown, state: standing },
-          ),
-          'F502',
-        );
-      }
-    }
-
-    // 2. `requires` edges: each prerequisite capability must have run.
-    const executed = await readExecuted(state);
-    for (const needed of prerequisites(capability)) {
-      if (!executed[needed]) {
-        const code: RefusalCode = capability === 'rollback' ? 'F503' : 'F501';
-        return refuse(
-          refusal(
-            code,
-            name,
-            capability,
-            `'${capability}' requires '${needed}' to have run first in this thread.`,
-            `Call a '${needed}' tool, then call ${name} again.`,
-          ),
-          code,
-        );
-      }
-    }
-
-    // 3. A valid checkpoint for this call alone, taken in this execution and
-    // not long ago.
-    const checkpoints = flags.requires_checkpoint ? await readCheckpoints(state) : [];
-    const unused = [...checkpoints].reverse().filter((c) => c.valid);
-    const maxAge = options.checkpoint_max_age_ms ?? CHECKPOINT_MAX_AGE_MS;
-    const at = now();
-    const checkpoint =
-      flow === null ? undefined : unused.find((c) => c.flow_id === flow && at - c.at <= maxAge);
-    if (flags.requires_checkpoint && !checkpoint) {
-      const message =
-        flow === null
-          ? 'This call is not part of an execution, and a checkpoint authorises a call only in the execution it was taken in.'
-          : unused.some((c) => c.flow_id === flow)
-            ? 'The last checkpoint was taken too long ago, and what it saved may have changed since.'
-            : unused.length > 0
-              ? 'The last checkpoint was taken before this thread last went idle, and what it saved may have changed since.'
-              : 'Every earlier checkpoint has been used; each call that requires a checkpoint needs its own.';
-      return refuse(
-        refusal(
-          'F501',
-          name,
-          capability,
-          message,
-          flow === null
-            ? `Call ${name} from a tool call, after a 'checkpoint' tool in the same execution.`
-            : `Call a 'checkpoint' tool, then call ${name} again.`,
-        ),
-        'F501',
-      );
-    }
-
-    // Every check has passed. Only now are the approval and the checkpoint
-    // used up, so a call refused above leaves both as they were.
-    let approvers: string[] | undefined;
-    let approvalUse: TraceEntry['approval'];
-    if (request) {
-      await consumeApproval(state, request, now());
-      approvers = [...new Set(request.decisions.map((d) => d.approver))];
-      approvalUse = {
-        digest: request.digest,
-        approvers,
-        decision_ids: request.decisions.map((d) => d.decision_id),
+    const step = stepOf(state);
+    const position = { ...(flow !== null ? { flow_id: flow } : {}), ...(step !== null ? { step } : {}) };
+    const identity = { action: name, capability, ...(domain !== undefined ? { domain } : {}), ...position };
+    // What is known of the call so far, for the record if a write fails.
+    const used: Pick<TraceEntry, 'args_digest' | 'approval' | 'checkpoint_id'> = {};
+    try {
+      used.args_digest = await digestOf(argsJson);
+      const base = { ...identity, args_digest: used.args_digest };
+      const refuse = async (result: ToolResult, code: RefusalCode): Promise<Claim> => {
+        await appendTrace(state, { ...base, at: now(), status: 'refused', code, error: result.error ?? code });
+        return { outcome: result };
       };
-    }
-    const checkpointId = checkpoint?.id;
-    if (checkpoint) {
-      await state.setValue(
-        KEYS.checkpoints,
-        checkpoints.map((c): CheckpointRecord => (c.id === checkpoint.id ? { ...c, valid: false } : c)),
-      );
-    }
 
-    // 4. Record that the call is starting, run, check the output contract,
-    // record the outcome. The entry is written first so that a call cut off
-    // while the tool's code runs still leaves a record of what it used.
-    const started = await appendTrace(state, {
-      ...base,
-      ...(checkpointId !== undefined ? { checkpoint_id: checkpointId } : {}),
-      ...(approvalUse !== undefined ? { approval: approvalUse } : {}),
-      at: now(),
-      status: 'started',
-    });
+      // 1. Approval, bound to the digest of exactly what is about to run.
+      let request: ApprovalRecord | undefined;
+      if (flags.requires_approval) {
+        if (flow === null) {
+          return await refuse(
+            refusal(
+              'F502',
+              name,
+              capability,
+              'This call is not part of an execution, and an approval authorises only a call made in one, where the runtime runs one call at a time.',
+              `Call ${name} from a tool call in an execution.`,
+            ),
+            'F502',
+          );
+        }
+        const shown: Json[] = [{ action: name, capability, args: argsJson }];
+        request = await requestApproval(state, shown, policy, now());
+        const standing = approvalState(request, now());
+        if (standing !== 'approved') {
+          return await refuse(
+            refusal(
+              'F502',
+              name,
+              capability,
+              `This call needs approval and the request is ${standing}.`,
+              'Tell the person what you intend to do and wait for them to decide; then call the tool again with the same arguments.',
+              { digest: request.digest, round: approvalRound(request), shown, state: standing },
+            ),
+            'F502',
+          );
+        }
+      }
+
+      // 2. `requires` edges: each prerequisite capability must have run.
+      const executed = await readExecuted(state);
+      for (const needed of prerequisites(capability)) {
+        if (!executed[needed]) {
+          const code: RefusalCode = capability === 'rollback' ? 'F503' : 'F501';
+          return await refuse(
+            refusal(
+              code,
+              name,
+              capability,
+              `'${capability}' requires '${needed}' to have run first in this thread.`,
+              `Call a '${needed}' tool, then call ${name} again.`,
+            ),
+            code,
+          );
+        }
+      }
+
+      // 3. A valid checkpoint for this call alone, taken in this execution and
+      // not long ago.
+      const checkpoints = flags.requires_checkpoint ? await readCheckpoints(state) : [];
+      const unused = [...checkpoints].reverse().filter((c) => c.valid);
+      const at = now();
+      const checkpoint =
+        flow === null ? undefined : unused.find((c) => c.flow_id === flow && at - c.at <= maxAge);
+      if (flags.requires_checkpoint && !checkpoint) {
+        const message =
+          flow === null
+            ? 'This call is not part of an execution, and a checkpoint authorises a call only in the execution it was taken in.'
+            : unused.some((c) => c.flow_id === flow)
+              ? 'The last checkpoint was taken too long ago, and what it saved may have changed since.'
+              : unused.length > 0
+                ? 'The last checkpoint was taken before this thread last went idle, and what it saved may have changed since.'
+                : 'Every earlier checkpoint has been used; each call that requires a checkpoint needs its own.';
+        return await refuse(
+          refusal(
+            'F501',
+            name,
+            capability,
+            message,
+            flow === null
+              ? `Call ${name} from a tool call, after a 'checkpoint' tool in the same execution.`
+              : `Call a 'checkpoint' tool, then call ${name} again.`,
+          ),
+          'F501',
+        );
+      }
+
+      // Every check has passed. Only now are the approval and the checkpoint
+      // used up, so a call refused above leaves both as they were.
+      let approvers: string[] | undefined;
+      if (request) {
+        approvers = [...new Set(request.decisions.map((d) => d.approver))];
+        used.approval = {
+          digest: request.digest,
+          approvers,
+          decision_ids: request.decisions.map((d) => d.decision_id),
+        };
+        // A rejection recorded since the request was read stops the call;
+        // the checkpoint is not touched.
+        if (await consumeApproval(state, request, now())) {
+          delete used.approval;
+          return await refuse(
+            refusal(
+              'F502',
+              name,
+              capability,
+              'The request was rejected while this call was starting.',
+              'Tell the person what you intend to do and wait for them to decide; then call the tool again with the same arguments.',
+              { digest: request.digest, round: approvalRound(request), state: 'rejected' },
+            ),
+            'F502',
+          );
+        }
+      }
+      if (checkpoint) {
+        used.checkpoint_id = checkpoint.id;
+        await state.setValue(
+          KEYS.checkpoints,
+          checkpoints.map((c): CheckpointRecord => (c.id === checkpoint.id ? { ...c, valid: false } : c)),
+        );
+      }
+
+      // 4. Record that the call is starting. The entry is written before the
+      // tool's own code runs, so that a call cut off while it runs still
+      // leaves a record of what it used.
+      const started = await appendTrace(state, { ...base, ...used, at: now(), status: 'started' });
+      return {
+        started,
+        flow,
+        call: {
+          seq: started.seq,
+          ...(used.checkpoint_id !== undefined ? { checkpoint_id: used.checkpoint_id } : {}),
+          ...(approvers !== undefined ? { approvers } : {}),
+        },
+      };
+    } catch (cause) {
+      // A write failed, or the arguments have no canonical JSON. Record what
+      // the call used, so no approval or checkpoint is spent without a trace
+      // entry; if the store refuses that too, there is nothing more to do.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      await appendTrace(state, { ...identity, ...used, at: now(), status: 'failed', error: message }).catch(() => undefined);
+      return { outcome: { status: 'error', error: message } };
+    }
+  };
+
+  const execute = async (state: ThreadState, args: z.infer<Args>): Promise<ToolResult> => {
+    const claim = await serially(state.threadId, () => check(state, args as Json));
+    if (claim.outcome) return claim.outcome;
+    const { started, call, flow } = claim;
+
+    // Run, check the output contract, record the outcome.
     let output: CapabilityOutput<C>;
     try {
-      output = await options.execute(state, args, {
-        seq: started.seq,
-        ...(checkpointId !== undefined ? { checkpoint_id: checkpointId } : {}),
-        ...(approvers !== undefined ? { approvers } : {}),
-      });
-      const missing = missingOutputFields(capability, output);
-      if (missing.length > 0) {
-        throw new Error(`the '${capability}' output is missing ${missing.join(', ')}`);
-      }
+      output = await options.execute(state, args, call);
+      const problems = outputProblems(capability, output);
+      if (problems.length > 0) throw new Error(problems.join('; '));
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      await completeTrace(state, started, { at: now(), status: 'failed', error: message });
+      await serially(state.threadId, () => completeTrace(state, started, { at: now(), status: 'failed', error: message }));
       return { status: 'error', error: message };
     }
 
     const anchors = output['evidence_anchors'];
-    const entry = await completeTrace(state, started, {
-      at: now(),
-      status: 'executed',
-      ...(Array.isArray(anchors) ? { evidence_anchors: anchors } : {}),
+    await serially(state.threadId, async () => {
+      const entry = await completeTrace(state, started, {
+        at: now(),
+        status: 'executed',
+        ...(Array.isArray(anchors) ? { evidence_anchors: anchors } : {}),
+      });
+      if (capability === 'checkpoint') {
+        const id = typeof output['checkpoint_id'] === 'string' ? output['checkpoint_id'] : `checkpoint-${entry.seq}`;
+        const checkpoints = await readCheckpoints(state);
+        await state.setValue(KEYS.checkpoints, [
+          ...checkpoints,
+          { id, valid: true, seq: entry.seq, at: entry.at, flow_id: flow },
+        ]);
+      }
     });
-
-    if (capability === 'checkpoint') {
-      const id = typeof output['checkpoint_id'] === 'string' ? output['checkpoint_id'] : `checkpoint-${entry.seq}`;
-      const checkpoints = await readCheckpoints(state);
-      await state.setValue(KEYS.checkpoints, [
-        ...checkpoints,
-        { id, valid: true, seq: entry.seq, at: entry.at, flow_id: flow },
-      ]);
-    }
 
     return { status: 'success', result: JSON.stringify(output) };
   };
 
-  return defineTool<ThreadState, Args>({
+  const definition = defineTool<ThreadState, Args>({
     description: options.description,
     args: options.args,
     annotations: { ...options.annotations, [ANNOTATION_KEY]: annotation },
@@ -345,6 +449,8 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     // it is exactly the signature of `execute` above.
     execute: execute as UsesAwareExecute<ThreadState, Args, readonly string[]>,
   });
+  STATED_NAMES.set(definition, name);
+  return definition;
 }
 
 /** The `acs` annotation of a tool definition, if it has a well-formed one. */

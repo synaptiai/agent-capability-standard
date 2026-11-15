@@ -27,6 +27,8 @@ export const KEYS = {
   executed: 'acs:executed',
   /** Trace entries the audit hook has not yet matched to a tool call id. */
   unlinked: 'acs:trace:unlinked',
+  /** The trace entry a tool call id was given to, so a hook delivered twice adds nothing. */
+  call: (id: string) => `acs:trace:call:${encodeURIComponent(id)}`,
   checkpoints: 'acs:checkpoints',
   approval: (digest: string) => `acs:approval:${digest}`,
   /** One approver's approval. Only that approver's request writes it. */
@@ -86,6 +88,11 @@ export function flowOf(state: { execution: { flowId: string } | null }): string 
   return state.execution?.flowId ?? null;
 }
 
+/** The model step of the execution a call belongs to (`stepCount`), or `null` outside an execution. */
+export function stepOf(state: { execution: { stepCount: number } | null }): number | null {
+  return state.execution?.stepCount ?? null;
+}
+
 /** One person's answer to an approval request. */
 export interface ApprovalDecision {
   decision_id: string;
@@ -112,7 +119,11 @@ export interface ApprovalRecord {
   /** When set, only a caller holding this application role may decide. */
   role?: string;
   requested_at: number;
-  /** How long the approval stays valid after the last decision, in milliseconds. */
+  /**
+   * How long a decision stays valid, in milliseconds: no decision is
+   * accepted later than this after `requested_at`, and an approval counts
+   * for this long after it was given. See `approvalState`.
+   */
   expires_ms?: number;
   decisions: ApprovalDecision[];
   /** Set when a tool call ran under this approval: an approval is single-use. */
@@ -130,6 +141,8 @@ export interface TraceEntry {
   at: number;
   /** The execution the call ran in (`state.execution.flowId`), when there was one. */
   flow_id?: string;
+  /** The model step of that execution (`state.execution.stepCount`). */
+  step?: number;
   /** The tool's name. */
   action: string;
   /** `null` for a tool call the audit hook saw that no grounded tool recorded. */
@@ -141,7 +154,10 @@ export interface TraceEntry {
    * (an aborted execution, a lost process) after it may have acted.
    */
   status: 'started' | 'executed' | 'failed' | 'refused';
-  /** SHA-256 of the canonical JSON of the arguments; absent for an unclassified call. */
+  /**
+   * SHA-256 of the canonical JSON of the arguments; absent for an
+   * unclassified call, and for arguments that have no canonical JSON.
+   */
   args_digest?: string;
   /** Why the call was refused. */
   code?: RefusalCode;
@@ -158,17 +174,46 @@ export interface TraceEntry {
 export interface Unlinked {
   seq: number;
   action: string;
+  /** The execution and model step the call was made in: only a hook of the same step may link it. */
+  flow_id: string | null;
+  step: number | null;
 }
 
-/** Append an entry to the thread's trace and return it with its sequence number. */
+/** Whether a waiting entry belongs to the given execution and model step. */
+export function samePosition(waiting: Unlinked, flow: string | null, step: number | null): boolean {
+  return (waiting.flow_id ?? null) === flow && (waiting.step ?? null) === step;
+}
+
+/**
+ * Whether a waiting entry can no longer be linked, as seen from a call or a
+ * hook at the given position. Seen from an execution, an entry of any other
+ * execution or model step cannot: the runtime runs one execution of a thread
+ * at a time, and no model step starts between a call and its hook. Code
+ * outside an execution, such as a thread endpoint, can run while an entry of
+ * the execution waits for its hook, so from there no entry is stale.
+ */
+export function stale(waiting: Unlinked, flow: string | null, step: number | null): boolean {
+  return flow !== null && !samePosition(waiting, flow, step);
+}
+
+/**
+ * Append an entry to the thread's trace and return it with its sequence
+ * number. The count is advanced before the entry is written, so a write that
+ * fails part-way leaves a gap in the numbering, never an entry that the next
+ * one overwrites.
+ */
 export async function appendTrace(store: Store, entry: Omit<TraceEntry, 'seq'>): Promise<TraceEntry> {
   const seq = ((await store.getValue<number>(KEYS.traceCount)) ?? 0) + 1;
   const stored: TraceEntry = { seq, ...entry };
-  await store.setValue(KEYS.trace(seq), stored);
   await store.setValue(KEYS.traceCount, seq);
+  await store.setValue(KEYS.trace(seq), stored);
   if (stored.capability !== null && stored.tool_call_id === undefined) {
-    const unlinked = (await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? [];
-    await store.setValue(KEYS.unlinked, [...unlinked, { seq, action: stored.action }]);
+    const waiting: Unlinked = { seq, action: stored.action, flow_id: stored.flow_id ?? null, step: stored.step ?? null };
+    // An entry of an earlier step can no longer be linked (see audit.ts).
+    const unlinked = ((await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? []).filter(
+      (u) => !stale(u, waiting.flow_id, waiting.step),
+    );
+    await store.setValue(KEYS.unlinked, [...unlinked, waiting]);
   }
   await countExecuted(store, stored);
   return stored;

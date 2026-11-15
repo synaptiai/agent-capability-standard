@@ -12,7 +12,7 @@ import readConfig from '../agents/tools/read_config.js';
 import rollbackConfig from '../agents/tools/rollback_config.js';
 import verifyConfig from '../agents/tools/verify_config.js';
 import writeConfig from '../agents/tools/write_config.js';
-import { approvalState, decideApproval, readApproval } from '../src/acs/approval.js';
+import { approvalState, decideApproval, readApproval, type ApprovalPolicy } from '../src/acs/approval.js';
 import { digest } from '../src/acs/canonical.js';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
@@ -191,6 +191,47 @@ describe('checkpoint before mutation', () => {
     expect(result.error).toMatch(/not part of an execution/);
   });
 
+  it('lets a tool shorten the time a checkpoint counts, never lengthen it', async () => {
+    const define = (checkpoint_max_age_ms: number) =>
+      groundedTool({
+        name: 'store',
+        capability: 'persist',
+        flags: { requires_checkpoint: true },
+        description: 'x',
+        args: z.object({}),
+        checkpoint_max_age_ms,
+        execute: async () => ({ stored: true, evidence_anchors: [] }),
+      });
+    for (const age of [CHECKPOINT_MAX_AGE_MS + 1, Number.POSITIVE_INFINITY, 0, -1, Number.NaN]) {
+      expect(() => define(age), String(age)).toThrow(/checkpoint_max_age_ms/);
+    }
+    expect(() => define(CHECKPOINT_MAX_AGE_MS)).not.toThrow();
+
+    let clock = 0;
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'x',
+      args: z.object({}),
+      now: () => clock,
+      execute: async (_state, _args, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+    });
+    const quick = groundedTool({
+      name: 'store',
+      capability: 'persist',
+      flags: { requires_checkpoint: true },
+      description: 'x',
+      args: z.object({}),
+      checkpoint_max_age_ms: 60_000,
+      now: () => clock,
+      execute: async () => ({ stored: true, evidence_anchors: [] }),
+    });
+    const t = thread();
+    await save.execute(t.state, {});
+    clock = 60_001;
+    expect((await quick.execute(t.state, {})).error).toMatch(/too long ago/);
+  });
+
   it('refuses a rollback when no checkpoint has run', async () => {
     const t = thread();
     const result = await rollbackConfig.execute(t.state, { checkpoint_id: 'cp-1' });
@@ -296,6 +337,88 @@ describe('approval bound to what was shown', () => {
     clock += 60_001;
     expect(await tool.execute(t.state, { version: '1.2.0' })).toMatchObject({ error_code: 'F502' });
   });
+
+  it('refuses, when the tool is defined, an approval policy §5.14 does not allow', () => {
+    const define = (approval: ApprovalPolicy) => () =>
+      groundedTool({
+        name: 'release',
+        capability: 'execute',
+        description: 'Run the release.',
+        approval,
+        args: z.object({}),
+        execute: async () => ({ result: 'released', evidence_anchors: [] }),
+      });
+    // An unset environment variable read with Number() is NaN, and 0 or less
+    // would let the call run on no decision at all.
+    for (const min_approvers of [0, -1, 1.5, Number.NaN]) {
+      expect(define({ min_approvers }), String(min_approvers)).toThrow(/min_approvers/);
+    }
+    for (const expires_ms of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(define({ expires_ms }), String(expires_ms)).toThrow(/expires_ms/);
+    }
+    expect(define({ min_approvers: 2, expires_ms: 1 })).not.toThrow();
+
+    // A stored request with no usable approver count is never approved.
+    const record = { digest: 'd', shown: [], min_approvers: 0, requested_at: 0, decisions: [] };
+    for (const min_approvers of [0, -1, null as unknown as number]) {
+      expect(approvalState({ ...record, min_approvers }, 1), String(min_approvers)).toBe('pending');
+    }
+  });
+
+  it('accepts no decision after the request has expired, as the reference executor does', async () => {
+    let clock = 0;
+    const release = (min_approvers: number) =>
+      groundedTool({
+        name: 'release',
+        capability: 'execute',
+        description: 'Run the release.',
+        approval: { min_approvers, expires_ms: 60_000 },
+        args: z.object({ version: z.string() }),
+        now: () => clock,
+        execute: async () => ({ result: 'released', evidence_anchors: [] }),
+      });
+    const t = thread();
+
+    // Two approvers: the second decides thirty days after the first.
+    const two = release(2);
+    const d = digestOf(await two.execute(t.state, { version: '1' }));
+    await decideApproval(t.state, user('alice'), d, 'approved', clock);
+    clock = 30 * 24 * 60 * 60 * 1000;
+    await expect(decideApproval(t.state, user('bob'), d, 'approved', clock)).rejects.toThrow(/expired/);
+    expect(await two.execute(t.state, { version: '1' })).toMatchObject({ error_code: 'F502' });
+
+    // One approver, deciding a year after the request was made.
+    const one = release(1);
+    const stale = digestOf(await one.execute(t.state, { version: '2' }));
+    clock += 365 * 24 * 60 * 60 * 1000;
+    await expect(decideApproval(t.state, user('alice'), stale, 'approved', clock)).rejects.toThrow(/expired/);
+    expect(await one.execute(t.state, { version: '2' })).toMatchObject({ error_code: 'F502' });
+  });
+
+  it('keeps an approval given in time valid for the expiry after it was given', async () => {
+    let clock = 0;
+    const tool = groundedTool({
+      name: 'release',
+      capability: 'execute',
+      description: 'Run the release.',
+      approval: { expires_ms: 60_000 },
+      args: z.object({ version: z.string() }),
+      now: () => clock,
+      execute: async () => ({ result: 'released', evidence_anchors: [] }),
+    });
+    const t = thread();
+    const d = digestOf(await tool.execute(t.state, { version: '1' }));
+    clock = 59_000;
+    await decideApproval(t.state, user('alice'), d, 'approved', clock);
+    clock = 119_000;
+    data(await tool.execute(t.state, { version: '1' }));
+
+    const late = digestOf(await tool.execute(t.state, { version: '2' }));
+    clock += 59_000;
+    await decideApproval(t.state, user('alice'), late, 'approved', clock);
+    clock += 60_001;
+    expect(await tool.execute(t.state, { version: '2' })).toMatchObject({ error_code: 'F502' });
+  });
 });
 
 describe('decisions made at the same moment', () => {
@@ -359,12 +482,12 @@ describe('the approval endpoint', () => {
 
     const listed = (await (
       await approvalsGet(new Request('https://runtime.example/x'), t.state, {}, { caller: user('alice'), threadAccess: true })
-    ).json()) as { approvals: { digest: string; shown: unknown }[] };
+    ).json()) as { approvals: { digest: string; round: number; shown: unknown }[] };
     expect(listed.approvals).toEqual([
-      expect.objectContaining({ digest: d, shown: [{ action: 'write_config', capability: 'mutate', args: CHANGE }] }),
+      expect.objectContaining({ digest: d, round: 1, shown: [{ action: 'write_config', capability: 'mutate', args: CHANGE }] }),
     ]);
 
-    const response = await post(t, user('alice'), { digest: d, decision: 'approved' });
+    const response = await post(t, user('alice'), { digest: d, round: listed.approvals[0]?.round, decision: 'approved' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ digest: d, state: 'approved' });
     expect(t.queued).toEqual([expect.objectContaining({ role: 'user', silent: true })]);
@@ -376,9 +499,98 @@ describe('the approval endpoint', () => {
 
   it('refuses an anonymous caller, a malformed body and an unknown request', async () => {
     const t = thread();
-    expect((await post(t, null, { digest: 'a'.repeat(64), decision: 'approved' })).status).toBe(401);
+    expect((await post(t, null, { digest: 'a'.repeat(64), round: 1, decision: 'approved' })).status).toBe(401);
     expect((await post(t, user('alice'), { decision: 'approved' })).status).toBe(400);
-    expect((await post(t, user('alice'), { digest: 'a'.repeat(64), decision: 'approved' })).status).toBe(404);
+    // The round the approver was shown is part of the decision.
+    expect((await post(t, user('alice'), { digest: 'a'.repeat(64), decision: 'approved' })).status).toBe(400);
+    expect((await post(t, user('alice'), { digest: 'a'.repeat(64), round: 0, decision: 'approved' })).status).toBe(400);
+    expect((await post(t, user('alice'), { digest: 'a'.repeat(64), round: 1, decision: 'approved' })).status).toBe(404);
+  });
+
+  it('applies a decision only to the round the approver was shown', async () => {
+    const t = thread();
+    const first = await writeConfig.execute(t.state, CHANGE);
+    const d = digestOf(first);
+    expect(first.error_data).toMatchObject({ round: 1 });
+
+    // Alice and Bob both have round 1 open. Bob rejects it, and the model,
+    // woken, asks again: that opens round 2.
+    expect((await post(t, user('bob'), { digest: d, round: 1, decision: 'rejected' })).status).toBe(200);
+    expect(await writeConfig.execute(t.state, CHANGE)).toMatchObject({ error_data: { state: 'pending', round: 2 } });
+
+    // Alice's approval, given on the list she loaded before Bob rejected.
+    const late = await post(t, user('alice'), { digest: d, round: 1, decision: 'approved' });
+    expect(late.status).toBe(409);
+    await checkpointConfig.execute(t.state, { label: 'one' });
+    expect(await writeConfig.execute(t.state, CHANGE)).toMatchObject({ error_code: 'F502' });
+    expect(t.files.get(SETTINGS_PATH)).toBe('{"retries":"3"}');
+  });
+
+  it('does not let a repeated approval authorise the next round', async () => {
+    const t = thread();
+    const d = digestOf(await writeConfig.execute(t.state, CHANGE));
+    const approval = { digest: d, round: 1, decision: 'approved' };
+    expect((await post(t, user('alice'), approval)).status).toBe(200);
+    await checkpointConfig.execute(t.state, { label: 'one' });
+    data(await writeConfig.execute(t.state, CHANGE));
+
+    // The setting is changed back, and the model makes the same change again.
+    t.files.set(SETTINGS_PATH, '{"retries":"3"}');
+    expect(await writeConfig.execute(t.state, CHANGE)).toMatchObject({ error_data: { state: 'pending', round: 2 } });
+    // A client's retry of Alice's first request (a second tab, a double submit).
+    expect((await post(t, user('alice'), approval)).status).toBe(409);
+    await checkpointConfig.execute(t.state, { label: 'two' });
+    expect(await writeConfig.execute(t.state, CHANGE)).toMatchObject({ error_code: 'F502' });
+    expect(t.files.get(SETTINGS_PATH)).toBe('{"retries":"3"}');
+  });
+
+  it('answers a decision it stored when the thread cannot be woken, and accepts the same decision again', async () => {
+    const t = thread();
+    const d = digestOf(await writeConfig.execute(t.state, CHANGE));
+    const failing = new Proxy(t.state, {
+      get(target, property, receiver) {
+        if (property === 'queueMessage') return async () => Promise.reject(new Error('queue unavailable'));
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+    const request = (body: unknown) =>
+      new Request('https://runtime.example/threads/thread-1/acs/approvals', { method: 'POST', body: JSON.stringify(body) });
+    const approval = { digest: d, round: 1, decision: 'approved' };
+
+    const response = await approvalsPost(request(approval), failing, {}, { caller: user('alice'), threadAccess: true });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ digest: d, state: 'approved', woken: false });
+
+    // The client sends the same decision again: it is answered, and the thread woken.
+    const retry = await post(t, user('alice'), approval);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ digest: d, state: 'approved' });
+    expect(t.queued).toHaveLength(1);
+    // A different decision by the same approver is still refused.
+    expect((await post(t, user('alice'), { ...approval, decision: 'rejected' })).status).toBe(409);
+  });
+
+  it('answers a rejection sent again as the first, and no other decision on the closed round', async () => {
+    const t = thread();
+    const d = digestOf(await writeConfig.execute(t.state, CHANGE));
+    const rejection = { digest: d, round: 1, decision: 'rejected' };
+    expect((await post(t, user('bob'), rejection)).status).toBe(200);
+
+    // Bob's client did not get the answer and sends the rejection again.
+    const retry = await post(t, user('bob'), rejection);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ digest: d, state: 'rejected' });
+    expect(t.queued).toHaveLength(2);
+
+    // Anyone else's decision, or Bob's approval, on the rejected round is refused.
+    expect((await post(t, user('carol'), rejection)).status).toBe(409);
+    expect((await post(t, user('alice'), { ...rejection, decision: 'approved' })).status).toBe(409);
+    expect((await post(t, user('bob'), { ...rejection, decision: 'approved' })).status).toBe(409);
+
+    // Once the same values are asked for again, the rejection is of a closed round.
+    expect(await writeConfig.execute(t.state, CHANGE)).toMatchObject({ error_data: { state: 'pending', round: 2 } });
+    expect((await post(t, user('bob'), rejection)).status).toBe(409);
+    expect(t.queued).toHaveLength(2);
   });
 });
 
@@ -397,6 +609,50 @@ describe('evidence and audit trail', () => {
     expect(result).toMatchObject({ status: 'error' });
     expect(result.error).toMatch(/missing evidence_anchors, confidence/);
     expect((await readTrace(t.state)).at(-1)).toMatchObject({ status: 'failed' });
+  });
+
+  it('rejects required output fields of the wrong type', async () => {
+    const returning = (output: Record<string, unknown>) =>
+      groundedTool({
+        name: 'ungrounded_read',
+        capability: 'retrieve',
+        description: 'x',
+        args: z.object({}),
+        execute: async () => output as { data: number; evidence_anchors: []; confidence: number },
+      });
+    const t = thread();
+    for (const [output, problem] of [
+      [{ data: 1, evidence_anchors: null, confidence: 1 }, /evidence_anchors is not an array/],
+      [{ data: 1, evidence_anchors: [], confidence: 'very' }, /confidence is not a number from 0 to 1/],
+      [{ data: 1, evidence_anchors: [], confidence: 1.5 }, /confidence is not a number from 0 to 1/],
+    ] as const) {
+      const result = await returning(output).execute(t.state, {});
+      expect(result, JSON.stringify(output)).toMatchObject({ status: 'error' });
+      expect(result.error).toMatch(problem);
+      expect((await readTrace(t.state)).at(-1)).toMatchObject({ status: 'failed' });
+    }
+    data(await returning({ data: 1, evidence_anchors: [], confidence: 0 }).execute(t.state, {}));
+  });
+
+  it('records a call whose arguments have no canonical JSON, and does not run it', async () => {
+    let runs = 0;
+    const tool = groundedTool({
+      name: 'note',
+      capability: 'persist',
+      description: 'x',
+      args: z.object({ text: z.string() }),
+      execute: async () => {
+        runs += 1;
+        return { stored: true, evidence_anchors: [] };
+      },
+    });
+    const t = thread();
+    // Half of a surrogate pair: JSON.parse and z.string() accept it; RFC 8785 does not.
+    const result = await tool.execute(t.state, { text: 'ok \ud83d' });
+    expect(result).toMatchObject({ status: 'error' });
+    expect(result.error).toMatch(/unpaired surrogate/);
+    expect(runs).toBe(0);
+    expect((await readTrace(t.state)).at(-1)).toMatchObject({ action: 'note', status: 'failed' });
   });
 
   it('records every call, including refusals, with its evidence', async () => {
@@ -496,6 +752,28 @@ describe('evidence and audit trail', () => {
     expect(t.files.get(SETTINGS_PATH)).toBe('{"retries":"3"}');
   });
 
+  it('restores over damaged settings, and only from a restore point taken in this thread', async () => {
+    const t = thread();
+    const cp = data(await checkpointConfig.execute(t.state, { label: 'one' }));
+
+    // The settings are damaged: the case a restore point exists for.
+    t.files.set(SETTINGS_PATH, '{"retries": "5",');
+    const output = data(await rollbackConfig.execute(t.state, { checkpoint_id: cp['checkpoint_id'] as string }));
+    expect(output).toMatchObject({ restored: true, previous_state: '{"retries": "5",', restored_state: { retries: '3' } });
+    expect(t.files.get(SETTINGS_PATH)).toBe('{"retries":"3"}');
+
+    // A path made from the model's string, and an id no checkpoint call returned.
+    t.files.set('/acs/checkpoints/../../attachments/settings.json', '{"admin":"true"}');
+    t.files.set('/acs/checkpoints/cp-99/settings.json', '{"admin":"true"}');
+    for (const checkpoint_id of ['../../attachments', 'cp-99']) {
+      const result = await rollbackConfig.execute(t.state, { checkpoint_id });
+      expect(result, checkpoint_id).toMatchObject({ status: 'error' });
+      expect(result.error).toMatch(/not a restore point/);
+    }
+    expect(t.files.get(SETTINGS_PATH)).toBe('{"retries":"3"}');
+    expect(rollbackConfig.args.safeParse({ checkpoint_id: '../../attachments' }).success).toBe(false);
+  });
+
   it('joins tool call ids to grounded entries and records ungrounded calls', async () => {
     const t = thread();
     const call = (id: string, name: string): HookToolCall => ({ id, type: 'function', function: { name, arguments: '{}' } });
@@ -508,6 +786,76 @@ describe('evidence and audit trail', () => {
     expect(await readTrace(t.state)).toEqual([
       expect.objectContaining({ seq: 1, action: 'read_config', capability: 'retrieve', tool_call_id: 'call_1' }),
       expect.objectContaining({ seq: 2, action: 'web_search', capability: null, status: 'failed', tool_call_id: 'call_2' }),
+    ]);
+  });
+
+  it('keeps an entry waiting for its hook when a call is made outside the execution meanwhile', async () => {
+    const t = thread();
+    const call = (id: string, name: string): HookToolCall => ({ id, type: 'function', function: { name, arguments: '{}' } });
+    const context = { source: { kind: 'prompt', promptName: 'config_steward' } } as const;
+    // A thread endpoint, with no execution, reads the settings while the
+    // model's own call to the same tool waits for its hook.
+    const endpoint = new Proxy(t.state, {
+      get: (target, property, receiver) => (property === 'execution' ? null : (Reflect.get(target, property, receiver) as unknown)),
+    });
+    await readConfig.execute(t.state, {});
+    await readConfig.execute(endpoint, {});
+    await auditHook.execute(t.state, call('call_1', 'read_config'), { status: 'success' }, context);
+
+    expect((await readTrace(t.state)).map((e) => [e.seq, e.flow_id ?? null, e.capability, e.tool_call_id ?? null])).toEqual([
+      [1, 'flow-1', 'retrieve', 'call_1'],
+      [2, null, 'retrieve', null],
+    ]);
+  });
+
+  it('never gives a call id to an entry of an earlier step or execution', async () => {
+    const t = thread();
+    const call = (id: string, name: string): HookToolCall => ({ id, type: 'function', function: { name, arguments: '{}' } });
+    const context = { source: { kind: 'prompt', promptName: 'config_steward' } } as const;
+
+    // Step 1: the write is refused, and its hook does not run (it failed or
+    // timed out, which the specification allows).
+    await approve(t);
+    // Step 2: the restore point and the write that changes the setting.
+    t.nextStep();
+    await checkpointConfig.execute(t.state, { label: 'one' });
+    await auditHook.execute(t.state, call('call_2', 'checkpoint_config'), { status: 'success' }, context);
+    data(await writeConfig.execute(t.state, CHANGE));
+    await auditHook.execute(t.state, call('call_3', 'write_config'), { status: 'success' }, context);
+    // A hook delivered twice for one call adds nothing.
+    await auditHook.execute(t.state, call('call_3', 'write_config'), { status: 'success' }, context);
+
+    expect((await readTrace(t.state)).map((e) => [e.seq, e.action, e.status, e.tool_call_id ?? null])).toEqual([
+      [1, 'write_config', 'refused', null],
+      [2, 'checkpoint_config', 'executed', 'call_2'],
+      [3, 'write_config', 'executed', 'call_3'],
+    ]);
+  });
+
+  it('does not give a cut-off call the id of a call in a later execution', async () => {
+    const hangs = groundedTool({
+      name: 'observe_forever',
+      capability: 'observe',
+      description: 'x',
+      args: z.object({}),
+      execute: () => new Promise<never>(() => {}),
+    });
+    const t = thread();
+    void hangs.execute(t.state, {});
+    await started(t);
+
+    // The execution is lost. In the next one a call to the same tool never
+    // reaches it (the runtime rejects its arguments), and its hook runs.
+    t.newExecution();
+    await auditHook.execute(
+      t.state,
+      { id: 'call_9', type: 'function', function: { name: 'observe_forever', arguments: '{"x":' } },
+      { status: 'error', error: 'invalid arguments' },
+      { source: { kind: 'prompt', promptName: 'config_steward' } },
+    );
+    expect((await readTrace(t.state)).map((e) => [e.seq, e.capability, e.status, e.tool_call_id ?? null])).toEqual([
+      [1, 'observe', 'started', null],
+      [2, null, 'failed', 'call_9'],
     ]);
   });
 });
@@ -538,6 +886,26 @@ describe('the agent definition', () => {
     const plain = { ...tools, web_search: { annotations: { agentbuilder: {} } } };
     expect(lintPromptTools('config_steward', plain)).toEqual([
       expect.objectContaining({ code: 'unclassified', severity: 'warning', location: { prompt: 'config_steward', tool: 'web_search' } }),
+    ]);
+  });
+
+  it('reports a tool whose stated name is not the name it is offered under', () => {
+    // Copied from another tool, with `name` left unchanged: an approver
+    // would be shown `archive_record` for a call that purges.
+    const purge = groundedTool({
+      name: 'archive_record',
+      capability: 'execute',
+      description: 'Purge a record.',
+      args: z.object({ key: z.string() }),
+      execute: async () => ({ result: 'purged', evidence_anchors: [] }),
+    });
+    expect(lintPromptTools('records', { purge_record: purge }).map((d) => [d.code, d.severity, d.location, d.message])).toEqual([
+      [
+        'misnamed_tool',
+        'error',
+        { prompt: 'records', tool: 'purge_record', capability: 'execute' },
+        "tool 'purge_record' states the name 'archive_record', which is what an approver is shown and the trace records",
+      ],
     ]);
   });
 
@@ -605,12 +973,16 @@ describe('the package', () => {
       const packed = await loadPrompt();
       expect(Object.keys(pkg.models)).toContain(packed.model);
       for (const hook of packed.hooks ?? []) expect(Object.keys(pkg.hooks)).toContain(hook);
+      const offered: Record<string, { annotations?: Record<string, unknown> }> = {};
       for (const tool of packed.tools ?? []) {
         const name = typeof tool === 'string' ? tool : tool.name;
         const definition = await pkg.tools[name]?.();
         expect(definition, name).toBeDefined();
         expect(acsAnnotation(definition ?? {}), name).not.toBeNull();
+        offered[name] = definition ?? {};
       }
+      // Each tool states the name it is packed under, and nothing is unmet.
+      expect(lintPromptTools(packed.name, offered)).toEqual([]);
     }
   });
 });

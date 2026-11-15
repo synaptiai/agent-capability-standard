@@ -5,11 +5,12 @@
  * before anything runs. A prompt has no steps, but it does have a fixed list
  * of tools, and two things can be checked from that list alone: every tool is
  * classified, and no tool needs a capability the prompt can never perform.
- * An agent definition adds a third: no tool that can be refused is bound to
- * a stop or session action.
+ * A third is the name: each tool states the name an approver is shown, which
+ * must be the name the prompt offers it under. An agent definition adds a
+ * fourth: no tool that can be refused is bound to a stop or session action.
  */
 import type { AgentDefinition } from '@standardagents/spec';
-import { acsAnnotation } from './grounded.js';
+import { acsAnnotation, statedName } from './grounded.js';
 import { prerequisites, type CapabilityId } from './ontology.js';
 
 /** The prompt-side options that act when a named tool is called. */
@@ -18,11 +19,12 @@ export type ToolBinding = 'stopTool' | 'sessionStop' | 'sessionFail' | 'sessionS
 export interface LintDiagnostic {
   /**
    * V102 (MISSING_PREREQUISITE, STANDARD v1.1.0 §9.2): a `requires` edge
-   * that cannot be met. `unclassified` and `bound_gated_tool` are this
-   * binding's own: the Standard has no code for a tool outside the ontology,
-   * or for a host that acts on a call whatever its result.
+   * that cannot be met. `unclassified`, `misnamed_tool` and
+   * `bound_gated_tool` are this binding's own: the Standard has no code for a
+   * tool outside the ontology, for a tool that cannot see its own name, or
+   * for a host that acts on a call whatever its result.
    */
-  code: 'V102' | 'unclassified' | 'bound_gated_tool';
+  code: 'V102' | 'unclassified' | 'misnamed_tool' | 'bound_gated_tool';
   severity: 'error' | 'warning';
   message: string;
   location:
@@ -35,6 +37,9 @@ export interface LintDiagnostic {
  *
  * - A tool with no `acs` annotation is reported (`unclassified`, warning): its calls
  *   are not classified, so no rule applies to them.
+ * - A tool defined with `groundedTool` whose stated `name` is not the name
+ *   the prompt offers it under is an error (`misnamed_tool`): an approver
+ *   would be shown, and the trace would record, another tool's name.
  * - A tool whose capability `requires` another, or needs a checkpoint, when
  *   the prompt offers no tool of that capability, is an error (V102): the
  *   model could never get the call accepted.
@@ -60,6 +65,15 @@ export function lintPromptTools(
         location: { prompt, tool: name },
       });
       continue;
+    }
+    const stated = statedName(tool);
+    if (stated !== undefined && stated !== name) {
+      diagnostics.push({
+        code: 'misnamed_tool',
+        severity: 'error',
+        message: `tool '${name}' states the name '${stated}', which is what an approver is shown and the trace records`,
+        location: { prompt, tool: name, capability: annotation.capability },
+      });
     }
     const needed = new Set<CapabilityId>(prerequisites(annotation.capability));
     if (annotation.requires_checkpoint) needed.add('checkpoint');

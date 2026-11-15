@@ -21,6 +21,15 @@ export async function readText(state: Files, path: string): Promise<string | nul
   return bytes === null ? null : new TextDecoder().decode(bytes);
 }
 
+/** `text` parsed as JSON, or `text` itself when it is not JSON. */
+export function parsedOrText(text: string): Json {
+  try {
+    return JSON.parse(text) as Json;
+  } catch {
+    return text;
+  }
+}
+
 /** The settings document, its exact text and that text's SHA-256. */
 export async function readSettings(
   state: Files,

@@ -32,9 +32,19 @@ export interface DeclaredFlags {
   requires_approval?: true;
 }
 
+/**
+ * The JSON types of the required output fields the ontology types the same
+ * way wherever it declares them. Every other required field is any JSON.
+ */
+interface FieldTypes {
+  evidence_anchors: Json[];
+  /** A number from 0 to 1, which the wrapper checks at run time. */
+  confidence: number;
+}
+
 /** The output a capability must return: the ontology's required output fields. */
 export type CapabilityOutput<C extends CapabilityId> = {
-  [K in (typeof CAPABILITIES)[C]['output_required'][number]]: Json;
+  [K in (typeof CAPABILITIES)[C]['output_required'][number]]: K extends keyof FieldTypes ? FieldTypes[K] : Json;
 } & { [key: string]: Json };
 
 const RISK_ORDER: Record<Risk, number> = { low: 0, medium: 1, high: 2 };

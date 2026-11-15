@@ -16,6 +16,8 @@ export interface MemoryThread {
   queued: QueueMessageInput[];
   /** Start a new execution, as when an idle thread runs again. */
   newExecution(): void;
+  /** Start the execution's next model step (`stepCount` goes up by one). */
+  nextStep(): void;
   /** Leave any execution: `state.execution` is null, as in a thread endpoint. */
   atRest(): void;
 }
@@ -26,14 +28,15 @@ export function memoryThread(): MemoryThread {
   const queued: QueueMessageInput[] = [];
 
   let flow = 1;
+  let step = 1;
   let executing = true;
   const implemented = {
     threadId: 'thread-1',
     agentId: 'config_steward',
     userId: 'owner',
-    // Only the execution's identity is modelled.
+    // Only the execution's identity and its model step are modelled.
     get execution() {
-      return executing ? { flowId: `flow-${flow}` } : null;
+      return executing ? { flowId: `flow-${flow}`, stepCount: step } : null;
     },
     getValue: async <T>(key: string): Promise<T | null> => {
       const stored = values.get(key);
@@ -75,7 +78,11 @@ export function memoryThread(): MemoryThread {
     queued,
     newExecution: () => {
       flow += 1;
+      step = 1;
       executing = true;
+    },
+    nextStep: () => {
+      step += 1;
     },
     atRest: () => {
       executing = false;

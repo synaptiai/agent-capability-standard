@@ -25,6 +25,21 @@ function byCodeUnits(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** A high surrogate not followed by a low one, or a low one not preceded by a high one. */
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * A string as RFC 8785 writes it. Text with an unpaired surrogate is refused:
+ * it "MUST cause a compliant JCS implementation to terminate with an
+ * appropriate error" (§3.2.2.2), and it is not I-JSON (RFC 7493 §2.1).
+ */
+function canonicalString(text: string): string {
+  if (UNPAIRED_SURROGATE.test(text)) {
+    throw new NotCanonicalizableError('a string with an unpaired surrogate is not I-JSON');
+  }
+  return JSON.stringify(text);
+}
+
 /**
  * The RFC 8785 serialization of `value`: members sorted by UTF-16 code
  * units, no insignificant whitespace, strings and numbers as ECMAScript's
@@ -36,7 +51,7 @@ export function canonicalize(value: unknown): string {
     case 'boolean':
       return value ? 'true' : 'false';
     case 'string':
-      return JSON.stringify(value);
+      return canonicalString(value);
     case 'number':
       if (!Number.isFinite(value)) {
         throw new NotCanonicalizableError(`not a JSON number: ${value}`);
@@ -45,7 +60,11 @@ export function canonicalize(value: unknown): string {
       return JSON.stringify(value);
     case 'object': {
       if (Array.isArray(value)) {
-        return `[${value.map((item) => canonicalize(item)).join(',')}]`;
+        // An index loop, not `map`, so that a hole in a sparse array reaches
+        // the `undefined` case and is refused instead of being skipped.
+        const items: string[] = [];
+        for (let index = 0; index < value.length; index += 1) items.push(canonicalize(value[index]));
+        return `[${items.join(',')}]`;
       }
       const proto: unknown = Object.getPrototypeOf(value);
       if (proto !== Object.prototype && proto !== null) {
@@ -54,7 +73,7 @@ export function canonicalize(value: unknown): string {
       const record = value as Record<string, unknown>;
       const members = Object.keys(record)
         .sort(byCodeUnits)
-        .map((key) => `${JSON.stringify(key)}:${canonicalize(record[key])}`);
+        .map((key) => `${canonicalString(key)}:${canonicalize(record[key])}`);
       return `{${members.join(',')}}`;
     }
     default:

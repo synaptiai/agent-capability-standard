@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { groundedTool } from '../../src/acs/grounded.js';
 import { SETTINGS_PATH, fileAnchor, readSettings, writeText } from '../../src/example/settings.js';
 
+/** The form of every restore point id this tool returns. */
+export const CHECKPOINT_ID = /^cp-\d+$/;
+
 export const checkpointPath = (id: string) => `/acs/checkpoints/${id}/settings.json`;
 
 export default groundedTool({
