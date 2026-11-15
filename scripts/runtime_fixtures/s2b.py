@@ -134,7 +134,9 @@ def register(add):
     _time(add)
     _cancel(add)
     _records(add)
+    _failed_records(add)
     _reasons(add)
+    _invoke_attendance(add)
 
 
 def _groups(add):
@@ -923,6 +925,196 @@ def _records(add):
         },
         [{"expect": inv("audit"), "respond": out(recorded=False)}],
         {"kind": "Failed", "code": "R403", "step": 0},
+    )
+
+
+def _failing_mutate(failure_mode):
+    """Checkpoint, constrain, then a mutation asked of a person whose
+    failure mode answers R402 with `failure_mode`."""
+    return {
+        "w": wf(
+            [
+                CP,
+                POLICY,
+                mutate(
+                    approval=HUMAN,
+                    failure_modes=[
+                        {"condition": "it fails", "on_error": "R402", **failure_mode}
+                    ],
+                ),
+            ],
+            requires=["approval@1"],
+        )
+    }
+
+
+APPROVED_THEN_FAILS = [
+    *CHECKPOINTED,
+    {"expect": {"kind": "RequestApproval", "step": 2}, "respond": approve("d1")},
+    {"expect": inv("mutate", step=2), "respond": err("R402")},
+]
+
+
+def _failed_records(add):
+    """An approved step that fails has a failed record, also when its run
+    then fails for another reason (§6.4)."""
+    rollback = _failing_mutate({"action": "rollback"})
+    rollback_fails = [
+        *APPROVED_THEN_FAILS,
+        {"expect": {"kind": "Rollback", "step": 2}, "respond": err("F503")},
+    ]
+    add(
+        "records_actions_failure_rollback_fails",
+        "Record mode actions: an approved step that fails, whose failure mode's "
+        "Rollback then fails (F503), has a failed record with its own code, beside "
+        "the failed record of the rollback (§6.4).",
+        rollback,
+        rollback_fails,
+        {
+            "kind": "Failed",
+            "code": "F503",
+            "action_records": [
+                {"capability": "checkpoint", "status": "executed"},
+                {"capability": "constrain", "status": "executed"},
+                {"capability": "mutate", "status": "failed", "code": "R402"},
+                {"capability": "rollback", "status": "failed", "code": "F503"},
+            ],
+        },
+        records="actions",
+    )
+    add(
+        "records_actions_failure_checkpoint_fails",
+        "Record mode actions: an approved step that fails, whose failure mode's "
+        "checkpoint then cannot be taken (F501), has a failed record with its own "
+        "code, beside the failed record of the checkpoint (§6.4).",
+        _failing_mutate(
+            {
+                "action": "pause_and_checkpoint",
+                "recovery": {"goto_step": "m", "max_loops": 1},
+            }
+        ),
+        [
+            *APPROVED_THEN_FAILS,
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": err("F501")},
+        ],
+        {
+            "kind": "Failed",
+            "code": "F501",
+            "action_records": [
+                {"capability": "checkpoint", "status": "executed"},
+                {"capability": "constrain", "status": "executed"},
+                {"capability": "mutate", "status": "failed", "code": "R402"},
+                {"capability": "checkpoint", "status": "failed", "code": "F501"},
+            ],
+        },
+        records="actions",
+    )
+    add(
+        "records_failure_rollback_fails",
+        "The default record mode: an approved step that fails, whose failure mode's "
+        "Rollback then fails (F503), has a failed record with its own code, as an "
+        "approved step that fails has (§6.4).",
+        rollback,
+        rollback_fails,
+        {
+            "kind": "Failed",
+            "code": "F503",
+            "action_records": [
+                {"capability": "mutate", "status": "failed", "code": "R402"}
+            ],
+        },
+    )
+    add(
+        "records_failure_nothing_to_roll_back",
+        "An approved step that fails, whose failure mode rolls back when the run "
+        "has no checkpoint (F503), has a failed record with its own code (§6.4).",
+        {
+            "w": wf(
+                [
+                    retrieve(
+                        approval=HUMAN,
+                        requires_approval=True,
+                        failure_modes=[
+                            {
+                                "condition": "it fails",
+                                "on_error": "R402",
+                                "action": "rollback",
+                            }
+                        ],
+                    )
+                ],
+                requires=["approval@1"],
+            )
+        },
+        [
+            {
+                "expect": {"kind": "RequestApproval", "step": 0},
+                "respond": approve("d1"),
+            },
+            {"expect": inv("retrieve"), "respond": err("R402")},
+        ],
+        {
+            "kind": "Failed",
+            "code": "F503",
+            "action_records": [
+                {"capability": "retrieve", "status": "failed", "code": "R402"}
+            ],
+        },
+    )
+
+
+def _invoke_attendance(add):
+    """A run an invoke step starts has its invoker's attendance, whatever its
+    invoke trigger declares (§5.10, §5.10.2)."""
+
+    def catalog(declared):
+        return {
+            "w": wf(
+                [
+                    st(
+                        "invoke",
+                        "i",
+                        workflow_id="child",
+                        input_bindings={"workflow": "child"},
+                    )
+                ]
+            ),
+            "child": wf(
+                [retrieve(approval=HUMAN, requires_approval=True)],
+                requires=["approval@1", "triggers@1"],
+                triggers=[{"kind": "invoke", "attendance": declared}],
+            ),
+        }
+
+    add(
+        "invoke_trigger_attendance_ignored",
+        "An invoke trigger's declared attendance has no effect: invoked from an "
+        "attended run, a nested run whose invoke trigger declares unattended is "
+        "attended, and its step is asked of a person (§5.10, §5.10.2).",
+        catalog("unattended"),
+        [
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "frame": ["w", "child"],
+                    "approver": {"kind": "human"},
+                },
+                "respond": approve("d1"),
+            },
+            {"expect": inv("retrieve", frame=["w", "child"]), "respond": found()},
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+    )
+    add(
+        "invoke_trigger_attendance_ignored_unattended",
+        "Invoked from an unattended run, a nested run whose invoke trigger declares "
+        "attended is unattended: its step's human approver is not asked, the step "
+        "fails (F502), and so does the invoke step (R402) (§5.10, §5.10.2).",
+        catalog("attended"),
+        [],
+        {"kind": "Failed", "code": "R402", "step": 0, "frame": ["w"]},
+        trace=["approval_unattended", "invoke_returned"],
+        attendance="unattended",
     )
 
 

@@ -15,6 +15,7 @@ from grounded_agency import _core
 from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 from grounded_agency.workflows import (
     Host,
+    RunResult,
     RunStartError,
     WorkflowEngine,
     WorkflowRunner,
@@ -1455,3 +1456,137 @@ def test_take_trace_and_records_with_chain_heads(runner: WorkflowRunner) -> None
     assert run.run_record()["details"]["records"] == len(taken_records) + len(
         run.action_records()
     )
+
+
+def _engine(tmp_path: Path, text: str) -> WorkflowEngine:
+    catalog = tmp_path / "catalog.yaml"
+    catalog.write_text(text)
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    return engine
+
+
+def test_resume_saves_before_acting(mandate_runner: WorkflowRunner) -> None:
+    """With save=, resume saves the resumed state before it returns, so the
+    host acts on no action of the resumption unsaved (§5.19.4)."""
+    saved, _ = deferred_nightly(mandate_runner)
+    events: list[tuple[str, int]] = []
+
+    class Logging(Approves):
+        def request_approval(self, action: dict[str, Any]) -> dict[str, Any]:
+            events.append(("act", action["id"]))
+            return super().request_approval(action)
+
+    def save(state: dict[str, Any]) -> None:
+        pending = mandate_runner.restore(state, b"secret").next()
+        events.append(("save", pending["id"]))
+
+    run = mandate_runner.resume(saved, b"secret", save=save)
+    assert events == [("save", run.next()["id"])]
+    assert mandate_runner.drive(run, Logging(Clock()), save=save, key=b"secret").ok
+    first_act = next(i for i, e in enumerate(events) if e[0] == "act")
+    assert events[first_act - 1] == ("save", events[first_act][1])
+
+
+def test_cancel_saves_before_withdrawing(tmp_path: Path) -> None:
+    runner = WorkflowRunner(_wait_catalog(tmp_path, "1h"))
+    order: list[str] = []
+
+    class Logging(Withdrawing):
+        def withdraw(self, action: dict[str, Any], why: str) -> None:
+            order.append("withdraw")
+            super().withdraw(action, why)
+
+    clock = Clock()
+    host = Logging(clock)
+    run = runner.start("wait_for_job", None, now_ms=clock.now)
+    assert runner.advance(run, host).pending is not None
+    saved: list[dict[str, Any]] = []
+
+    def save(state: dict[str, Any]) -> None:
+        order.append("save")
+        saved.append(state)
+
+    result = runner.cancel(run, "operator stop", host=host, save=save, key=b"k")
+    assert result.cancelled
+    assert order == ["save", "withdraw"]
+    end = runner.restore(saved[0], b"k").next()
+    assert (end["kind"], end["code"]) == ("Failed", "R408")
+
+
+def test_run_ids_come_from_the_hosts_store(tmp_path: Path) -> None:
+    """A run_id must be unique among the runs whose records and keys the
+    host keeps (§5.19.2): the runner checks, and adds to, the host's store,
+    so a restarted runner over the same store refuses one used before."""
+    used = {"r-old"}
+    engine = _engine(tmp_path, CATALOG)
+    runner = WorkflowRunner(engine, run_ids=used)
+    with pytest.raises(RunStartError, match="already used"):
+        runner.start("change_config", {"setting": "x"}, run_id="r-old", now_ms=0)
+    run = runner.start("change_config", {"setting": "x"}, now_ms=0)
+    assert used == {"r-old", run.run_id}
+    restarted = WorkflowRunner(engine, run_ids=used)
+    with pytest.raises(RunStartError, match="already used"):
+        restarted.start("change_config", {"setting": "x"}, run_id=run.run_id, now_ms=0)
+
+
+def test_event_dedup_survives_a_restart(tmp_path: Path) -> None:
+    """With event_seen, the event_ids that started runs are in the host's
+    stores: an event delivered again after a restart starts no run
+    (§5.10.2)."""
+    stores: dict[tuple[str, int], set[str]] = {}
+
+    def event_seen(workflow: str, index: int) -> set[str]:
+        return stores.setdefault((workflow, index), set())
+
+    engine = _engine(tmp_path, TRIGGERED)
+    WorkflowRunner(engine, event_seen=event_seen).start(
+        "nightly", trigger=1, event=_event("e1"), now_ms=0
+    )
+    assert stores == {("nightly", 1): {"e1"}}
+    restarted = WorkflowRunner(engine, event_seen=event_seen)
+    with pytest.raises(RunStartError, match="already started a run"):
+        restarted.start("nightly", trigger=1, event=_event("e1"), now_ms=0)
+    restarted.start("nightly", trigger=1, event=_event("e2"), now_ms=0)
+    assert stores == {("nightly", 1): {"e1", "e2"}}
+
+
+def test_event_driven_recipe_keeps_each_record_once(tmp_path: Path) -> None:
+    """The event-driven host of RUNNING_WORKFLOWS.md takes records while the
+    run goes on and archives the result when it ends: the result's records
+    are those not taken before, so each record is kept once. Taking an ended
+    run's records as well would keep them twice."""
+
+    class Later(FakeHost):
+        """Has no decision on its first turn."""
+
+        def __init__(self, clock: Clock) -> None:
+            super().__init__(clock)
+            self.waited = False
+
+        def request_approval(self, action: dict[str, Any]) -> dict[str, Any] | None:  # type: ignore[override]
+            if not self.waited:
+                self.waited = True
+                return None
+            return super().request_approval(action)
+
+    archived: list[RunResult] = []
+    runner = WorkflowRunner(_engine(tmp_path, CATALOG), archive=archived.append)
+    clock = Clock()
+    host = Later(clock)
+    run = runner.start(
+        "change_config", {"setting": "x"}, now_ms=clock.now, records="actions"
+    )
+    audit_store: list[dict[str, Any]] = []
+    while True:
+        turn = runner.advance(run, host)
+        if turn.result is None:
+            audit_store.extend(run.take_records())
+            continue
+        break
+    assert len(audit_store) == 3  # retrieve, checkpoint, constrain
+    [result] = archived
+    kept = audit_store + result.action_records
+    ids = [r["action_id"] for r in kept]
+    assert len(ids) == len(set(ids)) == result.run_record["details"]["records"] == 4
+    assert run.take_records() == result.action_records

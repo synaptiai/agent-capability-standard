@@ -247,6 +247,7 @@ class OrchestrationRuntime:
                 target_agent_ids=[],
                 capability_id="audit",
                 details=details,
+                intent=intent,
             )
         except Exception as e:
             logger.warning("audit step: the record was not written: %s", e)
@@ -271,7 +272,7 @@ class OrchestrationRuntime:
             output={
                 "recorded": True,
                 "audit_id": recorded.event_id,
-                "record": recorded.to_action_record(intent=intent),
+                "record": recorded.to_action_record(),
                 "timestamp": recorded.timestamp,
                 "evidence_anchors": [],
             },

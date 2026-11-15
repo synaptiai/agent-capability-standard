@@ -63,10 +63,12 @@ flowchart TB
 | `schedule` | On a cron schedule or an interval | `schedule` | unattended |
 | `event` | When a matching event arrives | `event` | unattended |
 | `manual` | When a person starts it | — | attended |
-| `invoke` | When another workflow invokes it | — | the invoker's |
+| `invoke` | When another workflow invokes it | — | always the invoker's |
 
-`attendance: attended | unattended` overrides the default. It matters for
-approval steps: an unattended run cannot wait for a person in the session.
+`attendance: attended | unattended` overrides the default, except on an
+`invoke` trigger: a run another workflow invokes always has its invoker's
+attendance. It matters for approval steps: an unattended run cannot wait for
+a person in the session.
 
 The host evaluates triggers, not the executor
 ([STANDARD v1.2 §5.10.2](../../spec/STANDARD-v1.2.0.md#5102-evaluating-triggers)):

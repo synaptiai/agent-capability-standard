@@ -591,3 +591,17 @@ Workstreams should run `npm run check:axe` (or at least
   and `cancel` entries, a `Sleep` expectation and the action pending at a
   cancel. S2b split a §5.13 paragraph, which moved the `wait-replay` slot to
   paragraph index 7.
+- **For S3 (`spec/EDGE_TYPES.md`).** S2b's review round 1 rewrote two
+  sentences outside S3's §5: "Runs before" now says the members of one
+  parallel group are not ordered (STANDARD §5.2.3) rather than that they
+  run concurrently, and the "Coexistence with `precedes`" example says a
+  mutation and its checkpoint in one group are not ordered. The V102
+  detail for a group mate (`semantics.rs`) now reads "shares
+  parallel_group 'g' with it, so it is not ordered before it", and the
+  S303 messages of `wait.rs` (delay in a group) and `exprs.rs` (`end` in a
+  group) no longer say the group runs concurrently.
+- **Attendance of `invoke` runs (§5.10, §5.10.2).** A run an `invoke`
+  step starts always has its invoker's attendance, whatever its `invoke`
+  trigger declares (the executor's 1.1 behaviour); `trigger_attendance`
+  and the vectors follow. The validator still counts an `invoke` trigger
+  that declares `unattended` as an unattended start for W606.

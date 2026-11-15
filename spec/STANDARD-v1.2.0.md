@@ -655,7 +655,7 @@ triggers:
 | `kind` | `schedule`, `event`, `manual`, `invoke` |
 | `schedule` | Required iff `kind: schedule`: exactly one of `cron` (5 fields) or `every` (a duration); `timezone` (IANA name, default `UTC`); `overlap`: `skip` (default), `buffer_one`, `allow_all` |
 | `event` | Required iff `kind: event`: `event_type` and `delivers_to` (required; an input whose `ref` ends `event_schema.yaml#/event`, else V107), `source_kind` (an `event_schema` source kind; 1.1 adds `agent`) |
-| `attendance` | `attended` or `unattended`: the attendance of the runs the trigger starts (§5.10.2). Default: `manual` → attended, `invoke` → the invoker's, `schedule`/`event` → unattended |
+| `attendance` | `attended` or `unattended`: the attendance of the runs the trigger starts (§5.10.2); it has no effect on an `invoke` trigger, since a run an `invoke` step starts always has its invoker's. Default: `manual` → attended, `invoke` → the invoker's, `schedule`/`event` → unattended |
 
 **Cron:** minute 0–59, hour 0–23, day-of-month 1–31, month 1–12 or JAN–DEC,
 day-of-week 0–7 or SUN–SAT (0 and 7 are Sunday); `*`, lists, ranges and
@@ -695,7 +695,8 @@ MUST:
 
 - start each run with the trigger's attendance: its `attendance`, else the
   default of its kind (§5.10). A run that an `invoke` step starts has its
-  invoker's attendance; the executor applies that itself;
+  invoker's attendance, whatever its `invoke` trigger declares; the
+  executor applies that itself;
 - for an `event` trigger, start one run for each event it accepts, with the
   event (a canonical event, §6.2) as the input that `delivers_to` names,
   and at most one run per `event_id` for the trigger: an event delivered
@@ -1712,7 +1713,8 @@ year 9999) counts as that time.
   (F502).
 - So the **wake-up time** of a run is `until` for a pending `Sleep`, the
   `deadline` or `expires_at` plus one millisecond for an action that has
-  one, and none for any other pending action or an ended run.
+  one (none when that time would be after 253402300799999: no tick is ever
+  after it), and none for any other pending action or an ended run.
 - The executor has no clock of its own: it acts only when the host submits,
   ticks, cancels or resumes. A host that waits on a run sets its own timer
   for the wake-up time and ticks when it fires.

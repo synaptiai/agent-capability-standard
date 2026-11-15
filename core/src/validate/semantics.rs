@@ -541,7 +541,7 @@ pub(crate) fn check_edges(
             let first = &placed[o.first];
             let detail = if first.concurrent_with(p) {
                 format!(
-                    "'{from}' (step {}) runs concurrently in parallel_group '{}'",
+                    "'{from}' (step {}) shares parallel_group '{}' with it, so it is not ordered before it",
                     first.index,
                     first.parallel_group.unwrap_or_default()
                 )

@@ -303,6 +303,15 @@ impl<'a> Machine<'a> {
             record.remove("reason");
             record.remove("reason_code");
             record.remove("code");
+            // The checkpoint of this pass, not of an earlier one (§6.4).
+            match self.frame_ref().cur.checkpoint_id.clone() {
+                Some(c) => self.st.rec_mut(r)["checkpoint_id"] = json!(c),
+                None => {
+                    if let Some(record) = self.st.rec_mut(r).as_object_mut() {
+                        record.remove("checkpoint_id");
+                    }
+                }
+            }
             return r;
         }
         let top = self.st.frames.len() - 1;
@@ -677,6 +686,12 @@ impl<'a> Machine<'a> {
     /// The top frame ends: the run ends, or the parent's invoke step gets
     /// the result.
     fn end_frame(&mut self, end: Result<(Outcome, Option<String>), Fail>) -> Flow {
+        // The frame fails while its step has failed (a failure mode's
+        // rollback or checkpoint failed too, or there was no checkpoint to
+        // roll back to): an approved record of the step is failed (§6.4).
+        if end.is_err() && self.frame_ref().cur.error.is_some() {
+            self.record_failed();
+        }
         self.settle_queued();
         // A run that completed with deferred steps ends deferred.
         let end = match end {
@@ -2315,14 +2330,12 @@ impl<'a> Machine<'a> {
             }
         }
         match error {
-            Some(e) => {
-                self.record_failed();
-                self.end_frame(Err(Fail {
-                    code: e.code,
-                    message: e.message,
-                    reason: e.reason,
-                }))
-            }
+            // end_frame fails the step's approved record.
+            Some(e) => self.end_frame(Err(Fail {
+                code: e.code,
+                message: e.message,
+                reason: e.reason,
+            })),
             None => match self.frame().cur.ending.take() {
                 Some(message) => self.end_run(message),
                 None => self.next_step(),

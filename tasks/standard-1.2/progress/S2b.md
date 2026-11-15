@@ -177,20 +177,120 @@ Design: `tasks/standard-1.2/designs/S2b.md`. Base: tag `round3/S2b-base`
     keeps one short bullet: the record's members are output contract
     content, and step 6 had made the procedure run 990px over the limit.
 
-## Checks (2026-11-15, before the last commit)
+17. **Failed records in both record modes.** The fix of review round 1
+    issue 7 applies in record mode `approvals` too: an approved step that
+    fails has a `failed` record also when its failure mode's rollback or
+    checkpoint then fails or finds no checkpoint, where 1.1 left it
+    `approved`. Codes, actions and traces are unchanged; only that record's
+    status (and its `code`) in the terminal action differs, under a
+    CHANGELOG Upgrading note. Gating it on mode `actions` would have kept a
+    stale `approved` record that holds back `take_records` and that a
+    cancellation turns into `cancelled`.
+18. **`spec/EDGE_TYPES.md`.** Its body is S3's (FOUNDATION-notes); S2b
+    rewrote two sentences outside S3's §5 ("Runs before" and "Coexistence
+    with `precedes`") so the file no longer says group members run
+    concurrently (ACS-15). Recorded in FOUNDATION-notes for S3.
+19. **W606 and `invoke` triggers.** With the declared attendance of an
+    `invoke` trigger ignored at run time, the validator still counts an
+    `invoke` trigger that declares `unattended` as an unattended start for
+    W606 (1.1's codes kept): the warning stays a conservative "this step may
+    run unattended". No new diagnostic for `attendance` on an `invoke`
+    trigger: it would add a code to valid 1.1 workflows.
+
+## Review round 1
+
+1. **Invoke trigger attendance (medium): real.** The Standard said both
+   "the attendance of the runs the trigger starts" and "the invoker's";
+   `trigger_attendance` and the vector oracle let a declared value win; the
+   executor ignored it. Decided for the compatible rule, since 1.1
+   executors ignore it: a run an `invoke` step starts always has its
+   invoker's attendance. §5.10 row and §5.10.2 say so; `trigger_attendance`
+   and `attendance_of` ignore the declared value for `invoke`; vectors
+   `invoke_declared_ignored` and `invoke_declared_ignored_unattended`;
+   runtime fixtures `invoke_trigger_attendance_ignored` and
+   `invoke_trigger_attendance_ignored_unattended` pin the executor; the
+   orchestration guide's table, RFC-0006 B7 and ACS-14's resolution follow.
+   (The reviewer's probe read `errors`/`warnings` keys the result does not
+   have: the validator does give W606 there; see deviation 19.)
+2. **"Run concurrently" in companion docs (low): real.** Reworded in
+   `spec/EDGE_TYPES.md` (deviation 18), `templates/composition_patterns.md`
+   and its 22 copies, `docs/guides/MODALITY_HANDLING.md`,
+   `analysis/07-common-tasks.md` (which quotes the V102 message), and the
+   validator's messages (`wait.rs` S303, `semantics.rs` V102 detail,
+   `exprs.rs` S303) and the V102 message test.
+3. **"No audit is recorded" in copies (low): real.** The design part 7
+   replacement is in the template's five recovery texts and their 22
+   copies, the template's mermaid description, the digital twin skill and
+   the invoke skill's example.
+4. **No Upgrading note for `records.jsonl` (low): real.** CHANGELOG
+   Upgrading bullet (new line format, old lines do not verify, move the file
+   aside); the skill's `record` row says to start a new file when the last
+   line has no readable `hmac` (a new chain mid-file would not verify).
+5. **Save before acting on resume and cancel (low): real.**
+   `WorkflowRunner.resume(save=)` saves the resumed state before it
+   returns; `cancel(save=, key=)` saves before it withdraws; the guide says
+   so and its resume example saves. Tests
+   `test_resume_saves_before_acting`, `test_cancel_saves_before_withdrawing`.
+6. **Wake-up time at the maximum time (low): real.** §5.19.3's bullet now
+   says none when the deadline plus one would be after the maximum time,
+   as `Run::wake_at` and `wake_at_max_deadline_is_none` have it.
+7. **`approved` record after a failed rollback or checkpoint (medium):
+   real.** `end_frame` now fails the step's approved record whenever the
+   frame fails while its step has failed, which covers the three paths and
+   any later one (`failure()`'s own call became redundant and went).
+   Applied in both modes (deviation 17). Fixtures
+   `records_actions_failure_rollback_fails`,
+   `records_actions_failure_checkpoint_fails`,
+   `records_failure_rollback_fails`, `records_failure_nothing_to_roll_back`;
+   Rust test `failed_rollback_fails_the_approved_record` (the nested case,
+   with `take_records`), which fails on the earlier code.
+8. **Stale `checkpoint_id` on a reused queued record (low): real.** The
+   reuse path of `Machine::record` drops it and sets the current pass's.
+   Rust test `reused_queued_record_names_only_its_pass_checkpoint` (the
+   reviewer's repro; fails on the earlier code). A runtime fixture cannot
+   pin an absent member (subset matching), hence the Rust test.
+9. **Orchestrator `audit` record differs from the export (low): real.**
+   `CoordinationEvent.intent` (and `CoordinationAuditLog.record(intent=)`)
+   keep the intent; `to_action_record()` reads it and lost its `intent`
+   parameter (unreleased). `test_the_orchestrators_audit_record` asserts
+   the step's record is in `export_action_records()`.
+10. **Audit skill's HMAC key (low): real.** The `record` row names the
+    default key the hook and the verifier derive. Tests: the documented line
+    verifies with `verify_entry`, and the skill, the hook and
+    `get_default_hmac_key` name one derivation.
+11. **Runner dedup and run_ids in memory only (low): real.**
+    `WorkflowRunner(run_ids=, event_seen=)` take host stores (forwarded to
+    `EventGate(seen=)`); the docstrings and the guide say uniqueness across
+    restarts is the host's, and the default set grows by one per run.
+    Tests `test_run_ids_come_from_the_hosts_store`,
+    `test_event_dedup_survives_a_restart`.
+12. **Recipe stores ended runs' records twice (low): real.** The recipe
+    takes records only while the run goes on and archives the result when
+    it ends; the guide and `RunResult.action_records` say the result holds
+    the records not taken before the end. Test
+    `test_event_driven_recipe_keeps_each_record_once`.
+
+## Checks (2026-11-15, review round 1, before the last commit)
 
 - Validators: `validate_workflows --strict` and every catalog, profiles,
   skill refs, ontology, canonical schemas, RFCs, constraints, doc links,
   YAML util sync, transform refs, benchmark deps: pass.
-- Generators `--check`: `sync_skill_schemas`, `gen_runtime_fixtures` (254
+- Generators `--check`: `sync_skill_schemas`, `gen_runtime_fixtures` (260
   fixtures), `gen_standard_agents_binding`, `gen_capability_json_schemas`,
   `gen_trigger_vectors`: no drift.
-- `pytest`: 2652 passed. `ruff check` and `ruff format --check` (CI's paths),
-  `mypy grounded_agency`: clean.
+- `pytest tests/`: 2598 passed (HEAD before the round collected 2584);
+  `pytest benchmarks/tests/`: 68 passed. `ruff check`, `ruff format
+  --check` (CI's paths) and `mypy grounded_agency`: clean.
 - Rust (1.99.1): `fmt --check`, `clippy --all-targets` with and without
-  `--features python`, `cargo test --locked`: pass.
+  `--features python`, `cargo test --locked`: pass (the two new tests fail
+  on the code before the round).
 - `packages/acs-core`: check, 61 tests, build. `examples/standard_agents`:
   check, 61 tests.
 - `site/`: `npm run check`, `npm test` (1148 tests), `npm run build`,
-  `check-runs` (0 enforced pages over 1800px), `check-axe` on the 15 pages
-  S2b changed: pass.
+  `check-runs` (0 enforced pages over 1800px), `check-axe` on the 12 pages
+  the round changed (`/spec/1.2.0/`, `/spec/edge-types/`, the running,
+  orchestration and modality guides, composition patterns, the `audit` and
+  `invoke` capability pages, the digital twin skill, `/rfcs/0006/`, the
+  changelog and release notes): pass. The site reads §5.10's attendance
+  row's `Default:` list, so the row keeps `invoke` → the invoker's there
+  and states before it that a declared value has no effect on `invoke`.

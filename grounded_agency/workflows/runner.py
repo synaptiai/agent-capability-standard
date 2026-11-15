@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableSet
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -196,6 +196,8 @@ class RunResult:
     message: str
     outputs: dict[str, Any] = field(default_factory=dict)
     action_records: list[dict[str, Any]] = field(default_factory=list)
+    """The run's action records that were not taken out before it ended
+    (``run.take_records()``): with those taken, all its records."""
     trace: list[dict[str, Any]] = field(default_factory=list)
     cause: str | None = None
     """The code that caused an escalation."""
@@ -312,6 +314,8 @@ class WorkflowRunner:
         poll_interval_ms: int = 1_000,
         max_polls: int = 100_000,
         archive: Callable[[RunResult], None] | None = None,
+        run_ids: MutableSet[str] | None = None,
+        event_seen: Callable[[str, int], MutableSet[str]] | None = None,
     ) -> None:
         """
         Args:
@@ -333,17 +337,34 @@ class WorkflowRunner:
                 :meth:`cancel`), before it returns: the host keeps the run's
                 record and its action records there (STANDARD v1.2 §5.19.8).
                 Without it, keep ``result.run_record`` and
-                ``result.action_records`` yourself. A run restored after it
-                ended and driven again is archived again, under the same
-                ``run_record["action_id"]``.
+                ``result.action_records`` yourself. ``action_records`` are
+                the records not taken out before the end: keep those you
+                took with ``run.take_records()`` yourself. A run restored
+                after it ended and driven again is archived again, under
+                the same ``run_record["action_id"]``.
+            run_ids: The ``run_id``s already used, which :meth:`start`
+                refuses and adds to. A ``run_id`` must differ from those of
+                the runs whose records and keys the host keeps (§5.19.2),
+                across restarts and processes too: that is the host's duty.
+                Pass a store you persist, and prune as you drop runs'
+                records and keys; the default is an in-memory set of the
+                runs this runner started, which grows by one per run.
+            event_seen: Called with a workflow and the index of one of its
+                event triggers, it gives the store of the ``event_id``s that
+                started runs of that trigger (:class:`EventGate`'s
+                ``seen``), which :meth:`start` checks and adds to. Pass
+                stores you persist, so an event delivered again after a
+                restart starts no other run (§5.10.2); the default is an
+                in-memory set per trigger.
         """
         self._engine = engine
         self._max_actions = max_actions
         self._poll_ms = poll_interval_ms
         self._max_polls = max_polls
         self._archive = archive
-        # The run_ids this runner started (§5.19.2: a run_id is unique).
-        self._run_ids: set[str] = set()
+        # The run_ids used (§5.19.2: a run_id is unique).
+        self._run_ids: MutableSet[str] = set() if run_ids is None else run_ids
+        self._event_seen = event_seen
         # One gate per event trigger, (workflow, trigger index): it starts
         # at most one run per event_id (§5.10.2).
         self._event_gates: dict[tuple[str, int], EventGate] = {}
@@ -373,7 +394,7 @@ class WorkflowRunner:
 
         ``run_id`` must be fresh: it keys the run's records, its run record
         and the host's delivery and idempotency keys (§5.19.2), so the
-        runner refuses one it has already started (the default is a random
+        runner refuses one in its ``run_ids`` (the default is a random
         one). ``records`` is the record mode (§6.4): ``approvals`` (the
         records of approval steps, as in 1.1) or ``actions`` (a record of
         every step that runs).
@@ -419,7 +440,7 @@ class WorkflowRunner:
         rid = run_id or uuid.uuid4().hex
         if rid in self._run_ids:
             raise RunStartError(
-                f"run_id {rid!r} was already used by this runner; a run_id must be "
+                f"run_id {rid!r} was already used; a run_id must be "
                 "unique among the runs whose records or idempotency keys the host "
                 "keeps (STANDARD §5.19.2)",
                 [],
@@ -476,7 +497,14 @@ class WorkflowRunner:
             raise RunStartError(
                 "an event trigger starts a run for an event: pass it", []
             )
-        gate = self._event_gates.setdefault((workflow, index), EventGate(t["event"]))
+        gate = self._event_gates.get((workflow, index))
+        if gate is None:
+            seen = (
+                None if self._event_seen is None else self._event_seen(workflow, index)
+            )
+            gate = self._event_gates[(workflow, index)] = EventGate(
+                t["event"], seen=seen
+            )
         decision = gate.check(event)
         if decision == "no_match":
             raise RunStartError("the event does not match the trigger", [])
@@ -541,9 +569,13 @@ class WorkflowRunner:
         attendance: str = "attended",
         now_ms: int | None = None,
         actor_identity: Mapping[str, Any] | None = None,
+        save: Callable[[dict[str, Any]], None] | None = None,
     ) -> _core.Run:
         """Resume a run that ended ``deferred`` from its saved state
         (STANDARD v1.2 §5.14.1), and return it to drive with :meth:`drive`.
+        With ``save``, the resumed state (``run.snapshot(key)``) is saved
+        before this returns, so no action of the resumption is performed
+        unsaved (§5.19.4); else save it yourself before you drive it.
 
         The run continues as the same run: its deferred steps run again,
         each asked afresh (of a person when ``attendance`` is attended, even
@@ -587,6 +619,8 @@ class WorkflowRunner:
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None
+        if save is not None:
+            save(run.snapshot(key))
         return run
 
     def run(
@@ -757,14 +791,18 @@ class WorkflowRunner:
         *,
         now_ms: int | None = None,
         host: Host | None = None,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
     ) -> RunResult:
         """Cancel ``run`` (STANDARD v1.2 §5.19.5): it ends at once with
         ``Failed`` R408, ``reason`` as its message; no retry, failure mode,
         recovery or rollback runs, and the result's ``checkpoint_id`` names
         the latest checkpoint, which you may restore yourself. A run that
-        ended ``deferred`` can be cancelled too. With ``host``, the action
-        it was performing is withdrawn (:meth:`Host.withdraw`). The result
-        is archived as any end.
+        ended ``deferred`` can be cancelled too. With ``save``, the
+        cancelled state (``run.snapshot(key)``) is saved first (§5.19.4);
+        else save it yourself. With ``host``, the action it was performing
+        is then withdrawn (:meth:`Host.withdraw`). The result is archived as
+        any end.
 
         Raises:
             ValueError: the run ended otherwise than ``deferred``.
@@ -776,8 +814,11 @@ class WorkflowRunner:
             else now_ms
         )
         _check_ms(now)
+        _check_key(key)
         before = run.next()
         run.cancel(reason, now)
+        if save is not None:
+            save(run.snapshot(key))
         if host is not None and before["kind"] not in TERMINAL | {"Sleep"}:
             host.withdraw(before, "cancelled")
         return self._ended(run, run.next())

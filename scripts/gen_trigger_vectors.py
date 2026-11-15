@@ -391,6 +391,16 @@ ATTENDANCE: dict[str, tuple[dict[str, Any], str | None, str]] = {
         None,
         "unattended",
     ),
+    "invoke_declared_ignored": (
+        {"kind": "invoke", "attendance": "unattended"},
+        "attended",
+        "attended",
+    ),
+    "invoke_declared_ignored_unattended": (
+        {"kind": "invoke", "attendance": "attended"},
+        "unattended",
+        "unattended",
+    ),
 }
 
 
@@ -481,11 +491,13 @@ def overlap_decisions(overlap: str | None, events: list[str]) -> list[str]:
 
 
 def attendance_of(trigger: dict[str, Any], invoker: str | None) -> str:
-    """§5.10: the declared attendance, else the kind's default."""
-    if "attendance" in trigger:
-        return str(trigger["attendance"])
+    """§5.10: an invoke trigger's run has its invoker's attendance, whatever
+    the trigger declares; else the declared attendance, else the kind's
+    default."""
     if trigger["kind"] == "invoke":
         return invoker or "attended"
+    if "attendance" in trigger:
+        return str(trigger["attendance"])
     return "attended" if trigger["kind"] == "manual" else "unattended"
 
 
@@ -613,7 +625,8 @@ def attendance() -> dict[str, Any]:
     out = header(
         "The attendance of a run a trigger starts (STANDARD 1.2.0 sections 5.10 and 5.10.2), "
         "normative under section 10.3: the trigger's declared attendance, else the default "
-        "of its kind; an invoke trigger's run has its invoker's ('invoker')."
+        "of its kind; an invoke trigger's run has its invoker's ('invoker'), whatever "
+        "the trigger declares."
     )
     out["cases"] = cases
     return out

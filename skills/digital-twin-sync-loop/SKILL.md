@@ -98,7 +98,7 @@ Then execute the sync loop:
 
 17) **Invoke `/execute`** with `run_verification_suite` if a mutation was applied (`mutate_out` is not null), and store output as `execute_out`
     - Run verification tests and commands; skip this step when nothing was mutated
-    - If the verification suite fails or times out (R401/R402), roll back to `checkpoint_out` so the unverified mutation does not stay in place, and end the run with that error (no audit is recorded)
+    - If the verification suite fails or times out (R401/R402), roll back to `checkpoint_out` so the unverified mutation does not stay in place, and end the run with that error (the audit step does not run; the run record the host keeps, STANDARD v1.2 §5.19.8, records the failure)
 
 18) **Invoke `/verify`** on `execute_out` (`drift_resolved`, `no_policy_violation`) if a mutation was applied, and store output as `verify_out`
     - Verify outcome: PASS/FAIL with evidence; skip this step when nothing was mutated. On FAIL, carry on: step 19 rolls back, once, and `audit` records the verdict and the rollback

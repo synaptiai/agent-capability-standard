@@ -378,8 +378,9 @@ A host that saves runs and continues them later
   around a turn. Never continue two copies of one saved state.
 - **Save before acting.** Save the state after every operation that changed
   it (start, submit, a tick that changed it, cancel, resume) and before you
-  perform the action it left pending. `drive`, `advance` and `run` take
-  `save=` and `key=` and do that; after `start` you save yourself.
+  perform the action it left pending. `drive`, `advance`, `run`, `resume`
+  and `cancel` take `save=` (and `key=`) and do that; after `start`, and
+  after `resume` or `cancel` without `save=`, you save yourself.
 - **At least once.** A restored run asks for its pending action again, with
   the same `run_id` and `id`, though you may already have performed it.
   Make what you do idempotent under that delivery key: keep the response you
@@ -400,7 +401,10 @@ A host that saves runs and continues them later
   and these delivery keys ([§5.19.2](../../spec/STANDARD-v1.2.0.md#5192-run-operations)):
   two runs under one id would share keys. The runner's default is a random
   one, and it refuses a `run_id` it has already started; a restored run
-  keeps its own.
+  keeps its own. Across restarts and processes, uniqueness is yours: pass
+  `WorkflowRunner(..., run_ids=store)`, a set-like store you persist and
+  prune as you drop runs' records and keys (the default, in memory, grows by
+  one per run).
 - **Interrupted turns.** When your process stops between performing an
   action and submitting the answer, the run is unchanged: restore the latest
   state on the next turn and go on as above, or cancel the run.
@@ -458,17 +462,21 @@ its `wake_at`.
 with lock(run_key):
     run = runner.restore(load(run_key), key=KEY)
     turn = runner.advance(run, host, save=lambda s: store(run_key, s), key=KEY)
-    log.extend(run.take_trace())            # events carry seq: a repeat shows
-    audit_store.extend(run.take_records())  # settled records, kept by you
+    log.extend(run.take_trace())                # events carry seq: a repeat shows
+    if turn.result is None:
+        audit_store.extend(run.take_records())  # settled records, kept by you
     store(run_key, run.snapshot(KEY))
     if turn.result is not None:
-        archive(turn.result)                # the run record and the records
+        archive(turn.result)  # the run record and the records not taken before
     elif turn.wake_at is not None:
         set_timer(run_key, turn.wake_at)
 ```
 
 Treat an inbound message, an approval decision and a timer alike: each is a
-reason to run a turn. When auditing, check what you took against
+reason to run a turn. An ended run's `turn.result.action_records` are the
+records not taken out in earlier turns, so archive them with the run record
+rather than take them again: taking an ended run's records would give you
+the same records twice. When auditing, check what you took against
 `run.taken_sha256`: the state keeps, for records and for trace events, a
 SHA-256 chain head over everything taken, so a signed state still vouches
 for them.
@@ -478,13 +486,12 @@ for them.
 title: One turn of an event-driven host
 ---
 flowchart TB
-  accDescr: A wake-up (an inbound message, a decision or a timer) leads to a turn under the run's lock: restore the state, advance the run, take the trace and settled records into the host's stores, save the state, then archive the result if the run ended or set a timer for its wake-up time.
+  accDescr: A wake-up (an inbound message, a decision or a timer) leads to a turn under the run's lock: restore the state, advance the run and take the trace into the host's log; if the run has not ended, take its settled records into the host's store, save the state and set a timer for its wake-up time; if it ended, save the state and archive the result, whose records are those not taken before.
   wake["Wake-up: message, decision or timer"] --> turn["Under the run's lock: restore, then advance"]
-  turn --> take["take_trace, take_records into your stores"]
-  take --> save[Save the state]
-  save --> done{Ended?}
-  done -->|yes| arch["Archive run record and records"]
-  done -->|no| timer["Set a timer for wake_at"]
+  turn --> trace["take_trace into your log"]
+  trace --> done{Ended?}
+  done -->|no| timer["take_records, save, set a timer for wake_at"]
+  done -->|yes| arch["Save, archive the run record and the records not taken"]
 ```
 
 `drive` is a loop of such turns that sleeps between them until the run's
@@ -495,7 +502,7 @@ wake-up time or the next poll.
 A snapshot holds a fixed part (about 0.5 kB), each stored step's output and
 the inputs it ran with, the action records (about 0.3 kB each, 0.6 kB with an
 approval), the trace (about 0.15 kB an event, three to six a step) and the
-pending action. Measured at the end of each of the 254 runtime fixtures, a
+pending action. Measured at the end of each of the 260 runtime fixtures, a
 snapshot is 1.2 kB to 35 kB (median 2.9 kB), of which the trace is about
 42%; the terminal action no longer stores copies of the records and outputs
 (in 1.1 that copy was a median 13%, up to 26%, of a finished run's state).
@@ -512,14 +519,18 @@ The executor never reads a workflow's triggers: the host evaluates them
 attendance (an `attendance` that differs is refused); for an event trigger
 pass `event=` (a canonical event): it must match, it is given as the input
 `delivers_to` names, and an `event_id` that already started a run of the
-trigger is refused, so a redelivered event starts nothing. Apply your sender
+trigger is refused, so a redelivered event starts nothing. Those ids are
+kept in memory unless you pass `WorkflowRunner(..., event_seen=factory)`,
+where `factory(workflow, index)` returns a set-like store you persist: with
+it, a redelivery after a restart starts nothing either. Apply your sender
 policy before you start the run (the runner does not see the sender).
 `grounded_agency.workflows.triggers` holds the rest: `next_fire(schedule,
 after_ms)` (fire times in the schedule's time zone, RFC 5545 for clock
 changes, `every` counted from the Unix epoch), `OverlapGate` (the `skip`,
 `buffer_one` and `allow_all` decisions, with `missed` fire times and
 `resumed` runs), `EventGate` (event acceptance, with a pluggable store of
-seen ids for deduplication across restarts) and `trigger_attendance`.
+seen ids for deduplication across restarts) and `trigger_attendance` (an
+`invoke` trigger's run always has its invoker's attendance).
 
 ## The trace
 
@@ -674,11 +685,12 @@ it when the approvers can be asked
 run = runner.start("nightly_sweep", inputs, attendance="unattended")
 result = runner.drive(run, host)
 if result.resumable:
-    saved = run.snapshot(key=b"secret")   # keep it with the queue entries
+    store(result.run_id, run.snapshot(key=b"secret"))  # with the queue entries
 # ... later, when the approvers can be asked, once per saved state:
-run = runner.resume(saved, key=b"secret", attendance="attended",
-                    actor_identity=operator_identity)
-result = runner.drive(run, host)
+save = lambda s: store(run_id, s)         # the resumed state replaces it
+run = runner.resume(load(run_id), key=b"secret", attendance="attended",
+                    actor_identity=operator_identity, save=save)
+result = runner.drive(run, host, save=save, key=b"secret")
 ```
 
 The resumed run is the same run, with the same `run_id`, records and

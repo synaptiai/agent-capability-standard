@@ -198,7 +198,7 @@ Nothing was rolled back: there was nothing to undo.
 Had the change been compliant and applied, and a later nested step failed
 (say the verification suite timed out: `execute`'s failure mode rolls the twin
 back to the checkpoint taken before the mutation, then the nested run ends
-with that code and records no audit), the invoke step would fail with
+with that code and its audit step does not run), the invoke step would fail with
 `R402: invoked workflow 'digital_twin_sync_loop' failed with R401: ...`.
 
 ### Example 3: Nested Workflow Invocation

@@ -341,7 +341,9 @@ their own way.
 #### B7) The host evaluates triggers; fire times follow RFC 5545
 
 §5.10.2 assigns trigger evaluation to the host, which applies the trigger's
-attendance, starts one run per event it accepts under its sender policy
+attendance (a run an `invoke` step starts has its invoker's, whatever its
+`invoke` trigger declares, as 1.1 executors already did), starts one run
+per event it accepts under its sender policy
 (§5.17 where the workflow declares `identity@1`) and at most one per
 `event_id`, and starts schedule runs at fire times as `overlap` allows.
 Local times map to instants by RFC 5545 §3.3.5; `every` is anchored at the
@@ -489,7 +491,8 @@ already does.
   replays every fixture with the trace and records taken before every
   entry, checking the state's chain heads against what was taken.
 - Trigger vectors `tests/conformance/triggers/` (fire times, overlap with
-  resumed runs, attendance, event acceptance with a redelivered event),
+  resumed runs, attendance, an `invoke` trigger's declared attendance
+  ignored, event acceptance with a redelivered event),
   normative for §5.10.2 with the tzdata release they name or any that agrees
   on their dates, generated from an oracle independent of the core.
 - Plugin hook tests for every failure path (exit 1 with a message).

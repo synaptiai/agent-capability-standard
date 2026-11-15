@@ -100,14 +100,14 @@ pub(crate) fn gates<'a>(
                 .at("field", format!("{field}.action")),
             );
         }
-        // Ending the run from a concurrently running step would leave its
-        // group mates half done.
+        // Ending the run from a group member would leave its group mates,
+        // which may run concurrently with it, half done.
         if action == Some("end") && step.contains_key("parallel_group") {
             report.push(
                 loc.diag(
                     Code::SchemaValidationFailed,
                     format!(
-                        "{field} ends the run, but the step runs concurrently in a parallel_group"
+                        "{field} ends the run, but the step is in a parallel_group, whose members may run concurrently"
                     ),
                 )
                 .at("field", format!("{field}.action")),

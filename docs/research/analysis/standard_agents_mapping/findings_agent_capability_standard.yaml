@@ -628,15 +628,17 @@ findings:
     where `start` passes its `attendance` argument, default `attended`, to the core.
   status: fixed
   resolution: 'spec/STANDARD-v1.2.0.md §5.10.2 (Evaluating Triggers) assigns trigger evaluation to the host, which
-    applies the trigger''s attendance, starts one run per event it accepts under its sender policy and at
-    most one per `event_id`, and starts schedule runs at their fire times as `overlap` allows; it defines
+    applies the trigger''s attendance (a run an `invoke` step starts always has its invoker''s), starts one
+    run per event it accepts under its sender policy and at most one per `event_id`, and starts schedule runs at their fire times as `overlap` allows; it defines
     fire times in the declared time zone (RFC 5545 §3.3.5 for clock changes), the `every` anchor (the Unix
     epoch), the three `overlap` values (a resumed run counts as in progress) and missed fire times.
     core/src/trigger.rs next_fire, exposed as _core.next_fire; grounded_agency/workflows/triggers.py
-    (trigger_attendance, OverlapGate, EventGate); WorkflowRunner.start(trigger=, event=). Normative vectors
+    (trigger_attendance, OverlapGate, EventGate); WorkflowRunner.start(trigger=, event=) and
+    WorkflowRunner(event_seen=) for a persisted store of seen event ids. Normative vectors
     tests/conformance/triggers/ (fire times, overlap, attendance, events), computed by
     scripts/gen_trigger_vectors.py with zoneinfo and run by core/tests/triggers.rs and
-    tests/test_triggers.py. RFC-0006 Part B, decision B7.'
+    tests/test_triggers.py; runtime fixtures invoke_trigger_attendance_ignored*. RFC-0006 Part B, decision
+    B7.'
   concerns:
   - workflow-execution
 - id: ACS-15
@@ -678,7 +680,8 @@ findings:
     every member has finished; unfinished members are abandoned when a recovery escalates or ends the run,
     and a loop continues from its target. `join` has one defined value, `all_complete`; any other, or a
     `join` without a group, is W618 (UNKNOWN_JOIN, ignored); a read of a group mate''s store is W619
-    (GROUP_MATE_READ). §4.3, §5.2 and §5.6 reworded. core/src/validate/groups.rs; validator fixtures
+    (GROUP_MATE_READ). §4.3, §5.2 and §5.6 reworded, as are spec/EDGE_TYPES.md, the composition patterns,
+    the modality guide and the validator''s messages. core/src/validate/groups.rs; validator fixtures
     pass_join_unknown_warns and pass_group_mate_read_warns; runtime fixtures parallel_group_list_order,
     parallel_group_unknown_join and parallel_group_member_fails. RFC-0006 Part B, decision B8.'
   concerns:
@@ -867,7 +870,9 @@ findings:
     fails silently; an `audit` step that binds `require_record: true` fails R402, reason not_recorded,
     unless its output''s `recorded` is true (ontology 2.2.0 input); §5.19.8 gives every run a run record, an
     ActionRecord derived from its terminal action, that every host keeps with the run''s records (failed and
-    cancelled runs included); §8.4 defines allow_manual_override, requires_anchors and audit_required.
+    cancelled runs included), and the recovery texts of the reference catalog, the composition patterns and
+    the digital twin skill point to it; §8.4 defines allow_manual_override, requires_anchors and
+    audit_required.
     Run::run_record, RunResult.run_record, WorkflowRunner(archive=); grounded_agency.trust.manual_override;
     create_evidence_collector(required=True); hooks/posttooluse_log_tool.sh reports every call it does not
     log or cannot sign (exit 1). Fixtures audit_require_record_*, audit_recorded_false_*, run_record_*;
@@ -1279,8 +1284,8 @@ findings:
     failure-mode checkpoint and every rollback; `audit` records its event under details.event of a record of
     its own; the trace is not an audit record. The plugin hook''s line is an ActionRecord, the audit skill
     writes one, CoordinationEvent.to_action_record and the TypeScript actionRecord export them. Fixtures
-    records_actions_*, records_default_unchanged; tests/test_audit_records.py validates every writer''s
-    records against ActionRecord. RFC-0006 Part B, decision B9.'
+    records_actions_*, records_failure_*, records_default_unchanged; tests/test_audit_records.py validates
+    every writer''s records against ActionRecord. RFC-0006 Part B, decision B9.'
   concerns:
   - evidence-audit-observability
   related:

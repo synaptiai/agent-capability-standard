@@ -836,7 +836,7 @@ content_moderation:
     # 2. Analyze audio content
     # The ontology orders detect before classify (`detect precedes classify`),
     # so detection runs first rather than in the same parallel group as the
-    # classify steps: steps of one group run concurrently.
+    # classify steps: the steps of one group are not ordered.
     - capability: detect
       domain: audio.speech
       purpose: Detect speech in audio for transcription and analysis.

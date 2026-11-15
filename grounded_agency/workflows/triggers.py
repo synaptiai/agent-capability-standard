@@ -28,25 +28,22 @@ OVERLAPS = ("skip", "buffer_one", "allow_all")
 
 
 def trigger_attendance(trigger: Mapping[str, Any], invoker: str | None = None) -> str:
-    """The attendance of a run ``trigger`` starts (§5.10): its declared
+    """The attendance of a run ``trigger`` starts (§5.10): for ``invoke``,
+    always the invoker's (attended when ``invoker`` is not given), whatever
+    the trigger declares, as the executor applies it; else its declared
     ``attendance``, else the default of its kind: ``manual`` attended,
-    ``schedule`` and ``event`` unattended, ``invoke`` the invoker's
-    (attended when ``invoker`` is not given)."""
+    ``schedule`` and ``event`` unattended."""
     declared = trigger.get("attendance")
-    if declared is not None:
-        if declared not in ATTENDANCES:
-            raise ValueError(
-                f"attendance must be one of {ATTENDANCES}, not {declared!r}"
-            )
-        return str(declared)
+    if declared is not None and declared not in ATTENDANCES:
+        raise ValueError(f"attendance must be one of {ATTENDANCES}, not {declared!r}")
     kind = trigger.get("kind")
-    if kind == "manual":
-        return "attended"
-    if kind in ("schedule", "event"):
-        return "unattended"
     if kind == "invoke":
         return invoker or "attended"
-    raise ValueError(f"unknown trigger kind {kind!r}")
+    if kind not in ("manual", "schedule", "event"):
+        raise ValueError(f"unknown trigger kind {kind!r}")
+    if declared is not None:
+        return str(declared)
+    return "attended" if kind == "manual" else "unattended"
 
 
 def next_fire(schedule: Mapping[str, Any], after_ms: int) -> int | None:

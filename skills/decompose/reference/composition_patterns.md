@@ -123,14 +123,14 @@ execute:
   - condition: The fix command failed or timed out
     on_error: [R401, R402]
     action: rollback
-    recovery: Roll back to the checkpoint taken before the fix; the run then ends with the execute step's error, and no audit is recorded.
+    recovery: Roll back to the checkpoint taken before the fix; the run then ends with the execute step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
 
 verify:
   failure_modes:
   - condition: Verification could not run (timed out or failed after its retries)
     on_error: [R401, R402]
     action: rollback
-    recovery: Roll back the unverified fix to the checkpoint; the run then ends with the verify step's error, and no audit is recorded.
+    recovery: Roll back the unverified fix to the checkpoint; the run then ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
 ```
 
 The `observe` failure mode has neither `on_error` nor `when`, so it documents the response and never fires (STANDARD v1.1.0 §5.7). A FAIL verdict is not a step error: `verify` succeeds, and the gated `rollback` step rolls back once, before `audit` records `verified: false` and `rolled_back`. When `execute` or `verify` itself fails, its failure mode rolls back to the latest checkpoint and the run ends with that step's code (STANDARD v1.1.0 §5.12). Do not also give the FAIL verdict a `rollback` failure mode: it would roll back, end the run R402, and skip the audit.
@@ -357,21 +357,21 @@ mutate:
   - condition: The mutation failed or timed out
     on_error: [R401, R402]
     action: rollback
-    recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded.
+    recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
 
 execute:
   failure_modes:
   - condition: The verification suite failed or timed out
     on_error: [R401, R402]
     action: rollback
-    recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded.
+    recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
 
 verify:
   failure_modes:
   - condition: Verification could not run (timed out or failed after its retries)
     on_error: [R401, R402]
     action: rollback
-    recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded.
+    recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
 ```
 
 Other failure modes, which have neither `on_error` nor `when` and so only document the response: `receive` "No messages/events available" → `stop`; `integrate` "Conflicts exceed threshold" → `request_more_context`.
@@ -526,7 +526,7 @@ Parallel data gathering, then identity resolution:
 [retrieve || observe || search] → integrate → detect (domain: entity) → classify
 ```
 
-Steps that share a `parallel_group` (with `join: all_complete`) run concurrently; Digital Twin Sync Loop uses `parallel_group: context_gathering` for its `search` step. None of these capabilities `conflicts_with` another, so they may share a group.
+Steps that share a `parallel_group` (with `join: all_complete`) are not ordered: an executor may run them in any order or concurrently, and the step after the group runs once all of them have finished; Digital Twin Sync Loop uses `parallel_group: context_gathering` for its `search` step. None of these capabilities `conflicts_with` another, so they may share a group.
 
 ### Risk Assessment
 

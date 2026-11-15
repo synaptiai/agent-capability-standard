@@ -1649,7 +1649,7 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(v102.len(), 2, "{v102:?}");
         assert!(v102[0].contains("missing required prerequisite 'checkpoint'"));
-        assert!(v102[1].contains("runs concurrently in parallel_group 'g'"));
+        assert!(v102[1].contains("shares parallel_group 'g' with it"));
         // soft_requires likewise.
         let c = codes(wf(json!([
             grouped("observe", "o", "g"),

@@ -698,6 +698,128 @@ fn records_actions_write_one_per_pass() {
     );
 }
 
+fn respond(run: &mut Run, response: Value, now: u64) {
+    let id = run.next().id;
+    run.submit(id, serde_json::from_value(response).unwrap(), now)
+        .unwrap();
+}
+
+fn decide(run: &mut Run, decision_id: &str, decision: &str, now: u64) {
+    let digest = serde_json::to_value(run.next()).unwrap()["digest"].clone();
+    respond(
+        run,
+        json!({"kind": "Decision", "decision_id": decision_id, "decision": decision,
+               "approvers": ["alice"], "digest": digest}),
+        now,
+    );
+}
+
+#[test]
+fn failed_rollback_fails_the_approved_record() {
+    // An approved step that fails has a failed record, also when the
+    // rollback its failure mode asks for fails too (§6.4); so no stale
+    // approved record holds back the records after it (take, §5.19.4).
+    let child = json!({"goal": "g", "risk": "high", "spec_version": "1.1",
+        "workflow_extensions": {"requires": ["approval@1"]},
+        "steps": [checkpoint(), policy(), mutate(json!({
+            "approval": {"approver": {"kind": "human"}},
+            "failure_modes": [{"condition": "it fails", "on_error": "R402",
+                               "action": "rollback"}]}))]});
+    let mut catalog = wf(json!([{"capability": "invoke", "purpose": "run it",
+        "store_as": "i", "workflow_id": "child", "input_bindings": {"workflow": "child"},
+        "failure_modes": [{"condition": "it fails", "on_error": "R402",
+            "action": "request_more_context",
+            "recovery": {"goto_step": "i", "max_loops": 1}}]}]));
+    catalog["child"] = child;
+    let mut run = start(&catalog, RecordMode::Actions);
+    answer(&mut run, output(json!({"checkpoint_id": "cp1"})), 0);
+    answer(&mut run, output(json!({"compliant": true})), 0);
+    approve(&mut run, "d1", 0);
+    answer(&mut run, error("R402"), 0);
+    assert_eq!(
+        serde_json::to_value(run.next()).unwrap()["kind"],
+        "Rollback"
+    );
+    answer(&mut run, error("F503"), 0);
+    // The nested run failed F503; the invoke step's loop runs it again.
+    answer(&mut run, output(json!({"checkpoint_id": "cp2"})), 0);
+    answer(&mut run, output(json!({"compliant": true})), 0);
+    approve(&mut run, "d2", 0);
+    let taken = run.take_records();
+    let statuses: Vec<(&str, &str)> = taken
+        .iter()
+        .map(|r| {
+            (
+                r["capability"].as_str().unwrap(),
+                r["status"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            ("checkpoint", "executed"),
+            ("constrain", "executed"),
+            ("mutate", "failed"),
+            ("rollback", "failed"),
+            ("invoke", "failed"),
+            ("checkpoint", "executed"),
+            ("constrain", "executed"),
+        ]
+    );
+    assert_eq!(taken[2]["code"], "R402", "the step's own code");
+    assert_eq!(run.action_records().len(), 1, "only the approved one stays");
+    answer(&mut run, output(json!({"success": true})), 0);
+    let end = end(&run);
+    assert_eq!(end["outcome"], "completed");
+    assert_eq!(end["action_records"][0]["status"], "executed");
+}
+
+#[test]
+fn reused_queued_record_names_only_its_pass_checkpoint() {
+    // A resumed queued step's record is updated in place; a pass refused
+    // before it ran used no checkpoint, so the record names none, though
+    // an earlier pass used one (§6.4, §5.14.1).
+    let catalog = wf(json!([
+        checkpoint(),
+        policy(),
+        mutate(json!({
+            "approval": {"approver": {"kind": "human"}, "when_unattended": "defer_to_queue"},
+            "failure_modes": [{"condition": "it fails", "on_error": "R402",
+                "action": "request_more_context",
+                "recovery": {"goto_step": "m", "max_loops": 1}}]}))
+    ]));
+    let mut o = opts(RecordMode::Approvals);
+    o.attendance = Attendance::Unattended;
+    let mut run = Run::start(&ctx(), &catalog, "w", Map::new(), o).unwrap();
+    answer(&mut run, output(json!({"checkpoint_id": "cp1"})), 0);
+    answer(&mut run, output(json!({"compliant": true})), 0);
+    assert_eq!(end(&run)["outcome"], "deferred");
+    run.resume(ResumeOptions {
+        attendance: Attendance::Attended,
+        now_ms: 10,
+        actor_identity: None,
+    })
+    .unwrap();
+    decide(&mut run, "d1", "approved", 10);
+    respond(
+        &mut run,
+        json!({"kind": "Checkpoint", "checkpoint_id": "cp2"}),
+        10,
+    );
+    assert_eq!(run.action_records()[0]["checkpoint_id"], "cp2");
+    answer(&mut run, error("R402"), 10);
+    decide(&mut run, "d2", "rejected", 10);
+    let end = end(&run);
+    assert_eq!(end["code"], "F502");
+    let record = &end["action_records"][0];
+    assert_eq!(record["status"], "rejected");
+    assert!(
+        record.get("checkpoint_id").is_none(),
+        "the refused pass used no checkpoint: {record}"
+    );
+}
+
 #[test]
 fn require_record_fails_an_audit_step_that_did_not_record() {
     let catalog = wf(

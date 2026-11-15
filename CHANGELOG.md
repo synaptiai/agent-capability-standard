@@ -80,6 +80,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
   line with `hmac: "no-hmac-available"`, which broke the chain), a line that
   could not be built, an unreadable last line, an unavailable digest.
+- Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
+  an action record of its own (Standard 1.2.0 §6.4), with the event under
+  `details.event`, the collected `audit_record`, `changes` and `provenance`
+  under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (else
+  the hook's default key), so `tools/verify_audit_log.py --log-file
+  .claude/audit/records.jsonl` checks the file. Lines an earlier version
+  wrote (`audit_id`, `timestamp`, `event`, `context`, `retention`,
+  `audit_record`, `changes`, `provenance`) carry no chain and do not verify:
+  move an existing file aside and let the skill start a new one (it does so
+  itself when the last line has no `hmac`), and read the old members under
+  `details` in new lines.
+- Reference executor: an approved step that fails now has a `failed`
+  record, with the step's code, also when its failure mode's rollback or
+  checkpoint then fails (F503, F501) or finds no checkpoint to roll back
+  to; 1.1 left that record `approved`, which a cancellation would then turn
+  into `cancelled` and which held back `take_records` for the rest of the
+  run. A record a resumed run reuses no longer keeps the `checkpoint_id` of
+  an earlier pass.
 
 ### Added
 - Standard 1.2.0, host protocol, runs and audit records
@@ -103,16 +121,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     failure-mode checkpoint and every rollback; an `audit` step that binds
     `require_record: true` fails R402, reason `not_recorded`, when it did not
     record. Python: `_core.Run` gains the same operations, `_core.next_fire`;
-    `WorkflowRunner.advance`, `cancel`, `archive=`, `save=`/`key=`,
+    `WorkflowRunner.advance`, `cancel`, `archive=`, `save=`/`key=` (on
+    `run`, `drive`, `advance`, `resume` and `cancel`), `run_ids=` and
+    `event_seen=` (host stores for used `run_id`s and seen `event_id`s),
     `start(records=, trigger=, event=)`; `Host.withdraw`, `HostCannotServe`,
     `RunArchiveError`, `Turn`; `grounded_agency.workflows.protocol` (typed
     actions and responses) and `grounded_agency.workflows.triggers`
     (`OverlapGate`, `EventGate`, `trigger_attendance`, `next_fire`).
+    `CoordinationEvent` keeps its record's `intent`, so the orchestrator's
+    `audit` step returns the record its log exports.
   - §5.10.2 Evaluating Triggers: the host's duties, event acceptance with
     one run per `event_id`, fire times in the schedule's time zone (RFC 5545
     for clock changes), `every` anchored at the Unix epoch, `overlap` and
-    missed fire times; normative trigger vectors
-    (`tests/conformance/triggers/`, from `scripts/gen_trigger_vectors.py`).
+    missed fire times; a run an `invoke` step starts always has its
+    invoker's attendance, whatever its `invoke` trigger declares; normative
+    trigger vectors (`tests/conformance/triggers/`, from
+    `scripts/gen_trigger_vectors.py`).
   - §5.2.3 Parallel Groups: members are unordered and the reference executor
     runs them in list order; W618 (`UNKNOWN_JOIN`) and W619
     (`GROUP_MATE_READ`).
@@ -124,8 +148,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     reports a capture that failed; the audit skill writes a record of its own
     with the event under `details.event`; the Standard Agents binding exports
     its trace entries as action records (`actionRecord`).
-  - 38 runtime fixtures (`cancel_*`, `wake_at_*`, `records_*`,
+  - 44 runtime fixtures (`cancel_*`, `wake_at_*`, `records_*`,
     `run_record_*`, `parallel_group_*`, `audit_*`, `error_reason_*`,
+    `invoke_trigger_attendance_*`,
     `response_extra_members_ignored`, `action_has_run_id`,
     `approval_record_decision_id`), whose script may hold `tick` with
     `changed`, `wake_at` and `cancel` entries and whose fixture may state

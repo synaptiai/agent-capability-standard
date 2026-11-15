@@ -123,6 +123,11 @@ def test_the_orchestrators_audit_record() -> None:
     assert problems(record) == []
     assert record["intent"] == "deploy.finished"
     assert record["details"]["retention"] == "P30D"
+    # The step's output record is the record written (§6.4): the log gives
+    # the same one, under the same action_id.
+    exported = runtime.audit_log.export_action_records()
+    assert record in exported
+    assert result.output["audit_id"] == record["action_id"]
 
 
 def test_audit_event_cannot_forge() -> None:
@@ -241,6 +246,32 @@ def test_the_audit_skills_documented_line() -> None:
     assert problems(record) == []
     assert record["capability"] == "audit"
     assert record["recorded_by"] == {"name": "audit skill"}
+    # It is the first line of a chain under the key the example names, and
+    # the verifier accepts it.
+    from tools.verify_audit_log import verify_entry
+
+    assert verify_entry(record, "", "example-key") == []
+
+
+def test_the_audit_skill_signs_with_the_verifiers_default_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With AUDIT_HMAC_KEY unset, the skill, the hook and the verifier use
+    one default key, so the skill's own chain verifies (§6.4)."""
+    import socket
+
+    from tools.verify_audit_log import get_default_hmac_key
+
+    monkeypatch.delenv("AUDIT_HMAC_KEY", raising=False)
+    monkeypatch.setattr(socket, "gethostname", lambda: "box.example")
+    assert get_default_hmac_key() == "grounded-agency-audit-box"
+    hook = HOOK.read_text(encoding="utf-8")
+    assert 'hmac_key="${AUDIT_HMAC_KEY:-grounded-agency-audit-$(hostname -s' in hook
+    skill = (ROOT / "skills" / "audit" / "SKILL.md").read_text(encoding="utf-8")
+    (row,) = [x for x in skill.splitlines() if x.startswith("| `record` |")]
+    assert "under `AUDIT_HMAC_KEY`, else the default key" in row
+    assert "`grounded-agency-audit-` then the short host name, `hostname -s`" in row
+    assert "or `default` when there is none" in row
 
 
 class _FailingStore:

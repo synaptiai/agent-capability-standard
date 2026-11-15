@@ -44,6 +44,9 @@ class CoordinationEvent:
         timestamp: ISO 8601 UTC timestamp.
         details: Free-form event-specific data.
         evidence_refs: Evidence anchor refs associated with this event.
+        intent: What the event records, as its audit record's ``intent``
+                (an ``audit`` step's event type, say); empty for the
+                event type.
     """
 
     event_id: str
@@ -56,10 +59,11 @@ class CoordinationEvent:
         default_factory=lambda: types.MappingProxyType({})
     )
     evidence_refs: tuple[str, ...] = field(default_factory=tuple)
+    intent: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for JSON export."""
-        return {
+        out: dict[str, Any] = {
             "event_id": self.event_id,
             "event_type": self.event_type,
             "source_agent_id": self.source_agent_id,
@@ -69,24 +73,26 @@ class CoordinationEvent:
             "details": dict(self.details),
             "evidence_refs": list(self.evidence_refs),
         }
+        if self.intent:
+            out["intent"] = self.intent
+        return out
 
     def to_action_record(
-        self,
-        recorded_by: dict[str, Any] | None = None,
-        intent: str | None = None,
+        self, recorded_by: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """The event as an audit record (STANDARD v1.2 §6.4): an action
         record of this log's own. The event's ``details`` stay under
         ``details``, with the log's own members (``source_agent_id``,
         ``target_agent_ids``, ``evidence_refs``) written last, so a detail
         cannot replace them; nothing in ``details`` becomes a member of the
-        record. ``intent`` defaults to the event type; ``recorded_by`` to
+        record. Its ``intent`` is the event's, else the event type, so the
+        record is the same whenever it is given; ``recorded_by`` defaults to
         this log."""
         record: dict[str, Any] = {
             "action_id": self.event_id,
             "timestamp": self.timestamp,
             "actor": "agent",
-            "intent": intent or self.event_type,
+            "intent": self.intent or self.event_type,
             "status": "executed",
         }
         if self.capability_id:
@@ -129,8 +135,10 @@ class CoordinationAuditLog:
         capability_id: str = "",
         details: dict[str, Any] | types.MappingProxyType[str, Any] | None = None,
         evidence_refs: list[str] | tuple[str, ...] | None = None,
+        intent: str = "",
     ) -> CoordinationEvent:
-        """Create and append a new audit event.
+        """Create and append a new audit event. ``intent`` is its audit
+        record's ``intent``, when not the event type.
 
         Returns the recorded ``CoordinationEvent`` so callers can
         reference its ``event_id`` if needed.
@@ -146,6 +154,7 @@ class CoordinationAuditLog:
                 json.loads(json.dumps(details, default=str)) if details else {}
             ),
             evidence_refs=tuple(evidence_refs) if evidence_refs else (),
+            intent=intent,
         )
         with self._lock:
             self._events.append(event)
