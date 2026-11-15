@@ -1,0 +1,246 @@
+{
+  "description": "A retry of a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (\u00a75.14.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          },
+          "failure_modes": [
+            {
+              "condition": "the change failed",
+              "on_error": "R402",
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "m",
+                "max_loops": 1
+              }
+            }
+          ]
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "after_deferral": "run",
+          "input_bindings": {
+            "task": {
+              "page": "oncall"
+            },
+            "agent": "pager"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 3
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "task_id": "t1",
+          "accepted": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+          {
+            "step": 2,
+            "action_id": "run-1/w/2/0"
+          }
+        ]
+      }
+    },
+    {
+      "resume": {
+        "attendance": "attended",
+        "at": 3600000
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "queued_action_id": "run-1/w/2/0",
+        "approver": {
+          "kind": "human"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp2"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "down"
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "queued_action_id": "run-1/w/2/0",
+        "approver": {
+          "kind": "human"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp3"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "deferred": [],
+    "outputs": {
+      "d": {
+        "task_id": "t1"
+      }
+    },
+    "action_records": [
+      {
+        "action_id": "run-1/w/2/0",
+        "status": "executed"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "run_resumed",
+    "loop"
+  ]
+}

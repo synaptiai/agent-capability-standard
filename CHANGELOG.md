@@ -35,7 +35,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Standard Agents binding: a trace entry's `approval.approvers` (and
   `GroundedCall.approvers`) are now the approvers' principals,
   `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
-  `approval.approver_identities`; compare approvers by principal.
+  `approval.approver_identities`; compare approvers by principal. They list
+  only the approvers whose approvals counted when the call ran
+  (`countedDecisions`): one that had lapsed under `expires_ms` is left out.
+  `POST acs/approvals` takes the digest in either case.
   `decideApproval` takes an optional last argument, `ApproverOptions`
   (`kind`, `ownerId`). Decisions stored by an earlier version have no
   identity, and a call that uses one records no `approver_identities`.
@@ -61,8 +64,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     run again as the same run, with the steps that ran ahead of them that
     they read and a checkpoint step a queued mutation binds; a nested run
     that ended deferred continues; a queued step is asked afresh (of a
-    person when attended), its request names `queued_action_id`, and its
-    `planned` record is updated in place. Trace kinds `run_resumed` and
+    person when attended), every request of the step names
+    `queued_action_id` (a re-ask after a recheck and a retry included), and
+    its `planned` record is updated in place with each decision and
+    outcome. A recovery loop during a resumption runs again only the steps
+    from its target to the step that looped, and the resumption then goes
+    on, so nothing that ran ahead runs twice. Trace kinds `run_resumed` and
     `invoke_resumed`.
   - With `identity@1`, an approval decision may attest its approvers
     (`approver_identities`); approvers are then counted by principal and
@@ -76,9 +83,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `WorkflowRunner.restore` take `actor_identity` and refuse another
     principal; a resumption may name a new actor, which the trace and later
     records show.
-  - 31 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
+  - 37 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
     `resume` entry and the `{{digest_upper}}` placeholder) and four
-    validator fixtures (`*approver_identity*`).
+    validator fixtures (`*approver_identity*`). Each `step` digest vector
+    gives what its step shows from (`bindings`, `recheck_read`), so an
+    executor can be checked against the file alone.
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
   a mapping of this standard against the Standard Agent Specification 0.2.0,
   how to build a grounded agent on it, and the changes proposed to each

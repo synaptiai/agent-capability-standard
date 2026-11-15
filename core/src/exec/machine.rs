@@ -7,8 +7,8 @@ use super::program::{GateAction, Program, Step, Workflow};
 use super::quorum;
 use super::{
     Action, Attendance, Body, Checkpoint, Deferral, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending,
-    Purpose, Replacement, Response, ResumeOptions, Stage, State, StepError, StepState, SubmitError,
-    check_inputs,
+    Purpose, Queued, Replacement, Response, ResumeOptions, Stage, State, StepError, StepState,
+    SubmitError, check_inputs,
 };
 use crate::duration;
 use crate::expr::ast::RefAt;
@@ -283,10 +283,10 @@ impl<'a> Machine<'a> {
 
     fn record(&mut self, status: &str, approval: Option<Value>) -> usize {
         // A queued step a resumption re-entered continues its queued
-        // action: its `planned` record is updated in place (§5.14.1).
-        if let Some(r) = self.frame().cur.queued.take()
-            && self.st.records[r]["status"] == "planned"
-        {
+        // action: the record its deferral left is updated in place, with
+        // every decision and outcome of the step until it goes on, a
+        // re-ask and a retry included (§5.14.1).
+        if let Some(r) = self.queued_record() {
             let always_ask = self.always_ask();
             let now = iso(self.st.now);
             let actor = self.st.actor_identity.clone();
@@ -312,6 +312,7 @@ impl<'a> Machine<'a> {
                 None => record.remove("approval"),
             };
             record.remove("reason");
+            record.remove("reason_code");
             return r;
         }
         let step = self.frame_ref().step;
@@ -493,7 +494,11 @@ impl<'a> Machine<'a> {
     /// After a step: the next one, or the end of an escalation. During a
     /// resumption, the next step of its list (§5.14.1).
     fn next_step(&mut self) -> Flow {
-        self.settle_queued();
+        // The step goes on: the queued action it continued closes. A loop
+        // that runs a later step again keeps that step's.
+        if self.queued_record().is_some() {
+            self.settle_queued();
+        }
         if let Some(list) = self.frame_ref().resume.clone() {
             if let Some(&next) = list.first() {
                 let f = self.frame();
@@ -754,10 +759,16 @@ impl<'a> Machine<'a> {
         };
         // A step that begins while a deferral of its own is listed is one a
         // resumption re-enters: it continues that queued action (§5.14.1).
+        // A recovery loop that runs it again keeps the action (`queued`).
         let path: Vec<usize> = self.st.frames.iter().map(|f| f.step).collect();
         if let Some(pos) = self.st.deferrals.iter().position(|d| d.path == path) {
             let d = self.st.deferrals.remove(pos);
-            self.frame().cur.queued = d.record;
+            if let Some(record) = d.record {
+                self.frame().queued = Some(Queued {
+                    step: index,
+                    record,
+                });
+            }
         }
         let capability = self.step_ref().capability.clone();
         self.trace_step("step_started", json!({"capability": capability}));
@@ -936,12 +947,9 @@ impl<'a> Machine<'a> {
             self.trace_step("always_ask", json!({}));
         }
         // So is a queued step that an attended resumption re-enters
-        // (§5.14.1); every request for a re-entered queued step names it.
-        let queued = self
-            .frame_ref()
-            .cur
-            .queued
-            .filter(|&r| self.st.records[r]["status"] == "planned");
+        // (§5.14.1); every request for a re-entered queued step names it,
+        // until the step goes on (a re-ask and a retry included).
+        let queued = self.queued_record();
         let person = marked || (queued.is_some() && self.st.attendance == Attendance::Attended);
         let queued_action_id =
             queued.and_then(|r| self.st.records[r]["action_id"].as_str().map(str::to_string));
@@ -1100,8 +1108,11 @@ impl<'a> Machine<'a> {
             }
             None => None,
         };
-        // A queued step deferred again keeps its record `planned`.
-        self.frame().cur.queued = None;
+        // A queued step deferred again keeps its record `planned`, under
+        // its deferral; it no longer continues it now.
+        if self.queued_record().is_some() {
+            self.frame().queued = None;
+        }
         let store_as = self.step_ref().store_as.clone();
         if let Some(store) = &store_as {
             let f = self.frame();
@@ -1194,33 +1205,52 @@ impl<'a> Machine<'a> {
             })
     }
 
-    /// A recovery loop to `target` runs its steps again: they are no longer
-    /// deferred, here or in the nested runs under them, and the actions
-    /// they queued are superseded.
+    /// The steps a recovery loop to `target` runs again: during a
+    /// resumption, those up to the step that loops, after which the
+    /// resumption goes on with its list (§5.14.1); else every step from
+    /// `target` on.
+    fn rerun(&self, target: usize) -> std::ops::Range<usize> {
+        let f = self.frame_ref();
+        let end = if f.resume.is_some() && f.escalation.is_none() {
+            f.step + 1
+        } else {
+            self.workflow().steps.len()
+        };
+        target..end
+    }
+
+    /// A recovery loop to `target` runs its steps again (`rerun`): they are
+    /// no longer deferred, here or in the nested runs under them, and the
+    /// actions they queued are superseded. During a resumption they run
+    /// first, and then the steps left in its list, a deferred handler
+    /// last: the queued steps after the loop keep their queued actions, and
+    /// a step after it that ran ahead keeps its output.
     fn undefer_from(&mut self, target: usize) {
-        // During a resumption the loop returns to normal flow: the queued
-        // steps not yet re-entered and a deferred handler not yet run are
-        // superseded, and that handler's escalation is dropped (§5.14.1).
-        if let Some(left) = self.frame().resume.take() {
-            self.frame().pending_escalation = None;
-            self.supersede_queued(
-                &left,
-                "superseded: a recovery loop ran from an earlier step",
-            );
-        }
+        let rerun = self.rerun(target);
+        let wf = self.workflow();
         let f = self.frame();
-        f.deferred.retain(|&d| d < target);
-        f.nested_caps.retain(|&k, _| k < target);
-        f.parked.retain(|&k, _| k < target);
+        if let Some(list) = f.resume.as_mut()
+            && f.escalation.is_none()
+        {
+            let again = rerun.clone().filter(|&k| !wf.steps[k].handler);
+            list.splice(0..0, again);
+        }
+        f.deferred.retain(|d| !rerun.contains(d));
+        f.nested_caps.retain(|k, _| !rerun.contains(k));
+        f.parked.retain(|k, _| !rerun.contains(k));
         if f.deferred.is_empty() {
             f.ahead = None;
         } else if let Some(ahead) = &mut f.ahead {
-            ahead.retain(|&k| k < target);
+            ahead.retain(|k| !rerun.contains(k));
         }
         let depth = self.st.frames.len() - 1;
         let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
         self.supersede(
-            |d| d.path.len() > depth && d.path[..depth] == prefix[..] && d.path[depth] >= target,
+            |d| {
+                d.path.len() > depth
+                    && d.path[..depth] == prefix[..]
+                    && rerun.contains(&d.path[depth])
+            },
             "superseded: a recovery loop ran the step again",
         );
     }
@@ -1273,12 +1303,21 @@ impl<'a> Machine<'a> {
         f.nested_caps.retain(|k, _| !steps.contains(k));
     }
 
-    /// A re-entered queued step that ends without reaching its approval
-    /// (skipped, failed or ended first) supersedes its queued action.
+    /// The record of the queued action the current step continues, if it
+    /// continues one (§5.14.1).
+    fn queued_record(&self) -> Option<usize> {
+        let f = self.frame_ref();
+        f.queued.filter(|q| q.step == f.step).map(|q| q.record)
+    }
+
+    /// The re-entered queued step went on, or the run left it: its queued
+    /// action closes. One whose step never reached its approval (skipped,
+    /// failed or ended first) is superseded.
     fn settle_queued(&mut self) {
-        if let Some(r) = self.frame().cur.queued.take()
-            && self.st.records[r]["status"] == "planned"
+        if let Some(q) = self.frame().queued.take()
+            && self.st.records[q.record]["status"] == "planned"
         {
+            let r = q.record;
             self.st.records[r]["status"] = json!("rejected");
             self.st.records[r]["reason"] =
                 json!("superseded: the step did not reach its approval when its run resumed");
@@ -2187,7 +2226,9 @@ impl<'a> Machine<'a> {
         if self.frame_ref().cur.error.is_some() {
             self.record_failed();
         }
-        self.settle_queued();
+        // An escalation or the end of the run closes the step's queued
+        // action (`escalate`, `end_frame`); a loop runs the step again, which
+        // keeps it.
         if fm.action == "escalate" {
             return match fm.goto {
                 Some(h) => self.escalate(h, &code),
@@ -2285,7 +2326,7 @@ impl<'a> Machine<'a> {
                 }
             }
         }
-        let cleared: Vec<String> = wf.steps[target..]
+        let cleared: Vec<String> = wf.steps[self.rerun(target)]
             .iter()
             .filter_map(|s| s.store_as.clone())
             .collect();

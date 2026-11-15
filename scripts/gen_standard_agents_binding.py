@@ -388,9 +388,10 @@ DIGEST_VECTORS = [
 DIGEST_FIELDS = {
     "name": "The vector's name, unique in this file.",
     "kind": (
-        "`step`: an approval request of a workflow step, with `approval` and,"
-        " without `shows`, `inputs`; `tool_call`: the approval of a tool call"
-        " (STANDARD v1.2.0 §5.18.7), with `call`."
+        "`step`: an approval request of a workflow step, with `approval`;"
+        " without `shows`, `inputs`; with `shows`, `bindings`; asked again"
+        " after a recheck, `recheck_read`. `tool_call`: the approval of a"
+        " tool call (STANDARD v1.2.0 §5.18.7), with `call`."
     ),
     "about": "What the vector covers.",
     "approval": (
@@ -400,6 +401,20 @@ DIGEST_FIELDS = {
     "inputs": (
         "For a `step` vector: the step's resolved inputs. Present where the"
         " step declares no `shows`, so that `shown` is built from them."
+    ),
+    "bindings": (
+        "For a `step` vector whose step declares `shows`: the values its"
+        " references resolve against, by root name: the workflow input"
+        " `setting` and the store `current` of the step before it, so that"
+        " `${current.data}` resolves to `bindings.current.data`. A reference"
+        " to something they do not hold resolves to null."
+    ),
+    "recheck_read": (
+        "For a `step` vector asked again after a recheck: the value the"
+        " recheck read, which differs from the value approved before (the"
+        " recheck `source` resolved against `bindings`). The vector is the"
+        " request asked again; the first request showed the `shows` values"
+        " alone."
     ),
     "call": (
         "For a `tool_call` vector: the call, `{action, capability, args}`;"
@@ -528,6 +543,17 @@ def _ecmascript_number(x: float) -> str:
     return f"{sign}{digits[0]}{fraction}e{'+' if n > 0 else '-'}{abs(n - 1)}"
 
 
+# The workflow input of every digest run, and what its `retrieve` step
+# returns besides the vector's value.
+SETTING = "x"
+
+
+def retrieved(vector: DigestVector) -> dict[str, Any]:
+    """What the `retrieve` step returns, and so what the store `current`
+    holds."""
+    return {"data": vector.value, "confidence": 1.0, "evidence_anchors": []}
+
+
 def approval_requests(
     validator: _core.Validator, vector: DigestVector
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -538,7 +564,7 @@ def approval_requests(
         validator,
         digest_catalog(vector.approval),
         "change",
-        {"setting": "x"},
+        {"setting": SETTING},
         # The catalog is a value built here, with no header (§11.5).
         header=None,
         attendance="attended",
@@ -546,9 +572,9 @@ def approval_requests(
         now_ms=0,
     )
     outputs: dict[str, dict[str, Any]] = {
-        "retrieve": {"data": vector.value, "confidence": 1.0},
-        "checkpoint": {"checkpoint_id": "cp-1"},
-        "mutate": {"success": True},
+        "retrieve": retrieved(vector),
+        "checkpoint": {"checkpoint_id": "cp-1", "evidence_anchors": []},
+        "mutate": {"success": True, "evidence_anchors": []},
     }
     requests: list[dict[str, Any]] = []
     inputs: dict[str, Any] = {}
@@ -563,8 +589,7 @@ def approval_requests(
         if kind == "InvokeCapability":
             if action["capability"] == "mutate":
                 inputs = action["inputs"]
-            value = {**outputs[action["capability"]], "evidence_anchors": []}
-            response = {"kind": "Output", "value": value}
+            response = {"kind": "Output", "value": outputs[action["capability"]]}
         elif kind == "RequestApproval":
             requests.append(action)
             response = {
@@ -609,6 +634,10 @@ def render_digests() -> str:
             if shown != [inputs]:
                 raise SystemExit(f"{name}: shown is not the step's inputs")
             entry["inputs"] = inputs
+        else:
+            entry["bindings"] = {"setting": SETTING, "current": retrieved(vector)}
+        if vector.reread is not None:
+            entry["recheck_read"] = vector.reread
         entry.update(shown=shown, canonical=canonical, digest=digest)
         vectors.append(entry)
     if len({v["name"] for v in vectors}) != len(vectors):
@@ -630,7 +659,9 @@ def render_digests() -> str:
             " implementation that computes or checks approval digests"
             " produces each vector's `canonical` text and `digest` from its"
             " `shown` values; an executor shows each `step` vector's `shown`"
-            " values, and a safety layer each `tool_call` vector's. This"
+            " values, given its `inputs` or `bindings` and any"
+            " `recheck_read`, and a safety layer each `tool_call` vector's."
+            " This"
             " file is printable ASCII: any other character is written as a"
             " JSON \\u escape, so no tool that normalises or transcodes text"
             " can change a vector."

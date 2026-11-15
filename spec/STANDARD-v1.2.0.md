@@ -1084,8 +1084,9 @@ When a run resumes:
      `checkpoint_id`, §12.5), as W608's remedy takes a new checkpoint after a
      wait. A step that only binds the id, such as a `rollback`, does not
      cause this: it returns to the restore point it named.
-   No other step runs again: a step that ran before the deferral, or ran
-   ahead and is not read, keeps its output. The deferral rules of §5.14
+   No other step runs again, except under a recovery loop (item 7): a step
+   that ran before the deferral, or ran ahead and is not read, keeps its
+   output. The deferral rules of §5.14
    apply as in any run, so a step that depends on a step deferred again is
    deferred again. A deferred handler runs last (item 4).
 3. **Nested runs.** A deferred `invoke` step whose nested run ended
@@ -1103,31 +1104,39 @@ When a run resumes:
    afresh: its shown values and digest are computed now, a decision must
    match them, `expires` runs from the new request, and `recheck` re-reads
    its source after the decision. Every request for a re-entered queued step
-   names its queued action (`queued_action_id`: the `action_id` of its
-   `planned` record), in either attendance. In an attended resumption the
-   request is put to a person, a `human` approver keeping `role`,
+   names its queued action (`queued_action_id`: the `action_id` of the
+   record its deferral left), in either attendance, until the step goes on
+   (item 6), after a recheck or in a retry too. In an attended resumption
+   each such request is put to a person, a `human` approver keeping `role`,
    `min_approvers`, `sender_check` and `accept_trust_classes` and dropping
    `mandate_ref`. In an unattended resumption the step is asked as in any
    unattended run, and its `when_unattended` applies again.
-6. **The record.** A re-entered step continues its queued action: the
-   `planned` record its deferral left is updated in place, keeping its
-   `action_id`, with the decision, the outcome, the time and the actor. A
-   step deferred again leaves the record `planned`. A re-entered step that
-   ends without reaching its approval (its condition is false, a gate skips
-   or stops it, or it fails first) supersedes its queued action (`rejected`,
-   "superseded").
-7. **Ending early.** A recovery loop during the resumption returns the run to
-   normal flow from its target: the queued steps it has not re-entered, and a
-   deferred handler it has not run, are superseded, as for any loop over a
-   deferred step (§5.14), and the escalation that handler was to handle is
-   dropped. A gate `end` ends the run before the queued steps after it and
-   the deferred handler, whose queued actions are superseded. Another
-   escalation takes precedence over the deferred handler's: its queued
-   actions are superseded, the queued steps not yet re-entered stay deferred,
-   and the new handler is judged against them (§5.14). When the resumed run
-   fails, or needs a replan, the queued steps it did not reach stay deferred:
-   listed among the run's deferrals, with their records `planned`, abandoned
-   as above.
+6. **The record.** A re-entered step continues its queued action until it
+   goes on to another step, is deferred again, or its run leaves it; a
+   recovery loop that runs it again keeps it (item 7). Meanwhile each
+   decision and outcome of the step, with the time and the actor, updates
+   in place the record its deferral left, keeping its `action_id`; no other
+   record is written for it, and the trace keeps every decision. A step
+   deferred again leaves the record `planned`. A queued action whose step
+   goes on, or is left, before reaching its approval (its condition is
+   false, a gate skips or stops it, or it fails first) is superseded
+   (`rejected`, "superseded").
+7. **Ending early.** A recovery loop during the resumption runs again the
+   steps from its target to the step that looped, as in normal flow (a
+   handler among them does not run); the resumption then goes on with the
+   rest of its list, a deferred handler last. Of the queued steps the loop
+   runs again, one that has not gone on continues its queued action (item
+   6), one that had runs as a new action, and one deferred again in the
+   resumption has its queued action superseded (§5.14). The steps after the
+   one that looped keep their queued actions and outputs, so nothing that
+   ran ahead runs twice. A gate `end` ends the run before the queued steps
+   after it and the deferred handler, whose queued actions are superseded.
+   Another escalation takes precedence over the deferred handler's: its
+   queued actions are superseded, the queued steps not yet re-entered stay
+   deferred, and the new handler is judged against them (§5.14). When the
+   resumed run fails, or needs a replan, the queued steps it did not reach
+   stay deferred: listed among the run's deferrals, with their records
+   `planned`, abandoned as above.
 
 **Saved states.** An executor MUST refuse to resume a state that does not
 keep what this subsection needs: the nested run of each deferred `invoke`
@@ -1947,15 +1956,18 @@ informative for implementations that execute workflows.
 The approval digest vectors (`tests/conformance/approval/digests.json`) are
 normative for §5.14 and §5.18.7. Each vector has a `kind`. A `step` vector is
 one approval request of a workflow step: the step's `approval` field (or
-null for none), its resolved `inputs` where it declares no `shows`, and the
-`shown` values. A `tool_call` vector is the approval of a tool call: the
-`call` (`action`, `capability`, `args`) and the `shown` values `[call]`.
-Every vector gives the RFC 8785 `canonical` text of `shown` and its `digest`.
-An implementation that computes or checks approval digests MUST produce each
-vector's `canonical` text and `digest` from its `shown` values. An executor
-MUST show, for each `step` vector's step, that vector's `shown` values, and a
-layer (§5.18) MUST show, for each `tool_call` vector's call, that vector's
-`shown` values.
+null for none); where the step declares no `shows`, its resolved `inputs`;
+where it does, the values its references resolve against (`bindings`, by
+root name); for a request asked again after a recheck, the value the recheck
+read (`recheck_read`); and the `shown` values. A `tool_call` vector is the
+approval of a tool call: the `call` (`action`, `capability`, `args`) and the
+`shown` values `[call]`. Every vector gives the RFC 8785 `canonical` text of
+`shown` and its `digest`. An implementation that computes or checks approval
+digests MUST produce each vector's `canonical` text and `digest` from its
+`shown` values. An executor MUST show, for each `step` vector's step, given
+that vector's `inputs` or `bindings` and its `recheck_read`, that vector's
+`shown` values, and a layer (§5.18) MUST show, for each `tool_call` vector's
+call, that vector's `shown` values.
 
 ### 10.4 Safety-Layer Conformance
 

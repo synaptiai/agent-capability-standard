@@ -895,7 +895,7 @@ def _resumption(add):
     )
     add(
         "resume_deferred_handler_loop",
-        "A recovery loop during a resumption returns the run to normal flow: the deferred handler below the loop's target is superseded and its escalation dropped, the step is asked again with no queued action, and the run completes (§5.14.1).",
+        "A retry of a re-entered queued step during a resumption runs that step again and then goes on with the resumption: the second request names the same queued action, the record is updated in place again, the step that escalated in the first run is not run again, and the deferred handler still runs last, with the escalation's cause (§5.14.1).",
         escalating(handler_first=True, loop_on_mutate=True),
         CHECKPOINTED
         + [
@@ -909,7 +909,7 @@ def _resumption(add):
             },
             {"expect": inv("mutate", step=3), "respond": down},
             {
-                "expect": {"kind": "RequestApproval", "step": 3},
+                "expect": queued_request(3, "run-1/w/3/0", approver=HUMAN),
                 "respond": approve("d2"),
             },
             {
@@ -917,19 +917,16 @@ def _resumption(add):
                 "respond": {"kind": "Checkpoint", "checkpoint_id": "cp3"},
             },
             {"expect": inv("mutate", step=3), "respond": out(success=True)},
-            {
-                "expect": inv("observe", step=4),
-                "respond": out(observation={}, confidence=1),
-            },
+            paged,
         ],
         {
             "kind": "Completed",
-            "outcome": "completed",
-            "cause": None,
+            "outcome": "escalated",
+            "cause": "R402",
             "deferred": [],
-            "action_records": [{"status": "failed"}, {"status": "executed"}],
+            "action_records": [{"action_id": "run-1/w/3/0", "status": "executed"}],
         },
-        ["run_resumed", "loop"],
+        ["run_resumed", "loop", "invoke_started"],
         attendance="unattended",
     )
 
@@ -1065,8 +1062,8 @@ def _resumption(add):
     )
     cp_answer = {"kind": "Checkpoint", "checkpoint_id": "cp2"}
     add(
-        "resume_loop_supersedes",
-        "A recovery loop during a resumption to a step before a queued one supersedes that queued action; the steps from the loop's target run as in normal flow, asked afresh (§5.14.1).",
+        "resume_loop_goes_on",
+        "A recovery loop during a resumption runs the steps from its target to the step that looped again, as in normal flow, and the resumption then goes on: the queued step after the loop keeps its queued action. A step whose queued action was carried out runs again as a new action, asked with no queued action (§5.14.1).",
         {
             "w": wf(
                 [
@@ -1097,10 +1094,7 @@ def _resumption(add):
                 "expect": inv("verify", step=3),
                 "respond": out(passed=True, confidence=1),
             },
-            {
-                "expect": {"kind": "RequestApproval", "step": 4},
-                "respond": approve("d3"),
-            },
+            {"expect": queued_request(4, "run-1/w/4/1"), "respond": approve("d3")},
             {"expect": {"kind": "CreateCheckpoint", "step": 4}, "respond": cp_answer},
             {"expect": inv("mutate", step=4), "respond": out(success=True)},
         ],
@@ -1110,9 +1104,8 @@ def _resumption(add):
             "deferred": [],
             "action_records": [
                 {"action_id": "run-1/w/2/0", "status": "executed"},
-                {"action_id": "run-1/w/4/1", "status": "rejected"},
-                {"status": "executed"},
-                {"status": "executed"},
+                {"action_id": "run-1/w/4/1", "status": "executed"},
+                {"action_id": "run-1/w/2/2", "status": "executed"},
             ],
         },
         ["run_resumed", "loop"],
@@ -1212,5 +1205,403 @@ def _resumption(add):
             ],
         },
         ["run_resumed", "run_ended"],
+        attendance="unattended",
+    )
+
+    # A queued step keeps its queued action until it goes on: a retry and a
+    # re-ask after a recheck continue it, and a retry runs only that step
+    # again.
+    retried = mutate(
+        approval=DEFER,
+        failure_modes=[
+            {
+                "condition": "the change failed",
+                "on_error": "R402",
+                "action": "request_more_context",
+                "recovery": {"goto_step": "m", "max_loops": 1},
+            }
+        ],
+    )
+    paging_task = st(
+        "delegate",
+        "d",
+        after_deferral="run",
+        input_bindings={"task": {"page": "oncall"}, "agent": "pager"},
+    )
+    add(
+        "resume_retry_keeps_queue",
+        "A retry of a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (§5.14.1).",
+        {"w": wf([CP, POLICY, retried, paging_task], requires=["approval@1"])},
+        CHECKPOINTED
+        + [
+            {
+                "expect": inv("delegate", step=3),
+                "respond": out(task_id="t1", accepted=True),
+            },
+            deferred_end({"step": 2, "action_id": "run-1/w/2/0"}),
+            resume(at=3600000),
+            {
+                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "respond": approve("d1"),
+            },
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
+            {"expect": inv("mutate", step=2), "respond": down},
+            {
+                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "respond": approve("d2"),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 2},
+                "respond": {"kind": "Checkpoint", "checkpoint_id": "cp3"},
+            },
+            {"expect": inv("mutate", step=2), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "deferred": [],
+            "outputs": {"d": {"task_id": "t1"}},
+            "action_records": [{"action_id": "run-1/w/2/0", "status": "executed"}],
+        },
+        ["run_resumed", "loop"],
+        attendance="unattended",
+    )
+    rechecked = guarded(
+        {
+            "approver": NIGHTLY,
+            "when_unattended": "defer_to_queue",
+            "recheck": {"source": "${policy}", "on_change": "reask"},
+        },
+        requires=["approval@1"],
+    )
+    changed = {"kind": "Current", "value": {"compliant": False}}
+    add(
+        "resume_recheck_reask",
+        "Resumed attended, a queued step whose recheck sees its source change is asked again of a person, not of its standing mandate, and the request names the same queued action; the decision lands on the queued record, updated in place, which ends executed (§5.14.1).",
+        rechecked,
+        mandate_first
+        + [
+            resume(at=3600000),
+            {
+                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "respond": approve("d1"),
+            },
+            {"expect": {"kind": "RecheckSource", "step": 2}, "respond": changed},
+            {
+                "expect": queued_request(
+                    2,
+                    "run-1/w/2/0",
+                    approver=HUMAN,
+                    shown=[
+                        INPUTS,
+                        {
+                            "recheck": {
+                                "previous": {"compliant": True},
+                                "current": {"compliant": False},
+                            }
+                        },
+                    ],
+                ),
+                "respond": approve("d2"),
+            },
+            {"expect": {"kind": "RecheckSource", "step": 2}, "respond": changed},
+        ]
+        + mandate_tail,
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {
+                    "action_id": "run-1/w/2/0",
+                    "status": "executed",
+                    "approval": {"mandate_ref": None, "approvers": ["alice"]},
+                }
+            ],
+        },
+        ["run_resumed", "recheck"],
+        attendance="unattended",
+    )
+
+    # A loop supersedes only what it runs again.
+    looping_observe = st(
+        "observe",
+        "o",
+        input_bindings={"target": "elsewhere"},
+        failure_modes=[
+            {
+                "condition": "the observation failed",
+                "on_error": "R402",
+                "action": "request_more_context",
+                "recovery": {"goto_step": "m1", "max_loops": 1},
+            }
+        ],
+    )
+    m2_reads = mutate("m2", approval=DEFER)
+    m2_reads["input_bindings"] = {
+        "target": "config",
+        "operation": "${o.observation: object}",
+    }
+    add(
+        "resume_loop_supersedes",
+        "A recovery loop during an unattended resumption supersedes only what it runs again: the queued step it runs again, deferred again earlier in the resumption, gets a new queued action, and the queued step after the loop keeps its own (§5.14.1).",
+        {
+            "w": wf(
+                [CP, POLICY, mutate("m1", approval=DEFER), looping_observe, m2_reads],
+                requires=["approval@1"],
+            )
+        },
+        CHECKPOINTED
+        + [
+            {
+                "expect": inv("observe", step=3),
+                "respond": out(observation={"n": 1}, confidence=1),
+            },
+            deferred_end(
+                {"step": 2, "action_id": "run-1/w/2/0"},
+                {"step": 4, "action_id": "run-1/w/4/1"},
+            ),
+            resume(attendance="unattended", at=3600000),
+            {"expect": inv("observe", step=3), "respond": down},
+            {
+                "expect": inv("observe", step=3),
+                "respond": out(observation={"n": 2}, confidence=1),
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "deferred",
+            "deferred": [
+                {"step": 2, "action_id": "run-1/w/2/2"},
+                {"step": 4, "action_id": "run-1/w/4/1"},
+            ],
+            "action_records": [
+                {"action_id": "run-1/w/2/0", "status": "rejected"},
+                {"action_id": "run-1/w/4/1", "status": "planned"},
+                {"action_id": "run-1/w/2/2", "status": "planned"},
+            ],
+        },
+        ["run_resumed", "loop", "step_deferred"],
+        attendance="unattended",
+    )
+
+    # The queued actions a resumption supersedes, and those it leaves
+    # deferred.
+    failing_invoke = st(
+        "invoke",
+        "i",
+        workflow_id="child",
+        after_deferral="run",
+        input_bindings={"workflow": "child"},
+        failure_modes=[
+            {
+                "condition": "the nested run failed",
+                "on_error": "R402",
+                "action": "escalate",
+                "recovery": {"goto_step": "page"},
+            }
+        ],
+    )
+    page_after_m0 = st(
+        "invoke",
+        "page",
+        handler=True,
+        workflow_id="oncall",
+        input_bindings={
+            "workflow": "oncall",
+            "input": {
+                "why": "the nested run failed",
+                "applied": "${m0.success: boolean}",
+            },
+        },
+    )
+    failing_child = wf(
+        [
+            CP,
+            POLICY,
+            mutate(approval=DEFER),
+            st(
+                "retrieve",
+                "r",
+                after_deferral="run",
+                input_bindings={"target": "config"},
+            ),
+        ],
+        requires=["approval@1"],
+    )
+    pager = escalating(handler_first=False)["oncall"]
+    add(
+        "resume_nested_failure_supersedes",
+        "A nested run that deferred a step and then failed under an invoke step that runs after a deferral escalates to a handler, which is deferred; when the run resumes, the nested run's queued action is superseded, because the nested run it was queued in failed, and the handler runs last (§5.14.1).",
+        {
+            "w": wf(
+                [
+                    CP,
+                    POLICY,
+                    mutate("m0", approval=DEFER),
+                    failing_invoke,
+                    page_after_m0,
+                ],
+                requires=["approval@1", "recovery@1"],
+            ),
+            "child": failing_child,
+            "oncall": pager,
+        },
+        CHECKPOINTED
+        + [
+            {
+                "expect": inv("checkpoint", frame=["w", "child"]),
+                "respond": out(checkpoint_id="cp5"),
+            },
+            {
+                "expect": inv("constrain", frame=["w", "child"]),
+                "respond": out(compliant=True),
+            },
+            {"expect": inv("retrieve", frame=["w", "child"]), "respond": down},
+            deferred_end(
+                {"step": 2, "action_id": "run-1/w/2/0"},
+                {"frame": ["w", "child"], "step": 2, "action_id": "run-1/w/child/2/1"},
+                {"step": 4},
+                cause="R402",
+            ),
+            resume(at=3600000),
+            {"expect": queued_request(2, "run-1/w/2/0"), "respond": approve("d1")},
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
+            {"expect": inv("mutate", step=2), "respond": out(success=True)},
+            paged,
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "escalated",
+            "cause": "R402",
+            "deferred": [],
+            "action_records": [
+                {"action_id": "run-1/w/2/0", "status": "executed"},
+                {"action_id": "run-1/w/child/2/1", "status": "rejected"},
+            ],
+        },
+        ["run_resumed", "escalated", "invoke_started"],
+        attendance="unattended",
+    )
+    escalates = [
+        {
+            "condition": "it failed",
+            "on_error": "R402",
+            "action": "escalate",
+            "recovery": {"goto_step": "fix"},
+        }
+    ]
+    repair = ["w", "repair"]
+    add(
+        "resume_escalation_supersedes_handler",
+        "A re-entered step that escalates during a resumption takes precedence over the deferred handler: the queued action of the handler's nested run is superseded, and the handler runs for the new escalation, its nested run's step asked as a new action, with no queued action (§5.14.1).",
+        {
+            "w": wf(
+                [
+                    CP,
+                    POLICY,
+                    mutate(approval=DEFER, failure_modes=escalates),
+                    st(
+                        "observe",
+                        "o",
+                        input_bindings={"target": "elsewhere"},
+                        failure_modes=escalates,
+                    ),
+                    st(
+                        "invoke",
+                        "fix",
+                        handler=True,
+                        workflow_id="repair",
+                        input_bindings={"workflow": "repair"},
+                    ),
+                ],
+                requires=["approval@1", "recovery@1"],
+            ),
+            "repair": wf([CP, POLICY, mutate(approval=DEFER)], requires=["approval@1"]),
+        },
+        CHECKPOINTED
+        + [
+            {"expect": inv("observe", step=3), "respond": down},
+            {
+                "expect": inv("checkpoint", frame=repair),
+                "respond": out(checkpoint_id="cp5"),
+            },
+            {"expect": inv("constrain", frame=repair), "respond": out(compliant=True)},
+            deferred_end(
+                {"step": 2, "action_id": "run-1/w/2/0"},
+                {"frame": repair, "step": 2, "action_id": "run-1/w/repair/2/1"},
+                {"step": 4},
+                cause="R402",
+            ),
+            resume(at=3600000),
+            {"expect": queued_request(2, "run-1/w/2/0"), "respond": approve("d1")},
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
+            {"expect": inv("mutate", step=2), "respond": down},
+            {
+                "expect": inv("checkpoint", frame=repair),
+                "respond": out(checkpoint_id="cp6"),
+            },
+            {"expect": inv("constrain", frame=repair), "respond": out(compliant=True)},
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "frame": repair,
+                    "step": 2,
+                    "approver": HUMAN,
+                },
+                "respond": approve("d2"),
+            },
+            {"expect": inv("mutate", frame=repair), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "escalated",
+            "cause": "R402",
+            "deferred": [],
+            "action_records": [
+                {"action_id": "run-1/w/2/0", "status": "failed"},
+                {"action_id": "run-1/w/repair/2/1", "status": "rejected"},
+                {"action_id": "run-1/w/repair/2/2", "status": "executed"},
+            ],
+        },
+        ["run_resumed", "escalated"],
+        attendance="unattended",
+    )
+    add(
+        "resume_replan_keeps_queue",
+        "A resumed run that needs a replan (a recheck saw the source change, on_change: replan) leaves the queued steps it did not reach deferred, listed with planned records; the run cannot be resumed, so they are abandoned (§5.14.1).",
+        {
+            "w": wf(
+                [
+                    CP,
+                    POLICY,
+                    mutate(
+                        "m1",
+                        approval=dict(
+                            DEFER,
+                            recheck={"source": "${policy}", "on_change": "replan"},
+                        ),
+                    ),
+                    mutate("m2", approval=DEFER),
+                ],
+                requires=["approval@1"],
+            )
+        },
+        CHECKPOINTED
+        + [
+            deferred_end({"step": 2}, {"step": 3}),
+            resume(at=3600000),
+            {"expect": queued_request(2, "run-1/w/2/0"), "respond": approve("d1")},
+            {"expect": {"kind": "RecheckSource", "step": 2}, "respond": changed},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "replan_required",
+            "deferred": [{"step": 3, "action_id": "run-1/w/3/1"}],
+            "action_records": [
+                {"action_id": "run-1/w/2/0", "status": "expired"},
+                {"action_id": "run-1/w/3/1", "status": "planned"},
+            ],
+        },
+        ["run_resumed", "recheck"],
         attendance="unattended",
     )

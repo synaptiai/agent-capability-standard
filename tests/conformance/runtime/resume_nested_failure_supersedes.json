@@ -1,0 +1,361 @@
+{
+  "description": "A nested run that deferred a step and then failed under an invoke step that runs after a deferral escalates to a handler, which is deferred; when the run resumes, the nested run's queued action is superseded, because the nested run it was queued in failed, and the handler runs last (\u00a75.14.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m0",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "after_deferral": "run",
+          "input_bindings": {
+            "workflow": "child"
+          },
+          "failure_modes": [
+            {
+              "condition": "the nested run failed",
+              "on_error": "R402",
+              "action": "escalate",
+              "recovery": {
+                "goto_step": "page"
+              }
+            }
+          ]
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "page",
+          "handler": true,
+          "workflow_id": "oncall",
+          "input_bindings": {
+            "workflow": "oncall",
+            "input": {
+              "why": "the nested run failed",
+              "applied": "${m0.success: boolean}"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1",
+          "recovery@1"
+        ]
+      }
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "after_deferral": "run",
+          "input_bindings": {
+            "target": "config"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    },
+    "oncall": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "inquire",
+          "purpose": "inquire step",
+          "store_as": "q",
+          "input_bindings": {
+            "ambiguous_input": "${why}"
+          }
+        }
+      ],
+      "inputs": {
+        "why": {
+          "type": "string",
+          "required": true
+        },
+        "applied": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp5",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "down"
+      }
+    },
+    {
+      "expect": {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+          {
+            "step": 2,
+            "action_id": "run-1/w/2/0"
+          },
+          {
+            "frame": [
+              "w",
+              "child"
+            ],
+            "step": 2,
+            "action_id": "run-1/w/child/2/1"
+          },
+          {
+            "step": 4
+          }
+        ],
+        "cause": "R402"
+      }
+    },
+    {
+      "resume": {
+        "attendance": "attended",
+        "at": 3600000
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "queued_action_id": "run-1/w/2/0"
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp2"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "inquire",
+        "frame": [
+          "w",
+          "oncall"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "questions": [],
+          "ambiguity_analysis": {},
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "escalated",
+    "cause": "R402",
+    "deferred": [],
+    "action_records": [
+      {
+        "action_id": "run-1/w/2/0",
+        "status": "executed"
+      },
+      {
+        "action_id": "run-1/w/child/2/1",
+        "status": "rejected"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "run_resumed",
+    "escalated",
+    "invoke_started"
+  ]
+}

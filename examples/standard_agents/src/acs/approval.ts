@@ -136,12 +136,25 @@ export function approvalState(record: ApprovalRecord, now: number): ApprovalStat
   if (!Number.isInteger(record.min_approvers) || record.min_approvers < 1) return 'pending';
   const expires = record.expires_ms;
   if (expires !== undefined && !(expires > 0)) return 'expired';
+  const counted = countedDecisions(record, now);
+  if (new Set(counted.map((d) => d.approver)).size >= record.min_approvers) return 'approved';
   const deadline = approvalDeadline(record);
-  const counted = record.decisions.filter(
+  return deadline !== undefined && now > deadline ? 'expired' : 'pending';
+}
+
+/**
+ * The approvals of the request's current round that count at time `now`
+ * (`approvalState`): without `expires_ms`, every approval; with it, those
+ * given by the deadline and still within `expires_ms` of when they were
+ * given. A call's record lists the approvers of exactly these (§5.17), so
+ * an approval that has lapsed by the call is not among them.
+ */
+export function countedDecisions(record: ApprovalRecord, now: number): ApprovalDecision[] {
+  const expires = record.expires_ms;
+  const deadline = approvalDeadline(record);
+  return record.decisions.filter(
     (d) => d.decision === 'approved' && (expires === undefined || (d.at <= deadline! && now <= d.at + expires)),
   );
-  if (new Set(counted.map((d) => d.approver)).size >= record.min_approvers) return 'approved';
-  return deadline !== undefined && now > deadline ? 'expired' : 'pending';
 }
 
 async function pending(store: Store): Promise<string[]> {

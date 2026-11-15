@@ -488,7 +488,7 @@ Workstreams should run `npm run check:axe` (or at least
 
 - **Saved state (C34).** S2a does not bump `SNAPSHOT_VERSION`; S2b does,
   once. S2a's state members (`Frame.resume`, `.parked`,
-  `.pending_escalation`, `.ahead`, `StepState.queued`) are optional and left
+  `.pending_escalation`, `.ahead`, `.queued`) are optional and left
   out while they have their defaults; `Frame.ahead` is `None` while nothing
   of its frame is deferred. A state with deferrals saved before S2a has no
   `ahead`, and `Run::resume` refuses it (`ResumeError::NotKept`). S2b's
@@ -509,3 +509,12 @@ Workstreams should run `npm run check:axe` (or at least
   a stream that adds a §10.3 paragraph before S2a's (S2b, S1 by D2's order)
   moves that index. `approvalPlans` now finds §5.14's plans list by its
   "plan → result" items, and `deferral-replay` names list 3 of §5.14.
+- **The queued link is a frame member (S2a review round 1).** The queued
+  action a re-entered step continues is `Frame.queued` (`Queued {step,
+  record}`), no longer `StepState.queued`: it lasts until the step goes on,
+  through a re-ask after a recheck and a retry, and every decision of the
+  step updates that record in place. S2b's `cancel` and `take_records`
+  (S2b design lines 2361 and 3754) read `Frame.queued` of each running frame
+  where they read `cur.queued`; a parked frame holds none. A recovery loop
+  during a resumption now prepends the steps it runs again to `Frame.resume`
+  instead of clearing it (§5.14.1 item 7).

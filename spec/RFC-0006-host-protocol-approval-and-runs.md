@@ -151,16 +151,23 @@ again reads, in step order, so a re-entered `verify` reads the world after
 the `mutate` before it; and so does a `checkpoint` step whose checkpoint the
 resumption invalidated and that a re-entered mutation binds. A nested
 deferred run continues, a run whose handler was deferred runs it last,
-checkpoints are taken anew, a re-entered step is asked afresh (of a person
-when attended) with its queued `action_id`, and its `planned` record is
-updated in place. A loop, a gate `end` or another escalation during the
-resumption supersedes what it overtakes. A run that ended any other way is
-not resumable, and its queued actions are abandoned. An executor refuses a
-state that does not keep the nested runs and which steps ran ahead. A new run
-of the workflow does not touch the old run's queue. Reason: re-running the
-workflow repeats every effect that was not deferred and never closes the
-queued record, and resuming without bringing read results up to date would
-verify an action against observations taken before it.
+checkpoints are taken anew, and a re-entered step is asked afresh (of a
+person when attended), naming its queued `action_id` on every request until
+it goes on, a re-ask after a recheck and a retry included; the record its
+deferral left is updated in place with each decision and outcome, and no
+other record is written for the step. A recovery loop during the resumption
+runs again the steps from its target to the step that looped, and the
+resumption then goes on: the queued steps after it keep their queued
+actions, and nothing that ran ahead runs twice. A loop, a gate `end` or
+another escalation supersedes the queued actions it overtakes. A run that
+ended any other way is not resumable, and its queued actions are abandoned.
+An executor refuses a state that does not keep the nested runs and which
+steps ran ahead. A new run of the workflow does not touch the old run's
+queue. Reason: re-running the workflow, or every step after a loop's target,
+repeats effects that were not deferred, and a new record for a re-ask or a
+retry would leave the queue entry the host holds closed on an action that
+did not run; resuming without bringing read results up to date would verify
+an action against observations taken before it.
 
 #### A6) A run keeps its actor (ACS-35)
 
@@ -177,10 +184,13 @@ digest comparison and an unresolved `shows` value, approver identity counting
 and checks (including mismatched authentication and trust class, and the 1.1
 treatment of the approver fields), and resumption (attended, rejected,
 unattended, a mandate step in either attendance, nested, deferred handler, a
-new actor, steps that ran ahead read and unread, a bound checkpoint, a loop, a
-loop with a deferred handler, a gate `end`, a failure, a nested queue that
-waits through two resumptions). The runtime fixture
-format gains a `resume` entry.
+new actor, steps that ran ahead read and unread, a bound checkpoint, a retry
+and a re-ask after a recheck that continue the queued action, a loop that
+goes on with the resumption and one that supersedes what it runs again, a
+retry with a deferred handler, a gate `end`, a failure, a replan, the queued
+action of a nested run that failed, an escalation that overtakes a deferred
+handler, a nested queue that waits through two resumptions). The runtime
+fixture format gains a `resume` entry.
 
 ## Backward compatibility
 
@@ -213,7 +223,7 @@ existing catalog, so none needs migrating.
   `tool_call` vectors).
 - Runtime fixtures: `approval_defaults_partial`,
   `approval_out_of_band_unattended`, `approval_digest_any_case`,
-  `approval_shows_unresolved`, ten `approver_*` fixtures and seventeen
+  `approval_shows_unresolved`, ten `approver_*` fixtures and twenty-three
   `resume_*` fixtures; the `resume` script entry and the `{{digest_upper}}`
   placeholder in every replayer.
 - Validator fixtures for the approver fields (pass, V106, S303 in 1.2
@@ -246,8 +256,12 @@ existing catalog, so none needs migrating.
 - **Restart a nested deferred run instead of continuing it**, or resume a
   state an earlier executor saved by guessing what it did not keep. Repeats the nested run's
   effects, or verifies stale data.
-- **A new record that points back to the queued one.** Needs a new record
-  field and leaves the host two records for one action.
+- **A new record that points back to the queued one**, for the first
+  decision or for a re-ask or a retry. Needs a new record field and leaves
+  the host two records for one action.
+- **Return a recovery loop during a resumption to normal flow.** Every step
+  after the loop's target runs again, so an `after_deferral: run` step, or a
+  report sent under a mandate, that ran ahead acts twice.
 - **Close a failed run's queued records at its end, or let cancel reach
   ended runs.** The first changes the records 1.1 runs leave; the second
   replaces the run's own failure code with R408.

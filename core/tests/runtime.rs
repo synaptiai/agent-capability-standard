@@ -1473,3 +1473,34 @@ fn read_json_bounds_integer_literals() {
         assert!(read_json(bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn a_resumed_step_keeps_its_queued_action_in_the_state() {
+    // While a re-entered step is asked, the state names the queued action
+    // it continues (§5.14.1), and a restore asks the same; a state that
+    // names a step or a record that does not exist is refused.
+    let ctx = ctx();
+    let f = fixture("resume_deferred_attended");
+    let mut run = played(&ctx, "resume_deferred_attended");
+    run.resume(resume_options()).unwrap();
+    let asked = serde_json::to_value(run.next()).unwrap();
+    assert_eq!(asked["queued_action_id"], "run-1/w/3/0");
+    let snap = run.snapshot(None);
+    let state: Value = serde_json::from_str(&snap.state).unwrap();
+    assert_eq!(
+        state["frames"][0]["queued"],
+        serde_json::json!({"step": 3, "record": 0})
+    );
+    let restored = Run::restore(&ctx, &f["catalog"], &snap, None).unwrap();
+    assert_eq!(serde_json::to_value(restored.next()).unwrap(), asked);
+    for (what, queued) in [
+        ("a step", serde_json::json!({"step": 9, "record": 0})),
+        ("a record", serde_json::json!({"step": 3, "record": 9})),
+    ] {
+        let bad = forged(&snap, |s| s["frames"][0]["queued"] = queued.clone());
+        assert!(
+            Run::restore(&ctx, &f["catalog"], &bad, None).is_err(),
+            "a queued action naming {what} that does not exist was restored"
+        );
+    }
+}

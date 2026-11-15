@@ -3,13 +3,15 @@
   "standard": "1.2.0",
   "section": "5.14, 5.18.7",
   "status": "normative",
-  "description": "Approval digests (STANDARD v1.2.0 sections 5.14 and 5.18.7, normative under section 10.3), computed by the reference executor (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each `step` vector is one approval request of a workflow step; each `tool_call` vector is the approval of a tool call. The shown values are a JSON array; the digest is the SHA-256 of the UTF-8 encoding of their canonical JSON (RFC 8785), as 64 lowercase hexadecimal digits, compared regardless of case. An implementation that computes or checks approval digests produces each vector's `canonical` text and `digest` from its `shown` values; an executor shows each `step` vector's `shown` values, and a safety layer each `tool_call` vector's. This file is printable ASCII: any other character is written as a JSON \\u escape, so no tool that normalises or transcodes text can change a vector.",
+  "description": "Approval digests (STANDARD v1.2.0 sections 5.14 and 5.18.7, normative under section 10.3), computed by the reference executor (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each `step` vector is one approval request of a workflow step; each `tool_call` vector is the approval of a tool call. The shown values are a JSON array; the digest is the SHA-256 of the UTF-8 encoding of their canonical JSON (RFC 8785), as 64 lowercase hexadecimal digits, compared regardless of case. An implementation that computes or checks approval digests produces each vector's `canonical` text and `digest` from its `shown` values; an executor shows each `step` vector's `shown` values, given its `inputs` or `bindings` and any `recheck_read`, and a safety layer each `tool_call` vector's. This file is printable ASCII: any other character is written as a JSON \\u escape, so no tool that normalises or transcodes text can change a vector.",
   "fields": {
     "name": "The vector's name, unique in this file.",
-    "kind": "`step`: an approval request of a workflow step, with `approval` and, without `shows`, `inputs`; `tool_call`: the approval of a tool call (STANDARD v1.2.0 \u00a75.18.7), with `call`.",
+    "kind": "`step`: an approval request of a workflow step, with `approval`; without `shows`, `inputs`; with `shows`, `bindings`; asked again after a recheck, `recheck_read`. `tool_call`: the approval of a tool call (STANDARD v1.2.0 \u00a75.18.7), with `call`.",
     "about": "What the vector covers.",
     "approval": "For a `step` vector: the `approval` field of the step that asks, as the workflow declares it; null when the step has none.",
     "inputs": "For a `step` vector: the step's resolved inputs. Present where the step declares no `shows`, so that `shown` is built from them.",
+    "bindings": "For a `step` vector whose step declares `shows`: the values its references resolve against, by root name: the workflow input `setting` and the store `current` of the step before it, so that `${current.data}` resolves to `bindings.current.data`. A reference to something they do not hold resolves to null.",
+    "recheck_read": "For a `step` vector asked again after a recheck: the value the recheck read, which differs from the value approved before (the recheck `source` resolved against `bindings`). The vector is the request asked again; the first request showed the `shows` values alone.",
     "call": "For a `tool_call` vector: the call, `{action, capability, args}`; `shown` is `[call]`.",
     "shown": "The JSON array of shown values that the approval request carries.",
     "canonical": "The RFC 8785 (JCS) serialization of `shown`. It is held here as a JSON string: the canonical text is the value a JSON parser returns for it.",
@@ -27,6 +29,21 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "action": "write_config",
+            "capability": "mutate",
+            "args": {
+              "key": "a",
+              "value": "b"
+            }
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -52,6 +69,24 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "b": 2,
+            "a": 1,
+            "A": 0,
+            "aa": [
+              3,
+              2,
+              1
+            ],
+            "": null
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -80,6 +115,30 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "numbers": [
+              0,
+              -0.0,
+              1,
+              -1,
+              1.5,
+              1e+21,
+              1e-07,
+              123456789012,
+              0.1,
+              100,
+              1.0,
+              4.5e-10,
+              9007199254740992
+            ]
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -115,6 +174,16 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "text": "line\nbreak\ttab \"quote\" back\\slash \u0001 \u007f \u00e9 \u20ac \ud83d\ude00"
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         {
           "text": "line\nbreak\ttab \"quote\" back\\slash \u0001 \u007f \u00e9 \u20ac \ud83d\ude00"
@@ -134,6 +203,22 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "\u20ac": "Euro",
+            "\r": "CR",
+            "\ufb33": "Dalet",
+            "1": "One",
+            "\ud83d\ude00": "Emoji",
+            "\u0080": "Control",
+            "\u00f6": "o umlaut"
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -160,6 +245,30 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "nested": {
+              "z": {
+                "y": {
+                  "x": [
+                    true,
+                    false,
+                    null,
+                    {
+                      "k": []
+                    },
+                    {}
+                  ]
+                }
+              }
+            }
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         {
@@ -195,6 +304,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": "a bare string",
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         "a bare string"
       ],
@@ -212,6 +329,20 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": [
+            1,
+            "two",
+            {
+              "three": 3
+            }
+          ],
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         [
@@ -237,6 +368,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": 42,
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         42
       ],
@@ -254,6 +393,14 @@
         "shows": [
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": null,
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         null
@@ -273,6 +420,14 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": [],
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         []
       ],
@@ -291,6 +446,14 @@
           "${setting}",
           "${current.data}"
         ]
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": "a",
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [
         "x",
@@ -312,6 +475,16 @@
           "${current.data}"
         ]
       },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "present": 1
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
       "shown": [
         null,
         {
@@ -330,6 +503,14 @@
           "kind": "human"
         },
         "shows": []
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": null,
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
       },
       "shown": [],
       "canonical": "[]",
@@ -397,6 +578,19 @@
         "recheck": {
           "source": "${current.data}"
         }
+      },
+      "bindings": {
+        "setting": "x",
+        "current": {
+          "data": {
+            "version": 1
+          },
+          "confidence": 1.0,
+          "evidence_anchors": []
+        }
+      },
+      "recheck_read": {
+        "version": 2
       },
       "shown": [
         {

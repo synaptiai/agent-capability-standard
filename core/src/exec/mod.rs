@@ -235,7 +235,8 @@ pub enum Body {
         digest: String,
         expires_at: Option<u64>,
         /// A resumed run asks about a queued action (§5.14.1): the
-        /// `action_id` of its `planned` record.
+        /// `action_id` of the record its deferral left, on every request of
+        /// the step until the step goes on.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         queued_action_id: Option<String>,
     },
@@ -567,11 +568,6 @@ pub(crate) struct StepState {
     /// run ends once the step's failure modes are checked, unless one fires.
     #[serde(default)]
     pub ending: Option<Value>,
-    /// A queued step a resumption re-entered (§5.14.1): the index of its
-    /// `planned` record, which the step continues until it records its
-    /// approval (or is superseded).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queued: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -649,12 +645,25 @@ pub(crate) struct Frame {
     /// handler runs after the normal-flow steps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_escalation: Option<String>,
+    /// During a resumption: the queued action a re-entered step continues
+    /// (§5.14.1), until the step goes on, is deferred again or its run
+    /// leaves it. A recovery loop that runs the step again keeps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<Queued>,
     /// While a step of this frame is deferred: the steps that began since,
     /// and were not deferred themselves (they ran ahead, §5.14). `None` while
     /// nothing is deferred, and in a state saved before this was tracked:
     /// such a frame with deferred steps cannot be resumed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ahead: Option<BTreeSet<usize>>,
+}
+
+/// The queued action step `step` of a frame continues: the index of the
+/// record its deferral left (§5.14.1).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Queued {
+    pub step: usize,
+    pub record: usize,
 }
 
 /// A delegation to name as replaced when step `step` next delegates.
@@ -1258,7 +1267,7 @@ fn check_frame(program: &Program, st: &State, f: &Frame, depth: usize) -> Result
         ));
     }
     if f.cur.record.is_some_and(|r| r >= st.records.len())
-        || f.cur.queued.is_some_and(|r| r >= st.records.len())
+        || f.queued.is_some_and(|q| q.record >= st.records.len())
     {
         return Err("a step refers to a missing action record".into());
     }
@@ -1308,6 +1317,12 @@ fn check_frame(program: &Program, st: &State, f: &Frame, depth: usize) -> Result
                 f.workflow
             ));
         }
+    }
+    if f.queued.is_some_and(|q| q.step >= wf.steps.len()) {
+        return Err(format!(
+            "the queued action of '{}' names a step out of range",
+            f.workflow
+        ));
     }
     if f.pending_escalation.is_some() && (f.escalation.is_some() || f.resume.is_none()) {
         return Err("a pending escalation needs a resumption and no escalation".into());
@@ -1366,6 +1381,7 @@ impl Frame {
             resume: None,
             parked: BTreeMap::new(),
             pending_escalation: None,
+            queued: None,
             ahead: None,
         }
     }

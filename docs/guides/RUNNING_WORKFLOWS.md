@@ -450,7 +450,12 @@ asked for new ones. A queued step is asked afresh, of a person when the
 resumption is attended, even where its approver is a standing mandate, and
 the request names its queued action in `queued_action_id`; the `planned`
 record of that action is updated in place, under the same `action_id`, so
-the queue entry you hold closes on it.
+the queue entry you hold closes on it. A request asked again after a
+recheck, or in a retry of the step, names the same action, and its decision
+lands on the same record. A recovery loop during the resumption runs again
+only the steps from its target to the step that looped, and the resumption
+then goes on: a step that ran ahead, such as an `after_deferral: run`
+delegation, is not repeated.
 
 Resume a saved state once: each resumption could carry out the same queued
 action. A run that failed, escalated or needs a replan cannot be resumed:

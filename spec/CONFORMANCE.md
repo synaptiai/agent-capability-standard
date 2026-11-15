@@ -88,13 +88,16 @@ the Rust core in `core/`).
   `tests/conformance/approval/digests.json`. Each vector has a `kind`. A
   `step` vector is one approval request of a workflow step (§5.14): the
   step's `approval` field (or null), its resolved `inputs` where it declares
-  no `shows`, and the `shown` values; a `tool_call` vector is the approval
+  no `shows`, the values its references resolve against (`bindings`) where
+  it does, the value a recheck read (`recheck_read`) for a request asked
+  again, and the `shown` values; a `tool_call` vector is the approval
   of a tool call (§5.18.7): the `call` and `shown`, which is `[call]`. Every
   vector gives the canonical JSON (RFC 8785) of `shown` and the SHA-256
   digest of that text in lowercase hexadecimal. An implementation that
   computes or checks approval digests MUST reproduce each vector's
   `canonical` text and `digest`; an executor MUST show each `step` vector's
-  `shown` values, and a safety layer each `tool_call` vector's. The vectors
+  `shown` values, given its `inputs` or `bindings` and `recheck_read`, and a
+  safety layer each `tool_call` vector's. The vectors
   cover member order, nesting, number forms (2^53, the largest integer
   magnitude §5.14 allows, and `1e+21`, a binary64 value because it is
   written with an exponent), text outside ASCII, an empty list, a reference
@@ -102,9 +105,9 @@ the Rust core in `core/`).
   asked again after a recheck. `scripts/gen_standard_agents_binding.py`
   writes the file from runs of the executor, and CI fails when it is out of
   date. `tests/test_approval_vectors.py` replays each `step` vector on the
-  executor and recomputes the canonical JSON and the digest with a
-  serializer of its own; the TypeScript package (`packages/acs-core/`) tests
-  its digest against the file in place.
+  executor from the vector's own fields and recomputes the canonical JSON
+  and the digest with a serializer of its own; the TypeScript package
+  (`packages/acs-core/`) tests its digest against the file in place.
 
 ```mermaid
 ---

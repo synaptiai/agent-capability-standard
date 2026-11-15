@@ -528,11 +528,11 @@ flowchart TB
 
 | §5.14 field | In the binding |
 |---|---|
-| `approver.kind: human` | The authenticated caller of the endpoint, recorded as an approver identity per the identity map (`endpoint_caller`): principal `sa-user:<id>`, `kind: human` as the deployment's assertion, `role` when the caller holds the requested one, `authenticated_by: x-acs.sa-caller`, and `trust_class: owner` when the caller owns the thread. The trace entry's `approval` carries `approver_identities` and their principals in `approvers` (§5.17 of 1.2) |
+| `approver.kind: human` | The authenticated caller of the endpoint, recorded as an approver identity per the identity map (`endpoint_caller`): principal `sa-user:<id>`, `kind: human` as the deployment's assertion, `role` when the caller holds the requested one, `authenticated_by: x-acs.sa-caller`, and `trust_class: owner` when the caller owns the thread. The trace entry's `approval` carries the approvers that counted when the call ran (an approval that had lapsed is not listed): their principals in `approvers` and their `approver_identities` (§5.17 of 1.2) |
 | `approver.role` | `approval.role`, checked against the caller's `roles` |
 | `approver.min_approvers` | `approval.min_approvers`, an integer of at least 1, counting distinct callers whose approval has not expired |
 | `mode` | Decisions arrive through an authenticated endpoint, separate from the conversation: `out_of_band` (§5.14 of 1.2) |
-| `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON |
+| `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON, which the endpoint takes in either case and stores in lowercase |
 | `recheck` | Implicit: the digest is recomputed from the arguments at the moment the tool runs |
 | `expires` | `approval.expires_ms`. As in the reference executor, no approval is accepted later than `expires_ms` after the request, and one stored later counts for nothing. Each approval then counts for `expires_ms` after it was given: the executor uses a decision when it arrives, a tool when the model calls again, so a request can be used up to twice `expires_ms` after it was made, however many approvers decide. A rejection is accepted until the request is used or expires, since it can only stop the call |
 | `approver.kind: standing_mandate`, `when_unattended` | Not implemented: an unapproved call is refused, which is `when_unattended: fail` |

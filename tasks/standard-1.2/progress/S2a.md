@@ -30,7 +30,7 @@ Design: `tasks/standard-1.2/designs/S2a.md`. Base: tag `round3/S2a-base`
 
 ## Implementation (part 5)
 
-- [x] `core/src/exec/mod.rs`: `RequestApproval.queued_action_id`, `Decision.approver_identities`, `StepState.queued`, `Frame.{resume,parked,pending_escalation,ahead}`, `ResumeOptions`, `ResumeError`, `RestoreOptions`, `RestoreError::Actor`, `restore_with`, `resume`, `not_kept`, `check_state` additions
+- [x] `core/src/exec/mod.rs`: `RequestApproval.queued_action_id`, `Decision.approver_identities`, `Frame.{resume,parked,pending_escalation,ahead,queued}` (`Queued`; was `StepState.queued`, review round 1), `ResumeOptions`, `ResumeError`, `RestoreOptions`, `RestoreError::Actor`, `restore_with`, `resume`, `not_kept`, `check_state` additions
 - [x] `core/src/exec/machine.rs`: identities in `submit`, `record` in place, `approval` (person, queued id), `decide` (counting, `meets`), `begin`, `settle_queued`, `next_step`, `resume`/`reopen`, `end_frame` park, `end_run`, `escalate`, `undefer_from`, `deferred_cause`, `defer_step`, `undefer_nested`, `invalidate_checkpoints` returns ids
 - [x] `core/src/exec/program.rs`: `Workflow.targets_1_2`
 - [x] `core/src/exec/canonical.rs`: doc comment, `same_digest_ignores_case`
@@ -71,7 +71,7 @@ Design: `tasks/standard-1.2/designs/S2a.md`. Base: tag `round3/S2a-base`
 1. **Snapshot version (C34).** `SNAPSHOT_VERSION` stays 1: RECONCILIATION C34
    bumps it once, in S2b. Every member S2a adds to the saved state
    (`Frame.resume`, `Frame.parked`, `Frame.pending_escalation`,
-   `Frame.ahead`, `StepState.queued`) is optional and left out while it has
+   `Frame.ahead`, `Frame.queued`) is optional and left out while it has
    its default, and `Frame.ahead` is `None` while nothing of the frame is
    deferred, so the state of a run that never deferred is byte for byte what
    it was (checked over the 175 earlier fixtures: only the snapshots of runs
@@ -94,10 +94,11 @@ Design: `tasks/standard-1.2/designs/S2a.md`. Base: tag `round3/S2a-base`
    `nested_caps` entry is dropped when its nested run continues, not at
    re-entry, so a re-deferral keeps the ontology ordering; `check_state`
    accepts `nested_caps` keys of the resumption list.
-4. **`queued_action_id` while the record is planned.** A request names the
-   queued action only while its record is still `planned`; the record is
-   updated in place by the first decision, so a re-ask after a recheck (a
-   new record, as in 1.1) names none.
+4. **`queued_action_id` while the record is planned.** *Withdrawn in review
+   round 1 (issues 1 and 5):* a re-entered step now keeps its queued action
+   until it goes on (`Frame.queued`), so every request of the step names it
+   and is put to a person when attended, and every decision updates the
+   queued record in place, as §5.14.1 said all along.
 5. **`checkpoints_invalidated` at a resumption** has `step: null` (the
    resumption is not a step); the trace guide says so.
 6. **Validator fixture name.** `warn_approver_identity_1_1` is
@@ -131,3 +132,103 @@ Design: `tasks/standard-1.2/designs/S2a.md`. Base: tag `round3/S2a-base`
     in the resumption list counts as deferred; fixture
     `resume_nested_queue_after_escalation` pins it (it fails without the
     rule).
+12. **A recovery loop during a resumption (review round 1, issue 6).** The
+    design's item 7 returned the run to normal flow from the loop's target,
+    superseding every queued step not yet re-entered and the deferred
+    handler. Every step after the target then ran again, so a step that ran
+    ahead (`after_deferral: run`, a mandate-approved `send`, an `audit`)
+    acted twice. Now the loop runs again the steps from its target to the
+    step that looped (prepended to `Frame.resume`, handlers left out), and
+    the resumption goes on with its list: only what the loop runs again is
+    undeferred or superseded, the queued steps after it keep their actions,
+    and a deferred handler still runs last with its cause. Outside a
+    resumption loops are unchanged. Fixtures `resume_loop_supersedes` (now
+    a loop over a step deferred again) and `resume_deferred_handler_loop`
+    changed; the old `resume_loop_supersedes` became `resume_loop_goes_on`.
+    Recorded in FOUNDATION-notes for S2b (`Frame.queued`).
+13. **Digest vectors say what a step shows from (review round 1, issue 4).**
+    A `step` vector with `shows` gives `bindings` (the workflow input
+    `setting` and the store `current`), and the recheck vector
+    `recheck_read`; §10.3's executor MUST is stated against them.
+
+## Review round 1
+
+1. **High: a re-asked resumed step went to the mandate, named no
+   `queued_action_id`, and ran under a new record.** Real (reproduced with
+   the reviewer's script). Root cause: `record()` took the link
+   (`cur.queued.take()`) at the first decision and `approval()` named it
+   only while the record was `planned`. Fixed: the link is `Frame.queued`
+   (`Queued {step, record}`), set when a resumption re-enters the step,
+   kept through a re-ask and a retry, closed when the step goes on, is
+   deferred again or the run leaves it (`settle_queued`); `approval()`
+   asks a person and names the action on every request; `record()` updates
+   the queued record in place whatever its status (dropping `reason` and
+   `reason_code`). §5.14.1 items 5 and 6 now say "until the step goes on"
+   and that every decision lands on that record (the trace keeps each).
+   Fixture `resume_recheck_reask` (mandate approver, attended: the re-ask
+   is `{kind: human}`, names `run-1/w/2/0`, one `executed` record); test
+   `test_a_queued_step_names_its_action_until_it_goes_on`; Rust test
+   `a_resumed_step_keeps_its_queued_action_in_the_state`. Both fail on the
+   previous executor.
+2. **Low: two superseding rules had no fixture.** Real (coverage only; the
+   behaviour was right). Fixtures `resume_nested_failure_supersedes` (a
+   nested run that deferred and failed under an `after_deferral: run`
+   invoke whose escalation's handler was deferred: "superseded: the nested
+   run it was queued in failed") and `resume_escalation_supersedes_handler`
+   (a re-entered step escalates while a deferred handler holds a queued
+   action: "superseded: another escalation took precedence", and the
+   handler runs as a new action), plus `resume_replan_keeps_queue` for the
+   replan half of item 7. `test_superseded_records_say_why` is
+   parametrised and pins each fixture's exact reasons.
+3. **Low: ACS-13 said sixteen `resume_*` fixtures.** Real. The resolution
+   now says twenty-three (this round adds six), as do RFC-0006 and the
+   CHANGELOG (37 S2a runtime fixtures).
+4. **Low: §10.3's executor MUST could not be checked from the vector file
+   for `shows` vectors.** Real: the replay read the resolved values back
+   from `shown`. Fixed at the generator: each `step` vector with `shows`
+   has `bindings` and the recheck vector `recheck_read`, described in the
+   file's `fields`; §10.3 and spec/CONFORMANCE.md state the MUST against
+   them; `tests/test_approval_vectors.py` replays from them alone and
+   `test_a_step_vector_says_what_its_step_shows_from` checks every vector
+   has the members its step needs.
+5. **Medium: a recheck re-ask or a retry of a re-entered queued step broke
+   the queue link.** Same root cause as 1, fixed with it. Retry fixture
+   `resume_retry_keeps_queue`: both requests name `run-1/w/2/0`, are put
+   to a person, and the record ends `executed` (it ended `failed` beside a
+   new `executed` record before). `resume_deferred_handler_loop` now pins
+   the retry naming the same action too.
+6. **Medium: a recovery loop during a resumption re-ran what ran ahead.**
+   Real (the reviewer's script delegated twice). Fixed as the reviewer
+   proposed: `undefer_from` and `recover` work on `rerun(target)`, the
+   steps from the target to the step that looped, during a resumption,
+   and prepend them to the resumption list instead of clearing it. §5.14.1
+   item 7 rewritten (and item 2 points to it); RFC-0006 A5 and Alternatives
+   updated; deviation 12. `resume_retry_keeps_queue` pins a single
+   `delegate` invocation (the script is exact, and
+   `test_a_loop_during_a_resumption_does_not_repeat_what_ran_ahead` checks
+   the run ends with nothing more asked); `resume_loop_goes_on` pins that
+   the queued step after the loop keeps its action.
+7. **Low: the binding recorded approvers whose approvals no longer
+   counted.** Real. `countedDecisions(record, now)` in
+   `src/acs/approval.ts` is now the one rule: `approvalState` counts with
+   it, and `grounded.ts` builds `approvers`, `approver_identities` and
+   `decision_ids` from it at the time the request was found approved.
+   Vitest case "records only the approvers whose approvals still count
+   when the call runs" (alice at 0, bob at 50, call at 70: only bob).
+8. **Low: the approval endpoint refused an uppercase digest.** Real.
+   `approvals.post.ts` accepts `[0-9a-fA-F]{64}` and lowercases it before
+   `decideApproval` and `readApproval`. Vitest case "takes a digest in
+   either case, as §5.14 compares them" (and a repeat in uppercase). Kept
+   in S2a: tool-call approval is not reassigned, and S2a's text is what
+   requires it.
+
+
+F6 after review round 1: every CI validator and generator `--check`,
+ruff check and format, mypy, pytest `tests/` (2421) and `benchmarks/tests/`
+(68), `run_conformance.py`, cargo fmt, both clippy runs and cargo test
+(1.99.1), `packages/acs-core` check, test and build, the binding's check and
+test, and the site's check, test, build, `check-runs.mjs` (no enforced run
+over 1800px; §5.14.1 was tightened to stay under it) and axe on
+`/spec/1.2.0/`, `/rfcs/0006/`, `/spec/conformance/`,
+`/guides/running-workflows/`, `/guides/standard-agents/` and
+`/community/release-notes/`: all green.

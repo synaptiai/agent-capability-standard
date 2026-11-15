@@ -39,6 +39,7 @@ import {
   approvalRound,
   approvalState,
   consumeApproval,
+  countedDecisions,
   policyProblems,
   principalOf,
   requestApproval,
@@ -272,6 +273,9 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
 
       // 1. Approval, bound to the digest of exactly what is about to run.
       let request: ApprovalRecord | undefined;
+      // When the request was found approved: the approvals that counted then
+      // are the ones the call's record lists.
+      let approvedAt = 0;
       if (flags.requires_approval) {
         if (flow === null) {
           return await refuse(
@@ -286,8 +290,9 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
           );
         }
         const shown: Json[] = [{ action: name, capability, args: argsJson }];
-        request = await requestApproval(state, shown, policy, now());
-        const standing = approvalState(request, now());
+        approvedAt = now();
+        request = await requestApproval(state, shown, policy, approvedAt);
+        const standing = approvalState(request, approvedAt);
         if (standing !== 'approved') {
           return await refuse(
             refusal(
@@ -355,20 +360,22 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // used up, so a call refused above leaves both as they were.
       let approvers: string[] | undefined;
       if (request) {
-        // The approvers as principals, with their identities when every
-        // decision recorded one (§5.17); one decision per approver, so
-        // identities never disagree for one principal.
-        approvers = [...new Set(request.decisions.map((d) => principalOf(d.approver)))];
+        // The approvers that counted (§5.17): those whose approvals made
+        // the request approved, as principals, with their identities when
+        // every one of those decisions recorded one. One decision per
+        // approver, so identities never disagree for one principal.
+        const counted = countedDecisions(request, approvedAt);
+        approvers = [...new Set(counted.map((d) => principalOf(d.approver)))];
         const identities = new Map<string, AgentIdentity>();
-        for (const d of request.decisions) {
+        for (const d of counted) {
           if (d.approver_identity) identities.set(d.approver_identity.principal, d.approver_identity);
         }
-        const attested = request.decisions.every((d) => d.approver_identity !== undefined);
+        const attested = counted.every((d) => d.approver_identity !== undefined);
         used.approval = {
           digest: request.digest,
           approvers,
           ...(attested ? { approver_identities: [...identities.values()] } : {}),
-          decision_ids: request.decisions.map((d) => d.decision_id),
+          decision_ids: counted.map((d) => d.decision_id),
         };
         // A rejection recorded since the request was read stops the call;
         // the checkpoint is not touched.

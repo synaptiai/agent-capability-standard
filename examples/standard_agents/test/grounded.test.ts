@@ -12,7 +12,13 @@ import readConfig from '../agents/tools/read_config.js';
 import rollbackConfig from '../agents/tools/rollback_config.js';
 import verifyConfig from '../agents/tools/verify_config.js';
 import writeConfig from '../agents/tools/write_config.js';
-import { approvalState, decideApproval, readApproval, type ApprovalPolicy } from '../src/acs/approval.js';
+import {
+  approvalState,
+  countedDecisions,
+  decideApproval,
+  readApproval,
+  type ApprovalPolicy,
+} from '../src/acs/approval.js';
 import { digest } from '@synaptiai/acs-core';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
@@ -468,6 +474,33 @@ describe('approval bound to what was shown', () => {
     expect(await tool.execute(t.state, { version: '2' })).toMatchObject({ error_code: 'F502' });
   });
 
+  it('records only the approvers whose approvals still count when the call runs', async () => {
+    let clock = 0;
+    const tool = groundedTool({
+      name: 'release',
+      capability: 'execute',
+      description: 'Run the release.',
+      approval: { expires_ms: 60 },
+      args: z.object({ version: z.string() }),
+      now: () => clock,
+      execute: async () => ({ result: 'released', evidence_anchors: [] }),
+    });
+    const t = thread();
+    const d = digestOf(await tool.execute(t.state, { version: '1' }));
+    await decideApproval(t.state, user('alice'), d, 'approved', 0);
+    await decideApproval(t.state, user('bob'), d, 'approved', 50);
+    // At 70 Alice's approval has lapsed (given at 0, for 60) and Bob's
+    // counts: the request is approved by Bob alone, and the record says so.
+    clock = 70;
+    const request = await readApproval(t.state, d);
+    expect(countedDecisions(request!, clock).map((x) => x.approver)).toEqual(['bob']);
+    data(await tool.execute(t.state, { version: '1' }));
+    const approval = (await readTrace(t.state)).at(-1)?.approval;
+    expect(approval?.approvers).toEqual(['sa-user:bob']);
+    expect(approval?.approver_identities?.map((i) => i.principal)).toEqual(['sa-user:bob']);
+    expect(approval?.decision_ids).toHaveLength(1);
+  });
+
   it('takes no approval after the deadline, so later approvers cannot extend the window', async () => {
     let clock = 0;
     const tool = groundedTool({
@@ -589,6 +622,21 @@ describe('the approval endpoint', () => {
     expect((await post(t, user('alice'), { digest: 'a'.repeat(64), decision: 'approved' })).status).toBe(400);
     expect((await post(t, user('alice'), { digest: 'a'.repeat(64), round: 0, decision: 'approved' })).status).toBe(400);
     expect((await post(t, user('alice'), { digest: 'a'.repeat(64), round: 1, decision: 'approved' })).status).toBe(404);
+  });
+
+  it('takes a digest in either case, as §5.14 compares them', async () => {
+    const t = thread();
+    await checkpointConfig.execute(t.state, { label: 'one' });
+    const d = digestOf(await writeConfig.execute(t.state, CHANGE));
+    const response = await post(t, user('alice'), { digest: d.toUpperCase(), round: 1, decision: 'approved' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ digest: d, state: 'approved' });
+    // The same decision sent again in uppercase is answered as the first.
+    expect((await post(t, user('alice'), { digest: d.toUpperCase(), round: 1, decision: 'approved' })).status).toBe(200);
+    data(await writeConfig.execute(t.state, CHANGE));
+    expect((await readTrace(t.state)).at(-1)?.approval).toMatchObject({ digest: d, approvers: ['sa-user:alice'] });
+    // Anything but 64 hexadecimal digits is still refused.
+    expect((await post(t, user('alice'), { digest: `${d.slice(1)}g`, round: 1, decision: 'approved' })).status).toBe(400);
   });
 
   it('applies a decision only to the round the approver was shown', async () => {

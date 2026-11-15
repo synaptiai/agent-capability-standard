@@ -889,32 +889,94 @@ def _played(validator: _core.Validator, name: str) -> tuple[Any, list[dict[str, 
     return run, seen
 
 
-def test_superseded_records_say_why(validator: _core.Validator) -> None:
-    for name in (
-        "resume_skipped_supersedes",
-        "resume_gate_end_supersedes",
-        "resume_loop_supersedes",
-        "deferral_superseded_by_loop",
-    ):
-        run, _ = _played(validator, name)
-        rejected = [
-            r for r in run.next()["action_records"] if r["status"] == "rejected"
-        ]
-        assert rejected, name
-        assert all(r["reason"].startswith("superseded") for r in rejected), name
+SUPERSEDED = {
+    "resume_skipped_supersedes": [
+        "superseded: the step did not reach its approval when its run resumed"
+    ],
+    "resume_gate_end_supersedes": [
+        "superseded: a gate ended the resumed run before the step"
+    ],
+    "resume_loop_supersedes": ["superseded: a recovery loop ran the step again"],
+    "deferral_superseded_by_loop": ["superseded: a recovery loop ran the step again"],
+    "resume_nested_failure_supersedes": [
+        "superseded: the nested run it was queued in failed"
+    ],
+    "resume_escalation_supersedes_handler": [
+        "superseded: another escalation took precedence"
+    ],
+}
+
+
+@pytest.mark.parametrize("name", sorted(SUPERSEDED))
+def test_superseded_records_say_why(validator: _core.Validator, name: str) -> None:
+    """Each rule of §5.14 and §5.14.1 that supersedes a queued action says
+    which, in the record's reason."""
+    run, _ = _played(validator, name)
+    rejected = [r for r in run.next()["action_records"] if r["status"] == "rejected"]
+    assert [r["reason"] for r in rejected] == SUPERSEDED[name]
+
+
+def _requests(seen: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [a for a in seen if a["kind"] == "RequestApproval"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "resume_retry_keeps_queue",
+        "resume_recheck_reask",
+        "resume_deferred_handler_loop",
+    ],
+)
+def test_a_queued_step_names_its_action_until_it_goes_on(
+    validator: _core.Validator, name: str
+) -> None:
+    """A re-entered queued step keeps its queued action through a retry and
+    a re-ask after a recheck: every request names it and, in an attended
+    resumption, is put to a person, with no mandate_ref; its decisions land
+    on the queued record, the only record of the step (§5.14.1)."""
+    run, seen = _played(validator, name)
+    first, *again = [a for a in _requests(seen) if "queued_action_id" in a]
+    assert again, name
+    ids = {a["queued_action_id"] for a in [first, *again]}
+    assert len(ids) == 1, ids
+    for request in [first, *again]:
+        assert request["approver"]["kind"] == "human", request
+        assert "mandate_ref" not in request["approver"], request
+    records = run.next()["action_records"]
+    [record] = [r for r in records if r["action_id"] in ids]
+    assert record["status"] == "executed"
+    assert "reason" not in record and "reason_code" not in record, record
 
 
 def test_requests_outside_the_queue_name_no_queued_action(
     validator: _core.Validator,
 ) -> None:
-    """After a recovery loop a step is asked afresh: its request names no
-    queued action (§5.14.1)."""
-    for name in ("resume_loop_supersedes", "resume_deferred_handler_loop"):
-        _, seen = _played(validator, name)
-        requests = [a for a in seen if a["kind"] == "RequestApproval"]
-        assert "queued_action_id" in requests[0], name
-        assert requests[1:], name
-        assert all("queued_action_id" not in a for a in requests[1:]), name
+    """A step whose queued action was carried out, run again by a recovery
+    loop, is asked afresh as a new action: its request names no queued
+    action, and the queued step after the loop still names its own
+    (§5.14.1). So is a handler that runs for a new escalation."""
+    _, seen = _played(validator, "resume_loop_goes_on")
+    queued = [(a["step"], a.get("queued_action_id")) for a in _requests(seen)]
+    assert queued == [(2, "run-1/w/2/0"), (2, None), (4, "run-1/w/4/1")]
+    _, seen = _played(validator, "resume_escalation_supersedes_handler")
+    queued = [(a["frame"], a.get("queued_action_id")) for a in _requests(seen)]
+    assert queued == [(["w"], "run-1/w/2/0"), (["w", "repair"], None)]
+
+
+def test_a_loop_during_a_resumption_does_not_repeat_what_ran_ahead(
+    validator: _core.Validator,
+) -> None:
+    """A retry during a resumption runs the step again and goes on with the
+    resumption: a step that ran in the first run and declares
+    after_deferral: run is not run again, so it delegates once (§5.14.1)."""
+    run, seen = _played(validator, "resume_retry_keeps_queue")
+    calls = [a["capability"] for a in seen if a["kind"] == "InvokeCapability"]
+    assert calls.count("delegate") == 1
+    assert calls.count("mutate") == 2
+    # Nothing else is asked for once the script is played.
+    end = run.next()
+    assert (end["kind"], end["outcome"]) == ("Completed", "completed"), end
 
 
 def test_refused_approvers_are_named(validator: _core.Validator) -> None:

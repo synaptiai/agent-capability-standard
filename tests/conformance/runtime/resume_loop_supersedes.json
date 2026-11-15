@@ -1,5 +1,5 @@
 {
-  "description": "A recovery loop during a resumption to a step before a queued one supersedes that queued action; the steps from the loop's target run as in normal flow, asked afresh (\u00a75.14.1).",
+  "description": "A recovery loop during an unattended resumption supersedes only what it runs again: the queued step it runs again, deferred again earlier in the resumption, gets a new queued action, and the queued step after the loop keeps its own (\u00a75.14.1).",
   "catalog": {
     "w": {
       "goal": "g",
@@ -43,18 +43,15 @@
           }
         },
         {
-          "capability": "verify",
-          "purpose": "verify step",
-          "store_as": "v",
+          "capability": "observe",
+          "purpose": "observe step",
+          "store_as": "o",
           "input_bindings": {
-            "target": "${m1.success: boolean}",
-            "conditions": [
-              "applied"
-            ]
+            "target": "elsewhere"
           },
           "failure_modes": [
             {
-              "condition": "the check failed",
+              "condition": "the observation failed",
               "on_error": "R402",
               "action": "request_more_context",
               "recovery": {
@@ -70,9 +67,7 @@
           "store_as": "m2",
           "input_bindings": {
             "target": "config",
-            "operation": {
-              "set": 1
-            }
+            "operation": "${o.observation: object}"
           },
           "approval": {
             "approver": {
@@ -123,71 +118,47 @@
     },
     {
       "expect": {
-        "kind": "Completed",
-        "outcome": "deferred",
-        "deferred": [
-          {
-            "step": 2
-          },
-          {
-            "step": 3
-          },
-          {
-            "step": 4
-          }
-        ]
-      }
-    },
-    {
-      "resume": {
-        "attendance": "attended",
-        "at": 3600000
-      }
-    },
-    {
-      "expect": {
-        "kind": "RequestApproval",
-        "step": 2,
-        "queued_action_id": "run-1/w/2/0"
-      },
-      "respond": {
-        "kind": "Decision",
-        "decision_id": "d1",
-        "decision": "approved",
-        "approvers": [
-          "alice"
-        ],
-        "digest": "{{digest}}"
-      }
-    },
-    {
-      "expect": {
-        "kind": "CreateCheckpoint",
-        "step": 2
-      },
-      "respond": {
-        "kind": "Checkpoint",
-        "checkpoint_id": "cp2"
-      }
-    },
-    {
-      "expect": {
         "kind": "InvokeCapability",
-        "capability": "mutate",
-        "step": 2
+        "capability": "observe",
+        "step": 3
       },
       "respond": {
         "kind": "Output",
         "value": {
-          "success": true,
+          "observation": {
+            "n": 1
+          },
+          "confidence": 1,
           "evidence_anchors": []
         }
       }
     },
     {
       "expect": {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+          {
+            "step": 2,
+            "action_id": "run-1/w/2/0"
+          },
+          {
+            "step": 4,
+            "action_id": "run-1/w/4/1"
+          }
+        ]
+      }
+    },
+    {
+      "resume": {
+        "attendance": "unattended",
+        "at": 3600000
+      }
+    },
+    {
+      "expect": {
         "kind": "InvokeCapability",
-        "capability": "verify",
+        "capability": "observe",
         "step": 3
       },
       "respond": {
@@ -198,93 +169,17 @@
     },
     {
       "expect": {
-        "kind": "RequestApproval",
-        "step": 2
-      },
-      "respond": {
-        "kind": "Decision",
-        "decision_id": "d2",
-        "decision": "approved",
-        "approvers": [
-          "alice"
-        ],
-        "digest": "{{digest}}"
-      }
-    },
-    {
-      "expect": {
-        "kind": "CreateCheckpoint",
-        "step": 2
-      },
-      "respond": {
-        "kind": "Checkpoint",
-        "checkpoint_id": "cp2"
-      }
-    },
-    {
-      "expect": {
         "kind": "InvokeCapability",
-        "capability": "mutate",
-        "step": 2
-      },
-      "respond": {
-        "kind": "Output",
-        "value": {
-          "success": true,
-          "evidence_anchors": []
-        }
-      }
-    },
-    {
-      "expect": {
-        "kind": "InvokeCapability",
-        "capability": "verify",
+        "capability": "observe",
         "step": 3
       },
       "respond": {
         "kind": "Output",
         "value": {
-          "passed": true,
+          "observation": {
+            "n": 2
+          },
           "confidence": 1,
-          "evidence_anchors": []
-        }
-      }
-    },
-    {
-      "expect": {
-        "kind": "RequestApproval",
-        "step": 4
-      },
-      "respond": {
-        "kind": "Decision",
-        "decision_id": "d3",
-        "decision": "approved",
-        "approvers": [
-          "alice"
-        ],
-        "digest": "{{digest}}"
-      }
-    },
-    {
-      "expect": {
-        "kind": "CreateCheckpoint",
-        "step": 4
-      },
-      "respond": {
-        "kind": "Checkpoint",
-        "checkpoint_id": "cp2"
-      }
-    },
-    {
-      "expect": {
-        "kind": "InvokeCapability",
-        "capability": "mutate",
-        "step": 4
-      },
-      "respond": {
-        "kind": "Output",
-        "value": {
-          "success": true,
           "evidence_anchors": []
         }
       }
@@ -292,27 +187,35 @@
   ],
   "end": {
     "kind": "Completed",
-    "outcome": "completed",
-    "deferred": [],
+    "outcome": "deferred",
+    "deferred": [
+      {
+        "step": 2,
+        "action_id": "run-1/w/2/2"
+      },
+      {
+        "step": 4,
+        "action_id": "run-1/w/4/1"
+      }
+    ],
     "action_records": [
       {
         "action_id": "run-1/w/2/0",
-        "status": "executed"
-      },
-      {
-        "action_id": "run-1/w/4/1",
         "status": "rejected"
       },
       {
-        "status": "executed"
+        "action_id": "run-1/w/4/1",
+        "status": "planned"
       },
       {
-        "status": "executed"
+        "action_id": "run-1/w/2/2",
+        "status": "planned"
       }
     ]
   },
   "trace_kinds": [
     "run_resumed",
-    "loop"
+    "loop",
+    "step_deferred"
   ]
 }

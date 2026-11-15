@@ -12,9 +12,14 @@ import type { ApprovalRecord } from '../../../src/acs/records.js';
 
 // `round` is the round the person was shown (GET acs/approvals, or the F502
 // refusal): a decision on a round that has closed since is refused, so it
-// cannot approve the same values when they are asked for again.
+// cannot approve the same values when they are asked for again. The digest
+// is compared regardless of the case of its hexadecimal letters (§5.14); a
+// request is stored under the lowercase digest.
 const Decision = z.object({
-  digest: z.string().regex(/^[0-9a-f]{64}$/),
+  digest: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/)
+    .transform((d) => d.toLowerCase()),
   round: z.number().int().min(1),
   decision: z.enum(['approved', 'rejected']),
 });
