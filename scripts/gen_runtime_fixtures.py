@@ -6715,7 +6715,12 @@ NORMATIVE_MEMBERS = {
         "expires_at": "5.19.1",
         "queued_action_id": "5.14.1",
     },
-    "RecheckSource": {**ACTION, "step": "5.19.1", "source": "5.19.1", "compare": "5.14"},
+    "RecheckSource": {
+        **ACTION,
+        "step": "5.19.1",
+        "source": "5.19.1",
+        "compare": "5.14",
+    },
     "AwaitEvent": {
         **ACTION,
         "step": "5.19.1",
@@ -6791,7 +6796,9 @@ def pinned_problems(name, value, table):
     problems = []
     for key, sub in value.items():
         if key not in NORMATIVE_MEMBERS[table]:
-            problems.append(f"{name}: {table}.{key} is not a member §10.5 lets a fixture pin")
+            problems.append(
+                f"{name}: {table}.{key} is not a member §10.5 lets a fixture pin"
+            )
             continue
         if key in OPEN:
             continue

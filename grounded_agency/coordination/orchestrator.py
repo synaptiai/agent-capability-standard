@@ -231,7 +231,9 @@ class OrchestrationRuntime:
         ``recorded: false``; with ``require_record: true`` the step fails
         (R402, reason ``not_recorded``)."""
         event = ctx.get("event")
-        details = {k: ctx[k] for k in ("event", "context", "retention") if k in ctx}
+        details: dict[str, Any] = {
+            k: ctx[k] for k in ("event", "context", "retention") if k in ctx
+        }
         intent = "audit"
         if isinstance(event, dict):
             for key in ("intent", "event_type"):

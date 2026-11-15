@@ -651,5 +651,35 @@
     "expected_error_codes": [
       "S303"
     ]
+  },
+  "pass_join_unknown_warns": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced",
+    "expected_warning_codes": [
+      "W618"
+    ]
+  },
+  "pass_group_mate_read_warns": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced",
+    "expected_warning_codes": [
+      "W619"
+    ]
+  },
+  "pass_audit_require_record": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "bindings",
+    "expected_warning_codes": []
+  },
+  "fail_audit_require_record_type": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "bindings",
+    "expected_error_codes": [
+      "B203"
+    ]
   }
 }

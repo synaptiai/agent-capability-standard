@@ -565,5 +565,5 @@ def test_skill_log_digest_matches_the_plugin_audit_log(tmp_path: Path) -> None:
     )
     entry = json.loads((tmp_path / ".claude" / "audit.log").read_text())
 
-    assert entry["input_sha256"] == input_digest(TOOL_INPUTS["Bash"])
-    assert f"input_sha256: {entry['input_sha256']}" in skill_line
+    assert entry["details"]["input_sha256"] == input_digest(TOOL_INPUTS["Bash"])
+    assert f"input_sha256: {entry['details']['input_sha256']}" in skill_line

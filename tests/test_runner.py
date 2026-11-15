@@ -5,6 +5,7 @@ host end to end."""
 from __future__ import annotations
 
 import datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -1082,3 +1083,375 @@ def test_contradictory_approver_identities_are_malformed(
     with pytest.raises(ValueError, match="two different identities for 'alice'"):
         run.submit(action["id"], decision, 0)
     assert run.snapshot() == saved
+
+
+# ---------------------------------------------------------------------------
+# The host protocol's run operations (STANDARD v1.2 §5.19): turns, wake-up
+# times, saving, withdrawal, cancellation, run records, triggers, run_ids.
+# ---------------------------------------------------------------------------
+
+TRIGGERED = """\
+# Standard version: 1.1.0
+nightly:
+  goal: Read the configuration on a schedule or an event.
+  risk: low
+  workflow_extensions:
+    requires: [triggers@1]
+  inputs:
+    ev: {type: object, ref: schemas/event_schema.yaml#/event}
+  triggers:
+  - kind: schedule
+    schedule: {cron: "0 2 * * *", timezone: UTC}
+  - kind: event
+    event: {event_type: deploy.finished, delivers_to: ev}
+  - kind: manual
+  - kind: invoke
+  steps:
+  - capability: retrieve
+    purpose: Read the configuration.
+    store_as: current
+    input_bindings:
+      target: config
+"""
+
+
+def _event(event_id: str, event_type: str = "deploy.finished") -> dict[str, Any]:
+    return {
+        "event_id": event_id,
+        "timestamp": "2026-11-15T12:00:00Z",
+        "source": {"kind": "agent", "name": "ci"},
+        "event_type": event_type,
+        "raw": {},
+        "canonical": {},
+        "anchors": [],
+        "provenance": {"transformer": "ci", "transform_version": "1"},
+    }
+
+
+@pytest.fixture()
+def triggered(tmp_path: Path) -> WorkflowRunner:
+    catalog = tmp_path / "triggered.yaml"
+    catalog.write_text(TRIGGERED)
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    return WorkflowRunner(engine)
+
+
+def _wait_catalog(tmp_path: Path, timeout: str = "10s") -> WorkflowEngine:
+    catalog = tmp_path / "wait.yaml"
+    catalog.write_text(
+        f"""\
+# Standard version: 1.1.0
+wait_for_job:
+  goal: Wait for a job.
+  risk: low
+  workflow_extensions:
+    requires: [wait@1]
+  steps:
+  - capability: receive
+    purpose: Wait for the job to finish.
+    store_as: done
+    timeout: {timeout}
+    wait:
+      event_type: job.done
+"""
+    )
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    return engine
+
+
+class Withdrawing(FakeHost):
+    """Records what it was asked to withdraw; never answers a wait."""
+
+    def __init__(self, clock: Clock) -> None:
+        super().__init__(clock)
+        self.withdrawn: list[tuple[str, str]] = []
+
+    def await_event(self, action: dict[str, Any]) -> dict[str, Any] | None:
+        return None
+
+    def withdraw(self, action: dict[str, Any], why: str) -> None:
+        self.withdrawn.append((action["kind"], why))
+
+
+def test_advance_returns_wake_at(tmp_path: Path) -> None:
+    runner = WorkflowRunner(_wait_catalog(tmp_path))
+    clock = Clock()
+    host = Withdrawing(clock)
+    run = runner.start("wait_for_job", None, now_ms=clock.now)
+    turn = runner.advance(run, host)
+    assert turn.result is None
+    assert turn.pending is not None and turn.pending["kind"] == "AwaitEvent"
+    assert turn.wake_at == clock.now + 10_000 + 1
+    # At the wake-up time, the next turn times the wait out and ends the run.
+    clock.now = turn.wake_at
+    turn = runner.advance(run, host)
+    assert turn.result is not None and turn.result.code == "R401"
+    assert host.withdrawn == [("AwaitEvent", "timed out")]
+
+
+def test_drive_uses_wake_at(tmp_path: Path) -> None:
+    runner = WorkflowRunner(_wait_catalog(tmp_path, "1h"), poll_interval_ms=600_000)
+    clock = Clock()
+    host = Withdrawing(clock)
+    result = runner.run("wait_for_job", None, host)
+    assert result.code == "R401"
+    # Polls every ten minutes, then exactly at the wake-up time.
+    assert host.slept[-1] == 1_000 + 3_600_000 + 1
+    assert host.slept[0] == 1_000 + 600_000
+
+
+def test_drive_saves_after_every_change(runner: WorkflowRunner) -> None:
+    saved: list[dict[str, Any]] = []
+    host = FakeHost(Clock())
+    run = runner.start("change_config", {"setting": "x"}, now_ms=host.now_ms())
+    result = runner.drive(run, host, save=saved.append, key=b"k")
+    assert result.ok
+    # Five answered actions: four capabilities and one approval.
+    assert len(saved) == 5
+    assert all(s["hmac"] for s in saved)
+    # run() saves after the start too.
+    saved.clear()
+    runner.run("change_config", {"setting": "x"}, FakeHost(Clock()), save=saved.append)
+    assert len(saved) == 6
+
+
+def test_withdraw_on_timeout(tmp_path: Path) -> None:
+    runner = WorkflowRunner(_wait_catalog(tmp_path))
+    host = Withdrawing(Clock())
+    result = runner.run("wait_for_job", None, host)
+    assert result.code == "R401"
+    assert host.withdrawn == [("AwaitEvent", "timed out")]
+
+
+def test_withdraw_on_cancel(tmp_path: Path) -> None:
+    runner = WorkflowRunner(_wait_catalog(tmp_path, "1h"))
+    clock = Clock()
+    host = Withdrawing(clock)
+    run = runner.start("wait_for_job", None, now_ms=clock.now)
+    assert runner.advance(run, host).pending is not None
+    result = runner.cancel(run, "operator stop", host=host)
+    assert host.withdrawn == [("AwaitEvent", "cancelled")]
+    assert result.cancelled
+
+
+def test_cancel_result(runner: WorkflowRunner) -> None:
+    clock = Clock()
+    host = FakeHost(clock)
+    run = runner.start("change_config", {"setting": "x"}, now_ms=clock.now)
+    for _ in range(2):  # retrieve, then the checkpoint step
+        action = run.next()
+        run.submit(action["id"], host.invoke_capability(action), clock.now)
+    result = runner.cancel(run, "operator stop", now_ms=clock.now)
+    assert result.code == "R408" and result.cancelled and not result.ok
+    assert result.message == "operator stop"
+    assert result.checkpoint_id == "cp-1"
+    assert result.run_record is not None
+    assert result.run_record["status"] == "cancelled"
+    assert result.run_record["action_id"] == result.run_id
+    with pytest.raises(ValueError, match="R408"):
+        runner.cancel(run, "again")
+
+
+def test_host_cannot_serve_reason(runner: WorkflowRunner) -> None:
+    from grounded_agency.workflows import HostCannotServe
+
+    class NoAudio(FakeHost):
+        def invoke_capability(self, action: dict[str, Any]) -> dict[str, Any]:
+            raise HostCannotServe("unsupported_domain", "no audio here")
+
+    result = runner.run("change_config", {"setting": "x"}, NoAudio(Clock()))
+    assert result.code == "R402"
+    assert result.reason == "unsupported_domain"
+    assert result.run_record is not None
+    assert result.run_record["reason_code"] == "unsupported_domain"
+
+
+def test_start_from_schedule_trigger_is_unattended(triggered: WorkflowRunner) -> None:
+    run = triggered.start("nightly", trigger=0, now_ms=0)
+    assert json.loads(run.snapshot()["state"])["attendance"] == "unattended"
+    manual = triggered.start("nightly", trigger=2, now_ms=0)
+    assert json.loads(manual.snapshot()["state"])["attendance"] == "attended"
+
+
+def test_start_from_trigger_refuses_conflicting_attendance(
+    triggered: WorkflowRunner,
+) -> None:
+    with pytest.raises(RunStartError, match="trigger's attendance is unattended"):
+        triggered.start("nightly", trigger=0, attendance="attended", now_ms=0)
+    with pytest.raises(RunStartError, match="no trigger 9"):
+        triggered.start("nightly", trigger=9, now_ms=0)
+
+
+def test_start_from_event_trigger_delivers_event(triggered: WorkflowRunner) -> None:
+    run = triggered.start("nightly", trigger=1, event=_event("e1"), now_ms=0)
+    state = json.loads(run.snapshot()["state"])
+    assert state["frames"][0]["inputs"]["ev"]["event_id"] == "e1"
+    assert state["attendance"] == "unattended"
+
+
+def test_start_from_event_trigger_refuses_mismatched_event(
+    triggered: WorkflowRunner,
+) -> None:
+    with pytest.raises(RunStartError, match="does not match"):
+        triggered.start("nightly", trigger=1, event=_event("e1", "x"), now_ms=0)
+    with pytest.raises(RunStartError, match="pass it"):
+        triggered.start("nightly", trigger=1, now_ms=0)
+    with pytest.raises(RunStartError, match="only an event trigger"):
+        triggered.start("nightly", trigger=0, event=_event("e1"), now_ms=0)
+    with pytest.raises(RunStartError, match="through an event trigger"):
+        triggered.start("nightly", event=_event("e1"), now_ms=0)
+
+
+def test_start_from_event_trigger_redelivery_refused(triggered: WorkflowRunner) -> None:
+    triggered.start("nightly", trigger=1, event=_event("e1"), now_ms=0)
+    with pytest.raises(RunStartError, match="already started a run"):
+        triggered.start("nightly", trigger=1, event=_event("e1"), now_ms=0)
+    triggered.start("nightly", trigger=1, event=_event("e2"), now_ms=0)
+
+
+def test_event_not_consumed_when_start_fails(triggered: WorkflowRunner) -> None:
+    with pytest.raises(RunStartError, match="delivers_to"):
+        triggered.start(
+            "nightly", {"ev": {"x": 1}}, trigger=1, event=_event("e1"), now_ms=0
+        )
+    triggered.start("nightly", trigger=1, event=_event("e1"), now_ms=0)
+
+
+def test_start_from_invoke_trigger_refused(triggered: WorkflowRunner) -> None:
+    with pytest.raises(RunStartError, match="nested runs only"):
+        triggered.start("nightly", trigger=3, now_ms=0)
+
+
+def test_restore_reissues_same_id_and_run_id(runner: WorkflowRunner) -> None:
+    """A restored run's pending action is the one pending when the state was
+    saved, with the same run_id and id: the delivery key (§5.19.4)."""
+    run = runner.start("change_config", {"setting": "x"}, run_id="r-once", now_ms=0)
+    before = run.next()
+    again = runner.restore(run.snapshot(b"k"), b"k").next()
+    assert (
+        (again["run_id"], again["id"])
+        == (before["run_id"], before["id"])
+        == (
+            "r-once",
+            1,
+        )
+    )
+    assert again == before
+
+
+def test_run_id_reuse_refused(runner: WorkflowRunner) -> None:
+    run = runner.start("change_config", {"setting": "x"}, run_id="r-1", now_ms=0)
+    with pytest.raises(RunStartError, match="already used"):
+        runner.start("change_config", {"setting": "x"}, run_id="r-1", now_ms=0)
+    a = runner.start("change_config", {"setting": "x"}, now_ms=0)
+    b = runner.start("change_config", {"setting": "x"}, now_ms=0)
+    assert a.run_id != b.run_id
+    # A restored run keeps its id: not a reuse.
+    assert runner.restore(run.snapshot()).run_id == "r-1"
+
+
+def test_run_result_has_run_record(runner: WorkflowRunner) -> None:
+    ok = runner.run("change_config", {"setting": "x"}, FakeHost(Clock()), run_id="ok")
+    assert ok.run_record is not None
+    assert ok.run_record["status"] == "executed"
+    assert ok.run_record["details"]["records"] == 1
+    failed = runner.run(
+        "change_config",
+        {"setting": "x"},
+        FakeHost(Clock(), fail={"retrieve"}),
+        run_id="failed",
+    )
+    assert failed.action_records == []
+    assert failed.run_record is not None
+    assert failed.run_record["status"] == "failed"
+    assert failed.run_record["details"]["records"] == 0
+
+
+def test_archive_called_once_per_end(runner: WorkflowRunner, tmp_path: Path) -> None:
+    archived: list[Any] = []
+    keeping = WorkflowRunner(runner._engine, archive=archived.append)
+    result = keeping.run("change_config", {"setting": "x"}, FakeHost(Clock()))
+    assert archived == [result]
+    assert result.run_record is not None
+    assert result.run_record["action_id"] == result.run_id
+    run = keeping.start("change_config", {"setting": "x"}, now_ms=0)
+    keeping.cancel(run, "stop")
+    assert len(archived) == 2 and archived[1].cancelled
+    clock = Clock()
+    host = FakeHost(clock)
+    run = keeping.start("change_config", {"setting": "x"}, now_ms=clock.now)
+    turn = keeping.advance(run, host)
+    assert turn.result is not None and archived[-1] is turn.result
+    assert len(archived) == 3
+
+
+def test_archive_failure_keeps_run(runner: WorkflowRunner) -> None:
+    from grounded_agency.workflows import RunArchiveError
+
+    def broken(result: Any) -> None:
+        raise OSError("archive offline")
+
+    keeping = WorkflowRunner(runner._engine, archive=broken)
+    with pytest.raises(RunArchiveError) as caught:
+        keeping.run("change_config", {"setting": "x"}, FakeHost(Clock()))
+    error = caught.value
+    assert error.result.ok
+    assert error.run.finished
+    # The state was not discarded: it snapshots, and can be archived again.
+    assert error.run.snapshot()["sha256"]
+    archived: list[Any] = []
+    again = WorkflowRunner(runner._engine, archive=archived.append)
+    assert again.drive(again.restore(error.run.snapshot()), FakeHost(Clock())).ok
+    assert len(archived) == 1
+
+
+def test_records_actions_through_the_runner(runner: WorkflowRunner) -> None:
+    result = runner.run(
+        "change_config", {"setting": "x"}, FakeHost(Clock()), records="actions"
+    )
+    assert [r["capability"] for r in result.action_records] == [
+        "retrieve",
+        "checkpoint",
+        "constrain",
+        "mutate",
+    ]
+    with pytest.raises(RunStartError, match="records must be"):
+        runner.start("change_config", {"setting": "x"}, records="everything")
+
+
+def test_take_trace_and_records_with_chain_heads(runner: WorkflowRunner) -> None:
+    """A host may take the trace and the settled records out of the state
+    (§5.19.4); the state's chain heads cover what it took."""
+    import hashlib
+
+    clock = Clock()
+    host = FakeHost(clock)
+    run = runner.start(
+        "change_config", {"setting": "x"}, now_ms=clock.now, records="actions"
+    )
+    taken_records: list[dict[str, Any]] = []
+    taken_trace: list[dict[str, Any]] = []
+    while not run.finished:
+        taken_trace += run.take_trace()
+        taken_records += run.take_records()
+        action = run.next()
+        if action["kind"] == "RequestApproval":
+            run.submit(action["id"], host.request_approval(action), clock.now)
+        else:
+            run.submit(action["id"], host.invoke_capability(action), clock.now)
+
+    def fold(items: list[dict[str, Any]]) -> str:
+        h = ""
+        for item in items:
+            h = hashlib.sha256((h + _core.canonical_json(item)).encode()).hexdigest()
+        return h
+
+    assert run.taken_sha256 == {
+        "records": fold(taken_records),
+        "trace": fold(taken_trace),
+    }
+    assert run.run_record()["details"]["records"] == len(taken_records) + len(
+        run.action_records()
+    )

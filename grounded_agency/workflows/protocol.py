@@ -8,7 +8,6 @@ a host ignores an action member it does not know, and the executor ignores a
 response member the protocol does not define (§5.19.1).
 """
 
-
 from typing import Any, Literal, NotRequired, TypedDict
 
 # The record modes of a run (§6.4): the 1.1 records of approval steps, or a

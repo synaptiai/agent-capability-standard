@@ -284,3 +284,82 @@ export async function readTrace(store: Store): Promise<TraceEntry[]> {
 export async function readCheckpoints(store: Store): Promise<CheckpointRecord[]> {
   return (await store.getValue<CheckpointRecord[]>(KEYS.checkpoints)) ?? [];
 }
+
+/**
+ * An audit record (STANDARD v1.2.0 §6.4): an action record of
+ * `schemas/world_state_schema.yaml`, with the members the binding fills.
+ */
+export interface ActionRecord {
+  action_id: string;
+  run_id: string;
+  timestamp: string;
+  actor: 'agent';
+  intent: string;
+  status: 'approved' | 'executed' | 'failed' | 'rejected';
+  tool: string;
+  capability?: string;
+  call_id?: string;
+  checkpoint_id?: string;
+  code?: string;
+  approval?: {
+    digest: string;
+    decision: 'approved';
+    approvers: string[];
+    decision_id?: string;
+    approver_identities?: AgentIdentity[];
+  };
+  details?: { args_digest?: string; flow_id?: string; step?: number; error?: string };
+  recorded_by: { name: string; version?: string; config_sha256?: string };
+}
+
+/** Who writes the binding's audit records (§6.4 `recorded_by`). */
+export const RECORDED_BY = { name: 'standardagent-acs-binding' } as const;
+
+const STATUS: Record<TraceEntry['status'], ActionRecord['status']> = {
+  executed: 'executed',
+  failed: 'failed',
+  // §6.4: `rejected` covers a refusal by a safety layer, with its code.
+  refused: 'rejected',
+  // Allowed, with no outcome yet: an entry that stays so was cut off.
+  started: 'approved',
+};
+
+/**
+ * A trace entry as an audit record (STANDARD v1.2.0 §6.4). The binding keeps
+ * `TraceEntry` in the thread's store; this is the export the Standard allows
+ * ("written in, or exported as"). `scope` names the records' scope, the
+ * thread, as `run_id`, and prefixes `action_id`.
+ */
+export function actionRecord(
+  entry: TraceEntry,
+  scope: string,
+  recordedBy: ActionRecord['recorded_by'] = RECORDED_BY,
+): ActionRecord {
+  const record: ActionRecord = {
+    action_id: `${scope}/${entry.seq}`,
+    run_id: scope,
+    timestamp: new Date(entry.at).toISOString(),
+    actor: 'agent',
+    intent: `${entry.action} call`,
+    status: STATUS[entry.status],
+    tool: entry.action,
+    recorded_by: { ...recordedBy },
+  };
+  if (entry.capability !== null) record.capability = entry.capability;
+  if (entry.tool_call_id !== undefined) record.call_id = entry.tool_call_id;
+  if (entry.checkpoint_id !== undefined) record.checkpoint_id = entry.checkpoint_id;
+  if (entry.code !== undefined) record.code = entry.code;
+  if (entry.approval !== undefined) {
+    const { digest, approvers, approver_identities, decision_ids } = entry.approval;
+    record.approval = { digest, decision: 'approved', approvers: [...approvers] };
+    if (decision_ids[0] !== undefined) record.approval.decision_id = decision_ids[0];
+    if (approver_identities !== undefined) record.approval.approver_identities = approver_identities;
+  }
+  const details: NonNullable<ActionRecord['details']> = {};
+  if (entry.args_digest !== undefined) details.args_digest = entry.args_digest;
+  if (entry.flow_id !== undefined) details.flow_id = entry.flow_id;
+  if (entry.step !== undefined) details.step = entry.step;
+  if (entry.error !== undefined) details.error = entry.error;
+  if (Object.keys(details).length > 0) record.details = details;
+  return record;
+}

@@ -42,6 +42,8 @@ def input_digest(tool_input: Any) -> str:
 def read_entries(project_dir: Path) -> list[dict[str, Any]]:
     """The entries of a project's audit log, one per line."""
     log_file = project_dir / ".claude" / "audit.log"
+    if not log_file.exists():
+        return []
     return [json.loads(line) for line in log_file.read_text().splitlines()]
 
 
@@ -269,16 +271,21 @@ class TestPostToolUseExitCodes:
 
         (entry,) = read_entries(tmp_path)
         assert entry["tool"] == "Bash"
-        assert entry["event"] == "PostToolUse"
-        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", entry["ts"])
+        assert entry["details"]["event"] == "PostToolUse"
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", entry["timestamp"])
         assert set(entry) == {
-            "ts",
-            "event",
+            "action_id",
+            "timestamp",
+            "actor",
+            "intent",
+            "status",
             "tool",
-            "input_sha256",
+            "details",
+            "recorded_by",
             "prev_hmac",
             "hmac",
         }
+        assert set(entry["details"]) == {"event", "input_sha256"}
 
     def test_log_line_holds_a_digest_and_not_the_command(
         self, log_env: dict[str, str], tmp_path: Path
@@ -305,8 +312,8 @@ class TestPostToolUseExitCodes:
         assert "Call the API" not in content
 
         (entry,) = read_entries(tmp_path)
-        assert entry["input_sha256"] == input_digest(tool_input)
-        assert re.fullmatch(r"[0-9a-f]{64}", entry["input_sha256"])
+        assert entry["details"]["input_sha256"] == input_digest(tool_input)
+        assert re.fullmatch(r"[0-9a-f]{64}", entry["details"]["input_sha256"])
 
     def test_digest_does_not_depend_on_key_order(
         self, log_env: dict[str, str], tmp_path: Path
@@ -320,7 +327,7 @@ class TestPostToolUseExitCodes:
             assert run_hook(POSTTOOLUSE_HOOK, payload, log_env).returncode == 0
 
         first, second = read_entries(tmp_path)
-        assert first["input_sha256"] == second["input_sha256"]
+        assert first["details"]["input_sha256"] == second["details"]["input_sha256"]
 
     def test_logs_skill_invocation(
         self, log_env: dict[str, str], tmp_path: Path
@@ -337,8 +344,8 @@ class TestPostToolUseExitCodes:
 
         (entry,) = read_entries(tmp_path)
         assert entry["tool"] == "Skill"
-        assert entry["skill"] == "checkpoint"
-        assert entry["input_sha256"] == input_digest(tool_input)
+        assert entry["details"]["skill"] == "checkpoint"
+        assert entry["details"]["input_sha256"] == input_digest(tool_input)
         assert "args" not in entry
 
     def test_special_characters_in_args(
@@ -356,8 +363,8 @@ class TestPostToolUseExitCodes:
         content = (tmp_path / ".claude" / "audit.log").read_text()
         assert "quotes" not in content
         (entry,) = read_entries(tmp_path)
-        assert entry["skill"] == "test-skill"
-        assert entry["input_sha256"] == input_digest(tool_input)
+        assert entry["details"]["skill"] == "test-skill"
+        assert entry["details"]["input_sha256"] == input_digest(tool_input)
 
     @pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl needed")
     def test_non_ascii_skill_name_verifies(self, tmp_path: Path) -> None:
@@ -370,7 +377,7 @@ class TestPostToolUseExitCodes:
             payload = {"tool_name": "Skill", "tool_input": {"skill": name}}
             assert run_hook(POSTTOOLUSE_HOOK, payload, env).returncode == 0
 
-        assert [entry["skill"] for entry in read_entries(tmp_path)] == names
+        assert [entry["details"]["skill"] for entry in read_entries(tmp_path)] == names
         log_file = tmp_path / ".claude" / "audit.log"
         assert verify_log(log_file, "unit-test-key") == (4, 4, [])
 
@@ -388,7 +395,7 @@ class TestPostToolUseExitCodes:
         content = (tmp_path / ".claude" / "audit.log").read_text()
         assert "express" not in content, "the error text is not written"
         (entry,) = read_entries(tmp_path)
-        assert entry["event"] == "PostToolUseFailure"
+        assert entry["details"]["event"] == "PostToolUseFailure"
         assert entry["tool"] == "Bash"
 
     def test_one_line_per_call(self, log_env: dict[str, str], tmp_path: Path) -> None:
@@ -454,8 +461,11 @@ class TestPostToolUseExitCodes:
             "tool_input": {"skill": "test", "args": ""},
         }
         result = run_hook(POSTTOOLUSE_HOOK, payload, log_env)
-        # Should not crash, but should log a warning
-        assert result.returncode == 0
+        # Refused, and reported: a non-blocking hook error (STANDARD v1.2 §6.4)
+        assert result.returncode == 1
+        assert "audit.log is a symlink" in result.stderr
+        assert "not logged" in result.stderr
+        assert real_log.read_text() == ""
 
     def test_a_lock_file_left_by_an_earlier_version_is_not_touched(
         self, log_env: dict[str, str], tmp_path: Path
@@ -577,7 +587,7 @@ class TestAuditLogConcurrency:
         total, valid, errors = verify_log(tmp_path / ".claude" / "audit.log", self.KEY)
         assert errors == []
         assert (total, valid) == (len(payloads), len(payloads))
-        digests = {entry["input_sha256"] for entry in read_entries(tmp_path)}
+        digests = {entry["details"]["input_sha256"] for entry in read_entries(tmp_path)}
         assert digests == {input_digest(p["tool_input"]) for p in payloads}
 
     @pytest.mark.skipif(shutil.which("flock") is None, reason="flock not installed")
@@ -812,11 +822,13 @@ class TestAuditDigestUnavailable:
         fake.write_text(f"#!{shutil.which('bash')}\n{fake_sha256sum}\n")
         fake.chmod(0o755)
 
-        assert self._log(tmp_path, bin_dir).returncode == 0
+        result = self._log(tmp_path, bin_dir)
+        assert result.returncode == 1
+        assert "input digest could not be computed" in result.stderr
 
         (entry,) = read_entries(tmp_path)
         assert entry["tool"] == "Bash"
-        assert entry["input_sha256"] == "unavailable"
+        assert entry["details"]["input_sha256"] == "unavailable"
         assert self.SECRET not in (tmp_path / ".claude" / "audit.log").read_text()
         assert verify_log(tmp_path / ".claude" / "audit.log", self.KEY) == (1, 1, [])
 
@@ -833,24 +845,105 @@ class TestAuditDigestUnavailable:
         )
         fake.chmod(0o755)
 
-        assert self._log(tmp_path, bin_dir).returncode == 0
+        result = self._log(tmp_path, bin_dir)
+        assert result.returncode == 1
+        assert "input digest could not be computed" in result.stderr
 
         (entry,) = read_entries(tmp_path)
         assert entry["tool"] == "Bash"
-        assert entry["input_sha256"] == "unavailable"
+        assert entry["details"]["input_sha256"] == "unavailable"
         assert verify_log(tmp_path / ".claude" / "audit.log", self.KEY) == (1, 1, [])
 
-    def test_no_sha256_tool(self, tmp_path: Path) -> None:
-        """Without sha256sum, shasum or openssl the entry is still written."""
+    def test_unavailable_digest_is_logged_and_exits_1(self, tmp_path: Path) -> None:
+        """Without sha256sum or shasum, and an openssl that signs but fails a
+        plain digest, the entry is written with an unavailable digest, and
+        the hook says so (STANDARD v1.2 §6.4: never silently)."""
         bin_dir = self._bin_dir(tmp_path, {"sha256sum", "openssl"})
         assert shutil.which("shasum", path=str(bin_dir)) is None
+        stub = bin_dir / "openssl"
+        stub.write_text(
+            f"#!{shutil.which('bash')}\n"
+            'case " $* " in *" -hmac "*) ;; *) cat > /dev/null; exit 1 ;; esac\n'
+            f'exec {shutil.which("openssl")} "$@"\n'
+        )
+        stub.chmod(0o755)
 
-        assert self._log(tmp_path, bin_dir).returncode == 0
+        result = self._log(tmp_path, bin_dir)
+        assert result.returncode == 1
+        assert "input digest could not be computed" in result.stderr
 
         (entry,) = read_entries(tmp_path)
         assert entry["tool"] == "Bash"
-        assert entry["input_sha256"] == "unavailable"
+        assert entry["details"]["input_sha256"] == "unavailable"
         assert self.SECRET not in (tmp_path / ".claude" / "audit.log").read_text()
+        assert verify_log(tmp_path / ".claude" / "audit.log", self.KEY) == (1, 1, [])
+
+    def test_no_openssl_writes_nothing_and_exits_1(self, tmp_path: Path) -> None:
+        """Without openssl no line can be signed: none is written (an
+        unsigned one would break the chain), and the hook says why."""
+        bin_dir = self._bin_dir(tmp_path, {"openssl"})
+        result = self._log(tmp_path, bin_dir)
+        assert result.returncode == 1
+        assert "openssl is not installed" in result.stderr
+        assert read_entries(tmp_path) == []
+
+    def test_no_jq_reports_and_exits_1(self, tmp_path: Path) -> None:
+        bin_dir = self._bin_dir(tmp_path, {"jq"})
+        result = self._log(tmp_path, bin_dir)
+        assert result.returncode == 1
+        assert "jq is not installed" in result.stderr
+        assert read_entries(tmp_path) == []
+
+    def test_entry_build_failure_exits_1(self, tmp_path: Path) -> None:
+        """A jq that cannot build the line (-n fails): nothing is written,
+        and the hook says why."""
+        bin_dir = self._bin_dir(tmp_path, {"jq"})
+        fake = bin_dir / "jq"
+        fake.write_text(
+            f"#!{shutil.which('bash')}\n"
+            'for arg in "$@"; do [ "$arg" = "-n" ] && exit 5; done\n'
+            f'exec {shutil.which("jq")} "$@"\n'
+        )
+        fake.chmod(0o755)
+        result = self._log(tmp_path, bin_dir)
+        assert result.returncode == 1
+        assert "could not be built" in result.stderr
+        assert read_entries(tmp_path) == []
+
+    def test_unreadable_last_line_starts_new_chain_and_exits_1(
+        self, tmp_path: Path
+    ) -> None:
+        bin_dir = self._bin_dir(tmp_path, set())
+        log = tmp_path / ".claude" / "audit.log"
+        log.parent.mkdir()
+        log.write_text("not json\n")
+        result = self._log(tmp_path, bin_dir)
+        assert result.returncode == 1
+        assert "starts a new chain" in result.stderr
+        line = json.loads(log.read_text().splitlines()[-1])
+        assert line["prev_hmac"] == ""
+        assert re.fullmatch(r"[0-9a-f]{64}", line["hmac"])
+
+    def test_the_line_is_an_action_record(self, tmp_path: Path) -> None:
+        """The line is an ActionRecord (STANDARD v1.2 §6.4) with the chain
+        fields; recorded_by names the hook."""
+        from tests.action_record_schema import problems
+
+        bin_dir = self._bin_dir(tmp_path, set())
+        assert self._log(tmp_path, bin_dir).returncode == 0
+        (entry,) = read_entries(tmp_path)
+        assert problems(entry) == []
+        assert list(entry)[:6] == [
+            "action_id",
+            "timestamp",
+            "actor",
+            "intent",
+            "status",
+            "tool",
+        ]
+        assert entry["intent"] == "Bash call"
+        assert entry["status"] == "executed"
+        assert entry["recorded_by"]["name"].endswith("posttooluse_log_tool.sh")
 
 
 # ─── Hook Pattern Parity Tests ───

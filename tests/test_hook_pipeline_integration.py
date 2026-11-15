@@ -329,8 +329,8 @@ class TestAuditLogIntegrity:
 
         entry = json.loads(lines[-1])
         assert entry["tool"] == "Skill"
-        assert entry["skill"] == "test-skill"
-        assert "ts" in entry
+        assert entry["details"]["skill"] == "test-skill"
+        assert "timestamp" in entry
         assert "hmac" in entry
         assert "args" not in entry, "skill arguments are not written"
 
@@ -439,7 +439,7 @@ class TestAuditLogIntegrity:
         assert verify_log(log_file, key) == (3, 3, [])
 
         entries = [json.loads(line) for line in log_file.read_text().splitlines()]
-        assert [(e["event"], e["tool"]) for e in entries] == [
+        assert [(e["details"]["event"], e["tool"]) for e in entries] == [
             ("PostToolUse", "Bash"),
             ("PostToolUse", "Skill"),
             ("PostToolUseFailure", "Read"),

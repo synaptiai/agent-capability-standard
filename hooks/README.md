@@ -9,7 +9,7 @@ These hooks directly implement capabilities defined in the standard's VERIFY lay
 | Hook | Capability | Purpose |
 |------|------------|---------|
 | `pretooluse_require_checkpoint.sh` | `checkpoint` | Require checkpoint marker before mutation operations |
-| `posttooluse_log_tool.sh` | `audit` | Log every tool call for audit trail and provenance |
+| `posttooluse_log_tool.sh` | none (an audit record of each call, §6.4) | Log every tool call as an action record, for the audit trail and provenance; it is not an `audit` step |
 
 ## How Hooks Work
 
@@ -140,30 +140,48 @@ manages this marker file, bridging the shell and Python safety layers.
 
 ## Audit Trail
 
-The `posttooluse_log_tool.sh` hook implements the `audit` capability:
-- Logs every tool call that ran, one JSON line per call in `.claude/audit.log` (the `PostToolUse` and `PostToolUseFailure` matchers are `*`). A call that a pre-tool-use hook or a permission rule refused did not run and is not logged
+The `posttooluse_log_tool.sh` hook keeps the plugin's log of tool calls,
+one action record ([STANDARD v1.2 §6.4](../spec/STANDARD-v1.2.0.md#64-audit-records))
+per call, in `.claude/audit.log`. It is not an `audit` step: the `audit`
+skill writes its own records, of the events a workflow reports.
+
+- Logs every tool call that ran, one JSON line per call (the `PostToolUse` and `PostToolUseFailure` matchers are `*`). A call that a pre-tool-use hook or a permission rule refused did not run and is not logged
 - Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
 - Each entry includes the HMAC of the previous entry, creating a hash chain
-- Serializes concurrent runs (tool calls made in parallel) with flock(2) on the log file itself, opened for append, taken by `perl` or, without it, by `flock`, so the chain stays in order and sessions using either exclude each other. There is no separate lock file, and the kernel releases the lock when its holder exits, however it exits. A run tries for at most `AUDIT_LOCK_WAIT` seconds (default 40, at most 55) and then appends without the lock, at once where the lock cannot be taken at all: the verifier reports an entry out of chain order, and a held lock cannot silence the log
-- Needs `jq` to read the tool call; without it nothing is logged and the hook exits 0, so no error is reported
+- Serializes concurrent runs (tool calls made in parallel) with flock(2) on the log file itself, opened for append, taken by `perl` or, without it, by `flock`, so the chain stays in order and sessions using either exclude each other. There is no separate lock file, and the kernel releases the lock when its holder exits, however it exits. A run tries for at most `AUDIT_LOCK_WAIT` seconds (default 40, at most 55) and then appends without the lock, with a warning, at once where the lock cannot be taken at all: the verifier reports an entry out of chain order, and a held lock cannot silence the log
 
-Each entry holds these fields:
+The log is a best-effort capture (STANDARD v1.2 §6.4): it can miss a call,
+but never silently. When it does not log a call, or logs it without a valid
+HMAC or chain link, the hook says why on standard error and exits 1, which
+Claude Code shows as a non-blocking hook error: no `jq`, a symlinked
+`audit.log` (refused, SEC-006), no `openssl` (no line is written: an unsigned
+one would make every later line fail verification), a line that could not
+be built or written, a last line whose `hmac` cannot be read (the line is
+written and starts a new chain), an input digest that could not be computed
+(the line is written with `unavailable`). It exits 0 for a call it logged and
+for input that is not a tool call.
+
+Each entry is an action record with these fields, in this order:
 
 | Field | Value |
 |-------|-------|
-| `ts` | Time of the entry, ISO 8601 in UTC |
-| `event` | `PostToolUse` (the call succeeded) or `PostToolUseFailure` (it failed) |
+| `action_id` | The call's `tool_use_id`, or `<timestamp>-<pid>-<8 hex digits>` when the input names none |
+| `timestamp` | Time of the entry, ISO 8601 in UTC |
+| `actor` | `agent` |
+| `intent` | `<tool> call` |
+| `status` | `executed` (the call succeeded, `PostToolUse`) or `failed` (`PostToolUseFailure`) |
 | `tool` | Tool name |
-| `skill` | Skill name, on a `Skill` call only |
-| `input_sha256` | SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (none of `sha256sum`, `shasum` and `openssl` is installed, or the one used fails); the entry is written either way |
+| `call_id` | The call's `tool_use_id`, when the input names one |
+| `details` | `event` (the hook event), `skill` (the skill name, on a `Skill` call only) and `input_sha256`: SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (no SHA-256 tool, or the one used fails) |
+| `recorded_by` | `{"name": ...}`: this hook |
 | `prev_hmac` | HMAC of the previous entry, empty on the first |
-| `hmac` | HMAC of this entry's other fields |
+| `hmac` | HMAC of this entry's other fields, as written |
 
 A `Skill` call with the input `{"skill": "checkpoint"}`, logged with `AUDIT_HMAC_KEY=example-key`:
 
 ```json
-{"ts":"2026-01-30T12:00:00Z","event":"PostToolUse","tool":"Skill","skill":"checkpoint","input_sha256":"a69e8f80ec2830e5006e68ce275a5077f299455c58def8f4d12762083815e11a","prev_hmac":"","hmac":"c8e3958eb21f82334d55b1c9c6d7d4a887ea8857fdd925573a67ca083203e19c"}
+{"action_id":"toolu_01AbCdEf","timestamp":"2026-11-15T12:00:00Z","actor":"agent","intent":"Skill call","status":"executed","tool":"Skill","call_id":"toolu_01AbCdEf","details":{"event":"PostToolUse","skill":"checkpoint","input_sha256":"a69e8f80ec2830e5006e68ce275a5077f299455c58def8f4d12762083815e11a"},"recorded_by":{"name":"grounded-agency/hooks/posttooluse_log_tool.sh"},"prev_hmac":"","hmac":"9ac28f39d5c7c40397813ccad102b9a3505769790f4d370c94d47fad492973d1"}
 ```
 
 A reader who holds a tool input can confirm it against `input_sha256`. The
@@ -173,11 +191,12 @@ prints, and jq 1.6 and 1.7 print some numbers differently (jq 1.7 keeps
 `1.000` as written, jq 1.6 prints `1`), so an input that holds such a number
 is confirmed with the jq version that wrote the log.
 
-A log begun before the hook logged every tool call opens with entries of the
-earlier form (`ts`, `skill`, `args`, `prev_hmac`, `hmac`, for `Skill` calls
-only). The chain continues across the change and the verifier accepts both
-forms; the earlier entries still hold the skill arguments they were written
-with.
+A log begun before Standard 1.2 opens with entries of an earlier form: `ts`,
+`event`, `tool`, `skill`, `input_sha256`, `prev_hmac`, `hmac`, and, before the
+hook logged every tool call, `ts`, `skill`, `args`, `prev_hmac`, `hmac`, for
+`Skill` calls only. The chain continues across each change and the verifier
+accepts every form; the earliest entries still hold the skill arguments they
+were written with.
 
 
 ```mermaid
@@ -215,6 +234,6 @@ These hooks implement runtime enforcement of VERIFY layer requirements:
 | Spec Field | Hook Implementation |
 |------------|---------------------|
 | `requires_checkpoint: true` | `pretooluse_require_checkpoint.sh` blocks without checkpoint |
-| `audit` capability | `posttooluse_log_tool.sh` records tool usage |
+| Audit records (§6.4) | `posttooluse_log_tool.sh` writes an action record of every tool call; the `audit` capability is the `audit` skill's |
 
 See `schemas/capability_ontology.yaml` for full capability definitions.

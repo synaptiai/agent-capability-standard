@@ -1,0 +1,19 @@
+# Standard version: 1.2.0
+# W619 (STANDARD v1.2 §5.2.3): a member reads the store of another member of
+# its parallel_group, which need not have run before it.
+racy_group:
+  goal: Two members of a group, one reading the other.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the configuration.
+    store_as: config
+    parallel_group: gather
+    input_bindings:
+      target: config
+  - capability: search
+    purpose: Search for what the configuration names.
+    store_as: hits
+    parallel_group: gather
+    input_bindings:
+      query: "${config.data: string}"

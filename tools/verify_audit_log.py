@@ -6,11 +6,19 @@ Reads .claude/audit.log and verifies that:
 2. Each entry's HMAC matches its content
 3. Each entry's prev_hmac matches the previous entry's HMAC (chain integrity)
 
-The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call:
-ts, event, tool, skill (on a Skill call), input_sha256, prev_hmac, hmac. Before
-the hook logged every tool call it wrote ts, skill, args, prev_hmac, hmac for
-Skill calls only; a log that begins with such entries still verifies, because
-the HMAC is taken over every field but ``hmac`` in the order recorded.
+The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call.
+Three generations of entry verify, in any mix, because the HMAC is taken over
+every field but ``hmac`` in the order recorded:
+
+- an action record (STANDARD v1.2 §6.4), with the chain fields: the hook
+  writes action_id, timestamp, actor, intent, status, tool, call_id (when
+  the call has one), details, recorded_by, prev_hmac, hmac, and the audit
+  skill's own chain (.claude/audit/records.jsonl) holds records of the same
+  form;
+- before Standard 1.2: ts, event, tool, skill (on a Skill call),
+  input_sha256, prev_hmac, hmac;
+- before the hook logged every tool call: ts, skill, args, prev_hmac, hmac,
+  for Skill calls only.
 
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
@@ -29,12 +37,16 @@ import socket
 import sys
 from pathlib import Path
 
-# Every entry carries the chain fields. An entry names either a tool call
-# (what the hook writes) or, in a log begun before the hook logged every tool
-# call, a skill and its arguments.
-CHAIN_FIELDS = {"ts", "prev_hmac", "hmac"}
-CALL_FIELDS = {"event", "tool", "input_sha256"}
-LEGACY_FIELDS = {"skill", "args"}
+# Every entry carries the chain fields, and the fields of one generation: an
+# action record (what the hook writes), a tool call of the hook before
+# Standard 1.2, or, in a log begun before the hook logged every tool call, a
+# skill and its arguments.
+CHAIN_FIELDS = {"prev_hmac", "hmac"}
+GENERATIONS = (
+    {"action_id", "timestamp", "actor", "intent", "status"},
+    {"ts", "event", "tool", "input_sha256"},
+    {"ts", "skill", "args"},
+)
 
 
 def get_default_hmac_key() -> str:
@@ -62,11 +74,12 @@ def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[st
     """Verify a single audit log entry. Returns list of error messages."""
     errors: list[str] = []
 
-    # Check required fields
+    # Check required fields: the chain's, and those of the generation the
+    # entry is closest to (the first, when it fits none)
     keys = set(entry.keys())
     missing = CHAIN_FIELDS - keys
-    if (CALL_FIELDS - keys) and (LEGACY_FIELDS - keys):
-        missing |= CALL_FIELDS - keys
+    if all(fields - keys for fields in GENERATIONS):
+        missing |= min((fields - keys for fields in GENERATIONS), key=len)
     if missing:
         errors.append(f"Missing fields: {sorted(missing)}")
         return errors
