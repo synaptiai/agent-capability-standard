@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/tests/conformance/bindings/schema/fixture.schema.json",
+  "title": "Binding fixture (Agent Capability Standard 1.2.0, section 10.4)",
+  "description": "A set of tool binding records, optionally the tools a host offers and the host actions tied to them, and the exact diagnostics and effective flags a conforming safety layer computes (sections 5.18.1 to 5.18.4). The records are any JSON values: some are malformed on purpose.",
+  "type": "object",
+  "required": ["description", "ontology", "records", "expect"],
+  "additionalProperties": false,
+  "properties": {
+    "description": { "type": "string", "minLength": 1 },
+    "ontology": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "needs": {
+      "type": "array",
+      "items": { "enum": ["offered_tools"] },
+      "uniqueItems": true
+    },
+    "records": { "type": "array" },
+    "offered": {
+      "type": "object",
+      "description": "Each name the host offers a tool under, mapped to the tool of the record it carries, or null for none.",
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "host_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "tool"],
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "tool": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "host_takes_checkpoints": { "type": "boolean", "default": false },
+    "expect": {
+      "type": "object",
+      "required": ["errors", "warnings", "effective"],
+      "additionalProperties": false,
+      "properties": {
+        "errors": { "$ref": "#/$defs/diagnostics" },
+        "warnings": { "$ref": "#/$defs/diagnostics" },
+        "effective": {
+          "type": "object",
+          "description": "The effective flags of exactly the records that load, by tool.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["risk", "mutation", "requires_checkpoint", "requires_approval"],
+            "additionalProperties": false,
+            "properties": {
+              "risk": { "enum": ["low", "medium", "high"] },
+              "mutation": { "type": "boolean" },
+              "requires_checkpoint": { "type": "boolean" },
+              "requires_approval": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["offered"] },
+      "then": { "required": ["needs"], "properties": { "needs": { "contains": { "const": "offered_tools" } } } }
+    },
+    {
+      "if": { "required": ["host_actions"] },
+      "then": { "required": ["needs"], "properties": { "needs": { "contains": { "const": "offered_tools" } } } }
+    },
+    {
+      "if": { "required": ["host_takes_checkpoints"] },
+      "then": { "required": ["needs"], "properties": { "needs": { "contains": { "const": "offered_tools" } } } }
+    }
+  ],
+  "$defs": {
+    "diagnostics": {
+      "type": "array",
+      "description": "The exact multiset of diagnostics, each a code and the tool it names; order does not matter.",
+      "items": {
+        "type": "object",
+        "required": ["code", "tool"],
+        "additionalProperties": false,
+        "properties": {
+          "code": { "type": "string", "pattern": "^[VBSRFW][0-9]{3}$" },
+          "tool": { "type": "string" }
+        }
+      }
+    }
+  }
+}

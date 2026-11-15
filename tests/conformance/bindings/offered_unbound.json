@@ -1,0 +1,35 @@
+{
+  "description": "An offered tool with no binding is W617.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    }
+  ],
+  "offered": {
+    "save": "save",
+    "other": null
+  },
+  "expect": {
+    "errors": [],
+    "warnings": [
+      {
+        "code": "W617",
+        "tool": "other"
+      }
+    ],
+    "effective": {
+      "save": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

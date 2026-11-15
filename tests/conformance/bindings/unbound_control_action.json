@@ -1,0 +1,32 @@
+{
+  "description": "A host action tied to an unbound tool is F506, beside the tool's W617.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [],
+  "offered": {
+    "other": null
+  },
+  "host_actions": [
+    {
+      "action": "stop",
+      "tool": "other"
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "F506",
+        "tool": "other"
+      }
+    ],
+    "warnings": [
+      {
+        "code": "W617",
+        "tool": "other"
+      }
+    ],
+    "effective": {}
+  }
+}

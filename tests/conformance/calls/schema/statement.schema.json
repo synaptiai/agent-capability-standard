@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/tests/conformance/calls/schema/statement.schema.json",
+  "title": "Safety-layer conformance statement (Agent Capability Standard 1.2.0, section 10.4)",
+  "description": "What a safety layer that claims class SL states about itself: what it covers, its scope and boundaries, how it obtains approval and makes a check atomic, the fixture features it supports, and its host gaps.",
+  "type": "object",
+  "required": [
+    "layer",
+    "host",
+    "standard",
+    "ontology",
+    "covers",
+    "does_not_cover",
+    "scope",
+    "boundaries",
+    "checkpoint_max_age",
+    "approval",
+    "concurrency",
+    "features",
+    "host_gaps"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "layer": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "host": { "type": "string", "minLength": 1 },
+    "standard": { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" },
+    "ontology": { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" },
+    "covers": { "type": "string", "minLength": 1 },
+    "does_not_cover": { "type": "string", "minLength": 1 },
+    "scope": { "type": "string", "minLength": 1 },
+    "boundaries": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "checkpoint_max_age": { "$ref": "#/$defs/duration" },
+    "approval": {
+      "type": "object",
+      "required": ["how", "expires", "max_approvers", "roles"],
+      "additionalProperties": false,
+      "properties": {
+        "how": { "enum": ["prompt", "recorded", "both"] },
+        "prompt_configurations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        "expires": { "anyOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "max_approvers": { "type": "integer", "minimum": 1 },
+        "roles": { "type": "boolean" }
+      },
+      "if": { "properties": { "how": { "enum": ["prompt", "both"] } } },
+      "then": { "required": ["prompt_configurations"] }
+    },
+    "concurrency": { "enum": ["lock", "host_order"] },
+    "concurrency_note": { "type": "string", "minLength": 1 },
+    "features": {
+      "type": "array",
+      "items": { "enum": ["unbound_calls", "nested_calls", "recorded_approval", "offered_tools"] },
+      "uniqueItems": true
+    },
+    "host_gaps": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "duration": {
+      "type": "string",
+      "pattern": "^(\\d+(ms|s|m|h|d)|P(\\d+D)?(T(\\d+H)?(\\d+M)?(\\d+(\\.\\d{1,9})?S)?)?)$"
+    }
+  }
+}

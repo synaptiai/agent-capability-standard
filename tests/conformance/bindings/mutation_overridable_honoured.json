@@ -1,0 +1,26 @@
+{
+  "description": "mutation: false on a mutation_overridable capability, the only one the record names, is honoured.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "log",
+      "ontology": "2.2.0",
+      "capability": "audit",
+      "flags": {
+        "mutation": false
+      }
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "log": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

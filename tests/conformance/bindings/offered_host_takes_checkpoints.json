@@ -1,0 +1,30 @@
+{
+  "description": "A host that takes checkpoints itself counts as performing checkpoint.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    }
+  ],
+  "offered": {
+    "write": "write"
+  },
+  "host_takes_checkpoints": true,
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

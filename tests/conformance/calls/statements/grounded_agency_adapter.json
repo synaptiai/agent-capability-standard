@@ -1,0 +1,29 @@
+{
+  "layer": { "name": "grounded_agency.adapter", "version": "0.1.0" },
+  "host": "Claude Agent SDK (Python) with Claude Code",
+  "standard": "1.2.0",
+  "ontology": "2.2.0",
+  "covers": "every tool call Claude Code reports to the PreToolUse hook of options wrapped by GroundedAgentAdapter.wrap_options(), including tools in allowed_tools",
+  "does_not_cover": "a tool's own nested calls (an MCP tool calling another service); calls of a session whose options were not wrapped",
+  "scope": "this adapter instance: every session and subagent it serves, ordered by its lock; serve sessions that must not share records with separate adapters",
+  "boundaries": ["Stop of any session this adapter serves (its main agent's turn ends)"],
+  "checkpoint_max_age": "PT30M",
+  "approval": {
+    "how": "prompt",
+    "prompt_configurations": [
+      "Claude Code permission mode default, acceptEdits or plan: the PreToolUse hook answers ask and can_use_tool, or the permission prompt tool, decides; in any other mode the call is refused with F502"
+    ],
+    "expires": null,
+    "max_approvers": 1,
+    "roles": false
+  },
+  "concurrency": "lock",
+  "concurrency_note": "CheckpointTracker's lock makes a check, a hold and its use one atomic step; a hold is re-checked and used in one step when the call is allowed",
+  "features": ["unbound_calls", "offered_tools"],
+  "host_gaps": [
+    "With a permission_prompt_tool_name, a call the prompt tool refuses is not reported to the adapter: the checkpoint it held is lost (it counts as used when its hold lapses or the session's turn ends), so the next gated call needs a new checkpoint",
+    "The permission mode is read from the hook input, else from the wrapped options: a host that changes the mode during a session and omits it from hook input is checked against the mode the session started in",
+    "That Claude Code puts an ask to can_use_tool in modes default, acceptEdits and plan rests on its documentation; the tests call the hook and the callback directly",
+    "strict_mode=False or approval='off' is outside class SL"
+  ]
+}

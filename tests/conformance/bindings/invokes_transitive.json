@@ -1,0 +1,51 @@
+{
+  "description": "A composite takes, transitively, the effective flags of every binding it invokes.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "a",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "b"
+      ]
+    },
+    {
+      "tool": "b",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "c"
+      ]
+    },
+    {
+      "tool": "c",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "a": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      },
+      "b": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      },
+      "c": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

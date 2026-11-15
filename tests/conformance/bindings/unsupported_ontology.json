@@ -1,0 +1,21 @@
+{
+  "description": "A record written against another ontology major is V109, and is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "x",
+      "ontology": "3.0.0",
+      "capability": "observe"
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "V109",
+        "tool": "x"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

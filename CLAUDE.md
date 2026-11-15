@@ -81,6 +81,17 @@ adds its fixtures in its own `scripts/runtime_fixtures/<workstream>.py`
 `null`) and is checked against
 `tests/conformance/runtime/schema/fixture.schema.json`.
 
+### Regenerate the call-sequence and binding conformance fixtures
+```bash
+python scripts/gen_call_fixtures.py          # after editing the fixtures there
+python scripts/gen_call_fixtures.py --check  # CI: fail on drift
+```
+These are the safety-layer fixtures of class SL (Standard 1.2.0 §10.4),
+`tests/conformance/bindings/*.json` and `tests/conformance/calls/*.json`;
+the Python runners (`tests/test_binding_fixtures.py`,
+`tests/test_call_fixtures.py`) and the Standard Agents binding's tests read
+them in place.
+
 ### Regenerate the TypeScript package's ontology table and the approval digest vectors
 ```bash
 python scripts/gen_standard_agents_binding.py          # after changing the ontology
