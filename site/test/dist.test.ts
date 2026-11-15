@@ -101,6 +101,11 @@ describe('built site', () => {
     expect(rows.length).toBe(loadCounts().diagnosticCount);
     expect(rows.length).toBe(scanned.reduce((a, b) => a + b, 0));
     expect(rows).toContain('v102');
+    // A family's table has a tile in every row, so it is an enriched table,
+    // which the figure-gap check counts as an information figure (visual spec 4.2).
+    const tables = [...html.matchAll(/<table class="diagnostics-table"([^>]*)>/g)].map((m) => m[1]);
+    expect(tables.length).toBeGreaterThan(1);
+    for (const attrs of tables) expect(attrs).toContain('data-info-figure="enriched-table"');
   });
 
   it('marks each profile workflow that no catalog defines as proposed', () => {

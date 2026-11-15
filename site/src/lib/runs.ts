@@ -60,6 +60,14 @@ export interface ExemptRun {
    * the example's code without its sentences. Nothing when there is none.
    */
   extent?: 'section' | 'open-first-example';
+  /**
+   * True for a section of the current Standard that is still a heading
+   * awaiting its text (its subheadings and the comment naming its owner, no
+   * content): there is nothing to draw from yet (category a). The site tests
+   * fail once the section holds anything else, so the entry is removed when
+   * the text lands and the section's run is measured from then on.
+   */
+  unwritten?: boolean;
   /** The spec's words for the run. */
   run: string;
 }
@@ -71,6 +79,19 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
   { page: CURRENT_STANDARD, anchor: 'appendix-b-reserved-identifiers', category: 'c', run: 'Appendix B' },
   { page: CURRENT_STANDARD, anchor: 'appendix-c-changes-from-100', category: 'c', run: 'Appendix C' },
   { page: CURRENT_STANDARD, anchor: 'appendix-d-changes-from-110', category: 'c', run: 'Appendix D' },
+  // Added at integration, read from STANDARD-v1.2.0.md. §9.8 is the format as
+  // a JSON fence and a lookup table of what each `location` key means, and
+  // §11.7 a register of this version's files, their versions and sections:
+  // reference tables with nothing to draw (category c), as Appendix B is.
+  { page: CURRENT_STANDARD, anchor: '98-diagnostic-format', category: 'c', run: '§9.8 Diagnostic Format (format fence and location keys)' },
+  { page: CURRENT_STANDARD, anchor: '117-artifacts-of-this-version', category: 'c', run: '§11.7 Artifacts of This Version (file register)' },
+  // The 1.2.0 Candidate's sections that are headings awaiting their text
+  // (tasks/standard-1.2/designs/FOUNDATION.md D2). Each entry goes when its
+  // section is written: test/runs.test.ts fails while one has text.
+  { page: CURRENT_STANDARD, anchor: '518-tool-calling-hosts', category: 'a', unwritten: true, run: 'Tool-Calling Hosts, §5.18 (awaiting its text)' },
+  { page: CURRENT_STANDARD, anchor: '519-host-protocol', category: 'a', unwritten: true, run: 'Host Protocol, §5.19 (awaiting its text)' },
+  { page: CURRENT_STANDARD, anchor: '520-grounding', category: 'a', unwritten: true, run: 'Grounding, §5.20 (awaiting its text)' },
+  { page: CURRENT_STANDARD, anchor: '521-domain-profiles', category: 'a', unwritten: true, run: 'Domain Profiles, §5.21 (awaiting its text)' },
   { page: '/start/overview/', anchor: 'why-this-matters', category: 'a', run: 'Why This Matters' },
   { page: '/start/overview/', anchor: 'quick-start', category: 'b', run: 'Quick Start' },
   { page: '/start/overview/', anchor: 'claude-agent-sdk-integration', category: 'b', run: 'Claude Agent SDK Integration' },

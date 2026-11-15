@@ -5,9 +5,11 @@
 // rows and the enforced scope are typed from the spec's table in 3.12 and
 // the scope list in 4.2.
 import { readFileSync } from 'node:fs';
+import { slug } from 'github-slugger';
 import { describe, expect, it } from 'vitest';
 import { assertMeasured, reportLines, standardUrlFrom, summarise } from '../scripts/check-runs.mjs';
 import { loadVersions } from '../src/data/versions';
+import { currentStandardText } from '../src/lib/spec-figures';
 import {
   CURRENT_STANDARD,
   EXEMPT_RUNS,
@@ -91,6 +93,15 @@ describe('exempt runs and scope', () => {
       'appendix-b-reserved-identifiers:c',
       'appendix-c-changes-from-100:c',
       'appendix-d-changes-from-110:c',
+      // Not in the spec's table: added at integration, read from
+      // STANDARD-v1.2.0.md (§9.8 and §11.7 are reference tables), and the
+      // Candidate's sections still awaiting their text.
+      '98-diagnostic-format:c',
+      '117-artifacts-of-this-version:c',
+      '518-tool-calling-hosts:a',
+      '519-host-protocol:a',
+      '520-grounding:a',
+      '521-domain-profiles:a',
     ]);
     expect(rows('/start/overview/')).toEqual([
       'why-this-matters:a',
@@ -141,6 +152,29 @@ describe('exempt runs and scope', () => {
     // Which version is current is not typed here: a later Standard moves the enforced page with it.
     expect(isEnforced('/spec/9.9.9/', 'spec', '/spec/9.9.9/')).toBe(true);
     expect(isEnforced(current, 'spec', '/spec/9.9.9/')).toBe(false);
+  });
+
+  it('exempts a section of the current Standard as unwritten only while it holds no text', () => {
+    // Only its subheadings, one-line comments (the owner's), blank lines and
+    // thematic breaks: once the section has text its entry goes, and its run
+    // is measured.
+    const { source, text } = currentStandardText();
+    const lines = text.split('\n');
+    const heading = (l: string) => /^(#{1,6})\s+(.*?)\s*$/.exec(l);
+    const unwritten = EXEMPT_RUNS.filter((e) => e.unwritten);
+    for (const e of unwritten) {
+      expect([e.page, e.category], e.anchor).toEqual([CURRENT_STANDARD, 'a']);
+      const start = lines.findIndex((l) => heading(l) !== null && slug(heading(l)![2]!) === e.anchor);
+      expect(start, `${source}: no heading #${e.anchor}`).toBeGreaterThanOrEqual(0);
+      const level = heading(lines[start]!)![1]!.length;
+      const body: string[] = [];
+      for (const l of lines.slice(start + 1)) {
+        const h = heading(l);
+        if (h !== null && h[1]!.length <= level) break;
+        if (h === null && !/^\s*$|^<!--.*-->\s*$|^---\s*$/.test(l)) body.push(l);
+      }
+      expect(body, `${source} #${e.anchor} has text: remove its unwritten entry from EXEMPT_RUNS`).toEqual([]);
+    }
   });
 
   it('limits a run to two 900px viewports, measured 1440px wide', () => {

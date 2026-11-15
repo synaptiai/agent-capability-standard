@@ -441,3 +441,45 @@ redacted whole (`api_key_json_member`); keys themselves are not redacted.
   binding keeps "a private copy" of the ontology table and canonical JSON
   (under "Still open"); the in-repository package replaces that copy but is
   not published, so the sentence is left for S6 (publishing) or S1.
+
+## 2026-11-15 — F6 from a clean state (the figure-gap sweep)
+
+F6 lists the site's `npm run check`, `npm test` and `npm run build`, but CI
+(`.github/workflows/site.yml`) also runs `npm run check:axe`: axe over every
+page, then `scripts/check-runs.mjs`, the figure-gap sweep, which fails an
+enforced page (every generated template and the current Standard) with a run
+over two viewport heights that has no figure and is not exempt. Run against
+the foundation, axe passed and the sweep failed on two enforced pages:
+
+- `/spec/diagnostics/`: the warnings table, 26 rows with W617 to W626
+  (Part C), is one 2762px run. Each family's table has a diagnostic tile in
+  every row, which makes it an enriched table, an information figure
+  (visual spec 4.2, as the page's own comment says: "each table a figure
+  whose Code column holds the same tiles"); the page did not mark it. The
+  table now carries `data-info-figure="enriched-table"` (the threshold is
+  the prose plugin's `ENRICHED_TABLE_MIN_ROWS`), with a check in
+  `test/dist.test.ts`. No visual change.
+- `/spec/1.2.0/`, now the current Standard, had three runs over the limit.
+  `site/src/lib/runs.ts` gains exempt runs for it, with the category and the
+  reason, as the entries added at integration have (and `test/runs.test.ts`
+  lists them):
+  - `98-diagnostic-format` (c): §9.8 as merged in C3 is the format fence and
+    a lookup table of the `location` keys, reference material as Appendix B
+    is;
+  - `117-artifacts-of-this-version` (c): §11.7 is the E2 file register;
+  - `518-tool-calling-hosts`, `519-host-protocol`, `520-grounding`,
+    `521-domain-profiles` (a), marked `unwritten: true`: the D2 skeleton
+    sections, headings and owner comments only, nothing to draw from yet.
+    `test/runs.test.ts` fails as soon as one of them holds anything but
+    subheadings, one-line comments, blank lines and `---`, with the message
+    "remove its unwritten entry from EXEMPT_RUNS". **S1 (§5.18), S2b
+    (§5.19), S4 (§5.20) and S6 (§5.21) remove their entry when they write
+    the section**; the sweep then measures it, so a long section needs a
+    figure (a `SPEC_SLOTS` entry) or a justified exempt run of its own.
+  - With these, the 1.2.0 page's longest net run is 1421px (§11.4's figure
+    to §12.1's, through §11.5 and §11.6). S6's text for §11.5 and §11.6 adds
+    to that run; S6 checks the sweep after writing them.
+
+Workstreams should run `npm run check:axe` (or at least
+`node scripts/check-runs.mjs`, with `ACS_CHROMIUM` naming a Chromium) after
+`npm run build` whenever they change the Standard or the site, since CI does.
