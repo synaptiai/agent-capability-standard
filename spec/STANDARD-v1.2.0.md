@@ -1317,7 +1317,7 @@ A binding classifies a tool by its effect, not by its transport or its name:
 | Delivers a message, notification or event to a recipient outside the scope: an e-mail, a chat or issue comment, a webhook, a published event; and any request to another system whose effect the binding does not know | `send` |
 | Both of the above in one call | `capability` the primary effect, the other in `additional_capabilities` |
 | Writes the store the host provides for the agent's own memory, which `recall` reads | `persist`; a write anywhere else is `mutate` |
-| Restores a checkpoint taken in the scope, which the call names | `rollback`; a call that restores any other state, even with the same command, is `mutate` |
+| Restores a checkpoint taken in the scope | `rollback`; restoring other state is `mutate` |
 | Gives an agent a task, or further instructions on a task already delegated to it | `delegate` |
 | Only signals the host (ends a turn or a session, reports a status) and has no other effect | Control-only (`control: true`) |
 | Carries only the values of an executor's host-protocol action to the party that performs or decides it (§5.19.6) | Not a `send`: protocol traffic, covered by the step whose action it performs |
@@ -1332,21 +1332,18 @@ prerequisites of every action it recognises.
 **Classifiers.** A layer MAY classify each call of a tool from its
 arguments (`classifier` names how), as a shell command may only read. The
 record's `capability`, `additional_capabilities` and `flags` are then the
-tool's worst case. A classifier returns a classification only for arguments
-it recognises; for any other argument, or when it fails, the worst case
-applies. A classification it returns is a capability and declared flags,
-subject to §5.18.1, so it is never weaker than that capability's ontology
-flags; it may be weaker than the worst case, which bounds what the tool may
-do, not what each call does.
+tool's worst case, which applies to any argument the classifier does not
+recognise and whenever it fails. A classification it returns is a
+capability and declared flags, subject to §5.18.1: never weaker than that
+capability's ontology flags, though it may be weaker than the worst case.
 
-**Control-only tools.** A record with `control: true` has none of
-`capability`, `domain`, `flags`, `additional_capabilities`, `classifier`,
-`invokes`, `approval` and `destination` (else S303). Its calls return no capability output
-and are never refused: no check of this section, no host policy such as a
-rate limit, applies to them, and a layer that cannot write the record of
-one reports the failure and does not refuse the call (§5.18.8). They are
-recorded. A tool that signals the host and also has an effect is not
-control-only: bind it by its effect.
+**Control-only tools.** A record with `control: true` has no member other
+than `tool`, `ontology`, `standard` and `x-` members (else S303). Its calls
+return no capability output and are never refused: no check of this
+section, no host policy such as a rate limit, applies to them, and a layer
+that cannot write the record of one reports the failure and does not refuse
+the call (§5.18.8). They are recorded. A tool that signals the host and also
+has an effect is not control-only: bind it by its effect.
 
 A host action that takes effect whenever a tool is called, whatever the
 call's result (such as ending the turn or the session, or reporting a
