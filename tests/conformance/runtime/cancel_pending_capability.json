@@ -1,0 +1,87 @@
+{
+  "description": "Cancelling ends the run with Failed R408 at once: no retry, failure mode or recovery loop runs; in record mode actions the started step has a cancelled record (\u00a75.19.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "retry": {
+            "max": 3
+          },
+          "failure_modes": [
+            {
+              "condition": "it fails",
+              "on_error": [
+                "R401",
+                "R402"
+              ],
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "r",
+                "max_loops": 2
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 1
+      }
+    },
+    {
+      "cancel": {
+        "reason": "operator stop",
+        "at": 5
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R408",
+    "message": "operator stop",
+    "step": 0,
+    "action_records": [
+      {
+        "status": "cancelled",
+        "capability": "retrieve",
+        "code": "R408",
+        "step": 0
+      }
+    ]
+  },
+  "trace_kinds": [
+    "run_cancelled"
+  ],
+  "records": "actions",
+  "run_record": {
+    "action_id": "run-1",
+    "run_id": "run-1",
+    "status": "cancelled",
+    "code": "R408",
+    "step": 0,
+    "intent": "run w",
+    "details": {
+      "kind": "Failed",
+      "records": 1
+    }
+  }
+}

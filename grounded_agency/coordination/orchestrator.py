@@ -219,6 +219,62 @@ class OrchestrationRuntime:
     def audit_log(self) -> CoordinationAuditLog:
         return self._audit_log
 
+    def _audit_step(
+        self, step: WorkflowStep, ctx: dict[str, Any]
+    ) -> WorkflowStepResult:
+        """Perform an ``audit`` step (STANDARD v1.2 §6.4): the step's
+        ``event``, whatever its shape, is recorded under ``details.event`` of
+        a record of the log's own, never spread into it, so an event cannot
+        claim another writer, an actor, an approval or a place in a chain.
+        The output is the contract's: ``recorded``, the ``record`` written
+        and its ``audit_id``. A record that could not be written gives
+        ``recorded: false``; with ``require_record: true`` the step fails
+        (R402, reason ``not_recorded``)."""
+        event = ctx.get("event")
+        details = {k: ctx[k] for k in ("event", "context", "retention") if k in ctx}
+        intent = "audit"
+        if isinstance(event, dict):
+            for key in ("intent", "event_type"):
+                if isinstance(event.get(key), str):
+                    intent = event[key]
+                    break
+        try:
+            recorded = self._audit_log.record(
+                event_type="workflow_step_audit",
+                source_agent_id=ORCHESTRATOR_AGENT_ID,
+                target_agent_ids=[],
+                capability_id="audit",
+                details=details,
+            )
+        except Exception as e:
+            logger.warning("audit step: the record was not written: %s", e)
+            if ctx.get("require_record") is True:
+                return WorkflowStepResult(
+                    step=step,
+                    status=StepStatus.FAILED,
+                    output={"recorded": False, "evidence_anchors": []},
+                    error=(
+                        "R402 EXECUTION_FAILED: the audit step did not write its "
+                        f"record (not_recorded): {e}"
+                    ),
+                )
+            return WorkflowStepResult(
+                step=step,
+                status=StepStatus.COMPLETED,
+                output={"recorded": False, "evidence_anchors": []},
+            )
+        return WorkflowStepResult(
+            step=step,
+            status=StepStatus.COMPLETED,
+            output={
+                "recorded": True,
+                "audit_id": recorded.event_id,
+                "record": recorded.to_action_record(intent=intent),
+                "timestamp": recorded.timestamp,
+                "evidence_anchors": [],
+            },
+        )
+
     # ------------------------------------------------------------------
     # Agent management (convenience wrappers)
     # ------------------------------------------------------------------
@@ -592,18 +648,7 @@ class OrchestrationRuntime:
             )
 
         if step.capability == "audit":
-            self._audit_log.record(
-                event_type="workflow_step_audit",
-                source_agent_id=ORCHESTRATOR_AGENT_ID,
-                target_agent_ids=[],
-                capability_id="audit",
-                details=ctx,
-            )
-            return WorkflowStepResult(
-                step=step,
-                status=StepStatus.COMPLETED,
-                output={"audited": True},
-            )
+            return self._audit_step(step, ctx)
 
         if step.capability == "invoke":
             workflow = ctx.get("workflow", "")

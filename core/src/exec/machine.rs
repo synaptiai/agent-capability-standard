@@ -6,9 +6,9 @@ use super::canonical;
 use super::program::{GateAction, Program, Step, Workflow};
 use super::quorum;
 use super::{
-    Action, Attendance, Body, Checkpoint, Deferral, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending,
-    Purpose, Queued, Replacement, Response, ResumeOptions, Stage, State, StepError, StepState,
-    SubmitError, check_inputs,
+    Action, Attendance, Body, CancelError, Checkpoint, Deferral, End, Frame, MAX_FRAMES, MAX_TIME,
+    Outcome, Pending, Purpose, Queued, RecordMode, Replacement, Response, ResumeOptions, Stage,
+    State, StepError, StepState, SubmitError, Terminal, check_inputs,
 };
 use crate::duration;
 use crate::expr::ast::RefAt;
@@ -157,10 +157,6 @@ pub(crate) struct Reason {
 
 impl Reason {
     /// A reason the executor raises itself.
-    #[allow(
-        dead_code,
-        reason = "the 1.2 workstreams raise reasons through it (FOUNDATION F1.8)"
-    )]
     pub(crate) fn of(token: &str) -> Reason {
         debug_assert!(is_reason(token), "{token} is not a reason");
         Reason {
@@ -266,7 +262,8 @@ impl<'a> Machine<'a> {
 
     pub(crate) fn trace(&mut self, kind: &str, step: Option<usize>, detail: Value) {
         let event = json!({
-            "seq": self.st.trace.len(),
+            // Taken events count (§5.19.4): `seq` goes on where it left off.
+            "seq": self.st.trace_base + self.st.trace.len() as u64,
             "at": self.st.now,
             "kind": kind,
             "frame": self.names(),
@@ -290,7 +287,7 @@ impl<'a> Machine<'a> {
             let always_ask = self.always_ask();
             self.stamp(r);
             // check_state keeps every record an object.
-            let Some(record) = self.st.records[r].as_object_mut() else {
+            let Some(record) = self.st.rec_mut(r).as_object_mut() else {
                 return r;
             };
             record.insert("status".into(), json!(status));
@@ -305,19 +302,35 @@ impl<'a> Machine<'a> {
             };
             record.remove("reason");
             record.remove("reason_code");
+            record.remove("code");
             return r;
         }
-        let step = self.frame_ref().step;
-        let purpose = self
-            .step_ref()
+        let top = self.st.frames.len() - 1;
+        self.push_record(top, status, approval)
+    }
+
+    /// Write a new action record for the current step of frame `i` (§6.4):
+    /// its correlation members, the run's actor, the step's `purpose` as
+    /// its intent and the checkpoint the step used. Returns its index.
+    fn push_record(&mut self, i: usize, status: &str, approval: Option<Value>) -> usize {
+        let f = &self.st.frames[i];
+        let step = &self.program.workflows[&f.workflow].steps[f.step];
+        let purpose = step
             .raw
             .get("purpose")
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let n = self.st.records.len();
+            .unwrap_or_default();
+        let frame: Vec<String> = self.st.frames[..=i]
+            .iter()
+            .map(|f| f.workflow.clone())
+            .collect();
+        let n = self.st.records_written();
         let mut record = json!({
-            "action_id": format!("{}/{}/{step}/{n}", self.st.run_id, self.names().join("/")),
+            "action_id": format!("{}/{}/{}/{n}", self.st.run_id, frame.join("/"), f.step),
+            "run_id": self.st.run_id,
+            "frame": frame,
+            "step": f.step,
+            "capability": step.capability,
             "timestamp": iso(self.st.now),
             "actor": "agent",
             "intent": purpose,
@@ -327,8 +340,11 @@ impl<'a> Machine<'a> {
             record["actor"] = identity["kind"].clone();
             record["actor_identity"] = identity.clone();
         }
-        if self.always_ask() {
+        if self.always_ask_at(i) {
             record["always_ask"] = json!(true);
+        }
+        if let Some(c) = &f.cur.checkpoint_id {
+            record["checkpoint_id"] = json!(c);
         }
         if let Some(a) = approval {
             record["approval"] = a;
@@ -337,12 +353,42 @@ impl<'a> Machine<'a> {
         n
     }
 
+    /// In record mode `actions` (§6.4): a record of its own for a
+    /// failure-mode checkpoint or a rollback of the current step, with the
+    /// step's correlation members and `purpose`; it is not the step's record.
+    fn side_record(
+        &mut self,
+        capability: &str,
+        status: &str,
+        checkpoint_id: Option<String>,
+        code: Option<&str>,
+    ) {
+        if self.st.records_mode != RecordMode::Actions {
+            return;
+        }
+        let top = self.st.frames.len() - 1;
+        let r = self.push_record(top, status, None);
+        let record = self.st.rec_mut(r);
+        record["capability"] = json!(capability);
+        match checkpoint_id {
+            Some(c) => record["checkpoint_id"] = json!(c),
+            None => {
+                if let Some(m) = record.as_object_mut() {
+                    m.remove("checkpoint_id");
+                }
+            }
+        }
+        if let Some(code) = code {
+            record["code"] = json!(code);
+        }
+    }
+
     /// Record `r` is written again now: it takes the time and the actor of
     /// then (§5.14.1, §5.17).
     fn stamp(&mut self, r: usize) {
         let now = iso(self.st.now);
         let actor = self.st.actor_identity.clone();
-        let Some(record) = self.st.records[r].as_object_mut() else {
+        let Some(record) = self.st.rec_mut(r).as_object_mut() else {
             return;
         };
         record.insert("timestamp".into(), json!(now));
@@ -354,35 +400,44 @@ impl<'a> Machine<'a> {
         }
     }
 
-    /// A record for an action that did not go ahead, with the reason.
-    fn record_refused(&mut self, status: &str, approval: Option<Value>, reason: &str) {
+    /// A record for an action that did not go ahead, with the reason and,
+    /// when the step fails for it, the code (§6.4).
+    fn record_refused(
+        &mut self,
+        status: &str,
+        approval: Option<Value>,
+        reason: &str,
+        code: Option<&str>,
+    ) {
         let r = self.record(status, approval);
-        self.st.records[r]["reason"] = json!(reason);
+        self.st.rec_mut(r)["reason"] = json!(reason);
+        if let Some(code) = code {
+            self.st.rec_mut(r)["code"] = json!(code);
+        }
         self.frame().cur.record = Some(r);
     }
 
     fn set_record_status(&mut self, status: &str) {
         if let Some(r) = self.frame_ref().cur.record {
-            self.st.records[r]["status"] = json!(status);
+            self.st.rec_mut(r)["status"] = json!(status);
         }
     }
 
     /// An approved action that then failed. A record that is already
     /// rejected, expired or executed keeps its status.
     fn record_failed(&mut self) {
-        let reason = self
-            .frame_ref()
-            .cur
-            .error
-            .as_ref()
-            .and_then(|e| e.reason.clone());
+        let error = self.frame_ref().cur.error.clone();
         if let Some(r) = self.frame_ref().cur.record
-            && self.st.records[r]["status"] == "approved"
+            && self.st.rec(r)["status"] == "approved"
         {
-            self.st.records[r]["status"] = json!("failed");
-            // The reason the step failed with (§5.19.7, §6.4).
-            if let Some(reason) = reason {
-                self.st.records[r]["reason_code"] = json!(reason);
+            let record = self.st.rec_mut(r);
+            record["status"] = json!("failed");
+            // The code and the reason the step failed with (§5.19.7, §6.4).
+            if let Some(e) = error {
+                record["code"] = json!(e.code);
+                if let Some(reason) = e.reason {
+                    record["reason_code"] = json!(reason);
+                }
             }
         }
     }
@@ -390,7 +445,18 @@ impl<'a> Machine<'a> {
     // ---- actions ----
 
     fn emit(&mut self, body: Body, purpose: Purpose, deadline: Option<u64>) -> Flow {
+        // The step starts its pass with its first checkpoint, call or wait
+        // (§5.19.5).
+        if matches!(
+            (&body, &purpose),
+            (Body::CreateCheckpoint { .. }, Purpose::Checkpoint)
+                | (Body::InvokeCapability { .. }, _)
+                | (Body::AwaitEvent { .. }, _)
+        ) {
+            self.frame().cur.started = true;
+        }
         let action = Action {
+            run_id: self.st.run_id.clone(),
             id: self.st.next_id,
             frame: self.names(),
             body,
@@ -404,31 +470,27 @@ impl<'a> Machine<'a> {
         Flow::Wait
     }
 
-    fn finish(&mut self, body: Body) -> Flow {
-        let action = Action {
+    /// The run ends: its terminal action's head is stored, and `next()`
+    /// derives the records, outputs and deferrals from the state.
+    fn finish(&mut self, end: End) -> Flow {
+        let terminal = Terminal {
             id: self.st.next_id,
             frame: self.names(),
-            body,
+            end,
         };
         self.st.next_id += 1;
         self.st.pending = None;
-        self.st.finished = Some(action);
+        self.st.finished = Some(terminal);
         Flow::Wait
     }
 
     /// End the whole run from any frame (replanning ends every frame).
     fn finish_run(&mut self, outcome: Outcome) -> Flow {
         self.trace("run_finished", None, json!({"outcome": outcome}));
-        let outputs = Value::Object(self.st.frames[0].stores.clone());
-        let records = self.st.records.clone();
-        let deferred = self.deferred_report();
-        self.finish(Body::Completed {
+        self.finish(End::Completed {
             outcome,
             cause: None,
             ended: None,
-            outputs,
-            action_records: records,
-            deferred,
         })
     }
 
@@ -482,6 +544,31 @@ impl<'a> Machine<'a> {
         let mut detail = json!({"code": code, "message": message});
         reason.annotate(&mut detail);
         self.trace_step("step_failed", detail);
+        // Record mode `actions` (§6.4): a step that fails after it started
+        // has a `failed` record of the pass; an approved one keeps its own,
+        // which says why.
+        if self.st.records_mode == RecordMode::Actions {
+            let cur = &self.frame_ref().cur;
+            match cur.record {
+                None if cur.started => {
+                    let r = self.record("failed", None);
+                    self.frame().cur.record = Some(r);
+                    let record = self.st.rec_mut(r);
+                    record["code"] = json!(code);
+                    if let Some(t) = &reason.token {
+                        record["reason_code"] = json!(t);
+                    }
+                }
+                Some(r) if self.st.rec(r)["status"] == "approved" => {
+                    let record = self.st.rec_mut(r);
+                    record["code"] = json!(code);
+                    if let Some(t) = &reason.token {
+                        record["reason_code"] = json!(t);
+                    }
+                }
+                _ => {}
+            }
+        }
         self.frame().cur.error = Some(StepError {
             code: code.to_string(),
             message,
@@ -578,15 +665,12 @@ impl<'a> Machine<'a> {
             detail["reason"] = json!(r);
         }
         self.trace("run_failed", step, detail);
-        let records = self.st.records.clone();
-        let deferred = self.deferred_report();
-        self.finish(Body::Failed {
+        self.finish(End::Failed {
             code: fail.code,
             step,
             message: fail.message,
             reason: fail.reason,
-            action_records: records,
-            deferred,
+            checkpoint_id: None,
         })
     }
 
@@ -609,17 +693,11 @@ impl<'a> Machine<'a> {
                         None,
                         json!({"outcome": outcome, "cause": cause}),
                     );
-                    let outputs = Value::Object(self.st.frames[0].stores.clone());
-                    let records = self.st.records.clone();
-                    let deferred = self.deferred_report();
                     let ended = self.st.frames[0].ended.clone();
-                    self.finish(Body::Completed {
+                    self.finish(End::Completed {
                         outcome,
                         cause,
                         ended,
-                        outputs,
-                        action_records: records,
-                        deferred,
                     })
                 }
                 Err(fail) => self.fail_run_with(fail),
@@ -678,10 +756,10 @@ impl<'a> Machine<'a> {
             // records are the queued actions.
             Ok((Outcome::Deferred, None)) => {
                 if let Some(r) = self.frame_ref().cur.record
-                    && self.st.records[r]["status"] == "approved"
+                    && self.st.rec(r)["status"] == "approved"
                 {
-                    self.st.records[r]["status"] = json!("executed");
-                    self.st.records[r]["reason"] =
+                    self.st.rec_mut(r)["status"] = json!("executed");
+                    self.st.rec_mut(r)["reason"] =
                         json!("its nested run deferred steps, which are queued separately");
                 }
                 let wf = &self.program.workflows[&child.workflow];
@@ -804,6 +882,8 @@ impl<'a> Machine<'a> {
             let f = self.frame();
             f.nested_caps.remove(&index);
             f.stage = Stage::Execute;
+            // Its nested run goes on: the step has started (§5.19.5).
+            f.cur.started = true;
             self.trace_step("invoke_resumed", json!({"workflow": child.workflow}));
             self.st.frames.push(child);
             return Flow::Continue;
@@ -928,6 +1008,11 @@ impl<'a> Machine<'a> {
             cp.valid = false;
             let id = cp.id.clone();
             self.trace_step("checkpoint_consumed", json!({"checkpoint_id": id}));
+            // The step's records name the checkpoint it uses (§6.4).
+            if let Some(r) = self.frame_ref().cur.record {
+                self.st.rec_mut(r)["checkpoint_id"] = json!(id);
+            }
+            self.frame().cur.checkpoint_id = Some(id);
             return self.set_stage(Stage::Execute);
         }
         let step = self.frame_ref().step;
@@ -961,7 +1046,7 @@ impl<'a> Machine<'a> {
         let queued = self.queued_record();
         let person = marked || (queued.is_some() && self.st.attendance == Attendance::Attended);
         let queued_action_id =
-            queued.and_then(|r| self.st.records[r]["action_id"].as_str().map(str::to_string));
+            queued.and_then(|r| self.st.rec(r)["action_id"].as_str().map(str::to_string));
         // A standing mandate needs no one present: it is asked even in an
         // unattended run, and the plan applies only if none covers the step.
         let mandate = !person
@@ -1071,19 +1156,20 @@ impl<'a> Machine<'a> {
                     "rejected",
                     approval,
                     &format!("{why} (when_unattended: skip); the step was skipped"),
+                    None,
                 );
                 self.skip_step(&format!("approval needed, but {why}"))
             }
             "defer_to_queue" => {
                 let r = self.record("planned", approval);
-                self.st.records[r]["reason"] =
+                self.st.rec_mut(r)["reason"] =
                     json!(format!("{why} (when_unattended: defer_to_queue)"));
                 self.frame().cur.record = Some(r);
                 self.defer_step(why)
             }
             _ => {
                 let why = format!("approval is needed, but {why}");
-                self.record_refused("rejected", approval, &why);
+                self.record_refused("rejected", approval, &why, Some("F502"));
                 self.step_error("F502", why)
             }
         }
@@ -1107,12 +1193,12 @@ impl<'a> Machine<'a> {
         }
         let record = match self.frame_ref().cur.record {
             // The queued action (when_unattended: defer_to_queue).
-            Some(r) if self.st.records[r]["status"] == "planned" => Some(r),
+            Some(r) if self.st.rec(r)["status"] == "planned" => Some(r),
             // An invoke that ran: its nested run's records are the queue.
             Some(_) => None,
             None if self.step_ref().requires_approval => {
                 let r = self.record("planned", None);
-                self.st.records[r]["reason"] = json!(why);
+                self.st.rec_mut(r)["reason"] = json!(why);
                 Some(r)
             }
             None => None,
@@ -1286,7 +1372,7 @@ impl<'a> Machine<'a> {
                 .partition(|d| gone(d));
         self.st.deferrals = kept;
         for r in dropped.iter().filter_map(|d| d.record) {
-            if self.st.records[r]["status"] == "planned" {
+            if self.st.rec(r)["status"] == "planned" {
                 self.reject_queued(r, reason);
             }
         }
@@ -1299,8 +1385,8 @@ impl<'a> Machine<'a> {
         if self.st.resumed {
             self.stamp(r);
         }
-        self.st.records[r]["status"] = json!("rejected");
-        self.st.records[r]["reason"] = json!(reason);
+        self.st.rec_mut(r)["status"] = json!("rejected");
+        self.st.rec_mut(r)["reason"] = json!(reason);
     }
 
     /// Supersede the deferrals of `steps` of the current frame, nested ones
@@ -1335,30 +1421,13 @@ impl<'a> Machine<'a> {
     /// failed or ended first) is superseded.
     fn settle_queued(&mut self) {
         if let Some(q) = self.frame().queued.take()
-            && self.st.records[q.record]["status"] == "planned"
+            && self.st.rec(q.record)["status"] == "planned"
         {
             self.reject_queued(
                 q.record,
                 "superseded: the step did not reach its approval when its run resumed",
             );
         }
-    }
-
-    /// The run's deferrals, as the terminal action reports them.
-    fn deferred_report(&self) -> Vec<Value> {
-        self.st
-            .deferrals
-            .iter()
-            .map(|d| {
-                json!({
-                    "frame": d.frame,
-                    "step": d.path.last(),
-                    "store_as": d.store_as,
-                    "reason": d.reason,
-                    "action_id": d.record.map(|r| self.st.records[r]["action_id"].clone()),
-                })
-            })
-            .collect()
     }
 
     fn decide(
@@ -1442,6 +1511,8 @@ impl<'a> Machine<'a> {
                 "mandate_ref": mandate_ref,
                 "decided_at": iso(now),
                 "expires_at": expires_at.map(iso),
+                // The host's identifier of the decision (§5.19.1, §6.4).
+                "decision_id": decision_id,
             });
             if let Some(ids) = &counting.identities {
                 sub["approver_identities"] = json!(ids);
@@ -1467,7 +1538,7 @@ impl<'a> Machine<'a> {
                 return self.unattended(Some(record), "no standing mandate covers the action");
             }
             let why = "the approver was unavailable";
-            self.record_refused("rejected", Some(record), why);
+            self.record_refused("rejected", Some(record), why, Some("F502"));
             return self.step_error("F502", why);
         }
         let reused = !self.st.used_decisions.insert(decision_id.clone());
@@ -1509,7 +1580,7 @@ impl<'a> Machine<'a> {
         );
         if let Some((status, reason)) = problem {
             let sub = sub(status);
-            self.record_refused(status, Some(sub), &reason);
+            self.record_refused(status, Some(sub), &reason, Some("F502"));
             return self.step_error("F502", reason);
         }
         let r = self.record("approved", Some(sub("approved")));
@@ -1575,12 +1646,15 @@ impl<'a> Machine<'a> {
             }
             "stop" => {
                 self.set_record_status("expired");
+                if let Some(r) = self.frame_ref().cur.record {
+                    self.st.rec_mut(r)["code"] = json!("F502");
+                }
                 self.step_error("F502", "the approved source changed before acting")
             }
             _ => {
                 self.set_record_status("expired");
                 if let Some(r) = self.frame_ref().cur.record {
-                    self.st.records[r]["reason"] =
+                    self.st.rec_mut(r)["reason"] =
                         json!("the approved source changed; asked again");
                 }
                 let f = self.frame();
@@ -1721,6 +1795,8 @@ impl<'a> Machine<'a> {
         {
             let identities =
                 self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+            // The executor runs the quorum itself: the step starts here.
+            self.frame().cur.started = true;
             let result = quorum::evaluate(q, self.frame_ref(), identities);
             self.trace_step("quorum", json!({"tally": result.output["tally"]}));
             self.frame().cur.output = Some(result.output);
@@ -1787,6 +1863,8 @@ impl<'a> Machine<'a> {
             return self.step_error("R402", e);
         }
         self.trace_step("invoke_started", json!({"workflow": target}));
+        // Its nested run starts: so has the step (§5.19.5).
+        self.frame().cur.started = true;
         self.undefer_nested();
         let mut frame = Frame::new(&target, child_inputs);
         frame.marked = self.always_ask();
@@ -1911,12 +1989,25 @@ impl<'a> Machine<'a> {
             f.cur.delegated = Some(value);
             return self.set_stage(Stage::Execute);
         }
+        // `require_record` (§6.4): an audit step that did not write its
+        // record fails, retried as any R402.
+        if step.capability == "audit"
+            && self.frame_ref().cur.inputs.get("require_record") == Some(&Value::Bool(true))
+            && value.get("recorded") != Some(&Value::Bool(true))
+        {
+            return self.exec_error_with(
+                "R402",
+                "the audit step did not write its record (recorded is not true)",
+                Reason::of("not_recorded"),
+            );
+        }
         if step.capability == "checkpoint" {
             let id = value
                 .get("checkpoint_id")
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| self.derived_checkpoint_id());
+            self.frame().cur.checkpoint_id = Some(id.clone());
             self.add_checkpoint(id);
         }
         self.frame().cur.output = Some(value);
@@ -1936,11 +2027,15 @@ impl<'a> Machine<'a> {
     /// Whether the current step reads (in its bindings, condition or gates)
     /// a store or input marked always-ask (§5.17).
     fn always_ask(&self) -> bool {
-        let f = self.frame_ref();
+        self.always_ask_at(self.st.frames.len() - 1)
+    }
+
+    /// [`Machine::always_ask`] for the current step of frame `i`.
+    fn always_ask_at(&self, i: usize) -> bool {
+        let f = &self.st.frames[i];
         f.marked
             || !f.always_ask.is_empty()
-                && self
-                    .step_ref()
+                && self.program.workflows[&f.workflow].steps[f.step]
                     .reads
                     .iter()
                     .any(|r| f.always_ask.contains(r))
@@ -2139,6 +2234,12 @@ impl<'a> Machine<'a> {
             let f = self.frame();
             f.stores.insert(store.clone(), out);
             f.ran_inputs.insert(store.clone(), inputs);
+        }
+        // Record mode `actions` (§6.4): one record for each pass of each
+        // step that runs; an approved step's record is that record.
+        if self.st.records_mode == RecordMode::Actions && self.frame_ref().cur.record.is_none() {
+            let r = self.record("executed", None);
+            self.frame().cur.record = Some(r);
         }
         self.set_record_status("executed");
         // The queued action the step continued is carried out: it closes,
@@ -2585,6 +2686,7 @@ impl<'a> Machine<'a> {
                 );
             }
             (Purpose::FailureCheckpoint { mode }, Response::Checkpoint { checkpoint_id }) => {
+                self.side_record("checkpoint", "executed", Some(checkpoint_id.clone()), None);
                 self.add_checkpoint(checkpoint_id);
                 self.recover(mode);
             }
@@ -2594,17 +2696,22 @@ impl<'a> Machine<'a> {
                     message, reason, ..
                 },
             ) => {
+                let reason = Reason::from_response(reason).token;
+                self.side_record("checkpoint", "failed", None, Some("F501"));
+                self.side_reason(reason.as_deref());
                 self.end_frame(Err(Fail {
                     code: "F501".to_string(),
                     message: format!("could not take a checkpoint: {message}"),
-                    reason: Reason::from_response(reason).token,
+                    reason,
                 }));
             }
             (Purpose::GateRollback { message }, Response::RolledBack) => {
+                self.side_record("rollback", "executed", rolled_back(&pending), None);
                 self.trace_step("rolled_back", json!({}));
                 self.step_error("R403", message);
             }
             (Purpose::FailureRollback { mode }, Response::RolledBack) => {
+                self.side_record("rollback", "executed", rolled_back(&pending), None);
                 self.trace_step("rolled_back", json!({}));
                 self.recover(mode);
             }
@@ -2614,10 +2721,13 @@ impl<'a> Machine<'a> {
                     message, reason, ..
                 },
             ) => {
+                let reason = Reason::from_response(reason).token;
+                self.side_record("rollback", "failed", rolled_back(&pending), Some("F503"));
+                self.side_reason(reason.as_deref());
                 self.end_frame(Err(Fail {
                     code: "F503".to_string(),
                     message: format!("rollback failed: {message}"),
-                    reason: Reason::from_response(reason).token,
+                    reason,
                 }));
             }
             (
@@ -2718,13 +2828,15 @@ impl<'a> Machine<'a> {
         self.drive();
     }
 
-    pub(crate) fn tick(&mut self, now: u64) {
+    /// True when the tick changed the run: a new action is pending, or the
+    /// run ended (§5.19.2 **tick**).
+    pub(crate) fn tick(&mut self, now: u64) -> bool {
         if self.st.finished.is_some() {
-            return;
+            return false;
         }
         self.st.now = self.st.now.max(now.min(MAX_TIME));
         let Some(pending) = self.st.pending.clone() else {
-            return;
+            return false;
         };
         match (&pending.action.body, &pending.purpose) {
             (Body::Sleep { until }, _) if self.st.now >= *until => {
@@ -2766,6 +2878,7 @@ impl<'a> Machine<'a> {
                     "expired",
                     Some(sub),
                     "no decision before the approval expired",
+                    Some("F502"),
                 );
                 self.trace_step("approval_expired", json!({}));
                 self.step_error("F502", "no decision before the approval expired");
@@ -2776,9 +2889,124 @@ impl<'a> Machine<'a> {
                 self.st.pending = None;
                 self.exec_error("R401", "the step timed out");
             }
-            _ => return,
+            _ => return false,
         }
         self.drive();
+        true
+    }
+
+    /// Cancel the run (§5.19.5): it ends with `Failed` R408 and no retry,
+    /// failure mode, recovery loop, handler or rollback. Approved and queued
+    /// records become `cancelled`; in record mode `actions`, so does a new
+    /// record of every step, in every frame, that started its pass and has
+    /// no record of it, and of a pending failure-mode checkpoint or rollback.
+    pub(crate) fn cancel(&mut self, reason: &str, now: u64) -> Result<(), CancelError> {
+        if let Some(t) = &self.st.finished
+            && !matches!(
+                t.end,
+                End::Completed {
+                    outcome: Outcome::Deferred,
+                    ..
+                }
+            )
+        {
+            return Err(CancelError::Ended(t.end.describe()));
+        }
+        self.st.now = self.st.now.max(now.min(MAX_TIME));
+        let pending = self.st.pending.take();
+        let was_finished = self.st.finished.take().is_some();
+        let cancel = |record: &mut Value| {
+            record["status"] = json!("cancelled");
+            record["code"] = json!("R408");
+            record["reason"] = json!(reason);
+        };
+        // Approved actions may or may not have been carried out; queued ones
+        // will not be. A resumed run writes a queued record again with the
+        // time and actor of now, as when it supersedes one (§5.14.1).
+        let base = self.st.records_base;
+        let open: Vec<(usize, bool)> = self
+            .st
+            .records
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| match r["status"].as_str() {
+                Some("approved") => Some((base + i, false)),
+                Some("planned") => Some((base + i, true)),
+                _ => None,
+            })
+            .collect();
+        for (r, queued) in open {
+            if queued && self.st.resumed {
+                self.stamp(r);
+            }
+            cancel(self.st.rec_mut(r));
+        }
+        if !was_finished && self.st.records_mode == RecordMode::Actions {
+            // By the step's state, root first: a step that started its pass
+            // and has no record of it may have taken effect.
+            for i in 0..self.st.frames.len() {
+                let cur = &self.st.frames[i].cur;
+                if cur.started && cur.record.is_none() {
+                    let r = self.push_record(i, "cancelled", None);
+                    cancel(self.st.rec_mut(r));
+                    self.st.frames[i].cur.record = Some(r);
+                }
+            }
+            // A pending failure-mode checkpoint or rollback has its own.
+            let side = match pending.as_ref().map(|p| (&p.action.body, &p.purpose)) {
+                Some((Body::CreateCheckpoint { .. }, Purpose::FailureCheckpoint { .. })) => {
+                    Some(("checkpoint", None))
+                }
+                Some((Body::Rollback { checkpoint_id, .. }, _)) => {
+                    Some(("rollback", Some(checkpoint_id.clone())))
+                }
+                _ => None,
+            };
+            if let Some((capability, checkpoint_id)) = side {
+                self.side_record(capability, "cancelled", checkpoint_id, Some("R408"));
+                if let Some(last) = self.st.records.last_mut() {
+                    last["reason"] = json!(reason);
+                }
+            }
+        }
+        let checkpoint_id = self.st.checkpoints.last().map(|c| c.id.clone());
+        let step = (!was_finished).then(|| self.frame_ref().step);
+        self.trace("run_cancelled", step, json!({"reason": reason}));
+        // A cancelled run cannot be resumed: nothing is kept for it.
+        for f in &mut self.st.frames {
+            f.parked.clear();
+            f.resume = None;
+            f.pending_escalation = None;
+            f.queued = None;
+            let deferred = f.deferred.clone();
+            f.nested_caps.retain(|k, _| deferred.contains(k));
+        }
+        self.finish(End::Failed {
+            code: "R408".into(),
+            step,
+            message: reason.into(),
+            reason: None,
+            checkpoint_id,
+        });
+        Ok(())
+    }
+
+    /// The reason a failure-mode checkpoint or rollback failed with, on the
+    /// record `side_record` just wrote (§6.4).
+    fn side_reason(&mut self, reason: Option<&str>) {
+        if let (RecordMode::Actions, Some(t)) = (self.st.records_mode, reason)
+            && let Some(last) = self.st.records.last_mut()
+        {
+            last["reason_code"] = json!(t);
+        }
+    }
+}
+
+/// The checkpoint a pending `Rollback` restores.
+fn rolled_back(pending: &Pending) -> Option<String> {
+    match &pending.action.body {
+        Body::Rollback { checkpoint_id, .. } => Some(checkpoint_id.clone()),
+        _ => None,
     }
 }
 

@@ -27,30 +27,50 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from .. import _core
 from ..state.checkpoint_tracker import CheckpointTracker
 from .engine import WorkflowEngine
+from .protocol import RECORD_MODES
+from .triggers import EventGate, trigger_attendance
 
+# An action or a response of the host protocol (STANDARD v1.2 §5.19.1;
+# their typed shapes are in .protocol). At run time both are plain dicts.
 Action = dict[str, Any]
 Response = dict[str, Any]
 
 TERMINAL = frozenset({"Completed", "Failed"})
 
 
+class HostCannotServe(Exception):
+    """Raised by :meth:`Host.invoke_capability` or :meth:`Host.await_event`
+    when the host cannot serve the step: the runner answers the action with
+    an ``Error`` R402 carrying ``reason`` (STANDARD v1.2 §5.19.7), such as
+    ``unsupported_capability`` (the host does not perform the capability)
+    or ``unsupported_domain`` (not for the step's ``domain``), or a vendor
+    ``x-`` reason."""
+
+    def __init__(self, reason: str, message: str = "") -> None:
+        super().__init__(message or reason)
+        self.reason = reason
+        self.message = message
+
+
 class Host:
     """What a run asks of its environment.
 
     Override the methods your workflows need; each receives the action (a
-    dict with ``kind``, ``id``, ``frame`` and the action's fields) and
+    dict with ``kind``, ``run_id``, ``id``, ``frame`` and the action's
+    fields, STANDARD v1.2 §5.19.1; ignore any member you do not know) and
     returns a response dict, or ``None`` when there is nothing yet (the
     runner waits a poll interval and asks again, until the action's deadline
     passes). An exception raised by :meth:`invoke_capability` is reported to
     the run as a failed step (R402) — except ``NotImplementedError``, which
-    means the host lacks the capability and stops the runner — and so is a
+    means the host lacks the capability and stops the runner, and
+    :class:`HostCannotServe`, which fails the step with its reason — and so is a
     response from it the run cannot accept (malformed, not JSON data, or
     not an answer to the action). A response to any other action that the
     run cannot accept stops the runner with :class:`HostResponseError`.
@@ -58,6 +78,13 @@ class Host:
 
     With a :class:`CheckpointTracker`, :meth:`create_checkpoint` records
     checkpoints in it.
+
+    A run may ask for an action again after it was restored (STANDARD v1.2
+    §5.19.4): make what you do for an action idempotent under its delivery
+    key, ``(action["run_id"], action["id"])``, by keeping the response you
+    gave for each key and giving it again. What you transmit to perform an
+    approval request, a recheck, a wait or the run's end is protocol traffic
+    (§5.19.6), not a ``send``: send only the action's values.
     """
 
     def __init__(self, checkpoint_tracker: CheckpointTracker | None = None) -> None:
@@ -74,9 +101,13 @@ class Host:
             time.sleep(delay / 1000)
 
     def invoke_capability(self, action: Action) -> Response:
-        """Run ``action["capability"]`` with ``action["inputs"]``; return
-        ``{"kind": "Output", "value": {...}}`` or ``{"kind": "Error", "code":
-        "R401" | "R402", "message": ...}``."""
+        """Run ``action["capability"]`` with ``action["inputs"]``, for
+        ``action["domain"]`` when it is not None; return ``{"kind":
+        "Output", "value": {...}}`` or ``{"kind": "Error", "code": "R401" |
+        "R402", "message": ..., "reason": ...}``. ``reason`` is optional
+        (STANDARD v1.2 §5.19.7): ``unsupported_capability`` or
+        ``unsupported_domain`` when you cannot serve the step (or raise
+        :class:`HostCannotServe`), or an ``x-`` vendor reason."""
         raise NotImplementedError(f"no implementation for {action['capability']}")
 
     def create_checkpoint(self, action: Action) -> Response:
@@ -141,8 +172,16 @@ class Host:
         ``identity@1`` inputs (STANDARD v1.1 §5.17),
         ``{"kind": "LivenessLost"}`` when the source stopped answering (the
         step fails with R406), or ``None`` when nothing arrived (the run then
-        times out, R401, once the deadline has passed)."""
+        times out, R401, once the deadline has passed). Liveness is yours to
+        watch (STANDARD v1.2 §5.19.3): answer ``LivenessLost`` once the
+        source has missed ``failure_threshold`` heartbeats or probes."""
         raise NotImplementedError("no event source")
+
+    def withdraw(self, action: Action, why: str) -> None:
+        """The run no longer waits for ``action``: it timed out (``why`` is
+        ``"timed out"``) or the run was cancelled (``"cancelled"``). Stop
+        performing it: a response to it would be refused (STANDARD v1.2
+        §5.19.3, §5.19.5). The default does nothing."""
 
 
 @dataclass(frozen=True)
@@ -167,10 +206,26 @@ class RunResult:
     ended: dict[str, Any] | None = None
     """When a gate with ``action: end`` ended the run early: the ``step``
     it ended at and the gate's ``message``."""
+    run_id: str | None = None
+    """The run's identifier (STANDARD v1.2 §5.19.2)."""
+    reason: str | None = None
+    """Why the step that failed the run failed, as a token (§5.19.7), when
+    the failure came with one."""
+    checkpoint_id: str | None = None
+    """For a cancelled run (R408): the latest checkpoint the run knew of,
+    which the host may restore itself (§5.19.5)."""
+    run_record: dict[str, Any] | None = None
+    """The run's record (§5.19.8): an action record derived from how it
+    ended, which every host keeps with :attr:`action_records`."""
 
     @property
     def ok(self) -> bool:
         return self.outcome == "completed"
+
+    @property
+    def cancelled(self) -> bool:
+        """The host cancelled the run (R408, §5.19.5)."""
+        return self.code == "R408"
 
     @property
     def resumable(self) -> bool:
@@ -207,6 +262,31 @@ class HostResponseError(RunIncomplete):
         self.response = response
 
 
+class RunArchiveError(RunIncomplete):
+    """The archive the runner hands each ended run to raised: the run's
+    record and records were not kept (STANDARD v1.2 §5.19.8). The run's
+    state was not discarded: ``run`` is the live run, ``result`` the result
+    to archive again."""
+
+    def __init__(self, message: str, run: _core.Run, result: RunResult) -> None:
+        super().__init__(message, run)
+        self.result = result
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One turn of an event-driven host (:meth:`WorkflowRunner.advance`):
+    the run's ``result`` when it ended; else the ``pending`` action the host
+    could not answer yet (a ``Sleep``, or one whose handler returned
+    ``None``) and the run's ``wake_at`` time, when it has one (STANDARD v1.2
+    §5.19.3): call ``advance`` again then, or when a response may have
+    arrived."""
+
+    result: RunResult | None
+    wake_at: int | None
+    pending: Action | None
+
+
 class RunStartError(ValueError):
     """The run did not start, could not be restored or could not be
     resumed: the catalog does not validate, the inputs do not match the
@@ -231,6 +311,7 @@ class WorkflowRunner:
         max_actions: int = 100_000,
         poll_interval_ms: int = 1_000,
         max_polls: int = 100_000,
+        archive: Callable[[RunResult], None] | None = None,
     ) -> None:
         """
         Args:
@@ -247,11 +328,25 @@ class WorkflowRunner:
                 the default ``poll_interval_ms``. Each new action starts
                 its count afresh. Raise it, or poll less often, for actions
                 that wait longer, or drive the run again.
+            archive: Called with the result of every run the runner sees
+                end (:meth:`run`, :meth:`drive`, :meth:`advance`,
+                :meth:`cancel`), before it returns: the host keeps the run's
+                record and its action records there (STANDARD v1.2 §5.19.8).
+                Without it, keep ``result.run_record`` and
+                ``result.action_records`` yourself. A run restored after it
+                ended and driven again is archived again, under the same
+                ``run_record["action_id"]``.
         """
         self._engine = engine
         self._max_actions = max_actions
         self._poll_ms = poll_interval_ms
         self._max_polls = max_polls
+        self._archive = archive
+        # The run_ids this runner started (§5.19.2: a run_id is unique).
+        self._run_ids: set[str] = set()
+        # One gate per event trigger, (workflow, trigger index): it starts
+        # at most one run per event_id (§5.10.2).
+        self._event_gates: dict[tuple[str, int], EventGate] = {}
 
     def catalog(self) -> dict[str, Any]:
         """The catalog the engine holds, as the executor sees it."""
@@ -262,15 +357,35 @@ class WorkflowRunner:
         workflow: str,
         inputs: Mapping[str, Any] | None = None,
         *,
-        attendance: str = "attended",
+        attendance: str | None = None,
         run_id: str | None = None,
         now_ms: int | None = None,
         actor_identity: Mapping[str, Any] | None = None,
+        records: str = "approvals",
+        trigger: int | None = None,
+        event: Mapping[str, Any] | None = None,
     ) -> _core.Run:
         """Start a run without driving it (drive it with :meth:`drive`, or
-        step it yourself). ``actor_identity`` (an ``agent_identity``, STANDARD
-        v1.1 §5.17, e.g. :meth:`AgentDescriptor.identity`) names who runs the
-        workflow; every action record carries it.
+        step it yourself; save it before you act on its first action,
+        STANDARD v1.2 §5.19.4). ``actor_identity`` (an ``agent_identity``,
+        STANDARD v1.1 §5.17, e.g. :meth:`AgentDescriptor.identity`) names who
+        runs the workflow; every action record carries it.
+
+        ``run_id`` must be fresh: it keys the run's records, its run record
+        and the host's delivery and idempotency keys (§5.19.2), so the
+        runner refuses one it has already started (the default is a random
+        one). ``records`` is the record mode (§6.4): ``approvals`` (the
+        records of approval steps, as in 1.1) or ``actions`` (a record of
+        every step that runs).
+
+        ``trigger`` starts the run from the workflow's trigger of that index
+        (§5.10.2): its attendance applies (an ``attendance`` that differs is
+        refused); an ``event`` trigger takes the ``event`` (a canonical
+        event), which must match it and must not have started a run of it
+        before (its ``event_id``), and is given as the input its
+        ``delivers_to`` names. The runner applies no sender policy: apply
+        yours before you start the run. Without ``trigger`` the run is
+        attended unless ``attendance`` says otherwise.
 
         The executor is given no catalog header (``header=None``, STANDARD
         v1.2 §11.5), and loses nothing by it: the engine writes the header
@@ -280,26 +395,105 @@ class WorkflowRunner:
         with different headers, which one ``header`` could not state.
 
         Raises:
-            RunStartError: the catalog does not validate, or ``inputs`` or
+            RunStartError: the catalog does not validate, ``inputs`` or
                 ``actor_identity`` do not fit the workflow or are not JSON
-                data.
+                data, ``run_id`` was used before, or the trigger or the
+                event does not start a run.
         """
         now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
         _check_ms(now)
+        if records not in RECORD_MODES:
+            raise RunStartError(
+                f"records must be one of {RECORD_MODES}, not {records!r}", []
+            )
+        values = dict(inputs or {})
+        gate: EventGate | None = None
+        if trigger is not None:
+            attendance, gate = self._from_trigger(
+                workflow, trigger, attendance, event, values
+            )
+        elif event is not None:
+            raise RunStartError(
+                "an event starts a run only through an event trigger", []
+            )
+        rid = run_id or uuid.uuid4().hex
+        if rid in self._run_ids:
+            raise RunStartError(
+                f"run_id {rid!r} was already used by this runner; a run_id must be "
+                "unique among the runs whose records or idempotency keys the host "
+                "keeps (STANDARD §5.19.2)",
+                [],
+            )
         try:
-            return _core.Run.start(
+            run = _core.Run.start(
                 self._engine.core_validator(),
                 self.catalog(),
                 workflow,
-                dict(inputs or {}),
+                values,
                 header=None,
-                attendance=attendance,
-                run_id=run_id or uuid.uuid4().hex,
+                attendance=attendance or "attended",
+                run_id=rid,
                 now_ms=now,
                 actor_identity=None if actor_identity is None else dict(actor_identity),
+                records=records,
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None
+        self._run_ids.add(rid)
+        if gate is not None and event is not None:
+            gate.commit(event)
+        return run
+
+    def _from_trigger(
+        self,
+        workflow: str,
+        index: int,
+        attendance: str | None,
+        event: Mapping[str, Any] | None,
+        inputs: dict[str, Any],
+    ) -> tuple[str, EventGate | None]:
+        """The attendance of a run trigger ``index`` starts, and the event
+        gate that admits ``event`` (put into ``inputs``), for an event
+        trigger (STANDARD v1.2 §5.10.2)."""
+        triggers = self.catalog().get(workflow, {}).get("triggers")
+        if not isinstance(triggers, list) or not 0 <= index < len(triggers):
+            raise RunStartError(f"workflow {workflow!r} has no trigger {index}", [])
+        t = triggers[index]
+        if t.get("kind") == "invoke":
+            raise RunStartError("an invoke trigger starts nested runs only", [])
+        effective = trigger_attendance(t)
+        if attendance is not None and attendance != effective:
+            raise RunStartError(
+                f"the trigger's attendance is {effective}, not {attendance}: a host "
+                "applies the trigger's attendance (STANDARD §5.10.2)",
+                [],
+            )
+        if t.get("kind") != "event":
+            if event is not None:
+                raise RunStartError("only an event trigger takes an event", [])
+            return effective, None
+        if event is None:
+            raise RunStartError(
+                "an event trigger starts a run for an event: pass it", []
+            )
+        gate = self._event_gates.setdefault((workflow, index), EventGate(t["event"]))
+        decision = gate.check(event)
+        if decision == "no_match":
+            raise RunStartError("the event does not match the trigger", [])
+        if decision == "duplicate":
+            raise RunStartError(
+                f"event {event['event_id']!r} already started a run of this trigger "
+                "(STANDARD §5.10.2)",
+                [],
+            )
+        target = t["event"]["delivers_to"]
+        if target in inputs:
+            raise RunStartError(
+                f"input {target!r} is the trigger's event (delivers_to); do not give it",
+                [],
+            )
+        inputs[target] = dict(event)
+        return effective, gate
 
     def restore(
         self,
@@ -401,11 +595,20 @@ class WorkflowRunner:
         inputs: Mapping[str, Any] | None,
         host: Host,
         *,
-        attendance: str = "attended",
+        attendance: str | None = None,
         run_id: str | None = None,
         actor_identity: Mapping[str, Any] | None = None,
+        records: str = "approvals",
+        trigger: int | None = None,
+        event: Mapping[str, Any] | None = None,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
     ) -> RunResult:
-        """Start ``workflow`` and drive it to its end with ``host``."""
+        """Start ``workflow`` (as :meth:`start`) and drive it to its end with
+        ``host``. With ``save``, the run's state is saved after it starts and
+        after every change (:meth:`drive`). Without ``archive``, keep the
+        result's ``run_record`` and ``action_records`` yourself (STANDARD
+        v1.2 §5.19.8)."""
         run = self.start(
             workflow,
             inputs,
@@ -413,11 +616,95 @@ class WorkflowRunner:
             run_id=run_id,
             now_ms=host.now_ms(),
             actor_identity=actor_identity,
+            records=records,
+            trigger=trigger,
+            event=event,
         )
-        return self.drive(run, host)
+        if save is not None:
+            save(run.snapshot(key))
+        return self.drive(run, host, save=save, key=key)
 
-    def drive(self, run: _core.Run, host: Host) -> RunResult:
-        """Drive a started or restored run to its end.
+    def advance(
+        self,
+        run: _core.Run,
+        host: Host,
+        *,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
+    ) -> Turn:
+        """One turn of an event-driven host (STANDARD v1.2 §5.19.3): give the
+        run the time, then perform every action the host can answer now,
+        until the run ends or waits. Returns the result when it ended, else
+        the action it waits on and its wake-up time: set a timer for it, and
+        call ``advance`` again when it fires or a response may have arrived
+        (an approval decision, an event).
+
+        A tick that times out the action the host was performing withdraws
+        it (:meth:`Host.withdraw`). With ``save``, the state
+        (``run.snapshot(key)``) is saved after every change, before the host
+        acts on the next action (§5.19.4).
+
+        Raises:
+            RunIncomplete: after ``max_actions`` answered actions in this
+                turn.
+            HostResponseError: as :meth:`drive`.
+            RunArchiveError: the archive raised.
+        """
+        turn, _ = self._turn(run, host, save, key, self._max_actions)
+        if turn.result is None and turn.pending is None:
+            raise RunIncomplete(
+                f"the run did not finish within {self._max_actions} actions", run
+            )
+        return turn
+
+    def _turn(
+        self,
+        run: _core.Run,
+        host: Host,
+        save: Callable[[dict[str, Any]], None] | None,
+        key: bytes | None,
+        budget: int,
+    ) -> tuple[Turn, int]:
+        """A turn and the actions it answered; an empty turn when it ran
+        out of ``budget``."""
+        _check_key(key)
+        now = host.now_ms()
+        _check_ms(now)
+        before = run.next()
+        if run.tick(now):
+            if before["kind"] not in TERMINAL | {"Sleep"}:
+                host.withdraw(before, "timed out")
+            if save is not None:
+                save(run.snapshot(key))
+        answered = 0
+        while answered < budget:
+            action = run.next()
+            if action["kind"] in TERMINAL:
+                return Turn(self._ended(run, action), None, None), answered
+            if action["kind"] == "Sleep":
+                return Turn(None, run.wake_at(), action), answered
+            response = self._dispatch(host, action)
+            if response is None:
+                return Turn(None, run.wake_at(), action), answered
+            self._submit(run, action, response, host.now_ms())
+            answered += 1
+            if save is not None:
+                save(run.snapshot(key))
+        return Turn(None, None, None), answered
+
+    def drive(
+        self,
+        run: _core.Run,
+        host: Host,
+        *,
+        save: Callable[[dict[str, Any]], None] | None = None,
+        key: bytes | None = None,
+    ) -> RunResult:
+        """Drive a started or restored run to its end: turns of
+        :meth:`advance`, sleeping between them until the run's wake-up time
+        or the next poll. With ``save``, the state is saved after every
+        change, before the host acts on the next action (STANDARD v1.2
+        §5.19.4).
 
         Raises:
             RunIncomplete: after ``max_actions`` answered actions, or
@@ -426,49 +713,88 @@ class WorkflowRunner:
             HostResponseError: (a :class:`RunIncomplete`) the host answered
                 an action other than ``InvokeCapability`` with a response
                 the run cannot accept.
+            RunArchiveError: (a :class:`RunIncomplete`) the archive raised.
         """
         answered = 0
         # Unanswered polls of the current action; a new action resets it.
         polls = 0
         polled: Any = None
-        while answered < self._max_actions:
-            action = run.next()
-            kind = action["kind"]
-            if action.get("id") != polled:
-                polled, polls = action.get("id"), 0
-            if kind in TERMINAL:
-                return self._result(run, action)
-            if kind == "Sleep":
+        while True:
+            turn, n = self._turn(run, host, save, key, self._max_actions - answered)
+            answered += n
+            if turn.result is not None:
+                return turn.result
+            action = turn.pending
+            if action is None or answered >= self._max_actions:
+                raise RunIncomplete(
+                    f"the run did not finish within {self._max_actions} actions", run
+                )
+            if action["id"] != polled:
+                polled, polls = action["id"], 0
+            if action["kind"] == "Sleep":
+                # A Sleep counts as an answered action.
                 host.sleep_until(action["until"])
-                run.tick(host.now_ms())
                 answered += 1
                 continue
-            response = self._dispatch(host, action)
-            if response is None:
-                if polls >= self._max_polls:
-                    raise RunIncomplete(
-                        f"no answer to action {action['id']} ({kind}) after "
-                        f"{self._max_polls} polls",
-                        run,
-                    )
-                polls += 1
-                # Nothing yet: wait a poll interval (or until the action's
-                # deadline, if sooner), then let the run time it out.
-                now = host.now_ms()
-                until = now + self._poll_ms
-                deadline = action.get("deadline")
-                if deadline is None:
-                    deadline = action.get("expires_at")
-                if deadline is not None:
-                    until = min(until, deadline + 1)
-                host.sleep_until(until)
-                run.tick(host.now_ms())
-                continue
-            self._submit(run, action, response, host.now_ms())
-            answered += 1
-        raise RunIncomplete(
-            f"the run did not finish within {self._max_actions} actions", run
+            if polls >= self._max_polls:
+                raise RunIncomplete(
+                    f"no answer to action {action['id']} ({action['kind']}) after "
+                    f"{self._max_polls} polls",
+                    run,
+                )
+            polls += 1
+            # Nothing yet: wait a poll interval, or until the run's wake-up
+            # time if sooner, when the next turn's tick times the action out.
+            until = host.now_ms() + self._poll_ms
+            if turn.wake_at is not None:
+                until = min(until, turn.wake_at)
+            host.sleep_until(until)
+
+    def cancel(
+        self,
+        run: _core.Run,
+        reason: str,
+        *,
+        now_ms: int | None = None,
+        host: Host | None = None,
+    ) -> RunResult:
+        """Cancel ``run`` (STANDARD v1.2 §5.19.5): it ends at once with
+        ``Failed`` R408, ``reason`` as its message; no retry, failure mode,
+        recovery or rollback runs, and the result's ``checkpoint_id`` names
+        the latest checkpoint, which you may restore yourself. A run that
+        ended ``deferred`` can be cancelled too. With ``host``, the action
+        it was performing is withdrawn (:meth:`Host.withdraw`). The result
+        is archived as any end.
+
+        Raises:
+            ValueError: the run ended otherwise than ``deferred``.
+            RunArchiveError: the archive raised.
+        """
+        now = (
+            (host.now_ms() if host else time.time_ns() // 1_000_000)
+            if now_ms is None
+            else now_ms
         )
+        _check_ms(now)
+        before = run.next()
+        run.cancel(reason, now)
+        if host is not None and before["kind"] not in TERMINAL | {"Sleep"}:
+            host.withdraw(before, "cancelled")
+        return self._ended(run, run.next())
+
+    def _ended(self, run: _core.Run, action: Action) -> RunResult:
+        """The result of an ended run, handed to the archive (§5.19.8)."""
+        result = self._result(run, action)
+        if self._archive is not None:
+            try:
+                self._archive(result)
+            except Exception as e:
+                raise RunArchiveError(
+                    f"the run ended, but its record could not be archived: {e}",
+                    run,
+                    result,
+                ) from e
+        return result
 
     @staticmethod
     def _submit(run: _core.Run, action: Action, response: Any, now: int) -> None:
@@ -508,12 +834,19 @@ class WorkflowRunner:
                 return host.invoke_capability(action)
             except NotImplementedError:
                 raise
+            except HostCannotServe as e:
+                return _cannot_serve(e)
             except Exception as e:  # the step failed, not the runner
                 return {
                     "kind": "Error",
                     "code": "R402",
                     "message": f"{type(e).__name__}: {e}",
                 }
+        if kind == "AwaitEvent":
+            try:
+                return host.await_event(action)
+            except HostCannotServe as e:
+                return _cannot_serve(e)
         handlers = {
             "CreateCheckpoint": host.create_checkpoint,
             "Rollback": host.rollback,
@@ -539,6 +872,8 @@ class WorkflowRunner:
                 cause=action.get("cause"),
                 deferred=action.get("deferred", []),
                 ended=action.get("ended"),
+                run_id=run.run_id,
+                run_record=run.run_record(),
             )
         return RunResult(
             outcome=None,
@@ -547,7 +882,21 @@ class WorkflowRunner:
             action_records=action["action_records"],
             trace=trace,
             deferred=action.get("deferred", []),
+            run_id=run.run_id,
+            reason=action.get("reason"),
+            checkpoint_id=action.get("checkpoint_id"),
+            run_record=run.run_record(),
         )
+
+
+def _cannot_serve(e: HostCannotServe) -> Response:
+    """The ``Error`` that says why a host cannot serve a step (§5.19.7)."""
+    return {
+        "kind": "Error",
+        "code": "R402",
+        "reason": e.reason,
+        "message": e.message or f"the host cannot serve the step ({e.reason})",
+    }
 
 
 def _start_error(e: TypeError | ValueError) -> RunStartError:

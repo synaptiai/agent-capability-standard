@@ -870,6 +870,22 @@ pub(crate) const FEATURES: &[Feature] = &[
         name: "approver 'accept_trust_classes'",
         first_use: |wf| first_approver_field(wf, "accept_trust_classes"),
     },
+    // S2b (§6.4): an `audit` step's `require_record`, which the executor
+    // itself reads (an earlier consumer would let the step complete).
+    Feature {
+        since: (1, 2),
+        name: "the audit input 'require_record'",
+        first_use: |wf| {
+            objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
+                (step.get("capability").and_then(Value::as_str) == Some("audit")
+                    && step
+                        .get("input_bindings")
+                        .and_then(|b| b.get("require_record"))
+                        .is_some())
+                .then(|| format!("steps[{i}].input_bindings.require_record"))
+            })
+        },
+    },
 ];
 
 /// The field `steps[i].approval.approver.<key>` of the first step whose

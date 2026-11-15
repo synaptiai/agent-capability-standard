@@ -23,8 +23,10 @@ use program::Program;
 
 /// Nested `invoke` runs, the root included.
 pub const MAX_FRAMES: usize = 4;
-/// The snapshot format this executor writes and reads.
-pub const SNAPSHOT_VERSION: u32 = 1;
+/// The snapshot format this executor writes. It also reads version 1, the
+/// format before Standard 1.2, whose terminal action held copies of the
+/// records, outputs and deferrals (§5.19.4).
+pub const SNAPSHOT_VERSION: u32 = 2;
 /// Times (ms since the epoch) are capped at 9999-12-31T23:59:59.999Z: every
 /// time stays an exact JSON number (I-JSON, RFC 7493, below 2^53) and an
 /// RFC 3339 timestamp (a four-digit year).
@@ -220,8 +222,7 @@ pub struct StartOptions {
     /// catalog from a file passes the version its header declares. The run
     /// validates the catalog with it, as a validator reading the file would.
     pub header: Option<String>,
-    /// Which action records the run writes (§6.4). Workstream S2b implements
-    /// `Actions`; until then it is refused.
+    /// Which action records the run writes (§6.4).
     pub records: RecordMode,
     /// Domain profiles to apply (§5.21). Workstream S6 applies them; until
     /// then a non-empty list is refused.
@@ -240,9 +241,6 @@ impl StartOptions {
     /// policy it was given were absent. Each workstream removes its line
     /// when it implements the member.
     fn unimplemented(&self) -> Option<&'static str> {
-        if self.records != RecordMode::Approvals {
-            return Some("records: actions (§6.4)");
-        }
         if !self.profiles.is_empty() {
             return Some("profiles (§5.21)");
         }
@@ -265,9 +263,13 @@ pub enum Outcome {
     ReplanRequired,
 }
 
-/// What the host should do next.
+/// What the host should do next (§5.19.1).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Action {
+    /// The run's identifier (§5.19.2): with `id`, the action's delivery key
+    /// (§5.19.4).
+    #[serde(default)]
+    pub run_id: String,
     pub id: u64,
     /// The workflows of the nested runs, root first.
     pub frame: Vec<String>,
@@ -358,6 +360,10 @@ pub enum Body {
         /// The reason the failure came with (§5.19.7), if any.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        /// A cancelled run (R408, §5.19.5): the latest checkpoint the run
+        /// knows of, which the host may restore itself.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checkpoint_id: Option<String>,
         action_records: Vec<Value>,
         /// As for `Completed`: deferrals made before the run failed.
         deferred: Vec<Value>,
@@ -513,6 +519,24 @@ impl fmt::Display for SubmitError {
     }
 }
 
+/// A run that cannot be cancelled (§5.19.5).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CancelError {
+    /// The run ended, and not `deferred`: how it ended.
+    Ended(String),
+}
+
+impl fmt::Display for CancelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CancelError::Ended(how) => write!(
+                f,
+                "the run has ended ({how}); only a run that has not ended, or one that ended deferred, can be cancelled (§5.19.5)"
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RestoreError {
     Malformed(String),
@@ -639,6 +663,16 @@ pub(crate) struct StepState {
     /// run ends once the step's failure modes are checked, unless one fires.
     #[serde(default)]
     pub ending: Option<Value>,
+    /// The checkpoint the step used or, for a `checkpoint` step, took: its
+    /// action records name it (§6.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_id: Option<String>,
+    /// The step has started its pass (§5.19.5): the executor issued a
+    /// `CreateCheckpoint`, `InvokeCapability` or `AwaitEvent` for it, started
+    /// its nested run, or evaluated its quorum. A cancelled run records such
+    /// a step in record mode `actions`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub started: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -789,7 +823,9 @@ pub(crate) struct State {
     pub next_id: u64,
     pub frames: Vec<Frame>,
     pub pending: Option<Pending>,
-    pub finished: Option<Action>,
+    /// How the run ended: the head of its terminal action, whose records,
+    /// outputs and deferrals `next()` derives from the state (§5.19.1).
+    pub finished: Option<Terminal>,
     pub checkpoints: Vec<Checkpoint>,
     pub used_decisions: BTreeSet<String>,
     pub records: Vec<Value>,
@@ -822,6 +858,178 @@ pub(crate) struct State {
     /// superseding it included, takes the time and actor of then.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub resumed: bool,
+    /// Trace events the host took (`take_trace`, §5.19.4): `seq` goes on
+    /// from here.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub trace_base: u64,
+    /// Action records the host took (`take_records`): record indices, and
+    /// the `<n>` of `action_id`, count them.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub records_base: usize,
+    /// The chain heads over what the host took, in order (§5.19.4): each
+    /// item taken replaces `h` by `sha256_hex(h ‖ canonical_json(item))`,
+    /// from the empty string. A state that verifies so vouches for them.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub records_taken_sha256: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub trace_taken_sha256: String,
+}
+
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
+}
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
+}
+
+/// How a run ended: what its terminal action holds besides the records,
+/// outputs and deferrals, which the state already holds (§5.19.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Terminal {
+    pub id: u64,
+    pub frame: Vec<String>,
+    #[serde(flatten)]
+    pub end: End,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub(crate) enum End {
+    Completed {
+        outcome: Outcome,
+        cause: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ended: Option<Value>,
+    },
+    Failed {
+        code: String,
+        step: Option<usize>,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checkpoint_id: Option<String>,
+    },
+}
+
+impl End {
+    /// How the run ended, in words: its outcome, or its code.
+    pub(crate) fn describe(&self) -> String {
+        match self {
+            End::Completed { outcome, .. } => serde_json::to_value(outcome)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default(),
+            End::Failed { code, .. } => format!("failed with {code}"),
+        }
+    }
+
+    /// The end of the terminal action `body`, if it is one.
+    fn of(body: &Body) -> Option<End> {
+        match body {
+            Body::Completed {
+                outcome,
+                cause,
+                ended,
+                ..
+            } => Some(End::Completed {
+                outcome: *outcome,
+                cause: cause.clone(),
+                ended: ended.clone(),
+            }),
+            Body::Failed {
+                code,
+                step,
+                message,
+                reason,
+                checkpoint_id,
+                ..
+            } => Some(End::Failed {
+                code: code.clone(),
+                step: *step,
+                message: message.clone(),
+                reason: reason.clone(),
+                checkpoint_id: checkpoint_id.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+impl State {
+    /// Action record `r`, by its index among every record the run wrote.
+    pub(crate) fn rec(&self, r: usize) -> &Value {
+        &self.records[r - self.records_base]
+    }
+
+    pub(crate) fn rec_mut(&mut self, r: usize) -> &mut Value {
+        &mut self.records[r - self.records_base]
+    }
+
+    /// How many action records the run wrote, taken ones included: the
+    /// index of the next.
+    pub(crate) fn records_written(&self) -> usize {
+        self.records_base + self.records.len()
+    }
+
+    /// The run's deferrals, as the terminal action reports them.
+    pub(crate) fn deferred_report(&self) -> Vec<Value> {
+        self.deferrals
+            .iter()
+            .map(|d| {
+                json!({
+                    "frame": d.frame,
+                    "step": d.path.last(),
+                    "store_as": d.store_as,
+                    "reason": d.reason,
+                    "action_id": d.record.map(|r| self.rec(r)["action_id"].clone()),
+                })
+            })
+            .collect()
+    }
+
+    /// The terminal action, once the run has ended: its head as stored,
+    /// with the root workflow's stores, the records not taken and the
+    /// deferrals of the state (§5.19.1).
+    pub(crate) fn terminal_action(&self) -> Option<Action> {
+        let t = self.finished.as_ref()?;
+        let body = match &t.end {
+            End::Completed {
+                outcome,
+                cause,
+                ended,
+            } => Body::Completed {
+                outcome: *outcome,
+                cause: cause.clone(),
+                ended: ended.clone(),
+                outputs: Value::Object(self.frames[0].stores.clone()),
+                action_records: self.records.clone(),
+                deferred: self.deferred_report(),
+            },
+            End::Failed {
+                code,
+                step,
+                message,
+                reason,
+                checkpoint_id,
+            } => Body::Failed {
+                code: code.clone(),
+                step: *step,
+                message: message.clone(),
+                reason: reason.clone(),
+                checkpoint_id: checkpoint_id.clone(),
+                action_records: self.records.clone(),
+                deferred: self.deferred_report(),
+            },
+        };
+        Some(Action {
+            run_id: self.run_id.clone(),
+            id: t.id,
+            frame: t.frame.clone(),
+            body,
+        })
+    }
 }
 
 /// One deferred step (§5.14).
@@ -936,6 +1144,10 @@ impl Run {
             grounding: options.grounding,
             destinations: options.destinations,
             resumed: false,
+            trace_base: 0,
+            records_base: 0,
+            records_taken_sha256: String::new(),
+            trace_taken_sha256: String::new(),
         };
         let mut run = Run { program, state };
         run.machine()
@@ -978,13 +1190,18 @@ impl Run {
         }
     }
 
-    /// The pending action, or the terminal one once the run has finished.
-    pub fn next(&self) -> &Action {
+    /// The pending action, or the terminal one once the run has finished
+    /// (§5.19.2 **next**). It changes nothing.
+    pub fn next(&self) -> Action {
         self.state
-            .finished
-            .as_ref()
-            .or(self.state.pending.as_ref().map(|p| &p.action))
+            .terminal_action()
+            .or_else(|| self.state.pending.as_ref().map(|p| p.action.clone()))
             .expect("a run always has a pending or a terminal action")
+    }
+
+    /// The run's identifier (§5.19.2).
+    pub fn run_id(&self) -> &str {
+        &self.state.run_id
     }
 
     pub fn is_finished(&self) -> bool {
@@ -997,18 +1214,179 @@ impl Run {
         self.machine().submit(id, response, now_ms)
     }
 
-    /// Tell the run the time: ends a `Sleep` that is due, and times out a
-    /// pending action whose deadline has passed.
-    pub fn tick(&mut self, now_ms: u64) {
-        self.machine().tick(now_ms);
+    /// Tell the run the time (§5.19.3): ends a `Sleep` that is due, and
+    /// times out a pending action whose deadline has passed. True when it
+    /// changed the run: a new action is pending, or the run ended.
+    pub fn tick(&mut self, now_ms: u64) -> bool {
+        self.machine().tick(now_ms)
     }
 
+    /// The earliest time at which a tick changes the run, or none
+    /// (§5.19.3): `until` for a pending `Sleep`, one millisecond after the
+    /// deadline (or `expires_at`) of an action that has one, and none for
+    /// any other action, for an ended run, or when that time would be after
+    /// the maximum time. Liveness is the host's to watch: it is never a
+    /// wake-up time.
+    pub fn wake_at(&self) -> Option<u64> {
+        if self.state.finished.is_some() {
+            return None;
+        }
+        let pending = self.state.pending.as_ref()?;
+        match &pending.action.body {
+            Body::Sleep { until } => Some(*until),
+            _ => pending
+                .deadline
+                .and_then(|d| d.checked_add(1))
+                .filter(|t| *t <= MAX_TIME),
+        }
+    }
+
+    /// Cancel the run (§5.19.5): it ends at once with a `Failed` action of
+    /// code R408 whose message is `reason`, and no retry, failure mode,
+    /// recovery loop, handler or rollback runs. A run that ended
+    /// `deferred` can be cancelled; one that ended otherwise cannot.
+    pub fn cancel(&mut self, reason: &str, now_ms: u64) -> Result<(), CancelError> {
+        self.machine().cancel(reason, now_ms)
+    }
+
+    /// The trace not taken yet (informative; §6.4: not an audit record).
     pub fn trace(&self) -> &[Value] {
         &self.state.trace
     }
 
+    /// The run's action records not taken yet (§5.19.4).
     pub fn action_records(&self) -> &[Value] {
         &self.state.records
+    }
+
+    /// Take the trace out of the run's state (§5.19.4): it is returned and
+    /// removed, `seq` goes on where it left off, and the state's chain head
+    /// over taken trace events covers it.
+    pub fn take_trace(&mut self) -> Vec<Value> {
+        let taken = std::mem::take(&mut self.state.trace);
+        for event in &taken {
+            self.state.trace_taken_sha256 = canonical::chain(&self.state.trace_taken_sha256, event);
+        }
+        self.state.trace_base += taken.len() as u64;
+        taken
+    }
+
+    /// Take the settled action records out of the run's state (§5.19.4):
+    /// the longest prefix of records that are neither `planned` nor
+    /// `approved` and that no step, deferral or queued action refers to.
+    /// Record indices and `action_id`s stay as they were, and the state's
+    /// chain head over taken records covers them.
+    pub fn take_records(&mut self) -> Vec<Value> {
+        // Once the run has ended, no step is in progress: the record of the
+        // step it ended at is settled like any other.
+        let finished = self.state.finished.is_some();
+        let referenced = referenced_records(&self.state, !finished);
+        let base = self.state.records_base;
+        let k = self
+            .state
+            .records
+            .iter()
+            .enumerate()
+            .take_while(|(i, r)| {
+                !matches!(r["status"].as_str(), Some("planned" | "approved"))
+                    && !referenced.contains(&(base + i))
+            })
+            .count();
+        let taken: Vec<Value> = self.state.records.drain(..k).collect();
+        for record in &taken {
+            self.state.records_taken_sha256 =
+                canonical::chain(&self.state.records_taken_sha256, record);
+        }
+        self.state.records_base += k;
+        if finished {
+            let base = self.state.records_base;
+            for f in &mut self.state.frames {
+                if f.cur.record.is_some_and(|r| r < base) {
+                    f.cur.record = None;
+                }
+            }
+        }
+        taken
+    }
+
+    /// The chain heads over the records and the trace events taken so far
+    /// (records, trace): empty while nothing was taken (§5.19.4).
+    pub fn taken_heads(&self) -> (&str, &str) {
+        (
+            &self.state.records_taken_sha256,
+            &self.state.trace_taken_sha256,
+        )
+    }
+
+    /// The run's record (§5.19.8), once the run has ended: an action record
+    /// derived from its terminal action, so that every run, failed and
+    /// cancelled ones included, leaves one. None while the run goes on.
+    pub fn run_record(&self) -> Option<Value> {
+        let st = &self.state;
+        let action = st.terminal_action()?;
+        let mut record = json!({
+            "action_id": st.run_id,
+            "run_id": st.run_id,
+            "frame": action.frame,
+        });
+        let mut details = json!({"kind": action.body.kind()});
+        let status = match &action.body {
+            Body::Completed {
+                outcome,
+                cause,
+                ended,
+                ..
+            } => {
+                details["outcome"] = json!(outcome);
+                details["cause"] = json!(cause);
+                if let Some(e) = ended {
+                    details["ended"] = e.clone();
+                }
+                if *outcome == Outcome::Deferred {
+                    "planned"
+                } else {
+                    "executed"
+                }
+            }
+            Body::Failed {
+                code,
+                step,
+                message,
+                reason,
+                checkpoint_id,
+                ..
+            } => {
+                if let Some(s) = step {
+                    record["step"] = json!(s);
+                }
+                record["code"] = json!(code);
+                if let Some(r) = reason {
+                    record["reason_code"] = json!(r);
+                }
+                if let Some(c) = checkpoint_id {
+                    record["checkpoint_id"] = json!(c);
+                }
+                details["message"] = json!(message);
+                if code == "R408" {
+                    "cancelled"
+                } else {
+                    "failed"
+                }
+            }
+            _ => unreachable!("a terminal action is Completed or Failed"),
+        };
+        record["timestamp"] = json!(machine::iso(st.now));
+        record["actor"] = json!("agent");
+        if let Some(identity) = &st.actor_identity {
+            record["actor"] = identity["kind"].clone();
+            record["actor_identity"] = identity.clone();
+        }
+        record["intent"] = json!(format!("run {}", st.root));
+        record["status"] = json!(status);
+        details["deferred"] = json!(st.deferred_report());
+        details["records"] = json!(st.records_written());
+        record["details"] = details;
+        Some(record)
     }
 
     /// The run's state as canonical JSON with its SHA-256, and an
@@ -1023,8 +1401,11 @@ impl Run {
         }
     }
 
-    /// Continue from a snapshot taken against `catalog`. The digest (and the
-    /// HMAC, when a key is given) must match, and so must the catalog.
+    /// Continue from a snapshot taken against `catalog` (§5.19.4). What each
+    /// check proves: the digest, that the state was not corrupted; the HMAC,
+    /// when a key is given, who wrote it (a digest anyone who can change the
+    /// state can recompute); `check_state`, that this executor could have
+    /// produced it. The catalog must be the one the run started with.
     pub fn restore(
         ctx: &Context,
         catalog: &Value,
@@ -1068,19 +1449,44 @@ impl Run {
             None if snapshot.hmac.is_some() => return Err(RestoreError::Hmac),
             None => {}
         }
-        let value: Value = serde_json::from_str(&snapshot.state)
+        let mut value: Value = serde_json::from_str(&snapshot.state)
             .map_err(|e| RestoreError::Malformed(e.to_string()))?;
-        if let Some(v) = value.get("version").and_then(Value::as_u64)
-            && v != u64::from(SNAPSHOT_VERSION)
-        {
-            return Err(RestoreError::Version(v));
+        // Version 1 (before Standard 1.2) stored the whole terminal action;
+        // it must equal the one derived from the state, checked below.
+        let mut stored_terminal: Option<Action> = None;
+        let v1 = value.get("version").and_then(Value::as_u64) == Some(1);
+        match value.get("version").and_then(Value::as_u64) {
+            Some(1) => {
+                if let Some(finished) = value.get_mut("finished").filter(|f| !f.is_null()) {
+                    let action: Action = serde_json::from_value(finished.clone())
+                        .map_err(|e| RestoreError::Malformed(e.to_string()))?;
+                    let Some(end) = End::of(&action.body) else {
+                        return Err(RestoreError::Malformed(
+                            "the terminal action is not terminal".into(),
+                        ));
+                    };
+                    *finished = serde_json::to_value(Terminal {
+                        id: action.id,
+                        frame: action.frame.clone(),
+                        end,
+                    })
+                    .expect("a terminal head serializes");
+                    stored_terminal = Some(action);
+                }
+                value["version"] = json!(SNAPSHOT_VERSION);
+            }
+            Some(v) if v != u64::from(SNAPSHOT_VERSION) => return Err(RestoreError::Version(v)),
+            _ => {}
         }
-        let state: State =
+        let mut state: State =
             serde_json::from_value(value).map_err(|e| RestoreError::Malformed(e.to_string()))?;
+        if let Some(p) = state.pending.as_mut().filter(|_| v1) {
+            // A version-1 pending action carried no run_id.
+            p.action.run_id = state.run_id.clone();
+        }
         // Members this executor does not implement yet: it could not have
         // written a state that holds them.
-        if state.records_mode != RecordMode::Approvals
-            || !state.profiles.is_empty()
+        if !state.profiles.is_empty()
             || !state.grounding.is_empty()
             || !state.destinations.is_empty()
         {
@@ -1100,6 +1506,14 @@ impl Run {
             return Err(RestoreError::Catalog);
         }
         check_state(&program, &state).map_err(RestoreError::Malformed)?;
+        if let Some(mut stored) = stored_terminal {
+            stored.run_id = state.run_id.clone();
+            if state.terminal_action().as_ref() != Some(&stored) {
+                return Err(RestoreError::Malformed(
+                    "the stored terminal action differs from the run's state".into(),
+                ));
+            }
+        }
         if let Some(actor) = &options.actor_identity {
             let principal = |v: &Value| {
                 v.get("principal")
@@ -1128,24 +1542,24 @@ impl Run {
     /// same run, with the steps it deferred. A host resumes one saved state
     /// once.
     pub fn resume(&mut self, options: ResumeOptions) -> Result<(), ResumeError> {
-        match self.state.finished.as_ref().map(|a| &a.body) {
-            Some(Body::Completed {
+        match self.state.finished.as_ref().map(|t| &t.end) {
+            Some(End::Completed {
                 outcome: Outcome::Deferred,
                 ..
             }) => {}
-            Some(Body::Completed { outcome, .. }) => {
+            Some(End::Completed { outcome, .. }) => {
                 let outcome = serde_json::to_value(outcome).unwrap_or(Value::Null);
                 return Err(ResumeError::NotDeferred(format!(
                     "this run ended {}",
                     outcome.as_str().unwrap_or("otherwise")
                 )));
             }
-            Some(Body::Failed { code, .. }) => {
+            Some(End::Failed { code, .. }) => {
                 return Err(ResumeError::NotDeferred(format!(
                     "this run failed with {code}"
                 )));
             }
-            _ => {
+            None => {
                 return Err(ResumeError::NotDeferred("this run has not finished".into()));
             }
         }
@@ -1200,6 +1614,27 @@ fn not_kept(program: &Program, st: &State) -> Option<String> {
     walk(program, st, &st.frames[0], &mut Vec::new())
 }
 
+/// The indices of the records a deferral or a queued action refers to and,
+/// with `current`, the record of each frame's current step, in every frame,
+/// running or kept under a deferred `invoke` step: these stay in the state
+/// (`take_records`).
+fn referenced_records(st: &State, current: bool) -> BTreeSet<usize> {
+    fn walk(f: &Frame, current: bool, out: &mut BTreeSet<usize>) {
+        if current {
+            out.extend(f.cur.record);
+        }
+        out.extend(f.queued.map(|q| q.record));
+        for child in f.parked.values() {
+            walk(child, current, out);
+        }
+    }
+    let mut out: BTreeSet<usize> = st.deferrals.iter().filter_map(|d| d.record).collect();
+    for f in &st.frames {
+        walk(f, current, &mut out);
+    }
+    out
+}
+
 /// A restored state must be one this executor could have produced: the
 /// digest only proves the snapshot was not corrupted, not who made it.
 fn check_state(program: &Program, st: &State) -> Result<(), String> {
@@ -1215,8 +1650,31 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
     if st.frames[0].workflow != st.root {
         return Err("the first frame does not run the root workflow".into());
     }
-    if st.now > MAX_TIME || st.next_id > MAX_TIME {
+    if st.now > MAX_TIME || st.next_id > MAX_TIME || st.trace_base > MAX_TIME {
         return Err("a time or action id is out of range".into());
+    }
+    if st.records_base > MAX_TIME as usize {
+        return Err("the count of taken records is out of range".into());
+    }
+    // A chain head is empty exactly while nothing was taken (§5.19.4).
+    let head_ok = |h: &str, taken: bool| {
+        if taken {
+            h.len() == 64 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        } else {
+            h.is_empty()
+        }
+    };
+    if !head_ok(&st.records_taken_sha256, st.records_base > 0)
+        || !head_ok(&st.trace_taken_sha256, st.trace_base > 0)
+    {
+        return Err("a chain head over taken items is malformed".into());
+    }
+    if st
+        .pending
+        .as_ref()
+        .is_some_and(|p| p.action.run_id != st.run_id)
+    {
+        return Err("the pending action is for another run".into());
     }
     if let Some(e) = st.actor_identity.as_ref().and_then(identity_error) {
         return Err(format!("actor_identity: {e}"));
@@ -1236,10 +1694,13 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
         || st
             .finished
             .as_ref()
-            .is_some_and(|a| matches!(&a.body, Body::Failed { reason, .. } if bad_reason(reason)))
+            .is_some_and(|t| matches!(&t.end, End::Failed { reason, .. } if bad_reason(reason)))
     {
         return Err("a failure's reason is not a reason (§5.19.7)".into());
     }
+    // Every record a step, a deferral or a queued action refers to is one
+    // the state still holds: only settled, unreferenced ones are taken.
+    let kept = |r: usize| r >= st.records_base && r < st.records_written();
     for (i, f) in st.frames.iter().enumerate() {
         check_frame(program, st, f, i)?;
     }
@@ -1267,7 +1728,7 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
                     .get(w)
                     .is_some_and(|wf| i < wf.steps.len())
             })
-            && d.record.is_none_or(|r| r < st.records.len());
+            && d.record.is_none_or(kept);
         if !well_formed {
             return Err("a deferral refers to a missing workflow, step or record".into());
         }
@@ -1278,9 +1739,6 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
         .all(|r| r.get("status").is_some_and(Value::is_string))
     {
         return Err("an action record is not an object with a status".into());
-    }
-    if st.finished.as_ref().is_some_and(|a| !a.body.is_terminal()) {
-        return Err("the terminal action is not terminal".into());
     }
     if let Some(p) = &st.pending {
         if p.action.body.is_terminal() || p.action.id >= st.next_id {
@@ -1343,9 +1801,8 @@ fn check_frame(program: &Program, st: &State, f: &Frame, depth: usize) -> Result
             f.step, f.workflow
         ));
     }
-    if f.cur.record.is_some_and(|r| r >= st.records.len())
-        || f.queued.is_some_and(|q| q.record >= st.records.len())
-    {
+    let kept = |r: usize| r >= st.records_base && r < st.records_written();
+    if f.cur.record.is_some_and(|r| !kept(r)) || f.queued.is_some_and(|q| !kept(q.record)) {
         return Err("a step refers to a missing action record".into());
     }
     let waiting_delegate = |i: usize| {

@@ -1,0 +1,79 @@
+{
+  "description": "Record mode actions: a recovery loop that runs a step again starts a new pass, with a record of its own (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "failure_modes": [
+            {
+              "condition": "it fails",
+              "on_error": "R402",
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "r",
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            1
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "action_records": [
+      {
+        "status": "failed",
+        "code": "R402"
+      },
+      {
+        "status": "executed"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions"
+}

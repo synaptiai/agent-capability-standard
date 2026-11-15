@@ -1,0 +1,69 @@
+{
+  "description": "Response members the protocol does not define are ignored, as in 1.1 (\u00a75.19.1): neither response is refused.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "retry": {
+            "max": 1
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m",
+        "reason": "Retry Later",
+        "x_trace": "abc"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            1
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        },
+        "x_meta": {
+          "n": 1
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": []
+}

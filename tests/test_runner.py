@@ -50,6 +50,9 @@ def test_runtime_fixture(validator: _core.Validator, path: Path) -> None:
     run = play(start(validator, f), f, expect)
     end = run.next()
     assert matches(f["end"], end), end
+    assert end["run_id"] == "run-1"
+    if "run_record" in f:
+        assert matches(f["run_record"], run.run_record()), run.run_record()
     kinds = {t["kind"] for t in run.trace()}
     assert set(f["trace_kinds"]) <= kinds
 

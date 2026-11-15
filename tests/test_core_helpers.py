@@ -160,7 +160,6 @@ def test_start_validates_with_the_header(validator: _core.Validator) -> None:
 @pytest.mark.parametrize(
     "option",
     [
-        {"records": "actions"},
         {"profiles": [{"domain": "d"}]},
         {"grounding": [{"require": ["retrieve"]}]},
         {"destinations": [["ops"]]},
@@ -176,6 +175,16 @@ def test_start_refuses_options_not_implemented_yet(
         _core.Run.start(
             validator, CATALOG, "w", header=None, run_id="r", now_ms=0, **option
         )
+
+
+def test_record_mode_actions_is_implemented(validator: _core.Validator) -> None:
+    """Record mode ``actions`` (STANDARD v1.2 §6.4) starts, and its state
+    restores."""
+    run = _core.Run.start(
+        validator, CATALOG, "w", header=None, run_id="r", now_ms=0, records="actions"
+    )
+    restored = _core.Run.restore(validator, CATALOG, run.snapshot())
+    assert restored.next() == run.next()
 
 
 @pytest.mark.parametrize(

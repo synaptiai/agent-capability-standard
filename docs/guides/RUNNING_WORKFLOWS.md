@@ -307,11 +307,11 @@ Every trace event is an object with these six fields:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `seq` | integer | Position of the event in the trace, from 0 |
+| `seq` | integer | Position of the event in the trace, from 0; it goes on after the host takes the trace out of the run's state (`take_trace`) |
 | `at` | integer | The run's clock when the event was recorded: the latest time the host passed, in milliseconds since the epoch |
 | `kind` | string | One of the kinds below |
 | `frame` | array of strings | The workflows of the nested runs, root first, as on an action |
-| `step` | integer or null | Index of the step in its workflow, from 0; null on `run_started`, `run_resumed` and `run_finished`, and on `checkpoints_invalidated` when a resumption invalidates them |
+| `step` | integer or null | Index of the step in its workflow, from 0; null on `run_started`, `run_resumed` and `run_finished`, on `checkpoints_invalidated` when a resumption invalidates them, and on `run_cancelled` of a run that had ended (deferred) |
 | `detail` | object | Members that depend on the kind; an empty object for a kind that has none |
 
 ### Trace kinds
@@ -326,7 +326,7 @@ members of its `detail`.
 | `step_skipped` | The step does not run: its condition is false, a gate skipped it, or it needed approval and `when_unattended: skip` applied | `reason` |
 | `step_deferred` | The step is deferred (§5.14) | `reason` |
 | `step_completed` | The step has its output, before its after-gates are evaluated | none |
-| `step_failed` | The step fails with a code, after its retries and before its failure modes | `code`, `message` |
+| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the host's reason token (§5.19.7), `reason_ignored` a `reason` the host gave that is not one | `code`, `message`, `reason`, `reason_ignored` |
 | `expression_error` | A condition, a gate's `when` or a failure mode's `when` did not evaluate (R405) | `site`, `code`, `message` |
 | `gate_fired` | A gate fires, whatever its action | `gate`, `action`, `message` |
 | `run_ended` | A gate with `action: end` ends the run, or the nested run it fired in | `message` |
@@ -348,13 +348,14 @@ members of its `detail`.
 | `invoke_started` | An `invoke` step starts a nested run | `workflow` |
 | `invoke_returned` | The nested run is over; `result` is its outcome or its failure code | `workflow`, `result`, `ended` |
 | `quorum` | A `constrain` step with a `quorum` counted the verdicts | `tally` |
-| `retry` | An attempt failed and the step will be tried again; `attempt` is the attempt that failed, from 1 | `code`, `message`, `attempt`, `backoff_ms` |
+| `retry` | An attempt failed and the step will be tried again; `attempt` is the attempt that failed, from 1; `reason` and `reason_ignored` as for `step_failed` | `code`, `message`, `attempt`, `backoff_ms`, `reason`, `reason_ignored` |
 | `failure_mode_fired` | A failure mode applies | `failure_mode`, `action` |
 | `loop` | A failure mode loops back; `to` is the index of the step it goes to and `loop` the count for this failure mode, from 1 | `failure_mode`, `to`, `loop` |
 | `recovery_exhausted` | A failure mode has no loops left | `failure_mode`, `loops` |
 | `escalated` | The run goes to a handler step; `cause` is the code that led there | `handler`, `cause` |
 | `run_finished` | The run ends with an outcome; `cause` is the code that led to an escalation, null without one, and absent when the run ends `replan_required` | `outcome`, `cause` |
-| `run_failed` | The run ends with a failure code | `code`, `message` |
+| `run_failed` | The run ends with a failure code, and the reason it came with, if any | `code`, `message`, `reason` |
+| `run_cancelled` | The host cancels the run (§5.19.5); `reason` is the host's words | `reason` |
 | `run_resumed` | A host resumes a run that ended `deferred` (§5.14.1); `actor` and `previous_actor` are principals or null | `attendance`, `actor`, `previous_actor` |
 | `invoke_resumed` | A resumed run continues the nested run of a deferred `invoke` step | `workflow` |
 

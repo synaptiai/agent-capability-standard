@@ -81,6 +81,16 @@ adds its fixtures in its own `scripts/runtime_fixtures/<workstream>.py`
 `null`) and is checked against
 `tests/conformance/runtime/schema/fixture.schema.json`.
 
+### Regenerate the trigger vectors
+```bash
+python scripts/gen_trigger_vectors.py          # after editing the cases there
+python scripts/gen_trigger_vectors.py --check  # CI: fail on drift
+```
+The vectors of `tests/conformance/triggers/` (fire times, overlap, attendance,
+event acceptance; STANDARD v1.2 §5.10.2) are computed with Python's zoneinfo,
+independently of the core; `fire_times.json` names its tzdata release, and
+`--check` ignores a different release name when every value agrees.
+
 ### Regenerate the TypeScript package's ontology table and the approval digest vectors
 ```bash
 python scripts/gen_standard_agents_binding.py          # after changing the ontology

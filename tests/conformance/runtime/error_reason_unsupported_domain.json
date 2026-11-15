@@ -1,0 +1,51 @@
+{
+  "description": "A host that cannot serve the step's domain says so with reason unsupported_domain; the run's Failed action carries it (\u00a75.19.7).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "domain": "audio"
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "domain": "audio"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m",
+        "reason": "unsupported_domain"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "reason": "unsupported_domain"
+  },
+  "trace_kinds": [],
+  "run_record": {
+    "reason_code": "unsupported_domain",
+    "code": "R402"
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "description": "Record mode actions: a step whose checkpoint cannot be taken fails F501 after it started, with a failed record (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "a",
+          "input_bindings": {
+            "target": "t"
+          },
+          "requires_checkpoint": true
+        },
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "b",
+          "input_bindings": {
+            "target": "t"
+          },
+          "requires_checkpoint": true
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            1
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "F501",
+        "message": "m"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F501",
+    "action_records": [
+      {
+        "capability": "checkpoint",
+        "status": "executed",
+        "checkpoint_id": "cp1"
+      },
+      {
+        "capability": "retrieve",
+        "step": 1,
+        "status": "executed",
+        "checkpoint_id": "cp1"
+      },
+      {
+        "capability": "retrieve",
+        "step": 2,
+        "status": "failed",
+        "code": "F501"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions"
+}

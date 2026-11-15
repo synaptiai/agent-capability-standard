@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 # Default maximum events retained in memory
 DEFAULT_MAX_EVENTS = 10000
 
+# Who writes the action records this log exports (STANDARD v1.2 §6.4).
+RECORDED_BY = {"name": "grounded_agency.coordination"}
+
 
 @dataclass(frozen=True, slots=True)
 class CoordinationEvent:
@@ -66,6 +69,36 @@ class CoordinationEvent:
             "details": dict(self.details),
             "evidence_refs": list(self.evidence_refs),
         }
+
+    def to_action_record(
+        self,
+        recorded_by: dict[str, Any] | None = None,
+        intent: str | None = None,
+    ) -> dict[str, Any]:
+        """The event as an audit record (STANDARD v1.2 §6.4): an action
+        record of this log's own. The event's ``details`` stay under
+        ``details``, with the log's own members (``source_agent_id``,
+        ``target_agent_ids``, ``evidence_refs``) written last, so a detail
+        cannot replace them; nothing in ``details`` becomes a member of the
+        record. ``intent`` defaults to the event type; ``recorded_by`` to
+        this log."""
+        record: dict[str, Any] = {
+            "action_id": self.event_id,
+            "timestamp": self.timestamp,
+            "actor": "agent",
+            "intent": intent or self.event_type,
+            "status": "executed",
+        }
+        if self.capability_id:
+            record["capability"] = self.capability_id
+        record["details"] = {
+            **dict(self.details),
+            "source_agent_id": self.source_agent_id,
+            "target_agent_ids": list(self.target_agent_ids),
+            "evidence_refs": list(self.evidence_refs),
+        }
+        record["recorded_by"] = dict(recorded_by or RECORDED_BY)
+        return record
 
 
 class CoordinationAuditLog:
@@ -170,6 +203,13 @@ class CoordinationAuditLog:
         """Serialize all events to a list of dicts."""
         with self._lock:
             return [e.to_dict() for e in self._events]
+
+    def export_action_records(self) -> list[dict[str, Any]]:
+        """Every event as an audit record, an action record of this log's
+        own (STANDARD v1.2 §6.4): the log keeps its own form internally and
+        gives its records in the canonical shape."""
+        with self._lock:
+            return [e.to_action_record() for e in self._events]
 
     def __len__(self) -> int:
         with self._lock:

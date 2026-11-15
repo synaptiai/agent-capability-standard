@@ -10,6 +10,7 @@ mod bindings;
 mod delegation;
 mod exprs;
 mod extensions;
+mod groups;
 pub(crate) mod identity;
 mod invoke;
 mod quorum;
@@ -573,6 +574,7 @@ impl WorkflowCheck<'_> {
                 groups.entry(g).or_default().push(i);
             }
         }
+        groups::check(self.name, steps, &groups, &plan.handlers, self.report);
         let mut independence = quorum::Independence::new(steps);
         // Steps whose items may be from an always-ask trust class (§5.17).
         let always_ask: HashSet<&str> = steps

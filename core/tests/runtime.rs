@@ -105,10 +105,40 @@ fn fixture_options(name: &str, f: &Value, now: u64) -> StartOptions {
     }
 }
 
-/// Run one fixture; with `restore`, snapshot and restore before each step.
-/// Returns every action seen and the end, as canonical JSON (RFC 8785, so
-/// object key order does not matter but array order does), and the trace.
-fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Value, Vec<Value>) {
+/// How a fixture is replayed (§10.5): as scripted, with the run's state
+/// saved and restored before every entry, or with the trace and the settled
+/// records taken out of the state before every entry (§5.19.4).
+#[derive(Clone, Copy, PartialEq)]
+enum Replay {
+    Plain,
+    Restore,
+    Drain,
+}
+
+/// What a replay saw: every action and the end, as canonical JSON (RFC 8785,
+/// so object key order does not matter but array order does); the end; the
+/// trace and the records taken (a drain replay), with the trace left in the
+/// run; and the run record derived from the end.
+struct Played {
+    seen: Vec<String>,
+    end: Value,
+    trace: Vec<Value>,
+    taken_trace: Vec<Value>,
+    taken_records: Vec<Value>,
+    run_record: Option<Value>,
+}
+
+/// Fold items into a chain head from the empty string (§5.19.4).
+fn fold(items: &[Value]) -> String {
+    items.iter().fold(String::new(), |h, item| {
+        acs_core::exec::canonical::chain(&h, item)
+    })
+}
+
+/// Run one fixture in the given replay mode. At every `tick` entry the tick
+/// must change the run exactly when its time reaches the run's wake-up time
+/// (§5.19.3), and as the entry says when it gives `changed`.
+fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
     let catalog = &f["catalog"];
     let inputs: Map<String, Value> = f["inputs"].as_object().cloned().unwrap_or_default();
     let mut now = f["start"].as_u64().unwrap_or(0);
@@ -121,15 +151,61 @@ fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Va
     )
     .unwrap_or_else(|e| panic!("{name}: start: {e}"));
     let mut seen = Vec::new();
+    let mut taken_trace = Vec::new();
+    let mut taken_records = Vec::new();
     for (i, entry) in f["script"].as_array().unwrap().iter().enumerate() {
-        if restore {
-            let snap = run.snapshot(Some(b"key"));
-            run = Run::restore(ctx, catalog, &snap, Some(b"key"))
-                .unwrap_or_else(|e| panic!("{name}: restore before {i}: {e}"));
+        match mode {
+            Replay::Plain => {}
+            Replay::Restore => {
+                let snap = run.snapshot(Some(b"key"));
+                run = Run::restore(ctx, catalog, &snap, Some(b"key"))
+                    .unwrap_or_else(|e| panic!("{name}: restore before {i}: {e}"));
+            }
+            Replay::Drain => {
+                taken_trace.extend(run.take_trace());
+                taken_records.extend(run.take_records());
+                let (records, trace) = run.taken_heads();
+                assert_eq!(
+                    records,
+                    fold(&taken_records),
+                    "{name}: before {i}: the records' chain head"
+                );
+                assert_eq!(
+                    trace,
+                    fold(&taken_trace),
+                    "{name}: before {i}: the trace's chain head"
+                );
+            }
         }
         if let Some(t) = entry.get("tick").and_then(Value::as_u64) {
             now = t;
-            run.tick(t);
+            let wake = run.wake_at();
+            let changed = run.tick(t);
+            assert_eq!(
+                changed,
+                wake.is_some_and(|w| t >= w),
+                "{name}: script[{i}]: tick {t} with wake-up time {wake:?}"
+            );
+            if let Some(c) = entry.get("changed") {
+                assert_eq!(Some(changed), c.as_bool(), "{name}: script[{i}]: changed");
+            }
+            continue;
+        }
+        if let Some(w) = entry.get("wake_at") {
+            assert_eq!(
+                run.wake_at(),
+                w.as_u64(),
+                "{name}: script[{i}]: wake_at {w}"
+            );
+            continue;
+        }
+        if let Some(c) = entry.get("cancel") {
+            if let Some(at) = c.get("at").and_then(Value::as_u64) {
+                now = at;
+            }
+            let reason = c["reason"].as_str().unwrap_or_default();
+            run.cancel(reason, now)
+                .unwrap_or_else(|e| panic!("{name}: script[{i}]: cancel: {e}"));
             continue;
         }
         // A resume entry (§5.14.1): the host keeps the run's state while it
@@ -153,7 +229,11 @@ fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Va
             .unwrap_or_else(|e| panic!("{name}: resume at {i}: {e}"));
             continue;
         }
-        let action = serde_json::to_value(run.next()).unwrap();
+        let mut action = serde_json::to_value(run.next()).unwrap();
+        assert_eq!(action["run_id"], "run-1", "{name}: script[{i}]: run_id");
+        if mode == Replay::Drain {
+            restore_taken(&mut action, &taken_records);
+        }
         seen.push(canonical(&action));
         if let Some(expect) = entry.get("expect") {
             assert!(
@@ -172,16 +252,77 @@ fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Va
                 .unwrap_or_else(|e| panic!("{name}: script[{i}]: submit: {e}"));
         }
     }
-    let end = serde_json::to_value(run.next()).unwrap();
+    let mut end = serde_json::to_value(run.next()).unwrap();
+    assert_eq!(end["run_id"], "run-1", "{name}: the end's run_id");
+    if mode == Replay::Drain {
+        restore_taken(&mut end, &taken_records);
+    }
     seen.push(canonical(&end));
-    (seen, end, run.trace().to_vec())
+    if mode == Replay::Drain {
+        // The final state vouches for everything taken: its heads are the
+        // fold, and a keyed snapshot of it restores.
+        let snap = run.snapshot(Some(b"key"));
+        let restored = Run::restore(ctx, catalog, &snap, Some(b"key"))
+            .unwrap_or_else(|e| panic!("{name}: restore after draining: {e}"));
+        assert_eq!(restored.taken_heads().0, fold(&taken_records), "{name}");
+        assert_eq!(restored.taken_heads().1, fold(&taken_trace), "{name}");
+    }
+    Played {
+        seen,
+        end,
+        trace: run.trace().to_vec(),
+        taken_trace,
+        taken_records,
+        run_record: run.run_record(),
+    }
 }
 
-#[test]
-fn runtime_fixtures() {
-    let root = root();
-    let ctx = Context::load(&root.join("schemas/capability_ontology.yaml"), &root).unwrap();
-    let dir = root.join("tests/conformance/runtime");
+/// A terminal action of a run whose host took records holds the records not
+/// taken (§5.19.1): with the taken ones before them, it is the action of a
+/// run that took none.
+fn restore_taken(action: &mut Value, taken: &[Value]) {
+    if let Some(left) = action.get("action_records").and_then(Value::as_array) {
+        let mut all = taken.to_vec();
+        all.extend(left.iter().cloned());
+        action["action_records"] = Value::Array(all);
+    }
+}
+
+/// The matching of class EX (§10.5): as [`matches`], but text the executor
+/// composes is not compared: `message` (except `ended.message`), `reason`
+/// in an item of `action_records` or `deferred`, and `ignored`, `note` and
+/// `quorum` in an item of a `violations` list under `outputs`.
+fn ex_matches(expected: &Value, actual: &Value, path: &mut Vec<String>) -> bool {
+    let under = |path: &[String], list: &str| {
+        path.len() >= 2 && path[path.len() - 1] == "[]" && path[path.len() - 2] == list
+    };
+    match (expected, actual) {
+        (Value::Object(e), Value::Object(a)) => e.iter().all(|(k, v)| {
+            let prose = (k == "message" && path.last().is_none_or(|p| p != "ended"))
+                || (k == "reason" && (under(path, "action_records") || under(path, "deferred")))
+                || (matches!(k.as_str(), "ignored" | "note" | "quorum")
+                    && under(path, "violations")
+                    && path.iter().any(|p| p == "outputs"));
+            if prose {
+                return true;
+            }
+            path.push(k.clone());
+            let ok = a.get(k).is_some_and(|x| ex_matches(v, x, path));
+            path.pop();
+            ok
+        }),
+        (Value::Array(e), Value::Array(a)) => {
+            path.push("[]".into());
+            let ok = e.len() == a.len() && e.iter().zip(a).all(|(x, y)| ex_matches(x, y, path));
+            path.pop();
+            ok
+        }
+        _ => expected == actual,
+    }
+}
+
+fn fixtures() -> Vec<(String, Value)> {
+    let dir = root().join("tests/conformance/runtime");
     let mut names: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().path())
@@ -193,18 +334,42 @@ fn runtime_fixtures() {
         "runtime fixtures missing in {}",
         dir.display()
     );
-    for path in names {
-        let name = path.file_stem().unwrap().to_string_lossy().to_string();
-        // Read as a host's JSON is read: no integer beyond 2^53.
-        let f: Value = read_json(&std::fs::read_to_string(&path).unwrap())
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
-        let (seen, end, trace) = play(&ctx, &name, &f, false);
+    names
+        .into_iter()
+        .map(|path| {
+            let name = path.file_stem().unwrap().to_string_lossy().to_string();
+            // Read as a host's JSON is read: no integer beyond 2^53.
+            let f: Value = read_json(&std::fs::read_to_string(&path).unwrap())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            (name, f)
+        })
+        .collect()
+}
+
+#[test]
+fn runtime_fixtures() {
+    let root = root();
+    let ctx = Context::load(&root.join("schemas/capability_ontology.yaml"), &root).unwrap();
+    for (name, f) in fixtures() {
+        let plain = play(&ctx, &name, &f, Replay::Plain);
         assert!(
-            matches(&f["end"], &end),
-            "{name}: expected end {}\n  got {end}",
-            f["end"]
+            matches(&f["end"], &plain.end),
+            "{name}: expected end {}\n  got {}",
+            f["end"],
+            plain.end
         );
-        let kinds: Vec<&str> = trace.iter().filter_map(|t| t["kind"].as_str()).collect();
+        if let Some(expected) = f.get("run_record") {
+            let actual = plain.run_record.clone().unwrap_or(Value::Null);
+            assert!(
+                matches(expected, &actual),
+                "{name}: expected run_record {expected}\n  got {actual}"
+            );
+        }
+        let kinds: Vec<&str> = plain
+            .trace
+            .iter()
+            .filter_map(|t| t["kind"].as_str())
+            .collect();
         for k in f["trace_kinds"].as_array().unwrap() {
             assert!(
                 kinds.contains(&k.as_str().unwrap()),
@@ -213,12 +378,96 @@ fn runtime_fixtures() {
         }
         // Snapshots are complete: restoring before every step changes
         // nothing.
-        let (seen2, _, trace2) = play(&ctx, &name, &f, true);
-        assert_eq!(seen, seen2, "{name}: restore changed an action or the end");
+        let restored = play(&ctx, &name, &f, Replay::Restore);
+        assert_eq!(
+            plain.seen, restored.seen,
+            "{name}: restore changed an action or the end"
+        );
+        assert_eq!(
+            canonical(&Value::Array(plain.trace.clone())),
+            canonical(&Value::Array(restored.trace)),
+            "{name}: restore changed the trace"
+        );
+        assert_eq!(plain.run_record, restored.run_record, "{name}: run record");
+        // Taking the trace and the settled records out changes no action:
+        // the records taken, with those a terminal action holds, are the
+        // records of a run that took none.
+        let drained = play(&ctx, &name, &f, Replay::Drain);
+        assert_eq!(
+            plain.seen, drained.seen,
+            "{name}: taking records or the trace changed an action"
+        );
+        let mut trace = drained.taken_trace.clone();
+        trace.extend(drained.trace.iter().cloned());
         assert_eq!(
             canonical(&Value::Array(trace)),
-            canonical(&Value::Array(trace2)),
-            "{name}: restore changed the trace"
+            canonical(&Value::Array(plain.trace.clone())),
+            "{name}: the taken trace and the rest are not the run's trace"
+        );
+        let count = |r: &Option<Value>| r.as_ref().map(|r| r["details"]["records"].clone());
+        assert_eq!(
+            count(&drained.run_record),
+            count(&plain.run_record),
+            "{name}: the run record's count"
+        );
+        assert_eq!(
+            count(&plain.run_record),
+            Some(serde_json::json!(
+                plain.end["action_records"].as_array().unwrap().len()
+            )),
+            "{name}: the run record counts the run's records"
+        );
+        // Dropping or editing any one taken item breaks the fold.
+        for items in [&drained.taken_records, &drained.taken_trace] {
+            let head = fold(items);
+            for i in 0..items.len() {
+                let mut dropped = items.clone();
+                dropped.remove(i);
+                assert_ne!(fold(&dropped), head, "{name}: dropping item {i}");
+                let mut edited = items.clone();
+                edited[i]["edited"] = Value::Bool(true);
+                assert_ne!(fold(&edited), head, "{name}: editing item {i}");
+            }
+        }
+    }
+}
+
+#[test]
+fn runtime_fixtures_ex_matching() {
+    // Every fixture passes under the EX rule (§10.5), and the rule leaves
+    // out executor prose only.
+    let ctx = ctx();
+    for (name, f) in fixtures() {
+        let plain = play(&ctx, &name, &f, Replay::Plain);
+        assert!(
+            ex_matches(&f["end"], &plain.end, &mut Vec::new()),
+            "{name}: EX end"
+        );
+    }
+    let actual = serde_json::json!({
+        "kind": "Failed", "code": "R402", "message": "the executor's words", "reason": "not_recorded",
+        "action_records": [{"status": "rejected", "reason": "words"}],
+        "deferred": [{"step": 1, "reason": "words"}],
+        "ended": {"step": 0, "message": "the author's"},
+        "outputs": {"q": {"violations": [{"reviewer_id": "r", "note": "words"}, {"quorum": "words"}]}}
+    });
+    let prose = serde_json::json!({
+        "message": "other words",
+        "action_records": [{"status": "rejected", "reason": "other"}],
+        "deferred": [{"step": 1, "reason": "other"}],
+        "outputs": {"q": {"violations": [{"reviewer_id": "r", "note": "other"}, {"quorum": "other"}]}}
+    });
+    assert!(ex_matches(&prose, &actual, &mut Vec::new()));
+    assert!(!matches(&prose, &actual));
+    for compared in [
+        serde_json::json!({"reason": "unsupported_domain"}),
+        serde_json::json!({"ended": {"message": "another"}}),
+        serde_json::json!({"action_records": [{"status": "executed"}]}),
+        serde_json::json!({"outputs": {"q": {"violations": [{"reviewer_id": "s"}, {}]}}}),
+    ] {
+        assert!(
+            !ex_matches(&compared, &actual, &mut Vec::new()),
+            "{compared}"
         );
     }
 }
@@ -898,10 +1147,6 @@ fn start_refuses_options_not_implemented_yet() {
     let ctx = ctx();
     let cases = [
         StartOptions {
-            records: RecordMode::Actions,
-            ..opts()
-        },
-        StartOptions {
             profiles: vec![serde_json::json!({"domain": "d"})],
             ..opts()
         },
@@ -925,7 +1170,6 @@ fn start_refuses_options_not_implemented_yet() {
     // Nor does a restore accept a state that holds one.
     let run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
     for (key, value) in [
-        ("records_mode", serde_json::json!("actions")),
         ("profiles", serde_json::json!([{"domain": "d"}])),
         ("grounding", serde_json::json!([{"require": ["search"]}])),
         ("destinations", serde_json::json!([["ops"]])),

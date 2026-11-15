@@ -24,6 +24,7 @@ def create_evidence_collector(
     mapper: ToolCapabilityMapper | None = None,
     *,
     include_tool_input: bool = False,
+    required: bool = False,
 ) -> HookCallback:
     """
     Create a PostToolUse hook that collects evidence anchors.
@@ -44,6 +45,13 @@ def create_evidence_collector(
         mapper: Optional mapper to associate anchors with capabilities
         include_tool_input: Keep each call's input in its anchor's
             metadata, and a Bash command's text in its command anchor
+        required: The capture is required (STANDARD v1.2 §6.4): a call
+            whose evidence could not be recorded is reported to the model
+            in the hook's result (R402, reason ``not_recorded``), logged at
+            error level, and handed to the store's
+            ``record_capture_failure`` when it has one. By default the
+            capture is best-effort: a failure is logged as a warning, never
+            silently dropped.
 
     Returns:
         Async hook callback function
@@ -127,8 +135,28 @@ def create_evidence_collector(
                 store.add_anchor(cmd_anchor, capability_id=capability_id)
 
         except Exception as e:
-            # Fail silently - evidence collection is observational
-            logger.warning("Evidence collection failed: %s", e)
+            # A best-effort capture that fails is reported where the
+            # operator sees it; a required one also where the call's result
+            # goes (§6.4). The call itself has already run.
+            if not required:
+                logger.warning("Evidence collection failed: %s", e)
+                return {}
+            logger.error("Evidence collection failed (required): %s", e)
+            report = getattr(store, "record_capture_failure", None)
+            if callable(report):
+                try:
+                    report(tool_use_id, str(e))
+                except Exception as nested:
+                    logger.error("Could not report the capture failure: %s", nested)
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": (
+                        "R402 EXECUTION_FAILED: the call ran, but its evidence was "
+                        f"not recorded (not_recorded): {e}"
+                    ),
+                }
+            }
 
         # Return empty dict - we don't modify execution
         return {}

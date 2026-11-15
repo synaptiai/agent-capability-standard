@@ -118,13 +118,17 @@ impl Cron {
     }
 
     /// Whether the schedule fires at this local time. `dow` is 0 (Sunday)
-    /// to 6.
+    /// to 6. The fire times themselves are `trigger::next_fire` (§5.10.2).
     pub fn matches(&self, minute: u32, hour: u32, dom: u32, month: u32, dow: u32) -> bool {
-        let bit = |set: u64, v: u32| v < 64 && set & (1 << v) != 0;
-        if !bit(self.minutes, minute)
-            || !bit(self.hours.into(), hour)
-            || !bit(self.months.into(), month)
-        {
+        bit(self.minutes, minute)
+            && bit(self.hours.into(), hour)
+            && self.matches_day(dom, month, dow)
+    }
+
+    /// Whether the schedule fires on this local date (the day part of
+    /// [`Cron::matches`]). `dow` is 0 (Sunday) to 6.
+    pub(crate) fn matches_day(&self, dom: u32, month: u32, dow: u32) -> bool {
+        if !bit(self.months.into(), month) {
             return false;
         }
         let dom_ok = bit(self.days_of_month.into(), dom);
@@ -134,6 +138,20 @@ impl Cron {
             _ => dom_ok && dow_ok,
         }
     }
+
+    /// The hours the schedule fires in, ascending.
+    pub(crate) fn hours(&self) -> impl Iterator<Item = u32> + '_ {
+        (0..24).filter(|&h| bit(self.hours.into(), h))
+    }
+
+    /// The minutes the schedule fires at, ascending.
+    pub(crate) fn minutes(&self) -> impl Iterator<Item = u32> + '_ {
+        (0..60).filter(|&m| bit(self.minutes, m))
+    }
+}
+
+fn bit(set: u64, v: u32) -> bool {
+    v < 64 && set & (1 << v) != 0
 }
 
 fn parse_field(text: &str, field: &Field) -> Result<u64, String> {

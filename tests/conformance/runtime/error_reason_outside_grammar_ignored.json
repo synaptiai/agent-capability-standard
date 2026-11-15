@@ -1,0 +1,45 @@
+{
+  "description": "A reason outside \u00a75.19.7 is ignored, not refused: the step fails as if the Error carried none.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m",
+        "reason": "Unsupported Domain"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": []
+}

@@ -575,9 +575,11 @@ impl PyRun {
     }
 
     /// Pass the time: ends a due `Sleep`, times out a pending action.
-    fn tick(&mut self, py: Python<'_>, now_ms: u64) {
+    /// True when it changed the run (STANDARD v1.2 §5.19.2): a new action is
+    /// pending, or the run ended.
+    fn tick(&mut self, py: Python<'_>, now_ms: u64) -> bool {
         let run = &mut self.run;
-        py.detach(|| run.tick(now_ms));
+        py.detach(|| run.tick(now_ms))
     }
 
     #[getter]
@@ -600,6 +602,62 @@ impl PyRun {
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         to_py(py, &value)
     }
+
+    // ---- the host protocol's run operations (STANDARD v1.2 §5.19) ----
+
+    /// The run's identifier (§5.19.2).
+    #[getter]
+    fn run_id(&self) -> String {
+        self.run.run_id().to_string()
+    }
+
+    /// The earliest time at which a tick changes the run, or None (§5.19.3).
+    fn wake_at(&self) -> Option<u64> {
+        self.run.wake_at()
+    }
+
+    /// Cancel the run (§5.19.5): it ends with `Failed` R408, `reason` as
+    /// its message. ValueError when it ended otherwise than `deferred`.
+    fn cancel(&mut self, py: Python<'_>, reason: &str, now_ms: u64) -> PyResult<()> {
+        let run = &mut self.run;
+        py.detach(|| run.cancel(reason, now_ms))
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// Take the trace out of the run's state (§5.19.4); `seq` goes on.
+    fn take_trace(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        to_py(py, &Value::Array(self.run.take_trace()))
+    }
+
+    /// Take the settled action records out of the run's state (§5.19.4).
+    fn take_records(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        to_py(py, &Value::Array(self.run.take_records()))
+    }
+
+    /// The chain heads over what was taken (§5.19.4): `{"records": ...,
+    /// "trace": ...}`, each empty while nothing was taken.
+    #[getter]
+    fn taken_sha256(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let (records, trace) = self.run.taken_heads();
+        to_py(py, &serde_json::json!({"records": records, "trace": trace}))
+    }
+
+    /// The run's record (§5.19.8), or None while the run goes on.
+    fn run_record(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        match self.run.run_record() {
+            Some(r) => to_py(py, &r),
+            None => Ok(py.None()),
+        }
+    }
+}
+
+/// The first fire time of a validated schedule trigger (`{cron|every,
+/// timezone}`) strictly after `after_ms`, or None (STANDARD v1.2 §5.10.2).
+/// ValueError when the schedule cannot be read.
+#[pyfunction]
+fn next_fire(schedule: &Bound<'_, PyAny>, after_ms: u64) -> PyResult<Option<u64>> {
+    let schedule = from_py(schedule)?;
+    crate::trigger::next_fire(&schedule, after_ms).map_err(PyValueError::new_err)
 }
 
 /// A value as I-JSON (RFC 7493): plain Python data within ±2^53 and at most
@@ -687,6 +745,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(duration_ms, m)?)?;
     m.add_function(wrap_pyfunction!(check_destination_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(destination_allowed, m)?)?;
+    m.add_function(wrap_pyfunction!(next_fire, m)?)?;
     let spec_versions: Vec<String> = validate::semantics::SUPPORTED_VERSIONS
         .iter()
         .map(|(a, b)| format!("{a}.{b}"))

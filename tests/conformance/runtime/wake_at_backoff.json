@@ -1,0 +1,85 @@
+{
+  "description": "A retry's Sleep ends at a tick at its until, not before: the wake-up time is until (\u00a75.19.3), and linear backoff waits attempt x 1 s (\u00a75.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "retry": {
+            "max": 1,
+            "backoff": "linear"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    },
+    {
+      "expect": {
+        "kind": "Sleep",
+        "until": 1000
+      }
+    },
+    {
+      "wake_at": 1000
+    },
+    {
+      "tick": 999,
+      "changed": false
+    },
+    {
+      "tick": 1000,
+      "changed": true
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "attempt": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            1
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      },
+      "at": 1000
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "retry"
+  ]
+}

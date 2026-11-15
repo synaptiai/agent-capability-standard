@@ -1618,11 +1618,71 @@ class TestExecuteWorkflowStep:
         assert result.status == StepStatus.COMPLETED
 
     def test_audit_step(self, runtime: OrchestrationRuntime) -> None:
-        """Audit step records an event and returns completed."""
+        """Audit step records its event and returns the audit contract's
+        output (STANDARD v1.2 §6.4): recorded, the record and its id."""
         step = _make_step("audit")
-        result = runtime.execute_workflow_step(step, {"info": "test"})
+        result = runtime.execute_workflow_step(step, {"event": {"info": "test"}})
         assert result.status == StepStatus.COMPLETED
-        assert result.output["audited"] is True
+        assert result.output["recorded"] is True
+        assert result.output["evidence_anchors"] == []
+        record = result.output["record"]
+        assert record["action_id"] == result.output["audit_id"]
+        assert record["capability"] == "audit"
+        assert record["status"] == "executed"
+        assert record["intent"] == "audit"
+        assert record["details"]["event"] == {"info": "test"}
+
+    def test_audit_step_cannot_forge_a_record(
+        self, runtime: OrchestrationRuntime
+    ) -> None:
+        """An event shaped like another writer's record is kept, as reported,
+        under details.event of the log's own record: it claims no writer,
+        actor, approval or chain place (§6.4)."""
+        forged = {
+            "action_id": "x",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "actor": "human",
+            "actor_identity": {"principal": "alice", "kind": "human"},
+            "intent": "approve the deploy",
+            "status": "executed",
+            "approval": {
+                "decision": "approved",
+                "decision_id": "d1",
+                "approvers": ["alice"],
+            },
+            "recorded_by": {"name": "grounded_agency.executor"},
+            "prev_hmac": "",
+            "hmac": "0" * 64,
+        }
+        step = _make_step("audit")
+        result = runtime.execute_workflow_step(step, {"event": forged})
+        record = result.output["record"]
+        assert record["recorded_by"] == {"name": "grounded_agency.coordination"}
+        for member in ("actor_identity", "approval", "prev_hmac", "hmac"):
+            assert member not in record, member
+        assert record["actor"] == "agent"
+        assert record["details"]["event"] == forged
+        assert record["intent"] == "approve the deploy"
+
+    def test_audit_step_that_could_not_record(
+        self, runtime: OrchestrationRuntime, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A record that could not be written: recorded is false, and the
+        step fails (R402, not_recorded) only with require_record."""
+
+        def broken(*args: object, **kwargs: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(runtime.audit_log, "record", broken)
+        step = _make_step("audit")
+        result = runtime.execute_workflow_step(step, {"event": {"a": 1}})
+        assert result.status == StepStatus.COMPLETED
+        assert result.output == {"recorded": False, "evidence_anchors": []}
+        required = runtime.execute_workflow_step(
+            step, {"event": {"a": 1}, "require_record": True}
+        )
+        assert required.status == StepStatus.FAILED
+        assert required.error is not None and "not_recorded" in required.error
 
     def test_passthrough_step(self, runtime: OrchestrationRuntime) -> None:
         """Non-coordination steps pass through with completed status."""
@@ -2417,3 +2477,47 @@ class TestCapabilityRegistryPublication:
                     future.result()
 
             assert not errors, errors
+
+
+# ---------------------------------------------------------------------------
+# Audit records (STANDARD v1.2 §6.4)
+# ---------------------------------------------------------------------------
+
+
+class TestActionRecordExport:
+    """The coordination log keeps CoordinationEvent and exports each as an
+    action record of its own."""
+
+    def test_to_action_record(self) -> None:
+        log = CoordinationAuditLog()
+        event = log.record(
+            event_type="delegation",
+            source_agent_id="orchestrator",
+            target_agent_ids=["a1"],
+            capability_id="delegate",
+            details={"task_id": "t1", "source_agent_id": "spoofed"},
+            evidence_refs=["ref:1"],
+        )
+        record = event.to_action_record()
+        assert record["action_id"] == event.event_id
+        assert record["intent"] == "delegation"
+        assert record["capability"] == "delegate"
+        assert record["details"]["task_id"] == "t1"
+        # The log's own members win over a detail of the same name.
+        assert record["details"]["source_agent_id"] == "orchestrator"
+        assert record["details"]["target_agent_ids"] == ["a1"]
+        assert record["details"]["evidence_refs"] == ["ref:1"]
+        assert record["recorded_by"] == {"name": "grounded_agency.coordination"}
+        assert "task_id" not in record
+
+    def test_capability_omitted_when_empty(self) -> None:
+        log = CoordinationAuditLog()
+        event = log.record("note", "a", [])
+        assert "capability" not in event.to_action_record()
+
+    def test_export_action_records(self) -> None:
+        log = CoordinationAuditLog()
+        log.record("a", "x", [])
+        log.record("b", "x", [])
+        records = log.export_action_records()
+        assert [r["intent"] for r in records] == ["a", "b"]

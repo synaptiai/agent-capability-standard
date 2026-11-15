@@ -56,9 +56,9 @@
     },
     "head": {
       "type": "object",
-      "required": ["id", "frame", "kind"],
+      "required": ["run_id", "id", "frame", "kind"],
       "properties": {
-        "run_id": { "type": "string", "description": "Section 5.19.1: the run the action belongs to. Required once the reference executor emits it." },
+        "run_id": { "type": "string", "description": "Section 5.19.1: the run the action belongs to (section 5.19.2); with id, the action's delivery key (section 5.19.4)." },
         "id": { "type": "integer", "minimum": 1 },
         "frame": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "kind": { "type": "string" }

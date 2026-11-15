@@ -102,6 +102,13 @@ pub fn digest(value: &Value) -> String {
     sha256_hex(&canonical(value))
 }
 
+/// One link of a chain over taken items (§5.19.4): the lowercase hex
+/// SHA-256 of `head` followed by the canonical JSON of `item`. A chain
+/// starts from the empty string.
+pub fn chain(head: &str, item: &Value) -> String {
+    sha256_hex(&(head.to_owned() + &canonical(item)))
+}
+
 /// HMAC-SHA-256 of `text` under `key`, as lowercase hex.
 pub fn hmac_hex(key: &[u8], text: &str) -> String {
     // HMAC takes keys of any length.

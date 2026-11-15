@@ -89,6 +89,9 @@ jobs:
       - name: Check runtime fixtures are generated
         run: python scripts/gen_runtime_fixtures.py --check
 
+      - name: Check trigger vectors are generated
+        run: python scripts/gen_trigger_vectors.py --check
+
       - name: Check Standard Agents binding files are generated
         run: python scripts/gen_standard_agents_binding.py --check
 
@@ -178,7 +181,7 @@ jobs:
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
 
       - name: Ruff format check
-        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/runtime_fixtures/ scripts/gen_standard_agents_binding.py scripts/gen_capability_json_schemas.py
+        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/runtime_fixtures/ scripts/gen_trigger_vectors.py scripts/gen_standard_agents_binding.py scripts/gen_capability_json_schemas.py
 
       - name: Mypy type check
         run: mypy grounded_agency/

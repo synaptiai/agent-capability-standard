@@ -6660,6 +6660,172 @@ def check_format():
             raise ValueError(f"{name}: {where}: {errors[0].message}")
 
 
+# The members a fixture may pin (STANDARD v1.2 §10.5): those the Standard
+# defines, each with the section that defines it (S2b design 6.1a). Below the
+# members of OPEN, whose contents the Standard defines by reference (a
+# capability's output, a step's bindings, an event, ...), any member is
+# allowed. A fixture that pins a member outside this table is refused: the
+# table is edited deliberately, with the section that defines the member.
+ACTION = {"kind": "5.19.1", "run_id": "5.19.1", "id": "5.19.1", "frame": "5.19.1"}
+RECORD = {
+    "action_id": "5.19.1",
+    "run_id": "6.4",
+    "frame": "6.4",
+    "step": "6.4",
+    "capability": "6.4",
+    "tool": "5.18",
+    "call_id": "5.18",
+    "timestamp": "6.4",
+    "actor": "5.17",
+    "actor_identity": "5.17",
+    "intent": "6.4",
+    "status": "6.4",
+    "always_ask": "5.17",
+    "approval": "5.14",
+    "reason": "6.3",
+    "reason_code": "5.19.7",
+    "code": "6.4",
+    "checkpoint_id": "6.4",
+    "details": "6.4",
+    "recorded_by": "6.4",
+    "anchors": "6.5",
+}
+NORMATIVE_MEMBERS = {
+    "InvokeCapability": {
+        **ACTION,
+        "step": "5.19.1",
+        "capability": "5.19.1",
+        "store_as": "5.19.1",
+        "domain": "5.2",
+        "inputs": "5.19.1",
+        "deadline": "5.19.1",
+        "attempt": "5.2",
+        "replaces": "5.13",
+        "idempotency_key": "4.4.2",
+    },
+    "CreateCheckpoint": {**ACTION, "step": "5.19.1"},
+    "Rollback": {**ACTION, "step": "5.19.1", "checkpoint_id": "5.12"},
+    "RequestApproval": {
+        **ACTION,
+        "step": "5.19.1",
+        "approver": "5.14",
+        "mode": "5.14",
+        "shown": "5.14",
+        "digest": "5.14",
+        "expires_at": "5.19.1",
+        "queued_action_id": "5.14.1",
+    },
+    "RecheckSource": {**ACTION, "step": "5.19.1", "source": "5.19.1", "compare": "5.14"},
+    "AwaitEvent": {
+        **ACTION,
+        "step": "5.19.1",
+        "event_type": "5.13",
+        "source_kind": "5.13",
+        "correlate": "5.19.1",
+        "accept_from": "5.15",
+        "sender_check": "5.17",
+        "accept_trust_classes": "5.17",
+        "delegate_principal": "5.17",
+        "liveness": "5.13",
+        "deadline": "5.19.1",
+    },
+    "Sleep": {**ACTION, "until": "5.19.1"},
+    "Completed": {
+        **ACTION,
+        "outcome": "5.19.1",
+        "cause": "5.19.1",
+        "ended": "5.6",
+        "outputs": "5.19.1",
+        "action_records": "5.19.1",
+        "deferred": "5.14",
+    },
+    "Failed": {
+        **ACTION,
+        "code": "9",
+        "step": "5.19.1",
+        "message": "5.19.1",
+        "reason": "5.19.7",
+        "checkpoint_id": "5.19.5",
+        "action_records": "5.19.1",
+        "deferred": "5.14",
+    },
+    "ended": {"step": "5.6", "message": "5.6"},
+    "action_records[]": RECORD,
+    "run_record": RECORD,
+    "approval": {
+        "digest": "5.14",
+        "decision": "5.14",
+        "decision_id": "5.19.1",
+        "approvers": "5.14",
+        "approver_identities": "5.17",
+        "mode": "5.14",
+        "mandate_ref": "5.14",
+        "decided_at": "5.14",
+        "expires_at": "5.14",
+    },
+    "deferred[]": {
+        "frame": "5.14",
+        "step": "5.14",
+        "store_as": "5.14",
+        "reason": "5.14",
+        "action_id": "5.14",
+    },
+}
+OPEN = {
+    "outputs",
+    "inputs",
+    "shown",
+    "correlate",
+    "event",
+    "details",
+    "approver",
+    "liveness",
+    "actor_identity",
+    "approver_identities",
+}
+
+
+def pinned_problems(name, value, table):
+    """The members `value` pins that `table` (a NORMATIVE_MEMBERS entry)
+    does not list."""
+    problems = []
+    for key, sub in value.items():
+        if key not in NORMATIVE_MEMBERS[table]:
+            problems.append(f"{name}: {table}.{key} is not a member §10.5 lets a fixture pin")
+            continue
+        if key in OPEN:
+            continue
+        items = sub if isinstance(sub, list) else [sub]
+        nested = {
+            "action_records": "action_records[]",
+            "deferred": "deferred[]",
+            "approval": "approval",
+            "ended": "ended",
+        }.get(key)
+        for item in items:
+            if nested and isinstance(item, dict):
+                problems += pinned_problems(name, item, nested)
+    return problems
+
+
+def check_pinned():
+    """Every member a fixture pins in an `expect`, its `end` or its
+    `run_record` is one the Standard defines (NORMATIVE_MEMBERS)."""
+    problems = []
+    for name, f in fixtures.items():
+        pinned = [e["expect"] for e in f["script"] if "expect" in e] + [f["end"]]
+        for value in pinned:
+            kind = value.get("kind")
+            if kind not in NORMATIVE_MEMBERS:
+                problems.append(f"{name}: an action of kind {kind!r}")
+                continue
+            problems += pinned_problems(name, value, kind)
+        if "run_record" in f:
+            problems += pinned_problems(name, f["run_record"], "run_record")
+    if problems:
+        raise ValueError("\n".join(problems))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -6667,6 +6833,7 @@ def main(argv: list[str]) -> int:
     )
     check = parser.parse_args(argv).check
     check_format()
+    check_pinned()
     rendered = {
         f"{name}.json": json.dumps(f, indent=2) + "\n" for name, f in fixtures.items()
     }
