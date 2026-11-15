@@ -44,7 +44,10 @@ export default defineThreadEndpoint(async (req, state, _params, auth) => {
   const now = Date.now();
   let record: ApprovalRecord;
   try {
-    record = await decideApproval(state, caller, digest, decision, now, round);
+    // The caller is recorded as an approver identity (§5.17); the one who
+    // owns the thread is of trust class `owner`.
+    const owner = state.userId ? { ownerId: state.userId } : {};
+    record = await decideApproval(state, caller, digest, decision, now, round, owner);
   } catch (error) {
     if (!(error instanceof ApprovalError)) throw error;
     // The same decision sent again, as a client does when it did not get the

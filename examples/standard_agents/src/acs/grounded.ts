@@ -40,6 +40,7 @@ import {
   approvalState,
   consumeApproval,
   policyProblems,
+  principalOf,
   requestApproval,
   type ApprovalPolicy,
 } from './approval.js';
@@ -65,6 +66,7 @@ import {
   readCheckpoints,
   readExecuted,
   stepOf,
+  type AgentIdentity,
   type CheckpointRecord,
   type Diagnostic,
   type ApprovalRecord,
@@ -95,7 +97,10 @@ export interface GroundedCall {
   seq: number;
   /** The checkpoint this call used, when the capability requires one. */
   checkpoint_id?: string;
-  /** The approvers who approved this call, when the capability requires approval. */
+  /**
+   * The approvers who approved this call, as principals (`sa-user:<id>`),
+   * when the capability requires approval.
+   */
   approvers?: string[];
 }
 
@@ -350,10 +355,19 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // used up, so a call refused above leaves both as they were.
       let approvers: string[] | undefined;
       if (request) {
-        approvers = [...new Set(request.decisions.map((d) => d.approver))];
+        // The approvers as principals, with their identities when every
+        // decision recorded one (§5.17); one decision per approver, so
+        // identities never disagree for one principal.
+        approvers = [...new Set(request.decisions.map((d) => principalOf(d.approver)))];
+        const identities = new Map<string, AgentIdentity>();
+        for (const d of request.decisions) {
+          if (d.approver_identity) identities.set(d.approver_identity.principal, d.approver_identity);
+        }
+        const attested = request.decisions.every((d) => d.approver_identity !== undefined);
         used.approval = {
           digest: request.digest,
           approvers,
+          ...(attested ? { approver_identities: [...identities.values()] } : {}),
           decision_ids: request.decisions.map((d) => d.decision_id),
         };
         // A rejection recorded since the request was read stops the call;

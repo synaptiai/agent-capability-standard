@@ -649,10 +649,6 @@ pub(crate) fn parse_version(v: &str) -> Option<(u64, u64)> {
 /// else none. Rules this Standard applies only to workflows that target 1.2
 /// or later compare this with `(1, 2)`; a workflow that declares no version
 /// gets none of them.
-#[allow(
-    dead_code,
-    reason = "the 1.2 workstreams' target-dependent rules call it (FOUNDATION F1.2)"
-)]
 pub(crate) fn target(wf: &Map<String, Value>, header: Option<&str>) -> Option<(u64, u64)> {
     wf.get("spec_version")
         .and_then(Value::as_str)
@@ -863,7 +859,30 @@ pub(crate) const FEATURES: &[Feature] = &[
             })
         },
     },
+    // S2a (§5.14, §5.17): the approver's identity requirements.
+    Feature {
+        since: (1, 2),
+        name: "approver 'sender_check'",
+        first_use: |wf| first_approver_field(wf, "sender_check"),
+    },
+    Feature {
+        since: (1, 2),
+        name: "approver 'accept_trust_classes'",
+        first_use: |wf| first_approver_field(wf, "accept_trust_classes"),
+    },
 ];
+
+/// The field `steps[i].approval.approver.<key>` of the first step whose
+/// approval's approver names `key`.
+fn first_approver_field(wf: &Map<String, Value>, key: &str) -> Option<String> {
+    objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
+        step.get("approval")
+            .and_then(|a| a.get("approver"))
+            .and_then(Value::as_object)
+            .is_some_and(|ap| ap.contains_key(key))
+            .then(|| format!("steps[{i}].approval.approver.{key}"))
+    })
+}
 
 /// The mappings in a list, with their indices.
 fn objects(v: Option<&Value>) -> Vec<(usize, &Map<String, Value>)> {

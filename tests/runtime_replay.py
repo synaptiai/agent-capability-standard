@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -60,9 +61,12 @@ def matches(expected: Any, actual: Any) -> bool:
 
 
 def fill(response: Any, action: dict[str, Any]) -> Any:
-    """``response`` with ``"{{digest}}"`` replaced by the action's digest."""
+    """``response`` with ``"{{digest}}"`` replaced by the action's digest, and
+    ``"{{digest_upper}}"`` by it in uppercase."""
     if response == "{{digest}}":
         return action["digest"]
+    if response == "{{digest_upper}}":
+        return action["digest"].upper()
     if isinstance(response, dict):
         return {k: fill(v, action) for k, v in response.items()}
     if isinstance(response, list):
@@ -94,19 +98,50 @@ def start(
     )
 
 
+@cache
+def _validator() -> _core.Validator:
+    return _core.Validator(ONTOLOGY, ROOT)
+
+
+KEY = b"key"
+
+
+def resume(
+    run: _core.Run, fixture: dict[str, Any], entry: dict[str, Any], now: int
+) -> _core.Run:
+    """A ``resume`` entry (STANDARD v1.2 §5.14.1): the run's state is saved
+    and restored, as a host keeps it while the run waits, and resumed with
+    the entry's attendance (default attended), time and actor."""
+    saved = run.snapshot(KEY)
+    run = _core.Run.restore(_validator(), fixture["catalog"], saved, KEY)
+    options = entry["resume"]
+    run.resume(
+        attendance=options.get("attendance", "attended"),
+        now_ms=options.get("at", now),
+        actor_identity=options.get("actor_identity"),
+    )
+    return run
+
+
 def play(
     run: _core.Run,
     fixture: dict[str, Any],
     expect: Callable[[int, dict[str, Any], dict[str, Any]], None] | None = None,
 ) -> _core.Run:
     """Play the fixture's script on ``run``: each ``tick`` passes the time,
-    each other entry reads the pending action (``expect(i, expected,
-    action)`` checks it, when given) and submits the response, if any."""
+    each ``resume`` resumes the run (:func:`resume`; the run returned is
+    the resumed one), each other entry reads the pending action
+    (``expect(i, expected, action)`` checks it, when given) and submits the
+    response, if any."""
     now = fixture["start"]
     for i, entry in enumerate(fixture["script"]):
         if "tick" in entry:
             now = entry["tick"]
             run.tick(now)
+            continue
+        if "resume" in entry:
+            now = entry["resume"].get("at", now)
+            run = resume(run, fixture, entry, now)
             continue
         action = run.next()
         if expect is not None and "expect" in entry:

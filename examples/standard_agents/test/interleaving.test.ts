@@ -282,7 +282,7 @@ describe('a store that fails part-way', () => {
       action: 'write_config',
       status: 'failed',
       error: 'storage unavailable',
-      approval: { digest: d, approvers: ['alice'] },
+      approval: { digest: d, approvers: ['sa-user:alice'] },
       checkpoint_id: JSON.parse(cp.result ?? '{}').checkpoint_id,
     });
   });

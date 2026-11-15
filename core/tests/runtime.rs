@@ -5,7 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use acs_core::exec::canonical::canonical;
-use acs_core::exec::{Attendance, RecordMode, Response, Run, StartOptions, read_json};
+use acs_core::exec::{
+    Attendance, RecordMode, Response, ResumeOptions, Run, StartOptions, read_json,
+};
 use acs_core::validate::Context;
 use serde_json::{Map, Value};
 
@@ -27,10 +29,14 @@ fn matches(expected: &Value, actual: &Value) -> bool {
     }
 }
 
-/// Replace `"{{digest}}"` in a response with the pending action's digest.
+/// Replace `"{{digest}}"` in a response with the pending action's digest,
+/// and `"{{digest_upper}}"` with it in uppercase.
 fn fill(response: &Value, action: &Value) -> Value {
     match response {
         Value::String(s) if s == "{{digest}}" => action["digest"].clone(),
+        Value::String(s) if s == "{{digest_upper}}" => {
+            Value::String(action["digest"].as_str().unwrap_or_default().to_uppercase())
+        }
         Value::Object(m) => Value::Object(
             m.iter()
                 .map(|(k, v)| (k.clone(), fill(v, action)))
@@ -124,6 +130,27 @@ fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Va
         if let Some(t) = entry.get("tick").and_then(Value::as_u64) {
             now = t;
             run.tick(t);
+            continue;
+        }
+        // A resume entry (§5.14.1): the host keeps the run's state while it
+        // waits, restores it, and resumes it.
+        if let Some(resume) = entry.get("resume") {
+            if let Some(at) = resume.get("at").and_then(Value::as_u64) {
+                now = at;
+            }
+            let snap = run.snapshot(Some(b"key"));
+            run = Run::restore(ctx, catalog, &snap, Some(b"key"))
+                .unwrap_or_else(|e| panic!("{name}: restore at {i}: {e}"));
+            let attendance = match resume.get("attendance").and_then(Value::as_str) {
+                Some("unattended") => Attendance::Unattended,
+                _ => Attendance::Attended,
+            };
+            run.resume(ResumeOptions {
+                attendance,
+                now_ms: now,
+                actor_identity: resume.get("actor_identity").cloned(),
+            })
+            .unwrap_or_else(|e| panic!("{name}: resume at {i}: {e}"));
             continue;
         }
         let action = serde_json::to_value(run.next()).unwrap();
@@ -1051,4 +1078,398 @@ fn read_json_refuses_inexact_integers() {
     assert!(read_json("{").is_err());
     assert!(read_json(&format!("{}1{}", "[".repeat(110), "]".repeat(110))).is_err());
     assert!(read_json("\"unterminated").is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Resuming a deferred run (§5.14.1), the restore actor (§5.17) and approver
+// identities (§5.17)
+// ---------------------------------------------------------------------------
+
+fn fixture(name: &str) -> Value {
+    let path = root().join(format!("tests/conformance/runtime/{name}.json"));
+    read_json(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// Play a fixture's script up to its first `resume` entry (or to its end):
+/// the run as a host holds it then.
+fn played(ctx: &Context, name: &str) -> Run {
+    let f = fixture(name);
+    let inputs: Map<String, Value> = f["inputs"].as_object().cloned().unwrap_or_default();
+    let mut run = Run::start(
+        ctx,
+        &f["catalog"],
+        f["workflow"].as_str().unwrap(),
+        inputs,
+        fixture_options(name, &f, 0),
+    )
+    .unwrap();
+    for entry in f["script"].as_array().unwrap() {
+        if entry.get("resume").is_some() {
+            break;
+        }
+        if let Some(t) = entry.get("tick").and_then(Value::as_u64) {
+            run.tick(t);
+            continue;
+        }
+        let action = serde_json::to_value(run.next()).unwrap();
+        if let Some(respond) = entry.get("respond") {
+            let response: Response = serde_json::from_value(fill(respond, &action)).unwrap();
+            run.submit(action["id"].as_u64().unwrap(), response, 0)
+                .unwrap();
+        }
+    }
+    run
+}
+
+fn resume_options() -> ResumeOptions {
+    ResumeOptions {
+        attendance: Attendance::Attended,
+        now_ms: 0,
+        actor_identity: None,
+    }
+}
+
+#[test]
+fn resume_needs_a_deferred_end() {
+    use acs_core::exec::ResumeError;
+    let ctx = ctx();
+    // A run still pending, one that completed, and one that failed after
+    // deferring (its planned record is abandoned, not resumable).
+    let mut pending = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
+    let mut completed = played(&ctx, "linear_bindings");
+    let mut failed = played(&ctx, "failure_after_deferral");
+    assert!(
+        failed
+            .action_records()
+            .iter()
+            .any(|r| r["status"] == "planned")
+    );
+    for (run, says) in [
+        (&mut pending, "has not finished"),
+        (&mut completed, "ended completed"),
+        (&mut failed, "failed with R402"),
+    ] {
+        let before = run.snapshot(None);
+        match run.resume(resume_options()) {
+            Err(ResumeError::NotDeferred(m)) => assert!(m.contains(says), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            run.snapshot(None),
+            before,
+            "a refused resume changes nothing"
+        );
+    }
+}
+
+#[test]
+fn resume_refuses_a_malformed_actor() {
+    use acs_core::exec::ResumeError;
+    let ctx = ctx();
+    let mut run = played(&ctx, "resume_deferred_attended");
+    let before = run.snapshot(None);
+    for bad in [
+        serde_json::json!({"kind": "agent"}),
+        serde_json::json!({"principal": "b", "kind": "robot"}),
+    ] {
+        let o = ResumeOptions {
+            actor_identity: Some(bad),
+            ..resume_options()
+        };
+        assert!(matches!(run.resume(o), Err(ResumeError::Identity(_))));
+    }
+    assert_eq!(run.snapshot(None), before);
+}
+
+/// The state of `run`'s snapshot without the members an executor before
+/// resumption did not keep (`remove`: member names), at any depth.
+fn without(run: &Run, remove: &[&str]) -> acs_core::exec::Snapshot {
+    fn strip(v: &mut Value, remove: &[&str]) {
+        match v {
+            Value::Object(m) => {
+                for k in remove {
+                    m.remove(*k);
+                }
+                m.values_mut().for_each(|x| strip(x, remove));
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| strip(x, remove)),
+            _ => {}
+        }
+    }
+    forged(&run.snapshot(None), |s| strip(s, remove))
+}
+
+#[test]
+fn resume_refuses_states_it_did_not_keep() {
+    use acs_core::exec::ResumeError;
+    let ctx = ctx();
+    let old = ["ahead", "parked", "resume", "pending_escalation", "queued"];
+    for (name, remove, says) in [
+        (
+            "deferral_continues",
+            &old[..],
+            "ran after its first deferral",
+        ),
+        (
+            "deferred_in_child",
+            &old[..],
+            "ran after its first deferral",
+        ),
+        (
+            "deferred_in_child",
+            &["parked"][..],
+            "the nested run of step 0",
+        ),
+    ] {
+        let f = fixture(name);
+        let run = played(&ctx, name);
+        let snap = without(&run, remove);
+        // A state saved before resumption existed restores and reports its
+        // end; it cannot be resumed (cancel it and start a new run).
+        let mut restored = Run::restore(&ctx, &f["catalog"], &snap, None)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(restored.next(), run.next());
+        match restored.resume(resume_options()) {
+            Err(ResumeError::NotKept(m)) => assert!(m.contains(says), "{name}: {m}"),
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn states_without_resumption_members_restore() {
+    // A state of a run that never deferred has none of the members
+    // resumption added: it is the state an earlier executor wrote, and it
+    // restores and runs to its end.
+    let ctx = ctx();
+    let run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
+    let snap = run.snapshot(None);
+    for member in [
+        "\"ahead\"",
+        "\"parked\"",
+        "\"resume\"",
+        "\"queued\"",
+        "\"pending_escalation\"",
+    ] {
+        assert!(!snap.state.contains(member), "{member}");
+    }
+    let mut restored = Run::restore(&ctx, &one_step(), &snap, None).unwrap();
+    let id = restored.next().id;
+    restored
+        .submit(
+            id,
+            Response::Output {
+                value: serde_json::json!({"data": 1, "evidence_anchors": [], "confidence": 1}),
+            },
+            1,
+        )
+        .unwrap();
+    assert!(restored.is_finished());
+    // A deferred end keeps which steps ran ahead.
+    let deferred = played(&ctx, "deferral_continues").snapshot(None);
+    assert!(deferred.state.contains("\"ahead\""));
+}
+
+#[test]
+fn resume_twice_is_two_runs() {
+    // Resuming two copies of one saved state gives two identical requests:
+    // each could carry out the same queued action, which is why a host
+    // resumes a saved state once (§5.14.1).
+    let ctx = ctx();
+    let f = fixture("resume_deferred_attended");
+    let snap = played(&ctx, "resume_deferred_attended").snapshot(Some(b"k"));
+    let resumed = || {
+        let mut run = Run::restore(&ctx, &f["catalog"], &snap, Some(b"k")).unwrap();
+        run.resume(resume_options()).unwrap();
+        serde_json::to_value(run.next()).unwrap()
+    };
+    let (a, b) = (resumed(), resumed());
+    assert_eq!(a, b);
+    assert_eq!(a["kind"], "RequestApproval");
+    assert_eq!(a["queued_action_id"], "run-1/w/3/0");
+}
+
+#[test]
+fn restore_checks_the_actor() {
+    use acs_core::exec::{RestoreError, RestoreOptions};
+    let ctx = ctx();
+    let a = serde_json::json!({"principal": "agent-a", "kind": "agent"});
+    let b = serde_json::json!({"principal": "agent-b", "kind": "agent"});
+    let as_a = StartOptions {
+        actor_identity: Some(a.clone()),
+        ..opts()
+    };
+    let snap = Run::start(&ctx, &one_step(), "w", topic(), as_a)
+        .unwrap()
+        .snapshot(None);
+    let restore = |actor: Option<Value>| {
+        Run::restore_with(
+            &ctx,
+            &one_step(),
+            &snap,
+            None,
+            RestoreOptions {
+                actor_identity: actor,
+            },
+        )
+    };
+    assert!(restore(Some(a.clone())).is_ok());
+    // The same principal under other attributes is the same party.
+    assert!(
+        restore(Some(
+            serde_json::json!({"principal": "agent-a", "kind": "agent", "role": "r"})
+        ))
+        .is_ok()
+    );
+    assert!(matches!(
+        restore(Some(b.clone())),
+        Err(RestoreError::Actor(_))
+    ));
+    assert!(matches!(
+        restore(Some(serde_json::json!({"kind": "agent"}))),
+        Err(RestoreError::Actor(_))
+    ));
+    assert!(restore(None).is_ok());
+    assert!(Run::restore(&ctx, &one_step(), &snap, None).is_ok());
+    // A run started without an actor cannot be restored for one.
+    let anonymous = Run::start(&ctx, &one_step(), "w", topic(), opts())
+        .unwrap()
+        .snapshot(None);
+    assert!(matches!(
+        Run::restore_with(
+            &ctx,
+            &one_step(),
+            &anonymous,
+            None,
+            RestoreOptions {
+                actor_identity: Some(a)
+            }
+        ),
+        Err(RestoreError::Actor(_))
+    ));
+}
+
+/// A run asking a human approver, with `identity@1` declared or not.
+fn asking(identity: bool) -> Run {
+    let mut requires = vec!["approval@1"];
+    if identity {
+        requires.push("identity@1");
+    }
+    let catalog = serde_json::json!({"w": {"goal": "g", "risk": "high", "spec_version": "1.1",
+        "workflow_extensions": {"requires": requires},
+        "steps": [{"capability": "execute", "purpose": "p", "store_as": "x",
+                   "input_bindings": {"code": "c"},
+                   "approval": {"approver": {"kind": "human"}}}]}});
+    Run::start(&ctx(), &catalog, "w", Map::new(), opts()).unwrap()
+}
+
+fn decision(digest: &Value, approvers: &[&str], identities: Value) -> Response {
+    serde_json::from_value(serde_json::json!({
+        "kind": "Decision", "decision_id": "d1", "decision": "approved",
+        "approvers": approvers, "digest": digest, "approver_identities": identities,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn decision_identities_must_be_well_formed() {
+    let alice = serde_json::json!({"principal": "alice", "kind": "human"});
+    let alice_lead = serde_json::json!({"principal": "alice", "kind": "human", "role": "lead"});
+    let malformed = [
+        (vec![], serde_json::json!("alice")),
+        (vec![], serde_json::json!([{"principal": "alice"}])),
+        (
+            vec![],
+            serde_json::json!([alice, {"principal": "bob", "kind": "robot"}]),
+        ),
+        (vec![], serde_json::json!([alice, alice_lead])),
+        (vec!["bob"], serde_json::json!([alice])),
+        (vec!["alice", "bob"], serde_json::json!([alice])),
+    ];
+    let mut run = asking(true);
+    let action = serde_json::to_value(run.next()).unwrap();
+    let id = action["id"].as_u64().unwrap();
+    let before = run.snapshot(None);
+    for (approvers, identities) in malformed {
+        let r = run.submit(
+            id,
+            decision(&action["digest"], &approvers, identities.clone()),
+            0,
+        );
+        assert!(
+            matches!(r, Err(acs_core::exec::SubmitError::Malformed(_))),
+            "{identities}: {r:?}"
+        );
+        assert_eq!(
+            run.snapshot(None),
+            before,
+            "a refused response changes nothing"
+        );
+    }
+    // Two identical identities are one approver; approvers may be empty or
+    // name exactly their principals.
+    for approvers in [vec![], vec!["alice"], vec!["alice", "alice"]] {
+        let mut run = asking(true);
+        let ok = run.submit(
+            id,
+            decision(
+                &action["digest"],
+                &approvers,
+                serde_json::json!([alice, alice]),
+            ),
+            0,
+        );
+        assert!(ok.is_ok(), "{approvers:?}: {ok:?}");
+        let record = &run.action_records()[0];
+        assert_eq!(
+            record["approval"]["approvers"],
+            serde_json::json!(["alice"])
+        );
+        assert_eq!(
+            record["approval"]["approver_identities"],
+            serde_json::json!([alice])
+        );
+    }
+    // Without identity@1 the member is neither checked nor kept.
+    let mut plain = asking(false);
+    plain
+        .submit(
+            id,
+            decision(
+                &action["digest"],
+                &["carol"],
+                serde_json::json!("not a list"),
+            ),
+            0,
+        )
+        .unwrap();
+    let record = &plain.action_records()[0];
+    assert_eq!(
+        record["approval"]["approvers"],
+        serde_json::json!(["carol"])
+    );
+    assert!(record["approval"].get("approver_identities").is_none());
+}
+
+#[test]
+fn read_json_bounds_integer_literals() {
+    // §5.14: an integer, a number written without a fraction or an
+    // exponent, has a magnitude of at most 2^53; any other number is a
+    // binary64 value, so 1e21 reads although its value is beyond 2^53.
+    for ok in [
+        "[9007199254740992]",
+        "[-9007199254740992]",
+        "[1e21]",
+        "[1.5]",
+        "[\"123456789012345678901\"]",
+    ] {
+        assert!(read_json(ok).is_ok(), "{ok}");
+    }
+    for bad in [
+        "[9007199254740993]",
+        "[100000000000000000000000]",
+        "{\"a\":-9007199254740993}",
+    ] {
+        assert!(read_json(bad).is_err(), "{bad}");
+    }
 }

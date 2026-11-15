@@ -1,0 +1,143 @@
+{
+  "description": "An attested approver counts only if its role is the requested one: bob's ops role does not count toward a release-manager approval, and the record lists only the approver that counted (\u00a75.17).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human",
+              "role": "release-manager",
+              "min_approvers": 2
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [],
+        "digest": "{{digest}}",
+        "approver_identities": [
+          {
+            "principal": "alice",
+            "kind": "human",
+            "role": "release-manager",
+            "authenticated_by": "directory_id",
+            "trust_class": "decision_person"
+          },
+          {
+            "principal": "bob",
+            "kind": "human",
+            "role": "ops",
+            "authenticated_by": "directory_id",
+            "trust_class": "decision_person"
+          }
+        ]
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F502",
+    "action_records": [
+      {
+        "status": "rejected",
+        "approval": {
+          "approvers": [
+            "alice"
+          ],
+          "approver_identities": [
+            {
+              "principal": "alice",
+              "kind": "human",
+              "role": "release-manager",
+              "authenticated_by": "directory_id",
+              "trust_class": "decision_person"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "approval_decided"
+  ]
+}

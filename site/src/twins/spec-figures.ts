@@ -18,7 +18,10 @@ import { slotBlocks } from './spec-slot-blocks';
 const REPLAY_TITLES: Record<string, string> = {
   'recovery-replay': 'A recovery that runs out, from §5.12',
   'wait-replay': 'A wait that loses its source, from §5.13',
+  'approval-unattended-replay': 'An approval no one is asked for, from §5.14',
   'deferral-replay': 'What a deferral reaches, from §5.14',
+  'resume-replay': 'What a resumption runs again, from §5.14.1',
+  'resume-skip-replay': 'A queued step that no longer runs, from §5.14.1',
 };
 
 function replayBlock(slot: string): string {
@@ -70,6 +73,7 @@ export function specLateBlocks(): string[] {
   const asked = D.approverAsked(text, source);
   const deleg = D.delegateGroups(text, source);
   const trust = D.trustClassBars(text, source);
+  const approvers = D.approverCount(text, source);
   return [
     figure('Extensions and what they unlock, from §5.9', D.extensionsCaption(ext), table(['Extension', 'Sections'], ext.map((e) => [code(e.id), e.sections.map((s) => `§${s}`).join(', ')]))),
     replayBlock('recovery-replay'),
@@ -83,7 +87,10 @@ export function specLateBlocks(): string[] {
         table(['when_unattended', 'Result'], plans.map((p) => [`${code(p.plan)}${p.isDefault ? ' (default)' : ''}`, cell(p.result)])),
       ].join('\n\n'),
     ),
+    replayBlock('approval-unattended-replay'),
     replayBlock('deferral-replay'),
+    replayBlock('resume-replay'),
+    replayBlock('resume-skip-replay'),
     figure(
       'What a delegate binds, from §5.15',
       D.delegateCaption(deleg),
@@ -100,6 +107,11 @@ export function specLateBlocks(): string[] {
       D.trustCaption(trust),
       table(['Trust class', 'Default weight', 'In the example'], trust.map((b) => [code(b.cls), String(b.weight), [b.accepted ? 'accepted' : '', b.alwaysAsk ? 'always ask' : ''].filter(Boolean).join(', ')])),
     ),
+    figure(
+      'Who counts as an approver, from §5.17',
+      D.approverCaption(approvers),
+      table(['Approver', 'Kind', 'Role', 'Counts', 'Why'], approvers.rows.map((r) => [code(r.principal), r.kind, r.role ?? '', r.counts ? 'Yes' : 'No', cell(r.why)])),
+    ),
   ];
 }
 
@@ -110,6 +122,7 @@ export function specTailBlocks(): string[] {
   const fams = T.diagnosticFamilies(text, source);
   const heat = T.codeHeat(text, source);
   const suite = T.conformanceSuite(text, source);
+  const digests = T.digestVectors(text, source);
   return [
     figure(
       'Merge thresholds, from §7.3',
@@ -130,6 +143,7 @@ export function specTailBlocks(): string[] {
       table(['Section', ...heat.families.map((f) => f.name)], heat.sections.map((x, j) => [`§${x.n} ${x.title}`, ...heat.families.map((_, i) => String(heat.counts[i]![j]))])),
     ),
     figure('The conformance suite, from §10.3', T.suiteCaption(suite), table(['Part', 'Count', 'Folder'], suite.map((p) => [p.label, String(p.count), code(p.dir)]))),
+    figure('The approval digest vectors, from §10.3', T.digestCaption(digests), table(['Vectors', 'Count'], digests.map((g) => [g.label, String(g.count)]))),
   ];
 }
 

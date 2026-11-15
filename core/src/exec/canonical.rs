@@ -1,5 +1,7 @@
 //! Canonical JSON (RFC 8785, JCS) and the digests built on it: approval
-//! bindings (STANDARD v1.1 §5.14) and run snapshots (design-114 §16.5).
+//! digests (STANDARD v1.2 §5.14: the SHA-256 of the shown values' canonical
+//! JSON, as lowercase hex, compared regardless of case) and run snapshots
+//! (design-114 §16.5).
 
 use std::fmt::Write as _;
 
@@ -208,6 +210,16 @@ mod tests {
         assert!(!same_digest("ab", "ac"));
         assert!(!same_digest("ab", "abc"));
         assert!(same_digest("AB", "ab"));
+    }
+
+    #[test]
+    fn same_digest_ignores_case() {
+        // A decision may repeat a request's digest in either case (§5.14).
+        let d = digest(&json!([{"target": "config"}]));
+        assert_eq!(d, d.to_lowercase());
+        assert!(same_digest(&d.to_uppercase(), &d));
+        assert!(same_digest(&d, &d.to_uppercase()));
+        assert!(!same_digest(&d.to_uppercase(), &digest(&json!([]))));
     }
 
     #[test]

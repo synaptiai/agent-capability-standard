@@ -99,9 +99,26 @@ class Run:
         snapshot: dict[str, Any],
         key: bytes | None = None,
         *,
+        actor_identity: dict[str, Any] | None = None,
         catalogs: list[Any] | None = None,
         agents: list[Any] | None = None,
-    ) -> Run: ...
+    ) -> Run:
+        """With ``actor_identity``, the actor the host continues the run
+        for: another principal than the run's, or any actor for a run started
+        without one, is refused (``ValueError``; §5.17)."""
+
+    def resume(
+        self,
+        *,
+        attendance: str = "attended",
+        now_ms: int,
+        actor_identity: dict[str, Any] | None = None,
+    ) -> None:
+        """Resume a run that ended ``deferred`` (§5.14.1), as the same run,
+        under ``attendance`` and, with ``actor_identity``, a new actor.
+        ``ValueError`` when the run did not end deferred, the actor is not an
+        ``agent_identity``, or the state does not keep what resuming needs."""
+
     def next(self) -> dict[str, Any]: ...
     def submit(self, action_id: int, response: dict[str, Any], now_ms: int) -> None: ...
     def tick(self, now_ms: int) -> None: ...

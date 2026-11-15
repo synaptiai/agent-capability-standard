@@ -234,6 +234,10 @@ pub enum Body {
         shown: Value,
         digest: String,
         expires_at: Option<u64>,
+        /// A resumed run asks about a queued action (§5.14.1): the
+        /// `action_id` of its `planned` record.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        queued_action_id: Option<String>,
     },
     RecheckSource {
         step: usize,
@@ -334,6 +338,11 @@ pub enum Response {
         #[serde(default)]
         approvers: Vec<String>,
         digest: String,
+        /// `identity@1`: who decided, as the host attests them (§5.17), one
+        /// `agent_identity` per principal. Checked in `submit`; ignored
+        /// without the extension.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        approver_identities: Option<Value>,
     },
     Current {
         value: Value,
@@ -440,6 +449,8 @@ pub enum RestoreError {
     Catalog,
     Version(u64),
     Start(StartError),
+    /// The actor the host restores the run for is not the run's (§5.17).
+    Actor(String),
 }
 
 impl fmt::Display for RestoreError {
@@ -453,6 +464,52 @@ impl fmt::Display for RestoreError {
             }
             RestoreError::Version(v) => write!(f, "unsupported snapshot version {v}"),
             RestoreError::Start(e) => write!(f, "{e}"),
+            RestoreError::Actor(m) => write!(f, "actor_identity: {m}"),
+        }
+    }
+}
+
+/// How a host restores a saved run (§5.19.4).
+#[derive(Debug, Clone, Default)]
+pub struct RestoreOptions {
+    /// The actor the host continues the run for (§5.17): its principal must
+    /// be the run's. `None` checks nothing.
+    pub actor_identity: Option<Value>,
+}
+
+/// How a host resumes a run that ended `deferred` (§5.14.1).
+#[derive(Debug, Clone)]
+pub struct ResumeOptions {
+    /// The run's attendance from now on.
+    pub attendance: Attendance,
+    pub now_ms: u64,
+    /// Who carries the run on (§5.17): `None` keeps the run's actor.
+    pub actor_identity: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResumeError {
+    /// Only a run that ended `deferred` can be resumed (§5.14.1).
+    NotDeferred(String),
+    /// The new actor is not an `agent_identity`.
+    Identity(String),
+    /// The state does not keep what resumption needs: the nested run of a
+    /// deferred invoke step, or which steps ran ahead (§5.14.1).
+    NotKept(String),
+}
+
+impl fmt::Display for ResumeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResumeError::NotDeferred(m) => write!(
+                f,
+                "only a run that ended deferred can be resumed (§5.14.1); {m}"
+            ),
+            ResumeError::Identity(m) => write!(f, "actor_identity: {m}"),
+            ResumeError::NotKept(m) => write!(
+                f,
+                "the saved state does not keep {m}, which resuming needs (§5.14.1); cancel the run and start a new one"
+            ),
         }
     }
 }
@@ -510,6 +567,11 @@ pub(crate) struct StepState {
     /// run ends once the step's failure modes are checked, unless one fires.
     #[serde(default)]
     pub ending: Option<Value>,
+    /// A queued step a resumption re-entered (§5.14.1): the index of its
+    /// `planned` record, which the step continues until it records its
+    /// approval (or is superseded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -575,6 +637,24 @@ pub(crate) struct Frame {
     /// A gate ended this run (`action: end`): `{step, message}`.
     #[serde(default)]
     pub ended: Option<Value>,
+    /// During a resumption (§5.14.1): the steps of this frame still to run,
+    /// in the order they run (step order; a deferred handler last).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<Vec<usize>>,
+    /// For a deferred `invoke` step: the nested run that ended `deferred`
+    /// under it, kept so that a resumption continues it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parked: BTreeMap<usize, Frame>,
+    /// During a resumption: the cause of the escalation whose deferred
+    /// handler runs after the normal-flow steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_escalation: Option<String>,
+    /// While a step of this frame is deferred: the steps that began since,
+    /// and were not deferred themselves (they ran ahead, §5.14). `None` while
+    /// nothing is deferred, and in a state saved before this was tracked:
+    /// such a frame with deferred steps cannot be resumed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<BTreeSet<usize>>,
 }
 
 /// A delegation to name as replaced when step `step` next delegates.
@@ -802,7 +882,7 @@ impl Run {
         if !errors.is_empty() {
             return Err(StartError::Invalid(errors));
         }
-        Program::build(ctx, catalog, workflow).map_err(StartError::Program)
+        Program::build(ctx, catalog, workflow, header).map_err(StartError::Program)
     }
 
     fn machine(&mut self) -> Machine<'_> {
@@ -857,7 +937,7 @@ impl Run {
         }
     }
 
-    /// Resume from a snapshot taken against `catalog`. The digest (and the
+    /// Continue from a snapshot taken against `catalog`. The digest (and the
     /// HMAC, when a key is given) must match, and so must the catalog.
     pub fn restore(
         ctx: &Context,
@@ -865,6 +945,25 @@ impl Run {
         snapshot: &Snapshot,
         key: Option<&[u8]>,
     ) -> Result<Run, RestoreError> {
+        Self::restore_with(ctx, catalog, snapshot, key, RestoreOptions::default())
+    }
+
+    /// [`Run::restore`], for the actor `options` names (§5.17): a run keeps
+    /// its actor while it continues, so a principal other than the run's is
+    /// refused, and so is any actor for a run started without one.
+    pub fn restore_with(
+        ctx: &Context,
+        catalog: &Value,
+        snapshot: &Snapshot,
+        key: Option<&[u8]>,
+        options: RestoreOptions,
+    ) -> Result<Run, RestoreError> {
+        if let Some(actor) = &options.actor_identity {
+            ijson(actor).map_err(RestoreError::Actor)?;
+            if let Some(e) = identity_error(actor) {
+                return Err(RestoreError::Actor(e));
+            }
+        }
         if !canonical::same_digest(&canonical::sha256_hex(&snapshot.state), &snapshot.sha256) {
             return Err(RestoreError::Digest);
         }
@@ -915,8 +1014,104 @@ impl Run {
             return Err(RestoreError::Catalog);
         }
         check_state(&program, &state).map_err(RestoreError::Malformed)?;
+        if let Some(actor) = &options.actor_identity {
+            let principal = |v: &Value| {
+                v.get("principal")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            };
+            match state.actor_identity.as_ref().and_then(principal) {
+                None => {
+                    return Err(RestoreError::Actor(
+                        "the run was started without an actor".into(),
+                    ));
+                }
+                Some(p) if Some(&p) != principal(actor).as_ref() => {
+                    return Err(RestoreError::Actor(format!(
+                        "the run's actor is '{p}', not '{}'; a run keeps its actor while it continues (§5.17)",
+                        principal(actor).unwrap_or_default()
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
         Ok(Run { program, state })
     }
+
+    /// Resume a run that ended `deferred` (§5.14.1): it continues, as the
+    /// same run, with the steps it deferred. A host resumes one saved state
+    /// once.
+    pub fn resume(&mut self, options: ResumeOptions) -> Result<(), ResumeError> {
+        match self.state.finished.as_ref().map(|a| &a.body) {
+            Some(Body::Completed {
+                outcome: Outcome::Deferred,
+                ..
+            }) => {}
+            Some(Body::Completed { outcome, .. }) => {
+                let outcome = serde_json::to_value(outcome).unwrap_or(Value::Null);
+                return Err(ResumeError::NotDeferred(format!(
+                    "this run ended {}",
+                    outcome.as_str().unwrap_or("otherwise")
+                )));
+            }
+            Some(Body::Failed { code, .. }) => {
+                return Err(ResumeError::NotDeferred(format!(
+                    "this run failed with {code}"
+                )));
+            }
+            _ => {
+                return Err(ResumeError::NotDeferred("this run has not finished".into()));
+            }
+        }
+        if let Some(actor) = &options.actor_identity {
+            ijson(actor).map_err(ResumeError::Identity)?;
+            if let Some(e) = identity_error(actor) {
+                return Err(ResumeError::Identity(e));
+            }
+        }
+        if let Some(m) = not_kept(&self.program, &self.state) {
+            return Err(ResumeError::NotKept(m));
+        }
+        self.machine().resume(options);
+        Ok(())
+    }
+}
+
+/// What a deferred end's state does not keep that resuming needs, if
+/// anything (§5.14.1): which steps ran ahead of a frame's deferrals, and the
+/// nested run of each deferred `invoke` step that has deferrals under it.
+fn not_kept(program: &Program, st: &State) -> Option<String> {
+    fn walk(program: &Program, st: &State, f: &Frame, prefix: &mut Vec<usize>) -> Option<String> {
+        if !f.deferred.is_empty() && f.ahead.is_none() {
+            return Some(format!(
+                "which steps of '{}' ran after its first deferral",
+                f.workflow
+            ));
+        }
+        let listed = f.deferred.iter().chain(f.resume.iter().flatten());
+        for &s in listed {
+            let wf = &program.workflows[&f.workflow];
+            if wf.steps.get(s).is_none_or(|x| x.capability != "invoke") {
+                continue;
+            }
+            prefix.push(s);
+            let under = st
+                .deferrals
+                .iter()
+                .any(|d| d.path.len() > prefix.len() && d.path[..prefix.len()] == prefix[..]);
+            let found = match f.parked.get(&s) {
+                Some(child) => walk(program, st, child, prefix),
+                None if under => Some(format!("the nested run of step {s} of '{}'", f.workflow)),
+                None => None,
+            };
+            prefix.pop();
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
+    }
+    walk(program, st, &st.frames[0], &mut Vec::new())
 }
 
 /// A restored state must be one this executor could have produced: the
@@ -959,48 +1154,8 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
     {
         return Err("a failure's reason is not a reason (§5.19.7)".into());
     }
-    for f in &st.frames {
-        let Some(wf) = program.workflows.get(&f.workflow) else {
-            return Err(format!("unknown workflow '{}'", f.workflow));
-        };
-        let limit = if f.stage == Stage::Begin && f.escalation.is_none() {
-            wf.steps.len()
-        } else {
-            wf.steps.len().saturating_sub(1)
-        };
-        if f.step > limit || (f.stage != Stage::Begin && wf.steps.is_empty()) {
-            return Err(format!(
-                "step {} is out of range in '{}'",
-                f.step, f.workflow
-            ));
-        }
-        if f.cur.record.is_some_and(|r| r >= st.records.len()) {
-            return Err("a step refers to a missing action record".into());
-        }
-        let waiting_delegate = |i: usize| {
-            wf.steps.get(i).is_some_and(|s| {
-                s.capability == "delegate" && s.raw.get("wait").is_some_and(Value::is_object)
-            })
-        };
-        if !f.replaces.iter().all(|r| waiting_delegate(r.step))
-            || !f.replaces.windows(2).all(|w| w[0].step < w[1].step)
-        {
-            return Err("replaced delegations must name waiting delegate steps, in order".into());
-        }
-        // Deferred steps come before the current one, except while a
-        // handler runs: it may be listed before the steps it escalates from.
-        let ordered = f.deferred.windows(2).all(|w| w[0] < w[1]);
-        let in_range = f
-            .deferred
-            .iter()
-            .all(|&d| d < wf.steps.len() && (f.escalation.is_some() || d <= f.step));
-        let caps_known = f.nested_caps.keys().all(|k| f.deferred.contains(k));
-        if !ordered || !in_range || !caps_known {
-            return Err(format!(
-                "the deferred steps of '{}' are out of range or out of order",
-                f.workflow
-            ));
-        }
+    for (i, f) in st.frames.iter().enumerate() {
+        check_frame(program, st, f, i)?;
     }
     // A frame below the top waits on its invoke step for the nested run.
     for f in &st.frames[..st.frames.len() - 1] {
@@ -1084,6 +1239,111 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
     Ok(())
 }
 
+/// The checks of one frame, a running one or (recursively) a nested run
+/// parked under a deferred `invoke` step (§5.14.1); `depth` is the number of
+/// frames above it, parked or running.
+fn check_frame(program: &Program, st: &State, f: &Frame, depth: usize) -> Result<(), String> {
+    let Some(wf) = program.workflows.get(&f.workflow) else {
+        return Err(format!("unknown workflow '{}'", f.workflow));
+    };
+    let limit = if f.stage == Stage::Begin && f.escalation.is_none() {
+        wf.steps.len()
+    } else {
+        wf.steps.len().saturating_sub(1)
+    };
+    if f.step > limit || (f.stage != Stage::Begin && wf.steps.is_empty()) {
+        return Err(format!(
+            "step {} is out of range in '{}'",
+            f.step, f.workflow
+        ));
+    }
+    if f.cur.record.is_some_and(|r| r >= st.records.len())
+        || f.cur.queued.is_some_and(|r| r >= st.records.len())
+    {
+        return Err("a step refers to a missing action record".into());
+    }
+    let waiting_delegate = |i: usize| {
+        wf.steps.get(i).is_some_and(|s| {
+            s.capability == "delegate" && s.raw.get("wait").is_some_and(Value::is_object)
+        })
+    };
+    if !f.replaces.iter().all(|r| waiting_delegate(r.step))
+        || !f.replaces.windows(2).all(|w| w[0].step < w[1].step)
+    {
+        return Err("replaced delegations must name waiting delegate steps, in order".into());
+    }
+    // Deferred steps come before the current one, except while a handler
+    // runs: it may be listed before the steps it escalates from.
+    let ordered = f.deferred.windows(2).all(|w| w[0] < w[1]);
+    let in_range = f
+        .deferred
+        .iter()
+        .all(|&d| d < wf.steps.len() && (f.escalation.is_some() || d <= f.step));
+    let listed = |k: &usize| f.deferred.contains(k) || f.resume.iter().flatten().any(|r| r == k);
+    let caps_known = f.nested_caps.keys().all(listed);
+    if !ordered || !in_range || !caps_known {
+        return Err(format!(
+            "the deferred steps of '{}' are out of range or out of order",
+            f.workflow
+        ));
+    }
+    // A resumption's list (§5.14.1): steps in step order, none deferred,
+    // and a handler only last, while its escalation waits for it.
+    if let Some(list) = &f.resume {
+        let handler_last = f.pending_escalation.is_some();
+        let normal = if handler_last {
+            &list[..list.len().saturating_sub(1)]
+        } else {
+            &list[..]
+        };
+        let fits = list
+            .iter()
+            .all(|&k| k < wf.steps.len() && !f.deferred.contains(&k))
+            && normal.windows(2).all(|w| w[0] < w[1])
+            && normal.iter().all(|&k| !wf.steps[k].handler)
+            && (!handler_last || list.last().is_some_and(|&h| wf.steps[h].handler));
+        if !fits {
+            return Err(format!(
+                "the resumption list of '{}' is out of range or out of order",
+                f.workflow
+            ));
+        }
+    }
+    if f.pending_escalation.is_some() && (f.escalation.is_some() || f.resume.is_none()) {
+        return Err("a pending escalation needs a resumption and no escalation".into());
+    }
+    if f.ahead.as_ref().is_some_and(|a| {
+        a.iter()
+            .any(|&k| k >= wf.steps.len() || f.deferred.contains(&k))
+    }) {
+        return Err(format!(
+            "the steps that ran ahead in '{}' are out of range",
+            f.workflow
+        ));
+    }
+    for (&k, child) in &f.parked {
+        let invoke = wf.steps.get(k).is_some_and(|s| s.capability == "invoke");
+        if !invoke || !listed(&k) {
+            return Err(format!(
+                "a nested run is kept under step {k} of '{}', which is not a deferred invoke step",
+                f.workflow
+            ));
+        }
+        let waiting = !child.deferred.is_empty() || child.resume.is_some();
+        if child.escalation.is_some() || !waiting || child.stage != Stage::Begin {
+            return Err(format!(
+                "the nested run kept under step {k} of '{}' did not end deferred",
+                f.workflow
+            ));
+        }
+        if depth + 2 > MAX_FRAMES {
+            return Err(format!("more than {MAX_FRAMES} nested runs"));
+        }
+        check_frame(program, st, child, depth + 1)?;
+    }
+    Ok(())
+}
+
 impl Frame {
     pub(crate) fn new(workflow: &str, inputs: Map<String, Value>) -> Frame {
         Frame {
@@ -1103,6 +1363,10 @@ impl Frame {
             always_ask: BTreeSet::new(),
             marked: false,
             replaces: Vec::new(),
+            resume: None,
+            parked: BTreeMap::new(),
+            pending_escalation: None,
+            ahead: None,
         }
     }
 }

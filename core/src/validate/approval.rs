@@ -1,4 +1,4 @@
-//! Structured approval (STANDARD v1.1 §5.14, design-114 §13; `approval@1`)
+//! Structured approval (STANDARD v1.2 §5.14, design-114 §13; `approval@1`)
 //! and unattended runs that reach an approval (W606).
 
 use std::collections::HashSet;
@@ -21,6 +21,17 @@ const APPROVAL_KEYS: &[&str] = &[
     "when_unattended",
 ];
 const APPROVER_KEYS: &[&str] = &["kind", "role", "min_approvers", "mandate_ref"];
+/// In a workflow that targets 1.2, the approver also takes `identity@1`'s
+/// `sender_check` and `accept_trust_classes` (§5.17); in an earlier target
+/// they are unknown fields, as in 1.1 (W604, and W616).
+const APPROVER_KEYS_1_2: &[&str] = &[
+    "kind",
+    "role",
+    "min_approvers",
+    "mandate_ref",
+    "sender_check",
+    "accept_trust_classes",
+];
 const RECHECK_KEYS: &[&str] = &["source", "compare", "on_change"];
 
 /// Check a step's `approval` block; `requires_approval` is the step's
@@ -53,11 +64,15 @@ pub(crate) fn check_after_deferral(
     }
 }
 
+/// `targets_1_2`: the workflow targets 1.2 or later (§11.5), so the
+/// approver's 1.2 fields apply.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check(
     loc: &StepLoc<'_>,
     step: &Map<String, Value>,
     requires_approval: bool,
     declared: &Declared,
+    targets_1_2: bool,
     checker: &Checker<'_>,
     scope: &Scope,
     report: &mut Report,
@@ -102,7 +117,7 @@ pub(crate) fn check(
             "approval.approver",
             "approval has no 'approver'".into(),
         )),
-        Some(v) => approver(v, &at, report),
+        Some(v) => approver(v, declared, targets_1_2, &at, report),
     }
     enum_field(
         a,
@@ -154,7 +169,13 @@ pub(crate) fn check(
     );
 }
 
-fn approver(value: &Value, at: &dyn Fn(Diagnostic) -> Diagnostic, report: &mut Report) {
+fn approver(
+    value: &Value,
+    declared: &Declared,
+    targets_1_2: bool,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
     let field = "approval.approver";
     let Value::Object(ap) = value else {
         report.push(s303(
@@ -164,7 +185,15 @@ fn approver(value: &Value, at: &dyn Fn(Diagnostic) -> Diagnostic, report: &mut R
         ));
         return;
     };
-    semantics::unknown_fields(ap, APPROVER_KEYS, field, at, report);
+    let keys = if targets_1_2 {
+        APPROVER_KEYS_1_2
+    } else {
+        APPROVER_KEYS
+    };
+    semantics::unknown_fields(ap, keys, field, at, report);
+    if targets_1_2 {
+        approver_identity(ap, declared, at, report);
+    }
     if !ap.contains_key("kind") {
         report.push(s304(
             at,
@@ -203,6 +232,62 @@ fn approver(value: &Value, at: &dyn Fn(Diagnostic) -> Diagnostic, report: &mut R
             format!("{field}.mandate_ref applies only to kind 'standing_mandate'"),
         )),
         _ => {}
+    }
+}
+
+/// In a workflow that targets 1.2, the approver's `sender_check` and
+/// `accept_trust_classes` (§5.17): each needs `identity@1` (V106) and is a
+/// non-empty list of values from its vocabulary (S303).
+fn approver_identity(
+    ap: &Map<String, Value>,
+    declared: &Declared,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    use super::identity::{TRUST_CLASSES, known_mechanism};
+    for key in ["sender_check", "accept_trust_classes"] {
+        let Some(value) = ap.get(key) else {
+            continue;
+        };
+        let field = format!("approval.approver.{key}");
+        if !declared.require(
+            "identity@1",
+            &format!("'{field}'"),
+            |d| at(d).at("field", field.clone()),
+            report,
+        ) {
+            continue;
+        }
+        let known = |s: &str| {
+            if key == "sender_check" {
+                known_mechanism(s)
+            } else {
+                TRUST_CLASSES.contains(&s)
+            }
+        };
+        let problem = match value.as_array() {
+            None => Some(format!(
+                "{field} must be a list, found {}",
+                yaml::kind_of(value)
+            )),
+            Some(items) if items.is_empty() => Some(format!(
+                "{field} is empty, so no approver could count; list the accepted values"
+            )),
+            Some(items) => items
+                .iter()
+                .find(|i| !i.as_str().is_some_and(known))
+                .map(|bad| {
+                    let vocabulary = if key == "sender_check" {
+                        "an authenticated_by value (session_id, chat_user_id, code_host_login, directory_id, api_key, signed_token or x-...)"
+                    } else {
+                        "a trust class (owner, decision_person, system_of_record, own_subagent_report, peer_agent, colleague or external)"
+                    };
+                    format!("{field} holds {bad}, which is not {vocabulary}")
+                }),
+        };
+        if let Some(message) = problem {
+            report.push(s303(at, &field, message));
+        }
     }
 }
 
@@ -513,6 +598,63 @@ mod tests {
             .is_empty()
         );
         assert!(run("rotate-logs", json!({"approver": mandate})).is_empty());
+    }
+
+    #[test]
+    fn approver_identity_fields_in_a_1_2_target() {
+        let run = |spec: Option<&str>, requires: &[&str], approver: Value| {
+            let mut c = catalog(guarded(json!({"approver": approver})), requires, None);
+            match spec {
+                Some(v) => c["w"]["spec_version"] = json!(v),
+                None => {
+                    c["w"].as_object_mut().unwrap().remove("spec_version");
+                }
+            }
+            codes(c)
+        };
+        let both = &["approval@1", "identity@1"];
+        let with = |key: &str, v: Value| {
+            let mut a = json!({"kind": "human"});
+            a[key] = v;
+            a
+        };
+        // Declared and valid: no code.
+        let full = json!({"kind": "human", "sender_check": ["directory_id", "x-acme.sso"],
+                          "accept_trust_classes": ["decision_person"]});
+        assert!(run(Some("1.2"), both, full.clone()).is_empty());
+        // Without identity@1: V106, once per field.
+        assert_eq!(run(Some("1.2"), &["approval@1"], full), ["V106", "V106"]);
+        // Malformed or outside the vocabularies: S303.
+        for bad in [json!([]), json!("x"), json!([1]), json!(["robot"])] {
+            assert_eq!(
+                run(Some("1.2"), both, with("accept_trust_classes", bad.clone())),
+                ["S303"],
+                "{bad}"
+            );
+        }
+        for bad in [json!([]), json!("directory_id"), json!(["password"])] {
+            assert_eq!(
+                run(Some("1.2"), both, with("sender_check", bad.clone())),
+                ["S303"],
+                "{bad}"
+            );
+        }
+        // In a 1.1 target the fields are unknown, as in 1.1: W604 (and
+        // W616, the 1.2 feature), with or without identity@1, never V106 or
+        // S303, whatever their value.
+        for requires in [&["approval@1"][..], both] {
+            for v in [json!(["directory_id"]), json!("x")] {
+                assert_eq!(
+                    run(Some("1.1"), requires, with("sender_check", v)),
+                    ["W616", "W604"]
+                );
+            }
+        }
+        // With no version declared: W604 (and W605), as in 1.1.
+        assert_eq!(
+            run(None, both, with("accept_trust_classes", json!(["owner"]))),
+            ["W605", "W604"]
+        );
     }
 
     #[test]

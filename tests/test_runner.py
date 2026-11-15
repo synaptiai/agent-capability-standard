@@ -723,3 +723,239 @@ sample_twice:
     assert host.calls == ["retrieve", "retrieve"]
     # The second sample waited a minute after the first.
     assert host.slept == [1_000 + 10 + 60_000]
+
+
+# ---------------------------------------------------------------------------
+# Resuming a deferred run (STANDARD v1.2 §5.14.1), the restore actor and
+# approver identities (§5.17)
+# ---------------------------------------------------------------------------
+
+
+class NoMandates(FakeHost):
+    """Holds no mandates, as the default host: a mandate is unavailable."""
+
+    request_approval = Host.request_approval
+
+
+class Approves(FakeHost):
+    """Approves every request, recording what it was asked."""
+
+    def __init__(self, clock: Clock) -> None:
+        super().__init__(clock)
+        self.asked: list[dict[str, Any]] = []
+
+    def request_approval(self, action: dict[str, Any]) -> dict[str, Any]:
+        self.asked.append(action)
+        return super().request_approval(action)
+
+    def create_checkpoint(self, action: dict[str, Any]) -> dict[str, Any]:
+        return {"kind": "Checkpoint", "checkpoint_id": f"cp-{action['id']}"}
+
+
+def deferred_nightly(runner: WorkflowRunner) -> tuple[dict[str, Any], Any]:
+    """The nightly sync run unattended by a host without mandates: it ends
+    deferred, saved with a key."""
+    clock = Clock()
+    run = runner.start(
+        "nightly_sync", {"setting": "x"}, attendance="unattended", now_ms=clock.now
+    )
+    result = runner.drive(run, NoMandates(clock))
+    assert result.outcome == "deferred" and result.resumable
+    return run.snapshot(b"secret"), result
+
+
+def test_resume_a_deferred_run(mandate_runner: WorkflowRunner) -> None:
+    saved, first = deferred_nightly(mandate_runner)
+    queued = first.action_records[0]["action_id"]
+    host = Approves(Clock())
+    run = mandate_runner.resume(saved, b"secret", attendance="attended")
+    result = mandate_runner.drive(run, host)
+    assert result.ok, result
+    # Asked of a person (attended), naming the queued action; the mutate
+    # gets a new checkpoint; the report, which ran ahead, reads nothing it
+    # changed and is not run again.
+    [asked] = host.asked
+    assert asked["approver"] == {"kind": "human"}
+    assert asked["queued_action_id"] == queued
+    assert host.calls == ["mutate"]
+    assert [(r["action_id"], r["status"]) for r in result.action_records] == [
+        (queued, "executed")
+    ]
+    assert result.action_records[0]["approval"]["mandate_ref"] is None
+    assert result.deferred == []
+    assert any(t["kind"] == "run_resumed" for t in result.trace)
+
+
+def test_resumed_mandate_step_asks_a_person(mandate_runner: WorkflowRunner) -> None:
+    """Subset matching cannot show a key is absent: the request of an
+    attended resumption names no mandate_ref (§5.14.1)."""
+    saved, _ = deferred_nightly(mandate_runner)
+    host = Approves(Clock())
+    mandate_runner.drive(mandate_runner.resume(saved, b"secret"), host)
+    assert "mandate_ref" not in host.asked[0]["approver"]
+
+
+def test_resume_refuses_other_outcomes(
+    runner: WorkflowRunner, validator: _core.Validator
+) -> None:
+    clock = Clock()
+    run = runner.start("change_config", {"setting": "x"}, now_ms=clock.now)
+    with pytest.raises(RunStartError, match="has not finished"):
+        runner.resume(run.snapshot())
+    runner.drive(run, FakeHost(clock))
+    with pytest.raises(RunStartError, match="ended completed"):
+        runner.resume(run.snapshot())
+
+
+def test_resume_refuses_a_failed_run_with_planned_records(
+    validator: _core.Validator,
+) -> None:
+    """A run that fails after deferring keeps its planned record, but it
+    cannot be resumed: the queued action is abandoned (§5.14.1)."""
+    f = load(RUNTIME / "failure_after_deferral.json")
+    run = play(start(validator, f), f)
+    end = run.next()
+    assert end["kind"] == "Failed"
+    assert [r["status"] for r in end["action_records"]] == ["planned"]
+    saved = run.snapshot()
+    with pytest.raises(ValueError, match="failed with R402"):
+        run.resume(now_ms=1)
+    assert run.snapshot() == saved
+
+
+def test_resume_refuses_an_old_state(mandate_runner: WorkflowRunner) -> None:
+    """A state saved before the executor kept which steps ran ahead cannot
+    be resumed: cancel the run and start a new one."""
+    import hashlib
+    import json
+
+    saved, _ = deferred_nightly(mandate_runner)
+    state = json.loads(saved["state"])
+    for frame in state["frames"]:
+        frame.pop("ahead", None)
+    text = _core.canonical_json(state)
+    old = {
+        "state": text,
+        "sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "hmac": None,
+    }
+    with pytest.raises(RunStartError, match="ran after its first deferral"):
+        mandate_runner.resume(old)
+
+
+def test_restore_refuses_another_actor(runner: WorkflowRunner) -> None:
+    a = {"principal": "agent-a", "kind": "agent"}
+    run = runner.start("change_config", {"setting": "x"}, now_ms=1, actor_identity=a)
+    saved = run.snapshot()
+    assert runner.restore(saved, actor_identity=a).next() == run.next()
+    with pytest.raises(RunStartError, match="agent-a"):
+        runner.restore(saved, actor_identity={"principal": "agent-b", "kind": "agent"})
+    anonymous = runner.start("change_config", {"setting": "x"}, now_ms=1).snapshot()
+    with pytest.raises(RunStartError, match="without an actor"):
+        runner.restore(anonymous, actor_identity=a)
+
+
+def test_resume_under_a_new_actor(mandate_runner: WorkflowRunner) -> None:
+    """A handoff of a deferred run: resumed under the agent that took over,
+    which the trace and the queued record show (§5.17)."""
+    clock = Clock()
+    a = {"principal": "agent-a", "kind": "agent"}
+    b = {"principal": "agent-b", "kind": "agent"}
+    run = mandate_runner.start(
+        "nightly_sync",
+        {"setting": "x"},
+        attendance="unattended",
+        now_ms=clock.now,
+        actor_identity=a,
+    )
+    mandate_runner.drive(run, NoMandates(clock))
+    resumed = mandate_runner.resume(run.snapshot(), actor_identity=b)
+    result = mandate_runner.drive(resumed, Approves(clock))
+    [record] = result.action_records
+    assert record["actor_identity"] == b
+    [event] = [t for t in result.trace if t["kind"] == "run_resumed"]
+    assert event["step"] is None
+    assert event["detail"] == {
+        "attendance": "attended",
+        "actor": "agent-b",
+        "previous_actor": "agent-a",
+    }
+
+
+def _played(validator: _core.Validator, name: str) -> tuple[Any, list[dict[str, Any]]]:
+    f = load(RUNTIME / f"{name}.json")
+    seen: list[dict[str, Any]] = []
+    run = play(start(validator, f), f, lambda i, e, a: seen.append(a))
+    return run, seen
+
+
+def test_superseded_records_say_why(validator: _core.Validator) -> None:
+    for name in (
+        "resume_skipped_supersedes",
+        "resume_gate_end_supersedes",
+        "resume_loop_supersedes",
+        "deferral_superseded_by_loop",
+    ):
+        run, _ = _played(validator, name)
+        rejected = [
+            r for r in run.next()["action_records"] if r["status"] == "rejected"
+        ]
+        assert rejected, name
+        assert all(r["reason"].startswith("superseded") for r in rejected), name
+
+
+def test_requests_outside_the_queue_name_no_queued_action(
+    validator: _core.Validator,
+) -> None:
+    """After a recovery loop a step is asked afresh: its request names no
+    queued action (§5.14.1)."""
+    for name in ("resume_loop_supersedes", "resume_deferred_handler_loop"):
+        _, seen = _played(validator, name)
+        requests = [a for a in seen if a["kind"] == "RequestApproval"]
+        assert "queued_action_id" in requests[0], name
+        assert requests[1:], name
+        assert all("queued_action_id" not in a for a in requests[1:]), name
+
+
+def test_refused_approvers_are_named(validator: _core.Validator) -> None:
+    run, _ = _played(validator, "approver_identity_role")
+    [record] = run.next()["action_records"]
+    assert record["approval"]["approvers"] == ["alice"]
+    assert "bob" in record["reason"]
+    assert "role 'ops' is not 'release-manager'" in record["reason"]
+
+
+def test_identities_are_not_kept_without_the_extension(
+    validator: _core.Validator,
+) -> None:
+    run, _ = _played(validator, "approver_identities_without_identity_ext")
+    [record] = run.next()["action_records"]
+    assert "approver_identities" not in record["approval"]
+
+
+def test_contradictory_approver_identities_are_malformed(
+    validator: _core.Validator,
+) -> None:
+    """Two different identities for one principal make a decision malformed:
+    it is refused and changes nothing (§5.17)."""
+    f = load(RUNTIME / "approver_identity_role_met.json")
+    run = start(validator, f)
+    for entry in f["script"]:
+        if entry["expect"]["kind"] == "RequestApproval":
+            break
+        action = run.next()
+        run.submit(action["id"], fill(entry["respond"], action), 0)
+    action = run.next()
+    saved = run.snapshot()
+    alice = {"principal": "alice", "kind": "human", "role": "release-manager"}
+    decision = {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [],
+        "digest": action["digest"],
+        "approver_identities": [alice, {**alice, "role": "ops"}],
+    }
+    with pytest.raises(ValueError, match="two different identities for 'alice'"):
+        run.submit(action["id"], decision, 0)
+    assert run.snapshot() == saved

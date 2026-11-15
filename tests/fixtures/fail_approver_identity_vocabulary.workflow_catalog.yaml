@@ -1,0 +1,35 @@
+# Standard version: 1.2.0
+# Negative fixture (STANDARD v1.2 §5.17): in a workflow that targets 1.2, an
+# empty sender_check and a trust class outside agent_identity's vocabulary.
+# S303.
+approver_identity_vocabulary:
+  goal: Require approvers with an empty and an unknown requirement.
+  risk: high
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [approval@1, identity@1]
+  steps:
+  - capability: checkpoint
+    purpose: Save a restore point before the change.
+    store_as: cp
+    input_bindings:
+      scope: release
+  - capability: constrain
+    purpose: Check the change against the release policy.
+    store_as: policy
+    input_bindings:
+      target: release
+      constraints: [release-policy]
+  - capability: mutate
+    purpose: Apply the release change.
+    store_as: applied
+    input_bindings:
+      target: release
+      operation: {promote: candidate}
+    approval:
+      approver:
+        kind: human
+        sender_check: []
+        accept_trust_classes: [robot]
+  success:
+  - Never valid

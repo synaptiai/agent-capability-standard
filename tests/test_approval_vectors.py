@@ -1,5 +1,6 @@
 """The approval digest vectors (tests/conformance/approval/digests.json,
-STANDARD v1.1.0 §5.14) hold against the reference executor and against a
+STANDARD v1.2.0 §5.14 and §5.18.7, normative under §10.3) hold against the
+reference executor and against a
 computation that uses neither the executor nor the generator: an RFC 8785
 serializer written here, and ``hashlib``.
 
@@ -176,14 +177,22 @@ def test_the_typescript_package_tests_against_this_file() -> None:
     assert not list(BINDING_FIXTURES.glob("*.json"))
 
 
-def test_the_vectors_are_informative_and_named() -> None:
-    assert DOC["standard"] == "1.1.0"
-    assert DOC["section"] == "5.14"
-    assert DOC["status"] == "informative"
+def test_the_vectors_are_normative_and_named() -> None:
+    """§10.3 names the file: its canonical text and digests are normative
+    for §5.14 and §5.18.7."""
+    assert DOC["standard"] == "1.2.0"
+    assert DOC["section"] == "5.14, 5.18.7"
+    assert DOC["status"] == "normative"
     assert len(set(IDS)) == len(IDS)
     for vector in CASES:
         assert set(vector) <= set(DOC["fields"]), vector["name"]
         assert {"name", "kind", "about", "shown", "canonical", "digest"} <= set(vector)
+
+
+def test_every_vector_has_a_known_kind() -> None:
+    """A `step` vector describes a workflow step's request; a `tool_call`
+    vector a tool call's approval, whose shown values are `[call]`."""
+    for vector in CASES:
         assert vector["kind"] in ("step", "tool_call"), vector["name"]
         if vector["kind"] == "step":
             assert "approval" in vector and "call" not in vector, vector["name"]
@@ -217,6 +226,9 @@ def test_the_vectors_cover_what_the_digest_depends_on() -> None:
         next(v for v in CASES if v["name"] == "no_approval_field")["approval"] is None
     )
     assert "recheck" in shown["asked_again_after_recheck"][-1]
+    # A reference that resolves to nothing is null, in its place.
+    assert shown["unresolved_reference"][0] is None
+    assert len(shown["unresolved_reference"]) == 2
 
 
 # ---------------------------------------------------------------------------

@@ -620,5 +620,36 @@
       "V106",
       "S303"
     ]
+  },
+  "pass_approver_identity": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "pass_approver_identity_1_1_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": [
+      "W604",
+      "W616"
+    ]
+  },
+  "fail_approver_identity_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "fail_approver_identity_vocabulary": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303"
+    ]
   }
 }

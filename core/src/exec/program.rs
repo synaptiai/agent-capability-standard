@@ -104,6 +104,10 @@ pub struct Workflow {
     pub raw: Map<String, Value>,
     pub steps: Vec<Step>,
     pub declared: Vec<String>,
+    /// The workflow targets 1.2 or later (§11.5): by its `spec_version`,
+    /// else by the catalog header's version. Rules for 1.2 targets only,
+    /// such as the approver's `sender_check` (§5.17), apply.
+    pub targets_1_2: bool,
 }
 
 impl Workflow {
@@ -148,8 +152,14 @@ fn target(steps: &[Value], name: &str) -> Option<usize> {
 
 impl Program {
     /// Prepare every workflow of the catalog (an `invoke` may name its
-    /// target at run time). The catalog must already have passed validation.
-    pub fn build(ctx: &Context, catalog: &Value, root: &str) -> Result<Program, String> {
+    /// target at run time). The catalog must already have passed validation,
+    /// with `header`, the version its header declares (§11.5).
+    pub fn build(
+        ctx: &Context,
+        catalog: &Value,
+        root: &str,
+        header: Option<&str>,
+    ) -> Result<Program, String> {
         let entries = catalog
             .as_object()
             .ok_or_else(|| "the catalog is not a mapping".to_string())?;
@@ -159,7 +169,10 @@ impl Program {
             if name.starts_with("x-") || !raw.contains_key("steps") {
                 continue;
             }
-            workflows.insert(name.clone(), Self::workflow(ctx, name, raw)?);
+            let mut workflow = Self::workflow(ctx, name, raw)?;
+            workflow.targets_1_2 =
+                crate::validate::semantics::target(raw, header).is_some_and(|t| t >= (1, 2));
+            workflows.insert(name.clone(), workflow);
         }
         if !workflows.contains_key(root) {
             return Err(format!("workflow '{root}' is not in the catalog"));
@@ -213,6 +226,7 @@ impl Program {
             raw: raw.clone(),
             steps,
             declared,
+            targets_1_2: false,
         })
     }
 

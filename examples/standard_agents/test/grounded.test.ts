@@ -338,6 +338,54 @@ describe('approval bound to what was shown', () => {
     expect(await tool.execute(t.state, { version: '1.2.0' })).toMatchObject({ error_code: 'F502' });
   });
 
+  it('records who approved a call as attested identities', async () => {
+    const release = () =>
+      groundedTool({
+        name: 'release',
+        capability: 'execute',
+        description: 'Run the release.',
+        approval: { role: 'release-manager' },
+        args: z.object({ version: z.string() }),
+        execute: async () => ({ result: 'released', success: true, evidence_anchors: [] }),
+      });
+    const alice = {
+      principal: 'sa-user:alice',
+      kind: 'human',
+      role: 'release-manager',
+      authenticated_by: 'x-acs.sa-caller',
+    };
+    // The approvers are principals, and their identities as the deployment
+    // attests them (STANDARD v1.2.0 §5.17).
+    const t = thread();
+    const tool = release();
+    const d = digestOf(await tool.execute(t.state, { version: '1.2.0' }));
+    await decideApproval(t.state, user('alice', ['release-manager']), d, 'approved', Date.now());
+    data(await tool.execute(t.state, { version: '1.2.0' }));
+    expect((await readTrace(t.state)).at(-1)?.approval).toEqual({
+      digest: d,
+      approvers: ['sa-user:alice'],
+      approver_identities: [alice],
+      decision_ids: [expect.any(String)],
+    });
+    // The thread's owner approving is of trust class `owner`.
+    const u = thread();
+    const owned = release();
+    const e = digestOf(await owned.execute(u.state, { version: '1.2.1' }));
+    await decideApproval(u.state, user('alice', ['release-manager']), e, 'approved', Date.now(), undefined, {
+      ownerId: 'alice',
+    });
+    data(await owned.execute(u.state, { version: '1.2.1' }));
+    expect((await readTrace(u.state)).at(-1)?.approval?.approver_identities).toEqual([
+      { ...alice, trust_class: 'owner' },
+    ]);
+    // A caller without the requested role cannot decide at all.
+    const v = thread();
+    const f = digestOf(await release().execute(v.state, { version: '1.2.2' }));
+    await expect(decideApproval(v.state, user('mallory'), f, 'approved', Date.now())).rejects.toThrow(
+      /release-manager/,
+    );
+  });
+
   it('refuses, when the tool is defined, an approval policy §5.14 does not allow', () => {
     const define = (approval: ApprovalPolicy) => () =>
       groundedTool({
@@ -530,7 +578,7 @@ describe('the approval endpoint', () => {
 
     data(await writeConfig.execute(t.state, CHANGE));
     const entry = (await readTrace(t.state)).at(-1);
-    expect(entry?.approval).toMatchObject({ digest: d, approvers: ['alice'] });
+    expect(entry?.approval).toMatchObject({ digest: d, approvers: ['sa-user:alice'] });
   });
 
   it('refuses an anonymous caller, a malformed body and an unknown request', async () => {
@@ -709,7 +757,7 @@ describe('evidence and audit trail', () => {
       [5, 'write_config', 'mutate', 'executed', null],
       [6, 'verify_config', 'verify', 'executed', null],
     ]);
-    expect(trace[4]).toMatchObject({ checkpoint_id: cp['checkpoint_id'], approval: { approvers: ['alice'] } });
+    expect(trace[4]).toMatchObject({ checkpoint_id: cp['checkpoint_id'], approval: { approvers: ['sa-user:alice'] } });
     expect(trace[4]?.evidence_anchors).toHaveLength(2);
     expect(trace[0]?.args_digest).toBe(await digest({}));
   });
@@ -740,7 +788,7 @@ describe('evidence and audit trail', () => {
       action: 'send_report',
       status: 'started',
       checkpoint_id: cp['checkpoint_id'],
-      approval: { approvers: ['alice'] },
+      approval: { approvers: ['sa-user:alice'] },
     });
 
     // A later call to the same tool finishes (refused: the approval is used).

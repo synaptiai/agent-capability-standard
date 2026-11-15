@@ -483,3 +483,29 @@ the foundation, axe passed and the sweep failed on two enforced pages:
 Workstreams should run `npm run check:axe` (or at least
 `node scripts/check-runs.mjs`, with `ACS_CHROMIUM` naming a Chromium) after
 `npm run build` whenever they change the Standard or the site, since CI does.
+
+## 2026-11-15 — S2a (approval, deferral and run identity), for the streams after it
+
+- **Saved state (C34).** S2a does not bump `SNAPSHOT_VERSION`; S2b does,
+  once. S2a's state members (`Frame.resume`, `.parked`,
+  `.pending_escalation`, `.ahead`, `StepState.queued`) are optional and left
+  out while they have their defaults; `Frame.ahead` is `None` while nothing
+  of its frame is deferred. A state with deferrals saved before S2a has no
+  `ahead`, and `Run::resume` refuses it (`ResumeError::NotKept`). S2b's
+  `cancel` clears these members and must accept such a state (S2a part 10).
+- **`Program::build(ctx, catalog, root, header)`** takes the catalog
+  header's version, for `Workflow.targets_1_2` (§11.5 target 1.2 or later).
+  S6's profile policy on `Program` can come in beside it.
+- **Runtime fixture format.** The `resume` script entry and the
+  `"{{digest_upper}}"` placeholder are implemented in `core/tests/runtime.rs`
+  and `tests/runtime_replay.py` (`play()` returns the resumed run), and an
+  entry may expect a run's end before a resumption (`{"expect":
+  {"kind": "Completed", ...}}` without `respond`). The site's
+  `loadRuntimeFixture` reads both (`RuntimeFixture.resumedAt`).
+- **Standard 1.2.0 page figures.** S2a added five site figures (slots
+  `approval-unattended-replay`, `resume-replay`, `resume-skip-replay`,
+  `approver-count`, `digest-vectors`). `digest-vectors` sits after §10.3's
+  paragraph 2 (`after('paragraph', 2, 'The approval digest vectors (tests/confo')`):
+  a stream that adds a §10.3 paragraph before S2a's (S2b, S1 by D2's order)
+  moves that index. `approvalPlans` now finds §5.14's plans list by its
+  "plan → result" items, and `deferral-replay` names list 3 of §5.14.

@@ -775,6 +775,7 @@ impl WorkflowCheck<'_> {
                 step,
                 allows_approval,
                 &declared,
+                semantics::target(self.wf, self.header).is_some_and(|t| t >= (1, 2)),
                 &checker,
                 scope,
                 self.report,

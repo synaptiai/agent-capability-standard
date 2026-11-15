@@ -83,13 +83,16 @@ const o = loadOntology();
 const schema = loadCatalogSchema();
 const KNOWN = ['layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
 const OLDER = ['categories', ...Object.keys(T.TABLE_FIGURES)];
-const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
-const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
+const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'digest-vectors', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
+const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter', 'approver-count'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
   'recovery-replay': 'A recovery that runs out',
   'wait-replay': 'A wait that loses its source',
+  'approval-unattended-replay': 'An approval no one is asked for',
   'deferral-replay': 'What a deferral reaches',
+  'resume-replay': 'What a resumption runs again',
+  'resume-skip-replay': 'A queued step that no longer runs',
 };
 // A link to a numbered section of this page's own Standard (1.0.0's links stay on 1.0.0).
 const sectionLink = (sec: string) => {
@@ -141,6 +144,7 @@ const deleg = slot === 'delegate' ? D.delegateGroups(text, where) : null;
 const quorum = slot === 'quorum' ? D.quorumExample(text, where) : null;
 const trust = slot === 'trust-classes' ? D.trustClassBars(text, where) : [];
 const sender = slot === 'sender-filter' ? D.senderFilter(text, where) : [];
+const approvers = slot === 'approver-count' ? D.approverCount(text, where) : null;
 const shelf = slot === 'schema-shelf' ? T.schemaShelf(text, where) : [];
 const policy = slot === 'merge-thresholds' ? loadIdentityPolicy() : null;
 const mergeBands = policy ? T.mergeBands(policy) : [];
@@ -149,6 +153,7 @@ const families = slot === 'families' ? T.diagnosticFamilies(text, where) : [];
 const heat = slot === 'code-heat' ? T.codeHeat(text, where) : null;
 const levels = slot === 'levels' ? T.conformanceLevels(text, where) : [];
 const suite = slot === 'suite' ? T.conformanceSuite(text, where) : [];
+const digestGroups = slot === 'digest-vectors' ? T.digestVectors(text, where) : [];
 const bumps = slot === 'bumps' ? T.versionBumps(text, where) : [];
 const tree = slot === 'checkpoint-tree' ? T.decisionTree(text, where) : null;
 const pattern = slot.startsWith('pattern-') ? T.patternStrips(text, where)[Number(slot.slice(8))] : null;
@@ -548,6 +553,21 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
     </ol>
   </Figure>
 )}
+{approvers && (
+  <Figure id={idOf('who counts as an approver')} n={n} title={titled('Who counts as an approver')} caption={D.approverCaption(approvers)} kind="approver-count">
+    <ol class="sender">
+      <li class="sender__item">A decision attests {approvers.rows.length} approvers for a <code>{approvers.approver.kind}</code> approver{approvers.approver.role && <> with role <code>{approvers.approver.role}</code></>}, <code>min_approvers</code> {approvers.approver.min}</li>
+      {approvers.rows.map((r) => (
+        <li class="sender__gate" data-counts={String(r.counts)}>
+          <FlowArrow />
+          <p class="sender__check"><PixelGlyph name={r.counts ? 'diamond' : 'close'} /><code>{r.principal}</code></p>
+          <p class="sender__effect">{r.counts ? 'Counts' : 'Does not count'}: {r.why}</p>
+        </li>
+      ))}
+      <li class="sender__item"><FlowArrow /><span>The record lists <code>{approvers.recorded.join(', ')}</code>; the action is {approvers.end}</span></li>
+    </ol>
+  </Figure>
+)}
 {slot === 'quorum-fields' && inner && (
   <Figure id={idOf('quorum fields and their codes')} n={n} title={titled('Quorum fields and the codes they raise')} caption={D.quorumFieldsCaption(D.quorumFieldCodes(text, where))} kind="quorum-fields">
     <Fragment set:html={inner} />
@@ -707,6 +727,15 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
     <ul class="trust-bars suite">
       {suite.map((p) => (
         <li class="trust-bars__row"><a class="suite__label" href={githubTreeUrl(p.dir)}>{p.label}</a><PixelBar value={p.count} max={Math.max(...suite.map((x) => x.count))} /></li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'digest-vectors' && (
+  <Figure id={idOf('the approval digest vectors')} n={n} title={titled('The approval digest vectors')} caption={T.digestCaption(digestGroups)} kind="digest-vectors">
+    <ul class="trust-bars suite">
+      {digestGroups.map((g) => (
+        <li class="trust-bars__row"><a class="suite__label" href={githubBlobUrl(T.DIGEST_VECTORS_SOURCE)}>{g.label}</a><PixelBar value={g.count} max={Math.max(...digestGroups.map((x) => x.count))} /></li>
       ))}
     </ul>
   </Figure>

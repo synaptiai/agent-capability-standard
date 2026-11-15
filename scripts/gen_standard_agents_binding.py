@@ -274,8 +274,10 @@ DIGEST_VECTORS = [
         "numbers",
         "Numbers are written as ECMAScript writes the binary64 value, so"
         " -0.0, 1.0, 1e+21 and 1e-07 in the JSON text of `shown` become 0, 1,"
-        " 1e+21 and 1e-7. 9007199254740992 is 2^53, the bound that section"
-        " 5.14 gives for integers.",
+        " 1e+21 and 1e-7. 9007199254740992 is 2^53, the largest magnitude"
+        " section 5.14 allows for an integer, a number written without a"
+        " fraction or an exponent. 1e+21 is written with an exponent, so it"
+        " is a binary64 value and that bound does not apply to it.",
         {
             "numbers": [
                 0,
@@ -341,6 +343,17 @@ DIGEST_VECTORS = [
         "Two references: `shown` keeps the order of `shows`.",
         "a",
         approval={"approver": HUMAN, "shows": ["${setting}", "${current.data}"]},
+    ),
+    DigestVector(
+        "unresolved_reference",
+        "A `shows` reference that resolves to nothing (here a member the"
+        " retrieved value does not have) is null in `shown`: one element per"
+        " reference, in order.",
+        {"present": 1},
+        approval={
+            "approver": HUMAN,
+            "shows": ["${current.data.absent}", "${current.data}"],
+        },
     ),
     DigestVector(
         "empty_shows",
@@ -602,18 +615,22 @@ def render_digests() -> str:
         raise SystemExit("two digest vectors have the same name")
     doc = {
         "generated_by": ME,
-        "standard": "1.1.0",
-        "section": "5.14",
-        "status": "informative",
+        "standard": "1.2.0",
+        "section": "5.14, 5.18.7",
+        "status": "normative",
         "description": (
-            "Approval digests computed by the reference executor"
-            " (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each"
-            " vector is one approval request. STANDARD v1.1.0 section 5.14"
-            " states that a decision is valid only if the SHA-256 digest of"
-            " the canonical JSON (RFC 8785) of the shown values matches. What"
-            " is shown when a step declares no `shows`, and the object added"
-            " when a step asks again after a recheck, are the reference"
-            " executor's behaviour; the Standard does not state them. This"
+            "Approval digests (STANDARD v1.2.0 sections 5.14 and 5.18.7,"
+            " normative under section 10.3), computed by the reference"
+            " executor (core/src/exec/machine.rs, core/src/exec/canonical.rs)."
+            " Each `step` vector is one approval request of a workflow step;"
+            " each `tool_call` vector is the approval of a tool call. The"
+            " shown values are a JSON array; the digest is the SHA-256 of the"
+            " UTF-8 encoding of their canonical JSON (RFC 8785), as 64"
+            " lowercase hexadecimal digits, compared regardless of case. An"
+            " implementation that computes or checks approval digests"
+            " produces each vector's `canonical` text and `digest` from its"
+            " `shown` values; an executor shows each `step` vector's `shown`"
+            " values, and a safety layer each `tool_call` vector's. This"
             " file is printable ASCII: any other character is written as a"
             " JSON \\u escape, so no tool that normalises or transcodes text"
             " can change a vector."

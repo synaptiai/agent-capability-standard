@@ -79,7 +79,32 @@ the Rust core in `core/`).
   (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`). The
   `domain_*` ones run reference domain workflows. Twenty (`gap*`) are an
   adopter's own scripted runs, kept as contributed in
-  `tests/conformance/contrib/` and copied by the generator.
+  `tests/conformance/contrib/` and copied by the generator. The
+  `approval_*`, `approver_*` and `resume_*` ones pin the approval request
+  for a step with no or a partial `approval` field, the digest comparison,
+  approver identities, and the resumption of a deferred run (§5.14,
+  §5.14.1, §5.17); a script's `resume` entry resumes the run.
+- Approval digest vectors, normative (§10.3):
+  `tests/conformance/approval/digests.json`. Each vector has a `kind`. A
+  `step` vector is one approval request of a workflow step (§5.14): the
+  step's `approval` field (or null), its resolved `inputs` where it declares
+  no `shows`, and the `shown` values; a `tool_call` vector is the approval
+  of a tool call (§5.18.7): the `call` and `shown`, which is `[call]`. Every
+  vector gives the canonical JSON (RFC 8785) of `shown` and the SHA-256
+  digest of that text in lowercase hexadecimal. An implementation that
+  computes or checks approval digests MUST reproduce each vector's
+  `canonical` text and `digest`; an executor MUST show each `step` vector's
+  `shown` values, and a safety layer each `tool_call` vector's. The vectors
+  cover member order, nesting, number forms (2^53, the largest integer
+  magnitude §5.14 allows, and `1e+21`, a binary64 value because it is
+  written with an exponent), text outside ASCII, an empty list, a reference
+  that resolves to nothing, a step that declares no `shows`, and a step
+  asked again after a recheck. `scripts/gen_standard_agents_binding.py`
+  writes the file from runs of the executor, and CI fails when it is out of
+  date. `tests/test_approval_vectors.py` replays each `step` vector on the
+  executor and recomputes the canonical JSON and the digest with a
+  serializer of its own; the TypeScript package (`packages/acs-core/`) tests
+  its digest against the file in place.
 
 ```mermaid
 ---
@@ -101,7 +126,7 @@ Running the suite:
 | Workflow fixtures (`tests/fixtures/`) | `python scripts/run_conformance.py` |
 | Runtime fixtures | `cargo test --test runtime` (in `core/`), `pytest tests/test_runner.py` |
 | Expression fixtures | `cargo test --test expressions` (in `core/`); `tools/cel_differential` against cel-go |
-| Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `examples/standard_agents/` |
+| Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `packages/acs-core/` |
 | Trust vectors | `pytest tests/test_trust.py` |
 
 `scripts/run_conformance.py` runs only the workflow fixtures.
@@ -113,30 +138,10 @@ tests it.
 
 ## Informative vectors
 
-These files are language-neutral and informative: STANDARD-v1.1.0 §10.3 does
+These files are language-neutral and informative: STANDARD-v1.2.0 §10.3 does
 not name them. Each is JSON, describes its own fields, and has one named
 entry per case.
 
-- Approval digests: `tests/conformance/approval/digests.json`. Each vector
-  is one approval request of the reference executor (§5.14): the shown
-  values, their canonical JSON (RFC 8785) and the SHA-256 digest of that
-  text in lowercase hexadecimal. The vectors cover member order, nesting,
-  number forms, text outside ASCII, an empty list, a step that declares no
-  `shows`, and a step asked again after a recheck. Three things the vectors
-  pin are the reference executor's behaviour and are not stated in the
-  Standard: a step with no `shows` shows its resolved inputs wrapped in an
-  array, a step asked again shows one more object, whose `recheck` member
-  holds the previous and the current value of the source, and the digest is
-  written in lowercase hexadecimal. The `numbers` vector holds 2^53
-  (9007199254740992), the bound §5.14 writes as "within ±2^53"; RFC 7493
-  §2.2 gives the range of integers a receiver can treat as exact as
-  ±(2^53 - 1).
-  `scripts/gen_standard_agents_binding.py` writes the file from runs of the
-  executor, and CI fails when it is out of date.
-  `tests/test_approval_vectors.py` replays each vector on the executor and
-  recomputes the canonical JSON and the digest with a serializer of its
-  own. The Standard Agents binding tests its digest against a copy,
-  `examples/standard_agents/test/fixtures/approval-digests.json`.
 - Trust: `tests/conformance/trust/decay.json` (the decay factor of §8.1:
   0.5 at one half-life, which §8.1 requires, `0.5 ** (age / half_life)` at
   other ages, which it recommends, and not below `decay_model.min_trust`),
@@ -154,11 +159,3 @@ entry per case.
   no vector covers them, and each entry says what the reference
   implementation does. `tests/test_trust.py` runs the reference
   implementation, `grounded_agency/trust.py`, against the vectors.
-
-Among the runtime fixtures, `checkpoint_per_mutation` pins what the
-reference executor asks for a step that needs approval and has no `approval`
-field: approver `{kind: human}`, mode `in_session`, the step's resolved
-inputs wrapped in an array, and no expiry. §5.14 does not state this
-request. A fixture's expectation matches by subset, so
-`tests/test_approval_vectors.py` also checks that the approver has no other
-member.

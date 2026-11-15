@@ -103,6 +103,18 @@ class Host:
         standing mandate covers the action): an unattended run then follows
         the step's ``when_unattended``.
 
+        ``action["mode"]`` says where to ask (STANDARD v1.2 §5.14):
+        ``in_session``, whoever attends the run, in its session;
+        ``out_of_band``, through a channel separate from the session, whose
+        approvers need not attend the run (keep the run's snapshot while
+        you wait). A request for a queued action that a resumed run
+        re-entered names it in ``queued_action_id``, the ``action_id`` of
+        its ``planned`` record (§5.14.1). With ``identity@1``, the decision
+        may attest who decided: ``approver_identities``, one
+        ``agent_identity`` per principal, with ``approvers`` empty or
+        exactly their principals (§5.17); approvers are then counted by
+        principal, and only those whose identity meets the request count.
+
         By default a standing mandate is unavailable (this host holds no
         mandates), and any other approver raises ``NotImplementedError``."""
         if action["approver"].get("kind") == "standing_mandate":
@@ -158,6 +170,15 @@ class RunResult:
     def ok(self) -> bool:
         return self.outcome == "completed"
 
+    @property
+    def resumable(self) -> bool:
+        """The run ended ``deferred``: it can be resumed once
+        (:meth:`WorkflowRunner.resume`), which carries out its queued
+        actions (STANDARD v1.2 §5.14.1). The queued actions of a run with
+        any other outcome are never carried out: their ``planned`` records
+        are abandoned."""
+        return self.outcome == "deferred"
+
 
 class RunIncomplete(RuntimeError):
     """The runner stopped before the run finished: it ran out of its action
@@ -185,10 +206,12 @@ class HostResponseError(RunIncomplete):
 
 
 class RunStartError(ValueError):
-    """The run did not start or could not be restored: the catalog does not
-    validate, the inputs do not match the workflow's or are not JSON data,
-    or the snapshot is malformed or fails its HMAC check. ``diagnostics``
-    lists the catalog's errors (empty for the other causes)."""
+    """The run did not start, could not be restored or could not be
+    resumed: the catalog does not validate, the inputs do not match the
+    workflow's or are not JSON data, the snapshot is malformed or fails its
+    HMAC check, the actor is not the run's, or the run did not end
+    deferred. ``diagnostics`` lists the catalog's errors (empty for the
+    other causes)."""
 
     def __init__(self, message: str, diagnostics: list[dict[str, Any]]) -> None:
         super().__init__(message)
@@ -277,24 +300,94 @@ class WorkflowRunner:
             raise _start_error(e) from None
 
     def restore(
-        self, snapshot: Mapping[str, Any], key: bytes | None = None
+        self,
+        snapshot: Mapping[str, Any],
+        key: bytes | None = None,
+        *,
+        actor_identity: Mapping[str, Any] | None = None,
     ) -> _core.Run:
-        """Resume a run from ``run.snapshot(key)``, against the same catalog.
+        """Continue a run from ``run.snapshot(key)``, against the same
+        catalog.
+
+        A run keeps its actor while it continues (STANDARD v1.2 §5.17):
+        name the actor you continue it for with ``actor_identity``, and a
+        principal other than the run's, or any actor for a run started
+        without one, is refused. When another agent takes over the
+        conversation the run belongs to (a handoff), do not continue the run
+        under it: cancel the run if it has not ended and start a new one
+        under the new agent's identity; a run that ended ``deferred`` may
+        instead be resumed under it (:meth:`resume`).
 
         Raises:
             RunStartError: the snapshot is malformed, has an unsupported
                 version, fails its digest or HMAC check, or was taken
-                against another catalog, or the catalog does not validate.
+                against another catalog, the catalog does not validate, or
+                ``actor_identity`` is not the run's actor.
             TypeError: ``key`` is not bytes.
         """
-        if key is not None and not isinstance(key, (bytes, bytearray)):
-            raise TypeError(f"key must be bytes, not {type(key).__name__}")
+        _check_key(key)
         try:
             return _core.Run.restore(
-                self._engine.core_validator(), self.catalog(), dict(snapshot), key
+                self._engine.core_validator(),
+                self.catalog(),
+                dict(snapshot),
+                key,
+                actor_identity=None if actor_identity is None else dict(actor_identity),
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None
+
+    def resume(
+        self,
+        snapshot: Mapping[str, Any],
+        key: bytes | None = None,
+        *,
+        attendance: str = "attended",
+        now_ms: int | None = None,
+        actor_identity: Mapping[str, Any] | None = None,
+    ) -> _core.Run:
+        """Resume a run that ended ``deferred`` from its saved state
+        (STANDARD v1.2 §5.14.1), and return it to drive with :meth:`drive`.
+
+        The run continues as the same run: its deferred steps run again,
+        each asked afresh (of a person when ``attendance`` is attended, even
+        where the approver is a standing mandate), with the steps that ran
+        ahead of them and that they read; a nested run that ended deferred
+        continues; checkpoints taken before are asked for again; and each
+        queued action's ``planned`` record is updated in place, under the
+        same ``action_id``. ``actor_identity`` names a new actor, which the
+        trace and the later records show.
+
+        Resume one saved state once: each resumption could carry out the
+        same queued action. A state saved by an executor before this
+        release cannot be resumed (it did not keep the nested runs of
+        deferred ``invoke`` steps or which steps ran ahead): cancel that run
+        and start a new one.
+
+        Raises:
+            RunStartError: the snapshot cannot be restored, the run did not
+                end ``deferred`` (a run that failed, escalated, needs a
+                replan or was cancelled cannot be resumed, and its queued
+                actions are abandoned), ``actor_identity`` is not an
+                ``agent_identity``, or the state does not keep what resuming
+                needs.
+            TypeError: ``key`` is not bytes, or ``now_ms`` is not an int.
+        """
+        _check_key(key)
+        now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
+        _check_ms(now)
+        # The resumer may be another party than the one that ran the run:
+        # the actor is checked when it is named here, not on restore.
+        run = self.restore(snapshot, key)
+        try:
+            run.resume(
+                attendance=attendance,
+                now_ms=now,
+                actor_identity=None if actor_identity is None else dict(actor_identity),
+            )
+        except (TypeError, ValueError) as e:
+            raise _start_error(e) from None
+        return run
 
     def run(
         self,
@@ -458,6 +551,12 @@ def _start_error(e: TypeError | ValueError) -> RunStartError:
     if isinstance(e, ValueError) and len(e.args) > 1:
         return RunStartError(str(e.args[0]), list(e.args[1] or []))
     return RunStartError(str(e.args[0]) if e.args else str(e), [])
+
+
+def _check_key(key: Any) -> None:
+    """A snapshot key must be bytes."""
+    if key is not None and not isinstance(key, (bytes, bytearray)):
+        raise TypeError(f"key must be bytes, not {type(key).__name__}")
 
 
 def _check_ms(now: Any) -> None:

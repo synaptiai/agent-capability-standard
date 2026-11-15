@@ -78,7 +78,12 @@ describe('run replay (RunReplay, F-S14b, F-S16b, F-S18)', () => {
     script: { expect: { kind: string; capability?: string; step?: number } }[];
     end: { kind: string; code?: string; outcome?: string; deferred?: { step: number; reason?: string }[] };
   };
-  const read = (name: string) => JSON.parse(repoText(`tests/conformance/runtime/${name}.json`)) as Fixture;
+  // The requests of a script: a `resume` entry (§5.14.1) and the end a run
+  // reached before it are not requests.
+  const read = (name: string) => {
+    const f = JSON.parse(repoText(`tests/conformance/runtime/${name}.json`)) as Fixture & { script: Record<string, unknown>[] };
+    return { ...f, script: f.script.filter((x) => 'respond' in x) } as Fixture;
+  };
 
   it.each(Object.values(REPLAY_FIXTURES))('marks %s as its script and end record it', (name) => {
     const f = read(name);
@@ -89,9 +94,12 @@ describe('run replay (RunReplay, F-S14b, F-S16b, F-S18)', () => {
     expect(r.steps.reduce((a, s) => a + s.requests, 0)).toBe(f.script.length);
     // A request that names its step lands on it (fixture steps are 0-based, the figure's 1-based).
     for (const e of f.script.filter((x) => typeof x.expect.step === 'number')) expect(r.steps[e.expect.step!]!.requests).toBeGreaterThan(0);
-    // A request for a capability lands on a step of that capability.
+    // A request for a capability lands on a step of that capability, as
+    // does one that names only its step (an approval, a checkpoint).
     for (const cap of new Set(f.script.map((x) => x.expect.capability).filter(Boolean))) {
-      const want = f.script.filter((x) => x.expect.capability === cap).length;
+      const own = (x: Fixture['script'][number]) =>
+        x.expect.capability === cap || (x.expect.capability === undefined && typeof x.expect.step === 'number' && steps[x.expect.step]!.capability === cap);
+      const want = f.script.filter(own).length;
       expect(r.steps.filter((s) => s.step.capability === cap).reduce((a, s) => a + s.requests, 0), cap).toBe(want);
     }
     // Deferred steps are exactly end.deferred, with its reasons.
@@ -107,6 +115,17 @@ describe('run replay (RunReplay, F-S14b, F-S16b, F-S18)', () => {
     const r = replay('recovery_loop_exhausted');
     expect(r.loops).toHaveLength(plan - 1);
     expect(r.loops[0]).toMatchObject({ from: 2, to: 1, maxLoops: 1 });
+  });
+
+  it('counts the requests after a resumption apart, and does not read the return to a deferred step as a loop', () => {
+    const r = replay('resume_reruns_read_ahead');
+    expect(r.resumes).toBe(1);
+    expect(r.loops).toEqual([]);
+    // retrieve ran ahead of the deferral and again when the run resumed;
+    // the queued mutate ran only then.
+    const byStore = (s: string) => r.steps.find((x) => x.step.store_as === s)!;
+    expect(byStore('r')).toMatchObject({ requests: 2, resumed: 1 });
+    expect(byStore('m')).toMatchObject({ requests: 3, resumed: 3 });
   });
 
   it('gives a step deferred without a reason the reason its own approval plan gives', () => {

@@ -482,17 +482,22 @@ impl PyRun {
         Ok(PyRun { run })
     }
 
-    /// Resume a run from `snapshot()`, against the same catalog. With a key,
-    /// the snapshot's HMAC must match. The catalog's header, and the other
-    /// start options, are the ones the run started with (kept in the state).
+    /// Continue a run from `snapshot()`, against the same catalog. With a
+    /// key, the snapshot's HMAC must match. The catalog's header, and the
+    /// other start options, are the ones the run started with (kept in the
+    /// state). With `actor_identity`, the actor the host continues the run
+    /// for: a principal other than the run's is refused (ValueError), as is
+    /// any actor for a run started without one (STANDARD v1.2 §5.17).
     #[staticmethod]
-    #[pyo3(signature = (validator, catalog, snapshot, key = None, *, catalogs = None, agents = None))]
+    #[pyo3(signature = (validator, catalog, snapshot, key = None, *, actor_identity = None, catalogs = None, agents = None))]
+    #[allow(clippy::too_many_arguments)]
     fn restore(
         py: Python<'_>,
         validator: PyRef<'_, Validator>,
         catalog: &Bound<'_, PyAny>,
         snapshot: &Bound<'_, PyAny>,
         key: Option<Vec<u8>>,
+        actor_identity: Option<&Bound<'_, PyAny>>,
         catalogs: Option<&Bound<'_, PyAny>>,
         agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
@@ -500,14 +505,51 @@ impl PyRun {
         let catalog = catalog_from_py(catalog)?;
         let snapshot: exec::Snapshot = serde_json::from_value(from_py(snapshot)?)
             .map_err(|e| PyValueError::new_err(format!("malformed snapshot: {e}")))?;
+        let options = exec::RestoreOptions {
+            actor_identity: actor_identity.map(from_py).transpose()?,
+        };
         let ctx = &validator.ctx;
         let run = py
-            .detach(|| exec::Run::restore(ctx, &catalog, &snapshot, key.as_deref()))
+            .detach(|| exec::Run::restore_with(ctx, &catalog, &snapshot, key.as_deref(), options))
             .map_err(|e| match e {
                 RestoreError::Start(s) => start_err(py, s),
                 other => PyValueError::new_err(other.to_string()),
             })?;
         Ok(PyRun { run })
+    }
+
+    /// Resume a run that ended `deferred` (STANDARD v1.2 §5.14.1): it
+    /// continues, as the same run, with the steps it deferred, under
+    /// `attendance` from now on and, with `actor_identity`, a new actor
+    /// (§5.17). ValueError when the run did not end deferred, the actor is
+    /// not an `agent_identity`, or the state does not keep what resuming
+    /// needs (a state saved before this executor kept it). Resume one saved
+    /// state once.
+    #[pyo3(signature = (*, attendance = "attended", now_ms, actor_identity = None))]
+    fn resume(
+        &mut self,
+        py: Python<'_>,
+        attendance: &str,
+        now_ms: u64,
+        actor_identity: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        let attendance = match attendance {
+            "attended" => Attendance::Attended,
+            "unattended" => Attendance::Unattended,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "attendance must be 'attended' or 'unattended', not '{other}'"
+                )));
+            }
+        };
+        let options = exec::ResumeOptions {
+            attendance,
+            now_ms,
+            actor_identity: actor_identity.map(from_py).transpose()?,
+        };
+        let run = &mut self.run;
+        py.detach(|| run.resume(options))
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// The pending action, or the terminal one (`Completed`/`Failed`).

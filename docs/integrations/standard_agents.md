@@ -183,7 +183,7 @@ requirement of the other.
 | `synchronize`, quorum ([§5.16](../../spec/STANDARD-v1.1.0.md#516-quorum)) | No agreement or voting construct | ACS only | Built from several children and code that counts |
 | `inquire` | A human-backed side: the session parks until input arrives | Fits | A tool returns the questions and the model puts them to the person in a reply that hands over the turn |
 | Nothing comparable | `parentHooks`: hooks a child requires of its parent, failing closed ([Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks)) | SA only | A grounded child can require its audit hook on whoever composes it |
-| Nothing comparable | Handoff: another agent takes over the same thread | SA only | The end of one actor's run and the start of another's |
+| Nothing comparable | Handoff: another agent takes over the same thread | SA only | The end of one actor's run and the start of another's: the host cancels the source agent's ACS run if it has not ended (§5.17, §5.19.5 of 1.2); a run that ended `deferred` may instead be resumed under the agent that took over (§5.14.1). A saved run is never restored under it |
 | Safety flags of what a delegate may do | No machine-readable statement of a child's effects | ACS only | A parent cannot know that a child mutates. Each agent grounds its own tools |
 
 ### Workflows
@@ -528,10 +528,10 @@ flowchart TB
 
 | §5.14 field | In the binding |
 |---|---|
-| `approver.kind: human` | The authenticated caller of the endpoint. That the caller is a person is the deployment's assertion |
+| `approver.kind: human` | The authenticated caller of the endpoint, recorded as an approver identity per the identity map (`endpoint_caller`): principal `sa-user:<id>`, `kind: human` as the deployment's assertion, `role` when the caller holds the requested one, `authenticated_by: x-acs.sa-caller`, and `trust_class: owner` when the caller owns the thread. The trace entry's `approval` carries `approver_identities` and their principals in `approvers` (§5.17 of 1.2) |
 | `approver.role` | `approval.role`, checked against the caller's `roles` |
 | `approver.min_approvers` | `approval.min_approvers`, an integer of at least 1, counting distinct callers whose approval has not expired |
-| `mode` | Not distinguished: the Standard names `in_session` and `out_of_band` without defining them. The decision always arrives through the endpoint, not the conversation |
+| `mode` | Decisions arrive through an authenticated endpoint, separate from the conversation: `out_of_band` (§5.14 of 1.2) |
 | `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON |
 | `recheck` | Implicit: the digest is recomputed from the arguments at the moment the tool runs |
 | `expires` | `approval.expires_ms`. As in the reference executor, no approval is accepted later than `expires_ms` after the request, and one stored later counts for nothing. Each approval then counts for `expires_ms` after it was given: the executor uses a decision when it arrives, a tool when the model calls again, so a request can be used up to twice `expires_ms` after it was made, however many approvers decide. A rejection is accepted until the request is used or expires, since it can only stop the call |

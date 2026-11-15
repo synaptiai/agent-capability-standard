@@ -309,7 +309,7 @@ and what the decision binds to:
       apply: "${plan_out.steps: array<object>}"
   approval:
     approver: {kind: human, role: release-manager, min_approvers: 2}
-    mode: out_of_band                # or in_session (the default)
+    mode: out_of_band                # a separate channel; in_session (the default): whoever attends the run
     shows: ["${plan_out.steps}"]     # references; quote them inside [ ] and { }
     binds_to: digest
     recheck: {source: "${plan_out}", compare: digest, on_change: reask}
@@ -317,10 +317,28 @@ and what the decision binds to:
     when_unattended: defer_to_queue  # or skip, or fail (the default)
 ```
 
+- `mode` says where the approvers are asked: `in_session` asks whoever
+  attends the run, in its session (the host's permission prompt, the
+  conversation); `out_of_band` asks through a separate channel (a ticket, a
+  message to an approver group), whose approvers need not attend the run,
+  and whose decision may arrive after the session ends. Neither changes
+  what is shown or which decisions are valid, and a `human` approver is
+  never asked in an unattended run, in either mode.
+- With no `approval` field, a step that requires approval is asked of a
+  person (`{kind: human}`), in session, shown its resolved inputs, with no
+  expiry and no recheck, and fails unattended. A partial field takes the
+  default of each member it leaves out; `expires` runs from the request.
 - The decision is bound to the SHA-256 digest of the shown values: if they
   change before the step runs, the approval no longer applies. `recheck`
   re-reads a source just before acting and asks again (`reask`), replans or
   stops when it changed.
+- What the digest covers: the shown values are an array, one element per
+  `shows` reference in order (null when it resolves to nothing), or
+  `[inputs]`, the step's resolved inputs, without `shows`; asked again
+  after a recheck, the array gains `{"recheck": {"previous", "current"}}`.
+  The digest is the SHA-256 of its RFC 8785 text, in lowercase hexadecimal.
+  An integer in the shown values, a number written without a fraction or
+  an exponent, may not exceed 2^53 in magnitude.
 
 
   ```mermaid
@@ -380,7 +398,9 @@ and what the decision binds to:
 
   The `mutate` needs its own `when_unattended`: when the mandate covers
   the send, nothing is deferred, and an unattended run reaches the
-  `mutate` with no one to approve it.
+  `mutate` with no one to approve it. In the morning, the host resumes the
+  run (`runner.resume`, attended): the queued send and `mutate` are asked
+  of a person, and each `planned` record closes under its `action_id`.
 
 
   ```mermaid
@@ -410,11 +430,21 @@ and what the decision binds to:
 - A run that fails or escalates after a deferral still lists its
   deferrals; a recovery loop that runs a deferred step again supersedes
   its earlier `planned` record.
+- **Carrying out a queued action.** Resume the run (`runner.resume`,
+  [STANDARD §5.14.1](../../spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)):
+  the deferred steps run again, each asked afresh (of a person when someone
+  attends, even if its approver is a mandate), and its `planned` record
+  becomes `executed`, `rejected` or `expired` under the same `action_id`.
+  Steps that ran ahead of the deferral and that those steps read run again
+  first, in step order, so a `verify` after the `mutate` reads the world
+  after it; a `checkpoint` step whose id the `mutate` binds runs again too.
+  A run that ended any other way cannot be resumed; a new run of the
+  workflow does not touch the old run's queue.
 - Decisions are recorded on the world state's action record
-  (`world_state_schema.yaml` 1.1.0): status `approved`, `rejected`,
+  (`world_state_schema.yaml` 1.2.0): status `approved`, `rejected`,
   `expired` or `planned`, with an `approval` entry holding the digest,
-  the decision (`approved`, `rejected`, `expired` or `unavailable`) and
-  the approvers.
+  the decision (`approved`, `rejected`, `expired` or `unavailable`), the
+  approvers that counted and, with `identity@1`, their identities.
 
 ## Delegation hints (`delegation@1`)
 
@@ -556,9 +586,41 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
   task routed to the wrong party or a peer answering in its place, not a
   host that lies.
 
+- **Who approved.** Your host may attest who decided an approval: the
+  decision's `approver_identities`, one `agent_identity` per principal.
+  Approvers are then counted by principal, and an identity counts only if
+  it meets the request: kind `human` for a human approver, and the
+  requested `role`. A workflow that targets 1.2 can require authenticated
+  approvers of given trust classes:
+
+  ```yaml
+  spec_version: "1.2"            # the approver fields need a 1.2 target
+  workflow_extensions:
+    requires: [approval@1, identity@1]
+  # ...
+  approval:
+    approver:
+      kind: human
+      role: release-manager
+      min_approvers: 2
+      sender_check: [directory_id]
+      accept_trust_classes: [decision_person]
+  ```
+
+  Each field is a non-empty list from the vocabularies above. With either,
+  a decision without attested identities counts no one, and an identity
+  authenticated another way, or of another class, does not count. The check
+  proves what your host attests, not that an approver is a person. The
+  target matters: in a 1.1 workflow the two fields are unknown (W604, and
+  W616) and nothing applies them, and a 1.1 consumer would ignore them;
+  declared 1.2, the workflow is refused by a 1.1 consumer (V109) instead.
+
 To record who ran a workflow, start the run with an actor identity
 (`WorkflowRunner.run(..., actor_identity=agent.identity())`); every action
-record then carries it. See [Running workflows](RUNNING_WORKFLOWS.md).
+record then carries it. A run keeps that actor: restoring it for another
+principal is refused, and at a handoff to another agent the run is
+cancelled, or, if it ended `deferred`, resumed under the new agent. See
+[Running workflows](RUNNING_WORKFLOWS.md).
 
 ## Review quorums (`quorum@1`)
 

@@ -123,9 +123,12 @@ capability_rulings:
     notes: >
       A delegation yields a separate task whose result returns to the
       delegator; a handoff changes which agent owns the thread. A handoff
-      target is recorded as `delegate` for audit only. An ACS run ends before
-      a handoff and a new run starts under the target's `actor_identity`; a
-      saved run is not restored under the agent that took over.
+      target is recorded as `delegate` for audit only. At a handoff the host
+      cancels the source agent's ACS run if it has not ended (Standard v1.2
+      §5.17, §5.19.5), and a new run starts under the target's
+      `actor_identity`; a run that ended deferred may instead be resumed
+      under the target's identity (§5.14.1), which records the change. A
+      saved run is never restored under the agent that took over.
     rows:
       - tools-contracts#cls-06
       - multi-agent#coord-17

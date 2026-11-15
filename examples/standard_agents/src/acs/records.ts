@@ -14,7 +14,7 @@
  * per entry.
  */
 import type { ThreadState } from '@standardagents/spec';
-import type { Json } from '@synaptiai/acs-core';
+import type { Json, TRUST_CLASSES } from '@synaptiai/acs-core';
 import type { CapabilityId } from './ontology.js';
 
 /** The part of `ThreadState` the binding uses. */
@@ -93,12 +93,32 @@ export function stepOf(state: { execution: { stepCount: number } | null }): numb
   return state.execution?.stepCount ?? null;
 }
 
+/**
+ * Who a party is, as the host authenticated it: an `agent_identity`
+ * (STANDARD v1.2.0 §5.17, `schemas/agent_identity_schema.yaml`).
+ */
+export interface AgentIdentity {
+  principal: string;
+  kind: 'agent' | 'human' | 'service';
+  role?: string;
+  model_family?: string;
+  owner?: string;
+  authenticated_by?: string;
+  trust_class?: (typeof TRUST_CLASSES)[number];
+}
+
 /** One person's answer to an approval request. */
 export interface ApprovalDecision {
   decision_id: string;
   decision: 'approved' | 'rejected';
   /** `ThreadUser.id` of the authenticated caller who decided. */
   approver: string;
+  /**
+   * The caller as an approver identity (§5.17), per the interop identity
+   * map's `endpoint_caller`: see `approverIdentity`. Absent on a decision
+   * an earlier version of the binding stored.
+   */
+  approver_identity?: AgentIdentity;
   at: number;
 }
 
@@ -163,7 +183,13 @@ export interface TraceEntry {
   code?: RefusalCode;
   /** The checkpoint this call used (`requires_checkpoint`) or took (`checkpoint`). */
   checkpoint_id?: string;
-  approval?: { digest: string; approvers: string[]; decision_ids: string[] };
+  /**
+   * The approval the call used. `approvers` are the approvers' principals
+   * (`sa-user:<id>`), and `approver_identities` their identities, as the
+   * deployment attests them (STANDARD v1.2.0 §5.17); the identities are
+   * absent when a decision was stored without one.
+   */
+  approval?: { digest: string; approvers: string[]; approver_identities?: AgentIdentity[]; decision_ids: string[] };
   evidence_anchors?: Json[];
   /** Filled in by the `tool_call_done` hook: a tool cannot see its own call id. */
   tool_call_id?: string;

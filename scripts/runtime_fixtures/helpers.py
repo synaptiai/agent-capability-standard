@@ -56,3 +56,15 @@ POLICY = st(
     "policy",
     input_bindings={"target": "config", "constraints": ["policy"]},
 )
+
+
+def resume(attendance="attended", at=None, actor=None):
+    """A script entry that resumes a run that ended deferred (STANDARD v1.2
+    §5.14.1): with `attendance` from then on, at time `at` (default: the
+    script's time so far) and, with `actor`, a new actor_identity."""
+    r = {"attendance": attendance}
+    if at is not None:
+        r["at"] = at
+    if actor is not None:
+        r["actor_identity"] = actor
+    return {"resume": r}

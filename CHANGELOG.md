@@ -32,8 +32,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   verifies old and new lines in one chain.
 - `schemas/interop/oasf_mapping.yaml`: `meta.grounded_agency_version` is
   replaced by `meta.agent_capability_standard.standard` and `.ontology`.
+- Standard Agents binding: a trace entry's `approval.approvers` (and
+  `GroundedCall.approvers`) are now the approvers' principals,
+  `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
+  `approval.approver_identities`; compare approvers by principal.
+  `decideApproval` takes an optional last argument, `ApproverOptions`
+  (`kind`, `ownerId`). Decisions stored by an earlier version have no
+  identity, and a call that uses one records no `approver_identities`.
+- Reference executor: the saved state of a run that deferred steps holds two
+  more members (`ahead`, and `parked` for a nested run that ended deferred);
+  a state with deferrals that an earlier version saved still restores, but
+  cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
+  new one. The state of a run that never deferred is unchanged.
 
 ### Added
+- Standard 1.2.0, approval, deferral and run identity
+  ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part A;
+  findings ACS-10, ACS-11, ACS-12, ACS-13, ACS-35, ACS-44):
+  - §5.14 states the request for a step with no or a partial `approval`
+    field, what the approval digest is computed over (the shown array,
+    RFC 8785, lowercase hexadecimal, compared regardless of case), the
+    integer bound as the executor applies it, and the meaning of
+    `in_session` and `out_of_band`. `tests/conformance/approval/digests.json`
+    is normative under §10.3, with a vector for a `shows` reference that
+    resolves to nothing.
+  - Resuming a deferred run (§5.14.1): `_core.Run.resume`,
+    `WorkflowRunner.resume` and `RunResult.resumable`. The deferred steps
+    run again as the same run, with the steps that ran ahead of them that
+    they read and a checkpoint step a queued mutation binds; a nested run
+    that ended deferred continues; a queued step is asked afresh (of a
+    person when attended), its request names `queued_action_id`, and its
+    `planned` record is updated in place. Trace kinds `run_resumed` and
+    `invoke_resumed`.
+  - With `identity@1`, an approval decision may attest its approvers
+    (`approver_identities`); approvers are then counted by principal and
+    checked against the requested kind and role, and the record lists the
+    approvers that counted (`ActionRecord.approval.approver_identities`). In
+    a workflow that targets 1.2, the approver may require `sender_check`
+    and `accept_trust_classes` (V106 without `identity@1`, S303 when
+    malformed); in an earlier target they stay unknown fields (W604) and
+    get W616.
+  - A run keeps its actor (§5.17): `Run.restore` and
+    `WorkflowRunner.restore` take `actor_identity` and refuse another
+    principal; a resumption may name a new actor, which the trace and later
+    records show.
+  - 30 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
+    `resume` entry and the `{{digest_upper}}` placeholder) and four
+    validator fixtures (`*approver_identity*`).
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
   a mapping of this standard against the Standard Agent Specification 0.2.0,
   how to build a grounded agent on it, and the changes proposed to each

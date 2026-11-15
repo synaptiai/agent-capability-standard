@@ -85,7 +85,7 @@ flowchart TB
 | `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` (any other code is read as R402) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
-| `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
+| `RequestApproval` | asks `approver` about `shown`, in `mode`: `in_session`, whoever attends the run, in its session; `out_of_band`, a separate channel whose approvers need not attend the run (keep the run's snapshot while you wait). `queued_action_id` names the queued action a resumed run is asking about, on every such request ([Resuming a deferred run](#resuming-a-deferred-run)) | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable`; with `identity@1`, optionally `approver_identities` (each an `agent_identity`, one per principal; `approvers` then empty or their principals) |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
 | `AwaitEvent` | waits for a matching event until `deadline` (a waiting delegate whose host attested who took it names that principal as `delegate_principal`: only its results count) | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's), `{"kind": "LivenessLost"}` (R406), or `{"kind": "Error", "code": "R401"/"R402"/"R406", "message": ...}` (any other code is read as R402) |
 | `Sleep` | waits until `until` (retry backoff, or a step's `delay`) | — (the runner calls `tick`) |
@@ -162,6 +162,24 @@ ontology contract requires, or the step fails (R402).
   `unavailable` is F502. The default `Host` holds no mandates: it answers
   `unavailable` for one. `recheck` re-reads a source before acting, then
   asks again (showing what changed), replans or stops if it changed.
+  A step with no `approval` field is asked of a person, in session, shown
+  its resolved inputs, with no expiry; a partial field takes the default of
+  each member it leaves out, and `expires` runs from the request. What is
+  shown is an array: the `shows` values in order (null for a reference that
+  resolves to nothing), or `[inputs]` without `shows`, plus a `recheck`
+  object when asked again; the digest is the SHA-256 of its RFC 8785 text in
+  lowercase hexadecimal, and a decision's digest is accepted in any case.
+  An integer, a number written without a fraction or an exponent, may not
+  exceed 2^53 in magnitude.
+  With `identity@1`, a decision that attests its approvers
+  (`approver_identities`) is counted by principal, and an identity counts
+  only if it meets the request: kind `human` for a human approver, the
+  requested `role`; the record lists the approvers that counted and their
+  identities, and a refused decision's `reason` names the others. In a
+  workflow that declares `spec_version: "1.2"`, the approver may also
+  require `sender_check` and `accept_trust_classes`, and a decision without
+  identities then counts no one. A run that ends `deferred` can be resumed:
+  see [Resuming a deferred run](#resuming-a-deferred-run).
   Every approval leaves an action record, with a `reason` when the action
   did not go ahead. A step that uses, directly or through other steps, an
   item from one of the `always_ask_trust_classes` of `identity@1` (or with
@@ -247,6 +265,12 @@ Start a run with `actor_identity=` (an `agent_identity`, such as
 every action record then carries it as `actor_identity`, and `actor` is its
 `kind`.
 
+A run keeps its actor: restore it with `actor_identity=` and the executor
+refuses another principal. When another agent takes over the conversation
+(a handoff), cancel the run if it has not ended, and start a new one under
+the new agent's identity; a run that ended `deferred` may instead be
+resumed under it.
+
 `RunResult` gives the `outcome` (`completed`, `escalated`, `deferred`,
 `replan_required`) or the failure `code`, `ended` when a gate ended the
 run early, plus the outputs, the action
@@ -287,7 +311,7 @@ Every trace event is an object with these six fields:
 | `at` | integer | The run's clock when the event was recorded: the latest time the host passed, in milliseconds since the epoch |
 | `kind` | string | One of the kinds below |
 | `frame` | array of strings | The workflows of the nested runs, root first, as on an action |
-| `step` | integer or null | Index of the step in its workflow, from 0; null on `run_started` and `run_finished` |
+| `step` | integer or null | Index of the step in its workflow, from 0; null on `run_started`, `run_resumed` and `run_finished`, and on `checkpoints_invalidated` when a resumption invalidates them |
 | `detail` | object | Members that depend on the kind; an empty object for a kind that has none |
 
 ### Trace kinds
@@ -316,7 +340,7 @@ members of its `detail`.
 | `recheck` | The source named by `approval.recheck` was read again after approval | `changed` |
 | `checkpoint_created` | A checkpoint is recorded: the host answered `CreateCheckpoint`, or a `checkpoint` step completed | `checkpoint_id` |
 | `checkpoint_consumed` | A step that requires a checkpoint uses the latest valid one | `checkpoint_id` |
-| `checkpoints_invalidated` | A completed wait or delay ends the validity of earlier checkpoints | `checkpoint_ids` |
+| `checkpoints_invalidated` | A completed wait or delay, or a resumption, ends the validity of earlier checkpoints | `checkpoint_ids` |
 | `rolled_back` | The host answered a `Rollback` that a gate or a failure mode asked for | none |
 | `event_dropped` | A wait receives an event that does not match; recorded once per reason for each wait | `reason` |
 | `event_received` | A wait receives its matching event; `dropped` counts the dropped events by reason | `event_type`, `dropped` |
@@ -331,6 +355,8 @@ members of its `detail`.
 | `escalated` | The run goes to a handler step; `cause` is the code that led there | `handler`, `cause` |
 | `run_finished` | The run ends with an outcome; `cause` is the code that led to an escalation, null without one, and absent when the run ends `replan_required` | `outcome`, `cause` |
 | `run_failed` | The run ends with a failure code | `code`, `message` |
+| `run_resumed` | A host resumes a run that ended `deferred` (§5.14.1); `actor` and `previous_actor` are principals or null | `attendance`, `actor`, `previous_actor` |
+| `invoke_resumed` | A resumed run continues the nested run of a deferred `invoke` step | `workflow` |
 
 `gate`, `failure_mode` and `handler` are indexes, from 0, into the step's
 `gates`, the step's `failure_modes` and the workflow's `steps`.
@@ -388,6 +414,66 @@ flowchart TB
   sb -.->|across processes or days| snap["run.snapshot(key), then runner.restore(): refuses a tampered one"]
 ```
 
+### Resuming a deferred run
+
+A run that ends `deferred` (`result.resumable`) has queued actions: steps
+that waited for an approval nobody could give at the time, and the steps
+that depend on them. Keep its snapshot with your queue entries, and resume
+it when the approvers can be asked
+([STANDARD §5.14.1](../../spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)):
+
+```python
+run = runner.start("nightly_sweep", inputs, attendance="unattended")
+result = runner.drive(run, host)
+if result.resumable:
+    saved = run.snapshot(key=b"secret")   # keep it with the queue entries
+# ... later, when the approvers can be asked, once per saved state:
+run = runner.resume(saved, key=b"secret", attendance="attended",
+                    actor_identity=operator_identity)
+result = runner.drive(run, host)
+```
+
+The resumed run is the same run, with the same `run_id`, records and
+trace. What runs again, in step order:
+
+- the deferred steps, each from its beginning (condition, gates, inputs,
+  approval, checkpoint);
+- a step that ran ahead of them and that one of them reads, so a `verify`
+  after the `mutate` reads the world after the change;
+- a `checkpoint` step whose id a queued mutation binds, for a fresh restore
+  point.
+
+Every other step keeps its output. A nested run that ended deferred
+continues where it stopped, and a deferred handler runs last. Checkpoints
+taken before the resumption authorise nothing after it, so the host is
+asked for new ones. A queued step is asked afresh, of a person when the
+resumption is attended, even where its approver is a standing mandate, and
+the request names its queued action in `queued_action_id`; the `planned`
+record of that action is updated in place, under the same `action_id`, so
+the queue entry you hold closes on it.
+
+Resume a saved state once: each resumption could carry out the same queued
+action. A run that failed, escalated or needs a replan cannot be resumed:
+its `planned` records are abandoned, so close your queue entries for them,
+and start a new run if the work is still wanted. A state saved by an
+executor before this release cannot be resumed (it did not keep the nested
+runs of deferred `invoke` steps or which steps ran ahead): `resume` refuses
+it; cancel the run and start a new one.
+
+```mermaid
+---
+title: Resuming a deferred run
+---
+flowchart TB
+  accDescr: A run that ended deferred is saved; later it is resumed once, as the same run; its deferred steps run again with the steps they read, each queued step is asked afresh and its planned record is updated in place; a run that ended any other way cannot be resumed, and its queued actions are abandoned.
+  end1["Run ends deferred"] --> save["Save its snapshot"]
+  save --> res["runner.resume(), once"]
+  res --> again["Deferred steps run again, with what they read"]
+  again --> ask["Each queued step asked afresh"]
+  ask --> rec["Its planned record updated in place"]
+  other["Run ends otherwise"] --> gone["Not resumable: queued actions abandoned"]
+```
+
 ## Conformance
 
 `tests/conformance/runtime/*.json` are scripted runs. Each one has a
@@ -405,7 +491,11 @@ contributed): nested invocations, gate
 that loops, an escalation and unattended deferral, end to end. Fixtures
 an adopter wrote themselves (`gap*`) are the exception: edit them in
 `tests/conformance/contrib/`, where they are kept as sent; the generator
-checks their keys and copies them in.
+checks their keys and copies them in. A script entry
+`{"resume": {"attendance", "at", "actor_identity"}}` (each member optional)
+saves the run, restores it and resumes it, and a response may write
+`"{{digest_upper}}"` for the pending action's digest in uppercase, beside
+`"{{digest}}"`.
 
 
 ```mermaid
@@ -421,10 +511,14 @@ flowchart TB
 ```
 
 A host that computes an approval digest itself, to check a decision before
-it submits it or to record what a person approved, can test that
-computation against `tests/conformance/approval/digests.json`. Each vector
-there is one `RequestApproval` of the reference executor: the `shown`
-values, their canonical JSON (RFC 8785) and the `digest`, including what
-the executor shows for a step that declares no `shows`. The file and the
-trust vectors beside it (`tests/conformance/trust/`) are described under
+it submits it or to record what a person approved, tests that computation
+against `tests/conformance/approval/digests.json`, which is normative
+([STANDARD §10.3](../../spec/STANDARD-v1.2.0.md#103-conformance-testing)).
+Each vector has a `kind`: a `step` vector is one `RequestApproval` of the
+reference executor (the step's `approval` field, its resolved `inputs` where
+it declares no `shows`, and the `shown` values), and a `tool_call` vector the
+approval of a tool call; each gives the canonical JSON (RFC 8785) of `shown`
+and the `digest`. The file is described under
+[Test suite requirements](../../spec/CONFORMANCE.md#test-suite-requirements),
+and the trust vectors beside it (`tests/conformance/trust/`) under
 [Informative vectors](../../spec/CONFORMANCE.md#informative-vectors).

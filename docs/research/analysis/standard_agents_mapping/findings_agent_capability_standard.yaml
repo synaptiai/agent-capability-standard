@@ -448,14 +448,14 @@ findings:
     step''s inputs in a one-element array, and expires_at None. Read core/src/exec/machine.rs lines 716-762
     and the script of tests/conformance/runtime/checkpoint_per_mutation.json, whose first RequestApproval
     expectation holds `kind`, `step`, `mode` and `shown`.'
-  status: partly_fixed
-  resolution: 'scripts/gen_runtime_fixtures.py: both approval requests of the runtime fixture checkpoint_per_mutation
-    (two `mutate` steps with no `approval` field) now expect approver `{kind: human}`, mode `in_session`,
-    the step''s resolved inputs in an array and `expires_at: null`. The regenerated fixture passes `--check`,
-    `cargo test --test runtime` and tests/test_runner.py. Fixture matching is by subset, so tests/test_approval_vectors.py
-    also checks that the approver has no other member. Executor behaviour is unchanged. Remaining: STANDARD
-    §5.14 still does not state what is asked for a step whose effective `requires_approval` is true and
-    that declares no `approval` field. That is normative text and needs an RFC; the fixture is informative.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14 ("The request") states it: a step whose effective `requires_approval` is
+    true and that declares no `approval` field is asked as if it declared `approval: {approver: {kind:
+    human}}` (a person, `in_session`, shown its resolved inputs as an array, no expiry, no recheck,
+    `when_unattended: fail`); a partial field takes the default of each member it omits; `expires` runs from
+    the request. Appendix D.2 lists it as a clarification of 1.1. The runtime fixtures
+    checkpoint_per_mutation and approval_defaults_partial pin it, and tests/test_approval_vectors.py checks
+    the exact approver. RFC-0006 Part A, decision A1.'
   concerns:
   - approval-human
   related:
@@ -492,18 +492,16 @@ findings:
     (ten vectors of `shown` and `digest` when this was verified, 16 now) and its generator, scripts/gen_standard_agents_binding.py lines
     174-300, which runs the reference executor; .github/workflows/ci.yml lines 92-93 check that the file
     is current.
-  status: partly_fixed
-  resolution: 'tests/conformance/approval/digests.json holds 16 approval requests of the reference executor,
-    written by scripts/gen_standard_agents_binding.py (CI runs it with `--check`): shown values, RFC 8785
-    canonical JSON and lowercase hexadecimal SHA-256, covering member order, nesting, number forms, non-ASCII
-    text, an empty list, a step without `shows`, a step without `approval` and a re-ask after a recheck.
-    tests/test_approval_vectors.py replays each on the executor and recomputes text and digest independently.
-    The binding''s fixture is a byte copy. spec/CONFORMANCE.md lists the vectors as informative and names
-    what the Standard does not state. Remaining: STANDARD §5.14 does not state the digest input (the array
-    of resolved `shows` values, the default when `shows` is absent, the object appended on a re-ask) or
-    the lowercase hexadecimal form, and §10.3 does not cite the vectors; both are normative text and need
-    an RFC. §5.14 bounds shown integers at ±2^53 while RFC 7493 §2.2 gives ±(2^53 - 1) as the exact range;
-    the `numbers` vector holds 2^53.'
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14 ("Shown values and digest") states the input (the array of resolved
+    `shows` values in order, null for a reference that resolves to nothing, `[inputs]` without `shows`, a
+    `recheck` element on a re-ask), the SHA-256 of its RFC 8785 text as 64 lowercase hexadecimal digits
+    compared regardless of case, and the integer bound as applied (a number written without fraction or
+    exponent, magnitude at most 2^53; every other number binary64, so `1e+21` is valid). §10.3 makes
+    tests/conformance/approval/digests.json normative, with a `kind` per vector and a new
+    `unresolved_reference` vector; tests/test_approval_vectors.py and
+    packages/acs-core/test/canonical.test.ts check it, and the runtime fixtures approval_digest_any_case and
+    approval_shows_unresolved pin the comparison and the null element. RFC-0006 Part A, decision A2.'
   concerns:
   - approval-human
   related:
@@ -537,9 +535,17 @@ findings:
     lines 373-412, core/src/exec/machine.rs lines 742-780 and 983-1030, core/src/exec/mod.rs lines 202-229
     and Standard Agent Specification endpoints.md lines 98-105. The record also proposes that `approval.approver`
     may bind `sender_check` and `accept_trust_classes`.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.17 ("Approvers"): with `identity@1` a decision may carry
+    `approver_identities`; approvers are counted by principal, an identity counts only if its kind is
+    `human` for a human approver and its `role` is the requested one, and two different identities for one
+    principal make the decision malformed. In a workflow that targets 1.2 the approver may require
+    `sender_check` and `accept_trust_classes` (V106, S303; W604 and W616 in an earlier target). The record
+    lists the counted approvers and `approval.approver_identities` (schemas/world_state_schema.yaml 1.2.0).
+    core/src/exec/machine.rs (decide, meets), core/src/validate/approval.rs; runtime fixtures `approver_*`,
+    validator fixtures `*approver_identity*`, core/tests/runtime.rs decision_identities_must_be_well_formed.
+    The Standard Agents binding records each approver as an identity
+    (examples/standard_agents/src/acs/approval.ts approverIdentity). RFC-0006 Part A, decision A4.'
   concerns:
   - approval-human
 - id: ACS-13
@@ -572,9 +578,14 @@ findings:
   verified: Ran the greps listed under searched; read spec/STANDARD-v1.1.0.md lines 844-902, the `defer`
     and `queue` passages of spec/RFC-0003-orchestration-extensions.md (lines 236-311) and of both guides,
     grounded_agency/_core.pyi lines 40-68, and core/src/exec/machine.rs lines 783-862 and 967-981.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14.1 defines resumption: a run that ended `deferred` continues as the same
+    run; its deferred steps run again, with the steps that ran ahead of them that they read and a checkpoint
+    step whose invalidated checkpoint a re-entered mutation binds; a nested deferred run continues; a queued
+    step is asked afresh (of a person when attended) with `queued_action_id`, and its `planned` record is
+    updated in place; the queued actions of a run that did not end `deferred` are abandoned. `Run.resume`
+    (core/src/exec/mod.rs, machine.rs), `_core.Run.resume`, `WorkflowRunner.resume`; sixteen `resume_*`
+    runtime fixtures, core/tests/runtime.rs and tests/test_runner.py. RFC-0006 Part A, decision A5.'
   concerns:
   - approval-human
 - id: ACS-14
@@ -1423,9 +1434,14 @@ findings:
     the snapshot state holds that identity; `Run.restore` rejected an `actor_identity` argument with TypeError;
     the restored run completed and both of its action records carry `agent-a`. Read core/src/exec/mod.rs
     lines 494-517 and 684-700.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.17 ("Actor"): a run keeps its actor while it continues; a restore that names
+    an actor of another principal (or any actor for a run started without one) is refused; at a handoff the
+    host cancels the run unless it ended `deferred`, which may be resumed under the new actor.
+    `Run.restore_with` and `_core.Run.restore(actor_identity=)`, `WorkflowRunner.restore(actor_identity=)`,
+    `Run.resume` with a new actor (trace `run_resumed`); core/tests/runtime.rs restore_checks_the_actor,
+    tests/test_runner.py, runtime fixture resume_new_actor. docs/integrations/standard_agents.md and
+    schemas/interop/standard_agents_mapping.yaml state the handoff rule. RFC-0006 Part A, decision A6.'
   concerns:
   - multi-agent
 - id: ACS-36
@@ -1813,9 +1829,14 @@ findings:
   verified: Ran the greps listed under searched and read each matching line. In core/src/exec/machine.rs
     the value is read at line 761 for the request and at lines 1013 and 2150 for the record, each with
     the default `in_session`, and nowhere else.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'spec/STANDARD-v1.2.0.md §5.14 ("Modes") defines `in_session` (the party attending the run, in its
+    session) and `out_of_band` (a separate channel whose approvers need not attend the run), says the mode
+    changes neither the shown values, the digest nor which decisions are valid, and keeps the 1.1 rule that
+    a human approver is never asked in an unattended run; out-of-band approval of an unattended run''s
+    action is `defer_to_queue` and resumption (§5.14.1). schemas/workflow_catalog.schema.json and
+    schemas/world_state_schema.yaml describe both values; the runtime fixture
+    approval_out_of_band_unattended pins the unattended rule. RFC-0006 Part A, decision A3.'
   concerns:
   - approval-human
 - id: ACS-45

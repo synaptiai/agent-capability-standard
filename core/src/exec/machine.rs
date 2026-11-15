@@ -7,7 +7,8 @@ use super::program::{GateAction, Program, Step, Workflow};
 use super::quorum;
 use super::{
     Action, Attendance, Body, Checkpoint, Deferral, Frame, MAX_FRAMES, MAX_TIME, Outcome, Pending,
-    Purpose, Replacement, Response, Stage, State, StepError, StepState, SubmitError, check_inputs,
+    Purpose, Replacement, Response, ResumeOptions, Stage, State, StepError, StepState, SubmitError,
+    check_inputs,
 };
 use crate::duration;
 use crate::expr::ast::RefAt;
@@ -219,6 +220,13 @@ struct Asked<'s> {
     digest: &'s str,
     expires_at: Option<u64>,
     min: u64,
+    /// The approver as the request named it (§5.14): a person asked in
+    /// place of a mandate has no `mandate_ref`.
+    approver: &'s Value,
+    /// `identity@1`: the identities the decision attested (§5.17), checked
+    /// by `submit`; `None` when it carried none or the workflow does not
+    /// declare the extension.
+    identities: Option<Vec<Value>>,
 }
 
 pub(crate) struct Machine<'a> {
@@ -274,6 +282,38 @@ impl<'a> Machine<'a> {
     }
 
     fn record(&mut self, status: &str, approval: Option<Value>) -> usize {
+        // A queued step a resumption re-entered continues its queued
+        // action: its `planned` record is updated in place (§5.14.1).
+        if let Some(r) = self.frame().cur.queued.take()
+            && self.st.records[r]["status"] == "planned"
+        {
+            let always_ask = self.always_ask();
+            let now = iso(self.st.now);
+            let actor = self.st.actor_identity.clone();
+            // check_state keeps every record an object.
+            let Some(record) = self.st.records[r].as_object_mut() else {
+                return r;
+            };
+            record.insert("status".into(), json!(status));
+            record.insert("timestamp".into(), json!(now));
+            record.insert("actor".into(), json!("agent"));
+            record.remove("actor_identity");
+            if let Some(identity) = actor {
+                record.insert("actor".into(), identity["kind"].clone());
+                record.insert("actor_identity".into(), identity);
+            }
+            if always_ask {
+                record.insert("always_ask".into(), json!(true));
+            } else {
+                record.remove("always_ask");
+            }
+            match approval {
+                Some(a) => record.insert("approval".into(), a),
+                None => record.remove("approval"),
+            };
+            record.remove("reason");
+            return r;
+        }
         let step = self.frame_ref().step;
         let purpose = self
             .step_ref()
@@ -450,8 +490,28 @@ impl<'a> Machine<'a> {
         self.next_step()
     }
 
-    /// After a step: the next one, or the end of an escalation.
+    /// After a step: the next one, or the end of an escalation. During a
+    /// resumption, the next step of its list (§5.14.1).
     fn next_step(&mut self) -> Flow {
+        self.settle_queued();
+        if let Some(list) = self.frame_ref().resume.clone() {
+            if let Some(&next) = list.first() {
+                let f = self.frame();
+                f.step = next;
+                f.stage = Stage::Begin;
+                return Flow::Continue;
+            }
+            self.frame().resume = None;
+            if self.frame_ref().escalation.is_none() {
+                // The list is done: every later step ran before the deferral
+                // (or a gate ended the run), and its output stands.
+                let len = self.workflow().steps.len();
+                let f = self.frame();
+                f.step = len;
+                f.stage = Stage::Begin;
+                return Flow::Continue;
+            }
+        }
         if let Some(cause) = self.frame_ref().escalation.clone() {
             // A handler that was deferred (or whose nested run deferred
             // steps) did not finish handling: the run is deferred, not
@@ -477,6 +537,15 @@ impl<'a> Machine<'a> {
         let step = self.frame_ref().step;
         self.trace_step("run_ended", json!({"message": message}));
         self.frame().ended = Some(json!({"step": step, "message": message}));
+        // During a resumption, the queued steps after it, and a deferred
+        // handler, will not run: their queued actions are superseded.
+        if let Some(left) = self.frame().resume.take() {
+            self.supersede_queued(
+                &left,
+                "superseded: a gate ended the resumed run before the step",
+            );
+        }
+        self.frame().pending_escalation = None;
         if self.frame_ref().escalation.is_some() {
             return self.next_step();
         }
@@ -510,6 +579,7 @@ impl<'a> Machine<'a> {
     /// The top frame ends: the run ends, or the parent's invoke step gets
     /// the result.
     fn end_frame(&mut self, end: Result<(Outcome, Option<String>), Fail>) -> Flow {
+        self.settle_queued();
         // A run that completed with deferred steps ends deferred.
         let end = match end {
             Ok((Outcome::Completed, cause)) if !self.frame_ref().deferred.is_empty() => {
@@ -605,16 +675,28 @@ impl<'a> Machine<'a> {
                     .deferred
                     .iter()
                     .map(|&d| wf.steps[d].capability.clone())
-                    .chain(child.nested_caps.into_values().flatten())
+                    .chain(
+                        child
+                            .deferred
+                            .iter()
+                            .filter_map(|d| child.nested_caps.get(d))
+                            .flatten()
+                            .cloned(),
+                    )
                     .collect();
                 caps.sort_unstable();
                 caps.dedup();
                 let step = self.frame_ref().step;
-                self.frame().nested_caps.insert(step, caps);
-                self.defer_step(&format!(
-                    "invoked workflow '{}' deferred steps",
-                    child.workflow
-                ))
+                let why = format!("invoked workflow '{}' deferred steps", child.workflow);
+                // Kept, at rest, so that a resumption continues it (§5.14.1).
+                let mut child = child;
+                child.stage = Stage::Begin;
+                child.step = wf.steps.len();
+                child.cur = StepState::default();
+                let f = self.frame();
+                f.nested_caps.insert(step, caps);
+                f.parked.insert(step, child);
+                self.defer_step(&why)
             }
             Ok((outcome, _)) => self.finish_run(outcome),
             Err(Fail { code, message, .. }) => self.exec_error(
@@ -630,8 +712,22 @@ impl<'a> Machine<'a> {
     // ---- stages ----
 
     fn begin(&mut self) -> Flow {
+        let index = self.frame_ref().step;
+        // A resumption runs its list in order (§5.14.1): this step leaves
+        // it. A deferred handler reached so takes up the escalation it was
+        // deferred under, before the handler check below reads it.
+        if self.frame_ref().resume.as_ref().and_then(|l| l.first()) == Some(&index) {
+            let handler = self.step_ref().handler;
+            let f = self.frame();
+            if let Some(list) = f.resume.as_mut() {
+                list.remove(0);
+            }
+            if handler && let Some(cause) = f.pending_escalation.take() {
+                f.escalation = Some(cause);
+            }
+        }
         let escalating = self.frame_ref().escalation.is_some();
-        let (index, count) = (self.frame_ref().step, self.workflow().steps.len());
+        let count = self.workflow().steps.len();
         if !escalating {
             if index >= count {
                 return self.end_frame(Ok((Outcome::Completed, None)));
@@ -656,6 +752,13 @@ impl<'a> Machine<'a> {
             replaces,
             ..StepState::default()
         };
+        // A step that begins while a deferral of its own is listed is one a
+        // resumption re-enters: it continues that queued action (§5.14.1).
+        let path: Vec<usize> = self.st.frames.iter().map(|f| f.step).collect();
+        if let Some(pos) = self.st.deferrals.iter().position(|d| d.path == path) {
+            let d = self.st.deferrals.remove(pos);
+            self.frame().cur.queued = d.record;
+        }
         let capability = self.step_ref().capability.clone();
         self.trace_step("step_started", json!({"capability": capability}));
         let program = self.program;
@@ -666,6 +769,24 @@ impl<'a> Machine<'a> {
         // world.
         if let Some(why) = self.deferred_cause(step) {
             return self.defer_step(&why);
+        }
+        // Not deferred: while a step of its frame is, it runs ahead (§5.14).
+        let f = self.frame();
+        if !f.deferred.is_empty()
+            && let Some(ahead) = &mut f.ahead
+        {
+            ahead.insert(index);
+        }
+        // A deferred invoke step whose nested run ended deferred continues
+        // it (the resumption reopened it); its condition, gates and inputs
+        // were settled when the invocation started.
+        if let Some(child) = self.frame().parked.remove(&index) {
+            let f = self.frame();
+            f.nested_caps.remove(&index);
+            f.stage = Stage::Execute;
+            self.trace_step("invoke_resumed", json!({"workflow": child.workflow}));
+            self.st.frames.push(child);
+            return Flow::Continue;
         }
         if let Some(c) = &step.condition {
             let ok = match eval::eval_condition(c, &FrameBindings(self.frame_ref())) {
@@ -814,9 +935,19 @@ impl<'a> Machine<'a> {
             self.frame().cur.always_ask = true;
             self.trace_step("always_ask", json!({}));
         }
+        // So is a queued step that an attended resumption re-enters
+        // (§5.14.1); every request for a re-entered queued step names it.
+        let queued = self
+            .frame_ref()
+            .cur
+            .queued
+            .filter(|&r| self.st.records[r]["status"] == "planned");
+        let person = marked || (queued.is_some() && self.st.attendance == Attendance::Attended);
+        let queued_action_id =
+            queued.and_then(|r| self.st.records[r]["action_id"].as_str().map(str::to_string));
         // A standing mandate needs no one present: it is asked even in an
         // unattended run, and the plan applies only if none covers the step.
-        let mandate = !marked
+        let mandate = !person
             && spec
                 .get("approver")
                 .and_then(|a| a.get("kind"))
@@ -860,10 +991,12 @@ impl<'a> Machine<'a> {
             .get("approver")
             .cloned()
             .unwrap_or_else(|| json!({"kind": "human"}));
-        if marked && let Value::Object(a) = &mut approver {
+        if person && let Value::Object(a) = &mut approver {
             a.insert("kind".into(), json!("human"));
             a.remove("mandate_ref");
-            a.insert("always_ask".into(), json!(true));
+            if marked {
+                a.insert("always_ask".into(), json!(true));
+            }
         }
         // More approvers than any count can reach: the cap keeps the state
         // exactly representable (I-JSON) without changing the outcome.
@@ -889,6 +1022,7 @@ impl<'a> Machine<'a> {
                 shown,
                 digest: digest.clone(),
                 expires_at,
+                queued_action_id,
             },
             Purpose::Approval {
                 digest,
@@ -945,6 +1079,15 @@ impl<'a> Machine<'a> {
     fn defer_step(&mut self, why: &str) -> Flow {
         self.trace_step("step_deferred", json!({"reason": why}));
         let step = self.frame_ref().step;
+        // From a frame's first deferral on, the steps that run ahead of it
+        // are tracked, so that a resumption knows them (§5.14.1).
+        let f = self.frame();
+        if f.deferred.is_empty() {
+            f.ahead = Some(Default::default());
+        }
+        if let Some(ahead) = &mut f.ahead {
+            ahead.remove(&step);
+        }
         let record = match self.frame_ref().cur.record {
             // The queued action (when_unattended: defer_to_queue).
             Some(r) if self.st.records[r]["status"] == "planned" => Some(r),
@@ -957,6 +1100,8 @@ impl<'a> Machine<'a> {
             }
             None => None,
         };
+        // A queued step deferred again keeps its record `planned`.
+        self.frame().cur.queued = None;
         let store_as = self.step_ref().store_as.clone();
         if let Some(store) = &store_as {
             let f = self.frame();
@@ -979,9 +1124,10 @@ impl<'a> Machine<'a> {
         self.next_step()
     }
 
-    /// A wait or delay ended: checkpoints taken before it describe a world
-    /// that may have changed, so they authorise nothing after it (W608).
-    fn invalidate_checkpoints(&mut self) {
+    /// A wait or delay ended, or the run resumed: checkpoints taken before
+    /// it describe a world that may have changed, so they authorise nothing
+    /// after it (W608, §5.14.1). Traced at `step`; returns the ids.
+    fn invalidate_checkpoints(&mut self, step: Option<usize>) -> Vec<String> {
         let invalidated: Vec<String> = self
             .st
             .checkpoints
@@ -993,11 +1139,13 @@ impl<'a> Machine<'a> {
             })
             .collect();
         if !invalidated.is_empty() {
-            self.trace_step(
+            self.trace(
                 "checkpoints_invalidated",
+                step,
                 json!({"checkpoint_ids": invalidated}),
             );
         }
+        invalidated
     }
 
     /// Why `step` must wait for a deferred step of this frame, if it must:
@@ -1026,9 +1174,17 @@ impl<'a> Machine<'a> {
         if step.acts {
             return Some("it may act on the world, after a deferred step".to_string());
         }
+        // The capabilities nested runs deferred count for the deferred
+        // invoke steps only: during a resumption, an entry of a queued
+        // invoke step stays until its nested run continues.
         deferred()
             .map(|d| &d.capability)
-            .chain(f.nested_caps.values().flatten())
+            .chain(
+                f.deferred
+                    .iter()
+                    .filter_map(|d| f.nested_caps.get(d))
+                    .flatten(),
+            )
             .find(|c| step.after.contains(c))
             .map(|c| {
                 format!(
@@ -1042,9 +1198,25 @@ impl<'a> Machine<'a> {
     /// deferred, here or in the nested runs under them, and the actions
     /// they queued are superseded.
     fn undefer_from(&mut self, target: usize) {
+        // During a resumption the loop returns to normal flow: the queued
+        // steps not yet re-entered and a deferred handler not yet run are
+        // superseded, and that handler's escalation is dropped (§5.14.1).
+        if let Some(left) = self.frame().resume.take() {
+            self.frame().pending_escalation = None;
+            self.supersede_queued(
+                &left,
+                "superseded: a recovery loop ran from an earlier step",
+            );
+        }
         let f = self.frame();
         f.deferred.retain(|&d| d < target);
         f.nested_caps.retain(|&k, _| k < target);
+        f.parked.retain(|&k, _| k < target);
+        if f.deferred.is_empty() {
+            f.ahead = None;
+        } else if let Some(ahead) = &mut f.ahead {
+            ahead.retain(|&k| k < target);
+        }
         let depth = self.st.frames.len() - 1;
         let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
         self.supersede(
@@ -1059,6 +1231,7 @@ impl<'a> Machine<'a> {
         let path: Vec<usize> = self.st.frames.iter().map(|f| f.step).collect();
         let step = self.frame_ref().step;
         self.frame().nested_caps.remove(&step);
+        self.frame().parked.remove(&step);
         self.supersede(
             |d| d.path.len() > path.len() && d.path[..path.len()] == path[..],
             "superseded: the invoke step ran its workflow again",
@@ -1080,6 +1253,38 @@ impl<'a> Machine<'a> {
             }
         }
     }
+    /// Supersede the deferrals of `steps` of the current frame, nested ones
+    /// included, and drop their kept nested runs: a resumption will not
+    /// re-enter them (§5.14.1). Steps of the list that only run again have
+    /// no deferral and are unaffected.
+    fn supersede_queued(&mut self, steps: &[usize], reason: &str) {
+        let depth = self.st.frames.len() - 1;
+        let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
+        self.supersede(
+            |d| {
+                d.path.len() > depth
+                    && d.path[..depth] == prefix[..]
+                    && steps.contains(&d.path[depth])
+            },
+            reason,
+        );
+        let f = self.frame();
+        f.parked.retain(|k, _| !steps.contains(k));
+        f.nested_caps.retain(|k, _| !steps.contains(k));
+    }
+
+    /// A re-entered queued step that ends without reaching its approval
+    /// (skipped, failed or ended first) supersedes its queued action.
+    fn settle_queued(&mut self) {
+        if let Some(r) = self.frame().cur.queued.take()
+            && self.st.records[r]["status"] == "planned"
+        {
+            self.st.records[r]["status"] = json!("rejected");
+            self.st.records[r]["reason"] =
+                json!("superseded: the step did not reach its approval when its run resumed");
+        }
+    }
+
     /// The run's deferrals, as the terminal action reports them.
     fn deferred_report(&self) -> Vec<Value> {
         self.st
@@ -1109,29 +1314,80 @@ impl<'a> Machine<'a> {
             digest: expected,
             expires_at,
             min,
+            approver,
+            identities,
         } = asked;
         let spec = self.approval_spec();
         let now = self.st.now;
-        let distinct: std::collections::BTreeSet<&String> = approvers.iter().collect();
-        // A person was asked instead of the mandate (§5.17).
-        let mandate_ref = if self.always_ask() {
-            Value::Null
-        } else {
-            spec.get("approver")
-                .and_then(|a| a.get("mandate_ref"))
-                .cloned()
-                .unwrap_or(Value::Null)
+        // Who counts toward min_approvers (§5.14, §5.17): with attested
+        // identities, the principals whose identities meet the request;
+        // else the distinct strings of `approvers`, as the host vouches.
+        let wf = self.workflow();
+        let v12 = wf.targets_1_2;
+        let requires = v12
+            && (approver.get("sender_check").is_some()
+                || approver.get("accept_trust_classes").is_some());
+        let counting = match identities {
+            Some(list) => {
+                let mut by_principal: std::collections::BTreeMap<String, Value> =
+                    std::collections::BTreeMap::new();
+                for id in list {
+                    let p = id["principal"].as_str().unwrap_or_default().to_string();
+                    by_principal.entry(p).or_insert(id);
+                }
+                let mut counted = Vec::new();
+                let mut refused = Vec::new();
+                for (p, id) in by_principal {
+                    match meets(approver, &id, v12) {
+                        Ok(()) => counted.push((p, id)),
+                        Err(why) => refused.push(format!("{p} ({why})")),
+                    }
+                }
+                Counting {
+                    approvers: counted.iter().map(|(p, _)| p.clone()).collect(),
+                    identities: Some(counted.into_iter().map(|(_, id)| id).collect()),
+                    note: (!refused.is_empty())
+                        .then(|| format!("not counted: {}", refused.join(", "))),
+                    attested: true,
+                }
+            }
+            None if requires => Counting {
+                approvers: Vec::new(),
+                identities: None,
+                note: Some(
+                    "the approver requires attested identities (sender_check, accept_trust_classes), and the decision carries none"
+                        .into(),
+                ),
+                attested: true,
+            },
+            None => Counting {
+                approvers: approvers
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .cloned()
+                    .collect(),
+                identities: None,
+                note: None,
+                attested: false,
+            },
         };
+        // A person asked in place of a mandate (§5.17, §5.14.1) names none.
+        let mandate_ref = approver.get("mandate_ref").cloned().unwrap_or(Value::Null);
         let sub = |decision: &str| {
-            json!({
+            let mut sub = json!({
                 "digest": expected,
                 "decision": decision,
-                "approvers": distinct.iter().collect::<Vec<_>>(),
+                "approvers": counting.approvers,
                 "mode": spec.get("mode").and_then(Value::as_str).unwrap_or("in_session"),
                 "mandate_ref": mandate_ref,
                 "decided_at": iso(now),
                 "expires_at": expires_at.map(iso),
-            })
+            });
+            if let Some(ids) = &counting.identities {
+                sub["approver_identities"] = json!(ids);
+            }
+            sub
         };
         if decision == "unavailable" {
             // No one could decide: in an unattended run, the plan applies;
@@ -1145,6 +1401,9 @@ impl<'a> Machine<'a> {
             self.st.used_decisions.insert(decision_id.clone());
             let mut record = sub("unavailable");
             record["approvers"] = json!([]);
+            if let Value::Object(m) = &mut record {
+                m.remove("approver_identities");
+            }
             if self.st.attendance == Attendance::Unattended {
                 return self.unattended(Some(record), "no standing mandate covers the action");
             }
@@ -1153,6 +1412,7 @@ impl<'a> Machine<'a> {
             return self.step_error("F502", why);
         }
         let reused = !self.st.used_decisions.insert(decision_id.clone());
+        let counted = counting.approvers.len() as u64;
         // (status, reason) for a decision that does not let the step run.
         let problem: Option<(&str, String)> = if reused {
             Some((
@@ -1170,11 +1430,17 @@ impl<'a> Machine<'a> {
                 "rejected",
                 "the decision approves different values than were shown".to_string(),
             ))
-        } else if (distinct.len() as u64) < min {
-            Some((
-                "rejected",
-                format!("{} distinct approver(s), {min} needed", distinct.len()),
-            ))
+        } else if counted < min {
+            let mut why = if counting.attested {
+                format!("{counted} counted approver(s), {min} needed")
+            } else {
+                format!("{counted} distinct approver(s), {min} needed")
+            };
+            if let Some(note) = &counting.note {
+                why.push_str("; ");
+                why.push_str(note);
+            }
+            Some(("rejected", why))
         } else {
             None
         };
@@ -1752,7 +2018,8 @@ impl<'a> Machine<'a> {
             self.st.pending = Some(pending);
             return Flow::Wait;
         }
-        self.invalidate_checkpoints();
+        let at = self.frame_ref().step;
+        self.invalidate_checkpoints(Some(at));
         let mut item = event.clone();
         if let Value::Object(m) = &mut item {
             if let Some(p) = &principal {
@@ -1920,6 +2187,7 @@ impl<'a> Machine<'a> {
         if self.frame_ref().cur.error.is_some() {
             self.record_failed();
         }
+        self.settle_queued();
         if fm.action == "escalate" {
             return match fm.goto {
                 Some(h) => self.escalate(h, &code),
@@ -2046,6 +2314,46 @@ impl<'a> Machine<'a> {
 
     fn escalate(&mut self, handler: usize, cause: &str) -> Flow {
         self.trace_step("escalated", json!({"handler": handler, "cause": cause}));
+        self.settle_queued();
+        // During a resumption (§5.14.1): this escalation takes precedence
+        // over a deferred handler's, whose queued actions are superseded;
+        // the queued steps not yet re-entered stay deferred, and the steps
+        // listed only to run again keep their outputs from before.
+        if let Some(left) = self.frame().resume.take() {
+            let mut left = left;
+            if self.frame().pending_escalation.take().is_some()
+                && let Some(h) = left.pop()
+            {
+                self.supersede_queued(&[h], "superseded: another escalation took precedence");
+            }
+            let depth = self.st.frames.len() - 1;
+            let prefix: Vec<usize> = self.st.frames[..depth].iter().map(|f| f.step).collect();
+            let queued: Vec<bool> = left
+                .iter()
+                .map(|&k| {
+                    self.st.deferrals.iter().any(|d| {
+                        d.path.len() == depth + 1
+                            && d.path[..depth] == prefix[..]
+                            && d.path[depth] == k
+                    })
+                })
+                .collect();
+            let f = self.frame();
+            for (k, q) in left.into_iter().zip(queued) {
+                if q {
+                    if let Err(at) = f.deferred.binary_search(&k) {
+                        f.deferred.insert(at, k);
+                    }
+                } else {
+                    f.ahead.get_or_insert_with(Default::default).insert(k);
+                }
+            }
+            if f.deferred.is_empty() {
+                f.ahead = None;
+            } else if f.ahead.is_none() {
+                f.ahead = Some(Default::default());
+            }
+        }
         let f = self.frame();
         f.escalation = Some(cause.to_string());
         f.step = handler;
@@ -2133,6 +2441,20 @@ impl<'a> Machine<'a> {
                     "the event's principal is not its identity's principal".into(),
                 ));
             }
+        }
+        if let (
+            true,
+            Response::Decision {
+                approvers,
+                approver_identities: Some(list),
+                ..
+            },
+        ) = (identity_declared, &response)
+            && !list.is_null()
+        {
+            approver_identities_error(approvers, list).map_or(Ok(()), |e| {
+                Err(SubmitError::Malformed(format!("approver_identities: {e}")))
+            })?;
         }
         self.st.now = self.st.now.max(now.min(MAX_TIME));
         self.st.pending = None;
@@ -2239,12 +2561,23 @@ impl<'a> Machine<'a> {
                     decision,
                     approvers,
                     digest: given,
+                    approver_identities,
                 },
             ) => {
+                let approver = match &pending.action.body {
+                    Body::RequestApproval { approver, .. } => approver.clone(),
+                    _ => json!({"kind": "human"}),
+                };
+                // Read under identity@1 only; `submit` checked them.
+                let identities = approver_identities
+                    .filter(|_| self.workflow().extension("identity@1"))
+                    .and_then(|v| v.as_array().cloned());
                 let asked = Asked {
                     digest: &digest,
                     expires_at,
                     min,
+                    approver: &approver,
+                    identities,
                 };
                 self.decide(decision_id, &decision, &approvers, &given, asked);
             }
@@ -2273,6 +2606,47 @@ impl<'a> Machine<'a> {
         }
     }
 
+    /// Resume a run that ended `deferred` (§5.14.1); `Run::resume` checked
+    /// that it did, and that its state keeps what this needs.
+    pub(crate) fn resume(&mut self, o: ResumeOptions) {
+        let principal = |v: &Option<Value>| {
+            v.as_ref()
+                .and_then(|i| i.get("principal"))
+                .cloned()
+                .unwrap_or(Value::Null)
+        };
+        let previous = principal(&self.st.actor_identity);
+        if o.actor_identity.is_some() {
+            self.st.actor_identity = o.actor_identity;
+        }
+        self.st.attendance = o.attendance;
+        self.st.now = self.st.now.max(o.now_ms.min(MAX_TIME));
+        self.st.finished = None;
+        // The queued actions of a nested run that failed under a step that
+        // was not deferred are never carried out.
+        let orphans: Vec<Vec<usize>> = self
+            .st
+            .deferrals
+            .iter()
+            .filter(|d| orphaned(&self.st.frames[0], &d.path))
+            .map(|d| d.path.clone())
+            .collect();
+        self.supersede(
+            |d| orphans.contains(&d.path),
+            "superseded: the nested run it was queued in failed",
+        );
+        let actor = principal(&self.st.actor_identity);
+        let attendance = self.st.attendance;
+        self.trace(
+            "run_resumed",
+            None,
+            json!({"attendance": attendance, "actor": actor, "previous_actor": previous}),
+        );
+        let invalidated = self.invalidate_checkpoints(None);
+        reopen(self.program, &mut self.st.frames[0], &invalidated);
+        self.drive();
+    }
+
     pub(crate) fn tick(&mut self, now: u64) {
         if self.st.finished.is_some() {
             return;
@@ -2286,7 +2660,8 @@ impl<'a> Machine<'a> {
                 self.st.pending = None;
                 if matches!(self.frame_ref().stage, Stage::Delay { .. }) {
                     // The world may have changed while the step waited.
-                    self.invalidate_checkpoints();
+                    let step = self.frame_ref().step;
+                    self.invalidate_checkpoints(Some(step));
                     self.trace_step("delay_finished", json!({}));
                     self.set_stage(Stage::Ready);
                 } else {
@@ -2301,10 +2676,11 @@ impl<'a> Machine<'a> {
                     _ => String::new(),
                 };
                 let spec = self.approval_spec();
-                let mandate_ref = if self.always_ask() {
-                    None
-                } else {
-                    spec.get("approver").and_then(|a| a.get("mandate_ref"))
+                // As the request named it: a person asked in place of a
+                // mandate names none (§5.17, §5.14.1).
+                let mandate_ref = match &pending.action.body {
+                    Body::RequestApproval { approver, .. } => approver.get("mandate_ref").cloned(),
+                    _ => None,
                 };
                 let sub = json!({
                     "digest": digest,
@@ -2333,6 +2709,174 @@ impl<'a> Machine<'a> {
         }
         self.drive();
     }
+}
+
+/// Whether a deferral's queued action can no longer be carried out: its
+/// path runs through a step that is not deferred in its frame (the nested
+/// run it was queued in failed), or a nested run that was not kept.
+fn orphaned(top: &Frame, path: &[usize]) -> bool {
+    let mut f = top;
+    for (j, k) in path.iter().enumerate() {
+        if !f.deferred.contains(k) {
+            return true;
+        }
+        if j + 1 < path.len() {
+            match f.parked.get(k) {
+                Some(child) => f = child,
+                None => return true,
+            }
+        }
+    }
+    false
+}
+
+/// Reopen a frame that ended deferred (§5.14.1 item 2): its resumption list
+/// is, in step order, the deferred steps; the steps that ran ahead of them
+/// and that a later listed step reads; and the checkpoint steps whose
+/// checkpoint the resumption invalidated and that a later listed step that
+/// requires a checkpoint reads. A deferred handler goes last. Its kept
+/// nested runs are reopened too. A frame reopened before whose nested run
+/// was not continued (its invoke step was deferred again) keeps its list:
+/// nothing it reads has changed since.
+fn reopen(program: &Program, f: &mut Frame, invalidated: &[String]) {
+    if f.resume.is_some() {
+        return;
+    }
+    let wf = &program.workflows[&f.workflow];
+    let deferred = std::mem::take(&mut f.deferred);
+    let ahead = f.ahead.take().unwrap_or_default();
+    let handler = f.escalation.take().map(|cause| {
+        f.pending_escalation = Some(cause);
+        f.step
+    });
+    let mut list: std::collections::BTreeSet<usize> = deferred
+        .iter()
+        .copied()
+        .filter(|&s| Some(s) != handler)
+        .collect();
+    let reads = |s: usize, store: &str| wf.steps[s].reads.iter().any(|r| r == store);
+    // Descending, so that every later reader is settled first.
+    for c in (0..wf.steps.len()).rev() {
+        let step = &wf.steps[c];
+        if list.contains(&c) || step.handler {
+            continue;
+        }
+        let Some(store) = step.store_as.as_deref() else {
+            continue;
+        };
+        let later: Vec<usize> = list.range(c + 1..).copied().chain(handler).collect();
+        let ran_ahead = ahead.contains(&c)
+            && !step.after_deferral_runs
+            && later.iter().any(|&s| reads(s, store));
+        let stale_checkpoint = step.capability == "checkpoint"
+            && f.stores
+                .get(store)
+                .and_then(|o| o.get("checkpoint_id"))
+                .and_then(Value::as_str)
+                .is_some_and(|id| invalidated.iter().any(|i| i == id))
+            && later
+                .iter()
+                .any(|&s| wf.steps[s].requires_checkpoint && reads(s, store));
+        if ran_ahead || stale_checkpoint {
+            list.insert(c);
+        }
+    }
+    let mut queue: Vec<usize> = list.into_iter().collect();
+    queue.extend(handler);
+    for child in f.parked.values_mut() {
+        reopen(program, child, invalidated);
+    }
+    f.step = queue.first().copied().unwrap_or(wf.steps.len());
+    f.stage = Stage::Begin;
+    f.cur = StepState::default();
+    f.resume = Some(queue);
+}
+
+/// What is wrong with a decision's `approver_identities` (§5.17), if
+/// anything: a list of `agent_identity`, one per principal (an identical
+/// repeat is one), whose principals are exactly `approvers` when that is
+/// not empty.
+fn approver_identities_error(approvers: &[String], list: &Value) -> Option<String> {
+    let Some(items) = list.as_array() else {
+        return Some("must be a list".into());
+    };
+    let mut seen: std::collections::BTreeMap<&str, &Value> = std::collections::BTreeMap::new();
+    for (i, id) in items.iter().enumerate() {
+        if let Err(e) = super::ijson(id) {
+            return Some(format!("[{i}]: {e}"));
+        }
+        if let Some(e) = super::identity_error(id) {
+            return Some(format!("[{i}]: {e}"));
+        }
+        let p = id["principal"].as_str().unwrap_or_default();
+        match seen.get(p) {
+            Some(other) if *other != id => {
+                return Some(format!("two different identities for '{p}'"));
+            }
+            _ => {
+                seen.insert(p, id);
+            }
+        }
+    }
+    let principals: std::collections::BTreeSet<&str> = seen.keys().copied().collect();
+    let named: std::collections::BTreeSet<&str> = approvers.iter().map(String::as_str).collect();
+    if !approvers.is_empty() && principals != named {
+        return Some("the decision's approvers are not its identities' principals".into());
+    }
+    None
+}
+
+/// Who an approval decision counts (§5.14, §5.17).
+struct Counting {
+    /// The approvers that count: principals with identities, else the
+    /// distinct strings of `approvers`, in order.
+    approvers: Vec<String>,
+    /// With identities: those of the approvers that count.
+    identities: Option<Vec<Value>>,
+    /// Who did not count, and why.
+    note: Option<String>,
+    /// Counted by attested identity (or required to be, and none came).
+    attested: bool,
+}
+
+/// Whether an attested approver identity meets the request (§5.17): a
+/// `human` approver's identity has kind `human`; a requested `role` is its
+/// role; and, in a workflow that targets 1.2, its `authenticated_by` and
+/// `trust_class` are among the approver's `sender_check` and
+/// `accept_trust_classes`. In an earlier target those two are not read.
+fn meets(approver: &Value, id: &Value, v12: bool) -> Result<(), String> {
+    if approver["kind"] == "human" && id["kind"] != "human" {
+        return Err(format!(
+            "kind {} is not 'human'",
+            id.get("kind").unwrap_or(&Value::Null)
+        ));
+    }
+    if let Some(role) = approver.get("role").and_then(Value::as_str)
+        && id["role"].as_str() != Some(role)
+    {
+        return Err(match id["role"].as_str() {
+            Some(r) => format!("role '{r}' is not '{role}'"),
+            None => format!("no role, '{role}' requested"),
+        });
+    }
+    if v12 {
+        for (key, field) in [
+            ("sender_check", "authenticated_by"),
+            ("accept_trust_classes", "trust_class"),
+        ] {
+            let Some(allowed) = approver.get(key).and_then(Value::as_array) else {
+                continue;
+            };
+            let v = id[field].as_str();
+            if !v.is_some_and(|v| allowed.iter().any(|a| a == v)) {
+                return Err(match v {
+                    Some(v) => format!("{field} '{v}' is not in {key}"),
+                    None => format!("no {field}, which {key} requires"),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Whether `identity`'s `field` is one of `allowed` (`sender_check`,

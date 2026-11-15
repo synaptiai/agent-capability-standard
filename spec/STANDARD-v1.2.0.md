@@ -598,7 +598,7 @@ waiting or approval semantics.
 | `approval@1` | step `approval` and `after_deferral` (§5.14) |
 | `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role`, `.read_only` and `receive`/`synchronize`/`delegate` `accept_from` (§5.15) |
 | `quorum@1` | step `quorum` (§5.16) |
-| `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes` (§5.17) |
+| `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes`; approver identities on approval decisions; in a workflow that targets 1.2, `approval.approver` `sender_check` and `accept_trust_classes` (§5.14, §5.17) |
 
 `failure_modes[].when` and `.on_error` are part of base 1.1, not an
 extension: a consumer that ignores them only loses an optional trigger.
@@ -872,30 +872,108 @@ approval:
 
 | Field | Description |
 |-------|-------------|
-| `approver` | Required (S304). `kind` (required): `human` or `standing_mandate`; `role`; `min_approvers` (integer ≥ 1, default 1); `mandate_ref`, required for and only for a standing mandate (S304 / S303) |
-| `mode` | `in_session` (default) or `out_of_band` |
-| `shows` | References whose values the approvers see (each a `${...}` reference, else S303) |
+| `approver` | Required (S304). `kind` (required): `human` or `standing_mandate`; `role`; `min_approvers` (integer ≥ 1, default 1); `mandate_ref`, required for and only for a standing mandate (S304 / S303); in a workflow that targets 1.2, with `identity@1`, `sender_check` and `accept_trust_classes` (§5.17) |
+| `mode` | Where the approver is asked: `in_session` (default) or `out_of_band` (see **Modes**) |
+| `shows` | References whose values the approvers see (each a `${...}` reference, else S303); absent, the step's resolved inputs (see **Shown values and digest**) |
 | `binds_to` | `digest` (default): the decision binds to the shown values |
 | `recheck` | `source` (required, a `${...}` reference re-read before acting, else S303), `compare`: `version` or `digest` (default), `on_change`: `reask` (default), `replan` or `stop` |
-| `expires` | How long a decision stays valid: a duration longer than zero |
+| `expires` | How long after the request a decision may arrive: a duration longer than zero; absent, no limit |
 | `when_unattended` | `fail` (default), `skip` or `defer_to_queue` |
 
 `approval` is allowed only where the effective `requires_approval` is true
 (S303); other values above are S303 when malformed, and unknown fields W604.
-The shown values MUST be I-JSON (RFC 7493: integers within ±2^53, no
-duplicate keys), so that every implementation computes the same canonical
-JSON (RFC 8785). A decision is valid only if the SHA-256 digest of the
-canonical JSON of the shown values matches, at least `min_approvers` distinct approvers agree, it
-has not expired, and it has not been used before. A decision is
-`approved`, `rejected`, or `unavailable`: no one could decide (no standing
-mandate covers the action). A mandate's approval names the approvers it
-stands for, and `min_approvers` counts them as for people. An
-`unavailable` decision is single-use too, and records no approvers.
 
-A `standing_mandate` approver needs no one present, so it is asked in an
-unattended run too (except for a step that uses an always-ask item,
-§5.17); `when_unattended` applies only when it answers
-`unavailable`. A `human` approver is not asked in an unattended run, and
+**The request.** A step whose effective `requires_approval` is true asks for
+approval once its inputs are resolved (after its condition, its gates and
+any delay, §5.13) and before it uses a checkpoint. The executor puts a
+request to the host (`RequestApproval`, §5.19.1) that names the approver (the
+step's `approver` as declared), the mode, the shown values, their digest and,
+when `expires` is set, `expires_at`: the time of the request plus `expires`.
+
+A step that requires approval and has no `approval` field, in a workflow that
+declares `approval@1` or not, is asked as if it declared
+`approval: {approver: {kind: human}}`: a person (one approver, no role), in
+session, shown its resolved inputs, with no expiry and no recheck, and with
+`when_unattended: fail` (W606, F502). A member that an `approval` field leaves
+out takes the default the table gives. Two steps are asked of a person even
+when their approver is a standing mandate: a step marked always-ask (§5.17)
+and a queued step that an attended resumption re-enters (§5.14.1).
+
+**Modes.** The mode tells the host where to ask:
+
+- `in_session`: the party attending the run is asked, through the session
+  the run is attended in (such as the host's own permission prompt or the
+  conversation), and answers while the run waits in that session.
+- `out_of_band`: the approvers are asked through a channel separate from the
+  run's session (such as a ticket, a message to an approver group or a review
+  queue). They need not attend the run, and the decision may arrive after the
+  session that asked has ended; a host that asks so keeps the run's state
+  while it waits (§5.19.4).
+
+The mode changes neither the shown values, nor the digest, nor which
+decisions are valid. A host that cannot ask in the declared mode SHOULD
+answer `unavailable` rather than ask elsewhere. A `human` approver is not
+asked in an unattended run, in either mode (see **Attendance**): to have an
+action of an unattended run approved out of band, declare
+`when_unattended: defer_to_queue` and resume the run once its approvers can
+be asked (§5.14.1).
+
+**Shown values and digest.** The shown values are a JSON array:
+
+1. With `shows`: one element per reference, in order, each the value the
+   reference resolves to when the request is made; a reference that resolves
+   to nothing gives `null`. An array value is one element: it is not spliced
+   into the array.
+2. Without `shows`: one element, the step's resolved inputs: its
+   `input_bindings` with every reference resolved, the value its capability
+   is invoked with (`{}` when the step binds none).
+3. Asked again because a recheck saw its source change (`on_change: reask`):
+   the array of item 1 or 2, then one more element,
+   `{"recheck": {"previous": P, "current": C}}`, where `P` is the value of the
+   source that the earlier decision was bound to and `C` the value the recheck
+   read.
+
+The shown values MUST be I-JSON (RFC 7493): no member name appears twice in
+one object, and every **integer**, a number written without a fraction or an
+exponent, has a magnitude of at most 2^53. An executor refuses a value that
+breaks either rule: a step whose resolved inputs hold one fails with R402,
+and a response that carries one is malformed and changes nothing (§5.19.1). A
+host that reads values from JSON text keeps each integer an integer: where
+its parser would read an integer too long for it as a binary64 value, it
+refuses the value instead. Every other number is a finite binary64 value,
+written as RFC 8785 writes it, so `1e+21` (the `numbers` vector of §10.3) is
+valid although its value exceeds 2^53. (RFC 7493 §2.2 recommends integers of
+magnitude at most 2^53 − 1; 2^53 is also exactly representable in binary64,
+and 1.1 executors accept it.)
+
+The **digest** is the SHA-256 of the UTF-8 encoding of the array's canonical
+JSON (RFC 8785), written as 64 lowercase hexadecimal digits. The request
+carries it and a decision repeats it; the two are compared without regard to
+the case of the hexadecimal letters. The digest vectors of §10.3 fix the
+canonical text and the digest for representative values.
+
+**Decisions.** A decision is `approved`, `rejected`, or `unavailable`: no one
+could decide (no standing mandate covers the action). An `approved` decision
+is valid only if:
+
+- its digest matches the request's;
+- at least `min_approvers` distinct approvers agree: the distinct strings of
+  its `approvers` or, with `identity@1` and attested approver identities, the
+  distinct principals whose identities meet the request (§5.17);
+- it arrives no later than the request's `expires_at`, where there is one;
+- its `decision_id` has not been used before in the run.
+
+A mandate's approval names the approvers it stands for, and `min_approvers`
+counts them as for people. Every decision is single-use; an `unavailable` one
+records no approvers. A `rejected` decision, and an `approved` one that is
+not valid, refuse the step (F502) with a `rejected` record (`expired` when
+the decision came too late). A request with no decision by its `expires_at`
+lapses: an `expired` record, and F502.
+
+**Attendance.** A `standing_mandate` approver needs no one present, so it is
+asked in an unattended run too (except for a step that uses an always-ask
+item, §5.17); `when_unattended` applies only when it answers `unavailable`. A
+`human` approver is not asked in an unattended run, whatever the mode, and
 `when_unattended` applies at once. In an attended run, `unavailable` is a
 refusal (F502). The plans:
 
@@ -933,14 +1011,16 @@ on a missing value or an unchanged world; a deferred dependent is not
 asked for approval and does not follow its own `when_unattended`. Other
 steps, those that read, reason or record (`retrieve`, `observe`, `plan`,
 `audit`, `persist`, `checkpoint`, …) and depend on nothing deferred, still
-run. A deferred step that requires approval gets its own `planned` record.
-A nested run that ends `deferred` defers its `invoke` step; the
-invocation itself ran, so its record (if any) is `executed`, and the
-nested run's records are the queued actions. A recovery loop whose target
-is a deferred step, or one before it, runs the step again, and an invoke
-step that runs its workflow again (a retry) starts it afresh; either way
-the records of the earlier deferrals become `rejected` ("superseded"), so
-a queue never holds the same action twice.
+run: they **run ahead** of the deferred steps, and a resumption runs one
+again when a step it runs again reads it (§5.14.1). A deferred step that
+requires approval gets its own `planned` record. A nested run that ends
+`deferred` defers its `invoke` step; the invocation itself ran, so its
+record (if any) is `executed`, and the nested run's records are the queued
+actions. A recovery loop whose target is a deferred step, or one before it,
+runs the step again, and an invoke step that runs its workflow again (a
+retry) starts it afresh; either way the records of the earlier deferrals
+become `rejected` ("superseded"), so a queue never holds the same action
+twice.
 
 A run with deferred steps ends `deferred`, unless it fails, escalates or
 needs a replan, which take precedence. Whatever the outcome, the terminal
@@ -951,15 +1031,112 @@ deferred (or whose nested run deferred steps) has not finished handling,
 so that run ends `deferred`, keeping the escalation's cause; a nested run
 that ends so is, for its invoke step, an escalated nested run (R402).
 
+A queued action is put to its approvers, and carried out, by resuming its
+run (§5.14.1). The queued actions of a run that did not end `deferred` are
+never carried out (§5.14.1). A new run of the workflow is another run: it
+neither carries out nor closes an earlier run's queued actions.
+
 The decision is recorded on the action record (`world_state_schema.yaml`
-1.1.0: `approval` with the digest, decision and approvers; status
-`rejected` or `expired`, with a `reason`, when it was refused, invalid or
-lapsed, or when an unattended run did not ask; `planned`, with the reason,
-when it was deferred).
+1.2.0: `approval` with the digest, decision, the counted approvers and, with
+`identity@1`, their identities; status `rejected` or `expired`, with a
+`reason`, when it was refused, invalid or lapsed, or when an unattended run
+did not ask; `planned`, with the reason, when it was deferred). A resumed run
+updates the record of a queued action in place (§5.14.1).
 
 #### 5.14.1 Resuming a Deferred Run
 
-<!-- owner: S2a; text: S2a.md part 2.3 -->
+A run that ended with outcome `deferred` can be **resumed**: it continues, as
+the same run, with the steps it deferred. This is how its queued actions are
+put to their approvers and carried out. An executor that implements
+`approval@1` MUST support resumption. The host resumes a run from its state
+at the end (the `resume` operation, §5.19.2), names the run's attendance from then on (attended unless
+it says otherwise), and may name a new actor (§5.17). A host MUST NOT resume
+the same saved state twice: each resumption could carry out the same queued
+action.
+
+**Runs that did not end deferred.** A run that failed, escalated, needed a
+replan or was cancelled (§5.19.5) cannot be resumed, and the queued actions it
+lists are never carried out. Their records stay `planned` in its terminal
+action (a cancelled run's become `cancelled`): a host treats them as
+abandoned, closes whatever queue entries it keeps for them, and may start a
+new run of the workflow, which is another run (§5.14).
+
+When a run resumes:
+
+1. **What it keeps.** Its stores, inputs, injected recovery context, loop
+   counts, used decision ids, action records and trace are kept, and the
+   trace records the resumption. No checkpoint taken before the resumption
+   authorises a step after it, as after a wait (§5.13): a resumed step that
+   requires a checkpoint gets a new one.
+2. **What runs again.** These steps run again, in step order, each from its
+   beginning (its condition, gates, delay, inputs, approval and checkpoint):
+   - the deferred steps;
+   - each step that **ran ahead**: it began after a step of its run was
+     deferred and was not deferred itself (§5.14), and a later step that runs
+     again under this item reads its store. It runs again so that the step
+     that reads it sees what is there after the actions before it, as in a
+     run that never deferred. A handler, and a step that declares
+     `after_deferral: run`, keep their outputs;
+   - each `checkpoint` step whose checkpoint the resumption invalidated (no
+     step had used it) and whose store a later step that runs again under
+     this item, and that requires a checkpoint, reads: its new checkpoint is
+     then the one that step binds and uses (such as a `mutate` that binds
+     `checkpoint_id`, §12.5), as W608's remedy takes a new checkpoint after a
+     wait. A step that only binds the id, such as a `rollback`, does not
+     cause this: it returns to the restore point it named.
+   No other step runs again: a step that ran before the deferral, or ran
+   ahead and is not read, keeps its output. The deferral rules of §5.14
+   apply as in any run, so a step that depends on a step deferred again is
+   deferred again. A deferred handler runs last (item 4).
+3. **Nested runs.** A deferred `invoke` step whose nested run ended
+   `deferred` continues that nested run, which resumes as this subsection
+   says; when it ends, the step completes as any step whose nested run ended
+   does (§5.12). The step's condition and gates are not evaluated again, and
+   its inputs are not resolved again: they were when the invocation started.
+   The queued actions of a nested run that failed are not carried out: the
+   resumption supersedes them (`rejected`, "superseded").
+4. **A deferred handler.** In a run whose handler was deferred (it ended
+   `deferred` with an escalation's cause, §5.11), the steps of the normal
+   flow that item 2 lists run first, in step order, and then the handler,
+   with that cause; the run then ends as an escalation does.
+5. **The approval.** A re-entered step that requires approval is asked
+   afresh: its shown values and digest are computed now, a decision must
+   match them, `expires` runs from the new request, and `recheck` re-reads
+   its source after the decision. Every request for a re-entered queued step
+   names its queued action (`queued_action_id`: the `action_id` of its
+   `planned` record), in either attendance. In an attended resumption the
+   request is put to a person, a `human` approver keeping `role`,
+   `min_approvers`, `sender_check` and `accept_trust_classes` and dropping
+   `mandate_ref`. In an unattended resumption the step is asked as in any
+   unattended run, and its `when_unattended` applies again.
+6. **The record.** A re-entered step continues its queued action: the
+   `planned` record its deferral left is updated in place, keeping its
+   `action_id`, with the decision, the outcome, the time and the actor. A
+   step deferred again leaves the record `planned`. A re-entered step that
+   ends without reaching its approval (its condition is false, a gate skips
+   or stops it, or it fails first) supersedes its queued action (`rejected`,
+   "superseded").
+7. **Ending early.** A recovery loop during the resumption returns the run to
+   normal flow from its target: the queued steps it has not re-entered, and a
+   deferred handler it has not run, are superseded, as for any loop over a
+   deferred step (§5.14), and the escalation that handler was to handle is
+   dropped. A gate `end` ends the run before the queued steps after it and
+   the deferred handler, whose queued actions are superseded. Another
+   escalation takes precedence over the deferred handler's: its queued
+   actions are superseded, the queued steps not yet re-entered stay deferred,
+   and the new handler is judged against them (§5.14). When the resumed run
+   fails, or needs a replan, the queued steps it did not reach stay deferred:
+   listed among the run's deferrals, with their records `planned`, abandoned
+   as above.
+
+**Saved states.** An executor MUST refuse to resume a state that does not
+keep what this subsection needs: the nested run of each deferred `invoke`
+step, and which steps ran ahead. Such a run can be cancelled (§5.19.5). A host
+whose executor saved the state before it implemented this subsection
+cancels the run and starts a new one.
+
+A resumed run ends as any run does; one that ends `deferred` can be resumed
+again.
 
 ### 5.15 Delegation
 
@@ -1115,7 +1292,9 @@ type (§5.4), and a list holding anything but values of the vocabulary is
 S303; a reference
 that resolves to anything else (null, say) fails the step (R402), so a
 check is never silently off. A workflow that does not declare `identity@1`
-ignores any identity a host reports.
+ignores any identity a host reports. In a workflow that targets 1.2, the approver of an approval accepts two of
+them as fields, `sender_check` and `accept_trust_classes` (see
+**Approvers**).
 
 | Input | Effect on an item |
 |-------|-------------------|
@@ -1158,8 +1337,8 @@ has every step marked. Context a recovery loop injects from a marked
 value is marked (§5.12). A mark is never removed during a run. A
 marked step that requires approval is asked of a person even when its
 `approval` names a standing mandate (§5.14): the approval request names a
-`human` approver with `always_ask: true`, keeping the `role` and
-`min_approvers` and dropping the `mandate_ref`, and its action records
+`human` approver with `always_ask: true`, keeping the `role`, `min_approvers`, `sender_check` and
+`accept_trust_classes` and dropping the `mandate_ref`, and its action records
 carry `always_ask: true`. In an unattended run the step follows its
 `when_unattended` plan, and the action record's `reason` says why; a step whose only plan for an unattended run is a standing
 mandate and that uses, through bindings, a step that binds
@@ -1168,6 +1347,46 @@ approval runs as it would otherwise. The mark follows references only:
 content a host carries into a later step by other means is beyond what the
 executor can see.
 
+**Approvers.** With `identity@1` declared, a host may attest who decided an
+approval (§5.14): a decision's `approver_identities`, a list of
+`agent_identity`. Each MUST be one; two with the same principal MUST be
+identical (a repeat counts once); and `approvers`, when not empty, MUST list
+exactly their principals. A decision that breaks any of these is rejected as
+malformed and changes nothing, as an event is. The approvers are then
+counted by principal, and an identity counts toward `min_approvers` only if
+it meets the request:
+
+- for a `human` approver, including one asked in place of a standing mandate
+  (§5.14.1, and **Always ask** above), its `kind` is `human`;
+- when the request names a `role`, its `role` equals it;
+- in a workflow that targets 1.2, when the approver declares `sender_check`,
+  its `authenticated_by` is listed there;
+- in a workflow that targets 1.2, when the approver declares
+  `accept_trust_classes`, its `trust_class` is listed there.
+
+The action record lists the approvers that counted: their principals in
+`approval.approvers` and their identities in `approval.approver_identities`;
+when the decision is refused, its `reason` names the others and why they did
+not count. A layer that approves tool calls (§5.18.7) and can attest its
+approvers records them the same way.
+
+In a workflow that targets 1.2 (§11.5), `approval.approver` may declare
+`sender_check` and `accept_trust_classes`: each a non-empty list of values
+from the vocabularies above (else S303), with `identity@1` declared (else
+V106). They make attested identities required: a decision without
+`approver_identities` then counts no approvers. In a workflow that targets an
+earlier version they are unknown fields (W604, and W616, §11.5), and neither
+the validator nor the executor applies them; declare `spec_version: "1.2"` to
+have them enforced, and a consumer of an earlier version then refuses the
+workflow (V109) rather than ignore the requirement.
+
+Without identities, the approvers are the distinct strings of `approvers`,
+and the host vouches for them: it SHOULD accept a decision only from
+approvers who hold the requested `role`. A workflow that does not declare
+`identity@1` ignores `approver_identities`. As for a delegation, the
+identities are the host's attestation: the executor checks that they are
+consistent with the request, not that an approver is a person.
+
 **Actor.** A run may be started with the identity of the agent that runs
 it; every action record then carries it as `actor_identity`, and `actor`
 is its `kind`. `ActionRecord.actor_identity` and
@@ -1175,6 +1394,21 @@ is its `kind`. `ActionRecord.actor_identity` and
 `world_state_schema.yaml`. Two records denote the same party exactly when
 their identities' principals are equal; an implementation MUST NOT infer it
 from the `actor` or `agent` strings alone.
+
+A run keeps its actor while it continues. A host that saves a run and
+continues it later (§5.19.4) SHOULD name the actor it continues the run for; the
+executor MUST then refuse to restore the run when that actor's principal
+differs from the run's, or when the run was started without an actor.
+
+At a **handoff**, when another agent takes over the conversation or thread a
+run belongs to, the host MUST NOT continue the run under the agent that
+takes over. It cancels the run (§5.19.5) if the run has not ended, and the agent
+that takes over starts a new run under its own identity. A run that ended
+`deferred` may instead be resumed under the new agent, or cancelled. The one
+change of actor allowed is that resumption (§5.14.1): the host names the new
+actor, the trace records the change, and the action records written from
+then on, including the queued records the resumed run updates, carry the new
+actor; earlier records keep theirs.
 
 ### 5.18 Tool-Calling Hosts
 
@@ -1351,7 +1585,9 @@ World state snapshots MUST record:
 | `retention_policy` | object | No | How long to retain |
 
 An action record or a provenance record may carry the identity of who
-acted (`actor_identity`, `agent_identity`; §5.17).
+acted (`actor_identity`, `agent_identity`; §5.17), and an action record's
+approval the identities of the approvers that counted
+(`approval.approver_identities`; §5.17).
 
 ### 6.4 Audit Records
 
@@ -1707,6 +1943,19 @@ check §5.8.2's CEL compatibility. Runtime fixtures
 — the actions it must request, the responses it gets, and the end and trace
 it must reach — for the runtime semantics of §5.6–§5.17; they are
 informative for implementations that execute workflows.
+
+The approval digest vectors (`tests/conformance/approval/digests.json`) are
+normative for §5.14 and §5.18.7. Each vector has a `kind`. A `step` vector is
+one approval request of a workflow step: the step's `approval` field (or
+null for none), its resolved `inputs` where it declares no `shows`, and the
+`shown` values. A `tool_call` vector is the approval of a tool call: the
+`call` (`action`, `capability`, `args`) and the `shown` values `[call]`.
+Every vector gives the RFC 8785 `canonical` text of `shown` and its `digest`.
+An implementation that computes or checks approval digests MUST produce each
+vector's `canonical` text and `digest` from its `shown` values. An executor
+MUST show, for each `step` vector's step, that vector's `shown` values, and a
+layer (§5.18) MUST show, for each `tool_call` vector's call, that vector's
+`shown` values.
 
 ### 10.4 Safety-Layer Conformance
 
@@ -2145,7 +2394,34 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 <!-- owner: S1; entries: S1.md part 2.13 -->
 
 ### D.2 Approval, deferral and run identity (RFC-0006, Part A)
-<!-- owner: S2a; entries: S2a.md part 2.8 -->
+
+**Clarifications of 1.1 semantics** (apply to 1.0, 1.1 and 1.2 workflows):
+
+| Area | 1.1.0 text | 1.2.0 |
+|------|------------|-------|
+| Default approval request | Not stated | A step that requires approval and has no `approval` field is asked as `approval: {approver: {kind: human}}`: in session, shown its resolved inputs, no expiry; omitted members take their defaults; `expires` runs from the request (§5.14) |
+| Approval digest input | "the canonical JSON of the shown values" | The array of resolved `shows` values in order (null when unresolved), `[inputs]` without `shows`, plus a `recheck` element on a re-ask; SHA-256 as lowercase hex, compared regardless of case (§5.14); normative vectors with a `kind` per vector (§10.3) |
+| Numbers in shown values | "integers within ±2^53" | An integer, a number written without a fraction or an exponent, has magnitude at most 2^53 and is refused otherwise; every other number is a binary64 value, so `1e+21` is valid (§5.14) |
+| `approval.mode` | Listed values only | `in_session` and `out_of_band` defined; a human approver is still never asked in an unattended run (§5.14) |
+
+**New in 1.2.0:**
+- Resumption of a deferred run (§5.14.1): the deferred steps run again, with
+  the steps that ran ahead of them that they read and a checkpoint step whose
+  invalidated checkpoint a re-entered mutation binds; nested deferred runs
+  continue; a queued step is asked afresh (of a person when attended), the
+  request names `queued_action_id`, and its `planned` record is updated in
+  place. The queued actions of a run that did not end `deferred` are never
+  carried out
+- With `identity@1`, approver identities on a decision
+  (`approver_identities`), approvers counted by principal and checked against
+  the requested kind and role, and, in a workflow that targets 1.2, the
+  approver fields `sender_check` and `accept_trust_classes` (§5.17)
+- A run keeps its actor while it continues: a restore for another actor is
+  refused, a handoff cancels the run unless it ended `deferred`, and
+  resumption may name a new actor (§5.17)
+- `world_state_schema.yaml` 1.2.0: `ActionRecord.approval.approver_identities`,
+  and descriptions of `approval.mode` and of `planned` records that a
+  resumption updates
 
 ### D.3 Host protocol, runs and audit records (RFC-0006, Part B)
 <!-- owner: S2b; entries: S2b.md part 2.18 -->

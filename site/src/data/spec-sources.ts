@@ -222,7 +222,14 @@ export interface RuntimeFixture {
   workflow: string;
   attendance: string;
   start: number;
+  /** The requests of the script, in order: its entries that expect an action and respond to it. */
   script: ScriptEntry[];
+  /**
+   * Where the run was resumed (a `resume` entry, §5.14.1): for each, the
+   * index in `script` of the first request after it. An entry that only
+   * expects the end of the run before a resumption is not a request.
+   */
+  resumedAt: number[];
   end: { kind: string; code?: string; outcome?: string; deferred?: { step: number; reason?: string }[] } & Obj;
   /** The trace record kinds the run must emit, in order (empty when the fixture lists none). */
   traceKinds: string[];
@@ -240,10 +247,19 @@ export function loadRuntimeFixture(name: string): RuntimeFixture {
     throw new Error(`runtime fixture ${file}: needs catalog, workflow, script and end`);
   }
   if (!isObj(doc.catalog[doc.workflow])) throw new Error(`runtime fixture ${file}: its catalog has no workflow ${doc.workflow}`);
+  const script: ScriptEntry[] = [];
+  const resumedAt: number[] = [];
   for (const [i, s] of doc.script.entries()) {
+    if (isObj(s) && isObj(s.resume)) {
+      resumedAt.push(script.length);
+      continue;
+    }
+    // The end a run reached before it was resumed: expected, not answered.
+    if (isObj(s) && isObj(s.expect) && (s.expect.kind === 'Completed' || s.expect.kind === 'Failed') && !('respond' in s)) continue;
     if (!isObj(s) || !isObj(s.expect) || typeof s.expect.kind !== 'string' || !isObj(s.respond) || typeof s.respond.kind !== 'string') {
       throw new Error(`runtime fixture ${file}: script entry ${i} needs expect.kind and respond.kind`);
     }
+    script.push(s as unknown as ScriptEntry);
   }
   return {
     name,
@@ -253,7 +269,8 @@ export function loadRuntimeFixture(name: string): RuntimeFixture {
     workflow: doc.workflow,
     attendance: typeof doc.attendance === 'string' ? doc.attendance : 'attended',
     start: typeof doc.start === 'number' ? doc.start : 0,
-    script: doc.script as ScriptEntry[],
+    script,
+    resumedAt,
     end: doc.end as RuntimeFixture['end'],
     traceKinds: Array.isArray(doc.trace_kinds) ? doc.trace_kinds.map(String) : [],
   };
