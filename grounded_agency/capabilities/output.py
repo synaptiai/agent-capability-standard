@@ -51,13 +51,15 @@ class CapabilityOutputError(ValueError):
 
 
 def _fail(capability: str, message: str, field: str | None = None) -> None:
+    """Raise R402. ``message`` follows "the '<capability>' output"."""
     location: dict[str, Any] = {"capability": capability}
     if field is not None:
         location["field"] = field
+    joiner = "" if message.startswith("'s ") else " "
     raise CapabilityOutputError(
         ValidationError(
             ErrorCode.EXECUTION_FAILED,
-            f"the '{capability}' output {message}",
+            f"the '{capability}' output{joiner}{message}",
             location,
         )
     )
@@ -140,7 +142,7 @@ def _check_contract(
         output["evidence_anchors"], list
     ):
         _fail(
-            capability, "has evidence_anchors that is not an array", "evidence_anchors"
+            capability, "'s evidence_anchors is not an array", "evidence_anchors"
         )
     if "confidence" in required:
         confidence = output.get("confidence")
@@ -151,7 +153,7 @@ def _check_contract(
         ):
             _fail(
                 capability,
-                "has a confidence that is not a number from 0 to 1",
+                "'s confidence is not a number from 0 to 1",
                 "confidence",
             )
     check_i_json(output, capability)

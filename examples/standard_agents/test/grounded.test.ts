@@ -60,9 +60,11 @@ describe('classification', () => {
     expect(acsAnnotation(writeConfig)).toEqual({
       standard: STANDARD_VERSION,
       ontology: ONTOLOGY_VERSION,
+      tool: 'write_config',
       capability: 'mutate',
       layer: 'EXECUTE',
       domain: 'config',
+      approval: { expires: '15m' },
       risk: 'high',
       mutation: true,
       requires_checkpoint: true,
@@ -918,10 +920,15 @@ describe('the agent definition', () => {
       ['V102', 'rollback_config'],
     ]);
 
-    // A tool defined with plain defineTool is reported as unclassified.
+    // A tool defined with plain defineTool is unbound: W617 (STANDARD 1.2.0 §5.18.2).
     const plain = { ...tools, web_search: { annotations: { agentbuilder: {} } } };
     expect(lintPromptTools('config_steward', plain)).toEqual([
-      expect.objectContaining({ code: 'unclassified', severity: 'warning', location: { prompt: 'config_steward', tool: 'web_search' } }),
+      expect.objectContaining({
+        code: 'W617',
+        name: 'UNBOUND_TOOL',
+        severity: 'warning',
+        location: { prompt: 'config_steward', tool: 'web_search' },
+      }),
     ]);
   });
 
@@ -937,10 +944,10 @@ describe('the agent definition', () => {
     });
     expect(lintPromptTools('records', { purge_record: purge }).map((d) => [d.code, d.severity, d.location, d.message])).toEqual([
       [
-        'misnamed_tool',
+        'V111',
         'error',
         { prompt: 'records', tool: 'purge_record', capability: 'execute' },
-        "tool 'purge_record' states the name 'archive_record', which is what an approver is shown and the trace records",
+        "the host offers 'purge_record' with the binding of 'archive_record'; a binding's tool must be the name the tool is offered under",
       ],
     ]);
   });
@@ -962,12 +969,19 @@ describe('the agent definition', () => {
       sideB: { human: true },
     } as const;
     expect(lintAgentBindings(ending, tools).map((d) => [d.code, d.severity, d.location])).toEqual([
-      ['bound_gated_tool', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'stopTool', tool: 'rollback_config', capability: 'rollback' }],
-      ['bound_gated_tool', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'sessionStop', tool: 'write_config', capability: 'mutate' }],
+      ['F506', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'stopTool', tool: 'rollback_config', capability: 'rollback' }],
+      ['F506', 'error', { agent: 'ends_on_write', side: 'sideA', binding: 'sessionStop', tool: 'write_config', capability: 'mutate' }],
     ]);
     expect(lintAgentBindings(ending, tools).map((d) => d.message)).toEqual([
-      "agent 'ends_on_write' binds stopTool to 'rollback_config' (rollback), which is refused without a 'checkpoint' call; the binding acts on the call, not on its result",
-      "agent 'ends_on_write' binds sessionStop to 'write_config' (mutate), which is refused without approval and a 'checkpoint' call; the binding acts on the call, not on its result",
+      "agent 'ends_on_write' ties stopTool to 'rollback_config' (rollback): host action 'stopTool' takes effect whenever 'rollback_config' is called, and 'rollback_config' can be refused for want of a checkpoint, approval or a prerequisite; tie it to a control-only tool",
+      "agent 'ends_on_write' ties sessionStop to 'write_config' (mutate): host action 'sessionStop' takes effect whenever 'write_config' is called, and 'write_config' can be refused for want of a checkpoint, approval or a prerequisite; tie it to a control-only tool",
+    ]);
+
+    // A tool with no binding is unbound: F506 too, since a host policy or
+    // the strictest case can refuse it.
+    const unbound = { ...ending, sideA: { prompt: 'config_steward', stopTool: 'web_search' } } as const;
+    expect(lintAgentBindings(unbound, { ...tools, web_search: {} }).map((d) => [d.code, d.location.tool])).toEqual([
+      ['F506', 'web_search'],
     ]);
   });
 

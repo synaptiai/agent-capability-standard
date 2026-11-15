@@ -107,10 +107,67 @@ def test_annotation_schema_rejects(
     assert list(Draft202012Validator(schema).iter_errors(bad))
 
 
-def test_annotation_schema_requires_the_safety_flags(
+def test_the_copies_are_optional_and_never_contradict_the_capability(
     schema: dict[str, Any], ontology: dict[str, Any]
 ) -> None:
-    for flag in ("risk", "mutation", "requires_checkpoint", "requires_approval"):
+    """STANDARD 1.2.0 section 5.18.1: the annotation is a carrier of the
+    tool binding record, and `layer` and the effective flags are copies. A
+    copy may be left out; one that names another layer, or is weaker than
+    the capability's ontology flags, is rejected."""
+    validator = Draft202012Validator(schema)
+    for flag in (
+        "layer",
+        "risk",
+        "mutation",
+        "requires_checkpoint",
+        "requires_approval",
+    ):
         partial = annotation(ontology, "mutate")
         del partial[flag]
-        assert list(Draft202012Validator(schema).iter_errors(partial)), flag
+        assert not list(validator.iter_errors(partial)), flag
+    record = {
+        "standard": "1.2.0",
+        "ontology": "2.2.0",
+        "tool": "w",
+        "capability": "mutate",
+    }
+    assert not list(validator.iter_errors(record))
+    for change in (
+        {"layer": "PERCEIVE"},
+        {"requires_checkpoint": False},
+        {"requires_approval": False},
+        {"mutation": False},
+        {"risk": "low"},
+    ):
+        bad = {**annotation(ontology, "mutate"), **change}
+        assert list(validator.iter_errors(bad)), change
+    # mutation false is a copy an overridable capability may hold.
+    assert not list(
+        validator.iter_errors({**annotation(ontology, "audit"), "mutation": False})
+    )
+
+
+def test_the_record_members_and_a_control_annotation_validate(
+    schema: dict[str, Any], ontology: dict[str, Any]
+) -> None:
+    validator = Draft202012Validator(schema)
+    full = {
+        **annotation(ontology, "plan"),
+        "standard": "1.2.0",
+        "tool": "apply",
+        "flags": {"requires_approval": True},
+        "additional_capabilities": ["mutate"],
+        "invokes": ["write"],
+        "approval": {"min_approvers": 2, "role": "ops", "expires": "PT10M"},
+        "x-owner": "ops",
+    }
+    assert not list(validator.iter_errors(full))
+    control = {
+        "standard": "1.2.0",
+        "ontology": "2.2.0",
+        "tool": "done",
+        "control": True,
+    }
+    assert not list(validator.iter_errors(control))
+    assert list(validator.iter_errors({**control, "capability": "observe"}))
+    assert list(validator.iter_errors({"standard": "1.2.0", "ontology": "2.2.0"}))
