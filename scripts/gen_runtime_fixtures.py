@@ -11,78 +11,60 @@ trace. Edit the fixtures here, not the JSON, then regenerate:
 Writing also deletes any JSON file in the directory that this script does
 not generate, so the directory holds exactly the fixtures defined here.
 Contributed fixtures (tests/conformance/contrib/*.json) are copied as they
-are, after a check of their keys.
+are, after a check of their keys. Every fixture is checked against
+tests/conformance/runtime/schema/fixture.schema.json before anything is
+written.
+
+The fixtures of Standard 1.1 are defined in this file. Each 1.2 workstream
+adds its own in scripts/runtime_fixtures/<workstream>.py, whose
+register(add) this script calls with the add() below, so the workstreams do
+not edit one file; the shared building blocks (st, wf, out, ...) are in
+scripts/runtime_fixtures/helpers.py.
 """
 
 import argparse
 import copy
+import importlib
 import json
 import sys
 from functools import cache
 from pathlib import Path
 
+import jsonschema
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "tests" / "conformance" / "runtime"
+SCHEMA = OUT / "schema" / "fixture.schema.json"
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-def st(cap, store, **kw):
-    s = {"capability": cap, "purpose": f"{cap} step", "store_as": store}
-    s.update(kw)
-    return s
-
-
-def wf(steps, inputs=None, requires=None, **kw):
-    w = {"goal": "g", "risk": "high", "spec_version": "1.1", "steps": steps}
-    if inputs is not None:
-        w["inputs"] = inputs
-    if requires:
-        w["workflow_extensions"] = {"requires": requires}
-    w.update(kw)
-    return w
-
-
-def out(**v):
-    v.setdefault("evidence_anchors", [])
-    return {"kind": "Output", "value": v}
-
-
-def inv(cap, **kw):
-    e = {"kind": "InvokeCapability", "capability": cap}
-    e.update(kw)
-    return e
-
-
-def approve(d, who=("alice",), digest="{{digest}}"):
-    return {
-        "kind": "Decision",
-        "decision_id": d,
-        "decision": "approved",
-        "approvers": list(who),
-        "digest": digest,
-    }
-
-
-CP = st("checkpoint", "cp", input_bindings={"scope": "repo"})
-
-
-def mutate(store="m", **kw):
-    return st(
-        "mutate",
-        store,
-        input_bindings={"target": "config", "operation": {"set": 1}},
-        **kw,
-    )
-
-
-POLICY = st(
-    "constrain",
-    "policy",
-    input_bindings={"target": "config", "constraints": ["policy"]},
+from runtime_fixtures import WORKSTREAMS  # noqa: E402
+from runtime_fixtures.helpers import (  # noqa: E402
+    CP,
+    POLICY,
+    approve,
+    inv,
+    mutate,
+    out,
+    st,
+    wf,
 )
 
 fixtures = {}
+
+# Optional members of a fixture, in the order a fixture writes them (after
+# the required ones). Each is passed to the run's start as it is.
+OPTIONAL = (
+    "actor_identity",
+    "catalogs",
+    "agents",
+    "records",
+    "destinations",
+    "grounding",
+    "profiles",
+    "run_record",
+)
 
 
 def add(
@@ -95,13 +77,22 @@ def add(
     workflow="w",
     inputs=None,
     attendance="attended",
-    actor_identity=None,
+    header=None,
+    **optional,
 ):
+    """Define fixture `name`. `header` is the version the catalog's
+    '# Standard version:' header declares, or None for none (a fixture
+    always states it, STANDARD v1.2 §11.5); `optional` takes the members of
+    OPTIONAL, each written when it is not None."""
     if name in fixtures:
         raise ValueError(f"two fixtures are named {name!r}")
+    unknown = sorted(set(optional) - set(OPTIONAL))
+    if unknown:
+        raise TypeError(f"{name}: add() takes no member {unknown}")
     fixtures[name] = {
         "description": description,
         "catalog": catalog,
+        "header": header,
         "workflow": workflow,
         "inputs": inputs or {},
         "attendance": attendance,
@@ -110,8 +101,9 @@ def add(
         "end": end,
         "trace_kinds": list(trace),
     }
-    if actor_identity is not None:
-        fixtures[name]["actor_identity"] = actor_identity
+    for key in OPTIONAL:
+        if optional.get(key) is not None:
+            fixtures[name][key] = optional[key]
 
 
 add(
@@ -6608,10 +6600,18 @@ add(
 # Contributed runtime fixtures (tests/conformance/contrib/*.json), kept as
 # their authors wrote them: each is checked for the fixture keys and copied.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# The 1.2 workstreams' fixtures (scripts/runtime_fixtures/*.py).
+# ---------------------------------------------------------------------------
+for workstream in WORKSTREAMS:
+    importlib.import_module(f"runtime_fixtures.{workstream}").register(add)
+
+
 CONTRIB = ROOT / "tests" / "conformance" / "contrib"
 FIXTURE_KEYS = {
     "description",
     "catalog",
+    "header",
     "workflow",
     "inputs",
     "attendance",
@@ -6638,7 +6638,7 @@ def contributed():
             raise ValueError(f"{path}: a fixture is a JSON object")
         keys = set(fixture)
         missing = FIXTURE_KEYS - keys
-        unknown = keys - FIXTURE_KEYS - {"actor_identity"}
+        unknown = keys - FIXTURE_KEYS - set(OPTIONAL)
         if missing or unknown:
             raise ValueError(
                 f"{path}: missing {sorted(missing)}, unknown {sorted(unknown)}"
@@ -6649,12 +6649,24 @@ def contributed():
 contributed()
 
 
+def check_format():
+    """Every fixture conforms to the fixture schema."""
+    schema = json.loads(SCHEMA.read_text())
+    validator = jsonschema.Draft202012Validator(schema)
+    for name, fixture in fixtures.items():
+        errors = sorted(validator.iter_errors(fixture), key=lambda e: list(e.path))
+        if errors:
+            where = "/".join(str(p) for p in errors[0].path)
+            raise ValueError(f"{name}: {where}: {errors[0].message}")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--check", action="store_true", help="fail if the fixtures on disk differ"
     )
     check = parser.parse_args(argv).check
+    check_format()
     rendered = {
         f"{name}.json": json.dumps(f, indent=2) + "\n" for name, f in fixtures.items()
     }

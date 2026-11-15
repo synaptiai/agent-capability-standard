@@ -122,6 +122,98 @@ fn later(now: u64, d: std::time::Duration) -> u64 {
         .min(MAX_TIME)
 }
 
+/// The reasons §5.19.7 defines. A host may also send a vendor reason
+/// (`x-…`, [`is_reason`]).
+pub(crate) const REASONS: &[&str] = &[
+    "unsupported_capability",
+    "unsupported_domain",
+    "not_recorded",
+    "outcome_unknown",
+    "key_conflict",
+    "destination_not_allowed",
+    "unsupported_scope",
+    "unsupported_ttl",
+    "over_capacity",
+    "secret_in_data",
+    "below_minimum_confidence",
+    "invalid_confidence",
+];
+
+/// Whether `t` is a reason (§5.19.7): one of [`REASONS`], or `x-`, then a
+/// lowercase letter or a digit, then at most 61 lowercase letters, digits,
+/// `_`, `.` or `-`.
+pub(crate) fn is_reason(t: &str) -> bool {
+    REASONS.contains(&t) || (crate::grounding::vendor(t) && t.len() <= 2 + 1 + 61)
+}
+
+/// The reason a failure came with (§5.19.7): a token, or a value a host gave
+/// that is not one, which is ignored and only traced.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Reason {
+    pub token: Option<String>,
+    pub ignored: Option<Value>,
+}
+
+impl Reason {
+    /// A reason the executor raises itself.
+    #[allow(
+        dead_code,
+        reason = "the 1.2 workstreams raise reasons through it (FOUNDATION F1.8)"
+    )]
+    pub(crate) fn of(token: &str) -> Reason {
+        debug_assert!(is_reason(token), "{token} is not a reason");
+        Reason {
+            token: Some(token.to_string()),
+            ignored: None,
+        }
+    }
+
+    /// The `reason` member of a host's `Error` response.
+    fn from_response(v: Option<Value>) -> Reason {
+        match v {
+            None => Reason::default(),
+            Some(Value::String(t)) if is_reason(&t) => Reason {
+                token: Some(t),
+                ignored: None,
+            },
+            Some(other) => Reason {
+                token: None,
+                ignored: Some(other),
+            },
+        }
+    }
+
+    /// Add the reason to a trace event's detail: `reason`, or
+    /// `reason_ignored` for a value outside the grammar. Nothing without one.
+    fn annotate(&self, detail: &mut Value) {
+        if let Some(t) = &self.token {
+            detail["reason"] = json!(t);
+        }
+        if let Some(v) = &self.ignored {
+            detail["reason_ignored"] = v.clone();
+        }
+    }
+}
+
+/// How a run, or a nested run, failed.
+pub(crate) struct Fail {
+    pub code: String,
+    pub message: String,
+    /// The reason the failure came with (§5.19.7).
+    pub reason: Option<String>,
+}
+
+impl Fail {
+    /// A failure the executor makes, with no reason.
+    fn new(code: impl Into<String>, message: impl Into<String>) -> Fail {
+        Fail {
+            code: code.into(),
+            message: message.into(),
+            reason: None,
+        }
+    }
+}
+
 /// What an approval request asked for.
 struct Asked<'s> {
     digest: &'s str,
@@ -228,10 +320,20 @@ impl<'a> Machine<'a> {
     /// An approved action that then failed. A record that is already
     /// rejected, expired or executed keeps its status.
     fn record_failed(&mut self) {
+        let reason = self
+            .frame_ref()
+            .cur
+            .error
+            .as_ref()
+            .and_then(|e| e.reason.clone());
         if let Some(r) = self.frame_ref().cur.record
             && self.st.records[r]["status"] == "approved"
         {
             self.st.records[r]["status"] = json!("failed");
+            // The reason the step failed with (§5.19.7, §6.4).
+            if let Some(reason) = reason {
+                self.st.records[r]["reason_code"] = json!(reason);
+            }
         }
     }
 
@@ -320,11 +422,20 @@ impl<'a> Machine<'a> {
 
     /// The step failed before or while executing: on to its failure modes.
     fn step_error(&mut self, code: &str, message: impl Into<String>) -> Flow {
+        self.step_error_with(code, message, Reason::default())
+    }
+
+    /// [`Machine::step_error`] with the reason the failure came with
+    /// (§5.19.7): the step keeps it, and the trace shows it.
+    fn step_error_with(&mut self, code: &str, message: impl Into<String>, reason: Reason) -> Flow {
         let message = message.into();
-        self.trace_step("step_failed", json!({"code": code, "message": message}));
+        let mut detail = json!({"code": code, "message": message});
+        reason.annotate(&mut detail);
+        self.trace_step("step_failed", detail);
         self.frame().cur.error = Some(StepError {
             code: code.to_string(),
             message,
+            reason: reason.token,
         });
         self.set_stage(Stage::Failure)
     }
@@ -373,18 +484,24 @@ impl<'a> Machine<'a> {
     }
 
     fn fail_run(&mut self, code: &str, message: &str) -> Flow {
+        self.fail_run_with(Fail::new(code, message))
+    }
+
+    /// End the run with `fail`; the `Failed` action carries its reason.
+    fn fail_run_with(&mut self, fail: Fail) -> Flow {
         let step = self.st.frames.last().map(|f| f.step);
-        self.trace(
-            "run_failed",
-            step,
-            json!({"code": code, "message": message}),
-        );
+        let mut detail = json!({"code": fail.code, "message": fail.message});
+        if let Some(r) = &fail.reason {
+            detail["reason"] = json!(r);
+        }
+        self.trace("run_failed", step, detail);
         let records = self.st.records.clone();
         let deferred = self.deferred_report();
         self.finish(Body::Failed {
-            code: code.to_string(),
+            code: fail.code,
             step,
-            message: message.to_string(),
+            message: fail.message,
+            reason: fail.reason,
             action_records: records,
             deferred,
         })
@@ -392,7 +509,7 @@ impl<'a> Machine<'a> {
 
     /// The top frame ends: the run ends, or the parent's invoke step gets
     /// the result.
-    fn end_frame(&mut self, end: Result<(Outcome, Option<String>), (String, String)>) -> Flow {
+    fn end_frame(&mut self, end: Result<(Outcome, Option<String>), Fail>) -> Flow {
         // A run that completed with deferred steps ends deferred.
         let end = match end {
             Ok((Outcome::Completed, cause)) if !self.frame_ref().deferred.is_empty() => {
@@ -421,7 +538,7 @@ impl<'a> Machine<'a> {
                         deferred,
                     })
                 }
-                Err((code, message)) => self.fail_run(&code, &message),
+                Err(fail) => self.fail_run_with(fail),
             };
         }
         let child = self.st.frames.pop().expect("checked above");
@@ -430,7 +547,7 @@ impl<'a> Machine<'a> {
         }
         let result = match &end {
             Ok((o, _)) => json!(o),
-            Err((c, _)) => json!(c),
+            Err(f) => json!(f.code),
         };
         self.trace_step(
             "invoke_returned",
@@ -500,7 +617,7 @@ impl<'a> Machine<'a> {
                 ))
             }
             Ok((outcome, _)) => self.finish_run(outcome),
-            Err((code, message)) => self.exec_error(
+            Err(Fail { code, message, .. }) => self.exec_error(
                 "R402",
                 format!(
                     "invoked workflow '{}' failed with {code}: {message}",
@@ -644,9 +761,9 @@ impl<'a> Machine<'a> {
     /// Roll back to the latest checkpoint; with none, the run fails (F503).
     fn rollback(&mut self, purpose: Purpose) -> Flow {
         let Some(cp) = self.st.checkpoints.last().map(|c| c.id.clone()) else {
-            return self.end_frame(Err((
-                "F503".to_string(),
-                "there is no checkpoint to roll back to".to_string(),
+            return self.end_frame(Err(Fail::new(
+                "F503",
+                "there is no checkpoint to roll back to",
             )));
         };
         let step = self.frame_ref().step;
@@ -1355,6 +1472,13 @@ impl<'a> Machine<'a> {
     /// An execution error: retried while attempts remain (R401, R402,
     /// R406), then on to the failure modes.
     fn exec_error(&mut self, code: &str, message: impl Into<String>) -> Flow {
+        self.exec_error_with(code, message, Reason::default())
+    }
+
+    /// [`Machine::exec_error`] with the reason the error came with
+    /// (§5.19.7): the retry trace shows it, and the step keeps it when it
+    /// fails.
+    fn exec_error_with(&mut self, code: &str, message: impl Into<String>, reason: Reason) -> Flow {
         let message = message.into();
         let (attempt, retry) = {
             let s = self.step_ref();
@@ -1372,12 +1496,13 @@ impl<'a> Machine<'a> {
                 "exponential" => 1000u64.saturating_mul(1u64 << attempt.saturating_sub(1).min(32)),
                 _ => 0,
             };
-            let detail = json!({
+            let mut detail = json!({
                 "code": code,
                 "message": message,
                 "attempt": attempt,
                 "backoff_ms": wait_ms,
             });
+            reason.annotate(&mut detail);
             self.trace_step("retry", detail);
             // A delegate that waits is delegated again: a delegate
             // that went silent is replaced, not waited on again.
@@ -1393,7 +1518,7 @@ impl<'a> Machine<'a> {
             let until = self.st.now.saturating_add(wait_ms).min(MAX_TIME);
             return self.set_stage(Stage::Backoff { until });
         }
-        self.step_error(code, message)
+        self.step_error_with(code, message, reason)
     }
 
     fn output(&mut self, value: Value) -> Flow {
@@ -1757,7 +1882,11 @@ impl<'a> Machine<'a> {
         match error {
             Some(e) => {
                 self.record_failed();
-                self.end_frame(Err((e.code, e.message)))
+                self.end_frame(Err(Fail {
+                    code: e.code,
+                    message: e.message,
+                    reason: e.reason,
+                }))
             }
             None => match self.frame().cur.ending.take() {
                 Some(message) => self.end_run(message),
@@ -1772,15 +1901,21 @@ impl<'a> Machine<'a> {
         let wf = &program.workflows[&self.frame_ref().workflow];
         let step = &wf.steps[self.frame_ref().step];
         let fm = &step.failure_modes[f];
-        let (code, message) = match &self.frame_ref().cur.error {
-            Some(e) => (e.code.clone(), e.message.clone()),
+        let (code, message, reason) = match &self.frame_ref().cur.error {
+            Some(e) => (e.code.clone(), e.message.clone(), e.reason.clone()),
             None => (
                 "R402".to_string(),
                 format!(
                     "failure mode {f} fired: {}",
                     step.raw["failure_modes"][f]["condition"]
                 ),
+                None,
             ),
+        };
+        let failed = |code: String, message: String| Fail {
+            code,
+            message,
+            reason: reason.clone(),
         };
         if self.frame_ref().cur.error.is_some() {
             self.record_failed();
@@ -1788,11 +1923,11 @@ impl<'a> Machine<'a> {
         if fm.action == "escalate" {
             return match fm.goto {
                 Some(h) => self.escalate(h, &code),
-                None => self.end_frame(Err((code, message))),
+                None => self.end_frame(Err(failed(code, message))),
             };
         }
         let Some(target) = fm.goto else {
-            return self.end_frame(Err((code, message)));
+            return self.end_frame(Err(failed(code, message)));
         };
         let key = format!("{}:{f}", step.index);
         let taken = self
@@ -1808,8 +1943,8 @@ impl<'a> Machine<'a> {
             );
             return match fm.on_exhausted {
                 Some(h) => self.escalate(h, "R404"),
-                None => self.end_frame(Err((
-                    "R404".to_string(),
+                None => self.end_frame(Err(Fail::new(
+                    "R404",
                     format!("recovery loop exhausted after {taken} loop(s): {message}"),
                 ))),
             };
@@ -1841,8 +1976,8 @@ impl<'a> Machine<'a> {
             self.frame().always_ask.insert("_recovery".to_string());
         }
         if let Err(e) = super::ijson(&Value::Object(injected.clone())) {
-            return self.end_frame(Err((
-                "R402".to_string(),
+            return self.end_frame(Err(Fail::new(
+                "R402",
                 format!("the context a recovery loop injects: {e}"),
             )));
         }
@@ -2017,13 +2152,17 @@ impl<'a> Machine<'a> {
             }
             (
                 purpose @ (Purpose::Capability | Purpose::Event),
-                Response::Error { code, message },
+                Response::Error {
+                    code,
+                    message,
+                    reason,
+                },
             ) => {
                 // A timeout keeps its code; so does lost liveness on a wait.
                 // Anything else a host reports is a failed step.
                 let keep = code == "R401" || (code == "R406" && matches!(purpose, Purpose::Event));
                 let code = if keep { code } else { "R402".to_string() };
-                self.exec_error(&code, message);
+                self.exec_error_with(&code, message, Reason::from_response(reason));
             }
             (
                 Purpose::Event,
@@ -2041,18 +2180,33 @@ impl<'a> Machine<'a> {
             (Purpose::Checkpoint, Response::Checkpoint { checkpoint_id }) => {
                 self.add_checkpoint(checkpoint_id);
             }
-            (Purpose::Checkpoint, Response::Error { message, .. }) => {
-                self.step_error("F501", format!("could not take a checkpoint: {message}"));
+            (
+                Purpose::Checkpoint,
+                Response::Error {
+                    message, reason, ..
+                },
+            ) => {
+                self.step_error_with(
+                    "F501",
+                    format!("could not take a checkpoint: {message}"),
+                    Reason::from_response(reason),
+                );
             }
             (Purpose::FailureCheckpoint { mode }, Response::Checkpoint { checkpoint_id }) => {
                 self.add_checkpoint(checkpoint_id);
                 self.recover(mode);
             }
-            (Purpose::FailureCheckpoint { .. }, Response::Error { message, .. }) => {
-                self.end_frame(Err((
-                    "F501".to_string(),
-                    format!("could not take a checkpoint: {message}"),
-                )));
+            (
+                Purpose::FailureCheckpoint { .. },
+                Response::Error {
+                    message, reason, ..
+                },
+            ) => {
+                self.end_frame(Err(Fail {
+                    code: "F501".to_string(),
+                    message: format!("could not take a checkpoint: {message}"),
+                    reason: Reason::from_response(reason).token,
+                }));
             }
             (Purpose::GateRollback { message }, Response::RolledBack) => {
                 self.trace_step("rolled_back", json!({}));
@@ -2064,12 +2218,15 @@ impl<'a> Machine<'a> {
             }
             (
                 Purpose::GateRollback { .. } | Purpose::FailureRollback { .. },
-                Response::Error { message, .. },
+                Response::Error {
+                    message, reason, ..
+                },
             ) => {
-                self.end_frame(Err((
-                    "F503".to_string(),
-                    format!("rollback failed: {message}"),
-                )));
+                self.end_frame(Err(Fail {
+                    code: "F503".to_string(),
+                    message: format!("rollback failed: {message}"),
+                    reason: Reason::from_response(reason).token,
+                }));
             }
             (
                 Purpose::Approval {
@@ -2094,10 +2251,16 @@ impl<'a> Machine<'a> {
             (Purpose::Recheck, Response::Current { value }) => {
                 self.rechecked(value);
             }
-            (Purpose::Recheck, Response::Error { message, .. }) => {
-                self.step_error(
+            (
+                Purpose::Recheck,
+                Response::Error {
+                    message, reason, ..
+                },
+            ) => {
+                self.step_error_with(
                     "F502",
                     format!("could not recheck the approved source: {message}"),
+                    Reason::from_response(reason),
                 );
             }
             // check_state and submit rule this out; a run never panics.

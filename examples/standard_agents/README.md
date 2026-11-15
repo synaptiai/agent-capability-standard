@@ -35,12 +35,24 @@ flowchart TB
 Node 22.12 or newer on the 22, 24 or 26 release line (CI uses the version in
 `site/.nvmrc`).
 
+The binding depends on the TypeScript package
+[`@synaptiai/acs-core`](../../packages/acs-core/README.md) of this repository
+(`file:../../packages/acs-core`), which holds the ontology table, effective
+flags, canonical JSON and the digest. Build it first:
+
 ```bash
-cd examples/standard_agents
+cd packages/acs-core
+npm ci
+npm run build   # dist/, which the binding imports
+cd ../../examples/standard_agents
 npm ci
 npm run check   # type-check against the published @standardagents/spec types
 npm test        # the binding's rules, against an in-memory thread
 ```
+
+A packed agent bundles the package with the binding's code: the Standard
+Agents packaging page does not say how a packed agent's npm dependencies are
+resolved.
 
 The tests call the tools, the hook and the endpoints directly with an
 in-memory `ThreadState` (`test/memory_thread.ts`). No model runs and no
@@ -52,11 +64,10 @@ code enforces its rules, not how a particular runtime behaves.
 | Path | What it is |
 |------|------------|
 | `src/acs/grounded.ts` | `groundedTool`: defines a function tool for one capability and enforces its safety flags inside the tool |
-| `src/acs/ontology.gen.ts` | Each capability's flags and required output fields, generated from `schemas/capability_ontology.yaml` |
+| `src/acs/ontology.ts` | The ontology table, types and effective flags, from `@synaptiai/acs-core`, and the Standard version the binding follows |
 | `src/acs/approval.ts` | Approval requests and decisions, bound to a digest of what the approver was shown |
 | `src/acs/audit.ts` | Joins tool call ids to the trace from a `tool_call_done` hook, and records calls no grounded tool recorded |
 | `src/acs/lint.ts` | Checks before anything runs. A prompt's tool list: every tool classified, each stating the name the prompt offers it under, no requirement the prompt can never meet. An agent's stop and session bindings: none names a tool that can be refused |
-| `src/acs/canonical.ts` | RFC 8785 canonical JSON and the SHA-256 digest, equal to the reference executor's |
 | `src/acs/records.ts` | The records kept in the thread's key-value store |
 | `src/acs/serial.ts` | Takes one thread's checks and record writes one at a time, for calls in one JavaScript realm |
 | `src/package.ts` | The example as a packed agent: the entry point exports that Packaging describes |
@@ -125,9 +136,11 @@ Three things the binding cannot do for a deployment:
 
 ## Generated files
 
-`src/acs/ontology.gen.ts` and `test/fixtures/approval-digests.json` come from
-this repository's ontology and reference executor. After changing either,
-from the repository root:
+The ontology table the binding uses is the package's
+`packages/acs-core/src/ontology.gen.ts`, generated from this repository's
+ontology; the package's tests read the reference executor's approval digest
+vectors (`tests/conformance/approval/digests.json`) in place. After changing
+the ontology, from the repository root:
 
 ```bash
 python scripts/gen_standard_agents_binding.py

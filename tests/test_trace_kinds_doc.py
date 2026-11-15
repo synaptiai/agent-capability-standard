@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from grounded_agency import _core
+from tests.runtime_replay import load, play, start
 
 ROOT = Path(__file__).resolve().parent.parent
 GUIDE = ROOT / "docs" / "guides" / "RUNNING_WORKFLOWS.md"
@@ -109,48 +110,19 @@ def fixture_kinds() -> set[str]:
     return kinds
 
 
-def _fill(response: Any, action: dict[str, Any]) -> Any:
-    if response == "{{digest}}":
-        return action["digest"]
-    if isinstance(response, dict):
-        return {k: _fill(v, action) for k, v in response.items()}
-    if isinstance(response, list):
-        return [_fill(v, action) for v in response]
-    return response
-
-
 @pytest.fixture(scope="module")
 def recorded() -> list[dict[str, Any]]:
     """Every trace event of every runtime fixture's run.
 
-    The script of each fixture is played as `tests/test_runner.py` plays it;
-    what the run must do is asserted there, not here.
+    The script of each fixture is played as `tests/test_runner.py` plays it
+    (`tests/runtime_replay.py`); what the run must do is asserted there, not
+    here.
     """
     validator = _core.Validator(ONTOLOGY, ROOT)
     events: list[dict[str, Any]] = []
     for path in sorted(RUNTIME.glob("*.json")):
-        f = json.loads(path.read_text(encoding="utf-8"))
-        now = f["start"]
-        run = _core.Run.start(
-            validator,
-            f["catalog"],
-            f["workflow"],
-            f["inputs"],
-            attendance=f["attendance"],
-            run_id="run-1",
-            now_ms=now,
-            actor_identity=f.get("actor_identity"),
-        )
-        for entry in f["script"]:
-            if "tick" in entry:
-                now = entry["tick"]
-                run.tick(now)
-                continue
-            action = run.next()
-            if "respond" in entry:
-                now = entry.get("at", now)
-                run.submit(action["id"], _fill(entry["respond"], action), now)
-        events.extend(run.trace())
+        f = load(path)
+        events.extend(play(start(validator, f), f).trace())
     return events
 
 

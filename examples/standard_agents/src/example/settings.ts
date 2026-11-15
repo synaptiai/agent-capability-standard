@@ -3,7 +3,7 @@
  * in the thread's file system.
  */
 import type { ThreadState } from '@standardagents/spec';
-import { sha256Hex, type Json } from '../acs/canonical.js';
+import { sha256Hex, type Json } from '@synaptiai/acs-core';
 
 export const SETTINGS_PATH = '/config/settings.json';
 

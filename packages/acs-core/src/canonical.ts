@@ -1,12 +1,12 @@
 /**
  * Canonical JSON (RFC 8785, JCS) and the SHA-256 digest built on it.
  *
- * STANDARD v1.1.0 §5.14 binds an approval to "the SHA-256 digest of the
+ * STANDARD v1.2.0 §5.14 binds an approval to "the SHA-256 digest of the
  * canonical JSON of the shown values". This module computes the same digest
  * as the reference executor (`core/src/exec/canonical.rs`), so an approval
- * recorded by a Standard Agents tool and one recorded by the executor agree
- * on what was approved. `test/canonical.test.ts` checks that against digests
- * the executor produced.
+ * recorded by a TypeScript host and one recorded by the executor agree on
+ * what was approved. `test/canonical.test.ts` checks that against the
+ * executor's vectors, `tests/conformance/approval/digests.json`.
  */
 
 /** A value that survives a JSON round trip unchanged (I-JSON, RFC 7493). */

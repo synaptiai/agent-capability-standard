@@ -14,11 +14,12 @@ pub(crate) mod identity;
 mod invoke;
 mod quorum;
 mod recovery;
-mod semantics;
+pub(crate) mod semantics;
 mod wait;
 
 pub(crate) use extensions::count;
-pub use semantics::header_version;
+pub(crate) use semantics::effective;
+pub use semantics::{Flags, check_cited, header_version};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -29,6 +30,7 @@ use serde_json::{Map, Value, json};
 
 use crate::diag::{Code, Diagnostic};
 use crate::ontology::{Ontology, Risk};
+use crate::profile::Policy;
 use crate::refs;
 use crate::schema::{self, SchemaStore};
 use crate::types::{self, Type};
@@ -244,9 +246,78 @@ pub fn validate_catalog_file(ctx: &Context, path: &Path) -> Result<Report, LoadE
     ))
 }
 
+/// What validation takes besides the catalog (STANDARD v1.2 §5.1.1, §5.15.1,
+/// §5.21, §11.5). The default is one catalog with no header and nothing
+/// else given.
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    /// The version the catalog's `# Standard version:` header declares
+    /// (§11.5), or none for a catalog without one.
+    pub header: Option<String>,
+    /// Domain profiles to apply (§5.21), as given. Workstream S6 loads and
+    /// applies them; until then a non-empty list is refused.
+    pub profiles: Vec<Value>,
+    /// Agent manifests (§5.15.1), as given. Workstream S3 reads them; until
+    /// then a non-empty list is refused.
+    pub agents: Vec<Value>,
+    /// The further catalogs of a catalog set (§5.1.1), each with its
+    /// header's version. Workstream S3 resolves them; until then a non-empty
+    /// list is refused.
+    pub catalogs: Vec<(Value, Option<String>)>,
+}
+
+impl Options {
+    /// The first member this validator does not implement yet, if any is
+    /// given: refused rather than ignored, so nothing is validated as if a
+    /// profile, manifest or catalog it was given were absent. Each
+    /// workstream removes its line when it implements the member.
+    pub(crate) fn unimplemented(&self) -> Option<&'static str> {
+        if !self.profiles.is_empty() {
+            return Some("profiles (§5.21)");
+        }
+        if !self.agents.is_empty() {
+            return Some("agent manifests (§5.15.1)");
+        }
+        if !self.catalogs.is_empty() {
+            return Some("catalog sets (§5.1.1)");
+        }
+        None
+    }
+}
+
+/// Validate a catalog with `options`. `Err` when the options cannot be used
+/// (a member this validator does not implement yet).
+pub fn validate_with(
+    ctx: &Context,
+    catalog: &Value,
+    options: &Options,
+) -> Result<Report, LoadError> {
+    if let Some(what) = options.unimplemented() {
+        return Err(LoadError::Invalid(format!(
+            "this validator does not implement {what} yet"
+        )));
+    }
+    Ok(validate_catalog_policy(
+        ctx,
+        catalog,
+        options.header.as_deref(),
+        &Policy::default(),
+    ))
+}
+
 /// Validate a parsed catalog: a mapping of workflow name to workflow.
 /// `header` is the version from the file's `# Standard version:` comment.
 pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) -> Report {
+    validate_catalog_policy(ctx, catalog, header, &Policy::default())
+}
+
+/// [`validate_catalog`] with the applied profiles' `policy` (§5.21).
+fn validate_catalog_policy(
+    ctx: &Context,
+    catalog: &Value,
+    header: Option<&str>,
+    policy: &Policy,
+) -> Report {
     let mut report = Report::default();
     let workflows = match catalog {
         Value::Object(m) => m,
@@ -278,6 +349,7 @@ pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) ->
                     name,
                     wf,
                     header,
+                    policy,
                     invoked_unattended: invoked_unattended.contains(name.as_str()),
                     waiting: &waiting,
                     schema_budget: &mut schema_budget,
@@ -426,6 +498,8 @@ struct WorkflowCheck<'a> {
     name: &'a str,
     wf: &'a Map<String, Value>,
     header: Option<&'a str>,
+    /// The applied profiles (§5.21): they raise steps' flags.
+    policy: &'a Policy,
     /// A workflow that an unattended run can invoke runs unattended too.
     invoked_unattended: bool,
     /// The catalog's workflows that can wait, directly or through ones they
@@ -568,6 +642,9 @@ impl WorkflowCheck<'_> {
                 continue;
             };
             semantics::flag_downgrades(&loc, step, node, self.report);
+            // The step's effective flags (§5.2.1), raised by the applied
+            // profiles (§5.21.3).
+            let flags = semantics::effective(node, step, None, self.policy).flags;
             semantics::unknown_inputs(&loc, step, node, self.report);
             semantics::missing_inputs(&loc, step, node, self.report);
             // A handler step runs only on escalation, after the step that
@@ -582,8 +659,7 @@ impl WorkflowCheck<'_> {
                 index: i,
                 capability: cap,
                 parallel_group: step.get("parallel_group").and_then(Value::as_str),
-                requires_checkpoint: node.requires_checkpoint
-                    || step.get("requires_checkpoint") == Some(&Value::Bool(true)),
+                requires_checkpoint: flags.requires_checkpoint,
                 waits: waits_well || delays || nested,
                 delays,
                 nested: nested && !waits_well && !delays,
@@ -687,12 +763,17 @@ impl WorkflowCheck<'_> {
                 scope,
                 self.report,
             );
-            let requires_approval =
-                node.requires_approval || step.get("requires_approval") == Some(&Value::Bool(true));
+            // Whether an `approval` block applies does not depend on the
+            // profiles applied; whether an unattended run must plan for the
+            // step (W606) does.
+            let allows_approval = semantics::effective(node, step, None, &Policy::default())
+                .flags
+                .requires_approval;
+            let requires_approval = flags.requires_approval;
             approval::check(
                 &loc,
                 step,
-                requires_approval,
+                allows_approval,
                 &declared,
                 &checker,
                 scope,
@@ -1898,6 +1979,49 @@ pub(crate) mod tests {
         // No version, or an unsupported one, says nothing about features.
         assert!(w1616(None, None, true).is_empty());
         assert!(w1616(Some("0.9"), None, true).is_empty());
+    }
+
+    #[test]
+    fn options_carry_the_header_and_refuse_what_is_not_implemented() {
+        let catalog = json!({"w": {"goal": "g", "risk": "low", "steps": []}});
+        let codes = |r: &Report| {
+            r.diagnostics
+                .iter()
+                .map(|d| d.code.as_str())
+                .collect::<Vec<_>>()
+        };
+        let with = |header: Option<&str>| Options {
+            header: header.map(str::to_string),
+            ..Options::default()
+        };
+        for header in [None, Some("1.1.0"), Some("2.0")] {
+            let given = validate_with(&ctx(), &catalog, &with(header)).unwrap();
+            assert_eq!(
+                codes(&given),
+                codes(&validate_catalog(&ctx(), &catalog, header))
+            );
+        }
+        assert_eq!(
+            codes(&validate_with(&ctx(), &catalog, &with(None)).unwrap()),
+            ["W605"]
+        );
+        assert!(codes(&validate_with(&ctx(), &catalog, &with(Some("1.2"))).unwrap()).is_empty());
+        for options in [
+            Options {
+                profiles: vec![json!({"domain": "d"})],
+                ..Options::default()
+            },
+            Options {
+                agents: vec![json!({"agent": "a"})],
+                ..Options::default()
+            },
+            Options {
+                catalogs: vec![(json!({}), None)],
+                ..Options::default()
+            },
+        ] {
+            assert!(validate_with(&ctx(), &catalog, &options).is_err());
+        }
     }
 
     #[test]

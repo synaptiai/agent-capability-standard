@@ -242,3 +242,202 @@ page:
   (`spec-figures.test.ts`, the F-S27 case and `SPEC_PAGES` in `dist.test.ts`)
   or name 1.2.0 (`routes.test.ts`, `twins-md.test.ts`); `data.test.ts`'s V101
   description follows the merged row.
+
+## 2026-11-15 — Part F1 items 2 to 15 and Part F3 (code spine, TypeScript package)
+
+**Start options and validator options fail closed (F1.5).** FOUNDATION says
+the new members are "stored in the run's state and unused until their owner
+merges". Stored and unused, a profile, a grounding policy or a destination
+policy that a caller gives would be silently ignored, and the run would go
+ahead as if it were absent. Instead every member whose behaviour is not
+implemented yet is refused when it is given:
+
+- `exec::StartOptions` has all nine members (`attendance, run_id, now_ms,
+  actor_identity, header, records, profiles, grounding, destinations`), no
+  `Default`. `Run::start` refuses `records: Actions` and a non-empty
+  `profiles`, `grounding` or `destinations` with the new
+  `StartError::Unsupported`; each workstream deletes its line of
+  `StartOptions::unimplemented()` when it implements the member. The state
+  has the five members (`header`, `records_mode`, `profiles`, `grounding`,
+  `destinations`), each `#[serde(default)]` and left out of a snapshot while
+  it has its default, so a 1.1 run's snapshot is byte for byte what it was;
+  `restore` refuses a state that holds one this executor does not implement.
+- `validate::Options { header, profiles, agents, catalogs }` (`Default`);
+  `validate::validate_with(ctx, catalog, &options) -> Result<Report,
+  LoadError>` refuses non-empty `profiles`, `agents` or `catalogs`
+  (`Options::unimplemented()`, the same pattern). `validate_catalog` is
+  unchanged. `catalogs` is `Vec<(Value, Option<String>)>` (a catalog and its
+  header); S3 may change the type when it adds `validate_set`.
+- Python `Run.start(..., *, header, ..., records="approvals", profiles=None,
+  grounding=None, destinations=None, catalogs=None, agents=None)` and
+  `Run.restore(..., *, catalogs=None, agents=None)`: an empty list is the same
+  as None; a non-empty `catalogs` or `agents` raises `ValueError` (Rust has no
+  member for them yet: S3 adds `start_set`/`restore_set`). `grounding` dicts
+  are checked (`Policy::new`, `check_ids`) before the refusal, so a malformed
+  policy is reported as such.
+- `header` is required everywhere (Rust struct literal, Python keyword
+  without default: `TypeError` names it). A header that is not a version
+  (`MAJOR.MINOR[.PATCH]`) is refused at start (`StartError::Header`), even
+  when the workflow's own `spec_version` would make validation ignore it,
+  since the state keeps it and `restore` checks it.
+
+**Version helpers and W616 (F1.2, F1.3).**
+
+- `SUPPORTED_VERSIONS` has `(1, 2)`. The only validation result that changes
+  in the repository's 111 catalogs (checked by script, before and after) is
+  the text of `fail_unsupported_spec_version`'s V109, which now lists 1.2 as
+  supported.
+- `semantics` is `pub(crate) mod`; `parse_version`, `target` and
+  `SUPPORTED_VERSIONS` are `pub(crate)`; `check_cited` and `Flags` are
+  re-exported from `validate`. `target` is unused until a workstream calls
+  it (`#[allow(dead_code)]` with that reason; remove the attribute with the
+  first call). `check_cited` messages: S303 "'standard' must be a version
+  string MAJOR.MINOR[.PATCH] ..."; V109 "the document cites standard 1.3,
+  which is not supported (supported: 1.0, 1.1, 1.2)" and "... cites ontology
+  3.0, but this implementation uses ontology 2.2.0; another major is not
+  compatible (§11.6)". A value given as `None`/absent is not checked.
+- `Ontology.version: Option<String>` (from `meta.version` when a string).
+- W616 is table-driven: `semantics::FEATURES` (`Feature { since, name,
+  first_use }`), reported in table order for every feature with `since >
+  target`, for any supported target. The message keeps 1.1's wording,
+  generalised ("the workflow targets standard 1.0 by its 'spec_version', but
+  gate 'phase' is new in 1.1 and a 1.0 consumer does not know it";
+  suggestion "declare spec_version \"1.1\"", or "... or a 1.1 header"), so no
+  existing W616 message changed; S6's alternative wording in 5.1 was not
+  used. `version_feature_diag(name, since, version, by_header, field)` takes
+  `by_header` beside S6's arguments (the manifest check of S3 passes
+  `true`). Table order equals the old discovery order except when the `in`
+  operator is first used in a step's `condition` before a gate `phase`,
+  `action: end` or failure-mode `when` of the same or a later step: the
+  fields and codes are the same, the order of those W616s differs.
+
+**Effective flags (F1.4).** `semantics::Flags { risk, mutation,
+requires_checkpoint, requires_approval }` with `NONE`, `of`, `join` (S3's
+type, here rather than in S3's `agents.rs`), `Effective { flags, person }`
+and `effective(node, step, maxima, policy)`. Called in `validate/mod.rs` for
+`Placed.requires_checkpoint` (which `wait.rs` and the handler checks of
+`recovery.rs` read) and for W606, and in `exec/program.rs` for `Step`. The
+`approval` block rule reads `effective(..., None, &Policy::default())`, so
+it never depends on profiles (S3's review item 8). `core/src/profile.rs` is
+a stub (`Policy` with `is_empty`, `raise` returning `Raise::default()`), for
+S6 to replace.
+
+**Error reasons (F1.8).** `Response::Error.reason: Option<Value>` (any
+value deserialises); `machine::REASONS` (the 12 tokens of C5) and
+`is_reason` (a token, or `x-` + a lowercase letter or digit + at most 61 of
+`[a-z0-9_.-]`); `Reason { token, ignored }`. `exec_error_with` and
+`step_error_with` carry it: `retry` and `step_failed` trace details get
+`reason` (or `reason_ignored` with the value), `StepError.reason` keeps it,
+the run's `Failed` action and `run_failed` trace get `reason`, and an
+approved step's record that fails gets `reason_code`. `end_frame`'s error
+is a small struct `Fail { code, message, reason }`. Every `Error` response
+(capability, event, checkpoint, failure checkpoint, rollback, recheck)
+passes its reason. Without a reason nothing changes: no 1.1 response carries
+one (checked over every fixture). `Reason::of(token)` is for the reasons the
+executor raises itself (S2b, S5, S6). The trace documentation
+(`docs/guides/RUNNING_WORKFLOWS.md`) does not list `reason`/`reason_ignored`
+yet: `tests/test_trace_kinds_doc.py` requires every documented detail
+member to occur in a fixture's run, so the member is documented with the
+first fixture that exercises it (S2b).
+
+**Smaller items.**
+
+- `exec::read_json` (F1.9) is public; `core/tests/runtime.rs` reads every
+  fixture with it.
+- `_core.canonical_json` and `_core.approval_digest` (F1.10) refuse values
+  outside I-JSON (`exec::ijson`), not only those `from_py` refuses; a Rust
+  test checks every vector of `digests.json`.
+- `refs::executable_roots(step) -> Vec<StepRef { field, root, text }>`
+  (F1.11), in document order (`shift_remove`, so removing `purpose` keeps the
+  order); `program.rs` reads its roots.
+- `extensions::literal_duration(step, key, Positive, why, at, report)`
+  (F1.12) for `input_bindings.<key>`; the W614 `timeout` check calls the same
+  body (`duration_text`), with its message unchanged. `_core.duration_ms`
+  rounds up to whole milliseconds.
+- `core/src/destination.rs` (F1.13) as S5 5.1, with its `vectors` unit test
+  over `match.json`; `_core.check_destination_pattern` and
+  `_core.destination_allowed`.
+- `core/src/grounding.rs` (F1.14): `KINDS`, `vendor` (moved from
+  `validate/identity.rs`), `is_kind`, and `Policy { require, kinds, attested }`
+  with S4's `new` (shape) and `check_ids` (V101 with the closest id); FOUNDATION's
+  "`Policy::new` (refusing an unknown capability id, V101)" is the pair.
+- `_core.SPEC_VERSIONS` and `_core.check_cited_versions` (F1.2).
+
+**Runtime fixtures (F1.6, F1.7).**
+
+- Every fixture has `"header": null` right after `catalog`, generated and
+  contributed alike (the 20 contributed files edited by hand, one line each;
+  `tests/conformance/contrib/README.md` says why). No other fixture change.
+- `scripts/gen_runtime_fixtures.py`: `add(..., header=None, **optional)`
+  with `OPTIONAL = (actor_identity, catalogs, agents, records, destinations,
+  grounding, profiles, run_record)`, written in that order after the
+  required members when not None; it validates every fixture against
+  `fixture.schema.json` (jsonschema) before writing. The 1.1 fixtures stay in
+  the script; `scripts/runtime_fixtures/` holds `s2a.py` ... `s6.py` (each
+  `register(add)`, empty) and `helpers.py`, the building blocks (`st`, `wf`,
+  `out`, `inv`, `approve`, `CP`, `mutate`, `POLICY`) moved out of the script
+  so the workstream modules can import them (`from runtime_fixtures.helpers
+  import ...`). The CI `ruff format --check` list gains
+  `scripts/runtime_fixtures/`.
+- `tests/runtime_replay.py`: `load`, `matches`, `fill`, `start_options`
+  (every start member a fixture states; `header` required), `start` and
+  `play`; `tests/test_runner.py` and `tests/test_trace_kinds_doc.py` use it.
+  The Rust harness (`fixture_options`) passes every member too and refuses a
+  fixture with `catalogs` or `agents` until S3 adds them.
+
+**Redaction (F1.15).** `grounded_agency/state/redaction.py` (`MARKER`,
+`DEFAULT_PATTERNS`, `Redactor` with `add_secret`, `redact_text`, `redact`,
+`holds_secret`; module functions `redact`, `redact_text`, `holds_secret` on
+`DEFAULT_REDACTOR`) and `packages/acs-core/src/redact.ts` (`MARKER`,
+`DEFAULT_PATTERNS`, `redactText`, `redactJson`, `holdsSecret`), with
+`tests/conformance/secrets/redact.json` (25 vectors, informative), run by
+`tests/test_redaction.py` and `packages/acs-core/test/redact.test.ts`.
+`Redactor.redact_anchor` (S4) needs S4's `EvidenceAnchor` fields and is left
+to S4. FOUNDATION B15 had the secrets vectors land with S4, F1.15 with the
+foundation; F1.15 was followed. So that the two languages agree exactly,
+the patterns avoid `\s` (whitespace is spelled out), are ASCII
+(`re.ASCII`; no `u` flag in TypeScript, whose `\b` and `i` are then ASCII
+too), and the TypeScript assignment rule counts a value's length in code
+points as Python does; three vectors pin these choices. In a JSON value, a
+string member whose name is a credential name (alone or after `_`/`-`) is
+redacted whole (`api_key_json_member`); keys themselves are not redacted.
+
+**TypeScript package (F3).**
+
+- `packages/acs-core/` 0.1.0 without the WebAssembly parts (S6 adds
+  `wasm.ts`, `core-types.ts`, the build scripts, the `./wasm` export and the
+  publish job): `exports` is `.` only; scripts `build:ts`, `build`, `check`,
+  `test`, `prepack`; dev dependencies `typescript` and `vitest` at the
+  binding's versions (no `ajv` until a test needs it). `src/`: `index.ts`,
+  `ontology.ts`, `ontology.gen.ts`, `flags.ts`, `canonical.ts` (moved with
+  `git mv`), `redact.ts`. Tests read `tests/conformance/` in place (JSON
+  imports), so the package needs no Node types.
+- `ontology.gen.ts` gains `STANDARD_VERSION` (the newest
+  `spec/STANDARD-v*.md`: 1.2.0), `SPEC_VERSIONS` (`_core.SPEC_VERSIONS`) and
+  `TRUST_CLASSES` (from `agent_identity_schema.yaml`).
+- The binding keeps `STANDARD_VERSION = '1.1.0'` in its own `ontology.ts`
+  (the version it follows and its annotations and records cite, as the
+  previous note recorded) and re-exports everything else from
+  `@synaptiai/acs-core` (`file:../../packages/acs-core`, which imports the
+  built `dist/`). `src/acs/ontology.gen.ts`, `src/acs/canonical.ts`,
+  `test/canonical*.test.ts` and `test/fixtures/approval-digests.json` are
+  gone from the binding; `gen_standard_agents_binding.py --check` fails if
+  either generated one reappears, and writing deletes them.
+- CI: a `typescript-package` job (`npm ci --ignore-scripts`, `check`,
+  `test`, `build`); the binding job builds the package first. CLAUDE.md and
+  AGENTS.md have the package's commands and the placement rule.
+- The ROADMAP Versions table and `tests/test_version_lines.py` have the fifth
+  line (TypeScript package 0.1.0, `packages/acs-core/package.json`).
+- Site: `packages/acs-core/README.md` is public Markdown, so it has its route
+  (S6 5.8's row, `/guides/typescript-package/`) and a page glyph
+  (`page:typescript-package`, a parcel) — the site build refuses a guides
+  card without one. `site/src/data/versions.ts`'s `typescriptPackage` (S6
+  5.8) is left to S6.
+- `docs/research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml`
+  ACS-11 cited the binding's deleted copy of the digest vectors; the
+  reference now names `tests/conformance/approval/digests.json` and says
+  where the copy went (`tests/test_standard_agents_mapping.py` resolves
+  every cited path). `docs/integrations/standard_agents.md` still says the
+  binding keeps "a private copy" of the ontology table and canonical JSON
+  (under "Still open"); the in-repository package replaces that copy but is
+  not published, so the sentence is left for S6 (publishing) or S1.

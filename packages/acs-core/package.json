@@ -1,0 +1,40 @@
+{
+  "name": "@synaptiai/acs-core",
+  "version": "0.1.0",
+  "description": "Agent Capability Standard core for TypeScript: the capability ontology, effective safety flags, canonical JSON and approval digests, and secret redaction",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/synaptiai/agent-capability-standard.git",
+    "directory": "packages/acs-core"
+  },
+  "homepage": "https://acs.synapti.ai/",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build:ts": "tsc -p tsconfig.build.json",
+    "build": "npm run build:ts",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}

@@ -1436,6 +1436,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "checkin_recovery",
   "inputs": {},
   "attendance": "unattended",

@@ -10,10 +10,11 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use serde_json::{Map, Value};
 
-use crate::diag::{Code, Severity};
-use crate::exec::{self, Attendance, Response, RestoreError, StartError, StartOptions};
+use crate::diag::{Code, Diagnostic, Severity};
+use crate::exec::{self, Attendance, RecordMode, Response, RestoreError, StartError, StartOptions};
 use crate::validate::{self, Context, LoadError, Report};
 use crate::yaml::{self, YamlError};
+use crate::{destination, duration, grounding};
 
 pub(crate) fn to_py(py: Python<'_>, v: &Value) -> PyResult<Py<PyAny>> {
     Ok(match v {
@@ -319,10 +320,61 @@ fn start_err(py: Python<'_>, e: StartError) -> PyErr {
                 Err(err) => err,
             }
         }
-        StartError::Inputs(_) | StartError::Program(_) | StartError::Identity(_) => {
-            PyValueError::new_err(message)
+        StartError::Inputs(_)
+        | StartError::Program(_)
+        | StartError::Identity(_)
+        | StartError::Unsupported(_)
+        | StartError::Header(_) => PyValueError::new_err(message),
+    }
+}
+
+/// Catalog sets (§5.1.1) and agent manifests (§5.15.1) are start members of
+/// workstream S3; until it implements them, giving one is refused rather
+/// than ignored.
+fn unimplemented_sets(
+    catalogs: Option<&Bound<'_, PyAny>>,
+    agents: Option<&Bound<'_, PyAny>>,
+) -> PyResult<()> {
+    for (name, value) in [
+        ("catalog sets (catalogs)", catalogs),
+        ("agent manifests (agents)", agents),
+    ] {
+        if let Some(v) = value
+            && (!v.is_none() && v.len().map_or(true, |n| n > 0))
+        {
+            return Err(PyValueError::new_err(format!(
+                "this executor does not implement {name} yet"
+            )));
         }
     }
+    Ok(())
+}
+
+/// Grounding policies (§5.20) from a list of dicts `{require, kinds?,
+/// attested?}`: each checked for its shape and against the ontology.
+fn grounding_from_py(
+    obj: Option<&Bound<'_, PyAny>>,
+    ctx: &Context,
+) -> PyResult<Vec<grounding::Policy>> {
+    let Some(obj) = obj else {
+        return Ok(Vec::new());
+    };
+    let Value::Array(items) = from_py(obj)? else {
+        return Err(PyTypeError::new_err("grounding must be a list of dicts"));
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let p: grounding::Policy = serde_json::from_value(item)
+                .map_err(|e| PyValueError::new_err(format!("grounding[{i}]: {e}")))?;
+            let p = grounding::Policy::new(p.require, p.kinds, p.attested)
+                .map_err(|e| PyValueError::new_err(format!("grounding[{i}].{e}")))?;
+            p.check_ids(&ctx.ontology)
+                .map_err(|e| PyValueError::new_err(format!("grounding[{i}].{e}")))?;
+            Ok(p)
+        })
+        .collect()
 }
 
 fn response_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Response> {
@@ -343,10 +395,15 @@ struct PyRun {
 impl PyRun {
     /// Validate `catalog` and start `workflow`. Raises ValueError when the
     /// catalog does not validate (with the error diagnostics as the second
-    /// argument), the inputs do not match the workflow's, or
-    /// `actor_identity` is not an `agent_identity` (§5.17).
+    /// argument), the inputs do not match the workflow's, `actor_identity`
+    /// is not an `agent_identity` (§5.17), or an option is malformed or not
+    /// implemented yet.
+    ///
+    /// `header` is required: the version the catalog's `# Standard
+    /// version:` header declares, or None for a catalog without one
+    /// (STANDARD v1.2 §11.5); the catalog is validated with it.
     #[staticmethod]
-    #[pyo3(signature = (validator, catalog, workflow, inputs = None, *, attendance = "attended", run_id, now_ms, actor_identity = None))]
+    #[pyo3(signature = (validator, catalog, workflow, inputs = None, *, header, attendance = "attended", run_id, now_ms, actor_identity = None, records = "approvals", profiles = None, grounding = None, destinations = None, catalogs = None, agents = None))]
     #[allow(clippy::too_many_arguments)]
     fn start(
         py: Python<'_>,
@@ -354,11 +411,19 @@ impl PyRun {
         catalog: &Bound<'_, PyAny>,
         workflow: String,
         inputs: Option<&Bound<'_, PyAny>>,
+        header: Option<String>,
         attendance: &str,
         run_id: String,
         now_ms: u64,
         actor_identity: Option<&Bound<'_, PyAny>>,
+        records: &str,
+        profiles: Option<&Bound<'_, PyAny>>,
+        grounding: Option<&Bound<'_, PyAny>>,
+        destinations: Option<&Bound<'_, PyAny>>,
+        catalogs: Option<&Bound<'_, PyAny>>,
+        agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        unimplemented_sets(catalogs, agents)?;
         let catalog = catalog_from_py(catalog)?;
         let actor_identity = actor_identity.map(from_py).transpose()?;
         let inputs = match inputs.map(from_py).transpose()? {
@@ -375,12 +440,38 @@ impl PyRun {
                 )));
             }
         };
+        let records = match records {
+            "approvals" => RecordMode::Approvals,
+            "actions" => RecordMode::Actions,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "records must be 'approvals' or 'actions', not '{other}'"
+                )));
+            }
+        };
         let ctx = &validator.ctx;
+        let profiles = match profiles.map(from_py).transpose()? {
+            None => Vec::new(),
+            Some(Value::Array(a)) if a.iter().all(Value::is_object) => a,
+            Some(_) => return Err(PyTypeError::new_err("profiles must be a list of dicts")),
+        };
+        let grounding = grounding_from_py(grounding, ctx)?;
+        let destinations = match destinations {
+            None => Vec::new(),
+            Some(d) => d.extract::<Vec<Vec<String>>>().map_err(|_| {
+                PyTypeError::new_err("destinations must be a list of lists of strings")
+            })?,
+        };
         let options = StartOptions {
             attendance,
             run_id,
             now_ms,
             actor_identity,
+            header,
+            records,
+            profiles,
+            grounding,
+            destinations,
         };
         let run = py
             .detach(|| {
@@ -392,16 +483,20 @@ impl PyRun {
     }
 
     /// Resume a run from `snapshot()`, against the same catalog. With a key,
-    /// the snapshot's HMAC must match.
+    /// the snapshot's HMAC must match. The catalog's header, and the other
+    /// start options, are the ones the run started with (kept in the state).
     #[staticmethod]
-    #[pyo3(signature = (validator, catalog, snapshot, key = None))]
+    #[pyo3(signature = (validator, catalog, snapshot, key = None, *, catalogs = None, agents = None))]
     fn restore(
         py: Python<'_>,
         validator: PyRef<'_, Validator>,
         catalog: &Bound<'_, PyAny>,
         snapshot: &Bound<'_, PyAny>,
         key: Option<Vec<u8>>,
+        catalogs: Option<&Bound<'_, PyAny>>,
+        agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
+        unimplemented_sets(catalogs, agents)?;
         let catalog = catalog_from_py(catalog)?;
         let snapshot: exec::Snapshot = serde_json::from_value(from_py(snapshot)?)
             .map_err(|e| PyValueError::new_err(format!("malformed snapshot: {e}")))?;
@@ -465,6 +560,76 @@ impl PyRun {
     }
 }
 
+/// A value as I-JSON (RFC 7493): plain Python data within ±2^53 and at most
+/// `MAX_VALUE_DEPTH` levels deep, or a ValueError.
+fn ijson_from_py(obj: &Bound<'_, PyAny>) -> PyResult<Value> {
+    let value = from_py(obj)?;
+    exec::ijson(&value).map_err(PyValueError::new_err)?;
+    Ok(value)
+}
+
+/// The canonical JSON (RFC 8785) of a value, as the executor writes it for
+/// snapshots and approval digests. Any other digest of a value is the
+/// SHA-256 of this text.
+#[pyfunction]
+fn canonical_json(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    Ok(exec::canonical::canonical(&ijson_from_py(value)?))
+}
+
+/// The approval digest of what a request shows (§5.14): the SHA-256 (hex)
+/// of its canonical JSON.
+#[pyfunction]
+fn approval_digest(shown: &Bound<'_, PyAny>) -> PyResult<String> {
+    Ok(exec::canonical::digest(&ijson_from_py(shown)?))
+}
+
+/// The §11.6 check of the versions a document cites: the diagnostics for
+/// `standard` and `ontology` (each a value or None), located by `field`.
+#[pyfunction]
+#[pyo3(signature = (standard, ontology, ontology_version))]
+fn check_cited_versions(
+    py: Python<'_>,
+    standard: Option<&Bound<'_, PyAny>>,
+    ontology: Option<&Bound<'_, PyAny>>,
+    ontology_version: &str,
+) -> PyResult<Py<PyAny>> {
+    let standard = standard.filter(|v| !v.is_none()).map(from_py).transpose()?;
+    let ontology = ontology.filter(|v| !v.is_none()).map(from_py).transpose()?;
+    let diagnostics: Vec<Diagnostic> = validate::check_cited(
+        standard.as_ref(),
+        ontology.as_ref(),
+        ontology_version,
+        |d, field| d.at("field", field),
+    );
+    let value =
+        serde_json::to_value(&diagnostics).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    to_py(py, &value)
+}
+
+/// A duration of the §5.10.1 grammar in whole milliseconds, rounded up (so
+/// only a zero duration is 0). ValueError when it is not a duration.
+#[pyfunction]
+fn duration_ms(text: &str) -> PyResult<u64> {
+    let d = duration::parse(text).map_err(PyValueError::new_err)?;
+    u64::try_from(d.as_nanos().div_ceil(1_000_000))
+        .map_err(|_| PyValueError::new_err(format!("'{text}' is too large")))
+}
+
+/// Check a destination pattern (§4.4.2); ValueError says what is wrong.
+#[pyfunction]
+fn check_destination_pattern(pattern: &str) -> PyResult<()> {
+    destination::check_pattern(pattern)
+        .map(|_| ())
+        .map_err(PyValueError::new_err)
+}
+
+/// Whether every destination policy allows `destination` (§4.4.2); with no
+/// policy, every destination is allowed.
+#[pyfunction]
+fn destination_allowed(policies: Vec<Vec<String>>, destination: &str) -> bool {
+    destination::allowed(&policies, destination)
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -474,6 +639,20 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(load_yaml_str, m)?)?;
     m.add_function(wrap_pyfunction!(load_catalog, m)?)?;
     m.add_function(wrap_pyfunction!(validate_catalog, m)?)?;
+    m.add_function(wrap_pyfunction!(canonical_json, m)?)?;
+    m.add_function(wrap_pyfunction!(approval_digest, m)?)?;
+    m.add_function(wrap_pyfunction!(check_cited_versions, m)?)?;
+    m.add_function(wrap_pyfunction!(duration_ms, m)?)?;
+    m.add_function(wrap_pyfunction!(check_destination_pattern, m)?)?;
+    m.add_function(wrap_pyfunction!(destination_allowed, m)?)?;
+    let spec_versions: Vec<String> = validate::semantics::SUPPORTED_VERSIONS
+        .iter()
+        .map(|(a, b)| format!("{a}.{b}"))
+        .collect();
+    m.add(
+        "SPEC_VERSIONS",
+        pyo3::types::PyTuple::new(m.py(), spec_versions)?,
+    )?;
     m.add_class::<Validator>()?;
     m.add_class::<PyRun>()?;
     let codes: Vec<(&str, &str, &str)> = Code::ALL

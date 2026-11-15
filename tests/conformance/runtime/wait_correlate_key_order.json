@@ -37,6 +37,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "w",
   "inputs": {
     "z": "1",

@@ -228,9 +228,109 @@ pub fn parse_ref(body: &str) -> Result<Ref, RefError> {
     })
 }
 
+/// One reference a step reads in an executable field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepRef {
+    /// Where it is, as diagnostics name a field (`input_bindings.query`,
+    /// `gates[0].when`, `failure_modes[1].recovery.inject_context.note`).
+    pub field: String,
+    /// Its root: a store, an input or a reserved root (`_recovery`).
+    pub root: String,
+    /// The text between `${` and `}`, as written.
+    pub text: String,
+}
+
+/// Every reference that parses in a step's executable fields, in document
+/// order: everything the executor evaluates or passes on (bindings,
+/// conditions, gates, failure-mode `when` and structured `recovery`,
+/// `wait`, `approval`, `quorum` and the rest), but not `purpose`,
+/// `description`, a failure mode's prose `condition` or a prose (string)
+/// `recovery`. The one walk of the executor's "reads" (§5.14), the
+/// group-mate check (W619) and the deprecated-member check (W603).
+pub fn executable_roots(step: &serde_json::Map<String, serde_json::Value>) -> Vec<StepRef> {
+    use serde_json::Value;
+    fn walk(v: &Value, field: &str, out: &mut Vec<StepRef>) {
+        match v {
+            Value::String(s) => out.extend(find_refs(s).into_iter().filter_map(|m| {
+                let r = m.parsed.ok()?;
+                Some(StepRef {
+                    field: field.to_string(),
+                    root: r.root,
+                    text: r.raw,
+                })
+            })),
+            Value::Array(a) => {
+                for (i, x) in a.iter().enumerate() {
+                    walk(x, &format!("{field}[{i}]"), out);
+                }
+            }
+            Value::Object(m) => {
+                for (k, x) in m {
+                    let f = if field.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{field}.{k}")
+                    };
+                    walk(x, &f, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    // `shift_remove` keeps the other members in document order.
+    let mut executable = step.clone();
+    executable.shift_remove("purpose");
+    executable.shift_remove("description");
+    if let Some(Value::Array(modes)) = executable.get_mut("failure_modes") {
+        for fm in modes.iter_mut().filter_map(Value::as_object_mut) {
+            fm.shift_remove("condition");
+            if fm.get("recovery").is_some_and(Value::is_string) {
+                fm.shift_remove("recovery");
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&Value::Object(executable), "", &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn executable_roots_skip_prose() {
+        let step = serde_json::json!({
+            "capability": "search",
+            "purpose": "find ${not_read}",
+            "description": "${not_read}",
+            "input_bindings": {"query": "${inputs.q} and ${a.b[0]}", "bad": "${1x}"},
+            "condition": "${c} == true",
+            "gates": [{"when": "${g.x} > 1", "action": "stop"}],
+            "failure_modes": [
+                {"condition": "${prose}", "action": "stop", "when": "${f} == 1",
+                 "recovery": "retry ${prose}"},
+                {"condition": "c", "action": "stop",
+                 "recovery": {"goto_step": "s", "inject_context": {"note": "${r}"}}}
+            ]
+        });
+        let got: Vec<(String, String, String)> = executable_roots(step.as_object().unwrap())
+            .into_iter()
+            .map(|r| (r.field, r.root, r.text))
+            .collect();
+        let t = |f: &str, r: &str, x: &str| (f.to_string(), r.to_string(), x.to_string());
+        assert_eq!(
+            got,
+            [
+                t("input_bindings.query", "inputs", "inputs.q"),
+                t("input_bindings.query", "a", "a.b[0]"),
+                t("condition", "c", "c"),
+                t("gates[0].when", "g", "g.x"),
+                t("failure_modes[0].when", "f", "f"),
+                t("failure_modes[1].recovery.inject_context.note", "r", "r"),
+            ]
+        );
+    }
 
     fn r(s: &str) -> Ref {
         parse_ref(s).unwrap()

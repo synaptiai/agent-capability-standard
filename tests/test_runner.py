@@ -5,7 +5,6 @@ host end to end."""
 from __future__ import annotations
 
 import datetime
-import json
 from pathlib import Path
 from typing import Any
 
@@ -19,36 +18,17 @@ from grounded_agency.workflows import (
     WorkflowEngine,
     WorkflowRunner,
 )
-
-ROOT = Path(__file__).resolve().parent.parent
-ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
-RUNTIME = ROOT / "tests" / "conformance" / "runtime"
-FIXTURES = sorted(RUNTIME.glob("*.json"))
-
-
-def matches(expected: Any, actual: Any) -> bool:
-    """Every key ``expected`` names matches (arrays element by element)."""
-    if isinstance(expected, dict):
-        return isinstance(actual, dict) and all(
-            k in actual and matches(v, actual[k]) for k, v in expected.items()
-        )
-    if isinstance(expected, list):
-        return (
-            isinstance(actual, list)
-            and len(expected) == len(actual)
-            and all(matches(x, y) for x, y in zip(expected, actual, strict=True))
-        )
-    return bool(expected == actual) and type(expected) is type(actual)
-
-
-def fill(response: Any, action: dict[str, Any]) -> Any:
-    if response == "{{digest}}":
-        return action["digest"]
-    if isinstance(response, dict):
-        return {k: fill(v, action) for k, v in response.items()}
-    if isinstance(response, list):
-        return [fill(v, action) for v in response]
-    return response
+from tests.runtime_replay import (
+    FIXTURES,
+    ONTOLOGY,
+    ROOT,
+    RUNTIME,
+    fill,
+    load,
+    matches,
+    play,
+    start,
+)
 
 
 @pytest.fixture(scope="module")
@@ -62,29 +42,12 @@ def test_fixtures_exist() -> None:
 
 @pytest.mark.parametrize("path", FIXTURES, ids=[p.stem for p in FIXTURES])
 def test_runtime_fixture(validator: _core.Validator, path: Path) -> None:
-    f = json.loads(path.read_text())
-    now = f["start"]
-    run = _core.Run.start(
-        validator,
-        f["catalog"],
-        f["workflow"],
-        f["inputs"],
-        attendance=f["attendance"],
-        run_id="run-1",
-        now_ms=now,
-        actor_identity=f.get("actor_identity"),
-    )
-    for i, entry in enumerate(f["script"]):
-        if "tick" in entry:
-            now = entry["tick"]
-            run.tick(now)
-            continue
-        action = run.next()
-        if "expect" in entry:
-            assert matches(entry["expect"], action), (i, entry["expect"], action)
-        if "respond" in entry:
-            now = entry.get("at", now)
-            run.submit(action["id"], fill(entry["respond"], action), now)
+    f = load(path)
+
+    def expect(i: int, expected: Any, action: dict[str, Any]) -> None:
+        assert matches(expected, action), (i, expected, action)
+
+    run = play(start(validator, f), f, expect)
     end = run.next()
     assert matches(f["end"], end), end
     kinds = {t["kind"] for t in run.trace()}
@@ -95,10 +58,8 @@ def test_replacement_is_per_run(validator: _core.Validator) -> None:
     """A parent loop that runs an invoke again starts a new child run: its
     waiting delegate does not name the old run's delegation (§5.13). Fixture
     matching is by subset, so the absent key is checked here."""
-    f = json.loads((RUNTIME / "delegate_wait_replaced_per_run.json").read_text())
-    run = _core.Run.start(
-        validator, f["catalog"], f["workflow"], f["inputs"], run_id="run-1", now_ms=0
-    )
+    f = load(RUNTIME / "delegate_wait_replaced_per_run.json")
+    run = start(validator, f)
     delegations = []
     for entry in f["script"]:
         action = run.next()
@@ -114,10 +75,8 @@ def test_no_binding_without_identity(validator: _core.Validator) -> None:
     delegate_principal (§5.17); fixture matching is by subset, so the absent
     key is checked here."""
     name = "delegate_identity_needs_identity_extension.json"
-    f = json.loads((RUNTIME / name).read_text())
-    run = _core.Run.start(
-        validator, f["catalog"], f["workflow"], f["inputs"], run_id="run-1", now_ms=0
-    )
+    f = load(RUNTIME / name)
+    run = start(validator, f)
     waits = []
     for entry in f["script"]:
         action = run.next()

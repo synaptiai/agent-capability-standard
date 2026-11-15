@@ -1,20 +1,25 @@
-"""Generate the files the Standard Agents binding takes from this repository,
-and the approval digest vectors.
+"""Generate the files the TypeScript package and the Standard Agents binding
+take from this repository, and the approval digest vectors.
 
-The reference binding in examples/standard_agents/ must agree with the
-ontology and with the reference executor, so two of its files are generated:
+The TypeScript package in packages/acs-core/ (which the reference binding in
+examples/standard_agents/ depends on) must agree with the ontology and with
+the reference executor, so one of its files is generated:
 
-- src/acs/ontology.gen.ts: each capability's layer, safety flags and
-  required output fields, and the ontology's `requires` edges, from
-  schemas/capability_ontology.yaml
-- test/fixtures/approval-digests.json: a copy of the approval digest
-  vectors, which the binding's own digest is tested against
+- packages/acs-core/src/ontology.gen.ts: each capability's layer, safety
+  flags and required output fields, and the ontology's `requires` edges,
+  from schemas/capability_ontology.yaml; the trust classes of
+  schemas/agent_identity_schema.yaml; the current Standard version (the
+  newest spec/STANDARD-v*.md) and the versions the core supports
 
 The approval digest vectors are tests/conformance/approval/digests.json:
 approval requests of the reference executor (STANDARD v1.2.0 §5.14), each
 with the shown values, their RFC 8785 canonical JSON and the SHA-256 digest
-of it. They are conformance data for any implementation; the binding's
-fixture is the same text.
+of it. They are conformance data for any implementation; the package's
+tests read the file in place.
+
+The binding's former copies (examples/standard_agents/src/acs/ontology.gen.ts
+and test/fixtures/approval-digests.json) must not exist: --check fails if
+one does.
 
 It also writes schemas/interop/standard_agents_annotation.schema.json, the
 schema of the annotation the binding puts on a tool, whose capability and
@@ -28,6 +33,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -37,7 +43,15 @@ from grounded_agency import _core
 
 ROOT = Path(__file__).resolve().parent.parent
 ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
-OUT = ROOT / "examples" / "standard_agents"
+AGENT_IDENTITY = ROOT / "schemas" / "agent_identity_schema.yaml"
+PACKAGE = ROOT / "packages" / "acs-core"
+ONTOLOGY_TS = PACKAGE / "src" / "ontology.gen.ts"
+BINDING = ROOT / "examples" / "standard_agents"
+# Files this script once wrote into the binding; the package holds them now.
+REMOVED = (
+    BINDING / "src" / "acs" / "ontology.gen.ts",
+    BINDING / "test" / "fixtures" / "approval-digests.json",
+)
 ANNOTATION_SCHEMA = (
     ROOT / "schemas" / "interop" / "standard_agents_annotation.schema.json"
 )
@@ -45,10 +59,23 @@ DIGEST_VECTORS_OUT = ROOT / "tests" / "conformance" / "approval" / "digests.json
 ME = "scripts/gen_standard_agents_binding.py"
 
 HEADER = f"""\
-// Generated from schemas/capability_ontology.yaml by
+// Generated from schemas/capability_ontology.yaml,
+// schemas/agent_identity_schema.yaml and spec/STANDARD-v*.md by
 // {ME}. DO NOT EDIT: regenerate with
 //   python {ME}
 """
+
+
+def current_standard() -> str:
+    """The version of the newest spec/STANDARD-v*.md."""
+    versions = [
+        tuple(int(part) for part in m.group(1).split("."))
+        for path in (ROOT / "spec").glob("STANDARD-v*.md")
+        if (m := re.fullmatch(r"STANDARD-v(\d+\.\d+\.\d+)\.md", path.name))
+    ]
+    if not versions:
+        raise SystemExit("no spec/STANDARD-v*.md file")
+    return ".".join(map(str, max(versions)))
 
 
 def ts(value: Any) -> str:
@@ -56,13 +83,26 @@ def ts(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def render_ontology(ontology: dict[str, Any]) -> str:
+def render_ontology(ontology: dict[str, Any], identity: dict[str, Any]) -> str:
     layer_of = {
         capability: layer
         for layer, info in ontology["layers"].items()
         for capability in info["capabilities"]
     }
+    trust_classes = identity["agent_identity"]["properties"]["trust_class"]["enum"]
     lines = [HEADER]
+    lines.append(
+        "/** The Agent Capability Standard version this package implements. */"
+    )
+    lines.append(f"export const STANDARD_VERSION = {ts(current_standard())};")
+    lines.append("")
+    lines.append(
+        "/** The Standard versions a workflow may target (§11.5), as the core supports them. */"
+    )
+    lines.append(
+        f"export const SPEC_VERSIONS = {ts(list(_core.SPEC_VERSIONS))} as const;"
+    )
+    lines.append("")
     lines.append(
         f"export const ONTOLOGY_VERSION = {ts(str(ontology['meta']['version']))};"
     )
@@ -96,6 +136,11 @@ def render_ontology(ontology: dict[str, Any]) -> str:
         if e["type"] == "requires"
     )
     lines.append("] as const;")
+    lines.append("")
+    lines.append(
+        "/** The trust classes of an `agent_identity` (§5.17), in the schema's order. */"
+    )
+    lines.append(f"export const TRUST_CLASSES = {ts(trust_classes)} as const;")
     lines.append("")
     return "\n".join(lines)
 
@@ -481,6 +526,8 @@ def approval_requests(
         digest_catalog(vector.approval),
         "change",
         {"setting": "x"},
+        # The catalog is a value built here, with no header (§11.5).
+        header=None,
         attendance="attended",
         run_id="r",
         now_ms=0,
@@ -587,11 +634,10 @@ def main(argv: list[str]) -> int:
     )
     check = parser.parse_args(argv).check
     ontology = _core.load_yaml(str(ONTOLOGY))
-    digests = render_digests()
+    identity = _core.load_yaml(str(AGENT_IDENTITY))
     rendered = {
-        OUT / "src" / "acs" / "ontology.gen.ts": render_ontology(ontology),
-        DIGEST_VECTORS_OUT: digests,
-        OUT / "test" / "fixtures" / "approval-digests.json": digests,
+        ONTOLOGY_TS: render_ontology(ontology, identity),
+        DIGEST_VECTORS_OUT: render_digests(),
         ANNOTATION_SCHEMA: render_annotation_schema(ontology),
     }
     stale = [
@@ -599,10 +645,13 @@ def main(argv: list[str]) -> int:
         for p, text in rendered.items()
         if not p.exists() or p.read_text(encoding="utf-8") != text
     ]
+    leftover = [p for p in REMOVED if p.exists()]
     if check:
         for p in stale:
             print(f"out of date: {p.relative_to(ROOT)}")
-        if stale:
+        for p in leftover:
+            print(f"no longer generated, delete it: {p.relative_to(ROOT)}")
+        if stale or leftover:
             print(f"run: python {ME}")
             return 1
         print(f"{len(rendered)} generated files up to date")
@@ -610,7 +659,9 @@ def main(argv: list[str]) -> int:
     for p in stale:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(rendered[p], encoding="utf-8")
-    print(f"{len(rendered)} files ({len(stale)} written)")
+    for p in leftover:
+        p.unlink()
+    print(f"{len(rendered)} files ({len(stale)} written, {len(leftover)} removed)")
     return 0
 
 

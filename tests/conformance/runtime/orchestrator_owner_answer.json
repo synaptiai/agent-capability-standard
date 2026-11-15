@@ -732,6 +732,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "owner_decision",
   "inputs": {
     "question": {

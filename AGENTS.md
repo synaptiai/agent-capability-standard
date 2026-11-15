@@ -53,6 +53,15 @@ cargo clippy --all-targets --features python -- -D warnings
 cargo test
 ```
 
+TypeScript package, from `packages/acs-core/` (build it before the binding):
+
+```bash
+npm ci
+npm run check
+npm test
+npm run build
+```
+
 Standard Agents binding, from `examples/standard_agents/`:
 
 ```bash

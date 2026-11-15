@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::diag::Diagnostic;
-use crate::validate::{Context, validate_catalog};
+use crate::grounding;
+use crate::validate::{self, Context};
 use machine::Machine;
 use program::Program;
 
@@ -62,6 +63,53 @@ pub(crate) fn ijson(value: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// The largest integer magnitude JSON text may hold for a run: 2^53.
+const MAX_EXACT_INTEGER: &str = "9007199254740992";
+
+/// Read JSON text as a host value (§5.14): an integer literal (no fraction
+/// or exponent) of magnitude above 2^53 is refused, including one too long
+/// for 64 bits, which serde_json would read as a binary64 value. The value
+/// must also be I-JSON ([`ijson`]).
+pub fn read_json(text: &str) -> Result<Value, String> {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                // Skip the string, escapes included; an unterminated one is
+                // left for the parser to report.
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < bytes.len()
+                    && matches!(bytes[i], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9')
+                {
+                    i += 1;
+                }
+                let token = &text[start..i];
+                let digits = token.strip_prefix('-').unwrap_or(token);
+                let integer = !token.contains(['.', 'e', 'E']);
+                let too_large = digits.len() > MAX_EXACT_INTEGER.len()
+                    || (digits.len() == MAX_EXACT_INTEGER.len() && digits > MAX_EXACT_INTEGER);
+                if integer && too_large {
+                    return Err(format!(
+                        "the integer {token} is outside ±2^53 and has no exact JSON (I-JSON) form"
+                    ));
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    ijson(&value)?;
+    Ok(value)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Attendance {
@@ -69,6 +117,25 @@ pub enum Attendance {
     Unattended,
 }
 
+/// Which action records a run writes (§6.4): the 1.1 records of approved,
+/// refused and deferred actions, or a record of every action.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordMode {
+    #[default]
+    Approvals,
+    Actions,
+}
+
+impl RecordMode {
+    fn is_default(&self) -> bool {
+        *self == RecordMode::default()
+    }
+}
+
+/// How a run starts (§5.19.2). There is no `Default`: every construction
+/// names every member, so no caller leaves the catalog's `header` out by
+/// accident (§11.5).
 #[derive(Debug, Clone)]
 pub struct StartOptions {
     pub attendance: Attendance,
@@ -77,6 +144,45 @@ pub struct StartOptions {
     /// Who runs the workflow (`agent_identity`, §5.17): every action record
     /// carries it as `actor_identity`.
     pub actor_identity: Option<Value>,
+    /// The version the catalog's `# Standard version:` header declares, or
+    /// none for a catalog without one (§11.5): a host that loaded the
+    /// catalog from a file passes the version its header declares. The run
+    /// validates the catalog with it, as a validator reading the file would.
+    pub header: Option<String>,
+    /// Which action records the run writes (§6.4). Workstream S2b implements
+    /// `Actions`; until then it is refused.
+    pub records: RecordMode,
+    /// Domain profiles to apply (§5.21). Workstream S6 applies them; until
+    /// then a non-empty list is refused.
+    pub profiles: Vec<Value>,
+    /// The host's grounding policies (§5.20). Workstream S4 applies them;
+    /// until then a non-empty list is refused.
+    pub grounding: Vec<grounding::Policy>,
+    /// The host's destination policies (§4.4.2). Workstream S5 applies them;
+    /// until then a non-empty list is refused.
+    pub destinations: Vec<Vec<String>>,
+}
+
+impl StartOptions {
+    /// The first member this executor does not implement yet, if one is
+    /// given: refused rather than ignored, so that no run goes ahead as if a
+    /// policy it was given were absent. Each workstream removes its line
+    /// when it implements the member.
+    fn unimplemented(&self) -> Option<&'static str> {
+        if self.records != RecordMode::Approvals {
+            return Some("records: actions (§6.4)");
+        }
+        if !self.profiles.is_empty() {
+            return Some("profiles (§5.21)");
+        }
+        if !self.grounding.is_empty() {
+            return Some("grounding policies (§5.20)");
+        }
+        if !self.destinations.is_empty() {
+            return Some("destination policies (§4.4.2)");
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,6 +279,9 @@ pub enum Body {
         code: String,
         step: Option<usize>,
         message: String,
+        /// The reason the failure came with (§5.19.7), if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
         action_records: Vec<Value>,
         /// As for `Completed`: deferrals made before the run failed.
         deferred: Vec<Value>,
@@ -210,6 +319,10 @@ pub enum Response {
         code: String,
         #[serde(default)]
         message: String,
+        /// Why, as a token (§5.19.7). Any value deserialises: one outside
+        /// the grammar is ignored (and traced), never refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<Value>,
     },
     Checkpoint {
         checkpoint_id: String,
@@ -260,6 +373,10 @@ pub enum StartError {
     Program(String),
     /// The actor identity is not an `agent_identity`.
     Identity(String),
+    /// A start option this executor does not implement yet.
+    Unsupported(String),
+    /// The catalog header's version is not a version (§11.5).
+    Header(String),
 }
 
 impl fmt::Display for StartError {
@@ -275,6 +392,11 @@ impl fmt::Display for StartError {
             }
             StartError::Inputs(m) | StartError::Program(m) => f.write_str(m),
             StartError::Identity(m) => write!(f, "actor_identity: {m}"),
+            StartError::Unsupported(m) => write!(f, "this executor does not implement {m} yet"),
+            StartError::Header(h) => write!(
+                f,
+                "header: '{h}' is not a version (MAJOR.MINOR[.PATCH]); pass the version the catalog's header declares, or none"
+            ),
         }
     }
 }
@@ -347,6 +469,9 @@ pub(crate) struct Checkpoint {
 pub(crate) struct StepError {
     pub code: String,
     pub message: String,
+    /// The reason the failure came with (§5.19.7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// The current step's working state.
@@ -514,6 +639,24 @@ pub(crate) struct State {
     /// Who runs the workflow (§5.17), recorded on every action record.
     #[serde(default)]
     pub actor_identity: Option<Value>,
+    /// The catalog header's version the run started with (§11.5): a
+    /// restored run validates the catalog with it again. The members below
+    /// are left out of a snapshot while they have their default, so a 1.1
+    /// run's snapshot is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    /// The action records the run writes (§6.4).
+    #[serde(default, skip_serializing_if = "RecordMode::is_default")]
+    pub records_mode: RecordMode,
+    /// The domain profiles applied, as given (§5.21).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<Value>,
+    /// The host's grounding policies (§5.20).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub grounding: Vec<grounding::Policy>,
+    /// The host's destination policies (§4.4.2).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub destinations: Vec<Vec<String>>,
 }
 
 /// One deferred step (§5.14).
@@ -582,7 +725,23 @@ impl Run {
         inputs: Map<String, Value>,
         options: StartOptions,
     ) -> Result<Run, StartError> {
-        let program = Self::prepare(ctx, catalog, workflow)?;
+        if let Some(what) = options.unimplemented() {
+            return Err(StartError::Unsupported(what.to_string()));
+        }
+        if let Some(h) = options
+            .header
+            .as_deref()
+            .filter(|h| crate::validate::semantics::parse_version(h).is_none())
+        {
+            return Err(StartError::Header(h.to_string()));
+        }
+        let program = Self::prepare(
+            ctx,
+            catalog,
+            workflow,
+            options.header.as_deref(),
+            &options.profiles,
+        )?;
         check_inputs(&program.workflows[workflow], &inputs).map_err(StartError::Inputs)?;
         ijson(&Value::Object(inputs.clone())).map_err(StartError::Inputs)?;
         if let Some(identity) = &options.actor_identity {
@@ -606,6 +765,11 @@ impl Run {
             trace: Vec::new(),
             deferrals: Vec::new(),
             actor_identity: options.actor_identity,
+            header: options.header,
+            records_mode: options.records,
+            profiles: options.profiles,
+            grounding: options.grounding,
+            destinations: options.destinations,
         };
         let mut run = Run { program, state };
         run.machine()
@@ -614,8 +778,22 @@ impl Run {
         Ok(run)
     }
 
-    fn prepare(ctx: &Context, catalog: &Value, workflow: &str) -> Result<Program, StartError> {
-        let report = validate_catalog(ctx, catalog, None);
+    /// Validate the catalog as a validator reading its file would: with its
+    /// header's version (§11.5) and the applied profiles (§5.21).
+    fn prepare(
+        ctx: &Context,
+        catalog: &Value,
+        workflow: &str,
+        header: Option<&str>,
+        profiles: &[Value],
+    ) -> Result<Program, StartError> {
+        let options = validate::Options {
+            header: header.map(str::to_string),
+            profiles: profiles.to_vec(),
+            ..validate::Options::default()
+        };
+        let report = validate::validate_with(ctx, catalog, &options)
+            .map_err(|e| StartError::Unsupported(e.to_string()))?;
         let errors: Vec<Diagnostic> = report
             .diagnostics
             .into_iter()
@@ -714,7 +892,25 @@ impl Run {
         }
         let state: State =
             serde_json::from_value(value).map_err(|e| RestoreError::Malformed(e.to_string()))?;
-        let program = Self::prepare(ctx, catalog, &state.root).map_err(RestoreError::Start)?;
+        // Members this executor does not implement yet: it could not have
+        // written a state that holds them.
+        if state.records_mode != RecordMode::Approvals
+            || !state.profiles.is_empty()
+            || !state.grounding.is_empty()
+            || !state.destinations.is_empty()
+        {
+            return Err(RestoreError::Malformed(
+                "the state holds a start option this executor does not implement".into(),
+            ));
+        }
+        let program = Self::prepare(
+            ctx,
+            catalog,
+            &state.root,
+            state.header.as_deref(),
+            &state.profiles,
+        )
+        .map_err(RestoreError::Start)?;
         if program.digest != state.catalog_digest {
             return Err(RestoreError::Catalog);
         }
@@ -743,6 +939,25 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
     }
     if let Some(e) = st.actor_identity.as_ref().and_then(identity_error) {
         return Err(format!("actor_identity: {e}"));
+    }
+    if st
+        .header
+        .as_deref()
+        .is_some_and(|h| crate::validate::semantics::parse_version(h).is_none())
+    {
+        return Err("the catalog header's version is not a version".into());
+    }
+    let bad_reason = |r: &Option<String>| r.as_deref().is_some_and(|t| !machine::is_reason(t));
+    if st
+        .frames
+        .iter()
+        .any(|f| bad_reason(&f.cur.error.as_ref().and_then(|e| e.reason.clone())))
+        || st
+            .finished
+            .as_ref()
+            .is_some_and(|a| matches!(&a.body, Body::Failed { reason, .. } if bad_reason(reason)))
+    {
+        return Err("a failure's reason is not a reason (§5.19.7)".into());
     }
     for f in &st.frames {
         let Some(wf) = program.workflows.get(&f.workflow) else {

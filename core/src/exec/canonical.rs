@@ -209,4 +209,30 @@ mod tests {
         assert!(!same_digest("ab", "abc"));
         assert!(same_digest("AB", "ab"));
     }
+
+    #[test]
+    fn approval_digest_vectors() {
+        // Every vector's `shown` canonicalises to its `canonical` and
+        // digests to its `digest` (what `_core.canonical_json` and
+        // `_core.approval_digest` return).
+        let text = include_str!("../../../tests/conformance/approval/digests.json");
+        let doc: Value = serde_json::from_str(text).unwrap();
+        let vectors = doc["vectors"].as_array().unwrap();
+        assert!(vectors.iter().any(|v| v["name"] == "object"));
+        for v in vectors {
+            let shown = &v["shown"];
+            assert_eq!(
+                canonical(shown),
+                v["canonical"].as_str().unwrap(),
+                "{}",
+                v["name"]
+            );
+            assert_eq!(
+                digest(shown),
+                v["digest"].as_str().unwrap(),
+                "{}",
+                v["name"]
+            );
+        }
+    }
 }

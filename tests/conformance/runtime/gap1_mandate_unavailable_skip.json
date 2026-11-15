@@ -116,6 +116,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "w",
   "inputs": {},
   "attendance": "unattended",

@@ -394,6 +394,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "delegate_to_thread",
   "inputs": {
     "task": {

@@ -178,7 +178,7 @@ jobs:
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
 
       - name: Ruff format check
-        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/gen_standard_agents_binding.py scripts/gen_capability_json_schemas.py
+        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/runtime_fixtures/ scripts/gen_standard_agents_binding.py scripts/gen_capability_json_schemas.py
 
       - name: Mypy type check
         run: mypy grounded_agency/
@@ -294,6 +294,35 @@ jobs:
           path: build/conformance_results.json
           if-no-files-found: warn
 
+  typescript-package:
+    name: TypeScript package (type-check, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/acs-core
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/acs-core/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Type-check
+        run: npm run check
+
+      # The tests read the conformance vectors in tests/conformance/ in place.
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   standard-agents-binding:
     name: Standard Agents binding (type-check, tests)
     runs-on: ubuntu-latest
@@ -308,7 +337,16 @@ jobs:
         with:
           node-version-file: site/.nvmrc
           cache: npm
-          cache-dependency-path: examples/standard_agents/package-lock.json
+          cache-dependency-path: |
+            packages/acs-core/package-lock.json
+            examples/standard_agents/package-lock.json
+
+      # The binding imports the package's built dist/ (file: dependency).
+      - name: Build the TypeScript package
+        working-directory: packages/acs-core
+        run: |
+          npm ci --ignore-scripts
+          npm run build
 
       - name: Install dependencies
         run: npm ci --ignore-scripts

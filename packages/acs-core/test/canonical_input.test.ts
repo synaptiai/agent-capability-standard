@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalize, digest, NotCanonicalizableError } from '../src/acs/canonical.js';
+import { canonicalize, digest, NotCanonicalizableError } from '../src/canonical.js';
 
 describe('values RFC 8785 refuses', () => {
   // §3.2.2.2: data with an unpaired surrogate "MUST cause a compliant JCS

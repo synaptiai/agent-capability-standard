@@ -1,8 +1,8 @@
-"""The repository's four version lines are stated the same way everywhere.
+"""The repository's five version lines are stated the same way everywhere.
 
-The Standard, the capability ontology, the plugin and the Python package are
-numbered independently, and each number is declared in one file. The table
-under "Versions" in `spec/ROADMAP.md` lists all four. This test compares the
+The Standard, the capability ontology, the plugin, the Python package and the
+TypeScript package are numbered independently, and each number is declared in
+one file. The table under "Versions" in `spec/ROADMAP.md` lists all five. This test compares the
 table with the declaring files, so that a release which changes one of them
 has to change the table too. `grounded_agency.__version__` repeats the package
 version and is compared with it.
@@ -30,6 +30,7 @@ ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
 PLUGIN = ROOT / ".claude-plugin" / "plugin.json"
 PYPROJECT = ROOT / "pyproject.toml"
 PACKAGE_INIT = ROOT / "grounded_agency" / "__init__.py"
+TS_PACKAGE = ROOT / "packages" / "acs-core" / "package.json"
 OASF_MAPPING = ROOT / "schemas" / "interop" / "oasf_mapping.yaml"
 OASF_COVERAGE = ROOT / "docs" / "integrations" / "oasf_coverage.md"
 
@@ -67,11 +68,16 @@ def declared() -> dict[str, tuple[str, Path]]:
     standard_file, standard = current_standard()
     project = tomllib.loads(PYPROJECT.read_text("utf-8"))["project"]
     plugin = json.loads(PLUGIN.read_text("utf-8"))["version"]
+    ts_package = json.loads(TS_PACKAGE.read_text("utf-8"))
     return {
         "Standard": (standard, standard_file),
         "Capability ontology": (ontology_version(), ONTOLOGY),
         "Plugin": (plugin, PLUGIN),
         f"Python package `{project['name']}`": (project["version"], PYPROJECT),
+        f"TypeScript package `{ts_package['name']}`": (
+            ts_package["version"],
+            TS_PACKAGE,
+        ),
     }
 
 
@@ -96,7 +102,7 @@ def version_table() -> list[tuple[str, str, str]]:
     return rows
 
 
-def test_roadmap_table_lists_the_four_version_lines(
+def test_roadmap_table_lists_the_five_version_lines(
     declared: dict[str, tuple[str, Path]],
 ) -> None:
     assert [name for name, _, _ in version_table()] == list(declared)

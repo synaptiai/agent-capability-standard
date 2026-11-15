@@ -14,7 +14,7 @@
  * per entry.
  */
 import type { ThreadState } from '@standardagents/spec';
-import type { Json } from './canonical.js';
+import type { Json } from '@synaptiai/acs-core';
 import type { CapabilityId } from './ontology.js';
 
 /** The part of `ThreadState` the binding uses. */

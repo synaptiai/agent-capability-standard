@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalize, digest, NotCanonicalizableError } from '../src/acs/canonical.js';
-// The reference executor's approval digest vectors: a generated copy of
-// tests/conformance/approval/digests.json, written by
-// scripts/gen_standard_agents_binding.py.
-import fixture from './fixtures/approval-digests.json' with { type: 'json' };
+import { canonicalize, digest, NotCanonicalizableError } from '../src/canonical.js';
+// The reference executor's approval digest vectors, read in place
+// (written by scripts/gen_standard_agents_binding.py).
+import fixture from '../../../tests/conformance/approval/digests.json' with { type: 'json' };
 
 describe('canonical JSON (RFC 8785)', () => {
   it('sorts members by UTF-16 code units and drops whitespace', () => {
@@ -22,7 +21,7 @@ describe('canonical JSON (RFC 8785)', () => {
   });
 });
 
-describe('approval digest (STANDARD v1.1.0 §5.14)', () => {
+describe('approval digest (STANDARD v1.2.0 §5.14)', () => {
   it('has vectors from the reference executor', () => {
     expect(fixture.vectors.length).toBeGreaterThanOrEqual(10);
   });

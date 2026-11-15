@@ -1,6 +1,13 @@
-// Generated from schemas/capability_ontology.yaml by
+// Generated from schemas/capability_ontology.yaml,
+// schemas/agent_identity_schema.yaml and spec/STANDARD-v*.md by
 // scripts/gen_standard_agents_binding.py. DO NOT EDIT: regenerate with
 //   python scripts/gen_standard_agents_binding.py
+
+/** The Agent Capability Standard version this package implements. */
+export const STANDARD_VERSION = "1.2.0";
+
+/** The Standard versions a workflow may target (§11.5), as the core supports them. */
+export const SPEC_VERSIONS = ["1.0", "1.1", "1.2"] as const;
 
 export const ONTOLOGY_VERSION = "2.2.0";
 
@@ -49,3 +56,6 @@ export const REQUIRES = [
   ["checkpoint", "send"],
   ["checkpoint", "rollback"],
 ] as const;
+
+/** The trust classes of an `agent_identity` (§5.17), in the schema's order. */
+export const TRUST_CLASSES = ["owner", "decision_person", "system_of_record", "own_subagent_report", "peer_agent", "colleague", "external"] as const;

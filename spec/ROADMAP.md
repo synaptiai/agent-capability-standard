@@ -11,7 +11,7 @@ and the [project changelog](../CHANGELOG.md).
 
 ## Versions
 
-Four version numbers are in use. Each is declared in one file, and
+Five version numbers are in use. Each is declared in one file, and
 `tests/test_version_lines.py` compares this table with those files.
 
 | Version line | Current | Declared in |
@@ -20,6 +20,7 @@ Four version numbers are in use. Each is declared in one file, and
 | Capability ontology | 2.2.0 | `meta.version` in [capability_ontology.yaml](../schemas/capability_ontology.yaml) |
 | Plugin | 2.0.0 | `version` in [plugin.json](../.claude-plugin/plugin.json) |
 | Python package `grounded-agency` | 0.1.0 | `version` under `[project]` in [pyproject.toml](../pyproject.toml); `grounded_agency.__version__` repeats it |
+| TypeScript package `@synaptiai/acs-core` | 0.1.0 | `version` in [package.json](../packages/acs-core/package.json) |
 
 ## Standard
 

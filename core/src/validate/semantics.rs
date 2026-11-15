@@ -9,6 +9,7 @@ use super::{Context, Report, StepLoc};
 use crate::diag::{Code, Diagnostic};
 use crate::expr::ast::{CmpOp, Expr};
 use crate::ontology::{Capability, EdgeType, Risk};
+use crate::profile::Policy;
 
 /// Fields a workflow may carry (STANDARD v1.1 §5.1 plus recognised de-facto
 /// fields). Anything else is W604.
@@ -75,9 +76,18 @@ pub(crate) const WORKFLOW_EXTENSIONS_KEYS: &[&str] = &[
     "requires",
 ];
 
-/// Standard versions this validator implements (GOVERNANCE: the last two
-/// minors of the current major).
-pub(crate) const SUPPORTED_VERSIONS: &[(u64, u64)] = &[(1, 0), (1, 1)];
+/// Standard versions this validator implements (STANDARD v1.2 §11.5: a
+/// validator for 1.2 supports 1.0, 1.1 and 1.2).
+pub(crate) const SUPPORTED_VERSIONS: &[(u64, u64)] = &[(1, 0), (1, 1), (1, 2)];
+
+/// [`SUPPORTED_VERSIONS`] as text, for messages: `1.0, 1.1, 1.2`.
+fn supported_list() -> String {
+    SUPPORTED_VERSIONS
+        .iter()
+        .map(|(a, b)| format!("{a}.{b}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// Keys longer than this get no did-you-mean hint: they are not typos of
 /// a field name, and the distance is quadratic in the key's length.
@@ -240,6 +250,101 @@ pub(crate) fn missing_inputs(
                 .at("field", format!("input_bindings.{key}")),
             );
         }
+    }
+}
+
+/// A step's safety flags (§5.2.1): its risk and the three booleans.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Flags {
+    pub risk: Risk,
+    pub mutation: bool,
+    pub requires_checkpoint: bool,
+    pub requires_approval: bool,
+}
+
+impl Flags {
+    /// The least strict flags: low risk, every boolean false. The identity
+    /// of [`Flags::join`].
+    pub const NONE: Flags = Flags {
+        risk: Risk::Low,
+        mutation: false,
+        requires_checkpoint: false,
+        requires_approval: false,
+    };
+
+    /// The ontology's flags for a capability.
+    pub fn of(node: &Capability) -> Flags {
+        Flags {
+            risk: node.risk,
+            mutation: node.mutation,
+            requires_checkpoint: node.requires_checkpoint,
+            requires_approval: node.requires_approval,
+        }
+    }
+
+    /// The stricter of each flag: the higher risk, each boolean true when
+    /// either is.
+    #[must_use]
+    pub fn join(self, other: Flags) -> Flags {
+        Flags {
+            risk: self.risk.max(other.risk),
+            mutation: self.mutation || other.mutation,
+            requires_checkpoint: self.requires_checkpoint || other.requires_checkpoint,
+            requires_approval: self.requires_approval || other.requires_approval,
+        }
+    }
+}
+
+/// A step's effective flags (§5.2.1), and whether an applied profile
+/// requires a person for it (§5.21.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Effective {
+    pub flags: Flags,
+    pub person: bool,
+}
+
+/// The effective flags of `step`, a step of capability `node` (§5.2.1):
+/// the ontology's, joined with `maxima` (the delegation targets' manifests,
+/// §5.15.2, when known), then the step's stricter declarations (a higher
+/// `risk`, a boolean declared `true`; `mutation: false` only where the
+/// ontology lets a step override it and no maximum sets it), then what the
+/// applied profiles raise for the capability at that risk (§5.21.3).
+///
+/// Every site that needs a step's effective `requires_checkpoint` or
+/// `requires_approval` calls this, so that the validator and the executor
+/// agree. With `maxima = None` and an empty policy it gives the 1.1 flags.
+pub(crate) fn effective(
+    node: &Capability,
+    step: &Map<String, Value>,
+    maxima: Option<Flags>,
+    policy: &Policy,
+) -> Effective {
+    let maxima = maxima.unwrap_or(Flags::NONE);
+    let base = Flags::of(node).join(maxima);
+    let declared = |k: &str| step.get(k).and_then(Value::as_bool);
+    let risk = step
+        .get("risk")
+        .and_then(Value::as_str)
+        .and_then(Risk::parse)
+        .map_or(base.risk, |r| r.max(base.risk));
+    let mutation = match declared("mutation") {
+        Some(true) => true,
+        Some(false) if node.mutation_overridable => maxima.mutation,
+        _ => base.mutation,
+    };
+    let mut flags = Flags {
+        risk,
+        mutation,
+        requires_checkpoint: base.requires_checkpoint
+            || declared("requires_checkpoint") == Some(true),
+        requires_approval: base.requires_approval || declared("requires_approval") == Some(true),
+    };
+    let raised = policy.raise(&node.id, risk);
+    flags.requires_checkpoint |= raised.requires_checkpoint;
+    flags.requires_approval |= raised.requires_approval;
+    Effective {
+        flags,
+        person: raised.person,
     }
 }
 
@@ -522,8 +627,8 @@ pub(crate) fn check_edges(
     }
 }
 
-/// Parse `major.minor[.patch]`.
-fn parse_version(v: &str) -> Option<(u64, u64)> {
+/// Parse `major.minor[.patch]` (digits only; §11.5).
+pub(crate) fn parse_version(v: &str) -> Option<(u64, u64)> {
     let number = |p: &str| -> Option<u64> {
         if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
             return None;
@@ -539,9 +644,97 @@ fn parse_version(v: &str) -> Option<(u64, u64)> {
     parts.next().is_none().then_some((major, minor))
 }
 
+/// The version a workflow targets (§11.5): its `spec_version` when that is
+/// a string that parses, else the catalog header's version when that parses,
+/// else none. Rules this Standard applies only to workflows that target 1.2
+/// or later compare this with `(1, 2)`; a workflow that declares no version
+/// gets none of them.
+#[allow(
+    dead_code,
+    reason = "the 1.2 workstreams' target-dependent rules call it (FOUNDATION F1.2)"
+)]
+pub(crate) fn target(wf: &Map<String, Value>, header: Option<&str>) -> Option<(u64, u64)> {
+    wf.get("spec_version")
+        .and_then(Value::as_str)
+        .and_then(parse_version)
+        .or_else(|| header.and_then(parse_version))
+}
+
+/// The §11.6 check of the versions a document cites (a profile, an agent
+/// manifest, an interoperability mapping): `standard` and `ontology`, each
+/// when given. A value that is not a string `MAJOR.MINOR[.PATCH]` is S303; a
+/// `standard` this implementation does not support is V109; an `ontology`
+/// of another major than `ontology_version` (the loaded ontology's) is V109.
+/// A later minor or patch of the same major is accepted. `at` places each
+/// diagnostic, given the member it is about (`standard` or `ontology`).
+pub fn check_cited(
+    standard: Option<&Value>,
+    ontology: Option<&Value>,
+    ontology_version: &str,
+    at: impl Fn(Diagnostic, &str) -> Diagnostic,
+) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let mut cited = |member: &str, v: Option<&Value>| -> Option<(String, (u64, u64))> {
+        let v = v?;
+        match v.as_str().and_then(|s| parse_version(s).map(|mm| (s, mm))) {
+            Some((s, mm)) => Some((s.to_string(), mm)),
+            None => {
+                let shown = match v {
+                    Value::String(s) => format!("'{s}'"),
+                    other => other.to_string(),
+                };
+                out.push(at(
+                    Diagnostic::new(
+                        Code::SchemaValidationFailed,
+                        format!(
+                            "'{member}' must be a version string MAJOR.MINOR[.PATCH], such as \"1.2.0\"; found {shown}"
+                        ),
+                    ),
+                    member,
+                ));
+                None
+            }
+        }
+    };
+    let standard = cited("standard", standard);
+    let ontology = cited("ontology", ontology);
+    if let Some((s, mm)) = standard
+        && !SUPPORTED_VERSIONS.contains(&mm)
+    {
+        out.push(at(
+            Diagnostic::new(
+                Code::UnsupportedSpecVersion,
+                format!(
+                    "the document cites standard {s}, which is not supported (supported: {})",
+                    supported_list()
+                ),
+            ),
+            "standard",
+        ));
+    }
+    let loaded_major = ontology_version
+        .split('.')
+        .next()
+        .and_then(|m| m.parse::<u64>().ok());
+    if let (Some((o, (major, _))), Some(loaded)) = (ontology, loaded_major)
+        && major != loaded
+    {
+        out.push(at(
+            Diagnostic::new(
+                Code::UnsupportedSpecVersion,
+                format!(
+                    "the document cites ontology {o}, but this implementation uses ontology {ontology_version}; another major is not compatible (§11.6)"
+                ),
+            ),
+            "ontology",
+        ));
+    }
+    out
+}
+
 /// W605 when neither `spec_version` nor the file header names a version;
-/// V109 when the named version is not supported; W616 for each 1.1 feature
-/// a workflow that targets 1.0 uses.
+/// V109 when the named version is not supported; W616 for each feature
+/// newer than the version a workflow targets ([`FEATURES`]).
 pub(crate) fn spec_version(
     wf: &Map<String, Value>,
     header: Option<&str>,
@@ -575,18 +768,15 @@ pub(crate) fn spec_version(
         },
     };
     match parse_version(version) {
-        Some((1, 0)) => newer_features(wf, version, field, at, report),
-        Some(mm) if SUPPORTED_VERSIONS.contains(&mm) => {}
+        Some(mm) if SUPPORTED_VERSIONS.contains(&mm) => {
+            newer_features(wf, mm, version, field == "# Standard version", at, report);
+        }
         _ => report.push(
             at(Diagnostic::new(
                 Code::UnsupportedSpecVersion,
                 format!(
                     "standard version '{version}' is not supported (supported: {})",
-                    SUPPORTED_VERSIONS
-                        .iter()
-                        .map(|(a, b)| format!("{a}.{b}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    supported_list()
                 ),
             ))
             .at("field", field),
@@ -594,116 +784,191 @@ pub(crate) fn spec_version(
     }
 }
 
-/// W616, once per feature at its first use: a workflow that targets 1.0 uses
-/// a feature that is new in 1.1, which a 1.0 consumer does not know (§11.5).
+/// A feature a Standard version after 1.0 added (§11.5): a workflow that
+/// targets an earlier version and uses it gets W616 at its first use.
+pub(crate) struct Feature {
+    /// The version that added it.
+    pub since: (u64, u64),
+    /// How a message names it.
+    pub name: &'static str,
+    /// The field of its first use in a workflow, if the workflow uses it.
+    pub first_use: fn(&Map<String, Value>) -> Option<String>,
+}
+
+/// §11.5's table of features new after 1.0, in the order W616 reports them.
 /// Features that need an extension are covered by
 /// `workflow_extensions.requires`; the advisory `supports_*` flags and
-/// `invoke`'s `workflow_id` are 1.0.
+/// `invoke`'s `workflow_id` are 1.0. Each 1.2 workstream appends its
+/// entries (S2a, S2b, S3, S4, S5; RECONCILIATION C12).
+pub(crate) const FEATURES: &[Feature] = &[
+    Feature {
+        since: (1, 1),
+        name: "'workflow_extensions.requires'",
+        first_use: |wf| {
+            matches!(wf.get("workflow_extensions"), Some(Value::Object(ext)) if ext.contains_key("requires"))
+                .then(|| "workflow_extensions.requires".to_string())
+        },
+    },
+    Feature {
+        since: (1, 1),
+        name: "gate 'phase'",
+        first_use: |wf| first_in_items(wf, "gates", |g| g.contains_key("phase").then_some("phase")),
+    },
+    Feature {
+        since: (1, 1),
+        name: "gate action 'end'",
+        first_use: |wf| {
+            first_in_items(wf, "gates", |g| {
+                (g.get("action").and_then(Value::as_str) == Some("end")).then_some("action")
+            })
+        },
+    },
+    Feature {
+        since: (1, 1),
+        name: "the 'in' operator",
+        first_use: |wf| {
+            for (i, step) in objects(wf.get("steps")) {
+                if uses_in(step.get("condition")) {
+                    return Some(format!("steps[{i}].condition"));
+                }
+                for (g, gate) in objects(step.get("gates")) {
+                    if uses_in(gate.get("when")) {
+                        return Some(format!("steps[{i}].gates[{g}].when"));
+                    }
+                }
+                for (f, fm) in objects(step.get("failure_modes")) {
+                    if uses_in(fm.get("when")) {
+                        return Some(format!("steps[{i}].failure_modes[{f}].when"));
+                    }
+                }
+            }
+            None
+        },
+    },
+    Feature {
+        since: (1, 1),
+        name: "failure-mode 'when'",
+        first_use: |wf| {
+            first_in_items(wf, "failure_modes", |fm| {
+                fm.contains_key("when").then_some("when")
+            })
+        },
+    },
+    Feature {
+        since: (1, 1),
+        name: "failure-mode 'on_error'",
+        first_use: |wf| {
+            first_in_items(wf, "failure_modes", |fm| {
+                fm.contains_key("on_error").then_some("on_error")
+            })
+        },
+    },
+];
+
+/// The mappings in a list, with their indices.
+fn objects(v: Option<&Value>) -> Vec<(usize, &Map<String, Value>)> {
+    match v {
+        Some(Value::Array(a)) => a
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| Some((i, v.as_object()?)))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The field `steps[i].<list>[j].<key>` of the first item, in step order,
+/// of a step's `list` (`gates`, `failure_modes`) for which `key` names one.
+fn first_in_items(
+    wf: &Map<String, Value>,
+    list: &str,
+    key: impl Fn(&Map<String, Value>) -> Option<&'static str>,
+) -> Option<String> {
+    objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
+        objects(step.get(list))
+            .into_iter()
+            .find_map(|(j, item)| key(item).map(|k| format!("steps[{i}].{list}[{j}].{k}")))
+    })
+}
+
+/// Whether an expression that parses uses the `in` operator.
+fn uses_in(v: Option<&Value>) -> bool {
+    let Some(Ok(e)) = v.and_then(Value::as_str).map(crate::expr::parse) else {
+        return false;
+    };
+    let mut stack = vec![&e];
+    while let Some(e) = stack.pop() {
+        match e {
+            Expr::Cmp(CmpOp::In, ..) => return true,
+            Expr::Cmp(_, l, r, _) => stack.extend([&**l, &**r]),
+            Expr::Not(x, _) => stack.push(x),
+            Expr::And(v) | Expr::Or(v) => stack.extend(v),
+            Expr::Lit(..) | Expr::Ref(_) => {}
+        }
+    }
+    false
+}
+
+/// W616 for a feature new in `since` used at `field` by something that
+/// targets `version` (as declared: `1.0` or `1.0.0`), declared by a
+/// workflow's `spec_version` or, when `by_header`, by the file's header.
+/// Shared by the workflow check and S3's catalog-manifest check.
+pub(crate) fn version_feature_diag(
+    name: &str,
+    since: (u64, u64),
+    version: &str,
+    by_header: bool,
+    field: impl Into<String>,
+) -> Diagnostic {
+    let (since_major, since_minor) = since;
+    let target = parse_version(version).map_or_else(
+        || version.to_string(),
+        |(major, minor)| format!("{major}.{minor}"),
+    );
+    // A header cannot override a workflow's own spec_version.
+    let (declared_in, fix) = if by_header {
+        (
+            "the file's '# Standard version' header",
+            format!(
+                "declare spec_version \"{since_major}.{since_minor}\" or a {since_major}.{since_minor} header"
+            ),
+        )
+    } else {
+        (
+            "its 'spec_version'",
+            format!("declare spec_version \"{since_major}.{since_minor}\""),
+        )
+    };
+    Diagnostic::new(
+        Code::VersionFeatureMismatch,
+        format!(
+            "the workflow targets standard {version} by {declared_in}, but {name} is new in {since_major}.{since_minor} and a {target} consumer does not know it"
+        ),
+    )
+    .at("field", field.into())
+    .suggest(fix)
+}
+
+/// W616, once per feature at its first use, for each feature of
+/// [`FEATURES`] newer than `target` (§11.5).
 fn newer_features(
     wf: &Map<String, Value>,
+    target: (u64, u64),
     version: &str,
-    declared_in: &str,
+    by_header: bool,
     at: &dyn Fn(Diagnostic) -> Diagnostic,
     report: &mut Report,
 ) {
-    /// The mappings in a list, with their indices.
-    fn objects(v: Option<&Value>) -> Vec<(usize, &Map<String, Value>)> {
-        match v {
-            Some(Value::Array(a)) => a
-                .iter()
-                .enumerate()
-                .filter_map(|(i, v)| Some((i, v.as_object()?)))
-                .collect(),
-            _ => Vec::new(),
+    for feature in FEATURES.iter().filter(|f| f.since > target) {
+        if let Some(field) = (feature.first_use)(wf) {
+            report.push(at(version_feature_diag(
+                feature.name,
+                feature.since,
+                version,
+                by_header,
+                field,
+            )));
         }
-    }
-    /// Whether an expression that parses uses the `in` operator.
-    fn uses_in(v: Option<&Value>) -> bool {
-        let Some(Ok(e)) = v.and_then(Value::as_str).map(crate::expr::parse) else {
-            return false;
-        };
-        let mut stack = vec![&e];
-        while let Some(e) = stack.pop() {
-            match e {
-                Expr::Cmp(CmpOp::In, ..) => return true,
-                Expr::Cmp(_, l, r, _) => stack.extend([&**l, &**r]),
-                Expr::Not(x, _) => stack.push(x),
-                Expr::And(v) | Expr::Or(v) => stack.extend(v),
-                Expr::Lit(..) | Expr::Ref(_) => {}
-            }
-        }
-        false
-    }
-    let mut found: Vec<(&'static str, String)> = Vec::new();
-    let mut note = |feature: &'static str, field: String| {
-        if !found.iter().any(|(f, _)| *f == feature) {
-            found.push((feature, field));
-        }
-    };
-    if let Some(Value::Object(ext)) = wf.get("workflow_extensions")
-        && ext.contains_key("requires")
-    {
-        note(
-            "'workflow_extensions.requires'",
-            "workflow_extensions.requires".into(),
-        );
-    }
-    for (i, step) in objects(wf.get("steps")) {
-        if uses_in(step.get("condition")) {
-            note("the 'in' operator", format!("steps[{i}].condition"));
-        }
-        for (g, gate) in objects(step.get("gates")) {
-            if gate.contains_key("phase") {
-                note("gate 'phase'", format!("steps[{i}].gates[{g}].phase"));
-            }
-            if gate.get("action").and_then(Value::as_str) == Some("end") {
-                note("gate action 'end'", format!("steps[{i}].gates[{g}].action"));
-            }
-            if uses_in(gate.get("when")) {
-                note("the 'in' operator", format!("steps[{i}].gates[{g}].when"));
-            }
-        }
-        for (f, fm) in objects(step.get("failure_modes")) {
-            if fm.contains_key("when") {
-                note(
-                    "failure-mode 'when'",
-                    format!("steps[{i}].failure_modes[{f}].when"),
-                );
-            }
-            if fm.contains_key("on_error") {
-                note(
-                    "failure-mode 'on_error'",
-                    format!("steps[{i}].failure_modes[{f}].on_error"),
-                );
-            }
-            if uses_in(fm.get("when")) {
-                note(
-                    "the 'in' operator",
-                    format!("steps[{i}].failure_modes[{f}].when"),
-                );
-            }
-        }
-    }
-    // A header cannot override a workflow's own spec_version.
-    let (declared_in, fix) = if declared_in == "spec_version" {
-        ("its 'spec_version'", "declare spec_version \"1.1\"")
-    } else {
-        (
-            "the file's '# Standard version' header",
-            "declare spec_version \"1.1\" or a 1.1 header",
-        )
-    };
-    for (feature, field) in found {
-        report.push(
-            at(Diagnostic::new(
-                Code::VersionFeatureMismatch,
-                format!(
-                    "the workflow targets standard {version} by {declared_in}, but {feature} is new in 1.1 and a 1.0 consumer does not know it"
-                ),
-            ))
-            .at("field", field)
-            .suggest(fix),
-        );
     }
 }
 
@@ -826,5 +1091,255 @@ mod tests {
         }
         // Leading zeros are digits; the version is still 1.1.
         assert_eq!(parse_version("01.01"), Some((1, 1)));
+    }
+
+    #[test]
+    fn targets() {
+        let wf = |v: Value| v.as_object().unwrap().clone();
+        let t = |w: Value, h: Option<&str>| target(&wf(w), h);
+        assert_eq!(
+            t(serde_json::json!({"spec_version": "1.2"}), None),
+            Some((1, 2))
+        );
+        // spec_version takes precedence over the header.
+        assert_eq!(
+            t(serde_json::json!({"spec_version": "1.1.0"}), Some("1.2.0")),
+            Some((1, 1))
+        );
+        assert_eq!(t(serde_json::json!({}), Some("1.2.0")), Some((1, 2)));
+        // A spec_version that is not a version string leaves the header.
+        assert_eq!(
+            t(serde_json::json!({"spec_version": 1.2}), Some("1.0")),
+            Some((1, 0))
+        );
+        assert_eq!(
+            t(serde_json::json!({"spec_version": "x"}), Some("1.1")),
+            Some((1, 1))
+        );
+        assert_eq!(t(serde_json::json!({}), Some("one")), None);
+        assert_eq!(t(serde_json::json!({}), None), None);
+        assert_eq!(SUPPORTED_VERSIONS, [(1, 0), (1, 1), (1, 2)]);
+    }
+
+    #[test]
+    fn cited_versions() {
+        let check = |s: Option<Value>, o: Option<Value>| {
+            check_cited(s.as_ref(), o.as_ref(), "2.2.0", |d, f| d.at("field", f))
+                .into_iter()
+                .map(|d| {
+                    (
+                        d.code.as_str().to_string(),
+                        d.location["field"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let pair = |c: &str, f: &str| (c.to_string(), f.to_string());
+        let j = |s: &str| Some(Value::String(s.into()));
+        assert!(check(None, None).is_empty());
+        assert!(check(j("1.2.0"), j("2.2.0")).is_empty());
+        assert!(check(j("1.0"), j("2.0")).is_empty());
+        // A later minor or patch of the same ontology major is accepted.
+        assert!(check(j("1.1"), j("2.9.4")).is_empty());
+        assert_eq!(check(j("1.3"), None), [pair("V109", "standard")]);
+        assert_eq!(check(j("2.0.0"), None), [pair("V109", "standard")]);
+        assert_eq!(check(None, j("3.0")), [pair("V109", "ontology")]);
+        assert_eq!(check(None, j("1.9.0")), [pair("V109", "ontology")]);
+        for bad in [
+            j("1"),
+            j("v1.2"),
+            j("1.2.0.0"),
+            Some(serde_json::json!(1.2)),
+            Some(Value::Null),
+        ] {
+            assert_eq!(
+                check(bad.clone(), None),
+                [pair("S303", "standard")],
+                "{bad:?}"
+            );
+            assert_eq!(
+                check(None, bad.clone()),
+                [pair("S303", "ontology")],
+                "{bad:?}"
+            );
+        }
+        // Both members are checked, standard first.
+        assert_eq!(
+            check(j("9.9"), j("x")),
+            [pair("S303", "ontology"), pair("V109", "standard")]
+        );
+    }
+
+    fn node(
+        id: &str,
+        risk: Risk,
+        mutation: bool,
+        cp: bool,
+        ap: bool,
+        overridable: bool,
+    ) -> Capability {
+        Capability {
+            id: id.into(),
+            layer: "L".into(),
+            risk,
+            mutation,
+            requires_checkpoint: cp,
+            requires_approval: ap,
+            mutation_overridable: overridable,
+            input_schema: serde_json::json!({}),
+            output_schema: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn flags_join() {
+        let mutate = node("mutate", Risk::High, true, true, true, false);
+        let retrieve = node("retrieve", Risk::Low, false, false, false, false);
+        assert_eq!(Flags::of(&retrieve), Flags::NONE);
+        let m = Flags::of(&mutate);
+        assert_eq!(Flags::NONE.join(m), m);
+        assert_eq!(m.join(Flags::NONE), m);
+        let a = Flags {
+            risk: Risk::Medium,
+            requires_approval: true,
+            ..Flags::NONE
+        };
+        let b = Flags {
+            mutation: true,
+            requires_checkpoint: true,
+            ..Flags::NONE
+        };
+        assert_eq!(
+            a.join(b),
+            Flags {
+                risk: Risk::Medium,
+                mutation: true,
+                requires_checkpoint: true,
+                requires_approval: true
+            }
+        );
+    }
+
+    #[test]
+    fn effective_flags() {
+        let none = Policy::default();
+        let step = |v: Value| v.as_object().unwrap().clone();
+        let eff =
+            |n: &Capability, s: Value, maxima: Option<Flags>| effective(n, &step(s), maxima, &none);
+        let retrieve = node("retrieve", Risk::Low, false, false, false, false);
+        let mutate = node("mutate", Risk::High, true, true, true, false);
+        let audit = node("audit", Risk::Low, true, false, false, true);
+        // The ontology's flags, with no person.
+        let e = eff(&mutate, serde_json::json!({}), None);
+        assert_eq!(e.flags, Flags::of(&mutate));
+        assert!(!e.person);
+        // Stricter declarations take effect; weaker ones do not (W602).
+        let e = eff(
+            &retrieve,
+            serde_json::json!({"risk": "medium", "requires_checkpoint": true, "requires_approval": true, "mutation": true}),
+            None,
+        );
+        assert_eq!(
+            e.flags,
+            Flags {
+                risk: Risk::Medium,
+                mutation: true,
+                requires_checkpoint: true,
+                requires_approval: true
+            }
+        );
+        let e = eff(
+            &mutate,
+            serde_json::json!({"risk": "low", "requires_checkpoint": false, "requires_approval": false, "mutation": false}),
+            None,
+        );
+        assert_eq!(e.flags, Flags::of(&mutate));
+        // An unknown risk or a non-boolean flag declares nothing.
+        let e = eff(
+            &retrieve,
+            serde_json::json!({"risk": "extreme", "requires_approval": "yes"}),
+            None,
+        );
+        assert_eq!(e.flags, Flags::NONE);
+        // mutation: false is honoured where the ontology allows it...
+        assert!(
+            !eff(&audit, serde_json::json!({"mutation": false}), None)
+                .flags
+                .mutation
+        );
+        assert!(eff(&audit, serde_json::json!({}), None).flags.mutation);
+        // ...unless a maximum sets it: the exception is the ontology's only.
+        let maxima = Flags {
+            mutation: true,
+            ..Flags::NONE
+        };
+        assert!(
+            eff(&audit, serde_json::json!({"mutation": false}), Some(maxima))
+                .flags
+                .mutation
+        );
+        // Maxima join the ontology's flags.
+        let maxima = Flags {
+            risk: Risk::High,
+            requires_approval: true,
+            ..Flags::NONE
+        };
+        let e = eff(&retrieve, serde_json::json!({}), Some(maxima));
+        assert_eq!(
+            e.flags,
+            Flags {
+                risk: Risk::High,
+                requires_approval: true,
+                ..Flags::NONE
+            }
+        );
+    }
+
+    #[test]
+    fn feature_table() {
+        // The 1.1 features, in report order; a 1.1 or 1.2 target gets none
+        // of them.
+        let names: Vec<_> = FEATURES
+            .iter()
+            .filter(|f| f.since == (1, 1))
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(names.len(), 6);
+        assert!(
+            FEATURES
+                .iter()
+                .all(|f| f.since > (1, 0) && SUPPORTED_VERSIONS.contains(&f.since))
+        );
+        let wf = serde_json::json!({"workflow_extensions": {"requires": []}, "steps": [
+            {"condition": "\"a\" in [\"a\"]", "gates": [{"when": "true", "phase": "after"}]}]});
+        let wf = wf.as_object().unwrap();
+        let fields = |target: (u64, u64), version: &str| {
+            let mut report = Report::default();
+            newer_features(wf, target, version, false, &|d| d, &mut report);
+            report
+                .diagnostics
+                .iter()
+                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            fields((1, 0), "1.0"),
+            [
+                "workflow_extensions.requires",
+                "steps[0].gates[0].phase",
+                "steps[0].condition"
+            ]
+        );
+        assert!(fields((1, 1), "1.1").is_empty());
+        assert!(fields((1, 2), "1.2.0").is_empty());
+        let d = version_feature_diag("gate 'phase'", (1, 1), "1.0.0", true, "f");
+        assert_eq!(
+            d.message,
+            "the workflow targets standard 1.0.0 by the file's '# Standard version' header, but gate 'phase' is new in 1.1 and a 1.0 consumer does not know it"
+        );
+        assert_eq!(
+            d.suggestion.as_deref(),
+            Some("declare spec_version \"1.1\" or a 1.1 header")
+        );
     }
 }

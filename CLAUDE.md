@@ -75,20 +75,41 @@ python tools/sync_skill_schemas.py --check  # CI: fail on drift
 python scripts/gen_runtime_fixtures.py          # after editing the fixtures there
 python scripts/gen_runtime_fixtures.py --check  # CI: fail on drift
 ```
+The 1.1 fixtures are defined in that script; each Standard 1.2 workstream
+adds its fixtures in its own `scripts/runtime_fixtures/<workstream>.py`
+(`register(add)`). Every fixture states its catalog's `header` (a version or
+`null`) and is checked against
+`tests/conformance/runtime/schema/fixture.schema.json`.
 
-### Regenerate the Standard Agents binding's generated files
+### Regenerate the TypeScript package's ontology table and the approval digest vectors
 ```bash
 python scripts/gen_standard_agents_binding.py          # after changing the ontology
 python scripts/gen_standard_agents_binding.py --check  # CI: fail on drift
 ```
-It also writes the approval digest vectors, `tests/conformance/approval/digests.json`,
-from the reference executor; the binding's fixture is a copy.
+It writes `packages/acs-core/src/ontology.gen.ts`, the Standard Agents
+annotation schema and the approval digest vectors,
+`tests/conformance/approval/digests.json`, from the reference executor; the
+package's tests read the vectors in place.
 
 ### Regenerate the strict JSON Schema rendering of the capability contracts
 ```bash
 python scripts/gen_capability_json_schemas.py          # after changing a contract in the ontology
 python scripts/gen_capability_json_schemas.py --check  # CI: fail on drift
 ```
+
+### Check the TypeScript package (in `packages/acs-core/`)
+```bash
+cd packages/acs-core
+npm ci          # install the exact versions in package-lock.json
+npm run check   # type-check
+npm test        # vitest; reads the conformance vectors in tests/conformance/ in place
+npm run build   # compile to dist/, which the package exports
+```
+A host-neutral TypeScript module (one that imports nothing from
+`@standardagents/spec`) goes in `packages/acs-core/src/` and its tests in
+`packages/acs-core/test/`; code that reads or describes Standard Agents state
+stays in `examples/standard_agents/src/acs/`. No conformance file is copied
+under `examples/standard_agents/test/fixtures/`.
 
 ### Check the Standard Agents binding (TypeScript, in `examples/standard_agents/`)
 ```bash
@@ -97,6 +118,9 @@ npm ci          # install the exact versions in package-lock.json
 npm run check   # type-check against the published @standardagents/spec types
 npm test        # vitest
 ```
+The binding depends on the package with `file:../../packages/acs-core` and
+imports its built `dist/`: run `npm ci` and `npm run build` in
+`packages/acs-core` first.
 
 ### Run conformance tests (optional, local only)
 ```bash

@@ -43,7 +43,7 @@ import {
   requestApproval,
   type ApprovalPolicy,
 } from './approval.js';
-import { digest as digestOf, type Json } from './canonical.js';
+import { digest as digestOf, type Json } from '@synaptiai/acs-core';
 import {
   CAPABILITIES,
   ONTOLOGY_VERSION,

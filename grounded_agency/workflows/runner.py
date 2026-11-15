@@ -247,6 +247,13 @@ class WorkflowRunner:
         v1.1 §5.17, e.g. :meth:`AgentDescriptor.identity`) names who runs the
         workflow; every action record carries it.
 
+        The executor is given no catalog header (``header=None``, STANDARD
+        v1.2 §11.5), and loses nothing by it: the engine writes the header
+        of each file it loads into that file's workflows as their
+        ``spec_version`` (:meth:`WorkflowEngine.load_catalog`), which takes
+        precedence over a header. One engine may hold workflows from files
+        with different headers, which one ``header`` could not state.
+
         Raises:
             RunStartError: the catalog does not validate, or ``inputs`` or
                 ``actor_identity`` do not fit the workflow or are not JSON
@@ -260,6 +267,7 @@ class WorkflowRunner:
                 self.catalog(),
                 workflow,
                 dict(inputs or {}),
+                header=None,
                 attendance=attendance,
                 run_id=run_id or uuid.uuid4().hex,
                 now_ms=now,

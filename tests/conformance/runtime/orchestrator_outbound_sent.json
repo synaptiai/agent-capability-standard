@@ -378,6 +378,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "outbound_message",
   "inputs": {
     "request": {

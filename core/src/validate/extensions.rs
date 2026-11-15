@@ -255,23 +255,90 @@ pub(crate) fn duration_field(
 }
 
 /// W614: a legacy step `timeout` outside the duration grammar. It stays
-/// accepted (1.0 allowed any string), but cannot be enforced.
+/// advisory (the step runs without a deadline) when `wait@1` is not
+/// declared; under `wait@1` a waiting step's timeout is strict (S303).
 pub(crate) fn legacy_timeout(
     step: &Map<String, Value>,
     at: &dyn Fn(Diagnostic) -> Diagnostic,
     report: &mut Report,
 ) {
-    if let Some(Value::String(t)) = step.get("timeout")
-        && let Err(e) = duration::parse(t)
-    {
-        report.push(
-            at(Diagnostic::new(
-                Code::InvalidDuration,
-                format!("timeout: {e}; it cannot be enforced"),
-            ))
-            .at("field", "timeout"),
+    if let Some(Value::String(t)) = step.get("timeout") {
+        duration_text(
+            t,
+            "timeout",
+            "timeout",
+            Positive::Allowed,
+            "it cannot be enforced",
+            at,
+            report,
         );
     }
+}
+
+/// Whether a duration checked by [`literal_duration`] may be zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the 1.2 workstreams' literal-duration checks use both (FOUNDATION F1.12)"
+)]
+pub(crate) enum Positive {
+    /// Zero is a W614 too: the duration must be longer than zero.
+    Required,
+    /// Zero is a duration like any other.
+    Allowed,
+}
+
+/// W614 for `input_bindings.<key>` when it is a literal string (no `${`)
+/// that the §5.10.1 grammar rejects, or, with [`Positive::Required`], that is
+/// zero. Field `input_bindings.<key>`, message `<key>: <error>; <why>`. One
+/// implementation for every duration input the executor or a host must
+/// apply (`audit`'s `retention`, `persist`'s `ttl`).
+#[allow(
+    dead_code,
+    reason = "the 1.2 workstreams' input checks call it (FOUNDATION F1.12)"
+)]
+pub(crate) fn literal_duration(
+    step: &Map<String, Value>,
+    key: &str,
+    positive: Positive,
+    why: &str,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    let Some(Value::String(text)) = step.get("input_bindings").and_then(|b| b.get(key)) else {
+        return;
+    };
+    if text.contains("${") {
+        return;
+    }
+    let field = format!("input_bindings.{key}");
+    duration_text(text, key, &field, positive, why, at, report);
+}
+
+/// The W614 check of one duration text.
+fn duration_text(
+    text: &str,
+    name: &str,
+    field: &str,
+    positive: Positive,
+    why: &str,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    let error = match duration::parse(text) {
+        Err(e) => e,
+        Ok(d) if d.is_zero() && positive == Positive::Required => {
+            format!("'{text}' is zero, and it must be longer than zero")
+        }
+        Ok(_) => return,
+    };
+    report.push(
+        at(Diagnostic::new(
+            Code::InvalidDuration,
+            format!("{name}: {error}; {why}"),
+        ))
+        .at("field", field),
+    );
 }
 
 /// `triggers` (§5.10): S303/S304 for shape, V106 without `triggers@1`, V107
@@ -528,10 +595,11 @@ fn is_event_ref(r: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::super::tests::{codes, ctx};
-    use super::super::validate_catalog;
+    use super::super::{Report, validate_catalog};
+    use super::{Positive, literal_duration};
 
     fn wf(extra: serde_json::Value) -> serde_json::Value {
         let mut w = json!({"goal": "g", "risk": "low", "spec_version": "1.1",
@@ -762,6 +830,55 @@ mod tests {
         d["w"]["inputs"] =
             json!({"ev": {"type": "object", "ref": "schemas/event_schema.yaml#/event"}});
         assert_eq!(codes(d), ["W604"]);
+    }
+
+    #[test]
+    fn literal_durations() {
+        let check = |bindings: Value, positive: Positive| {
+            let step = json!({"capability": "persist", "input_bindings": bindings});
+            let mut report = Report::default();
+            literal_duration(
+                step.as_object().unwrap(),
+                "ttl",
+                positive,
+                "a host cannot end the entry",
+                &|d| d,
+                &mut report,
+            );
+            report
+                .diagnostics
+                .iter()
+                .map(|d| {
+                    (
+                        d.code.as_str().to_string(),
+                        d.location["field"].as_str().unwrap().to_string(),
+                        d.message.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(check(json!({"ttl": "PT1H"}), Positive::Required).is_empty());
+        assert!(check(json!({"ttl": "30d"}), Positive::Required).is_empty());
+        assert!(check(json!({"ttl": "0s"}), Positive::Allowed).is_empty());
+        // Bound values, other types and an absent key are not checked here.
+        assert!(check(json!({"ttl": "${inputs.ttl}"}), Positive::Required).is_empty());
+        assert!(check(json!({"ttl": 30}), Positive::Required).is_empty());
+        assert!(check(json!({}), Positive::Required).is_empty());
+        let bad = check(json!({"ttl": "a week"}), Positive::Allowed);
+        assert_eq!(bad.len(), 1);
+        assert_eq!(
+            (bad[0].0.as_str(), bad[0].1.as_str()),
+            ("W614", "input_bindings.ttl")
+        );
+        assert!(
+            bad[0].2.starts_with("ttl: 'a week' is not a duration")
+                && bad[0].2.ends_with("; a host cannot end the entry"),
+            "{}",
+            bad[0].2
+        );
+        let zero = check(json!({"ttl": "PT0S"}), Positive::Required);
+        assert_eq!(zero.len(), 1);
+        assert!(zero[0].2.contains("longer than zero"), "{}", zero[0].2);
     }
 
     #[test]

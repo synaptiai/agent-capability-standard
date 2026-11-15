@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 use super::canonical;
 use crate::duration;
 use crate::expr::{self, ast::Expr};
+use crate::profile::Policy;
 use crate::validate::Context;
 
 /// A gate or failure-mode action.
@@ -362,26 +363,20 @@ impl Program {
                 .unwrap_or("none")
                 .to_string(),
         });
-        let mut reads = Vec::new();
-        let mut executable = raw.clone();
-        executable.remove("purpose");
-        executable.remove("description");
-        if let Some(Value::Array(modes)) = executable.get_mut("failure_modes") {
-            for fm in modes.iter_mut().filter_map(Value::as_object_mut) {
-                fm.remove("condition");
-                if fm.get("recovery").is_some_and(Value::is_string) {
-                    fm.remove("recovery");
-                }
-            }
-        }
-        roots(&Value::Object(executable), &mut reads);
+        let mut reads: Vec<String> = crate::refs::executable_roots(raw)
+            .into_iter()
+            .map(|r| r.root)
+            .collect();
         if let Some(Value::Array(rs)) = raw.get("quorum").and_then(|q| q.get("reviewers")) {
             reads.extend(rs.iter().filter_map(Value::as_str).map(str::to_string));
         }
         reads.sort_unstable();
         reads.dedup();
-        let requires_checkpoint = node.requires_checkpoint || flag("requires_checkpoint");
-        let requires_approval = node.requires_approval || flag("requires_approval");
+        // The effective flags (§5.2.1), as the validator computes them. S3
+        // adds the delegation targets' maxima, S6 the applied profiles.
+        let flags = crate::validate::effective(node, raw, None, &Policy::default()).flags;
+        let (requires_checkpoint, requires_approval) =
+            (flags.requires_checkpoint, flags.requires_approval);
         // Acting on the world: a checkpoint or approval requirement, a
         // wait, another agent or workflow, or a rollback.
         let acts = requires_checkpoint

@@ -13,7 +13,7 @@ import rollbackConfig from '../agents/tools/rollback_config.js';
 import verifyConfig from '../agents/tools/verify_config.js';
 import writeConfig from '../agents/tools/write_config.js';
 import { approvalState, decideApproval, readApproval, type ApprovalPolicy } from '../src/acs/approval.js';
-import { digest } from '../src/acs/canonical.js';
+import { digest } from '@synaptiai/acs-core';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
 import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags } from '../src/acs/ontology.js';

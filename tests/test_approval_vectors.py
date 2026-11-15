@@ -29,14 +29,8 @@ from grounded_agency import _core
 ROOT = Path(__file__).resolve().parent.parent
 ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
 VECTORS = ROOT / "tests" / "conformance" / "approval" / "digests.json"
-BINDING_COPY = (
-    ROOT
-    / "examples"
-    / "standard_agents"
-    / "test"
-    / "fixtures"
-    / "approval-digests.json"
-)
+PACKAGE_TEST = ROOT / "packages" / "acs-core" / "test" / "canonical.test.ts"
+BINDING_FIXTURES = ROOT / "examples" / "standard_agents" / "test" / "fixtures"
 RUNTIME = ROOT / "tests" / "conformance" / "runtime"
 
 DOC: dict[str, Any] = json.loads(VECTORS.read_text(encoding="utf-8"))
@@ -173,8 +167,13 @@ def test_the_file_is_printable_ascii() -> None:
     assert re.fullmatch(r"[\x20-\x7e\n]*", text)
 
 
-def test_the_binding_tests_against_the_same_vectors() -> None:
-    assert BINDING_COPY.read_bytes() == VECTORS.read_bytes()
+def test_the_typescript_package_tests_against_this_file() -> None:
+    """The TypeScript digest is tested against these vectors, read in place:
+    no copy of them is kept beside the binding."""
+    imports = re.findall(r"from '([^']+\.json)'", PACKAGE_TEST.read_text("utf-8"))
+    assert imports == ["../../../tests/conformance/approval/digests.json"]
+    assert (PACKAGE_TEST.parent / imports[0]).resolve() == VECTORS
+    assert not list(BINDING_FIXTURES.glob("*.json"))
 
 
 def test_the_vectors_are_informative_and_named() -> None:
@@ -315,6 +314,7 @@ def replay(
         {"replay": workflow},
         "replay",
         {"setting": resolved.get("${setting}", "any")},
+        header=None,
         attendance="attended",
         run_id="replay",
         now_ms=0,
@@ -400,6 +400,7 @@ def test_a_step_with_no_approval_field_asks_a_human_in_session(
         fixture["catalog"],
         fixture["workflow"],
         fixture["inputs"],
+        header=fixture["header"],
         attendance=fixture["attendance"],
         run_id="run-1",
         now_ms=fixture["start"],

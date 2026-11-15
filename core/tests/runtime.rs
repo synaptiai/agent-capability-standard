@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use acs_core::exec::canonical::canonical;
-use acs_core::exec::{Attendance, Response, Run, StartOptions};
+use acs_core::exec::{Attendance, RecordMode, Response, Run, StartOptions, read_json};
 use acs_core::validate::Context;
 use serde_json::{Map, Value};
 
@@ -41,15 +41,69 @@ fn fill(response: &Value, action: &Value) -> Value {
     }
 }
 
+/// The start options a fixture states (`tests/conformance/runtime/schema/
+/// fixture.schema.json`): every member it gives is passed to start. The
+/// catalog's `header` is required, as the start operation requires it.
+fn fixture_options(name: &str, f: &Value, now: u64) -> StartOptions {
+    let attendance = match f["attendance"].as_str() {
+        Some("unattended") => Attendance::Unattended,
+        _ => Attendance::Attended,
+    };
+    let header = match f.get("header") {
+        Some(Value::String(h)) => Some(h.clone()),
+        Some(Value::Null) => None,
+        other => panic!(
+            "{name}: a fixture states its catalog's header (a version or null), found {other:?}"
+        ),
+    };
+    let records = match f.get("records").and_then(Value::as_str) {
+        None | Some("approvals") => RecordMode::Approvals,
+        Some("actions") => RecordMode::Actions,
+        Some(other) => panic!("{name}: records '{other}'"),
+    };
+    let list = |key: &str| -> Vec<Value> {
+        f.get(key)
+            .map(|v| {
+                v.as_array()
+                    .cloned()
+                    .unwrap_or_else(|| panic!("{name}: {key} is not a list"))
+            })
+            .unwrap_or_default()
+    };
+    // Catalog sets and agent manifests are start members of workstream S3.
+    for key in ["catalogs", "agents"] {
+        assert!(
+            f.get(key).is_none(),
+            "{name}: this harness does not pass '{key}' yet"
+        );
+    }
+    StartOptions {
+        attendance,
+        run_id: "run-1".into(),
+        now_ms: now,
+        actor_identity: f.get("actor_identity").cloned(),
+        header,
+        records,
+        profiles: list("profiles"),
+        grounding: list("grounding")
+            .into_iter()
+            .map(|g| serde_json::from_value(g).unwrap_or_else(|e| panic!("{name}: grounding: {e}")))
+            .collect(),
+        destinations: f
+            .get("destinations")
+            .map(|v| {
+                serde_json::from_value(v.clone())
+                    .unwrap_or_else(|e| panic!("{name}: destinations: {e}"))
+            })
+            .unwrap_or_default(),
+    }
+}
+
 /// Run one fixture; with `restore`, snapshot and restore before each step.
 /// Returns every action seen and the end, as canonical JSON (RFC 8785, so
 /// object key order does not matter but array order does), and the trace.
 fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Value, Vec<Value>) {
     let catalog = &f["catalog"];
-    let attendance = match f["attendance"].as_str() {
-        Some("unattended") => Attendance::Unattended,
-        _ => Attendance::Attended,
-    };
     let inputs: Map<String, Value> = f["inputs"].as_object().cloned().unwrap_or_default();
     let mut now = f["start"].as_u64().unwrap_or(0);
     let mut run = Run::start(
@@ -57,12 +111,7 @@ fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Va
         catalog,
         f["workflow"].as_str().unwrap(),
         inputs,
-        StartOptions {
-            attendance,
-            run_id: "run-1".into(),
-            now_ms: now,
-            actor_identity: f.get("actor_identity").cloned(),
-        },
+        fixture_options(name, f, now),
     )
     .unwrap_or_else(|e| panic!("{name}: start: {e}"));
     let mut seen = Vec::new();
@@ -119,7 +168,9 @@ fn runtime_fixtures() {
     );
     for path in names {
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
-        let f: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        // Read as a host's JSON is read: no integer beyond 2^53.
+        let f: Value = read_json(&std::fs::read_to_string(&path).unwrap())
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         let (seen, end, trace) = play(&ctx, &name, &f, false);
         assert!(
             matches(&f["end"], &end),
@@ -156,6 +207,11 @@ fn opts() -> StartOptions {
         run_id: "r".into(),
         now_ms: 0,
         actor_identity: None,
+        header: None,
+        records: RecordMode::Approvals,
+        profiles: Vec::new(),
+        grounding: Vec::new(),
+        destinations: Vec::new(),
     }
 }
 
@@ -723,4 +779,276 @@ fn the_executors_own_refusals_are_not_retried() {
     let end = serde_json::to_value(run.next()).unwrap();
     assert_eq!(end["code"], "R402");
     assert!(!run.trace().iter().any(|t| t["kind"] == "retry"));
+}
+
+#[test]
+fn contributed_fixtures_state_their_header() {
+    // The contributed fixtures run in pytest; here only their format: each
+    // states its catalog's header, as the start operation requires.
+    let dir = root().join("tests/conformance/contrib");
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        let f = read_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let header = f.get("header");
+        assert!(
+            header.is_some_and(|h| h.is_null() || h.is_string()),
+            "{}: no header",
+            path.display()
+        );
+    }
+}
+
+/// A one-step catalog that declares no version: only a header can.
+fn undeclared() -> Value {
+    let mut c = one_step();
+    c["w"].as_object_mut().unwrap().remove("spec_version");
+    c
+}
+
+#[test]
+fn the_header_is_validated_and_kept() {
+    let ctx = ctx();
+    let with = |header: Option<&str>| StartOptions {
+        header: header.map(str::to_string),
+        ..opts()
+    };
+    // A header the executor does not support refuses the start (V109), as
+    // a validator reading the file would.
+    let refused = Run::start(&ctx, &undeclared(), "w", topic(), with(Some("2.0")));
+    match refused {
+        Err(acs_core::exec::StartError::Invalid(d)) => {
+            assert_eq!(
+                d.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+                ["V109"]
+            );
+        }
+        other => panic!("{other:?}", other = other.map(|_| ())),
+    }
+    // A workflow's own spec_version takes precedence over the header.
+    assert!(Run::start(&ctx, &one_step(), "w", topic(), with(Some("2.0"))).is_ok());
+    for header in [None, Some("1.0"), Some("1.1.0"), Some("1.2.0")] {
+        let run = Run::start(&ctx, &undeclared(), "w", topic(), with(header)).unwrap();
+        let snap = run.snapshot(Some(b"k"));
+        // The snapshot keeps the header (and leaves it out when there is
+        // none, as a 1.1 snapshot did), and a restore validates with it.
+        assert_eq!(
+            snap.state.contains("\"header\""),
+            header.is_some(),
+            "{header:?}"
+        );
+        let restored = Run::restore(&ctx, &undeclared(), &snap, Some(b"k")).unwrap();
+        assert_eq!(restored.snapshot(Some(b"k")), snap);
+    }
+    // A forged state whose header the executor does not support is refused
+    // at restore, by validation.
+    let run = Run::start(&ctx, &undeclared(), "w", topic(), with(Some("1.1"))).unwrap();
+    let forged_header = forged(&run.snapshot(None), |s| {
+        s["header"] = serde_json::json!("2.0")
+    });
+    assert!(matches!(
+        Run::restore(&ctx, &undeclared(), &forged_header, None),
+        Err(acs_core::exec::RestoreError::Start(_))
+    ));
+    let not_a_version = forged(&run.snapshot(None), |s| {
+        s["header"] = serde_json::json!("one")
+    });
+    assert!(Run::restore(&ctx, &undeclared(), &not_a_version, None).is_err());
+    // A header that is not a version is refused at start, even where the
+    // workflow's own spec_version would make validation ignore it.
+    for header in ["one", "", "1", "v1.2"] {
+        assert!(matches!(
+            Run::start(&ctx, &one_step(), "w", topic(), with(Some(header))),
+            Err(acs_core::exec::StartError::Header(_))
+        ));
+    }
+}
+
+#[test]
+fn start_refuses_options_not_implemented_yet() {
+    let ctx = ctx();
+    let cases = [
+        StartOptions {
+            records: RecordMode::Actions,
+            ..opts()
+        },
+        StartOptions {
+            profiles: vec![serde_json::json!({"domain": "d"})],
+            ..opts()
+        },
+        StartOptions {
+            grounding: vec![
+                acs_core::grounding::Policy::new(vec!["search".into()], None, false).unwrap(),
+            ],
+            ..opts()
+        },
+        StartOptions {
+            destinations: vec![vec!["ops".into()]],
+            ..opts()
+        },
+    ];
+    for options in cases {
+        assert!(matches!(
+            Run::start(&ctx, &one_step(), "w", topic(), options),
+            Err(acs_core::exec::StartError::Unsupported(_))
+        ));
+    }
+    // Nor does a restore accept a state that holds one.
+    let run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
+    for (key, value) in [
+        ("records_mode", serde_json::json!("actions")),
+        ("profiles", serde_json::json!([{"domain": "d"}])),
+        ("grounding", serde_json::json!([{"require": ["search"]}])),
+        ("destinations", serde_json::json!([["ops"]])),
+    ] {
+        let snap = forged(&run.snapshot(None), |s| s[key] = value.clone());
+        assert!(
+            matches!(
+                Run::restore(&ctx, &one_step(), &snap, None),
+                Err(acs_core::exec::RestoreError::Malformed(_))
+            ),
+            "{key}"
+        );
+    }
+}
+
+/// A run of `one_step()` whose step fails with the host's `reason`, under
+/// `retry` when `retry` is set.
+fn failed_with(reason: Option<Value>, retry: bool) -> (Value, Vec<Value>) {
+    let ctx = ctx();
+    let mut catalog = one_step();
+    if retry {
+        catalog["w"]["steps"][0]["retry"] = serde_json::json!({"max": 1});
+    }
+    let mut run = Run::start(&ctx, &catalog, "w", topic(), opts()).unwrap();
+    let mut error = serde_json::json!({"kind": "Error", "code": "R402", "message": "no"});
+    if let Some(r) = reason {
+        error["reason"] = r;
+    }
+    while !run.is_finished() {
+        let id = run.next().id;
+        let response: Response = serde_json::from_value(error.clone()).unwrap();
+        run.submit(id, response, 0).unwrap();
+    }
+    (
+        serde_json::to_value(run.next()).unwrap(),
+        run.trace().to_vec(),
+    )
+}
+
+fn detail<'t>(trace: &'t [Value], kind: &str) -> &'t Value {
+    &trace.iter().find(|t| t["kind"] == kind).unwrap()["detail"]
+}
+
+#[test]
+fn reason_grammar() {
+    // The defined tokens and vendor reasons are kept: on the step's failure
+    // trace and on the Failed action.
+    for token in [
+        "unsupported_capability",
+        "not_recorded",
+        "outcome_unknown",
+        "x-acme.audio",
+        "x-0",
+    ] {
+        let (end, trace) = failed_with(Some(serde_json::json!(token)), false);
+        assert_eq!(end["kind"], "Failed");
+        assert_eq!(end["code"], "R402");
+        assert_eq!(end["reason"], token, "{token}");
+        assert_eq!(detail(&trace, "step_failed")["reason"], token);
+        assert_eq!(detail(&trace, "run_failed")["reason"], token);
+    }
+    // Under retry, the retry trace shows it too.
+    let (end, trace) = failed_with(Some(serde_json::json!("over_capacity")), true);
+    assert_eq!(detail(&trace, "retry")["reason"], "over_capacity");
+    assert_eq!(end["reason"], "over_capacity");
+}
+
+#[test]
+fn reason_outside_grammar_is_ignored() {
+    let (plain, plain_trace) = failed_with(None, false);
+    assert!(plain.get("reason").is_none());
+    assert!(
+        detail(&plain_trace, "step_failed")
+            .get("reason_ignored")
+            .is_none()
+    );
+    let long = format!("x-{}", "a".repeat(63));
+    for bad in [
+        serde_json::json!("Unsupported"),
+        serde_json::json!("x-"),
+        serde_json::json!(long),
+        serde_json::json!(5),
+        serde_json::json!({"a": 1}),
+        Value::Null,
+    ] {
+        let (end, trace) = failed_with(Some(bad.clone()), false);
+        // The run fails as without a reason; the value is only traced.
+        assert_eq!(end["code"], plain["code"], "{bad}");
+        assert!(end.get("reason").is_none(), "{bad}");
+        let d = detail(&trace, "step_failed");
+        assert!(d.get("reason").is_none(), "{bad}");
+        assert_eq!(d["reason_ignored"], bad, "{bad}");
+    }
+    // 64 characters in all is the longest vendor reason.
+    let longest = format!("x-{}", "a".repeat(62));
+    assert_eq!(
+        failed_with(Some(serde_json::json!(longest)), false).0["reason"],
+        longest
+    );
+}
+
+#[test]
+fn response_unknown_members_ignored() {
+    let output: Response = serde_json::from_value(serde_json::json!(
+        {"kind": "Output", "value": 1, "extra": true}
+    ))
+    .unwrap();
+    assert!(matches!(output, Response::Output { .. }));
+    let error: Response = serde_json::from_value(serde_json::json!(
+        {"kind": "Error", "code": "R402", "message": "m", "extra": [1], "reason": {"a": 1}}
+    ))
+    .unwrap();
+    assert!(matches!(
+        error,
+        Response::Error {
+            reason: Some(_),
+            ..
+        }
+    ));
+    // A response without a reason serialises as in 1.1.
+    let plain: Response =
+        serde_json::from_value(serde_json::json!({"kind": "Error", "code": "R402"})).unwrap();
+    assert_eq!(
+        serde_json::to_value(plain).unwrap(),
+        serde_json::json!({"kind": "Error", "code": "R402", "message": ""})
+    );
+}
+
+#[test]
+fn read_json_refuses_inexact_integers() {
+    let ok = read_json(
+        r#"{"a": [9007199254740992, -9007199254740992, 1.5e300, "99999999999999999999"]}"#,
+    )
+    .unwrap();
+    assert_eq!(ok["a"][0], serde_json::json!(9007199254740992u64));
+    // A string that looks like a number is a string; a fraction or an
+    // exponent is not an integer literal.
+    assert_eq!(ok["a"][3], "99999999999999999999");
+    for bad in [
+        "9007199254740993",
+        "-9007199254740993",
+        "[18446744073709551616]",
+        "{\"x\": 123456789012345678901234567890}",
+        "{\"s\": \"a\\\"b\", \"n\": 90071992547409930}",
+    ] {
+        let e = read_json(bad).unwrap_err();
+        assert!(e.contains("2^53"), "{bad}: {e}");
+    }
+    // Malformed JSON and values beyond I-JSON's depth are refused as well.
+    assert!(read_json("{").is_err());
+    assert!(read_json(&format!("{}1{}", "[".repeat(110), "]".repeat(110))).is_err());
+    assert!(read_json("\"unterminated").is_err());
 }

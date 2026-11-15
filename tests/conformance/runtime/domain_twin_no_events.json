@@ -525,6 +525,7 @@
       }
     }
   },
+  "header": null,
   "workflow": "digital_twin_sync_loop",
   "inputs": {},
   "attendance": "attended",

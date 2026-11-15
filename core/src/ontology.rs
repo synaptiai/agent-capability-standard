@@ -89,6 +89,9 @@ pub struct Edge {
 pub struct Ontology {
     pub capabilities: IndexMap<String, Capability>,
     pub edges: Vec<Edge>,
+    /// `meta.version`, when it is a string: the version a citing document's
+    /// `ontology` is compared with (STANDARD v1.2 §11.6).
+    pub version: Option<String>,
 }
 
 fn flag(node: &serde_json::Map<String, Value>, key: &str, id: &str) -> Result<bool, String> {
@@ -175,9 +178,15 @@ impl Ontology {
                 kind,
             });
         }
+        let version = doc
+            .get("meta")
+            .and_then(|m| m.get("version"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
         Ok(Ontology {
             capabilities,
             edges,
+            version,
         })
     }
 
@@ -259,5 +268,6 @@ mod tests {
         let o = Ontology::load(&path).unwrap();
         assert_eq!(o.capabilities.len(), 36);
         assert!(o.get("send").unwrap().requires_approval);
+        assert!(o.version.as_deref().is_some_and(|v| v.starts_with("2.")));
     }
 }

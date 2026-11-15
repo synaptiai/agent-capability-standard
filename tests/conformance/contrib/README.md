@@ -1,10 +1,17 @@
 # Contributed runtime fixtures
 
 Scripted runs written by adopters, kept as they sent them.
-`scripts/gen_runtime_fixtures.py` checks each file's keys and copies it to
+`scripts/gen_runtime_fixtures.py` checks each file's keys and its format
+(`tests/conformance/runtime/schema/fixture.schema.json`) and copies it to
 `tests/conformance/runtime/`, where both runners play it. A contributed
 name must not clash with a generated one. Each run was checked against the
 standard by hand before it was added.
+
+A fixture states the version its catalog's `# Standard version:` header
+declares, or `null` for a catalog without one (`header`, required: the start
+operation takes it, STANDARD v1.2 §11.5). The catalogs here are values with
+no header, so each file says `"header": null`; that member was added to them
+when Standard 1.2 made it required, and nothing else in them changed.
 
 | Files | Source | What they cover |
 |-------|--------|-----------------|

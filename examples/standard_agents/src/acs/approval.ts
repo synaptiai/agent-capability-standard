@@ -13,7 +13,7 @@
  * decide its own request.
  */
 import type { ThreadUser } from '@standardagents/spec';
-import { digest as digestOf, type Json } from './canonical.js';
+import { digest as digestOf, type Json } from '@synaptiai/acs-core';
 import { KEYS, type ApprovalDecision, type ApprovalRecord, type ApprovalRound, type Store } from './records.js';
 
 export interface ApprovalPolicy {
