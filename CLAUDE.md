@@ -426,6 +426,13 @@ Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push
 python scripts/release_notes.py vX.Y.Z
 ```
 
+The plugin release that carries the renamed skills (`/capability-gap-analysis`,
+`/digital-twin-sync-loop`, ACS-59) changes two slash commands, so under
+SemVer it is a plugin MAJOR version (3.0.0). The TypeScript package has its
+own tag, `acs-core-vX.Y.Z` on `main` (its version in
+`packages/acs-core/package.json`), which `.github/workflows/publish-npm.yml`
+publishes.
+
 ## Claude Agent SDK Integration
 
 The `grounded_agency/` Python package provides SDK integration:

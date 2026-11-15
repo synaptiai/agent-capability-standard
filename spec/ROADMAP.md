@@ -123,7 +123,7 @@ The open items are listed below.
 ### Standards and scale
 
 - [Industry standard adoption (ISO/IEC candidate)](https://github.com/synaptiai/agent-capability-standard/issues/82)
-- [Multi-language SDKs (TypeScript, Rust, Go, Java)](https://github.com/synaptiai/agent-capability-standard/issues/83)
+- [Multi-language SDKs (TypeScript, Rust, Go, Java)](https://github.com/synaptiai/agent-capability-standard/issues/83): TypeScript delivered as [`@synaptiai/acs-core`](../packages/acs-core/README.md), the ontology table, flags and digests in TypeScript and the Rust core through WebAssembly; Go and Java open
 - [Certification program for AI agents](https://github.com/synaptiai/agent-capability-standard/issues/84)
 - [Federated trust networks](https://github.com/synaptiai/agent-capability-standard/issues/85)
 - [Formal verification of workflow compositions](https://github.com/synaptiai/agent-capability-standard/issues/86)

@@ -12,7 +12,7 @@ The vision domain profile is calibrated for environments where:
 
 This profile maps to [OASF Category 2 (Computer Vision)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering image segmentation, object detection, image generation, and visual transformations.
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
 
 ## Domain Profile
 
@@ -59,6 +59,19 @@ Vision workflows require checkpoints before any action that:
 - Produces a final classification output
 - Generates new images
 - Processes large batches
+
+The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_image_modification -> mutate; before_classification_output and
+  # before_generation -> persist; before_batch_processing (high_risk) and
+  # during_pipeline_stages (medium_risk) -> "*": medium_risk.
+  mutate: always
+  persist: always
+  "*": medium_risk
+```
 
 ## Capability Usage
 
@@ -241,9 +254,10 @@ trust_weights:
   lidar_scan: 0.96          # Primary sensor for self-driving
   calibrated_camera: 0.94
   radar_return: 0.92
-checkpoint_policy:
-  before_classification_output: always  # Safety-critical
-  before_image_modification: always
+checkpoint_policy:             # Capability ids or "*" (Standard 1.2.0 §5.21)
+  persist: always               # Classification output written out: safety-critical
+  mutate: always                # Image modification
+  "*": high_risk
 ```
 
 ## Safety Considerations

@@ -10,7 +10,7 @@ The personal assistant domain profile is calibrated for environments where:
 - **Preferences evolve** — Learned patterns inform but don't override user
 - **Privacy matters** — User data sharing requires explicit consent
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
 
 ## Domain Profile
 
@@ -52,6 +52,19 @@ Personal assistants require checkpoints before:
 - Delegating tasks to others
 - Making purchases
 - Sharing user data with third parties
+
+The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_send_message and before_data_share -> send; before_schedule_change
+  # -> mutate; before_delegation -> delegate; before_purchase -> execute.
+  send: always
+  mutate: always
+  delegate: always
+  execute: always
+```
 
 ## Available Workflows
 

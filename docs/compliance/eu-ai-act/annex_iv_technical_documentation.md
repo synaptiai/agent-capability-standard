@@ -30,7 +30,7 @@ The technical documentation shall be drawn up before the high-risk AI system is 
 The Grounded Agency framework is general-purpose AI agent infrastructure. It is not an AI system itself but provides:
 
 1. **Capability ontology** — 36 atomic capabilities with typed I/O contracts, risk metadata, and compositional edges
-2. **Domain parameterisation** — 7 domain profiles recording trust weights and safety thresholds per deployment context, as informative data that no shipped component loads or selects (Section 3.1)
+2. **Domain parameterisation** — 7 domain profiles recording trust weights and safety thresholds per deployment context, enforced where a host, a safety layer or the validator applies them (Section 3.1)
 3. **Workflow composition** — 12 reference workflow patterns composing capabilities into auditable sequences
 4. **Safety enforcement** — Runtime hooks, checkpoint gates, and audit logging
 5. **SDK integration** — Python adapter for the Claude Agent SDK
@@ -121,7 +121,7 @@ Each profile records:
 - `evidence_policy` — Required anchor types, minimum confidence, grounding requirements
 - `domain_sources` — Trusted data sources with default trust levels
 
-**Profiles are informative.** A profile is data for hosts and workflow authors. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. `tools/validate_profiles.py` checks a profile's shape only. A profile setting takes effect only where the deployer's host implements it or where it is written into a workflow. What is enforced today rests on the ontology's safety flags: the validator rejects a workflow in which `mutate`, `send` or `rollback` has no `checkpoint` before it, the reference executor runs a step that requires a checkpoint or approval only with one, and the plugin hook blocks Write, Edit, MultiEdit, NotebookEdit and Bash calls without a valid checkpoint marker. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+**Profiles are applied.** A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), `require_grounding` with `required_anchor_types` is a grounding policy, and `minimum_confidence` fails an output below it (F504); a profile only tightens, and one with an error is refused. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 **Reference:** `schemas/profiles/*.yaml`, `schemas/profiles/profile_schema.yaml`
 
@@ -236,7 +236,7 @@ flowchart TB
 Training-related responsibilities:
 - **Model provider** (Anthropic): Responsible for model training, fine-tuning, bias mitigation, and performance evaluation
 - **Framework provider**: Responsible for structural safety (checkpoint enforcement, evidence grounding, audit logging)
-- **Deployer**: Responsible for domain-specific configuration (profile selection, trust weight calibration) and for implementing the selected profile's settings in the host or the workflows, since no shipped component loads or selects a profile
+- **Deployer**: Responsible for domain-specific configuration (profile selection, trust weight calibration) and for applying the selected profile in the host or safety layer (Standard 1.2.0 §5.21), since a workflow's `profile` field applies nothing
 
 ## 5. Annex IV Element 4 — Monitoring, Functioning, and Control
 
@@ -245,15 +245,15 @@ Training-related responsibilities:
 | Measure | Implementation | Enforcement Level |
 |---------|---------------|-------------------|
 | **Approval flag** | `execute`, `mutate` and `send` carry `requires_approval: true` in the ontology, and a workflow step may raise the flag on any capability; the reference executor runs such a step only on an approval decision bound to what the approver was shown (STANDARD §5.14) | Structural (reference executor) |
-| **Block autonomous execution** | `block_autonomous` lists in domain profiles name the capabilities a domain does not want run without human authorization | Declared in the profile; not enforced by a shipped component. The deployer's host or workflows implement it |
-| **Require human approval** | `require_human` threshold in domain profiles names the risk level from which a person is to act | Declared in the profile; not enforced by a shipped component |
-| **Require review** | `require_review` threshold names the risk level from which human review is expected before an action proceeds | Declared in the profile; not enforced by a shipped component |
+| **Block autonomous execution** | `block_autonomous` lists in domain profiles name the capabilities a domain does not want run without human authorization | Enforced where the profile is applied (STANDARD v1.2 §5.21): the reference executor, the validator given the profile and the Python adapter ask a person for each such step or call |
+| **Require human approval** | `require_human` threshold in domain profiles names the risk level from which a person approves each action | Enforced where the profile is applied (STANDARD v1.2 §5.21), by the reference executor, the validator given the profile and the Python adapter |
+| **Require review** | `require_review` threshold names the risk level from which approval is required before an action proceeds | Enforced where the profile is applied (STANDARD v1.2 §5.21), by the reference executor, the validator given the profile and the Python adapter |
 | **Inquire capability** | `inquire` capability enables agent to escalate to human for guidance | Capability — available in all workflows |
 | **Checkpoint gating** | PreToolUse hook blocks mutations (Write, Edit, Bash) without valid checkpoint | Structural — runtime hook enforcement |
 
 #### Human Oversight by Profile
 
-The table lists what each profile declares. No shipped component applies these values (Section 3.1, Domain Profile System).
+The table lists what each profile sets; the values take effect where the profile is applied (Section 3.1, Domain Profile System).
 
 | Profile | Auto-Approve | Require Review | Require Human | Blocked Capabilities |
 |---------|-------------|---------------|--------------|---------------------|
@@ -282,7 +282,7 @@ The table lists what each profile declares. No shipped component applies these v
 |-------------|-----------|-------------------|
 | **PreToolUse checkpoint gate** | Shell hook intercepts Write, Edit, MultiEdit, NotebookEdit, Bash tool calls; blocks them (exit code 2) if no valid checkpoint marker | Hook runs before tool execution; tool cannot proceed without passing |
 | **Conflict edges** | `conflicts_with` relationships prevent mutually exclusive capabilities from co-executing | Validated at design time by workflow validator |
-| **Domain blocking** | `block_autonomous` capability lists declare which capabilities a domain does not want run autonomously, whatever their approval status | Not enforced: no shipped component evaluates the list. The deployer's host has to implement the list, or the workflows have to require approval on those steps |
+| **Domain blocking** | `block_autonomous` capability lists declare which capabilities a domain does not want run autonomously, whatever their approval status | Enforced where the profile is applied (STANDARD v1.2 §5.21): the reference executor, the validator given the profile and the Python adapter require a person's approval for each such step or call |
 | **Trust decay** | Source trust halves every 10 days (τ₁/₂ = 10d, floor = 0.25) | Mathematical model; no override mechanism |
 
 ```mermaid

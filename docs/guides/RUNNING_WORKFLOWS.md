@@ -265,6 +265,40 @@ approval), the deferrals (`deferred`: each deferred step, why, and the
 `action_id` of its queued action) and the trace (every decision the
 executor took, see [The trace](#the-trace)).
 
+## Applying domain profiles
+
+A host applies domain profiles (Standard 1.2.0 §5.21) to every run it
+starts: `WorkflowRunner(engine, profiles=[...])`, each a loaded profile or
+the path of a profile file. They are checked when the runner is built
+(`ProfileError` on an error: a misspelled capability id or rule member is
+an error, not an ignored setting) and again when a run starts, cover the
+steps of nested runs, and are saved with the run's snapshot. A workflow's
+`profile` field applies nothing. What changes in a run under a profile:
+
+- **Approvals.** A step whose effective risk `require_review` covers, or
+  that is above `auto_approve`, needs approval, as a step whose
+  `requires_approval` is true does.
+- **A person, for the step itself.** A step `require_human` or
+  `block_autonomous` covers is asked of a person: the request names a
+  `human` approver with `always_ask: true` and no `mandate_ref`, whatever
+  its `approver` declares, and no standing mandate covers it; an unattended
+  run does not ask, and `when_unattended` applies. The requirement marks no
+  data, so a step that reads its output is asked by its own rules. The
+  trace records `person_required` (with the `profiles` that require it),
+  and the step's action records carry `person_required: true`.
+- **Checkpoints.** A step `checkpoint_policy` covers needs a checkpoint
+  before it, as one whose `requires_checkpoint` is true does; a
+  `checkpoint` step is exempt.
+- **Confidence.** With `minimum_confidence`, an output whose `confidence`
+  is below it fails the step with F504, reason `below_minimum_confidence`,
+  and one whose `confidence` is not a number from 0 to 1 with F504, reason
+  `invalid_confidence`; a failure mode's `on_error: [F504]` matches both.
+
+`tools/validate_workflows.py --profile <path>` validates a catalog as a run
+under the profile would be checked (F501, W606, W608). `AppliedProfiles`
+(`grounded_agency.profiles`) answers a profile's effective flags and rules
+through the core.
+
 ## The trace
 
 The trace is the executor's own record of a run: one event for each
@@ -370,6 +404,13 @@ snapshot = run.snapshot(key=b"secret")       # canonical JSON + SHA-256 + HMAC
 run = runner.restore(snapshot, key=b"secret")  # refuses tampered snapshots
 result = runner.drive(run, host)
 ```
+
+To start a run on the core directly, `_core.Run.start` needs `header`, a
+required keyword: the version the catalog file's `# Standard version:`
+header declares, or `None` for a catalog without one (Standard 1.2.0
+§11.5). `WorkflowRunner` supplies it: the engine writes each loaded file's
+header into its workflows as their `spec_version`, which takes precedence,
+so the runner passes `header=None`.
 
 A snapshot only restores against the catalog (and ontology) it was taken
 from, and a signed snapshot only with its key; `restore` raises

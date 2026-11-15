@@ -10,7 +10,7 @@ The manufacturing domain profile is calibrated for environments where:
 - **Regulations apply** — ISO, OSHA, FDA compliance may be required
 - **Human oversight is mandatory** — All actuator commands need approval
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
 
 ## Domain Profile
 
@@ -48,6 +48,19 @@ Manufacturing requires checkpoints before any action that affects:
 - Production process parameters
 - Quality decisions (accept/reject)
 - Maintenance actions
+
+The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_actuator_command and before_maintenance_action -> execute;
+  # before_process_change, before_quality_decision and before_parameter_update
+  # -> mutate; during_batch_processing (medium_risk) -> "*".
+  execute: always
+  mutate: always
+  "*": medium_risk
+```
 
 ## Available Workflows
 
@@ -168,15 +181,21 @@ domain_sources:
 
 ### Checkpoint Granularity
 
-Adjust checkpoint frequency based on criticality:
+Adjust checkpoint rules based on criticality (keys are capability ids or
+`"*"`, Standard 1.2.0 §5.21):
 
 ```yaml
 checkpoint_policy:
-  # Pharmaceutical manufacturing: checkpoint everything
-  before_any_change: always
+  # Pharmaceutical manufacturing: a checkpoint before every step
+  # (a checkpoint step itself is exempt)
+  "*": always
+```
 
-  # High-volume discrete: checkpoint only high-risk
-  before_actuator_command: high_risk
+```yaml
+checkpoint_policy:
+  # High-volume discrete: only before high-risk steps, and every execute
+  "*": high_risk
+  execute: always
 ```
 
 ## Integration Examples

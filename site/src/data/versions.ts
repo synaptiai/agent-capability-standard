@@ -16,6 +16,8 @@ export interface Versions {
   ontology: string;
   plugin: string;
   pythonPackage: string;
+  /** `@synaptiai/acs-core`, from `packages/acs-core/package.json`. */
+  typescriptPackage: string;
   commit: string;
   buildDate: string;
 }
@@ -82,11 +84,14 @@ export function loadVersions(): Versions {
   if (!current) throw new Error('versions: no spec/STANDARD-v*.md file is tracked');
   const plugin = JSON.parse(readRepoFile('.claude-plugin/plugin.json')) as { version?: unknown };
   if (typeof plugin.version !== 'string') throw new Error('versions: plugin.json has no version');
+  const tsPackage = JSON.parse(readRepoFile('packages/acs-core/package.json')) as { version?: unknown };
+  if (typeof tsPackage.version !== 'string') throw new Error('versions: packages/acs-core/package.json has no version');
   cached = {
     standard: { current, previous },
     ontology: loadOntology().version,
     plugin: plugin.version,
     pythonPackage: pyprojectVersion(readRepoFile('pyproject.toml')),
+    typescriptPackage: tsPackage.version,
     commit: COMMIT_SHA,
     buildDate: new Date().toISOString().slice(0, 10),
   };

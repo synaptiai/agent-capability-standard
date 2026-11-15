@@ -60,7 +60,7 @@ High-risk operations shall require checkpoints and approval before execution. Th
 - High-risk capabilities (`mutate`, `send`) have `requires_checkpoint: true` and `requires_approval: true`
 - `execute` capability has `requires_approval: true`
 - `rollback` needs a `checkpoint` before it, which the workflow validator checks
-- The other medium-risk capabilities (`delegate`, `invoke`, `synchronize`) carry no checkpoint or approval flag. A workflow step can raise `requires_approval` on them, and a domain profile may list them under `block_autonomous`, which is a declaration for the deployer's host to implement, not something a shipped component enforces
+- The other medium-risk capabilities (`delegate`, `invoke`, `synchronize`) carry no checkpoint or approval flag. A workflow step can raise `requires_approval` on them, and a domain profile may list them under `block_autonomous`, which the reference executor, the validator and the Python adapter enforce where the profile is applied (Standard 1.2.0 §5.21)
 
 ### 3.4 Reversibility
 
@@ -90,12 +90,12 @@ AI systems shall operate under appropriate human oversight, calibrated by domain
 - `requires_approval` on `execute`, `mutate` and `send`: the reference executor runs such a step only on an approval decision
 - `inquire` capability for human escalation
 
-**Declared in domain profiles, for the deployer's host to implement:**
+**Set in domain profiles, enforced where a profile is applied (Standard 1.2.0 §5.21):**
 - `require_review` threshold
 - `require_human` threshold
 - `block_autonomous` lists per domain
 
-A domain profile is informative data. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. The level of human involvement an operator configures in a profile is in effect only where the host implements it or where it is written into the workflows. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), `require_grounding` with `required_anchor_types` is a grounding policy, and `minimum_confidence` fails an output below it (F504); a profile only tightens, and one with an error is refused. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ## 4. Leadership Responsibilities (Clause 5.1)
 

@@ -435,6 +435,10 @@ describe('citation, versions and counts', () => {
     expect(v.plugin).toMatch(/^\d+\.\d+\.\d+$/);
     expect(v.pythonPackage).toMatch(/^\d+\.\d+\.\d+$/);
     expect(repoText('pyproject.toml')).toContain(`version = "${v.pythonPackage}"`);
+    // packages/acs-core/package.json "version" (0.1.0 when the package was added).
+    const tsPackage = JSON.parse(repoText('packages/acs-core/package.json')) as { version: string };
+    expect(v.typescriptPackage).toBe(tsPackage.version);
+    expect(v.typescriptPackage).toMatch(/^\d+\.\d+\.\d+$/);
     expect(v.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 

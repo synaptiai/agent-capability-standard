@@ -121,7 +121,7 @@ The capability ontology classifies all 36 atomic capabilities into a three-tier 
 | **Medium** | 7 | execute, rollback, delegate, synchronize, invoke | `requires_approval: true` for some, human review recommended |
 | **High** | 3 | mutate, send (+ checkpoint, audit as mutation-flagged but low-risk) | `mutation: true`, `requires_checkpoint: true`, `requires_approval: true` |
 
-Domain profiles further restrict autonomous behavior through `block_autonomous` lists. For example, the healthcare profile blocks autonomous execution of `mutate`, `send`, `execute`, and `delegate`.
+Domain profiles further restrict autonomous behavior through `block_autonomous` lists, enforced where a profile is applied (Standard 1.2.0 §5.21: by the reference executor, the validator given the profile and the Python adapter; the plugin hooks apply none). For example, the healthcare profile, applied, requires a person's approval for each `mutate`, `send`, `execute` and `delegate` step.
 
 **Regulatory Mapping:**
 
@@ -148,7 +148,7 @@ Multiple mechanisms enforce human-in-the-loop controls:
 
 4. **`inquire` capability** (COORDINATE layer): A dedicated capability for seeking explicit human input, enabling agents to escalate decisions rather than acting autonomously under uncertainty.
 
-5. **`block_autonomous` lists** (domain profiles): Per-domain lists of capabilities that must never run without human intervention. Healthcare blocks `mutate`, `send`, `execute`, and `delegate`.
+5. **`block_autonomous` lists** (domain profiles): Per-domain lists of capabilities that must never run without human intervention, enforced where the profile is applied (Standard 1.2.0 §5.21). Healthcare lists `mutate`, `send`, `execute`, and `delegate`.
 
 **Regulatory Mapping:**
 

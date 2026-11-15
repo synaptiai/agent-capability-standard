@@ -43,7 +43,7 @@ The Grounded Agency framework provides:
 | Component | Function | Risk Relevance |
 |-----------|----------|---------------|
 | Capability ontology (36 capabilities) | Typed I/O contracts, risk metadata, edges | Defines structural safety envelope |
-| Domain profiles (7 profiles) | Trust weights, risk thresholds, checkpoint policies | Records the settings a deployment intends; informative data that no shipped component loads or selects (Section 4) |
+| Domain profiles (7 profiles) | Trust weights, risk thresholds, checkpoint policies | Records the settings a deployment intends; enforced where the deployment applies the profile (Section 4) |
 | Workflow catalog (12 workflows) | Composable capability sequences | Enables auditable execution |
 | Safety enforcement (hooks, validators) | Runtime checkpoint gates, audit logging | Provides compliance infrastructure |
 | SDK integration (`grounded_agency/`) | Python adapter for Claude Agent SDK | Enables programmatic safety |
@@ -59,12 +59,12 @@ The Grounded Agency framework provides:
 | Technical documentation (Art. 11) | Formal specification, derivation methodology | `spec/WHITEPAPER.md`, `docs/methodology/` |
 | Record-keeping (Art. 12) | PostToolUse audit hook, audit log | `hooks/hooks.json`, `.claude/audit.log` |
 | Transparency (Art. 13) | Typed contracts, evidence anchors, confidence scores | Output schemas in capability ontology |
-| Human oversight (Art. 14) | `requires_approval` on `execute`, `mutate` and `send`, which the reference executor enforces; domain profiles declare `block_autonomous` and `require_human`, which a deployer's host has to implement | `schemas/capability_ontology.yaml`, `schemas/profiles/*.yaml` |
+| Human oversight (Art. 14) | `requires_approval` on `execute`, `mutate` and `send`, which the reference executor enforces; domain profiles set `block_autonomous` and `require_human`, which the reference executor, the validator and the Python adapter enforce where the profile is applied (Standard 1.2.0 §5.21) | `schemas/capability_ontology.yaml`, `schemas/profiles/*.yaml` |
 | Accuracy, robustness, cybersecurity (Art. 15) | 6 validators, confidence thresholds, trust weights | `tools/validate_*.py`, evidence policies |
 
 ## 4. Domain Profile Classification Matrix
 
-**Profile settings are declarations.** A domain profile is informative data for hosts and workflow authors. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. The settings quoted in this section (`block_autonomous`, `require_human`, `require_review`, `auto_approve`, `checkpoint_policy` entries, `minimum_confidence`, required anchor types) are what each profile declares; they take effect only where the deployer's host implements them or where they are written into a workflow. What is enforced today rests on the ontology's safety flags: the validator rejects a workflow in which `mutate`, `send` or `rollback` has no `checkpoint` before it, the reference executor runs a step that requires a checkpoint or approval only with one, and the plugin hook blocks Write, Edit, MultiEdit, NotebookEdit and Bash calls without a valid checkpoint marker. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+**Profile settings take effect where a profile is applied.** A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), `require_grounding` with `required_anchor_types` is a grounding policy, and `minimum_confidence` fails an output below it (F504); a profile only tightens, and one with an error is refused. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ### 4.1 Classification Summary
 
@@ -92,7 +92,7 @@ The Grounded Agency framework provides:
 - `minimum_confidence: 0.90` — Highest confidence threshold
 - `compliance.hipaa: required` — Existing regulatory awareness
 
-**Framework Readiness:** The healthcare profile declares more than EU AI Act Art. 14 (human oversight) asks for: its `block_autonomous` list names `mutate`, `send`, `execute` and `delegate`, and its evidence policy lists `clinician_verification` as a required anchor type. No shipped component enforces these settings. A deployment relies on the approval and checkpoint flags the reference executor enforces and on what its host implements of the profile.
+**Framework Readiness:** The healthcare profile declares more than EU AI Act Art. 14 (human oversight) asks for: its `block_autonomous` list names `mutate`, `send`, `execute` and `delegate`, and its evidence policy lists `clinician_verification` as a required anchor type. Where the profile is applied (Standard 1.2.0 §5.21), the reference executor, the validator and the Python adapter enforce these settings: a person approves each such step or call.
 
 **Gaps:** Post-market monitoring plan (addressed in EUAIA-PMM-001), formal declaration of conformity.
 

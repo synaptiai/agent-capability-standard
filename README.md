@@ -228,14 +228,14 @@ Reference workflow compositions defined in the [workflow catalog](schemas/workfl
 
 ### Domain Profiles
 
-Pre-configured trust weights, risk thresholds, and checkpoint policies for specific industries:
+Example profiles of trust weights, risk thresholds and checkpoint rules for specific industries. A profile takes effect where a host, a safety layer or the validator applies it (Standard v1.2 §5.21):
 
 | Domain | Key Feature | Profile |
 |--------|------------|---------|
-| Healthcare | Advisory-only, 7-year audit retention | [Guide](docs/domains/healthcare/) |
-| Manufacturing | Sensor trust (0.92-0.95), human-required mutations | [Guide](docs/domains/manufacturing/) |
-| Data Analysis | Lineage grounding, statistical uncertainty | [Guide](docs/domains/data-analysis/) |
-| Personal Assistant | Highest user trust (0.98), never auto-send | [Guide](docs/domains/personal-assistant/) |
+| Healthcare | A person approves every step when applied; declares 7-year audit retention (informative) | [Guide](docs/domains/healthcare/) |
+| Manufacturing | Sensor trust (0.92-0.95); `mutate` and `send` need a person when applied | [Guide](docs/domains/manufacturing/) |
+| Data Analysis | Lineage grounding and a confidence floor when applied | [Guide](docs/domains/data-analysis/) |
+| Personal Assistant | Highest user trust (0.98); `send` needs a person each time when applied | [Guide](docs/domains/personal-assistant/) |
 | Vision / Audio / Multimodal | Cross-modal consistency, spatial/temporal grounding | [Guide](docs/guides/MODALITY_HANDLING.md) |
 
 ### Canonical Schemas

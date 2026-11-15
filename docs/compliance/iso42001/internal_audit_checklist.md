@@ -221,7 +221,7 @@ flowchart LR
 |---|-------|---------|----------|-------|
 | 8.3.1 | Is the risk treatment plan implemented? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Hooks active, profiles configured, approvals flowing | |
 | 8.3.2 | Are structural controls functioning? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Test: attempt Write without checkpoint (must be blocked) | Critical test |
-| 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | The deployment's own implementation of `block_autonomous` and the confidence thresholds, in its host or its workflows (no shipped component applies either) | |
+| 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | That the deployment applies its profile (Standard 1.2.0 §5.21: the reference executor, the validator or the Python adapter given it), which enforces `block_autonomous` and the confidence threshold | |
 
 ```mermaid
 ---
@@ -332,7 +332,7 @@ These are Grounded Agency-specific checks beyond standard ISO 42001 requirements
 | F.11 | Verify `execute` capability has `requires_approval: true` | Flag present in ontology | | |
 | F.12 | Verify how the medium-risk capabilities a domain lists under `block_autonomous` are kept from running autonomously | The lists name the relevant capabilities per domain, and the deployment's host or workflows implement them | | |
 
-F.6 and F.12 check what a profile declares. A domain profile is informative data, and no shipped component enforces its `block_autonomous` list, so the control to audit is the deployment's implementation of it. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+F.6 and F.12 check what a profile declares. The list takes effect where the deployment applies the profile (Standard 1.2.0 §5.21), so the control to audit is that the deployment applies it. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ---
 

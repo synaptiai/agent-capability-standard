@@ -666,6 +666,32 @@ class GroundedAgentConfig:
     # Keep tool inputs, and Bash command text, in evidence anchors.
     # Off by default: inputs can hold credentials.
     evidence_include_tool_input: bool = False
+
+    # Domain profiles applied to every call the adapter covers (STANDARD
+    # 1.2.0 §5.21): loaded profiles or paths of profile files.
+    profiles: Sequence[Mapping | str | PathLike] = ()
+```
+
+**Domain profiles.** `GroundedAgentConfig(profiles=[...])` applies domain
+profiles to every tool call the adapter covers (STANDARD 1.2.0 §5.21): they
+raise the flags of the call's capability (`checkpoint_policy` a checkpoint,
+`require_review` and `auto_approve` an approval), and `require_human` and
+`block_autonomous` require a person's approval, which the adapter asks
+through the host's permission prompt; such a call's records carry
+`person_required: true`. The core computes the raised flags
+(`AppliedProfiles`, `adapter.profiles`), as it does for the executor. A
+profile with an error raises `ProfileError` when the adapter is built, and
+profiles need `approval="ask"` (with approvals off, the approvals they
+require would be skipped). The profiles' grounding, minimum confidence and
+destination rules are on `adapter.profiles` (`grounding`,
+`minimum_confidence`, `destinations`) for the checks that read outputs and
+sends.
+
+```python
+adapter = GroundedAgentAdapter(
+    GroundedAgentConfig(profiles=["schemas/profiles/healthcare.yaml"])
+)
+adapter.mapper.map_tool("Read", {"file_path": "notes.md"}).person_required  # True
 ```
 
 Any other value of `approval` raises `ValueError`, as does an `expiry_minutes` above 30 or not above 0, and a `checkpoint_reservation_seconds` of 0. `GroundedAgentAdapter(config, clock=...)` takes a clock (a function returning an aware `datetime`) that the checkpoint tracker and the records read, so a test can move time.

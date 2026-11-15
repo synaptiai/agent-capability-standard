@@ -20,7 +20,7 @@ This QMS applies to:
 - The full AI lifecycle: design, development, testing, deployment, post-market monitoring
 - All 36 capabilities in the ontology, all 7 domain profiles, and all 12 workflow patterns
 
-The domain profiles are informative data. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. Where this document cites a profile setting as an implementation, the setting is what the profile declares, and it takes effect only where the deployer's host implements it or where it is written into a workflow. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), `require_grounding` with `required_anchor_types` is a grounding policy, and `minimum_confidence` fails an output below it (F504); a profile only tightens, and one with an error is refused. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ```mermaid
 ---
@@ -84,8 +84,8 @@ flowchart TB
 |-------------------|--------------------------|----------|
 | Data acquisition | Trust-weighted source model; domain profiles record domain-specific weights for a host to apply | `schemas/profiles/*.yaml` — `trust_weights` sections |
 | Data collection | EvidenceStore with typed evidence anchors | `grounded_agency/state/evidence_store.py` |
-| Data analysis | Confidence score on every capability output; domain profiles record a minimum threshold (`minimum_confidence`), which no shipped component compares an output against | Evidence policies in domain profiles |
-| Data labelling | Anchor types each domain profile lists as required; no shipped component checks an output's anchors against the list | `evidence_policy.required_anchor_types` per profile |
+| Data analysis | Confidence score on every capability output; domain profiles set a minimum threshold (`minimum_confidence`), which the reference executor applies to every output where the profile is applied (F504, Standard 1.2.0 §5.21) | Evidence policies in domain profiles |
+| Data labelling | Anchor kinds each domain profile lists as required, a grounding policy's kinds where the profile is applied (Standard 1.2.0 §5.20, §5.21) | `evidence_policy.required_anchor_types` per profile |
 | Data storage | Append-only audit log; checkpoint metadata store; evidence store | `hooks/hooks.json`, `grounded_agency/state/checkpoint_tracker.py`, `grounded_agency/state/evidence_store.py` |
 | Data filtration | Trust decay model (halves every 10 days, floor 0.25) | Trust model in `grounded_agency/` |
 | Data retention | Domain-specific retention declared in the profile (healthcare: 2555 days), which the deployer's log storage has to apply; Art. 12 minimum 10 years | Domain profiles `compliance` section; EUAIA-PMM-001 Section 9 |

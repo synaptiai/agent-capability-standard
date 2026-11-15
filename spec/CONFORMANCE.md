@@ -103,6 +103,8 @@ Running the suite:
 | Expression fixtures | `cargo test --test expressions` (in `core/`); `tools/cel_differential` against cel-go |
 | Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `examples/standard_agents/` |
 | Trust vectors | `pytest tests/test_trust.py` |
+| Profile vectors | `cargo test --test profiles` (in `core/`), `pytest tests/test_profiles.py`, `npm test` in `packages/acs-core/` (through WebAssembly) |
+| Entity id vectors | `pytest tests/test_entities.py` |
 
 `scripts/run_conformance.py` runs only the workflow fixtures.
 
@@ -210,23 +212,30 @@ entry per case.
   Python in exponent form) are left out of `encode`.
   `tests/test_capability_output.py` and the TypeScript package's
   `test/output.test.ts` read the file in place.
-- Trust: `tests/conformance/trust/decay.json` (the decay factor of §8.1:
-  0.5 at one half-life, which §8.1 requires, `0.5 ** (age / half_life)` at
-  other ages, which it recommends, and not below `decay_model.min_trust`),
-  `tests/conformance/trust/weight.json` (the static weight of §8.3: the lower
-  of the class weight and the source weight, with a domain profile's
-  `trust_weights` overrides) and `tests/conformance/trust/score.json` (the
-  product that `conflict_resolution_function.formula` in
-  `schemas/authority_trust_model.yaml` names). Each file states the absolute
-  tolerance its expected values are given to. §8.3 states the profile
-  override of a class weight only; the vectors in which a profile key
-  replaces or adds a source weight rest on a comment in the schema and say
-  so. Each file lists under `not_covered` the cases whose result the
-  Standard does not state, such as a `min_trust` above 0.5, where §8.1
-  requires 0.5 at one half-life and also floors the factor at `min_trust`;
-  no vector covers them, and each entry says what the reference
-  implementation does. `tests/test_trust.py` runs the reference
-  implementation, `grounded_agency/trust.py`, against the vectors.
+
+## Normative vectors of Standard 1.2.0 (§10.3)
+
+- Trust: `tests/conformance/trust/decay.json` (the decay factor of §8.1,
+  `max(0.5 ** (age / half_life), min_trust)`, a floor above 0.5 included,
+  an age below zero counting as zero), `weight.json` (the static weight of
+  §8.3: the lower of the class weight and the source weight, with a domain
+  profile's `trust_weights`, either direction, the lowest across profiles),
+  `score.json` (`weight × confidence × decay`, confidence 1 when none is
+  reported) and `resolve.json` (the strategies of §8.2, ties and
+  tie-breakers, and the refusal of a conflict with an unweighable
+  candidate). Each file states the absolute tolerance of its values; a
+  vector with `expect_error` expects a refusal. `tests/test_trust.py` runs
+  the reference implementation, `grounded_agency/trust.py`, against them.
+- Domain profiles: `tests/conformance/profiles/load.json` (the diagnostics
+  of §5.21.2, each with its code, `location.profile` and `location.field`)
+  and `effective.json` (the effective flags and the rules of §5.21.3). The
+  core runs them (`core/tests/profiles.rs`), and so do the Python package
+  (`tests/test_profiles.py`, through `_core`) and the TypeScript package
+  (through WebAssembly): one loader.
+- Entity ids: `tests/conformance/entities/ids.json` (the grammar of §7.1:
+  valid ids parsed into class, namespace and local id; invalid ones
+  refused), run by `tests/test_entities.py` against
+  `grounded_agency/entities.py`.
 
 Among the runtime fixtures, `checkpoint_per_mutation` pins what the
 reference executor asks for a step that needs approval and has no `approval`

@@ -45,10 +45,11 @@ was checked and what was not.
   The digest is the same one the ACS reference executor computes. SA
   authenticates a caller; that the caller is a person is for the deployment
   to ensure.
-- **ACS workflows cannot yet run inside an SA runtime.** The reference
-  executor is Rust with Python bindings and SA definitions are TypeScript. The
-  core compiles to WebAssembly unchanged; it lacks a JavaScript interface, and
-  SA does not say that definition code can load WebAssembly.
+- **ACS workflows can run in process from TypeScript, but not yet inside an
+  SA runtime.** The reference executor is Rust; the TypeScript package
+  [`@synaptiai/acs-core`](../../packages/acs-core/README.md) loads it through
+  a WebAssembly JSON interface (`@synaptiai/acs-core/wasm`). SA does not say
+  that definition code can load WebAssembly.
 - **Changes are proposed to both standards**, listed at the end. The most
   important is a hook in SA that can decline a tool call before it runs.
 
@@ -778,13 +779,14 @@ With a handler as host, each executor action has a Standard Agents mechanism:
 | `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code |
 | The run between turns | `run.snapshot()` in the key-value store or a file, restored at the start of the next turn |
 
-What stands in the way is the language, not the design. The reference core is
-a Rust crate with Python bindings. It compiles for `wasm32-unknown-unknown`
-without source changes, but exports no JavaScript interface, and its context
-loads the ontology from file paths. A WebAssembly build also needs a runtime
-whose definition code can load WebAssembly, which SA 0.2.0 does not say; a
-plain TypeScript build of what a tool-calling binding needs (the ontology
-table, effective flags, canonical JSON, the digest) has no such dependency. See
+What stands in the way is the runtime, not the design. The reference core is
+a Rust crate; the TypeScript package's `./wasm` entry runs it in process
+through a JSON interface over WebAssembly, with a context built from bundled
+documents rather than file paths (`AcsCore`, `CoreContext.start`,
+`CoreRun.next`/`submit`/`snapshot`). That needs a runtime whose definition
+code can load WebAssembly, which SA 0.2.0 does not say; the package's plain
+TypeScript entry (the ontology table, effective flags, canonical JSON, the
+digest) has no such dependency. See
 [Changes proposed to ACS](#changes-proposed-to-the-agent-capability-standard).
 
 Until then, the rules a workflow would enforce by position are enforced per
@@ -1034,14 +1036,17 @@ requires for normative changes.
 
 ### Still open
 
-- **A JavaScript build of the core.** What a tool-calling binding needs
-  (the ontology table, effective flags, canonical JSON, the digest, the
-  binding checks and the text-only output rule) is in the TypeScript package
-  [`@synaptiai/acs-core`](../../packages/acs-core/README.md) of this
-  repository, which the binding imports; the package is not yet published to
-  npm. A WebAssembly interface to the validator and executor would let ACS
-  workflows run inside a Standard Agents thread; the crate already compiles
-  for `wasm32-unknown-unknown` unchanged. This is the roadmap's
+- **Publishing and loading the core in an SA runtime.** What a
+  tool-calling binding needs (the ontology table, effective flags, canonical
+  JSON, the digest, the binding checks and the text-only output rule) is in
+  the TypeScript package [`@synaptiai/acs-core`](../../packages/acs-core/README.md),
+  which the binding imports, and its `./wasm` entry runs the reference
+  validator and executor, domain profiles included, in process. The package
+  is published to npm from a tag `acs-core-vX.Y.Z` on `main` once the
+  repository enables publishing (`.github/workflows/publish-npm.yml`). What
+  stays open is SA's: whether definition code may load WebAssembly, and how
+  a packed agent's npm dependencies are resolved (bundle the package to be
+  safe). This was the roadmap's
   [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
   item.
 - **What crosses a delegation.** A delegate's effects are outside its
