@@ -92,6 +92,9 @@ jobs:
       - name: Check Standard Agents binding files are generated
         run: python scripts/gen_standard_agents_binding.py --check
 
+      - name: Check capability contract JSON Schemas are generated
+        run: python scripts/gen_capability_json_schemas.py --check
+
   rust-core:
     name: Rust core (fmt, clippy, tests, MSRV)
     runs-on: ubuntu-latest
@@ -175,7 +178,7 @@ jobs:
         run: ruff check grounded_agency/ tests/ tools/ scripts/ benchmarks/
 
       - name: Ruff format check
-        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/gen_standard_agents_binding.py
+        run: ruff format --check grounded_agency/ tests/ tools/ benchmarks/ scripts/gen_runtime_fixtures.py scripts/gen_standard_agents_binding.py scripts/gen_capability_json_schemas.py
 
       - name: Mypy type check
         run: mypy grounded_agency/
