@@ -40,9 +40,10 @@
 # SEC-006: Consistent path resolution (matches pretooluse_require_checkpoint.sh)
 set -euo pipefail
 
-# Read JSON from stdin (Claude Code hooks receive data via stdin), with a
-# builtin so that the hook does not need cat
-input=$(</dev/stdin)
+# Read JSON from stdin (Claude Code hooks receive data via stdin). Not
+# $(</dev/stdin): on Linux a hook's stdin is a socket, which cannot be opened
+# by path.
+input=$(cat)
 
 # Without jq the tool call cannot be read, so nothing is logged
 if ! command -v jq &> /dev/null; then
@@ -179,17 +180,19 @@ _do_append() {
 # Serialize read + append, so that concurrent hook runs (tool calls made in
 # parallel) do not read the same prev_hmac and break the HMAC chain.
 #
-# The lock is flock(2) on the log file itself, opened read-only as file
-# descriptor 9 of the subshell that appends. There is no lock file to plant,
-# replace or make unwritable, and the kernel releases the lock when that
-# subshell exits, however it exits. flock(1) takes it where installed (any
-# flock(1): only -x and -n are used); elsewhere (macOS ships perl, not flock)
-# perl does. Both are flock(2), so sessions with and without flock(1) exclude
-# each other. A run tries every 0.05 s for at most AUDIT_LOCK_WAIT seconds
-# (default 40, at most 55: Claude Code stops a hook after 60), then appends
-# without the lock, as it does at once where the lock cannot be taken at all.
-# An entry out of chain order is reported by the verifier, a missing one is
-# not, so a held lock cannot silence the log.
+# The lock is flock(2) on the log file itself, opened for append (never
+# truncated) as file descriptor 9 of the subshell that appends: writable,
+# because NFS emulates flock(2) with byte-range locks, which need it. There
+# is no lock file to plant, replace or make unwritable, and the kernel
+# releases the lock when that subshell exits, however it exits. perl takes it
+# where installed, since it tells a lock another run holds from one that
+# cannot be taken here; flock(1) elsewhere (any flock(1): only -x and -n are
+# used). Both are flock(2), so sessions using either exclude each other. A
+# run tries every 0.05 s for at most AUDIT_LOCK_WAIT seconds (default 40, at
+# most 55: Claude Code stops a hook after 60), then appends without the lock,
+# as it does at once where the lock cannot be taken at all. An entry out of
+# chain order is reported by the verifier, a missing one is not, so a held
+# lock cannot silence the log.
 lock_wait="${AUDIT_LOCK_WAIT:-40}"
 [[ "$lock_wait" =~ ^[0-9]{1,2}$ ]] || lock_wait=40
 (( 10#$lock_wait <= 55 )) || lock_wait=55
@@ -198,15 +201,15 @@ lock_wait="${AUDIT_LOCK_WAIT:-40}"
 # another run holds it, 2 when it cannot be taken here.
 _try_lock_fd9() {
   local rc=0
-  if command -v flock &> /dev/null; then
-    flock -x -n 9 2>/dev/null || rc=$?
-    (( rc <= 1 )) || rc=2
-  elif command -v perl &> /dev/null; then
+  if command -v perl &> /dev/null; then
     perl -MFcntl=:flock -e '
-      open(my $fd, "<&=", 9) or exit 2;
+      open(my $fd, ">>&=", 9) or exit 2;
       exit 0 if flock($fd, LOCK_EX | LOCK_NB);
       exit(($!{EWOULDBLOCK} || $!{EAGAIN} || $!{EINTR}) ? 1 : 2);
     ' 2>/dev/null || rc=$?
+  elif command -v flock &> /dev/null; then
+    flock -x -n 9 2>/dev/null || rc=$?
+    (( rc <= 1 )) || rc=2
   else
     rc=2
   fi
@@ -214,7 +217,8 @@ _try_lock_fd9() {
 }
 
 _lock_fd9() {
-  local deadline=$((SECONDS + 10#$lock_wait)) rc
+  # SECONDS counts whole seconds: one more, so the wait is never shorter.
+  local deadline=$((SECONDS + 10#$lock_wait + 1)) rc
   while true; do
     rc=0
     _try_lock_fd9 || rc=$?
@@ -224,9 +228,10 @@ _lock_fd9() {
   done
 }
 
-[[ -e "$log_file" ]] || : >> "$log_file"
-if [[ -f "$log_file" && -r "$log_file" ]]; then
-  (_lock_fd9 || true; _do_append) 9<"$log_file"
+# Lock only a regular file that descriptor 9 can open (not a FIFO, which
+# would block, and not past a very low open-file limit).
+if [[ ! -e "$log_file" || -f "$log_file" ]] && (: 9>>"$log_file") 2>/dev/null; then
+  (_lock_fd9 || true; _do_append) 9>>"$log_file"
 else
   _do_append
 fi

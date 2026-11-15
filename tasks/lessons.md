@@ -192,3 +192,14 @@ releases the lock when its holder exits.
 portable way to call it) before inventing a lock. Bound every wait by wall
 clock, and make the timeout path degrade to something detectable, not to
 silence. Test a lock under CPU load and with a slow holder, not only idle.
+
+## Test a hook with the stdin its host really gives it
+
+**What happened.** Replacing `$(cat)` with `$(</dev/stdin)` passed every test,
+which feed the hook through a pipe. Claude Code gives hooks a socket on
+Linux, and a socket cannot be opened by path, so the hook would have failed
+on every tool call. A reviewer found it by running the real binary.
+
+**Rule.** When a hook's input handling changes, test it with the host's
+actual stdin (a `socket.socketpair()` end for Claude Code on Linux) or run it
+under the host itself, not only through `subprocess.run(input=...)`.

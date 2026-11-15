@@ -168,8 +168,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   names in any case, and an address only where a host stands.
 - Plugin audit hook: where `flock` is not installed (macOS), concurrent runs
   appended without a lock and could break the HMAC chain. Every run now takes
-  flock(2) on the log file itself, through `flock` (any implementation) or
-  else `perl`, so the two kinds of session exclude each other and the kernel
+  flock(2) on the log file itself, through `perl` or else `flock` (any
+  implementation), so sessions using either exclude each other and the kernel
   releases the lock of a run that dies; `.claude/audit.log.lock` is no longer
   used. A held lock delays a run by at most `AUDIT_LOCK_WAIT` seconds
   (default 40, at most 55); the entry is then written, and the verifier

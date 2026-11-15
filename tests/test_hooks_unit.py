@@ -500,6 +500,7 @@ _AUDIT_HOOK_TOOLS = [
     "openssl",
     "sha256sum",
     "mkdir",
+    "sleep",
 ]
 
 
@@ -653,7 +654,7 @@ class TestAuditLogConcurrency:
         log_file = tmp_path / ".claude" / "audit.log"
         log_file.parent.mkdir()
         log_file.touch()
-        with open(log_file) as held:
+        with open(log_file, "a") as held:
             fcntl.flock(held, fcntl.LOCK_EX)
             start = time.monotonic()
             _run_concurrently(
@@ -721,6 +722,28 @@ class TestAuditLogConcurrency:
             env=env,
             timeout=30,
         )
+        assert result.returncode == 0, result.stderr
+        self._assert_chain(tmp_path, self.PAYLOADS[:1])
+
+    def test_stdin_that_is_a_socket_is_read(self, tmp_path: Path) -> None:
+        """Claude Code gives a hook a socket as stdin on Linux; a socket
+        cannot be opened by path (/dev/stdin), so it must be read as fd 0."""
+        import socket
+
+        bin_dir = self._bin(tmp_path, "bin", [*_AUDIT_HOOK_TOOLS, "perl"])
+        env = self._env(tmp_path, str(bin_dir))
+        ours, theirs = socket.socketpair()
+        with ours, theirs:
+            ours.sendall(json.dumps(self.PAYLOADS[0]).encode())
+            ours.shutdown(socket.SHUT_WR)
+            result = subprocess.run(
+                [env["HOOK_BASH"], str(POSTTOOLUSE_HOOK)],
+                stdin=theirs,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+            )
         assert result.returncode == 0, result.stderr
         self._assert_chain(tmp_path, self.PAYLOADS[:1])
 
