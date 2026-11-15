@@ -141,9 +141,7 @@ def _check_contract(
     if "evidence_anchors" in output and not isinstance(
         output["evidence_anchors"], list
     ):
-        _fail(
-            capability, "'s evidence_anchors is not an array", "evidence_anchors"
-        )
+        _fail(capability, "'s evidence_anchors is not an array", "evidence_anchors")
     if "confidence" in required:
         confidence = output.get("confidence")
         if (

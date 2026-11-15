@@ -359,3 +359,27 @@ describe('§12.5 pattern strips', () => {
     expect(() => T.patternStrips(text, 'spec/STANDARD-v1.1.0.md')).toThrow(/^spec\/STANDARD-v1\.1\.0\.md: §12\.5's Safe Mutation fence is not valid YAML: /);
   });
 });
+
+describe('§3 design principles and §10.4 safety-layer fixtures', () => {
+  it('lists each §3 principle, in order, with a glyph the site has', async () => {
+    const { CONCEPT_GLYPHS } = await import('../src/pixel/glyphs');
+    const heads = text.split('\n').flatMap((l) => (/^### 3\.\d+ /.test(l) ? [l.slice(4)] : []));
+    const p = D.designPrinciples(text, STD);
+    expect(p.map((x) => `${x.section} ${x.name}`)).toEqual(heads);
+    for (const x of p) expect(CONCEPT_GLYPHS[x.glyph], x.glyph).toBeDefined();
+  });
+
+  it('counts every binding and call-sequence fixture once, by the feature it needs', async () => {
+    const { readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = join(import.meta.dirname, '..', '..');
+    const files = (dir: string) => readdirSync(join(root, dir)).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(repoText(`${dir}/${f}`)) as { needs?: string[] });
+    const groups = T.safetyLayerFixtures(text, STD);
+    for (const [kind, dir] of [['Binding fixtures', 'tests/conformance/bindings'], ['Call-sequence fixtures', 'tests/conformance/calls']] as const) {
+      const docs = files(dir);
+      const ours = groups.filter((g) => g.label.startsWith(kind));
+      expect(ours.reduce((a, g) => a + g.count, 0)).toBe(docs.length);
+      expect(ours.find((g) => g.label.endsWith('any layer'))?.count ?? 0).toBe(docs.filter((d) => !d.needs || d.needs.length === 0).length);
+    }
+  });
+});

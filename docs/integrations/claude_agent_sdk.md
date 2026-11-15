@@ -237,6 +237,20 @@ server = create_grounded_mcp_server(
 # allowed the call (require_layer)
 ```
 
+```mermaid
+---
+title: How create_grounded_mcp_server binds a tool
+---
+flowchart TB
+  accDescr: A tool whose metadata names no capability is unbound, the strictest case, reported as W617. A tool whose record does not load (V101, S303, V105, V107) stops the server from being created. A tool whose record loads gets effective flags, the stricter of its declaration and the ontology, with W602 for a weaker declaration, and with require_layer it refuses any call the adapter's layer did not allow, with R407.
+  meta["A tool's metadata"] --> cap{"Names a capability?"}
+  cap -->|no| unbound["Unbound: the strictest case, W617"]
+  cap -->|yes| load{"The record loads?"}
+  load -->|no| err["ValueError with V101, S303, V105 or V107: no server"]
+  load -->|yes| flags["Effective flags; a weaker declaration is W602"]
+  flags --> layer["require_layer: a call the layer did not allow is R407"]
+```
+
 `metadata` may hold `capability`, `domain`, `flags` (`risk`, `mutation`, `requires_checkpoint`, `requires_approval`), `additional_capabilities`, `classifier`, `invokes`, `approval` (`min_approvers`, `role`, `expires`), `control` and `destination`; the flat legacy keys `capability_id`, `risk`, `mutation`, `requires_checkpoint` and `requires_approval` are still accepted (a `capability` and a `capability_id` that disagree raise `ValueError` with S303). A registration follows the Standard's rules ([§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)):
 
 - **A binding that does not load is refused.** A capability the ontology does not define (V101), a member of the wrong type (S303), an `invokes` name that does not resolve (V107) or a cycle (V105) raises `ValueError` whose message opens with each code and name, and no server is created.
@@ -358,15 +372,17 @@ Every call the layer allows or refuses is recorded in `adapter.call_records` (th
 
 A hook's reason and a permission result's message are text, and they are the only channel to the model and to the host. Each refusal is the diagnostic's text form ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)): the code, the name, a colon and the message.
 
-| Rule | Decision | Reason begins |
-|------|----------|---------------|
-| No valid checkpoint, it is held by another call, or none was taken in the scope | `deny` | `F501 CHECKPOINT_REQUIRED:` |
-| A `rollback` call with no checkpoint taken in the scope | `deny` | `F503 ROLLBACK_FAILED:` |
-| A prerequisite other than a checkpoint has not run | `deny` | `V102 MISSING_PREREQUISITE:` |
-| The call requires approval | `ask` | `F502 APPROVAL_REQUIRED:` |
-| No person can decide (the mode, no callback, more approvers or a role than a prompt can give, the host refused) | `deny` | `F502 APPROVAL_REQUIRED:` |
-| Rate limit | `deny` | `F504 CONSTRAINT_VIOLATED:` |
-| A failure of the layer itself, a gated call with no `tool_use_id`, an MCP tool reached without a decision | `deny` or the tool's error | `R407 SAFETY_CHECK_FAILED:` |
+| Rule | Decision | Reason begins | Also with `strict_mode=False` |
+|------|----------|---------------|-------------------------------|
+| No valid checkpoint, it is held by another call, or none was taken in the scope | `deny` | `F501 CHECKPOINT_REQUIRED:` | No: logged |
+| A `rollback` call with no checkpoint taken in the scope | `deny` | `F503 ROLLBACK_FAILED:` | No: logged |
+| A prerequisite other than a checkpoint has not run | `deny` | `V102 MISSING_PREREQUISITE:` | No: logged |
+| The call requires approval | `ask` | `F502 APPROVAL_REQUIRED:` | Yes |
+| No person can decide (the mode, no callback, more approvers or a role than a prompt can give, the host refused) | `deny` | `F502 APPROVAL_REQUIRED:` | Yes |
+| Rate limit | `deny` | `F504 CONSTRAINT_VIOLATED:` | Yes |
+| A failure of the layer itself, a gated call with no `tool_use_id`, an MCP tool reached without a decision | `deny` or the tool's error | `R407 SAFETY_CHECK_FAILED:` | Partial: a failed rate check and an MCP tool with `require_layer` still refuse |
+
+`strict_mode=False` is outside class SL.
 
 ## Approval
 
@@ -430,6 +446,20 @@ The tests in `tests/test_tool_call_approval.py` and `tests/test_permission_modes
 ## Text-Only Outputs
 
 Where a host carries a capability output as a string (a tool's result, a sub-prompt's or a model's reply), it travels as the I-JSON text of the output object, nothing around it, with every field the capability's contract requires; otherwise it is refused with R402 ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)). The package has both sides:
+
+```mermaid
+---
+title: A capability output on a text-only channel
+---
+flowchart TB
+  accDescr: The producer checks the output object against its contract and the I-JSON limits and sends its JSON text with nothing around it; the consumer parses the text and checks that it is one object, with no duplicate member and every required field. Either failure is R402.
+  out["The output object"] --> enc{"encode: required fields, I-JSON?"}
+  enc -->|no| r1["R402"]
+  enc -->|yes| text["Its JSON text, nothing around it"]
+  text --> dec{"decode: one object, no duplicate member, every required field?"}
+  dec -->|no| r2["R402"]
+  dec -->|yes| obj["The capability's output"]
+```
 
 ```python
 from grounded_agency import (

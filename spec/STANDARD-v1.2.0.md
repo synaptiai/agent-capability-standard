@@ -1239,20 +1239,20 @@ and checkpoint cover its calls as a composite's cover its nested calls
 
 A **tool binding** is a record (`schemas/interop/tool_binding.schema.json`):
 
-| Member | Required | Meaning |
-|--------|----------|---------|
-| `tool` | Yes | The name the host offers the tool under |
-| `ontology` | Yes | The ontology version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
-| `standard` | No | The Standard version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
-| `capability` | Yes, unless `control` | The capability the tool performs |
-| `domain` | No | The capability's domain parameter |
-| `flags` | No | Declared safety flags: `risk`, `mutation`, `requires_checkpoint`, `requires_approval` (§5.2.1) |
-| `additional_capabilities` | No | Other capabilities the same call performs (§5.18.3) |
-| `classifier` | No | Names the classifier a layer applies to each call (§5.18.3) |
-| `invokes` | No | Names of the bindings the tool may call while it runs (§5.18.4) |
-| `approval` | No | `min_approvers` (integer ≥ 1, default 1), `role`, `expires` (a duration, §5.10.1) for calls that require approval (§5.18.7) |
-| `control` | No | `true`: the tool only signals the host (§5.18.3) |
-| `destination` | No | For a tool that performs `send`: an RFC 6901 pointer to the argument that holds the destination, which a layer checks against the destination policies in force (§4.4.2) |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tool` | string | Yes | The name the host offers the tool under |
+| `ontology` | string | Yes | The ontology version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
+| `standard` | string | No | The Standard version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
+| `capability` | string | No | The capability the tool performs; required unless `control` is true |
+| `domain` | string | No | The capability's domain parameter |
+| `flags` | object | No | Declared safety flags: `risk`, `mutation`, `requires_checkpoint`, `requires_approval` (§5.2.1) |
+| `additional_capabilities` | array | No | Other capabilities the same call performs (§5.18.3) |
+| `classifier` | string | No | Names the classifier a layer applies to each call (§5.18.3) |
+| `invokes` | array | No | Names of the bindings the tool may call while it runs (§5.18.4) |
+| `approval` | object | No | `min_approvers` (integer ≥ 1, default 1), `role`, `expires` (a duration, §5.10.1) for calls that require approval (§5.18.7) |
+| `control` | boolean | No | `true`: the tool only signals the host (§5.18.3) |
+| `destination` | string | No | For a tool that performs `send`: an RFC 6901 pointer to the argument that holds the destination, which a layer checks against the destination policies in force (§4.4.2) |
 
 Members whose name starts with `x-` are vendor data. A **carrier** is a
 host's own form of the record (tool metadata, an annotation): it states the
@@ -1292,18 +1292,18 @@ capability with `risk: high`, and `mutation`, `requires_checkpoint` and
 reads.
 
 A host that knows the tools it offers a model SHOULD check them before the
-model runs, and report:
+model runs, and report each of these:
 
-- each offered tool with no binding (W617);
-- each binding whose `tool` is not the name the host offers it under (V111);
-- each tool that requires a capability no offered tool can perform, through
-  a prerequisite or through its effective `requires_checkpoint` (V102: its
-  calls could never run). An offered tool with a `classifier` counts as able
-  to perform any capability, and a host that takes checkpoints itself
-  (§5.18.6) counts as performing `checkpoint`;
-- each host action tied to a tool that is not control-only and is unbound,
-  has a prerequisite, or has an effective `requires_checkpoint` or
-  `requires_approval` (F506, §5.18.3).
+| Offered tool or host action | Code |
+|-----------------------------|------|
+| An offered tool with no binding | W617 |
+| A binding whose `tool` is not the name the host offers it under | V111 |
+| A tool that requires a capability no offered tool can perform, through a prerequisite or through its effective `requires_checkpoint`: its calls could never run | V102 |
+| A host action tied to a tool that is not control-only and is unbound, has a prerequisite, or has an effective `requires_checkpoint` or `requires_approval` (§5.18.3) | F506 |
+
+An offered tool with a `classifier` counts as able to perform any
+capability, and a host that takes checkpoints itself (§5.18.6) counts as
+performing `checkpoint`.
 
 #### 5.18.3 Classification
 
@@ -1359,9 +1359,13 @@ failure of the layer (R407).
 
 A tool that calls other tools while it runs (a **composite**) names the
 bindings it may call in `invokes`. Its effective flags include, transitively,
-those of each binding listed (§5.18.1). A name in `invokes` that no binding
-of the set has is V107, and a cycle through `invokes` is V105; either way
-the composite is not loaded.
+those of each binding listed (§5.18.1).
+
+| Composite | Code |
+|-----------|------|
+| A name in `invokes` that no binding of the set has: the composite is not loaded | V107 |
+| A cycle through `invokes`: the composite is not loaded | V105 |
+| A nested call the layer attributes to the composite, to a binding it does not list: the call is refused | F504 |
 
 - A call the composite's own code makes while it runs, to a binding it
   lists, is a **nested call**. The composite's approval and checkpoint
@@ -1394,17 +1398,16 @@ the composite is not loaded.
 - **History.** A call ran before another only if it completed before the
   other started. History counts over the scope's lifetime; a checkpoint's
   power to authorise ends sooner (§5.18.6).
-- **`requires`.** A call is refused unless each of its prerequisites
-  (§5.18.1) has run earlier in the scope: for `checkpoint`, a checkpoint was
-  taken in the scope (§5.18.6); for any other capability, a call of it
-  completed successfully. A missing checkpoint is F501, or F503 for a call
-  of `rollback`; any other missing prerequisite is V102 (§9.1).
-- **`soft_requires`** never refuses a call. A layer MAY report W601.
-- **`precedes`** is neither enforced nor reported over calls. At a call the
-  layer cannot know whether a call that must come first will follow, and
-  when one does, the earlier call has had its effect.
-- **`conflicts_with`** is not enforced over calls: it forbids two
-  capabilities only in one `parallel_group` (§4.3).
+
+The edge types (§4.3) apply to calls as follows:
+
+| Edge | Over calls | Code |
+|------|------------|------|
+| `requires` | A call is refused unless each of its prerequisites (§5.18.1) has run earlier in the scope: for `checkpoint`, a checkpoint was taken in the scope (§5.18.6); for any other capability, a call of it completed successfully | F501 for a missing checkpoint, F503 for a call of `rollback`; V102 (§9.1) for any other missing prerequisite |
+| `soft_requires` | Never refuses a call; a layer MAY report it | W601 |
+| `precedes` | Neither enforced nor reported. At a call the layer cannot know whether a call that must come first will follow, and when one does, the earlier call has had its effect | — |
+| `conflicts_with` | Not enforced: it forbids two capabilities only in one `parallel_group` (§4.3) | — |
+
 - **Concurrency.** A layer's check of a call and its use of a checkpoint or
   a decision (§5.18.6, §5.18.7) MUST be one atomic step for the scope: two
   calls that overlap never both pass on one checkpoint or one decision. A
@@ -1445,12 +1448,15 @@ the composite is not loaded.
   the layer states, of at most 30 minutes. The layer names the boundaries
   it observes (§10.4). A permission prompt answered while the call waits is
   not a boundary, but the maximum age keeps running while it is open.
-- **None valid.** A call that requires a checkpoint and has no valid one is
-  refused with F501. A layer does not take a checkpoint on the call's
-  behalf: it cannot know what the call will change, and the model takes one
-  with a `checkpoint` call.
-- **Rollback.** A call of `rollback` needs a checkpoint taken earlier in the
-  scope, valid or not, and uses none up. With none it is refused with F503.
+- **None valid.** A call is refused when it lacks what the table below
+  names. A layer does not take a checkpoint on the call's behalf: it cannot
+  know what the call will change, and the model takes one with a
+  `checkpoint` call.
+
+| Call | Refused without | Code |
+|------|-----------------|------|
+| A call whose effective `requires_checkpoint` is true | A valid checkpoint for it alone | F501 |
+| A call of `rollback` | A checkpoint taken earlier in the scope, valid or not; it uses none up | F503 |
 
 #### 5.18.7 Approval for Calls
 
@@ -1512,8 +1518,16 @@ decision; otherwise it is refused with F502.
   unbound tool) and, where the host gives calls an identifier, `call`; it
   holds no `workflow` or `step`. Where the channel to the model or the host
   carries only text, the text opens with the code and the name:
-  `F501 CHECKPOINT_REQUIRED: ...`. A refusal for a host's own policy, such
-  as a rate limit, is F504.
+  `F501 CHECKPOINT_REQUIRED: ...`. The codes a layer refuses a call with:
+
+| Code | The call is refused because |
+|------|-----------------------------|
+| F501 | It requires a checkpoint and has no valid one (§5.18.6), or no checkpoint was taken in the scope (§5.18.5) |
+| F502 | It requires approval and has no valid decision (§5.18.7) |
+| F503 | It is a call of `rollback` and no checkpoint was taken in the scope (§5.18.6) |
+| V102 | A prerequisite other than `checkpoint` has not run in the scope (§5.18.5) |
+| F504 | A host's own policy refuses it, such as a rate limit or a destination policy (§5.18.10), or a composite made it to a binding it does not list (§5.18.4) |
+| R407 | The layer cannot complete a check or write the call's record (below) |
 - **Records.** A layer records each call it allows or refuses: the tool,
   its capability, the digest of its shown value (§5.18.7) when it requires
   approval, the decision and its approvers, the checkpoint it used, any
