@@ -333,3 +333,53 @@ class TestCoverageReport:
         report = adapter.coverage_report()
         assert report["oasf_version"] == "0.8.0"
         assert report["mapping_version"] == "1.1.0"
+
+
+class TestCitedVersions:
+    """Standard v1.2 §11.6: the adapter refuses a mapping that cites another
+    ontology major or an unsupported Standard (V109) or a malformed version
+    (S303), and loads one that cites a later minor or nothing."""
+
+    def _copy(self, tmp_path: Path, cited: dict[str, str] | None) -> OASFAdapter:
+        import yaml
+
+        from grounded_agency.capabilities.registry import CapabilityRegistry
+
+        doc = yaml.safe_load(MAPPING_PATH.read_text(encoding="utf-8"))
+        if cited is None:
+            doc["meta"].pop("agent_capability_standard")
+        else:
+            doc["meta"]["agent_capability_standard"] = cited
+        path = tmp_path / "oasf_mapping.yaml"
+        path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        return OASFAdapter(path, registry=CapabilityRegistry(ONTOLOGY_PATH))
+
+    def test_the_shipped_mapping_cites_the_current_versions(
+        self, adapter: OASFAdapter
+    ) -> None:
+        assert adapter.cited_versions == {"standard": "1.2.0", "ontology": "2.2.0"}
+
+    @pytest.mark.parametrize(
+        ("cited", "code"),
+        [
+            ({"standard": "1.2.0", "ontology": "3.0.0"}, "V109"),
+            ({"standard": "2.0", "ontology": "2.2.0"}, "V109"),
+            ({"standard": "1.2.0", "ontology": "two"}, "S303"),
+        ],
+    )
+    def test_refused(self, tmp_path: Path, cited: dict[str, str], code: str) -> None:
+        from grounded_agency.versions import CitedVersionError
+
+        adapter = self._copy(tmp_path, cited)
+        with pytest.raises(CitedVersionError) as caught:
+            adapter.category_count  # noqa: B018 - loads the mapping
+        assert caught.value.code == code
+        assert caught.value.diagnostics[0]["location"]["document"].endswith(
+            "oasf_mapping.yaml"
+        )
+
+    @pytest.mark.parametrize(
+        "cited", [{"standard": "1.2.0", "ontology": "2.9"}, {"standard": "1.0"}, None]
+    )
+    def test_accepted(self, tmp_path: Path, cited: dict[str, str] | None) -> None:
+        assert self._copy(tmp_path, cited).category_count == 15

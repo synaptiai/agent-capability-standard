@@ -1754,11 +1754,43 @@ acted (`actor_identity`, `agent_identity`; §5.17).
 
 ### 7.1 Entity Identification
 
-Entities MUST have hierarchical namespaces:
+An entity's id (`Entity.id` in `world_state_schema.yaml`, and an
+`EntityRef`'s `entity_id`) is written
+
 ```
-namespace:type:id
-example: org.company:user:12345
+<class>:<namespace>/<local_id>
 ```
+
+- `<class>` is the entity's `type`: a class name or alias of
+  `entity_taxonomy.yaml` (`service` or `svc`, `person`, `sensor`, …), or a
+  vendor class, `x-` followed by a lower-case letter or digit and then
+  lower-case letters, digits, `_` or `-`.
+- `<namespace>` is one or more segments separated by `/`, outermost first.
+  With the class, it makes the id unique within the world
+  (`meta.world_id`). The taxonomy's `namespace_components` (organisation,
+  domain, environment, system, subsystem) is the recommended order: an id
+  SHOULD use those that apply, in that order, and MAY add segments of its
+  own (`person:acme/hr/employee/12345`). The grammar does not check what a
+  segment means.
+- `<local_id>` is the entity's identifier within the namespace.
+
+A segment is one or more characters, none of them `/`, `:`, white space or a
+control character (percent-encode them, RFC 3986). An id therefore has
+exactly one `:`, and at least one `/` after it. Ids are compared as strings,
+case-sensitively. `id_convention.pattern` in `entity_taxonomy.yaml` is the
+grammar; the entity id vectors (§10.3) fix it.
+
+```
+svc:acme/payments/prod/api
+host:acme/oslo/cluster-a/node-7
+sensor:acme/factory/line-3/temp-02
+person:org.company/user/12345
+```
+
+Versions 1.0 and 1.1 printed the form `namespace:type:id` here, with the
+example `org.company:user:12345`, while `entity_taxonomy.yaml` already gave
+the form above; the last example is that id written in it. No
+implementation checked either form.
 
 ### 7.2 Alias Confidence Scoring
 
@@ -1787,47 +1819,97 @@ Hard constraints that MUST NOT be violated:
 
 ### 8.1 Trust Score Calculation
 
-Trust scores MUST support:
+The **trust score** of a piece of evidence is a number from 0 to 1:
 
-| Factor | Description |
-|--------|-------------|
-| Source ranking | Static authority weight per source |
-| Time decay | Score decreases over time (configurable half-life) |
-| Field authority | Sources may be authoritative for specific fields |
-| Confidence weight | Self-reported confidence from source |
+```
+score = weight × confidence × decay
+```
 
-Time decay MUST be a true half-life: the decay factor for an observation of age
-equal to the configured `half_life` MUST be `0.5`. Implementations SHOULD use
-`0.5 ** (age / half_life)`.
+computed in that order in binary64 arithmetic, where:
 
-`decay_model.min_trust`, when present, is a floor on the **decay factor** — not
-on the composed score of §8.2 and not on the static source weight. Age alone
-therefore never reduces an observation's weight to zero; it only removes that
-observation's recency advantage over fresher ones.
+| Factor | Value |
+|--------|-------|
+| Source ranking: `weight` | The evidence's static weight (§8.3) |
+| Confidence weight: `confidence` | The confidence the source reports (§4.1.1), from 0 to 1; 1 when it reports none |
+| Time decay: `decay` | `max(0.5 ** (age / half_life), min_trust)`, or `0.5 ** (age / half_life)` when the model sets no `min_trust` |
+
+- `half_life` is `decay_model.half_life` of `authority_trust_model.yaml`: a
+  duration of whole days, `P<n>D` with `n` at least 1. `age` is the time from
+  the evidence's timestamp to the time the score is computed, in the same
+  unit. An age below zero (evidence dated after that time) counts as zero.
+- Time decay MUST be a true half-life: before the floor, the factor for an
+  age of one half-life is exactly `0.5`. (An exponential time constant,
+  `exp(-age / half_life)`, gives 0.368 there and does not conform.)
+- `decay_model.min_trust` is a floor on the decay factor only: not on the
+  static weight and not on the score. Age alone therefore never takes
+  evidence's weight to zero; it only removes its advantage over fresher
+  evidence. A floor above 0.5 holds the factor at the floor from the age at
+  which the curve reaches it.
+- A weight, a confidence or a `min_trust` outside 0 to 1, or a half-life of
+  another form, makes the model or the evidence invalid, and an
+  implementation refuses it. Evidence without a static weight (§8.3) has no
+  score: an implementation MUST NOT give it one.
+
+**Field authority** is not a factor of the score: the trust model's
+`field_authority.fields` names, for a field, the source types that are
+authoritative for it, and §8.2 ranks them first. (`field_authority.examples`
+is illustrative and is not read.)
 
 ### 8.2 Conflict Resolution
 
-When sources disagree, resolution strategies include:
+When **candidates** give different values for one field of one entity, a
+strategy resolves the conflict. Each candidate has its evidence: a source
+type, a trust class or both (§8.3), an age and a confidence. A strategy
+either chooses one candidate (`chosen`), keeps all of them (`merged`) or puts
+the conflict to a person (`escalated`):
 
-| Strategy | Description |
-|----------|-------------|
-| `prefer_authoritative_sources` | Highest authority wins |
-| `prefer_recent` | Most recent wins |
-| `prefer_high_confidence` | Highest confidence wins |
-| `merge_with_uncertainty` | Keep both with uncertainty |
-| `escalate_to_human` | Require human decision |
+| Strategy | Result |
+|----------|--------|
+| `highest_score` (default) | The candidate with the highest trust score (§8.1) |
+| `prefer_authoritative_sources` | Where some candidates' source types are authorities for the field (`field_authority.fields`), only those compete; of the competing candidates, the one with the highest static weight |
+| `prefer_recent` | The candidate with the lowest age |
+| `prefer_high_confidence` | The candidate with the highest confidence |
+| `merge_with_uncertainty` | `merged`: every candidate with its score, highest score first, candidates of equal score in the order given |
+| `escalate_to_human` | `escalated`: no candidate is chosen |
 
-### 8.3 Trust Classes
+**Ties.** Two values are equal when they differ by at most 10⁻¹². When
+several candidates are best by the strategy, the model's
+`conflict_resolution_function.tie_breakers` apply to them, in order:
+`prefer_authoritative_source` keeps those whose source type is an authority
+for the field, if any is; `prefer_high_confidence` those with the highest
+confidence; `prefer_recent` those with the lowest age; `escalate_to_human`
+stops. If more than one candidate remains, the conflict is `escalated`. A
+conflict with one candidate chooses it. A conflict in which a candidate has
+no static weight is refused, whatever the strategy: it is not resolved by
+leaving the candidate out.
 
-`authority_trust_model.yaml` gives each sender trust class of §5.17 a
-default weight (`trust_classes.weights`); the classes are exactly those of
-`agent_identity.trust_class`. When evidence comes from an item whose
-sender's identity has a trust class, its static weight in §8.2 is the
-class weight; when the evidence also has a source type of §8.1, the lower
-of the two applies, so a trusted channel cannot lift an untrusted sender.
-A domain profile overrides a class weight with a `trust_weights` key
-`trust_class:<class>` (e.g. `trust_class:peer_agent`), kept apart from
-source keys of the same name.
+A capability that resolves conflicts names its strategy (`integrate`'s
+`conflict_resolution`); absent, the strategy is `highest_score`. The
+conflict resolution vectors (§10.3) fix these results.
+
+### 8.3 Trust Classes and Static Weights
+
+`authority_trust_model.yaml` gives each source type a weight
+(`source_ranking.weights`) and each sender trust class of §5.17 a default
+weight (`trust_classes.weights`); the classes are exactly those of
+`agent_identity.trust_class`. The **static weight** of evidence is:
+
+- with a source type only: the source type's weight;
+- from an item whose sender's identity has a trust class, with no source
+  type: the class weight;
+- with both: the lower of the two, so a trusted channel cannot lift an
+  untrusted sender;
+- with neither, with a source type that has no weight, or with a trust class
+  the model does not have: none.
+
+A domain profile applied to the run (§5.21) overrides weights with
+`trust_weights`: the key `trust_class:<class>` (e.g. `trust_class:peer_agent`)
+replaces the weight of that class, kept apart from a source key of the same
+name; any other key replaces the weight of the source type it names, or gives
+a weight to a source type the model does not name. A replacement may be
+higher or lower than the model's weight; the rule above for evidence with
+both a source type and a class still takes the lower of the two. With several
+profiles, the lowest weight they give a key applies.
 
 ### 8.4 Manual Overrides
 

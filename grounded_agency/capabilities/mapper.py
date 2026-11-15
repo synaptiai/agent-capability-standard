@@ -29,13 +29,14 @@ import re
 import shlex
 import threading
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..errors import ErrorCode, Severity, ValidationError, text_form
 from .registry import CapabilityNode, CapabilityRegistry
 
 if TYPE_CHECKING:
+    from ..profiles import AppliedProfiles
     from .bindings import ApprovalPolicy
 
 logger = logging.getLogger("grounded_agency.capabilities.mapper")
@@ -361,6 +362,9 @@ class ToolMapping:
             mapper applies the worst case to such a tool's calls
         destination: For a ``send`` tool, the RFC 6901 pointer to the
             argument that holds the destination (section 4.4.2)
+        person_required: An applied domain profile requires a person's
+            approval for the call (``require_human`` or
+            ``block_autonomous``, section 5.21.3)
     """
 
     capability_id: str
@@ -376,6 +380,7 @@ class ToolMapping:
     control: bool = False
     classifier: str | None = None
     destination: str | None = None
+    person_required: bool = False
 
     def __post_init__(self) -> None:
         if not self.capabilities and not self.control and self.capability_id:
@@ -516,7 +521,10 @@ class ToolCapabilityMapper:
     """
 
     def __init__(
-        self, ontology: CapabilityRegistry | dict[str, Any] | None = None
+        self,
+        ontology: CapabilityRegistry | dict[str, Any] | None = None,
+        *,
+        profiles: AppliedProfiles | None = None,
     ) -> None:
         """
         Initialize the mapper.
@@ -525,6 +533,10 @@ class ToolCapabilityMapper:
             ontology: Where capability flags come from: a
                 :class:`CapabilityRegistry`, or a raw ontology dict. With
                 ``None`` the packaged ontology is loaded on first use.
+            profiles: Domain profiles the layer applies to every call it
+                covers (STANDARD 1.2.0 section 5.21): :meth:`map_tool`
+                returns each call's flags raised by them, and
+                ``person_required`` for a call they require a person for.
 
         Raises:
             ValueError: If a raw ontology dict holds a node the registry
@@ -550,6 +562,8 @@ class ToolCapabilityMapper:
             ]
             meta = ontology.get("meta") or {}
             self._raw_version = str(meta.get("version", "unknown"))
+        self._profiles = profiles if profiles else None
+        self._profiled: dict[ToolMapping, ToolMapping] = {}
         self._dynamic_mappings: dict[str, ToolMapping] = {}
         # Effective mappings of the static and Bash classifications, built
         # on first use (ToolMapping is immutable, so they can be shared).
@@ -895,8 +909,13 @@ class ToolCapabilityMapper:
             tool_input: Tool input parameters
 
         Returns:
-            ToolMapping with capability metadata
+            ToolMapping with capability metadata, raised by the applied
+            domain profiles (section 5.21.3)
         """
+        return self._apply_profiles(self._map_tool(tool_name, tool_input))
+
+    def _map_tool(self, tool_name: str, tool_input: dict[str, Any]) -> ToolMapping:
+        """:meth:`map_tool` before domain profiles."""
         # Handle Bash specially - analyze command content. Input that is
         # not a dict has no command to read: classify it as an empty one,
         # which is fail-safe high risk.
@@ -916,6 +935,42 @@ class ToolCapabilityMapper:
         # Unknown tool: nothing says what it does, so assume the strictest
         # case instead of a read.
         return UNCLASSIFIED_TOOL
+
+    def _apply_profiles(self, mapping: ToolMapping) -> ToolMapping:
+        """``mapping`` with the flags the applied profiles raise for each of
+        its capabilities at its risk, and ``person_required`` when one of
+        them requires a person (section 5.21.3). The core computes them, as
+        it does for the executor. A control-only tool has no capability, and
+        :data:`UNCLASSIFIED_TOOL` already needs a checkpoint and approval
+        (this adapter's approvals are a person's), so both stay as they are
+        and keep their identity."""
+        if self._profiles is None or mapping.control or mapping is UNCLASSIFIED_TOOL:
+            return mapping
+        hit = self._profiled.get(mapping)
+        if hit is not None:
+            return hit
+        checkpoint = mapping.requires_checkpoint
+        approval = mapping.requires_approval
+        person = mapping.person_required
+        for capability in mapping.capabilities:
+            flags = self._profiles.flags(capability, {"risk": mapping.risk})
+            checkpoint |= flags.requires_checkpoint
+            approval |= flags.requires_approval
+            person |= flags.person
+        raised = mapping
+        if (checkpoint, approval, person) != (
+            mapping.requires_checkpoint,
+            mapping.requires_approval,
+            mapping.person_required,
+        ):
+            raised = replace(
+                mapping,
+                requires_checkpoint=checkpoint,
+                requires_approval=approval,
+                person_required=person,
+            )
+        self._profiled[mapping] = raised
+        return raised
 
     def _classify_bash_command(self, tool_input: dict[str, Any]) -> ToolMapping:
         """

@@ -40,20 +40,23 @@ import hmac
 import inspect
 import json
 import logging
+import os
 import threading
 from collections import Counter, deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from . import _core
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
 from .errors import ErrorCode, ValidationError, text_form
 from .hooks.evidence_collector import create_evidence_collector
 from .hooks.skill_tracker import create_checkpoint_recorder
+from .profiles import AppliedProfiles
 from .state.checkpoint_tracker import MAX_AGE_MINUTES, CheckpointTracker
 from .state.evidence_store import EvidenceAnchor, EvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
@@ -226,6 +229,17 @@ class GroundedAgentConfig:
             metadata. Off by default: inputs can hold credentials.
         call_record_limit: How many call records (and refusals) the adapter
             keeps in memory (``call_records``, ``diagnostics``).
+        profiles: Domain profiles applied to every tool call the adapter
+            covers (STANDARD 1.2.0 section 5.21), each a loaded profile or
+            the path of a profile file: they raise the flags of the call's
+            capability, require a person's approval for ``require_human``
+            and ``block_autonomous`` (records carry ``person_required``),
+            and their evidence, confidence and destination rules are in
+            force where the adapter checks outputs and sends
+            (``adapter.profiles``). A profile with an error refuses the
+            configuration (:class:`~grounded_agency.profiles.ProfileError`).
+            Profiles need ``approval="ask"``: with approvals off, the
+            approvals they require would be skipped.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -244,11 +258,18 @@ class GroundedAgentConfig:
     approval: Literal["ask", "off"] = "ask"
     evidence_include_tool_input: bool = False
     call_record_limit: int = 10000
+    profiles: Sequence[Mapping[str, Any] | str | os.PathLike[str]] = ()
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
         if self.approval not in ("ask", "off"):
             raise ValueError(f"approval must be 'ask' or 'off', got {self.approval!r}")
+        if self.profiles and self.approval == "off":
+            raise ValueError(
+                "domain profiles need approval='ask': with approvals off, the "
+                "approvals a profile requires would be skipped (STANDARD 1.2.0 "
+                "section 5.21)"
+            )
         minutes = self.expiry_minutes
         if (
             isinstance(minutes, bool)
@@ -412,7 +433,20 @@ class GroundedAgentAdapter:
         # Load now, so an ontology that cannot be read fails here and not
         # at the first tool call.
         _ = self.registry.ontology
-        self.mapper = ToolCapabilityMapper(self.registry)
+        # Domain profiles (STANDARD 1.2.0 section 5.21), checked against the
+        # adapter's ontology; an error refuses the configuration.
+        self.profiles = AppliedProfiles(
+            self.config.profiles,
+            validator=(
+                _core.Validator(
+                    str(self.config.ontology_path),
+                    str(Path(self.config.ontology_path).resolve().parent.parent),
+                )
+                if self.config.profiles
+                else None
+            ),
+        )
+        self.mapper = ToolCapabilityMapper(self.registry, profiles=self.profiles)
         now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
         self._now = now
         # The tracker enforces the layer's maximum age on every checkpoint,
@@ -519,6 +553,9 @@ class GroundedAgentAdapter:
             entry["capability"] = mapping.capability_id or None
             if mapping.control:
                 entry["control"] = True
+            # An applied profile required a person (section 5.21.3).
+            if mapping.person_required:
+                entry["person_required"] = True
         else:
             entry["capability"] = None
         if call is not None:

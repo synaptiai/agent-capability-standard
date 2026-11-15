@@ -1,0 +1,462 @@
+{
+  "standard": "1.2.0",
+  "section": "8.2",
+  "status": "normative",
+  "description": "Conflict resolution vectors of STANDARD v1.2.0 section 8.2. Each vector gives the candidates for one field of one entity, with their evidence, and a strategy (null: highest_score). The expected result is chosen (winner), merged (order: every candidate, highest score first) or escalated (tied: the candidates left tied; every one for escalate_to_human), or an error: a conflict in which a candidate has no static weight is refused. Two values are equal when they differ by at most 1e-12; candidates the strategy leaves tied go through the model's tie_breakers in order (a vector's tie_breakers replace them). `model` holds the trust model the vectors read: the weights and decay of schemas/authority_trust_model.yaml, its field_authority.fields and its tie_breakers. Normative (section 10.3). grounded_agency/trust.py is the reference implementation (resolve); tests/test_trust.py runs it against this file.",
+  "tolerance": 1e-12,
+  "fields": {
+    "name": "The vector's name, unique in this file.",
+    "about": "What the vector covers.",
+    "field": "The field in conflict, for the model's field authorities. Absent: none.",
+    "strategy": "A strategy of section 8.2, or null for the default, highest_score.",
+    "profile_trust_weights": "The trust_weights of the applied profiles, merged. Absent: none.",
+    "tie_breakers": "Replaces the model's tie_breakers. Absent: the model's.",
+    "candidates": "Each candidate's evidence: source_type and trust_class (either or both), age_hours, and confidence (absent: none reported).",
+    "expect": "{outcome, winner?, order?, tied?, scores?} or {error: true}. scores, when given: every candidate's trust score, each within `tolerance`."
+  },
+  "model": {
+    "source_ranking": {
+      "weights": {
+        "hardware_sensor": 0.95,
+        "system_of_record": 0.92,
+        "primary_api": 0.88,
+        "observability_pipeline": 0.8,
+        "derived_inference": 0.65,
+        "human_note": 0.55
+      }
+    },
+    "trust_classes": {
+      "weights": {
+        "owner": 0.95,
+        "decision_person": 0.9,
+        "system_of_record": 0.92,
+        "own_subagent_report": 0.7,
+        "colleague": 0.6,
+        "peer_agent": 0.55,
+        "external": 0.35
+      }
+    },
+    "decay_model": {
+      "half_life": "P10D",
+      "min_trust": 0.25
+    },
+    "field_authority": {
+      "fields": [
+        {
+          "field": "serial_number",
+          "authorities": [
+            "hardware_sensor",
+            "system_of_record"
+          ]
+        },
+        {
+          "field": "deployment_version",
+          "authorities": [
+            "primary_api",
+            "system_of_record"
+          ]
+        },
+        {
+          "field": "error_rate_5m",
+          "authorities": [
+            "observability_pipeline"
+          ]
+        }
+      ]
+    },
+    "conflict_resolution_function": {
+      "tie_breakers": [
+        "prefer_authoritative_source",
+        "prefer_high_confidence",
+        "escalate_to_human"
+      ]
+    }
+  },
+  "vectors": [
+    {
+      "name": "single_candidate",
+      "about": "A conflict with one candidate chooses it.",
+      "strategy": null,
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 10
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 0
+      }
+    },
+    {
+      "name": "default_highest_score",
+      "about": "No strategy named: highest_score. A fresh human note (0.55 * 0.5 ** (1/240)) beats a system-of-record value two half-lives old (0.92 * 0.25).",
+      "strategy": null,
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 1
+        },
+        {
+          "source_type": "system_of_record",
+          "age_hours": 480
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 0,
+        "scores": [
+          0.548413829334024,
+          0.23
+        ]
+      }
+    },
+    {
+      "name": "default_named",
+      "about": "highest_score named: the same result.",
+      "strategy": "highest_score",
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 1
+        },
+        {
+          "source_type": "system_of_record",
+          "age_hours": 480
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 0
+      }
+    },
+    {
+      "name": "default_tie_authority",
+      "about": "Equal scores (0.92 each, a class weight and a source weight); for serial_number the tie-breaker prefer_authoritative_source keeps the system_of_record source.",
+      "field": "serial_number",
+      "strategy": null,
+      "candidates": [
+        {
+          "trust_class": "system_of_record",
+          "age_hours": 0
+        },
+        {
+          "source_type": "system_of_record",
+          "age_hours": 0
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "default_tie_confidence",
+      "about": "Equal scores (0.55 * 1 * 0.5 and 0.55 * 0.5 * 1), no field: no authority, so prefer_high_confidence decides.",
+      "strategy": null,
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 240,
+          "confidence": 1.0
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 0,
+          "confidence": 0.5
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 0
+      }
+    },
+    {
+      "name": "default_tie_escalates",
+      "about": "Identical candidates: every tie-breaker leaves both, so the conflict is escalated.",
+      "strategy": null,
+      "candidates": [
+        {
+          "source_type": "primary_api",
+          "age_hours": 5,
+          "confidence": 0.9
+        },
+        {
+          "source_type": "primary_api",
+          "age_hours": 5,
+          "confidence": 0.9
+        }
+      ],
+      "expect": {
+        "outcome": "escalated",
+        "tied": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "tie_within_tolerance",
+      "about": "Scores that differ by less than 1e-12 are equal; so are the confidences, so the tie stands.",
+      "strategy": null,
+      "candidates": [
+        {
+          "source_type": "primary_api",
+          "age_hours": 0,
+          "confidence": 0.9
+        },
+        {
+          "source_type": "primary_api",
+          "age_hours": 0,
+          "confidence": 0.9000000000001
+        }
+      ],
+      "expect": {
+        "outcome": "escalated",
+        "tied": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "authoritative_restricts",
+      "about": "prefer_authoritative_sources for deployment_version: only the authority (primary_api, 0.88) competes, though hardware_sensor weighs 0.95.",
+      "field": "deployment_version",
+      "strategy": "prefer_authoritative_sources",
+      "candidates": [
+        {
+          "source_type": "hardware_sensor",
+          "age_hours": 0
+        },
+        {
+          "source_type": "primary_api",
+          "age_hours": 0
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "authoritative_by_weight_not_score",
+      "about": "Two authorities for serial_number: the higher static weight wins (hardware_sensor, 0.95), though its score is lower for its age.",
+      "field": "serial_number",
+      "strategy": "prefer_authoritative_sources",
+      "candidates": [
+        {
+          "source_type": "system_of_record",
+          "age_hours": 0
+        },
+        {
+          "source_type": "hardware_sensor",
+          "age_hours": 480
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "authoritative_none_present",
+      "about": "No candidate is an authority for serial_number: all compete, by static weight.",
+      "field": "serial_number",
+      "strategy": "prefer_authoritative_sources",
+      "candidates": [
+        {
+          "source_type": "primary_api",
+          "age_hours": 480
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 0
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 0
+      }
+    },
+    {
+      "name": "prefer_recent",
+      "about": "The lowest age wins, whatever the weight.",
+      "strategy": "prefer_recent",
+      "candidates": [
+        {
+          "source_type": "hardware_sensor",
+          "age_hours": 48
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 1
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "prefer_recent_tie_breakers",
+      "about": "Equal ages: the model's tie-breakers apply; with no field, prefer_high_confidence decides.",
+      "strategy": "prefer_recent",
+      "candidates": [
+        {
+          "source_type": "primary_api",
+          "age_hours": 5,
+          "confidence": 0.6
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 5,
+          "confidence": 0.9
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "prefer_high_confidence",
+      "about": "The highest confidence wins.",
+      "strategy": "prefer_high_confidence",
+      "candidates": [
+        {
+          "source_type": "hardware_sensor",
+          "age_hours": 0,
+          "confidence": 0.7
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 0,
+          "confidence": 0.95
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "merge_orders_by_score",
+      "about": "merge_with_uncertainty keeps every candidate, highest score first, equal scores in the order given.",
+      "strategy": "merge_with_uncertainty",
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 0
+        },
+        {
+          "source_type": "hardware_sensor",
+          "age_hours": 0
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 0
+        }
+      ],
+      "expect": {
+        "outcome": "merged",
+        "order": [
+          1,
+          0,
+          2
+        ],
+        "scores": [
+          0.55,
+          0.95,
+          0.55
+        ]
+      }
+    },
+    {
+      "name": "escalate",
+      "about": "escalate_to_human chooses no candidate.",
+      "strategy": "escalate_to_human",
+      "candidates": [
+        {
+          "source_type": "hardware_sensor",
+          "age_hours": 0
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 0
+        }
+      ],
+      "expect": {
+        "outcome": "escalated",
+        "tied": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "tie_breakers_prefer_recent",
+      "about": "tie_breakers given ([prefer_recent]) replace the model's: the equal-score tie of default_tie_confidence goes to the fresher candidate.",
+      "strategy": null,
+      "tie_breakers": [
+        "prefer_recent"
+      ],
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 240,
+          "confidence": 1.0
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 0,
+          "confidence": 0.5
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "profile_changes_winner",
+      "about": "A profile lowers hardware_sensor to 0.5: primary_api (0.88) wins.",
+      "strategy": null,
+      "profile_trust_weights": {
+        "hardware_sensor": 0.5
+      },
+      "candidates": [
+        {
+          "source_type": "hardware_sensor",
+          "age_hours": 0
+        },
+        {
+          "source_type": "primary_api",
+          "age_hours": 0
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 1
+      }
+    },
+    {
+      "name": "unweighable_candidate",
+      "about": "A candidate without a static weight makes the conflict refused, whatever the strategy: it is not resolved by leaving the candidate out.",
+      "strategy": "prefer_recent",
+      "candidates": [
+        {
+          "source_type": "no_such_source",
+          "age_hours": 0
+        },
+        {
+          "source_type": "human_note",
+          "age_hours": 1
+        }
+      ],
+      "expect": {
+        "error": true
+      }
+    }
+  ]
+}

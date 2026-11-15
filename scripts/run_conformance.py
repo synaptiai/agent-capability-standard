@@ -23,9 +23,14 @@ FIX = ROOT / "tests" / "fixtures"
 EXPECT = json.loads((FIX / "EXPECTATIONS.json").read_text(encoding="utf-8"))
 
 
-def run_fixture(name: str, path: Path, suggestions: Path) -> dict:
+def run_fixture(
+    name: str, path: Path, suggestions: Path, profiles: list[str] | None = None
+) -> dict:
     """Validate one fixture, writing its suggestions JSON to ``suggestions``
-    (one file per run, so concurrent runs and stale output cannot mix)."""
+    (one file per run, so concurrent runs and stale output cannot mix).
+    ``profiles``: repository-relative domain profiles to validate it with
+    (STANDARD v1.2 §5.21), the expectation's ``profiles`` member."""
+    profile_args = [a for p in profiles or [] for a in ("--profile", str(ROOT / p))]
     proc = subprocess.run(
         [
             sys.executable,
@@ -34,6 +39,7 @@ def run_fixture(name: str, path: Path, suggestions: Path) -> dict:
             str(path),
             "--suggestions-out",
             str(suggestions),
+            *profile_args,
         ],
         cwd=str(ROOT),
         capture_output=True,
@@ -54,7 +60,7 @@ def _read_emitted_codes(suggestions: Path, key: str) -> set[str]:
     Empty if the file is missing or unreadable."""
     try:
         data = json.loads(suggestions.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return set()
     return {d["code"] for d in data.get(key, []) if d.get("code")}
 
@@ -83,7 +89,7 @@ def main() -> None:
                 failed += 1
                 continue
             suggestions = tmp_path / f"{name}.suggestions.json"
-            res = run_fixture(name, path, suggestions)
+            res = run_fixture(name, path, suggestions, meta.get("profiles"))
             should_pass = meta.get("should_pass", False)
             if not suggestions.is_file():
                 # No report means the validator did not run to the end.

@@ -25,6 +25,7 @@ from typing import Any, Literal
 
 from ..capabilities.registry import CapabilityNode, CapabilityRegistry
 from ..utils.safe_yaml import safe_yaml_load
+from ..versions import check_cited
 
 logger = logging.getLogger("grounded_agency.adapters.oasf")
 
@@ -111,7 +112,22 @@ class OASFAdapter:
         if not self._mapping_path.exists():
             raise FileNotFoundError(f"OASF mapping not found: {self._mapping_path}")
 
-        self._raw = safe_yaml_load(self._mapping_path)
+        raw = safe_yaml_load(self._mapping_path)
+        # Standard v1.2 §11.6: a mapping cites the Standard and ontology it
+        # was written against under meta.agent_capability_standard; refuse
+        # another ontology major or an unsupported Standard (V109). The
+        # members are optional in this format.
+        meta = raw.get("meta") if isinstance(raw, dict) else None
+        cited = (
+            meta.get("agent_capability_standard") if isinstance(meta, dict) else None
+        )
+        if isinstance(cited, dict):
+            check_cited(
+                cited,
+                ontology_version=self._registry.version,
+                document=str(self._mapping_path),
+            )
+        self._raw = raw
 
         self._build_index()
 
@@ -292,6 +308,17 @@ class OASFAdapter:
         assert self._raw is not None
         meta: dict[str, Any] = self._raw.get("meta", {})
         return str(meta.get("oasf_version", "unknown"))
+
+    @property
+    def cited_versions(self) -> dict[str, str]:
+        """``meta.agent_capability_standard``: the Standard and ontology
+        versions the mapping cites (§11.6), as given."""
+        self._ensure_loaded()
+        assert self._raw is not None
+        cited = (self._raw.get("meta") or {}).get("agent_capability_standard") or {}
+        return {
+            str(k): str(v) for k, v in cited.items() if k in ("standard", "ontology")
+        }
 
     @property
     def mapping_version(self) -> str:

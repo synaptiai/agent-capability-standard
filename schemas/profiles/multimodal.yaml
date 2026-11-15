@@ -8,12 +8,14 @@
 # (e.g., domain: image.object, domain: audio.speech).
 # See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
 #
-# Status: informative data for hosts and workflow authors. No shipped component
-# loads or selects this profile; see "Status of Domain Profiles" in
+# Status: applied where a host, a safety layer or a validator applies it
+# (Standard v1.2 §5.21); see "Status of Domain Profiles" in
 # docs/domains/README.md.
 
 domain: multimodal
-version: "1.0.0"
+version: "2.0.0"
+standard: "1.2.0"
+ontology: "2.2.0"
 description: |
   Profile for multi-modal AI environments that combine text, image, audio,
   and video modalities. Emphasizes cross-modal evidence consistency,
@@ -58,19 +60,25 @@ risk_thresholds:
     # already gates generation safely. Blocking it would contradict the ontology risk model.
 
 checkpoint_policy:
-  before_modality_conversion: always     # Always checkpoint before converting between modalities
-  before_content_generation: always      # Always checkpoint before generating content
-  before_alignment_decision: always      # Always checkpoint before cross-modal alignment
-  before_batch_transformation: high_risk # Checkpoint before large batch conversions
-  during_pipeline_stages: medium_risk    # Checkpoint at pipeline stage boundaries
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_modality_conversion and before_content_generation -> persist;
+  # before_alignment_decision -> none (comparing changes no state);
+  # before_batch_transformation (high_risk) and during_pipeline_stages
+  # (medium_risk) -> "*": medium_risk.
+  persist: always
+  "*": medium_risk
 
 evidence_policy:
   required_anchor_types:
-    - source_modality          # Identification of input modality and reference
-    - target_modality          # Identification of output modality
-    - alignment_score          # Cross-modal alignment/similarity metric
-    - confidence_score         # Model confidence for the transformation
-    - modality_hash            # Content hash for each modality artifact
+    # §6.5 kinds: no 1.0.0 entry is a kind (source_modality, target_modality,
+    # alignment_score, confidence_score, modality_hash); the kinds of
+    # domain_sources.
+    - file
+    - log
+    - sensor
+    - human_note
+    - api
+    - record
   minimum_confidence: 0.75     # Moderate confidence for cross-modal tasks
   require_grounding:
     - detect                   # Cross-modal detections must reference all modalities

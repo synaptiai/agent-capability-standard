@@ -1,0 +1,274 @@
+{
+  "description": "Entity id vectors (Agent Capability Standard 1.2.0, section 7.1). Normative. An id is <class>:<namespace>/<local_id>: the class is a class name or alias of schemas/entity_taxonomy.yaml 1.1.0 (listed in `classes`, so the file is self-contained) or a vendor class x- then a lower-case letter or digit; the namespace is one or more '/'-separated segments, outermost first; a segment is one or more characters, none of them '/', ':', white space or a control character. A valid id parses into its class, namespace segments and local id; an invalid one is refused. Ids are compared as strings, case-sensitively.",
+  "standard": "1.2.0",
+  "section": "7.1",
+  "status": "normative",
+  "fields": {
+    "name": "The vector's id.",
+    "about": "Why the id is invalid.",
+    "id": "The id.",
+    "expect": "{class, namespace (segments, outermost first), local_id}, or {error: true}."
+  },
+  "classes": [
+    "art",
+    "artifact",
+    "asset",
+    "container",
+    "ctr",
+    "database",
+    "dataset",
+    "db",
+    "doc",
+    "document",
+    "ds",
+    "endpoint",
+    "ep",
+    "event",
+    "evt",
+    "host",
+    "job",
+    "loc",
+    "location",
+    "mat",
+    "material",
+    "node",
+    "org",
+    "organization",
+    "person",
+    "proc",
+    "process",
+    "q",
+    "queue",
+    "sensor",
+    "service",
+    "svc"
+  ],
+  "vectors": [
+    {
+      "name": "service",
+      "id": "svc:acme/payments/prod/api",
+      "expect": {
+        "class": "svc",
+        "namespace": [
+          "acme",
+          "payments",
+          "prod"
+        ],
+        "local_id": "api"
+      }
+    },
+    {
+      "name": "database",
+      "id": "db:acme/payments/prod/postgres-main",
+      "expect": {
+        "class": "db",
+        "namespace": [
+          "acme",
+          "payments",
+          "prod"
+        ],
+        "local_id": "postgres-main"
+      }
+    },
+    {
+      "name": "host",
+      "id": "host:acme/oslo/cluster-a/node-7",
+      "expect": {
+        "class": "host",
+        "namespace": [
+          "acme",
+          "oslo",
+          "cluster-a"
+        ],
+        "local_id": "node-7"
+      }
+    },
+    {
+      "name": "person_own_segments",
+      "id": "person:acme/hr/employee/12345",
+      "expect": {
+        "class": "person",
+        "namespace": [
+          "acme",
+          "hr",
+          "employee"
+        ],
+        "local_id": "12345"
+      }
+    },
+    {
+      "name": "document",
+      "id": "doc:acme/payments/specs/prd-v2",
+      "expect": {
+        "class": "doc",
+        "namespace": [
+          "acme",
+          "payments",
+          "specs"
+        ],
+        "local_id": "prd-v2"
+      }
+    },
+    {
+      "name": "asset",
+      "id": "asset:acme/factory/line-3/robot-12",
+      "expect": {
+        "class": "asset",
+        "namespace": [
+          "acme",
+          "factory",
+          "line-3"
+        ],
+        "local_id": "robot-12"
+      }
+    },
+    {
+      "name": "sensor",
+      "id": "sensor:acme/factory/line-3/temp-02",
+      "expect": {
+        "class": "sensor",
+        "namespace": [
+          "acme",
+          "factory",
+          "line-3"
+        ],
+        "local_id": "temp-02"
+      }
+    },
+    {
+      "name": "one_one_form_rewritten",
+      "id": "person:org.company/user/12345",
+      "expect": {
+        "class": "person",
+        "namespace": [
+          "org.company",
+          "user"
+        ],
+        "local_id": "12345"
+      }
+    },
+    {
+      "name": "vendor_class",
+      "id": "x-robot:acme/line-3/r1",
+      "expect": {
+        "class": "x-robot",
+        "namespace": [
+          "acme",
+          "line-3"
+        ],
+        "local_id": "r1"
+      }
+    },
+    {
+      "name": "one_namespace_segment",
+      "id": "svc:acme/a",
+      "expect": {
+        "class": "svc",
+        "namespace": [
+          "acme"
+        ],
+        "local_id": "a"
+      }
+    },
+    {
+      "name": "percent_encoded_slash",
+      "id": "doc:acme/specs/prd%2Fv2",
+      "expect": {
+        "class": "doc",
+        "namespace": [
+          "acme",
+          "specs"
+        ],
+        "local_id": "prd%2Fv2"
+      }
+    },
+    {
+      "name": "one_one_printed_form",
+      "about": "1.0 and 1.1 printed namespace:type:id: two ':' and no '/'",
+      "id": "org.company:user:12345",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "no_namespace",
+      "about": "no '/' after the class",
+      "id": "svc:acme",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "empty_first_segment",
+      "about": "an empty segment",
+      "id": "svc:/acme/api",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "empty_middle_segment",
+      "about": "an empty segment",
+      "id": "svc:acme//api",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "empty_local_id",
+      "about": "an empty local id",
+      "id": "svc:acme/api/",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "upper_case_class",
+      "about": "the class is lower case",
+      "id": "SVC:acme/api",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "class_not_in_taxonomy",
+      "about": "not a class or alias of the taxonomy, and not x-",
+      "id": "robot:acme/r1",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "white_space",
+      "about": "white space in a segment",
+      "id": "svc:acme/my api",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "second_colon",
+      "about": "a second ':'",
+      "id": "svc:acme/a:b",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "empty",
+      "about": "the empty string",
+      "id": "",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "control_character",
+      "about": "a control character in a segment",
+      "id": "svc:acme/a\u0007b",
+      "expect": {
+        "error": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# Standard version: 1.1.0
+# Validated with tests/fixtures/profiles/invalid.profile.yaml: the workflow is
+# valid; the profile's errors refuse the validation (Standard v1.2 §5.21.2).
+read_source:
+  goal: Read a source.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the source.
+    store_as: data
+    input_bindings:
+      target: source

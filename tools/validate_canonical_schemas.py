@@ -39,6 +39,24 @@ from typing import Any
 import yaml
 from yaml_util import YAMLSizeExceededError, safe_yaml_load
 
+# The entity id parser (Standard v1.2 §7.1) is the package's; fall back to
+# the source tree for a bare run from a checkout.
+try:
+    from grounded_agency.entities import parse_entity_id, taxonomy_classes
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from grounded_agency.entities import parse_entity_id, taxonomy_classes
+
+# The tie-breakers Standard v1.2 §8.2 defines.
+TIE_BREAKERS = (
+    "prefer_authoritative_source",
+    "prefer_high_confidence",
+    "prefer_recent",
+    "escalate_to_human",
+)
+# The example Standard v1.2 §7.1 rewrites from 1.1's printed form.
+SECTION_7_1_EXAMPLE = "person:org.company/user/12345"
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMAS_DIR = ROOT / "schemas"
 DEFAULT_SKILLS_DIR = ROOT / "skills"
@@ -228,6 +246,56 @@ def validate_trust_model(schema: dict[str, Any], errors: list[str], name: str) -
                 f"a number in [0.0, 1.0]"
             )
 
+    # Standard v1.2 §8.2 reads field_authority.fields: a list of {field,
+    # authorities}, each field once, each authority list non-empty and
+    # distinct.
+    authority_section = schema.get("field_authority") or {}
+    fields = authority_section.get("fields")
+    if not isinstance(fields, list) or not fields:
+        errors.append(
+            f"[{name}] field_authority.fields is missing or not a non-empty list"
+        )
+    else:
+        seen_fields: set[str] = set()
+        for i, entry in enumerate(fields):
+            where = f"field_authority.fields[{i}]"
+            if not isinstance(entry, dict) or not isinstance(entry.get("field"), str):
+                errors.append(f"[{name}] {where} is not a mapping with a string field")
+                continue
+            if entry["field"] in seen_fields:
+                errors.append(f"[{name}] {where} repeats the field '{entry['field']}'")
+            seen_fields.add(entry["field"])
+            listed = entry.get("authorities")
+            if (
+                not isinstance(listed, list)
+                or not listed
+                or len(set(map(str, listed))) != len(listed)
+            ):
+                errors.append(
+                    f"[{name}] {where}.authorities is not a non-empty list of "
+                    f"distinct source types"
+                )
+    examples = authority_section.get("examples")
+    if examples is not None and not isinstance(examples, list):
+        errors.append(f"[{name}] field_authority.examples is not a list")
+
+    breakers = (schema.get("conflict_resolution_function") or {}).get("tie_breakers")
+    if not isinstance(breakers, list) or not breakers:
+        errors.append(
+            f"[{name}] conflict_resolution_function.tie_breakers is missing or empty"
+        )
+    else:
+        for breaker in breakers:
+            if breaker not in TIE_BREAKERS:
+                errors.append(
+                    f"[{name}] conflict_resolution_function.tie_breakers names "
+                    f"'{breaker}', not one of {', '.join(TIE_BREAKERS)} (§8.2)"
+                )
+        if len(set(map(str, breakers))) != len(breakers):
+            errors.append(
+                f"[{name}] conflict_resolution_function.tie_breakers repeats a name"
+            )
+
     # Every source named as a field authority must be a known source.  This is
     # the check that would have caught the NIST profile citing an
     # `unverified: 0.20` source that never existed (issue #105). `fields` is
@@ -322,6 +390,39 @@ def validate_entity_taxonomy(
         errors.append(f"[{name}] id_convention.examples is missing or empty")
     if not schema.get("classes"):
         errors.append(f"[{name}] classes is missing or empty")
+    # Standard v1.2 §7.1: the pattern is the grammar, and every example is an
+    # id of a class or alias the taxonomy lists.
+    pattern_text = convention.get("pattern")
+    try:
+        pattern = (
+            re.compile(pattern_text, re.ASCII)
+            if isinstance(pattern_text, str)
+            else None
+        )
+    except re.error as exc:
+        errors.append(f"[{name}] id_convention.pattern does not compile: {exc}")
+        return
+    if pattern is None:
+        errors.append(f"[{name}] id_convention.pattern is missing")
+        return
+    classes = taxonomy_classes(schema)
+    examples = convention.get("examples") or []
+    for example in examples:
+        if not isinstance(example, str) or pattern.fullmatch(example) is None:
+            errors.append(
+                f"[{name}] id_convention.examples: {example!r} does not match "
+                f"id_convention.pattern"
+            )
+            continue
+        try:
+            parse_entity_id(example, classes)
+        except ValueError as exc:
+            errors.append(f"[{name}] id_convention.examples: {exc}")
+    if SECTION_7_1_EXAMPLE not in examples:
+        errors.append(
+            f"[{name}] id_convention.examples does not list {SECTION_7_1_EXAMPLE!r}, "
+            f"the example of Standard v1.2 §7.1"
+        )
 
 
 def _agent_identity(schemas_dir: Path, label: str, errors: list[str]) -> Any:

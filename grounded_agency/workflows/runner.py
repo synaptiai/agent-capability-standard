@@ -25,13 +25,15 @@ Example::
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from .. import _core
+from ..profiles import AppliedProfiles
 from ..state.checkpoint_tracker import CheckpointTracker
 from .engine import WorkflowEngine
 
@@ -206,10 +208,18 @@ class WorkflowRunner:
         max_actions: int = 100_000,
         poll_interval_ms: int = 1_000,
         max_polls: int = 100_000,
+        profiles: Sequence[Mapping[str, Any] | str | os.PathLike[str]] = (),
     ) -> None:
         """
         Args:
             engine: Holds the catalog to run.
+            profiles: Domain profiles the host applies to every run it
+                starts (STANDARD v1.2 §5.21), each a loaded profile or a
+                path: they raise the steps' flags, require a person for the
+                steps ``require_human`` and ``block_autonomous`` cover, and
+                fail an output below ``minimum_confidence`` with F504. They
+                are checked here (:class:`~grounded_agency.profiles.ProfileError`)
+                and saved with each run.
             max_actions: Most actions to answer in one :meth:`drive` before
                 giving up on a run (:class:`RunIncomplete`). Polls that got
                 no answer do not count.
@@ -224,6 +234,9 @@ class WorkflowRunner:
                 that wait longer, or drive the run again.
         """
         self._engine = engine
+        self._profiles = AppliedProfiles(
+            profiles, validator=engine.core_validator() if profiles else None
+        )
         self._max_actions = max_actions
         self._poll_ms = poll_interval_ms
         self._max_polls = max_polls
@@ -272,6 +285,7 @@ class WorkflowRunner:
                 run_id=run_id or uuid.uuid4().hex,
                 now_ms=now,
                 actor_identity=None if actor_identity is None else dict(actor_identity),
+                profiles=self._profiles.documents or None,
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None

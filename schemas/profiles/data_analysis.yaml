@@ -1,12 +1,14 @@
 # Data Analysis Domain Profile
 # Calibrated for data pipelines, analytics, ML model monitoring, and reporting.
 #
-# Status: informative data for hosts and workflow authors. No shipped component
-# loads or selects this profile; see "Status of Domain Profiles" in
+# Status: applied where a host, a safety layer or a validator applies it
+# (Standard v1.2 §5.21); see "Status of Domain Profiles" in
 # docs/domains/README.md.
 
 domain: data-analysis
-version: "1.0.0"
+version: "2.0.0"
+standard: "1.2.0"
+ontology: "2.2.0"
 description: |
   Profile for data science and analytics environments.
   Emphasizes data quality, reproducibility, statistical rigor,
@@ -51,18 +53,22 @@ risk_thresholds:
     - send                # Never publish results without review
 
 checkpoint_policy:
-  before_data_mutation: always      # Always checkpoint before writes
-  before_model_deployment: always   # Always checkpoint model changes
-  before_report_publish: always     # Always checkpoint before publishing
-  before_pipeline_change: high_risk # Checkpoint pipeline modifications
-  during_batch_job: medium_risk     # Checkpoint long-running jobs
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_data_mutation -> mutate; before_model_deployment -> execute;
+  # before_report_publish -> send; before_pipeline_change (high_risk) and
+  # during_batch_job (medium_risk) -> "*": medium_risk.
+  mutate: always
+  execute: always
+  send: always
+  "*": medium_risk
 
 evidence_policy:
   required_anchor_types:
-    - data_lineage
-    - statistical_summary
-    - query_hash
-    - timestamp
+    # §6.5 kinds: data_lineage -> record, plus the kinds of domain_sources.
+    # statistical_summary, query_hash and timestamp are not kinds.
+    - human_note
+    - api
+    - record
   minimum_confidence: 0.80  # High confidence for data decisions
   require_grounding:
     - detect                # Anomaly detection needs evidence

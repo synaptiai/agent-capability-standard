@@ -1,0 +1,11 @@
+# A workflow that targets Standard 1.2 by its spec_version (§11.5).
+read_source:
+  goal: Read a source.
+  risk: low
+  spec_version: "1.2"
+  steps:
+  - capability: retrieve
+    purpose: Read the source.
+    store_as: data
+    input_bindings:
+      target: source
