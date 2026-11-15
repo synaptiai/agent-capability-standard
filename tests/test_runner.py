@@ -904,6 +904,13 @@ SUPERSEDED = {
     "resume_escalation_supersedes_handler": [
         "superseded: another escalation took precedence"
     ],
+    "resume_new_actor_supersedes": [
+        "superseded: the step did not reach its approval when its run resumed"
+    ],
+    # A loop over a deferred handler does not run it: nothing is superseded.
+    "resume_loop_keeps_handler_run": [],
+    # A loop back to a step whose queued action was carried out keeps it.
+    "resume_carried_out_then_loop": [],
 }
 
 
@@ -962,6 +969,57 @@ def test_requests_outside_the_queue_name_no_queued_action(
     _, seen = _played(validator, "resume_escalation_supersedes_handler")
     queued = [(a["frame"], a.get("queued_action_id")) for a in _requests(seen)]
     assert queued == [(["w"], "run-1/w/2/0"), (["w", "repair"], None)]
+    # A loop back to the step itself, after its queued action was carried
+    # out, asks for a new action too (a `when` failure mode).
+    _, seen = _played(validator, "resume_carried_out_then_loop")
+    queued = [(a["step"], a.get("queued_action_id")) for a in _requests(seen)]
+    assert queued == [(2, "run-1/w/2/0"), (2, None)]
+
+
+def test_a_loop_during_a_resumption_does_not_run_the_deferred_handler(
+    validator: _core.Validator,
+) -> None:
+    """A loop whose range holds the deferred handler leaves the handler, its
+    kept nested run and that run's queued action as they were: the nested
+    run continues, so its first step does not run twice and its request
+    names the queued action (§5.14.1 items 3, 6 and 7)."""
+    run, seen = _played(validator, "resume_loop_keeps_handler_run")
+    calls = [
+        (a["frame"], a["capability"]) for a in seen if a["kind"] == "InvokeCapability"
+    ]
+    assert calls.count((["w", "oncall"], "persist")) == 1, calls
+    nested = [a for a in _requests(seen) if a["frame"] == ["w", "oncall"]]
+    assert [a.get("queued_action_id") for a in nested] == ["run-1/w/oncall/3/1"]
+    end = run.next()
+    assert (end["kind"], end["outcome"]) == ("Completed", "escalated"), end
+    records = {r["action_id"]: r["status"] for r in end["action_records"]}
+    assert records == {
+        "run-1/w/3/0": "executed",
+        "run-1/w/oncall/3/1": "executed",
+    }
+
+
+def test_a_resumed_run_stamps_what_it_supersedes(
+    validator: _core.Validator,
+) -> None:
+    """A queued record the resumed run supersedes takes the time and the
+    actor of then, as a decided one does; a run that was never resumed
+    leaves a superseded record's as they were (§5.14.1, §5.17)."""
+    run, _ = _played(validator, "resume_new_actor_supersedes")
+    records = {r["action_id"]: r for r in run.next()["action_records"]}
+    superseded = records["run-1/w/3/1"]
+    assert superseded["status"] == "rejected"
+    assert superseded["actor_identity"]["principal"] == "agent-b"
+    assert superseded["timestamp"] == "1970-01-01T01:01:00.000Z"
+    # Carrying the action out changes the decided record's status only.
+    assert records["run-1/w/2/0"]["timestamp"] == "1970-01-01T01:00:00.000Z"
+    # Never resumed (1.1): a loop that supersedes a deferral a minute later
+    # leaves the record's time.
+    f = load(RUNTIME / "deferral_superseded_by_loop.json")
+    f["script"][3]["at"] = 60000
+    run = play(start(validator, f), f)
+    [first] = [r for r in run.next()["action_records"] if r["status"] == "rejected"]
+    assert first["timestamp"] == "1970-01-01T00:00:00.000Z"
 
 
 def test_a_loop_during_a_resumption_does_not_repeat_what_ran_ahead(

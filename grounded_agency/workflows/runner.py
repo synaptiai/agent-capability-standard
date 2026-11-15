@@ -109,8 +109,9 @@ class Host:
         approvers need not attend the run (keep the run's snapshot while
         you wait). A request for a queued action that a resumed run
         re-entered names it in ``queued_action_id``, the ``action_id`` of
-        the record its deferral left, on every request of that step: a
-        re-ask after a recheck and a retry included (§5.14.1). With ``identity@1``, the decision
+        the record its deferral left, on every request of that step until
+        the action is carried out: a re-ask after a recheck and a retry
+        included (§5.14.1). With ``identity@1``, the decision
         may attest who decided: ``approver_identities``, one
         ``agent_identity`` per principal, with ``approvers`` empty or
         exactly their principals (§5.17); approvers are then counted by
@@ -356,11 +357,12 @@ class WorkflowRunner:
         ahead of them and that they read; a nested run that ended deferred
         continues; checkpoints taken before are asked for again; and each
         queued action's ``planned`` record is updated in place, under the
-        same ``action_id``, with every decision and outcome of its step. A
-        recovery loop runs again only the steps from its target to the step
-        that looped, so nothing that ran ahead is repeated.
-        ``actor_identity`` names a new actor, which the trace and the later
-        records show.
+        same ``action_id``, with every decision of its step until the action
+        is carried out. A recovery loop runs again only the steps from its
+        target to the step that looped, so nothing that ran ahead is
+        repeated. ``actor_identity`` names a new actor, which the trace, the
+        later records and the queued records the resumption decides or
+        supersedes show.
 
         Resume one saved state once: each resumption could carry out the
         same queued action. A state saved by an executor before this

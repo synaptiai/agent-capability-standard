@@ -55,8 +55,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - §5.14 states the request for a step with no or a partial `approval`
     field, what the approval digest is computed over (the shown array,
     RFC 8785, lowercase hexadecimal, compared regardless of case), the
-    integer bound as the executor applies it, and the meaning of
-    `in_session` and `out_of_band`. `tests/conformance/approval/digests.json`
+    integer bound as the executor applies it, that whatever reads values
+    from JSON text refuses a member name twice in one object (the core's
+    `exec::read_json` does), and the meaning of `in_session` and
+    `out_of_band`. `tests/conformance/approval/digests.json`
     is normative under §10.3, with a vector for a `shows` reference that
     resolves to nothing.
   - Resuming a deferred run (§5.14.1): `_core.Run.resume`,
@@ -65,12 +67,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     they read and a checkpoint step a queued mutation binds; a nested run
     that ended deferred continues; a queued step is asked afresh (of a
     person when attended), every request of the step names
-    `queued_action_id` (a re-ask after a recheck and a retry included), and
-    its `planned` record is updated in place with each decision and
-    outcome. A recovery loop during a resumption runs again only the steps
-    from its target to the step that looped, and the resumption then goes
-    on, so nothing that ran ahead runs twice. Trace kinds `run_resumed` and
-    `invoke_resumed`.
+    `queued_action_id` (a re-ask after a recheck and a retry included) until
+    its action is carried out, and its `planned` record is updated in place
+    with each decision and refusal; a queued record the resumption decides
+    or supersedes takes the time and actor of then. A recovery loop during
+    a resumption runs again only the steps from its target to the step that
+    looped, a deferred handler among them keeping its nested run, and the
+    resumption then goes on, so nothing that ran ahead runs twice. Trace
+    kinds `run_resumed` and `invoke_resumed`.
   - With `identity@1`, an approval decision may attest its approvers
     (`approver_identities`); approvers are then counted by principal and
     checked against the requested kind and role, and the record lists the
@@ -83,7 +87,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `WorkflowRunner.restore` take `actor_identity` and refuse another
     principal; a resumption may name a new actor, which the trace and later
     records show.
-  - 37 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
+  - 41 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
     `resume` entry and the `{{digest_upper}}` placeholder) and four
     validator fixtures (`*approver_identity*`). Each `step` digest vector
     gives what its step shows from (`bindings`, `recheck_read`), so an

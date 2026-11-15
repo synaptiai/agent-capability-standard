@@ -454,8 +454,9 @@ findings:
     human}}` (a person, `in_session`, shown its resolved inputs as an array, no expiry, no recheck,
     `when_unattended: fail`); a partial field takes the default of each member it omits; `expires` runs from
     the request. Appendix D.2 lists it as a clarification of 1.1. The runtime fixtures
-    checkpoint_per_mutation and approval_defaults_partial pin it, and tests/test_approval_vectors.py checks
-    the exact approver. RFC-0006 Part A, decision A1.'
+    checkpoint_per_mutation and approval_defaults_partial (a request a second after the start, expiring an
+    hour after it) pin it, resume_expires_from_request pins `expires` from a resumed run''s new request, and
+    tests/test_approval_vectors.py checks the exact approver. RFC-0006 Part A, decision A1.'
   concerns:
   - approval-human
   related:
@@ -497,7 +498,9 @@ findings:
     `shows` values in order, null for a reference that resolves to nothing, `[inputs]` without `shows`, a
     `recheck` element on a re-ask), the SHA-256 of its RFC 8785 text as 64 lowercase hexadecimal digits
     compared regardless of case, and the integer bound as applied (a number written without fraction or
-    exponent, magnitude at most 2^53; every other number binary64, so `1e+21` is valid). §10.3 makes
+    exponent, magnitude at most 2^53; every other number binary64, so `1e+21` is valid); whatever reads
+    values from JSON text refuses a member name twice in one object, as `exec::read_json` does
+    (core/tests/runtime.rs read_json_refuses_values_outside_i_json). §10.3 makes
     tests/conformance/approval/digests.json normative, with a `kind` per vector, a new
     `unresolved_reference` vector, and what each step vector shows from (`inputs` or `bindings`,
     `recheck_read`); tests/test_approval_vectors.py and
@@ -585,10 +588,11 @@ findings:
     run; its deferred steps run again, with the steps that ran ahead of them that they read and a checkpoint
     step whose invalidated checkpoint a re-entered mutation binds; a nested deferred run continues; a queued
     step is asked afresh (of a person when attended), every request naming `queued_action_id` until the step
-    goes on, and its `planned` record is updated in place with each decision and outcome; a recovery loop
-    runs again only the steps from its target to the step that looped, and the resumption goes on; the
-    queued actions of a run that did not end `deferred` are abandoned. `Run.resume` (core/src/exec/mod.rs,
-    machine.rs), `_core.Run.resume`, `WorkflowRunner.resume`; twenty-three `resume_*` runtime fixtures,
+    goes on or its action is carried out, and its `planned` record is updated in place with each decision
+    and refusal; a recovery loop runs again only the steps from its target to the step that looped, a
+    deferred handler among them keeping its nested run, and the resumption goes on; the queued actions of a
+    run that did not end `deferred` are abandoned. `Run.resume` (core/src/exec/mod.rs, machine.rs),
+    `_core.Run.resume`, `WorkflowRunner.resume`; twenty-seven `resume_*` runtime fixtures,
     core/tests/runtime.rs and tests/test_runner.py. RFC-0006 Part A, decision A5.'
   concerns:
   - approval-human
@@ -1443,8 +1447,9 @@ findings:
     an actor of another principal (or any actor for a run started without one) is refused; at a handoff the
     host cancels the run unless it ended `deferred`, which may be resumed under the new actor.
     `Run.restore_with` and `_core.Run.restore(actor_identity=)`, `WorkflowRunner.restore(actor_identity=)`,
-    `Run.resume` with a new actor (trace `run_resumed`); core/tests/runtime.rs restore_checks_the_actor,
-    tests/test_runner.py, runtime fixture resume_new_actor. docs/integrations/standard_agents.md and
+    `Run.resume` with a new actor (trace `run_resumed`), which the queued records the resumption decides or
+    supersedes carry; core/tests/runtime.rs restore_checks_the_actor, tests/test_runner.py, runtime
+    fixtures resume_new_actor and resume_new_actor_supersedes. docs/integrations/standard_agents.md and
     schemas/interop/standard_agents_mapping.yaml state the handoff rule. RFC-0006 Part A, decision A6.'
   concerns:
   - multi-agent

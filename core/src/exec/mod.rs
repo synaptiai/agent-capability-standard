@@ -68,8 +68,9 @@ const MAX_EXACT_INTEGER: &str = "9007199254740992";
 
 /// Read JSON text as a host value (§5.14): an integer literal (no fraction
 /// or exponent) of magnitude above 2^53 is refused, including one too long
-/// for 64 bits, which serde_json would read as a binary64 value. The value
-/// must also be I-JSON ([`ijson`]).
+/// for 64 bits, which serde_json would read as a binary64 value; so is an
+/// object in which a member name appears twice, of which serde_json would
+/// keep the last. The value must also be I-JSON ([`ijson`]).
 pub fn read_json(text: &str) -> Result<Value, String> {
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -105,9 +106,79 @@ pub fn read_json(text: &str) -> Result<Value, String> {
             _ => i += 1,
         }
     }
-    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let Strict(value) = serde_json::from_str(text).map_err(|e| e.to_string())?;
     ijson(&value)?;
     Ok(value)
+}
+
+/// A JSON value read so that a member name repeated in one object is an
+/// error (I-JSON, RFC 7493 §2.3): parsed, the value could not show it.
+struct Strict(Value);
+
+impl<'de> Deserialize<'de> for Strict {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(StrictVisitor).map(Strict)
+    }
+}
+
+struct StrictVisitor;
+
+impl<'de> serde::de::Visitor<'de> for StrictVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a JSON value")
+    }
+
+    fn visit_bool<E>(self, v: bool) -> Result<Value, E> {
+        Ok(Value::Bool(v))
+    }
+
+    fn visit_i64<E>(self, v: i64) -> Result<Value, E> {
+        Ok(v.into())
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Value, E> {
+        Ok(v.into())
+    }
+
+    fn visit_f64<E>(self, v: f64) -> Result<Value, E> {
+        Ok(serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number))
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Value, E> {
+        Ok(Value::String(v.to_owned()))
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Value, E> {
+        Ok(Value::String(v))
+    }
+
+    fn visit_unit<E>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(Strict(v)) = seq.next_element()? {
+            items.push(v);
+        }
+        Ok(Value::Array(items))
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        let mut members = Map::new();
+        while let Some(name) = map.next_key::<String>()? {
+            if members.contains_key(&name) {
+                return Err(serde::de::Error::custom(format!(
+                    "the member name {name:?} appears twice in one object, which I-JSON forbids"
+                )));
+            }
+            let Strict(v) = map.next_value()?;
+            members.insert(name, v);
+        }
+        Ok(Value::Object(members))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,7 +307,7 @@ pub enum Body {
         expires_at: Option<u64>,
         /// A resumed run asks about a queued action (§5.14.1): the
         /// `action_id` of the record its deferral left, on every request of
-        /// the step until the step goes on.
+        /// the step while the step continues that action.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         queued_action_id: Option<String>,
     },
@@ -646,8 +717,9 @@ pub(crate) struct Frame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_escalation: Option<String>,
     /// During a resumption: the queued action a re-entered step continues
-    /// (§5.14.1), until the step goes on, is deferred again or its run
-    /// leaves it. A recovery loop that runs the step again keeps it.
+    /// (§5.14.1), until the step goes on, carries the action out, is
+    /// deferred again or its run leaves it. A recovery loop that runs the
+    /// step again before then keeps it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued: Option<Queued>,
     /// While a step of this frame is deferred: the steps that began since,
@@ -746,6 +818,10 @@ pub(crate) struct State {
     /// The host's destination policies (§4.4.2).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub destinations: Vec<Vec<String>>,
+    /// The run was resumed (§5.14.1): a queued record it writes again,
+    /// superseding it included, takes the time and actor of then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resumed: bool,
 }
 
 /// One deferred step (§5.14).
@@ -859,6 +935,7 @@ impl Run {
             profiles: options.profiles,
             grounding: options.grounding,
             destinations: options.destinations,
+            resumed: false,
         };
         let mut run = Run { program, state };
         run.machine()

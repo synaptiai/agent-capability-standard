@@ -284,24 +284,16 @@ impl<'a> Machine<'a> {
     fn record(&mut self, status: &str, approval: Option<Value>) -> usize {
         // A queued step a resumption re-entered continues its queued
         // action: the record its deferral left is updated in place, with
-        // every decision and outcome of the step until it goes on, a
-        // re-ask and a retry included (§5.14.1).
+        // every decision and refusal of the step until it goes on or
+        // carries the action out, a re-ask and a retry included (§5.14.1).
         if let Some(r) = self.queued_record() {
             let always_ask = self.always_ask();
-            let now = iso(self.st.now);
-            let actor = self.st.actor_identity.clone();
+            self.stamp(r);
             // check_state keeps every record an object.
             let Some(record) = self.st.records[r].as_object_mut() else {
                 return r;
             };
             record.insert("status".into(), json!(status));
-            record.insert("timestamp".into(), json!(now));
-            record.insert("actor".into(), json!("agent"));
-            record.remove("actor_identity");
-            if let Some(identity) = actor {
-                record.insert("actor".into(), identity["kind"].clone());
-                record.insert("actor_identity".into(), identity);
-            }
             if always_ask {
                 record.insert("always_ask".into(), json!(true));
             } else {
@@ -343,6 +335,23 @@ impl<'a> Machine<'a> {
         }
         self.st.records.push(record);
         n
+    }
+
+    /// Record `r` is written again now: it takes the time and the actor of
+    /// then (§5.14.1, §5.17).
+    fn stamp(&mut self, r: usize) {
+        let now = iso(self.st.now);
+        let actor = self.st.actor_identity.clone();
+        let Some(record) = self.st.records[r].as_object_mut() else {
+            return;
+        };
+        record.insert("timestamp".into(), json!(now));
+        record.insert("actor".into(), json!("agent"));
+        record.remove("actor_identity");
+        if let Some(identity) = actor {
+            record.insert("actor".into(), identity["kind"].clone());
+            record.insert("actor_identity".into(), identity);
+        }
     }
 
     /// A record for an action that did not go ahead, with the reason.
@@ -947,8 +956,8 @@ impl<'a> Machine<'a> {
             self.trace_step("always_ask", json!({}));
         }
         // So is a queued step that an attended resumption re-enters
-        // (§5.14.1); every request for a re-entered queued step names it,
-        // until the step goes on (a re-ask and a retry included).
+        // (§5.14.1); every request for a re-entered queued step names it
+        // while the step continues it (a re-ask and a retry included).
         let queued = self.queued_record();
         let person = marked || (queued.is_some() && self.st.attendance == Attendance::Attended);
         let queued_action_id =
@@ -1205,18 +1214,20 @@ impl<'a> Machine<'a> {
             })
     }
 
-    /// The steps a recovery loop to `target` runs again: during a
-    /// resumption, those up to the step that loops, after which the
-    /// resumption goes on with its list (§5.14.1); else every step from
-    /// `target` on.
-    fn rerun(&self, target: usize) -> std::ops::Range<usize> {
+    /// The steps a recovery loop to `target` runs again, in step order.
+    /// During a resumption, those from `target` to the step that loops,
+    /// after which the resumption goes on with its list; a handler among
+    /// them does not run, so a deferred one keeps its place last in the
+    /// list, its kept nested run and its queued actions (§5.14.1). Else
+    /// every step from `target` on.
+    fn rerun(&self, target: usize) -> Vec<usize> {
         let f = self.frame_ref();
-        let end = if f.resume.is_some() && f.escalation.is_none() {
-            f.step + 1
+        let steps = &self.workflow().steps;
+        if f.resume.is_some() && f.escalation.is_none() {
+            (target..=f.step).filter(|&k| !steps[k].handler).collect()
         } else {
-            self.workflow().steps.len()
-        };
-        target..end
+            (target..steps.len()).collect()
+        }
     }
 
     /// A recovery loop to `target` runs its steps again (`rerun`): they are
@@ -1227,13 +1238,11 @@ impl<'a> Machine<'a> {
     /// a step after it that ran ahead keeps its output.
     fn undefer_from(&mut self, target: usize) {
         let rerun = self.rerun(target);
-        let wf = self.workflow();
         let f = self.frame();
         if let Some(list) = f.resume.as_mut()
             && f.escalation.is_none()
         {
-            let again = rerun.clone().filter(|&k| !wf.steps[k].handler);
-            list.splice(0..0, again);
+            list.splice(0..0, rerun.iter().copied());
         }
         f.deferred.retain(|d| !rerun.contains(d));
         f.nested_caps.retain(|k, _| !rerun.contains(k));
@@ -1278,11 +1287,22 @@ impl<'a> Machine<'a> {
         self.st.deferrals = kept;
         for r in dropped.iter().filter_map(|d| d.record) {
             if self.st.records[r]["status"] == "planned" {
-                self.st.records[r]["status"] = json!("rejected");
-                self.st.records[r]["reason"] = json!(reason);
+                self.reject_queued(r, reason);
             }
         }
     }
+
+    /// Queued action `r` is superseded. A resumed run writes the record
+    /// again, with the time and the actor of then (§5.14.1, §5.17); a run
+    /// that was not resumed leaves them, as 1.1 does.
+    fn reject_queued(&mut self, r: usize, reason: &str) {
+        if self.st.resumed {
+            self.stamp(r);
+        }
+        self.st.records[r]["status"] = json!("rejected");
+        self.st.records[r]["reason"] = json!(reason);
+    }
+
     /// Supersede the deferrals of `steps` of the current frame, nested ones
     /// included, and drop their kept nested runs: a resumption will not
     /// re-enter them (§5.14.1). Steps of the list that only run again have
@@ -1317,10 +1337,10 @@ impl<'a> Machine<'a> {
         if let Some(q) = self.frame().queued.take()
             && self.st.records[q.record]["status"] == "planned"
         {
-            let r = q.record;
-            self.st.records[r]["status"] = json!("rejected");
-            self.st.records[r]["reason"] =
-                json!("superseded: the step did not reach its approval when its run resumed");
+            self.reject_queued(
+                q.record,
+                "superseded: the step did not reach its approval when its run resumed",
+            );
         }
     }
 
@@ -2121,6 +2141,14 @@ impl<'a> Machine<'a> {
             f.ran_inputs.insert(store.clone(), inputs);
         }
         self.set_record_status("executed");
+        // The queued action the step continued is carried out: it closes,
+        // so a recovery loop that runs the step again asks for a new action
+        // (§5.14.1).
+        if self.frame_ref().cur.record.is_some()
+            && self.frame_ref().cur.record == self.queued_record()
+        {
+            self.frame().queued = None;
+        }
         self.trace_step("step_completed", json!({}));
         for (g, gate) in step.gates.iter().enumerate().filter(|(_, g)| g.after) {
             if !self.gate_fires(g, gate) {
@@ -2326,9 +2354,10 @@ impl<'a> Machine<'a> {
                 }
             }
         }
-        let cleared: Vec<String> = wf.steps[self.rerun(target)]
-            .iter()
-            .filter_map(|s| s.store_as.clone())
+        let cleared: Vec<String> = self
+            .rerun(target)
+            .into_iter()
+            .filter_map(|k| wf.steps[k].store_as.clone())
             .collect();
         self.undefer_from(target);
         let frame = self.frame();
@@ -2663,6 +2692,7 @@ impl<'a> Machine<'a> {
         self.st.attendance = o.attendance;
         self.st.now = self.st.now.max(o.now_ms.min(MAX_TIME));
         self.st.finished = None;
+        self.st.resumed = true;
         // The queued actions of a nested run that failed under a step that
         // was not deferred are never carried out.
         let orphans: Vec<Vec<usize>> = self

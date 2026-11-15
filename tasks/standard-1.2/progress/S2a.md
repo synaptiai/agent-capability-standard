@@ -223,6 +223,83 @@ Design: `tasks/standard-1.2/designs/S2a.md`. Base: tag `round3/S2a-base`
    requires it.
 
 
+## Review round 2
+
+1. **Medium: queued records a resumption supersedes kept the first run's
+   time and actor.** Real (reproduced: `resume_skipped_supersedes` under
+   agent-a, resumed by agent-b, left `run-1/w/3/1` rejected at 00:00 by
+   agent-a). Root cause: `supersede` and `settle_queued` changed only
+   `status` and `reason`. Fixed as option 1: `State.resumed` (set by
+   `resume`, left out of the state while false) and `reject_queued`, which
+   both use, stamps the record (`stamp`, shared with `record()`'s in-place
+   path) with the time and actor of then in a resumed run; a run never
+   resumed leaves them, as 1.1 does. The texts now say exactly which writes
+   restamp: §5.14.1 item 6 (each decision and refusal, and any
+   supersession; carrying the action out sets only its status, as for any
+   record), §5.17 ("the queued records the resumed run decides, refuses or
+   supersedes"), the schema's `timestamp` description, Appendix D.2 and
+   RFC-0006 A5/A6. Fixture `resume_new_actor_supersedes` (the skipped
+   record ends rejected at 01:01 by agent-b, the decided one keeps its
+   decision's 01:00) and test `test_a_resumed_run_stamps_what_it_supersedes`
+   (also: a first-run loop's supersession a minute later keeps time 0). The
+   fixture fails on the previous executor.
+2. **Low: §5.14's loop-supersede rule contradicted §5.14.1 item 7.** Real.
+   §5.14 now says the loop rule holds outside a resumption, and that during
+   one a loop runs again only the steps from its target to the one that
+   looped and supersedes as item 7 says (the retry rule stays general).
+   RFC-0006 A5: a loop supersedes only the queued actions of the steps it
+   runs again that were deferred again.
+3. **Low: no fixture checked that `expires` runs from the request.** Real
+   (coverage; the executor was right). `approval_defaults_partial` now
+   answers the constrain step at 1000 ms and expects `expires_at` 3601000;
+   new `resume_expires_from_request` asks a mandate at 0 (`expires_at`
+   3600000), resumes attended at 3600000, expects the person's request to
+   expire at 7200000 and has it approved at 5400000, after the first
+   request's expiry. An executor counting from the run's start, or reusing
+   the first request's expiry, fails both. The ACS-10 resolution names them.
+4. **Low: the repeated-member-name MUST was neither implemented by
+   `read_json` nor implementable on parsed values.** Real (serde_json keeps
+   the last duplicate). `exec::read_json` now reads through a strict
+   visitor that refuses a member name seen before in the same object, at any
+   depth (escaped spellings included); `read_json_refuses_values_outside_i_json`
+   (renamed from `read_json_refuses_inexact_integers`) covers
+   `{"a":1,"a":2}`, a nested repeat and `{"\u0061":1,"a":2}`. §5.14 now
+   puts the duplicate-name refusal (with the over-long integer) on whatever
+   reads values from JSON text, the host or an executor, and keeps the
+   executor's refusal of an integer beyond 2^53; RFC-0006 A2, Appendix D.2
+   (row renamed "I-JSON shown values"), CHANGELOG and ACS-11's resolution
+   say so.
+5. **High: a loop during a resumption whose range held the deferred handler
+   dropped its kept nested run.** Real (reproduced with the reviewer's
+   script: `persist` ran twice, the nested request named no queued action,
+   `run-1/w/oncall/3/1` ended superseded). Root cause: `undefer_from` left
+   handlers out of the splice only, and applied the whole range to
+   `parked`, `nested_caps`, `deferred`, `ahead`, the supersede predicate and
+   `recover`'s `cleared`. Fixed at the root: `rerun(target)` is now the set
+   of steps the loop runs again (`Vec<usize>`), handlers left out during a
+   resumption, and every one of those uses it; outside a resumption it is
+   every step from the target, as before. Fixture
+   `resume_loop_keeps_handler_run` (the reviewer's layout: one `persist`,
+   the nested request names `run-1/w/oncall/3/1`, which ends executed),
+   added to `test_superseded_records_say_why` (nothing superseded) and
+   `test_a_loop_during_a_resumption_does_not_run_the_deferred_handler`; the
+   Rust harness plays every fixture. It fails on the previous executor.
+6. **Medium: a resumed queued step that executed and looped to itself
+   overwrote its executed record.** Real (reproduced: one record,
+   `['bob']`). Fixed: `after()` closes `Frame.queued` once the queued
+   record is `executed`, so the loop asks afresh (no `queued_action_id`,
+   the step's own approver) and writes a new record, as normal flow does.
+   §5.14.1 item 6 ("until it goes on to another step, the action is carried
+   out, ...") and item 7 ("one that had gone on or carried its action out
+   runs as a new action") amended; RFC-0006 A5, the guide and the runner's
+   docstring follow. Fixture `resume_carried_out_then_loop` (two executed
+   records, alice's and bob's; the second request names no queued action,
+   checked in `test_requests_outside_the_queue_name_no_queued_action`). It
+   fails on the previous executor.
+
+S2a now has 41 runtime fixtures (4 `approval_*`, 10 `approver_*`, 27
+`resume_*`); RFC-0006, the CHANGELOG and ACS-13's resolution say so.
+
 F6 after review round 1: every CI validator and generator `--check`,
 ruff check and format, mypy, pytest `tests/` (2421) and `benchmarks/tests/`
 (68), `run_conformance.py`, cargo fmt, both clippy runs and cargo test
@@ -232,3 +309,16 @@ over 1800px; §5.14.1 was tightened to stay under it) and axe on
 `/spec/1.2.0/`, `/rfcs/0006/`, `/spec/conformance/`,
 `/guides/running-workflows/`, `/guides/standard-agents/` and
 `/community/release-notes/`: all green.
+
+F6 after review round 2: every CI validator and generator `--check`, the
+domain catalogs, ruff check and format, mypy, pytest `tests/` (2430) and
+`benchmarks/tests/` (68), the benchmark runner, `validate_benchmark_deps`,
+`run_conformance.py`, cargo fmt, both clippy runs and cargo test (1.99.1;
+`edge_checks_scale_linearly`, a 5-second timing test, failed once while the
+other track loaded the machine and passed alone and on the full rerun), the
+MSRV check (1.88.0), `packages/acs-core` check, test and build, the
+binding's check and test, and the site's check, test, build,
+`check-runs.mjs` (no enforced run over 1800px: §5.14.1's list, 1822px after
+items 6 and 7 grew, is 1794px once item 3 says its condition, gates and
+inputs in one clause) and axe on `/spec/1.2.0/`, `/rfcs/0006/`,
+`/guides/running-workflows/` and `/community/release-notes/`: all green.

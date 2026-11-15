@@ -82,13 +82,14 @@ def register(add):
 def _requests(add):
     add(
         "approval_defaults_partial",
-        "A partial approval field takes the default of each member it leaves out: the request is in session, shows the step's resolved inputs as an array and expires one hour after the request (STANDARD v1.2 §5.14).",
+        "A partial approval field takes the default of each member it leaves out: the request is in session, shows the step's resolved inputs as an array and expires one hour after the request, which is made a second after the run started (STANDARD v1.2 §5.14).",
         guarded(
             {"approver": {"kind": "human", "role": "ops"}, "expires": "1h"},
             requires=["approval@1"],
         ),
-        CHECKPOINTED
-        + [
+        [
+            CHECKPOINTED[0],
+            dict(CHECKPOINTED[1], at=1000),
             {
                 "expect": {
                     "kind": "RequestApproval",
@@ -96,7 +97,7 @@ def _requests(add):
                     "approver": {"kind": "human", "role": "ops"},
                     "mode": "in_session",
                     "shown": [INPUTS],
-                    "expires_at": 3600000,
+                    "expires_at": 3601000,
                 },
                 "respond": approve("d1"),
             },
@@ -1603,5 +1604,279 @@ def _resumption(add):
             ],
         },
         ["run_resumed", "recheck"],
+        attendance="unattended",
+    )
+    _resumption_records_and_loops(add, unavailable, down, cp_answer)
+
+
+def _resumption_records_and_loops(add, unavailable, down, cp_answer):
+    """The time and actor of what a resumption supersedes, expires from the
+    new request, a loop over a deferred handler, and a queued action
+    carried out before a loop (§5.14, §5.14.1, §5.17)."""
+    agent_b = {"principal": "agent-b", "kind": "agent"}
+    m2 = mutate("m2", condition="${m1.success} == false", skip_if_false=True)
+    first_written = {
+        "timestamp": "1970-01-01T00:00:00.000Z",
+        "actor_identity": {"principal": "agent-a"},
+    }
+    add(
+        "resume_new_actor_supersedes",
+        "Under a new actor, a resumed run writes again each queued record it changes: the decided one takes the time of its decision, and the one it supersedes (its step's condition is now false) the time of the supersession; both take the new actor, where the first run's records had the first (§5.14.1, §5.17).",
+        {
+            "w": wf(
+                [CP, POLICY, mutate("m1", approval=DEFER), m2],
+                requires=["approval@1"],
+            )
+        },
+        CHECKPOINTED
+        + [
+            deferred_end(
+                {"step": 2},
+                {"step": 3},
+                action_records=[
+                    dict(first_written, action_id="run-1/w/2/0"),
+                    dict(first_written, action_id="run-1/w/3/1"),
+                ],
+            ),
+            resume(at=3600000, actor=agent_b),
+            {"expect": queued_request(2, "run-1/w/2/0"), "respond": approve("d1")},
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
+            {
+                "expect": inv("mutate", step=2),
+                "respond": out(success=True),
+                "at": 3660000,
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "deferred": [],
+            "action_records": [
+                {
+                    "action_id": "run-1/w/2/0",
+                    "status": "executed",
+                    "timestamp": "1970-01-01T01:00:00.000Z",
+                    "actor_identity": {"principal": "agent-b"},
+                },
+                {
+                    "action_id": "run-1/w/3/1",
+                    "status": "rejected",
+                    "timestamp": "1970-01-01T01:01:00.000Z",
+                    "actor": "agent",
+                    "actor_identity": {"principal": "agent-b"},
+                },
+            ],
+        },
+        ["run_resumed", "step_skipped"],
+        attendance="unattended",
+        actor_identity={"principal": "agent-a", "kind": "agent"},
+    )
+    expiring = guarded(
+        {"approver": NIGHTLY, "when_unattended": "defer_to_queue", "expires": "1h"},
+        requires=["approval@1"],
+    )
+    add(
+        "resume_expires_from_request",
+        "A re-entered queued step's expires runs from its new request: the mandate asked in the first run had until an hour after the start, the person asked when the run resumed an hour later has until two hours after it, and a decision between the two counts (§5.14, §5.14.1).",
+        expiring,
+        CHECKPOINTED
+        + [
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "step": 2,
+                    "approver": NIGHTLY,
+                    "expires_at": 3600000,
+                },
+                "respond": unavailable,
+            },
+            deferred_end({"step": 2, "action_id": "run-1/w/2/0"}),
+            resume(at=3600000),
+            {
+                "expect": queued_request(
+                    2, "run-1/w/2/0", approver=HUMAN, expires_at=7200000
+                ),
+                "respond": approve("d1"),
+                "at": 5400000,
+            },
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
+            {"expect": inv("mutate", step=2), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {
+                    "action_id": "run-1/w/2/0",
+                    "status": "executed",
+                    "approval": {
+                        "decided_at": "1970-01-01T01:30:00.000Z",
+                        "expires_at": "1970-01-01T02:00:00.000Z",
+                    },
+                }
+            ],
+        },
+        ["run_resumed", "approval_decided"],
+        attendance="unattended",
+    )
+
+    # A loop during a resumption whose range holds the deferred handler.
+    page = st(
+        "invoke",
+        "page",
+        handler=True,
+        workflow_id="oncall",
+        input_bindings={"workflow": "oncall", "input": {"why": "observation failed"}},
+    )
+    m = mutate(
+        approval=DEFER,
+        failure_modes=[
+            {
+                "condition": "the change failed",
+                "on_error": "R402",
+                "action": "request_more_context",
+                "recovery": {"goto_step": "policy", "max_loops": 1},
+            }
+        ],
+    )
+    o = st(
+        "observe",
+        "o",
+        input_bindings={"target": "elsewhere"},
+        failure_modes=[
+            {
+                "condition": "observation failed",
+                "on_error": "R402",
+                "action": "escalate",
+                "recovery": {"goto_step": "page"},
+            }
+        ],
+    )
+    noted = st("persist", "p", input_bindings={"data": {"paged": True}, "key": "page"})
+    oncall = wf(
+        [noted, CP, POLICY, mutate("n", approval=DEFER)],
+        inputs={"why": {"type": "string", "required": True}},
+        requires=["approval@1"],
+    )
+    paging = ["w", "oncall"]
+    add(
+        "resume_loop_keeps_handler_run",
+        "A recovery loop during a resumption whose range holds the deferred handler does not run the handler: the handler keeps its place last, its kept nested run and that run's queued action, so the nested run continues without running its first step again, and its request names the queued action (§5.14.1).",
+        {
+            "w": wf([CP, POLICY, page, m, o], requires=["approval@1", "recovery@1"]),
+            "oncall": oncall,
+        },
+        CHECKPOINTED
+        + [
+            {"expect": inv("observe", step=4), "respond": down},
+            {
+                "expect": inv("persist", frame=paging, step=0),
+                "respond": out(stored=True),
+            },
+            {
+                "expect": inv("checkpoint", frame=paging),
+                "respond": out(checkpoint_id="cp5"),
+            },
+            {"expect": inv("constrain", frame=paging), "respond": out(compliant=True)},
+            deferred_end(
+                {"step": 3, "action_id": "run-1/w/3/0"},
+                {"frame": paging, "step": 3, "action_id": "run-1/w/oncall/3/1"},
+                {"step": 2},
+                cause="R402",
+            ),
+            resume(at=3600000),
+            {"expect": queued_request(3, "run-1/w/3/0"), "respond": approve("d1")},
+            {"expect": {"kind": "CreateCheckpoint", "step": 3}, "respond": cp_answer},
+            {"expect": inv("mutate", step=3), "respond": down},
+            {"expect": inv("constrain", step=1), "respond": out(compliant=True)},
+            {
+                "expect": queued_request(3, "run-1/w/3/0", approver=HUMAN),
+                "respond": approve("d2"),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 3},
+                "respond": {"kind": "Checkpoint", "checkpoint_id": "cp3"},
+            },
+            {"expect": inv("mutate", step=3), "respond": out(success=True)},
+            {
+                "expect": queued_request(
+                    3, "run-1/w/oncall/3/1", frame=paging, approver=HUMAN
+                ),
+                "respond": approve("d3"),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 3, "frame": paging},
+                "respond": {"kind": "Checkpoint", "checkpoint_id": "cp9"},
+            },
+            {"expect": inv("mutate", frame=paging), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "escalated",
+            "cause": "R402",
+            "deferred": [],
+            "action_records": [
+                {"action_id": "run-1/w/3/0", "status": "executed"},
+                {"action_id": "run-1/w/oncall/3/1", "status": "executed"},
+            ],
+        },
+        ["run_resumed", "loop", "invoke_resumed"],
+        attendance="unattended",
+    )
+
+    # A queued action carried out, then a loop back to its step.
+    again = mutate(
+        approval=DEFER,
+        failure_modes=[
+            {
+                "condition": "the change did not apply",
+                "when": "${m.success} == false",
+                "action": "request_more_context",
+                "recovery": {"goto_step": "m", "max_loops": 1},
+            }
+        ],
+    )
+    add(
+        "resume_carried_out_then_loop",
+        "A re-entered queued step whose action is carried out, and which a failure mode's when then loops back to, runs again as a new action: the second request names no queued action, and the action carried out keeps its record and approval beside the new one's, as in a run that never deferred (§5.14.1).",
+        {"w": wf([CP, POLICY, again], requires=["approval@1", "recovery@1"])},
+        CHECKPOINTED
+        + [
+            deferred_end({"step": 2, "action_id": "run-1/w/2/0"}),
+            resume(at=3600000),
+            {
+                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "respond": approve("d1"),
+            },
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
+            {"expect": inv("mutate", step=2), "respond": out(success=False)},
+            {
+                "expect": {"kind": "RequestApproval", "step": 2, "approver": HUMAN},
+                "respond": approve("d2", who=("bob",)),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 2},
+                "respond": {"kind": "Checkpoint", "checkpoint_id": "cp3"},
+            },
+            {"expect": inv("mutate", step=2), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "deferred": [],
+            "action_records": [
+                {
+                    "action_id": "run-1/w/2/0",
+                    "status": "executed",
+                    "approval": {"approvers": ["alice"]},
+                },
+                {
+                    "action_id": "run-1/w/2/1",
+                    "status": "executed",
+                    "approval": {"approvers": ["bob"]},
+                },
+            ],
+        },
+        ["run_resumed", "loop"],
         attendance="unattended",
     )

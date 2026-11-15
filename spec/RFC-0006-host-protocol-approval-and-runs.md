@@ -115,9 +115,11 @@ compared regardless of case. An integer, a number written without a fraction
 or an exponent, may reach a magnitude of 2^53 (one beyond RFC 7493's
 recommendation, because 2^53 is exact and 1.1 runs accept it) and is refused
 beyond it; every other number is a binary64 value, which is why `1e+21` is a
-valid shown value. `tests/conformance/approval/digests.json` becomes normative
-under §10.3; each vector has a `kind`, `step` or `tool_call`, so the same file
-pins workflow and tool-call approval.
+valid shown value. Whatever reads values from JSON text refuses a member name
+twice in one object, which a parsed value can no longer show.
+`tests/conformance/approval/digests.json` becomes normative under §10.3;
+each vector has a `kind`, `step` or `tool_call`, so the same file pins
+workflow and tool-call approval.
 
 #### A3) The modes are defined (ACS-44)
 
@@ -153,13 +155,17 @@ resumption invalidated and that a re-entered mutation binds. A nested
 deferred run continues, a run whose handler was deferred runs it last,
 checkpoints are taken anew, and a re-entered step is asked afresh (of a
 person when attended), naming its queued `action_id` on every request until
-it goes on, a re-ask after a recheck and a retry included; the record its
-deferral left is updated in place with each decision and outcome, and no
-other record is written for the step. A recovery loop during the resumption
-runs again the steps from its target to the step that looped, and the
-resumption then goes on: the queued steps after it keep their queued
-actions, and nothing that ran ahead runs twice. A loop, a gate `end` or
-another escalation supersedes the queued actions it overtakes. A run that
+it goes on or its action is carried out, a re-ask after a recheck and a
+retry included; the record its deferral left is updated in place with each
+decision and refusal, and no other record is written for the step. A
+recovery loop during the resumption runs again the steps from its target to
+the step that looped, a handler among them excepted, and the resumption then
+goes on: the queued steps after it keep their queued actions, a deferred
+handler keeps its nested run, and nothing that ran ahead runs twice. A loop
+supersedes only the queued actions of the steps it runs again that were
+deferred again; a gate `end` or another escalation supersedes the queued
+actions it overtakes. A queued record the resumption decides or supersedes
+takes the time and actor of then. A run that
 ended any other way is not resumable, and its queued actions are abandoned.
 An executor refuses a state that does not keep the nested runs and which
 steps ran ahead. A new run of the workflow does not touch the old run's
@@ -174,8 +180,9 @@ an action against observations taken before it.
 A host that restores a run may name the actor, and the executor refuses
 another principal. At a handoff the host cancels the run (Part B) unless it
 ended `deferred`, and the new agent starts its own; a deferred run may
-instead be resumed under the new actor, which the trace and later records
-show.
+instead be resumed under the new actor, which the trace shows, as do the
+records written from then on and the queued records the resumption decides
+or supersedes.
 
 #### A7) Conformance
 
@@ -189,8 +196,11 @@ and a re-ask after a recheck that continue the queued action, a loop that
 goes on with the resumption and one that supersedes what it runs again, a
 retry with a deferred handler, a gate `end`, a failure, a replan, the queued
 action of a nested run that failed, an escalation that overtakes a deferred
-handler, a nested queue that waits through two resumptions). The runtime
-fixture format gains a `resume` entry.
+handler, a nested queue that waits through two resumptions, a loop whose
+range holds a deferred handler, a loop back to a step whose queued action
+was carried out, the time and actor of a superseded record, and `expires`
+counted from the new request). The runtime fixture format gains a `resume`
+entry.
 
 ## Backward compatibility
 
@@ -223,7 +233,7 @@ existing catalog, so none needs migrating.
   `tool_call` vectors).
 - Runtime fixtures: `approval_defaults_partial`,
   `approval_out_of_band_unattended`, `approval_digest_any_case`,
-  `approval_shows_unresolved`, ten `approver_*` fixtures and twenty-three
+  `approval_shows_unresolved`, ten `approver_*` fixtures and twenty-seven
   `resume_*` fixtures; the `resume` script entry and the `{{digest_upper}}`
   placeholder in every replayer.
 - Validator fixtures for the approver fields (pass, V106, S303 in 1.2

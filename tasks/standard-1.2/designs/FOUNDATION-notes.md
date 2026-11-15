@@ -518,3 +518,14 @@ Workstreams should run `npm run check:axe` (or at least
   where they read `cur.queued`; a parked frame holds none. A recovery loop
   during a resumption now prepends the steps it runs again to `Frame.resume`
   instead of clearing it (§5.14.1 item 7).
+- **Review round 2.** `Frame.queued` also closes once the queued action is
+  carried out (`after`, status `executed`), so a loop back to the step asks
+  for a new action. During a resumption a loop's range (`Machine::rerun`)
+  leaves out handler steps: a deferred handler keeps its parked nested run,
+  its `nested_caps` entry and its deferrals. `State.resumed` (left out
+  while false) says the run was resumed: a queued record the resumed run
+  supersedes is written again with the time and actor of then
+  (`reject_queued`, `stamp`); a run never resumed leaves them, as 1.1
+  does. S2b's `cancel` of a resumed run may stamp its `cancelled` records
+  the same way. `exec::read_json` refuses a member name twice in one
+  object.

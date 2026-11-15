@@ -935,16 +935,17 @@ be asked (§5.14.1).
 
 The shown values MUST be I-JSON (RFC 7493): no member name appears twice in
 one object, and every **integer**, a number written without a fraction or an
-exponent, has a magnitude of at most 2^53. An executor refuses a value that
-breaks either rule: a step whose resolved inputs hold one fails with R402,
-and a response that carries one is malformed and changes nothing (§5.19.1). A
-host that reads values from JSON text keeps each integer an integer: where
-its parser would read an integer too long for it as a binary64 value, it
-refuses the value instead. Every other number is a finite binary64 value,
-written as RFC 8785 writes it, so `1e+21` (the `numbers` vector of §10.3) is
-valid although its value exceeds 2^53. (RFC 7493 §2.2 recommends integers of
-magnitude at most 2^53 − 1; 2^53 is also exactly representable in binary64,
-and 1.1 executors accept it.)
+exponent, has a magnitude of at most 2^53. An executor refuses an integer
+beyond that: a step whose resolved inputs hold one fails with R402, and a
+response that carries one is malformed and changes nothing (§5.19.1). A host
+(or an executor) that reads values from JSON text refuses a value with a
+member name twice in one object, or an integer too long for its parser,
+rather than keep one of the members or read the integer as a binary64
+value: once parsed, the value no longer shows either. Every other number is
+a finite binary64 value, written as RFC 8785 writes it, so `1e+21` (the
+`numbers` vector of §10.3) is valid although its value exceeds 2^53. (RFC
+7493 §2.2 recommends integers of magnitude at most 2^53 − 1; 2^53 is also
+exactly representable in binary64, and 1.1 executors accept it.)
 
 The **digest** is the SHA-256 of the UTF-8 encoding of the array's canonical
 JSON (RFC 8785), written as 64 lowercase hexadecimal digits. The request
@@ -1016,11 +1017,13 @@ again when a step it runs again reads it (§5.14.1). A deferred step that
 requires approval gets its own `planned` record. A nested run that ends
 `deferred` defers its `invoke` step; the invocation itself ran, so its
 record (if any) is `executed`, and the nested run's records are the queued
-actions. A recovery loop whose target is a deferred step, or one before it,
-runs the step again, and an invoke step that runs its workflow again (a
-retry) starts it afresh; either way the records of the earlier deferrals
-become `rejected` ("superseded"), so a queue never holds the same action
-twice.
+actions. An invoke step that runs its workflow again (a retry) starts it
+afresh, and, outside a resumption, a recovery loop whose target is a
+deferred step, or one before it, runs the step again; either way the
+records of the earlier deferrals become `rejected` ("superseded"), so a
+queue never holds the same action twice. During a resumption, a loop runs
+again only the steps from its target to the one that looped, and supersedes
+as §5.14.1 item 7 says.
 
 A run with deferred steps ends `deferred`, unless it fails, escalates or
 needs a replan, which take precedence. Whatever the outcome, the terminal
@@ -1092,10 +1095,10 @@ When a run resumes:
 3. **Nested runs.** A deferred `invoke` step whose nested run ended
    `deferred` continues that nested run, which resumes as this subsection
    says; when it ends, the step completes as any step whose nested run ended
-   does (§5.12). The step's condition and gates are not evaluated again, and
-   its inputs are not resolved again: they were when the invocation started.
-   The queued actions of a nested run that failed are not carried out: the
-   resumption supersedes them (`rejected`, "superseded").
+   does (§5.12). The step's condition, gates and inputs are not evaluated
+   again: they were when the invocation started. The queued actions of a
+   nested run that failed are not carried out: the resumption supersedes
+   them (`rejected`, "superseded").
 4. **A deferred handler.** In a run whose handler was deferred (it ended
    `deferred` with an escalation's cause, §5.11), the steps of the normal
    flow that item 2 lists run first, in step order, and then the handler,
@@ -1105,38 +1108,40 @@ When a run resumes:
    match them, `expires` runs from the new request, and `recheck` re-reads
    its source after the decision. Every request for a re-entered queued step
    names its queued action (`queued_action_id`: the `action_id` of the
-   record its deferral left), in either attendance, until the step goes on
-   (item 6), after a recheck or in a retry too. In an attended resumption
+   record its deferral left), in either attendance, while the step continues
+   it (item 6), after a recheck or in a retry too. In an attended resumption
    each such request is put to a person, a `human` approver keeping `role`,
    `min_approvers`, `sender_check` and `accept_trust_classes` and dropping
    `mandate_ref`. In an unattended resumption the step is asked as in any
    unattended run, and its `when_unattended` applies again.
 6. **The record.** A re-entered step continues its queued action until it
-   goes on to another step, is deferred again, or its run leaves it; a
-   recovery loop that runs it again keeps it (item 7). Meanwhile each
-   decision and outcome of the step, with the time and the actor, updates
-   in place the record its deferral left, keeping its `action_id`; no other
-   record is written for it, and the trace keeps every decision. A step
-   deferred again leaves the record `planned`. A queued action whose step
-   goes on, or is left, before reaching its approval (its condition is
+   goes on to another step, carries the action out, is deferred again, or
+   its run leaves it; a recovery loop that runs it again before then keeps
+   it (item 7). Meanwhile each decision and refusal of the step updates in
+   place the record its deferral left, keeping its `action_id`, with the
+   time and actor of then (carrying the action out sets only its status);
+   no other record is written for it, and the trace keeps every decision. A
+   step deferred again leaves the record `planned`. A queued action whose
+   step goes on, or is left, before reaching its approval (its condition is
    false, a gate skips or stops it, or it fails first) is superseded
-   (`rejected`, "superseded").
+   (`rejected`, "superseded"); any record the resumption supersedes takes
+   the time and actor of then.
 7. **Ending early.** A recovery loop during the resumption runs again the
    steps from its target to the step that looped, as in normal flow (a
    handler among them does not run); the resumption then goes on with the
-   rest of its list, a deferred handler last. Of the queued steps the loop
-   runs again, one that has not gone on continues its queued action (item
-   6), one that had runs as a new action, and one deferred again in the
-   resumption has its queued action superseded (§5.14). The steps after the
-   one that looped keep their queued actions and outputs, so nothing that
-   ran ahead runs twice. A gate `end` ends the run before the queued steps
-   after it and the deferred handler, whose queued actions are superseded.
-   Another escalation takes precedence over the deferred handler's: its
-   queued actions are superseded, the queued steps not yet re-entered stay
-   deferred, and the new handler is judged against them (§5.14). When the
-   resumed run fails, or needs a replan, the queued steps it did not reach
-   stay deferred: listed among the run's deferrals, with their records
-   `planned`, abandoned as above.
+   rest of its list, a deferred handler last. Of the queued steps it runs
+   again, one still continuing its queued action keeps it (item 6), one that
+   had gone on or carried it out runs as a new action, and one deferred
+   again in the resumption has its queued action superseded (§5.14). The
+   steps after the one that looped keep their queued actions and outputs, so
+   nothing that ran ahead runs twice. A gate `end` ends the run before the
+   queued steps after it and the deferred handler, whose queued actions are
+   superseded. Another escalation takes precedence over the deferred
+   handler's: its queued actions are superseded, the queued steps not yet
+   re-entered stay deferred, and the new handler is judged against them
+   (§5.14). When the resumed run fails, or needs a replan, the queued steps
+   it did not reach stay deferred: listed among the run's deferrals, with
+   their records `planned`, abandoned as above.
 
 **Saved states.** An executor MUST refuse to resume a state that does not
 keep what this subsection needs: the nested run of each deferred `invoke`
@@ -1416,8 +1421,9 @@ that takes over starts a new run under its own identity. A run that ended
 `deferred` may instead be resumed under the new agent, or cancelled. The one
 change of actor allowed is that resumption (§5.14.1): the host names the new
 actor, the trace records the change, and the action records written from
-then on, including the queued records the resumed run updates, carry the new
-actor; earlier records keep theirs.
+then on, including the queued records the resumed run decides, refuses or
+supersedes (§5.14.1 item 6), carry the new actor; earlier records keep
+theirs.
 
 ### 5.18 Tool-Calling Hosts
 
@@ -2413,7 +2419,7 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 |------|------------|-------|
 | Default approval request | Not stated | A step that requires approval and has no `approval` field is asked as `approval: {approver: {kind: human}}`: in session, shown its resolved inputs, no expiry; omitted members take their defaults; `expires` runs from the request (§5.14) |
 | Approval digest input | "the canonical JSON of the shown values" | The array of resolved `shows` values in order (null when unresolved), `[inputs]` without `shows`, plus a `recheck` element on a re-ask; SHA-256 as lowercase hex, compared regardless of case (§5.14); normative vectors with a `kind` per vector (§10.3) |
-| Numbers in shown values | "integers within ±2^53" | An integer, a number written without a fraction or an exponent, has magnitude at most 2^53 and is refused otherwise; every other number is a binary64 value, so `1e+21` is valid (§5.14) |
+| I-JSON shown values | "integers within ±2^53" | An integer, a number written without a fraction or an exponent, has magnitude at most 2^53 and is refused otherwise; every other number is a binary64 value, so `1e+21` is valid; whatever reads values from JSON text refuses a member name twice in one object (§5.14) |
 | `approval.mode` | Listed values only | `in_session` and `out_of_band` defined; a human approver is still never asked in an unattended run (§5.14) |
 
 **New in 1.2.0:**
@@ -2422,8 +2428,8 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   invalidated checkpoint a re-entered mutation binds; nested deferred runs
   continue; a queued step is asked afresh (of a person when attended), the
   request names `queued_action_id`, and its `planned` record is updated in
-  place. The queued actions of a run that did not end `deferred` are never
-  carried out
+  place, with the time and actor of each decision or supersession. The
+  queued actions of a run that did not end `deferred` are never carried out
 - With `identity@1`, approver identities on a decision
   (`approver_identities`), approvers counted by principal and checked against
   the requested kind and role, and, in a workflow that targets 1.2, the

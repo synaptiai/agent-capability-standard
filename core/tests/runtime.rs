@@ -1055,7 +1055,7 @@ fn response_unknown_members_ignored() {
 }
 
 #[test]
-fn read_json_refuses_inexact_integers() {
+fn read_json_refuses_values_outside_i_json() {
     let ok = read_json(
         r#"{"a": [9007199254740992, -9007199254740992, 1.5e300, "99999999999999999999"]}"#,
     )
@@ -1074,6 +1074,19 @@ fn read_json_refuses_inexact_integers() {
         let e = read_json(bad).unwrap_err();
         assert!(e.contains("2^53"), "{bad}: {e}");
     }
+    // A member name twice in one object, at any depth: parsed, the value
+    // would keep the last and no longer show it (§5.14).
+    for bad in [
+        r#"{"a":1,"a":2}"#,
+        r#"{"a":1,"a":1}"#,
+        r#"[{"b":{"x":[],"y":0,"x":[]}}]"#,
+        r#"{"\u0061":1,"a":2}"#,
+    ] {
+        let e = read_json(bad).unwrap_err();
+        assert!(e.contains("appears twice"), "{bad}: {e}");
+    }
+    let distinct = read_json(r#"{"a":{"a":1},"b":[{"a":2},{"a":3}]}"#).unwrap();
+    assert_eq!(distinct["b"][1]["a"], 3);
     // Malformed JSON and values beyond I-JSON's depth are refused as well.
     assert!(read_json("{").is_err());
     assert!(read_json(&format!("{}1{}", "[".repeat(110), "]".repeat(110))).is_err());

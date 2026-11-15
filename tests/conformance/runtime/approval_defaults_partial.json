@@ -1,5 +1,5 @@
 {
-  "description": "A partial approval field takes the default of each member it leaves out: the request is in session, shows the step's resolved inputs as an array and expires one hour after the request (STANDARD v1.2 \u00a75.14).",
+  "description": "A partial approval field takes the default of each member it leaves out: the request is in session, shows the step's resolved inputs as an array and expires one hour after the request, which is made a second after the run started (STANDARD v1.2 \u00a75.14).",
   "catalog": {
     "w": {
       "goal": "g",
@@ -81,7 +81,8 @@
           "compliant": true,
           "evidence_anchors": []
         }
-      }
+      },
+      "at": 1000
     },
     {
       "expect": {
@@ -100,7 +101,7 @@
             }
           }
         ],
-        "expires_at": 3600000
+        "expires_at": 3601000
       },
       "respond": {
         "kind": "Decision",
