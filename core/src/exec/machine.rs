@@ -156,10 +156,6 @@ pub(crate) struct Reason {
 
 impl Reason {
     /// A reason the executor raises itself.
-    #[allow(
-        dead_code,
-        reason = "the 1.2 workstreams raise reasons through it (FOUNDATION F1.8)"
-    )]
     pub(crate) fn of(token: &str) -> Reason {
         debug_assert!(is_reason(token), "{token} is not a reason");
         Reason {
@@ -296,6 +292,10 @@ impl<'a> Machine<'a> {
         }
         if self.always_ask() {
             record["always_ask"] = json!(true);
+        }
+        // An applied profile required a person for the step (§5.21.3).
+        if self.step_ref().person {
+            record["person_required"] = json!(true);
         }
         if let Some(a) = approval {
             record["approval"] = a;
@@ -814,9 +814,18 @@ impl<'a> Machine<'a> {
             self.frame().cur.always_ask = true;
             self.trace_step("always_ask", json!({}));
         }
+        // A step an applied profile requires a person for (§5.21.3) is
+        // asked as an always-ask step is, but marks nothing: only the
+        // request and the decision change.
+        if self.step_ref().person && !self.frame_ref().cur.person {
+            self.frame().cur.person = true;
+            let profiles = self.step_ref().raised_by.clone();
+            self.trace_step("person_required", json!({"profiles": profiles}));
+        }
+        let person = marked || self.step_ref().person;
         // A standing mandate needs no one present: it is asked even in an
         // unattended run, and the plan applies only if none covers the step.
-        let mandate = !marked
+        let mandate = !person
             && spec
                 .get("approver")
                 .and_then(|a| a.get("kind"))
@@ -825,6 +834,8 @@ impl<'a> Machine<'a> {
         if self.st.attendance == Attendance::Unattended && !mandate {
             let why = if marked {
                 "the run is unattended and the step uses an item from an always-ask trust class"
+            } else if person {
+                "the run is unattended and an applied profile requires a person for this step"
             } else {
                 "the run is unattended"
             };
@@ -860,7 +871,7 @@ impl<'a> Machine<'a> {
             .get("approver")
             .cloned()
             .unwrap_or_else(|| json!({"kind": "human"}));
-        if marked && let Value::Object(a) = &mut approver {
+        if person && let Value::Object(a) = &mut approver {
             a.insert("kind".into(), json!("human"));
             a.remove("mandate_ref");
             a.insert("always_ask".into(), json!(true));
@@ -1113,8 +1124,8 @@ impl<'a> Machine<'a> {
         let spec = self.approval_spec();
         let now = self.st.now;
         let distinct: std::collections::BTreeSet<&String> = approvers.iter().collect();
-        // A person was asked instead of the mandate (§5.17).
-        let mandate_ref = if self.always_ask() {
+        // A person was asked instead of the mandate (§5.17, §5.21.3).
+        let mandate_ref = if self.asks_person() {
             Value::Null
         } else {
             spec.get("approver")
@@ -1586,6 +1597,29 @@ impl<'a> Machine<'a> {
             f.cur.delegated = Some(value);
             return self.set_stage(Stage::Execute);
         }
+        // An applied profile's minimum confidence (§5.21.3), after the
+        // required fields (and S4's grounding check), before the
+        // after-gates.
+        if let Some(min) = self.program.policy.minimum_confidence()
+            && let Some(fault) = crate::profile::check_confidence(&value, min)
+        {
+            return match fault {
+                crate::profile::ConfidenceFault::Below(c) => self.step_error_with(
+                    "F504",
+                    format!(
+                        "confidence {c} is below the minimum confidence {min} of the applied profiles"
+                    ),
+                    Reason::of("below_minimum_confidence"),
+                ),
+                crate::profile::ConfidenceFault::Invalid(text) => self.step_error_with(
+                    "F504",
+                    format!(
+                        "the output's confidence {text} is not a number from 0 to 1, and an applied profile sets a minimum confidence"
+                    ),
+                    Reason::of("invalid_confidence"),
+                ),
+            };
+        }
         if step.capability == "checkpoint" {
             let id = value
                 .get("checkpoint_id")
@@ -1606,6 +1640,13 @@ impl<'a> Machine<'a> {
             self.frame_ref().step,
             self.st.checkpoints.len()
         )
+    }
+
+    /// Whether this step must be asked of a person: it uses an always-ask
+    /// item (§5.17), or an applied profile requires a person (§5.21.3).
+    /// Read where the request and the decision are formed, nowhere else.
+    fn asks_person(&self) -> bool {
+        self.always_ask() || self.step_ref().person
     }
 
     /// Whether the current step reads (in its bindings, condition or gates)
@@ -2301,7 +2342,7 @@ impl<'a> Machine<'a> {
                     _ => String::new(),
                 };
                 let spec = self.approval_spec();
-                let mandate_ref = if self.always_ask() {
+                let mandate_ref = if self.asks_person() {
                     None
                 } else {
                     spec.get("approver").and_then(|a| a.get("mandate_ref"))

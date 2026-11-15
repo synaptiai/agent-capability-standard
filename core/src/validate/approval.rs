@@ -342,6 +342,19 @@ pub(crate) fn unattended_always_ask(loc: &StepLoc<'_>, report: &mut Report) {
     );
 }
 
+/// W606 for a step whose only plan for an unattended run is a standing
+/// mandate, when an applied domain profile requires a person for it
+/// (§5.21.3): no mandate covers that, so the run fails here.
+pub(crate) fn unattended_person(loc: &StepLoc<'_>, report: &mut Report) {
+    report.push(
+        loc.diag(
+            Code::UnattendedApproval,
+            "this step relies on a standing mandate in unattended runs, but an applied domain profile requires a person for it (require_human or block_autonomous); no mandate covers that, so an unattended run fails here with F502 unless approval.when_unattended says otherwise",
+        )
+        .at("field", "approval.when_unattended"),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};

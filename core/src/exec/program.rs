@@ -55,6 +55,12 @@ pub struct Step {
     pub raw: Map<String, Value>,
     pub requires_checkpoint: bool,
     pub requires_approval: bool,
+    /// An applied profile requires a person for this step (§5.21.3): it
+    /// is asked as an always-ask step is, but marks nothing.
+    pub person: bool,
+    /// The profiles that require the person (the trace's
+    /// `person_required`).
+    pub raised_by: Vec<String>,
     pub required_outputs: Vec<String>,
     pub handler: bool,
     pub condition: Option<Expr>,
@@ -118,6 +124,9 @@ pub struct Program {
     /// contracts its steps use: a snapshot is only restored against what it
     /// was taken from.
     pub digest: String,
+    /// The domain profiles applied to the run (§5.21): saved with the run
+    /// as given, and loaded again when it is restored.
+    pub policy: Policy,
 }
 
 fn parse(src: &str) -> Result<Expr, String> {
@@ -149,7 +158,12 @@ fn target(steps: &[Value], name: &str) -> Option<usize> {
 impl Program {
     /// Prepare every workflow of the catalog (an `invoke` may name its
     /// target at run time). The catalog must already have passed validation.
-    pub fn build(ctx: &Context, catalog: &Value, root: &str) -> Result<Program, String> {
+    pub fn build(
+        ctx: &Context,
+        catalog: &Value,
+        root: &str,
+        policy: Policy,
+    ) -> Result<Program, String> {
         let entries = catalog
             .as_object()
             .ok_or_else(|| "the catalog is not a mapping".to_string())?;
@@ -159,7 +173,7 @@ impl Program {
             if name.starts_with("x-") || !raw.contains_key("steps") {
                 continue;
             }
-            workflows.insert(name.clone(), Self::workflow(ctx, name, raw)?);
+            workflows.insert(name.clone(), Self::workflow(ctx, name, raw, &policy)?);
         }
         if !workflows.contains_key(root) {
             return Err(format!("workflow '{root}' is not in the catalog"));
@@ -181,10 +195,19 @@ impl Program {
             "catalog": catalog,
             "contracts": contracts,
         }));
-        Ok(Program { workflows, digest })
+        Ok(Program {
+            workflows,
+            digest,
+            policy,
+        })
     }
 
-    fn workflow(ctx: &Context, name: &str, raw: &Map<String, Value>) -> Result<Workflow, String> {
+    fn workflow(
+        ctx: &Context,
+        name: &str,
+        raw: &Map<String, Value>,
+        policy: &Policy,
+    ) -> Result<Workflow, String> {
         let declared: Vec<String> = raw
             .get("workflow_extensions")
             .and_then(|e| e.get("requires"))
@@ -206,7 +229,7 @@ impl Program {
             let Some(step) = value.as_object() else {
                 return Err(format!("{name}: step {index} is not a mapping"));
             };
-            steps.push(Self::step(ctx, name, index, step, list, &declared)?);
+            steps.push(Self::step(ctx, name, index, step, list, &declared, policy)?);
         }
         Ok(Workflow {
             name: name.to_string(),
@@ -223,6 +246,7 @@ impl Program {
         raw: &Map<String, Value>,
         all: &[Value],
         declared: &[String],
+        policy: &Policy,
     ) -> Result<Step, String> {
         let at = |what: &str| format!("{wf}: step {index}: {what}");
         let has = |ext: &str| declared.iter().any(|d| d == ext);
@@ -372,9 +396,16 @@ impl Program {
         }
         reads.sort_unstable();
         reads.dedup();
-        // The effective flags (§5.2.1), as the validator computes them. S3
-        // adds the delegation targets' maxima, S6 the applied profiles.
-        let flags = crate::validate::effective(node, raw, None, &Policy::default()).flags;
+        // The effective flags (§5.2.1), raised by the applied profiles
+        // (§5.21.3), as the validator computes them. S3 adds the delegation
+        // targets' maxima.
+        let effective = crate::validate::effective(node, raw, None, policy);
+        let flags = effective.flags;
+        let raised_by = if effective.person {
+            policy.labels_raising(&capability, flags.risk)
+        } else {
+            Vec::new()
+        };
         let (requires_checkpoint, requires_approval) =
             (flags.requires_checkpoint, flags.requires_approval);
         // Acting on the world: a checkpoint or approval requirement, a
@@ -413,6 +444,8 @@ impl Program {
                 .map(str::to_string),
             requires_checkpoint,
             requires_approval,
+            person: effective.person,
+            raised_by,
             required_outputs,
             handler: has("recovery@1") && capability == "invoke" && flag("handler"),
             delay,

@@ -161,7 +161,6 @@ def test_start_validates_with_the_header(validator: _core.Validator) -> None:
     "option",
     [
         {"records": "actions"},
-        {"profiles": [{"domain": "d"}]},
         {"grounding": [{"require": ["retrieve"]}]},
         {"destinations": [["ops"]]},
         {"catalogs": [{"x": {}}]},
@@ -182,6 +181,16 @@ def test_start_refuses_options_not_implemented_yet(
     "option",
     [
         {"records": "everything"},
+        {"profiles": [{"domain": "d"}]},
+        {
+            "profiles": [
+                {
+                    "domain": "d",
+                    "version": "1.0.0",
+                    "checkpoint_policy": {"mutat": "always"},
+                }
+            ]
+        },
         {"grounding": [{"require": ["retreive"]}]},
         {"grounding": [{"require": []}]},
         {"grounding": [{"require": ["retrieve"], "kinds": ["paper"]}]},

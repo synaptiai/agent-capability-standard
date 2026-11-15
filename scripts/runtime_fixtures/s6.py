@@ -2,9 +2,371 @@
 
 Define each with add(name, description, catalog, script, end, trace, ...),
 the function of scripts/gen_runtime_fixtures.py; the building blocks are in
-runtime_fixtures.helpers.
+runtime_fixtures.helpers. Each fixture here applies domain profiles
+(`profiles`, STANDARD v1.2 §5.21) and pins one rule of §5.21.3.
 """
+
+from runtime_fixtures.helpers import CP, POLICY, approve, inv, mutate, out, st, wf
+
+
+def profile(domain, **rules):
+    p = {"domain": domain, "version": "1.0.0"}
+    p.update(rules)
+    return p
+
+
+REVIEW_LOW = profile("review-low", risk_thresholds={"require_review": "low"})
+REVIEW_MEDIUM = profile("review-medium", risk_thresholds={"require_review": "medium"})
+HUMAN_LOW = profile("human-low", risk_thresholds={"require_human": "low"})
+PERSON_MUTATE = profile(
+    "person-mutate", risk_thresholds={"block_autonomous": ["mutate"]}
+)
+STAR_ALWAYS = profile("star-always", checkpoint_policy={"*": "always"})
+STAR_MEDIUM = profile("star-medium", checkpoint_policy={"*": "medium_risk"})
+CHECKPOINT_EXECUTE = profile(
+    "checkpoint-execute", checkpoint_policy={"execute": "always"}
+)
+CONFIDENT = profile("confident", evidence_policy={"minimum_confidence": 0.9})
+
+M1 = {"kind": "standing_mandate", "mandate_ref": "m1"}
+PERSON = {"kind": "human", "always_ask": True}
+
+
+def retrieve(store="r", **kw):
+    kw.setdefault("input_bindings", {"target": "x"})
+    return st("retrieve", store, **kw)
+
+
+def person_catalog(**approval):
+    """A mutate step a profile requires a person for, its approver a mandate."""
+    return {
+        "w": wf(
+            [CP, POLICY, mutate(approval={"approver": M1, **approval})],
+            requires=["approval@1"],
+        )
+    }
+
+
+def classify(**kw):
+    return {"w": wf([st("classify", "c", input_bindings={"item": "x"}, **kw)])}
+
+
+def invoke_child():
+    return st("invoke", "i", workflow_id="child", input_bindings={"workflow": "child"})
 
 
 def register(add):
-    """Add this workstream's fixtures (none yet)."""
+    add(
+        "profile_review_threshold",
+        "require_review: low covers every risk level: a low-risk retrieve is asked"
+        " for approval (a human, the default approver) before it runs.",
+        {"w": wf([retrieve()])},
+        [
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "step": 0,
+                    "approver": {"kind": "human"},
+                },
+                "respond": approve("d1"),
+            },
+            {"expect": inv("retrieve", step=0), "respond": out(data=1, confidence=1)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {"status": "executed", "approval": {"decision": "approved"}}
+            ],
+        },
+        ["approval_requested", "approval_decided"],
+        profiles=[REVIEW_LOW],
+    )
+
+    add(
+        "profile_person_overrides_mandate",
+        "block_autonomous requires a person for the mutate step: it is asked of a"
+        " human with always_ask and no mandate_ref, though its approver is a standing"
+        " mandate; its record carries person_required, and the decision no mandate_ref.",
+        person_catalog(),
+        [
+            {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+            {"expect": inv("constrain"), "respond": out(compliant=True)},
+            {
+                "expect": {"kind": "RequestApproval", "step": 2, "approver": PERSON},
+                "respond": approve("d1", who=("dana",)),
+            },
+            {"expect": inv("mutate", step=2), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {
+                    "status": "executed",
+                    "person_required": True,
+                    "approval": {"mandate_ref": None, "approvers": ["dana"]},
+                }
+            ],
+        },
+        ["person_required", "approval_requested", "approval_decided"],
+        profiles=[PERSON_MUTATE],
+    )
+
+    add(
+        "profile_person_does_not_mark_readers",
+        "The person requirement belongs to the mutate step alone: a later step that"
+        " reads its output is asked of its own approver, a standing mandate.",
+        {
+            "w": wf(
+                [
+                    CP,
+                    POLICY,
+                    mutate(approval={"approver": {"kind": "human"}}),
+                    retrieve(
+                        "after",
+                        requires_approval=True,
+                        approval={"approver": M1},
+                        input_bindings={"target": "after change ${m.success}"},
+                    ),
+                ],
+                requires=["approval@1"],
+            )
+        },
+        [
+            {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+            {"expect": inv("constrain"), "respond": out(compliant=True)},
+            {
+                "expect": {"kind": "RequestApproval", "step": 2, "approver": PERSON},
+                "respond": approve("d1", who=("dana",)),
+            },
+            {"expect": inv("mutate", step=2), "respond": out(success=True)},
+            {
+                "expect": {"kind": "RequestApproval", "step": 3, "approver": M1},
+                "respond": approve("d2", who=("mandate",)),
+            },
+            {"expect": inv("retrieve", step=3), "respond": out(data=1, confidence=1)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {"status": "executed", "person_required": True},
+                {"status": "executed", "approval": {"mandate_ref": "m1"}},
+            ],
+        },
+        ["person_required", "approval_requested"],
+        profiles=[PERSON_MUTATE],
+    )
+
+    add(
+        "profile_star_always_starts",
+        'checkpoint_policy {"*": always} never covers a checkpoint step, so the run'
+        " starts; the first retrieve uses the step's checkpoint and the second asks"
+        " for its own.",
+        {"w": wf([CP, retrieve("r1"), retrieve("r2")])},
+        [
+            {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+            {"expect": inv("retrieve", step=1), "respond": out(data=1, confidence=1)},
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 2},
+                "respond": {"kind": "Checkpoint", "checkpoint_id": "cp2"},
+            },
+            {"expect": inv("retrieve", step=2), "respond": out(data=2, confidence=1)},
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["checkpoint_consumed", "checkpoint_created"],
+        profiles=[STAR_ALWAYS],
+    )
+
+    add(
+        "profile_person_unattended_deferred",
+        "Unattended, a step a profile requires a person for is not asked, even of"
+        " its mandate: when_unattended applies (here, queued).",
+        person_catalog(when_unattended="defer_to_queue"),
+        [
+            {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+            {"expect": inv("constrain"), "respond": out(compliant=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "deferred",
+            "action_records": [{"status": "planned", "person_required": True}],
+            "deferred": [{"step": 2, "store_as": "m"}],
+        },
+        ["person_required", "approval_unattended", "step_deferred"],
+        attendance="unattended",
+        profiles=[PERSON_MUTATE],
+    )
+
+    add(
+        "profile_person_unattended_fails",
+        "Unattended, with no when_unattended, a step a profile requires a person for"
+        " fails with F502: its mandate does not cover it.",
+        person_catalog(),
+        [
+            {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+            {"expect": inv("constrain"), "respond": out(compliant=True)},
+        ],
+        {"kind": "Failed", "code": "F502", "step": 2},
+        ["person_required"],
+        attendance="unattended",
+        profiles=[PERSON_MUTATE],
+    )
+
+    add(
+        "profile_checkpoint_each_step",
+        "checkpoint_policy {execute: always}: the first execute uses the step's"
+        " checkpoint, the second asks for its own.",
+        {
+            "w": wf(
+                [
+                    CP,
+                    st("execute", "e1", input_bindings={"code": "a"}),
+                    st("execute", "e2", input_bindings={"code": "b"}),
+                ]
+            )
+        },
+        [
+            {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+            {
+                "expect": {"kind": "RequestApproval", "step": 1},
+                "respond": approve("d1"),
+            },
+            {"expect": inv("execute", step=1), "respond": out(result="ok")},
+            {
+                "expect": {"kind": "RequestApproval", "step": 2},
+                "respond": approve("d2"),
+            },
+            {
+                "expect": {"kind": "CreateCheckpoint", "step": 2},
+                "respond": {"kind": "Checkpoint", "checkpoint_id": "cp2"},
+            },
+            {"expect": inv("execute", step=2), "respond": out(result="ok")},
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["checkpoint_consumed", "checkpoint_created"],
+        profiles=[CHECKPOINT_EXECUTE],
+    )
+
+    add(
+        "profile_star_medium_risk",
+        'checkpoint_policy {"*": medium_risk} covers the invoke step (medium) but not'
+        " the low-risk retrieve of its nested run.",
+        {"w": wf([CP, invoke_child()]), "child": wf([retrieve()])},
+        [
+            {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+            {
+                "expect": inv("retrieve", frame=["w", "child"]),
+                "respond": out(data=1, confidence=1),
+            },
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["checkpoint_consumed", "invoke_started", "invoke_returned"],
+        profiles=[STAR_MEDIUM],
+    )
+
+    add(
+        "profile_minimum_confidence_fails",
+        "An output whose confidence is below the applied minimum fails its step:"
+        " F504, reason below_minimum_confidence.",
+        classify(),
+        [{"expect": inv("classify"), "respond": out(labels=["a"], confidence=0.5)}],
+        {
+            "kind": "Failed",
+            "code": "F504",
+            "step": 0,
+            "reason": "below_minimum_confidence",
+        },
+        ["step_failed"],
+        profiles=[CONFIDENT],
+    )
+
+    add(
+        "profile_minimum_confidence_not_a_number",
+        "While a minimum applies, a confidence that is not a number from 0 to 1"
+        ' (here the string "0.95") fails its step: F504, reason invalid_confidence.',
+        classify(),
+        [
+            {
+                "expect": inv("classify"),
+                "respond": out(labels=["a"], confidence="0.95"),
+            }
+        ],
+        {"kind": "Failed", "code": "F504", "step": 0, "reason": "invalid_confidence"},
+        ["step_failed"],
+        profiles=[CONFIDENT],
+    )
+
+    add(
+        "profile_minimum_confidence_failure_mode",
+        "F504 from a profile's minimum is matched by a failure mode's on_error; with"
+        " no recovery the run ends with the step's code.",
+        classify(
+            failure_modes=[
+                {"condition": "low confidence", "on_error": ["F504"], "action": "stop"}
+            ]
+        ),
+        [{"expect": inv("classify"), "respond": out(labels=["a"], confidence=0.5)}],
+        {"kind": "Failed", "code": "F504", "step": 0},
+        ["step_failed", "failure_mode_fired"],
+        profiles=[CONFIDENT],
+    )
+
+    add(
+        "profile_minimum_confidence_met",
+        "A confidence at or above the applied minimum passes.",
+        classify(),
+        [{"expect": inv("classify"), "respond": out(labels=["a"], confidence=0.95)}],
+        {"kind": "Completed", "outcome": "completed"},
+        profiles=[CONFIDENT],
+    )
+
+    add(
+        "profile_applies_in_nested_run",
+        "A run's profiles cover its nested runs: the invoke step and the retrieve"
+        " it runs are each asked for approval.",
+        {"w": wf([invoke_child()]), "child": wf([retrieve()])},
+        [
+            {
+                "expect": {"kind": "RequestApproval", "step": 0, "frame": ["w"]},
+                "respond": approve("d1"),
+            },
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "step": 0,
+                    "frame": ["w", "child"],
+                },
+                "respond": approve("d2"),
+            },
+            {
+                "expect": inv("retrieve", frame=["w", "child"]),
+                "respond": out(data=1, confidence=1),
+            },
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["approval_requested", "invoke_started"],
+        profiles=[REVIEW_LOW],
+    )
+
+    add(
+        "profile_two_profiles_strictest",
+        "Two profiles each apply: require_review: medium does not cover a low-risk"
+        " retrieve, require_human: low does, so a person is asked.",
+        {"w": wf([retrieve()])},
+        [
+            {
+                "expect": {"kind": "RequestApproval", "step": 0, "approver": PERSON},
+                "respond": approve("d1"),
+            },
+            {"expect": inv("retrieve", step=0), "respond": out(data=1, confidence=1)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [{"status": "executed", "person_required": True}],
+        },
+        ["person_required", "approval_requested"],
+        profiles=[REVIEW_MEDIUM, HUMAN_LOW],
+    )

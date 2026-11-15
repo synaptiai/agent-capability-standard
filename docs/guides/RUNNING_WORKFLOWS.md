@@ -312,13 +312,14 @@ members of its `detail`.
 | `step_skipped` | The step does not run: its condition is false, a gate skipped it, or it needed approval and `when_unattended: skip` applied | `reason` |
 | `step_deferred` | The step is deferred (§5.14) | `reason` |
 | `step_completed` | The step has its output, before its after-gates are evaluated | none |
-| `step_failed` | The step fails with a code, after its retries and before its failure modes | `code`, `message` |
+| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the failure's reason (§5.19.7), when it has one | `code`, `message`, `reason` |
 | `expression_error` | A condition, a gate's `when` or a failure mode's `when` did not evaluate (R405) | `site`, `code`, `message` |
 | `gate_fired` | A gate fires, whatever its action | `gate`, `action`, `message` |
 | `run_ended` | A gate with `action: end` ends the run, or the nested run it fired in | `message` |
 | `delay_started` | A step's `delay` begins | `until` |
 | `delay_finished` | The delay is over | none |
 | `always_ask` | A step that requires approval uses an item from an always-ask trust class (§5.17), so a person is asked | none |
+| `person_required` | A step that requires approval is one an applied domain profile requires a person for (§5.21.3), so a person is asked; recorded once per step, and it marks no data | `profiles` |
 | `approval_requested` | A `RequestApproval` action is issued | `digest` |
 | `approval_decided` | A decision arrives; `valid` is true only when it lets the step go ahead | `decision_id`, `decision`, `valid` |
 | `approval_unattended` | The run is unattended and no standing mandate covers the step, so `when_unattended` applies | `when_unattended`, `reason` |
@@ -340,7 +341,7 @@ members of its `detail`.
 | `recovery_exhausted` | A failure mode has no loops left | `failure_mode`, `loops` |
 | `escalated` | The run goes to a handler step; `cause` is the code that led there | `handler`, `cause` |
 | `run_finished` | The run ends with an outcome; `cause` is the code that led to an escalation, null without one, and absent when the run ends `replan_required` | `outcome`, `cause` |
-| `run_failed` | The run ends with a failure code | `code`, `message` |
+| `run_failed` | The run ends with a failure code; `reason` as for `step_failed` | `code`, `message`, `reason` |
 
 `gate`, `failure_mode` and `handler` are indexes, from 0, into the step's
 `gates`, the step's `failure_modes` and the workflow's `steps`.

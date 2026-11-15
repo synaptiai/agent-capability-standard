@@ -152,8 +152,9 @@ pub struct StartOptions {
     /// Which action records the run writes (§6.4). Workstream S2b implements
     /// `Actions`; until then it is refused.
     pub records: RecordMode,
-    /// Domain profiles to apply (§5.21). Workstream S6 applies them; until
-    /// then a non-empty list is refused.
+    /// Domain profiles to apply (§5.21), as given. They are checked when
+    /// the run starts (an error refuses it), cover every step of the run
+    /// and of its nested runs, and are saved with it.
     pub profiles: Vec<Value>,
     /// The host's grounding policies (§5.20). Workstream S4 applies them;
     /// until then a non-empty list is refused.
@@ -171,9 +172,6 @@ impl StartOptions {
     fn unimplemented(&self) -> Option<&'static str> {
         if self.records != RecordMode::Approvals {
             return Some("records: actions (§6.4)");
-        }
-        if !self.profiles.is_empty() {
-            return Some("profiles (§5.21)");
         }
         if !self.grounding.is_empty() {
             return Some("grounding policies (§5.20)");
@@ -495,6 +493,10 @@ pub(crate) struct StepState {
     /// its nested run used one (§5.17).
     #[serde(default)]
     pub always_ask: bool,
+    /// An applied profile requires a person for the step (§5.21.3), and
+    /// the trace says so: traced once per step. It marks nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person: bool,
     /// A `delegate` step that waits (§5.13): the delegation's output, once
     /// the host has delegated; the step then waits for the result.
     #[serde(default)]
@@ -792,7 +794,7 @@ impl Run {
             profiles: profiles.to_vec(),
             ..validate::Options::default()
         };
-        let report = validate::validate_with(ctx, catalog, &options)
+        let (report, policy) = validate::validate_options(ctx, catalog, &options)
             .map_err(|e| StartError::Unsupported(e.to_string()))?;
         let errors: Vec<Diagnostic> = report
             .diagnostics
@@ -802,7 +804,7 @@ impl Run {
         if !errors.is_empty() {
             return Err(StartError::Invalid(errors));
         }
-        Program::build(ctx, catalog, workflow).map_err(StartError::Program)
+        Program::build(ctx, catalog, workflow, policy).map_err(StartError::Program)
     }
 
     fn machine(&mut self) -> Machine<'_> {
@@ -895,7 +897,6 @@ impl Run {
         // Members this executor does not implement yet: it could not have
         // written a state that holds them.
         if state.records_mode != RecordMode::Approvals
-            || !state.profiles.is_empty()
             || !state.grounding.is_empty()
             || !state.destinations.is_empty()
         {

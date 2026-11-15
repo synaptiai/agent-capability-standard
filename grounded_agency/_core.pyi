@@ -24,6 +24,7 @@ def validate_catalog(
     catalog_path: str | PathLike[str],
     ontology_path: str | PathLike[str],
     schema_root: str | PathLike[str],
+    profiles: list[Any] | None = None,
 ) -> dict[str, Any]: ...
 def canonical_json(value: Any) -> str:
     """The canonical JSON (RFC 8785) of an I-JSON value; ``ValueError``
@@ -57,8 +58,28 @@ class Validator:
     def __new__(
         cls, ontology_path: str | PathLike[str], schema_root: str | PathLike[str]
     ) -> Validator: ...
-    def validate_file(self, path: str | PathLike[str]) -> dict[str, Any]: ...
-    def validate(self, catalog: Any, header: str | None = None) -> dict[str, Any]: ...
+    def validate_file(
+        self, path: str | PathLike[str], profiles: list[Any] | None = None
+    ) -> dict[str, Any]: ...
+    def validate(
+        self, catalog: Any, header: str | None = None, profiles: list[Any] | None = None
+    ) -> dict[str, Any]:
+        """``profiles``: domain profiles to apply (Standard v1.2 §5.21); their
+        diagnostics come first."""
+    def check_profiles(self, profiles: list[Any]) -> dict[str, Any]:
+        """The diagnostics of loading ``profiles`` (Standard v1.2 §5.21.2)."""
+    def profile_flags(
+        self,
+        profiles: list[Any],
+        capability: str,
+        declared: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """``{"risk", "mutation", "requires_checkpoint", "requires_approval",
+        "person", "warnings"}`` (§5.21.3); ``ValueError((message,
+        diagnostics))`` when the profiles have an error."""
+    def profile_policy(self, profiles: list[Any]) -> dict[str, Any]:
+        """``{"minimum_confidence", "grounding", "destinations",
+        "trust_weights"}`` (§5.21.3); ``ValueError`` as ``profile_flags``."""
     def contracts(self) -> dict[str, dict[str, Any]]:
         """Every capability's ``{"input": ..., "output": ...}`` contracts with
         each ``$ref`` resolved, in ontology order."""

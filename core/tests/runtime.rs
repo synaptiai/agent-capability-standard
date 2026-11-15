@@ -875,10 +875,6 @@ fn start_refuses_options_not_implemented_yet() {
             ..opts()
         },
         StartOptions {
-            profiles: vec![serde_json::json!({"domain": "d"})],
-            ..opts()
-        },
-        StartOptions {
             grounding: vec![
                 acs_core::grounding::Policy::new(vec!["search".into()], None, false).unwrap(),
             ],
@@ -899,7 +895,6 @@ fn start_refuses_options_not_implemented_yet() {
     let run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
     for (key, value) in [
         ("records_mode", serde_json::json!("actions")),
-        ("profiles", serde_json::json!([{"domain": "d"}])),
         ("grounding", serde_json::json!([{"require": ["search"]}])),
         ("destinations", serde_json::json!([["ops"]])),
     ] {
