@@ -16,14 +16,14 @@ import { cell, code, figure, table } from './md';
 
 /** The figure's title as the page prints it: "{name}, from §{n}". */
 export function slotTitle(slot: SpecSlot, text: string, where: string): string {
-  const name = SLOT_NAMES[slot.key] ?? T.TABLE_FIGURES[slot.key]?.name ?? (slot.key.startsWith('codes-') ? `${T.sectionCodes(text, slot.key.slice(6), where).heading} by code` : null);
+  const name = SLOT_NAMES[slot.key] ?? T.TABLE_FIGURES[slot.key]?.name ?? T.CODE_TABLE_FIGURES[slot.key]?.name ?? (slot.key.startsWith('codes-') ? `${T.sectionCodes(text, slot.key.slice(6), where).heading} by code` : null);
   if (slot.key.startsWith('pattern-')) {
     const p = T.patternStrips(text, where)[Number(slot.key.slice(8))];
     if (!p) throw new Error(`${where}: §12.5 has no pattern fence for ${slot.key}`);
     return `Pattern: ${p.name}, from §${slot.section.trim()}`;
   }
   if (name === null) throw new Error(`spec twin: no title for the figure slot ${slot.key}`);
-  return `${name}, from §${slot.section.trim()}`;
+  return `${name}, from §${slot.section.trim().replace(/\.$/, '')}`;
 }
 
 /** Names of the slots whose title does not come from the text (as in SpecFigure.astro). */
@@ -62,6 +62,8 @@ const SLOT_NAMES: Record<string, string> = {
   'code-heat': 'Where codes are raised',
   levels: 'What each level checks',
   suite: 'The conformance suite',
+  'sl-fixtures': 'The safety-layer fixtures',
+  principles: 'The design principles',
   bumps: 'Which change bumps which number',
   'checkpoint-tree': 'Checkpoint decision tree',
   categories: 'Error categories',
@@ -146,12 +148,21 @@ export function slotBlock(slot: SpecSlot, source: string): string {
       const t = T.decisionTree(text, where);
       return figure(title, T.treeCaption(t), [`${t.text}`, '', ...treeList(t)].join('\n'));
     }
+    case 'sl-fixtures': {
+      const g = T.safetyLayerFixtures(text, where);
+      return figure(title, T.safetyLayerFixturesCaption(g), table(['Fixtures', 'Count'], g.map((x) => [x.label, String(x.count)])));
+    }
+    case 'principles': {
+      const p = D.designPrinciples(text, where);
+      return figure(title, D.principlesCaption(p), table(['Section', 'Principle'], p.map((x) => [`§${x.section}`, x.name])));
+    }
     case 'categories': {
       const c = T.categoryCounts(text, where);
       return figure(title, T.categoryCaption(c), table(['Category', 'Range', 'Codes'], c.map((x) => [x.name, code(x.range), String(x.count)])));
     }
   }
   if (slot.key.startsWith('codes-')) return figure(title, T.sectionCodesCaption(T.sectionCodes(text, slot.key.slice(6), where)), drawn('table'));
+  if (slot.key in T.CODE_TABLE_FIGURES) return figure(title, T.codeTableCaption(slot.key, text, where), drawn('table'));
   if (slot.key in T.TABLE_FIGURES) return figure(title, T.tableFigureCaption(slot.key, text, where), drawn('field table'));
   if (slot.key.startsWith('pattern-')) {
     const p = T.patternStrips(text, where)[Number(slot.key.slice(8))]!;

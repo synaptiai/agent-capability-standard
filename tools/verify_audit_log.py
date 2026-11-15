@@ -7,7 +7,10 @@ Reads .claude/audit.log and verifies that:
 3. Each entry's prev_hmac matches the previous entry's HMAC (chain integrity)
 
 The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call:
-ts, event, tool, skill (on a Skill call), input_sha256, prev_hmac, hmac. Before
+ts, event, tool, skill (on a Skill call), input_sha256, recorded_by (the layer
+and its configuration: name, version, config_sha256 and settings; STANDARD
+1.2.0 section 5.18.8), prev_hmac, hmac. A line written before recorded_by was
+added has none, and verifies too. Before
 the hook logged every tool call it wrote ts, skill, args, prev_hmac, hmac for
 Skill calls only; a log that begins with such entries still verifies, because
 the HMAC is taken over every field but ``hmac`` in the order recorded.

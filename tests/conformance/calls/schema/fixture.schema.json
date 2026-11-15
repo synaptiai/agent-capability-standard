@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/synaptiai/agent-capability-standard/tests/conformance/calls/schema/fixture.schema.json",
+  "title": "Call-sequence fixture (Agent Capability Standard 1.2.0, section 10.4)",
+  "description": "One layer scope with a person present: tool bindings, then a sequence of calls and events, each call with the outcome a conforming safety layer gives it (section 5.18).",
+  "type": "object",
+  "required": ["description", "ontology", "bindings", "sequence"],
+  "additionalProperties": false,
+  "properties": {
+    "description": { "type": "string", "minLength": 1 },
+    "ontology": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "needs": {
+      "type": "array",
+      "items": { "enum": ["unbound_calls", "nested_calls", "recorded_approval"] },
+      "uniqueItems": true
+    },
+    "bindings": {
+      "type": "array",
+      "items": { "$ref": "../../../../schemas/interop/tool_binding.schema.json" }
+    },
+    "sequence": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "anyOf": [{ "$ref": "#/$defs/call" }, { "$ref": "#/$defs/event" }] }
+    }
+  },
+  "$defs": {
+    "decided_by": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "call": {
+      "type": "object",
+      "required": ["call", "expect"],
+      "additionalProperties": false,
+      "properties": {
+        "call": { "type": "string", "minLength": 1 },
+        "args": { "type": "object" },
+        "approve": { "$ref": "#/$defs/decided_by" },
+        "reject": { "$ref": "#/$defs/decided_by" },
+        "fails": { "const": true },
+        "nested": { "type": "array", "items": { "$ref": "#/$defs/call" } },
+        "expect": {
+          "oneOf": [
+            { "const": "run" },
+            {
+              "type": "object",
+              "required": ["refuse"],
+              "additionalProperties": false,
+              "properties": { "refuse": { "enum": ["F501", "F502", "F503", "F504", "R407", "V102"] } }
+            }
+          ]
+        }
+      }
+    },
+    "event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["boundary"],
+          "additionalProperties": false,
+          "properties": { "boundary": { "const": true } }
+        },
+        {
+          "type": "object",
+          "required": ["expire"],
+          "additionalProperties": false,
+          "properties": { "expire": { "enum": ["checkpoint", "decision"] } }
+        }
+      ]
+    }
+  }
+}

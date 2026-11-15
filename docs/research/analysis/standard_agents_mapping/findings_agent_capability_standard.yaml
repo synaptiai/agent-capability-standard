@@ -32,16 +32,22 @@ findings:
     and hooks/hooks.json in full; grounded_agency/adapter.py lines 525-706 and 737-844; core/src/exec/machine.rs
     lines 644-677; docs/guides/RUNNING_WORKFLOWS.md lines 145-148; spec/SECURITY.md §2.2.7 (lines 165-172);
     spec/CONFORMANCE.md lines 71-82. Ran the greps listed under searched.
-  status: proposed
-  resolution: 'RFC-0005 (Draft, target Standard 1.2.0) proposes the missing rules. Decision 1 defines
-    tool-calling host, tool binding and safety layer. Decision 3 fixes the scope in which history counts,
-    applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102), keeps `soft_requires`
-    a warning and leaves `precedes` and `conflicts_with` unenforced, with reasons. Rule 4.6 makes a layer
-    fail closed. Decision 9 proposes a conformance class whose statement names the calls a layer covers,
-    a call-sequence fixture format and six sequences. Remaining: Nothing is normative until the maintainers
-    accept the Draft and a Standard version carries the text (§2, a section or profile, §10). The fixtures
-    under tests/conformance/calls/ and a runner per reference binding do not exist yet. Open questions
-    1 (scope lifetime, reporting a `precedes` violation) and 8 (placement) are undecided.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18 (Tool-Calling Hosts), accepted from RFC-0005. §2 defines
+    tool-calling host, call, tool binding, safety layer, layer scope and execution boundary. §5.18.5
+    fixes the scope, applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102),
+    leaves `soft_requires` a warning at most and `precedes` and `conflicts_with` unenforced and
+    unreported, with reasons, and makes check-and-use atomic. §5.18.8 makes a layer fail closed (R407).
+    §10.4 adds the safety-layer class SL, which requires §5.18.5–§5.18.10 and whose statement names the
+    calls a layer covers and any §5.18.10 check it does not apply yet; the two reference layers meet the
+    class except the rows their statements list (the secret checks and redaction of §6.7, the
+    destination policy of §4.4.2 and, for the Python adapter, the output contract of a tool result), and
+    claim it once those are applied. Fixtures: tests/conformance/bindings/ (33) and
+    tests/conformance/calls/ (23), from scripts/gen_call_fixtures.py, with the statements in
+    tests/conformance/calls/statements/; the Python adapter runs them in tests/test_binding_fixtures.py
+    and tests/test_call_fixtures.py, the Standard Agents binding in
+    packages/acs-core/test/bindings.test.ts and examples/standard_agents/test/calls.test.ts, which read
+    the fixture text exactly (parseJsonExact).'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -79,17 +85,24 @@ findings:
     only), core/src/exec/machine.rs lines 644-677, 865-884 and 1375-1396, grounded_agency/state/checkpoint_tracker.py
     lines 40-64, 343-392 and 529-598, grounded_agency/adapter.py lines 660-704, the hook script, tests/conformance/runtime/checkpoint_per_mutation.json
     and skills/rollback/SKILL.md line 273.'
-  status: proposed
-  resolution: 'RFC-0005 decision 4 (Draft) proposes: one checkpoint authorises one call that requires
-    one, with the same rule for steps (4.1); it is used up before the effect, as in the executor and the
-    TypeScript binding, with the case for the Python adapter''s after-success rule stated (4.2); validity
-    ends at an execution boundary and a maximum age the layer states, and a permission prompt answered
-    within the call is not a boundary (4.3); `rollback` needs a checkpoint to exist and uses none (4.4,
-    F503); a missing one is F501 (4.5). Remaining: Draft only. Open question 2: whether one checkpoint
-    per call is normative for every host, before the effect or after success, whether a layer may take
-    a checkpoint itself, and whether the Standard caps the maximum age. The executor, the TypeScript binding,
-    the Python adapter (after success, no boundary) and the plugin hook (marker never used up) keep their
-    behaviours; the RFC aligns no implementation.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.2.2 (steps) and §5.18.6 (calls): one checkpoint per gated step or call,
+    the newest valid one, used up when the call is allowed to start and whatever its outcome once it
+    started; a hold that lapses or is never resolved counts as used; validity ends at an execution
+    boundary and, for a call, at a stated maximum age of at most 30 minutes; with none valid the
+    executor has its host take one and a layer refuses (F501); a rollback needs a checkpoint taken
+    earlier and uses none (F503). grounded_agency/state/checkpoint_tracker.py (holds, consume_if_valid,
+    end_validity, the cap, a maximum age applied to every checkpoint) and grounded_agency/adapter.py
+    follow it; a checkpoint dated after the clock reads (a crafted state file, a clock stepped back)
+    authorises nothing. The plugin''s hooks use the marker up per gated call, take it on a successful
+    `git stash create`, end it at Stop, and keep every marker whose validity ended (used, expired, ended
+    with its turn, replaced) under .claude/checkpoints/, so `git stash pop|apply <commit>` of a recorded
+    commit is a rollback that uses none; the rollback skill''s command hook refuses a restore that names
+    no recorded checkpoint (F503). Tests: tests/test_checkpoint_holds.py,
+    tests/test_hook_checkpoint_lifecycle.py and the call fixtures checkpoint_single_use,
+    two_checkpoints_two_calls, refused_call_keeps_checkpoint, failed_call_uses_checkpoint,
+    checkpoint_stale_after_boundary, checkpoint_stale_after_max_age, rollback_needs_checkpoint and
+    rollback_after_use.'
   concerns:
   - safety-enforcement
   - checkpoint-rollback-state
@@ -126,25 +139,21 @@ findings:
     lines 10-31; core/src/exec/machine.rs lines 688-780. Ran the executor on a `mutate` step with no `approval`
     field: it showed and hashed the step''s inputs wrapped in an array. The reference binding, examples/standard_agents/src/acs/grounded.ts,
     hashes `[{ action, capability, args }]`, a different object.'
-  status: partly_fixed
-  resolution: 'The SDK adapter applies requires_approval to tool calls. With GroundedAgentConfig.approval="ask"
-    (default) its PreToolUse hook answers permissionDecision "ask", reason beginning "F502 APPROVAL_REQUIRED:",
-    once the checkpoint rule holds; the host''s can_use_tool callback, which wrap_options now chains instead
-    of replacing, decides. Without a callback the adapter''s callback denies with F502. Read-only classifications,
-    such as a read-only Bash command, are not asked about; approval="off" restores the earlier behaviour.
-    docs/integrations/claude_agent_sdk.md states what is and is not implemented. Remaining: The Standard
-    defines no approval object or digest for a call without a step (RFC). The adapter obtains one decision
-    per call and computes no §5.14 digest, approver count, expiry or action record. The plugin hook and
-    the send skill''s prompt hook are outside this package. RFC-0005 decision 5 (Draft) defines approval
-    for a call with no step: the shown and hashed value is `[{action, capability, args}]` with the §5.14
-    digest, checked before the checkpoint; one decision per call; an expiry the layer states; at least
-    `min_approvers` distinct approvers; any rejection rejects. A host permission prompt that shows the
-    tool and the inputs and decides that call alone satisfies the rule `in_session` with one approver,
-    bound to the call in place of the digest. Otherwise, and with no one to ask, F502. Remaining: Draft
-    only. Open question 3: `[{action, capability, args}]` or `[args]`; one decision per call or per digest
-    until expiry; which check comes first (the executor and the TypeScript binding check approval first,
-    the working-tree Python adapter the checkpoint). Standing mandates, `skip` and `defer_to_queue` are
-    not defined for a call.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.7: the shown values of a call are `[{action, capability, args}]`
+    with the §5.14 digest; one decision per call, used up when the call is allowed; `min_approvers` and
+    expiry from the binding''s `approval`; a host prompt that shows the call and decides it alone is a
+    one-approver decision, relied on only where it reaches a person (F502 otherwise); changed arguments
+    are classified again; with no one to ask, or arguments that are not I-JSON, F502 (both layers, by
+    one I-JSON number rule, and the call fixtures approval_args_not_i_json,
+    approval_args_beyond_limit_by_one and approval_args_integral_float). The Python adapter records the
+    digest, asks only in the permission modes default, acceptEdits and plan, refuses `min_approvers`
+    above 1 and `role`, and re-classifies changed arguments (tests/test_permission_modes.py,
+    tests/test_permission_callback.py); the plugin hook answers `ask` with an F502 reason in those modes
+    and blocks F502 in the others unless ACS_HOOK_APPROVAL=off; the send skill''s prompt hook no longer
+    judges approval. Vectors: the `tool_call` kinds in tests/conformance/approval/digests.json; fixtures
+    decision_single_use, decision_expires, refused_call_keeps_decision, rejection_wins and
+    two_approvers.'
   concerns:
   - published-api-extension-points
   - safety-enforcement
@@ -326,13 +335,14 @@ findings:
     in full (`_ontology` is assigned at line 301 and not read again) and grounded_agency/adapter.py lines
     192-200 and 579-641.'
   status: fixed
-  resolution: 'grounded_agency/capabilities/mapper.py: register_mcp_tool resolves capability_id against
-    the ontology and raises ValueError naming V101 UNKNOWN_CAPABILITY for an unknown id. Flags are the
-    stricter of ontology and declaration (booleans OR-ed, risk the higher level); a weaker declaration
-    has no effect and is logged and kept in mapper.warnings as W602. ToolMapping is frozen and gains requires_approval
-    and domain; static mappings take every flag from the ontology. An unknown tool maps to UNCLASSIFIED_TOOL
-    (mutate, high, checkpoint and approval), the one constant the adapter also uses. Remaining: Nothing
-    for the SDK. The binding profile that states this default belongs to the tool-call RFC.'
+  resolution: 'Standard 1.2.0 §5.18.2 states the default: an unbound tool is the strictest case,
+    reported W617 UNBOUND_TOOL where the host knows the tools it offers.
+    grounded_agency/capabilities/mapper.py: an unknown tool maps to UNCLASSIFIED_TOOL; an unknown
+    capability is V101; a weaker declaration has no effect (W602). `register_mcp_tool` and
+    `create_grounded_mcp_server` no longer register a tool with no capability as `execute`: it is
+    unbound and reported W617. `check_offered` (Python) and `checkBindings` (TypeScript) report unbound
+    offered tools. Tests: tests/test_tool_bindings.py, tests/test_mcp_integration.py, the fixtures
+    offered_unbound and unbound_tool_is_strictest.'
   concerns:
   - tools-contracts
   - safety-enforcement
@@ -364,23 +374,15 @@ findings:
     569-641, hooks/pretooluse_require_checkpoint.sh lines 31-34, grounded_agency/errors.py lines 1-90
     and the published types at dist/index.d.ts lines 211-236. The reference binding, examples/standard_agents/src/acs/grounded.ts,
     returns the §9.8 object with `location: { tool, capability }`.'
-  status: partly_fixed
-  resolution: 'Hook part: the reason that hooks/pretooluse_require_checkpoint.sh writes to stderr when
-    it blocks a call (exit 2) now opens with `F501 CHECKPOINT_REQUIRED:`. Tests in tests/test_hooks_unit.py
-    and tests/test_pretooluse_hooks.py assert this prefix. hooks/README.md and SECURITY.md §5.1 state
-    it. Remaining: Not done in this package: a §9.8 convention for reporting tool-call denials (needs
-    an RFC), and the Python adapter''s deny reason. The SDK adapter''s refusal reasons open with the diagnostic
-    code and name: "F501 CHECKPOINT_REQUIRED:" for a missing or reserved checkpoint (PreToolUse hook and
-    permission callback) and "F502 APPROVAL_REQUIRED:" for an approval request or for a refusal when no
-    one can approve. Each reason names the tool and its capability. The mapper''s W602 reports carry location
-    {tool, capability, field}. Rate-limit and internal-failure reasons carry no code, since the Standard
-    defines none. Remaining: §9.8 still states no convention for a tool-call denial (RFC). The adapter
-    returns text, not a §9.8 object. The plugin shell hook is another package. RFC-0005 decision 6 (Draft)
-    proposes that a tool-call refusal is the §9.8 diagnostic whose `location` holds `tool` and `capability`
-    and no `workflow` or `step`, and that on a text-only channel the text opens with the code and name,
-    as in `F501 CHECKPOINT_REQUIRED: ...`. §9.8 is unchanged and no code is added. Remaining: Draft only,
-    so the convention is not normative. The adapter''s deny reason and the hook''s message are changed
-    by other work packages, not by this file.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §9.8 and §5.18.8: a refusal of a call is the §9.8 diagnostic with
+    `location` {tool, capability, call}, and its text form is `<CODE> <NAME>: <message>`; host policies
+    such as rate limits refuse with F504, and a failure of the layer is R407 SAFETY_CHECK_FAILED.
+    grounded_agency/errors.py `text_form`; the adapter keeps the diagnostic in `call_records` and sends
+    the text form; the plugin hook''s reasons open with the code and name and its ERR trap blocks with
+    R407; the Standard Agents binding returns R407 for a check or record it cannot complete. Tests:
+    tests/test_pretooluse_hooks.py, tests/test_hooks_unit.py,
+    examples/standard_agents/test/tools.test.ts.'
   concerns:
   - safety-enforcement
   related:
@@ -1462,14 +1464,17 @@ findings:
     and send, with `exit 1` at skills/persist/SKILL.md lines 42 and 47, skills/rollback/SKILL.md line
     46 and skills/send/SKILL.md line 38. Read hooks/pretooluse_require_checkpoint.sh lines 1-34 (its `block`
     function exits 2) and spec/SECURITY.md lines 270-299.'
-  status: partly_fixed
-  resolution: 'The command hooks of the persist, rollback and send skills read the tool call from stdin
-    with jq and block with exit 2, the reason on stderr; a call they cannot read is blocked. The {{tool_input...}}
-    text, which Claude Code never substitutes, was removed from all six skills'' hooks. The SECURITY.md
-    §5.3 example now exits 2 with the reason on stderr. A new §5.4 table lists which checks code enforces
-    and which a model judges. tests/test_skill_hooks.py runs each frontmatter command under sh and bash.
-    Remaining: The proposal to state each of the six checks as a host-neutral requirement of its capability
-    changes the Standard. It needs an RFC and was not done.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.10 states the capability checks host-neutrally, one row per
+    capability the six skills'' hooks cover, with the rule that a required check is decided by code and
+    a model''s judgement may only add a refusal; a host that loads a skill''s text without its hooks
+    applies the checks by other means or does not cover those calls. spec/SECURITY.md §5.4 maps every
+    condition of the six skills'' hooks to a §5.18.10 or §5.18.8 row or to a model-judged addition; the
+    rollback skill''s command hook makes the rollback row''s check in the plugin''s form (a restore must
+    name a commit a checkpoint marker recorded, F503 otherwise), and the `transform` and `persist`
+    secret rows are code where a layer applies §6.7. The send and rollback prompt hooks no longer judge
+    approval, checkpoints, rate limits or expiry; the remaining prompt conditions are labelled
+    model-judged additions. Tests: tests/test_skill_hooks.py.'
   concerns:
   - safety-enforcement
   - models-context-memory-security
@@ -1555,17 +1560,22 @@ findings:
     Specification tools.md lines 142-146. Validated the instance {capability: mutate, layer: PERCEIVE,
     risk: low, mutation, requires_checkpoint and requires_approval false} against the annotation schema
     with the jsonschema package: accepted.'
-  status: proposed
-  resolution: 'RFC-0005 decision 2 (Draft) proposes one host-neutral binding record under schemas/interop/:
-    `tool`, `capability`, optional `domain`, declared `flags`, `additional_capabilities`, `invokes`, `ontology`.
-    An unknown capability is V101; effective flags are the stricter of declaration and ontology, a weaker
-    declaration is W602 (except `mutation: false` on a `mutation_overridable` capability); an unbound
-    tool is the strictest case; the enforcing code is authoritative and copies such as `layer` are ignored.
-    The Python `metadata` and the `acs` annotation become carriers; neither is an instance today. Remaining:
-    Draft only: the schema file (proposed name `tool_binding.schema.json`) is not written and the annotation
-    schema is unchanged. Open question 4: strictest case, `observe` at medium risk or refusal for an unbound
-    tool, and whether a definition-time report needs a code. The SDK still gives an MCP tool without metadata
-    `execute`.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.1 and schemas/interop/tool_binding.schema.json: one host-neutral
+    record (`tool`, `ontology`, `standard`, `capability`, `domain`, `flags`, `additional_capabilities`,
+    `classifier`, `invokes`, `approval`, `control`, `destination`, `x-` members), with V101, V109
+    (another ontology major, or a cited Standard the layer does not support), V110 and W602, and
+    carriers that may hold informative copies a layer ignores. Loaders:
+    grounded_agency/capabilities/bindings.py (`load_bindings`, the MCP `metadata` carrier in
+    grounded_agency/mcp.py) and packages/acs-core/src/binding.ts (`checkBindings`, the `acs`
+    annotation). The generated schemas/interop/standard_agents_annotation.schema.json makes the
+    annotation a carrier and refuses a copy inconsistent with the capability. A record with a member
+    that has no I-JSON form is S303, by one number rule in both loaders (an integer beyond ±2^53, or a
+    float canonical JSON writes as one, such as 1.8e16); `approval.role`, when present, is a non-empty
+    string, and `approval.expires` at most 2^53 − 1 ms; diagnostics name members by dotted path.
+    Fixtures: the 33 in tests/conformance/bindings/ (unsupported_standard, the vendor_member and
+    approval limits), which both runners read exactly; tests/test_tool_bindings.py,
+    packages/acs-core/test/ijson.test.ts and tests/test_standard_agents_binding.py.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -1605,16 +1615,20 @@ findings:
     the ontology with PyYAML and compared the flags of `mutate`, `send` and `persist`. The cited Standard
     Agents example, `close_as_duplicate`, posts a comment and closes an issue in one call (the record
     describes it as labelling and commenting).'
-  status: proposed
-  resolution: 'RFC-0005 rules 2.4 and 2.5 (Draft) propose: a tool that performs several capabilities names
-    them in `additional_capabilities` and takes the strictest flags across them, flag by flag, with the
-    `requires` edges of each; a per-call classifier narrows only for input it recognises, and the declared
-    worst case applies otherwise or when it fails. The classification of remote writes, writes to the
-    host''s own store, messages to a delegate and control-only tools is put to the maintainers as open
-    question 6 (ACS-Q07). Remaining: Draft only. The RFC gives no control-only marker and no decision
-    table for `mutate` versus `send`, `persist` versus `mutate` or `delegate` versus `send`; choosing
-    needs normative text (open question 6). Whether a classifier may return flags weaker than its tool''s
-    declared worst case is open question 7 (ACS-Q08).'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.3 classifies a call by its effect, with a table that answers which
+    capability a remote write, a write to the agent''s own store, a message to a delegate and a stop
+    tool are; `additional_capabilities` takes the strictest flags and every prerequisite; a `classifier`
+    may narrow a call to what its arguments do, never below each returned capability''s flags; a call
+    is `rollback` only when it restores a checkpoint taken in the scope; a control-only tool is never
+    refused and is recorded, and a host action tied to a tool that can be refused is F506. The Python
+    mapper classifies Bash by command (a compound line takes the strictest of its commands; `git stash`
+    forms by class, `pop|apply <commit>` a rollback only for a commit a checkpoint recorded) and binds
+    `Skill` as `invoke`; a grounded MCP server serves a control-only tool unguarded; the Standard Agents
+    binding has `additional_capabilities` and `controlTool`, and its lint reports F506. Tests:
+    tests/test_bash_classification.py, tests/test_mcp_integration.py (TestGroundedServerGuard),
+    examples/standard_agents/test/tools.test.ts; fixtures additional_strictest, gated_control_action,
+    control_action_ok, additional_capability_strictest and control_tool_ungated.'
   concerns:
   - tools-contracts
   related:
@@ -1683,13 +1697,16 @@ findings:
     A script over schemas/capability_ontology.yaml found `evidence_anchors` required by all 36 output
     schemas. Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 149, 485-487, 505-507
     and 579 describe the binding''s encoding.'
-  status: proposed
-  resolution: 'RFC-0005 decision 7 (Draft) proposes: where a tool''s result is a string, a capability
-    output is the I-JSON text of the output object with nothing around it; the consumer parses it and
-    checks the fields the output contract requires (R402 otherwise, as in the executor); validated structure
-    such as a submit tool''s arguments is preferred where the host has it; the producer checks the §5.14
-    I-JSON limits first. Remaining: Draft only. The workflow guide and the integration document are not
-    changed by this file.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.9: a capability output carried as a string is the I-JSON text of the
+    output object, nothing around it, with every required field, else R402; it binds every producer and
+    consumer, a host answering an executor''s capability call included.
+    grounded_agency/capabilities/output.py (`encode_capability_output`, `decode_capability_output`) and
+    packages/acs-core/src/output.ts (`encodeCapabilityOutput`, `decodeCapabilityOutput`); `groundedTool`
+    returns the encoded text. docs/guides/RUNNING_WORKFLOWS.md and docs/integrations/standard_agents.md
+    tell a host to decode before it answers. The I-JSON limits apply to the text, so the two codecs
+    agree: both pass tests/conformance/output/vectors.json. Tests: tests/test_capability_output.py,
+    packages/acs-core/test/output.test.ts.'
   concerns:
   - tools-contracts
   - workflow-execution
@@ -2183,15 +2200,21 @@ findings:
     and 535-550, and in standardagents/spec content/0.2.0/specification/hooks.md lines 169-180 and 428-444,
     content/0.2.0/specification/agents.md lines 132-166 and content/0.2.0/infrastructure/runtime.md lines
     84-92.
-  status: partly_fixed
-  resolution: 'The plugin''s audit hook now runs after every tool call: hooks/hooks.json registers it
-    for PostToolUse and PostToolUseFailure with matcher `*`. It appends one HMAC-chained line per call
-    to .claude/audit.log with ts, event, tool, the skill name on a Skill call, and input_sha256. Concurrent
-    runs are serialised with flock(2) on the log file, taken by flock or else perl, and a held lock
-    delays a run by 40 seconds at most. Tests show that the chain breaks without the lock. tools/verify_audit_log.py verifies the new format and earlier entries.
-    Remaining: Three parts change the Standard and need an RFC: a required hook that a host must refuse
-    to run without, a record of which configuration activated a hook, and a stated concurrency assumption
-    for the safety layer.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.8: a host that claims a conforming layer runs no covered call
+    without the layer''s decision, and a missing, failing or silent layer means refusal (R407); every
+    record names the layer and its configuration (`recorded_by`). §5.18.10 makes the checks a skill''s
+    hooks implement requirements of the capability on every host. §5.18.5 makes check-and-use atomic,
+    and each statement says how. `create_grounded_mcp_server()` (`require_layer=True` by default) serves
+    tools that refuse a call the adapter''s layer did not allow (R407), a control-only tool excepted;
+    adapter records (digest of the settings, rate limits included, and bindings, computed once per
+    change, every loaded binding I-JSON), the plugin''s audit lines (`recorded_by` with the digest of
+    hooks/hooks.json and the effective settings) and every entry a grounded or control tool writes in
+    the binding''s trace (a grounded tool''s digest covers its annotation and checkpoint maximum age),
+    refusals and the layer''s own failures included, carry `recorded_by`; one adapter is one scope.
+    Tests: tests/test_mcp_integration.py, tests/test_tool_bindings.py (TestRecordedBy),
+    tests/test_verify_audit_log.py, tests/test_toctou_race.py,
+    examples/standard_agents/test/tools.test.ts, grounded.test.ts and nesting.test.ts.'
   concerns:
   - safety-enforcement
 - id: ACS-56
@@ -2267,14 +2290,17 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md §5.1 (lines 201-230), §5.12 (lines 659-672) and §9.2 (lines 1272-1284);
     skills/mutate/SKILL.md lines 1-9; Standard Agent Specification tools.md lines 36-44. The integration
     document names `uses` in the unnumbered paragraph that follows item 6, not in a numbered item.
-  status: proposed
-  resolution: 'RFC-0005 rule 2.6 (Draft) proposes an `invokes` field on the binding record, naming the
-    bindings a tool calls. The tool takes the strictest flags over its own and, transitively, those of
-    the bindings listed; a host SHOULD refuse an invocation outside the list; the list bounds named invocation
-    only, not storage or network calls, so the computed flags are a lower bound. Remaining: Draft only;
-    no schema or implementation carries `invokes`. The RFC does not say whether a layer that also sees
-    the invoked calls checks them on their own, which would make a composite and its inner `mutate` call
-    each need a checkpoint.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.18.4: `invokes` lists the bindings a composite may call; its effective
+    flags include theirs transitively (V107 for an unresolved name, V105 for a cycle); a nested call the
+    composite''s own code made is covered by its approval and checkpoint, keeps its other checks
+    (prerequisites included) and is recorded with the call that covered it; attribution needs evidence
+    the composite made the call, and a nested call outside the list is F504. The Standard Agents
+    binding''s `groundedTool({invokes})` passes the names as `uses` and issues a one-shot nesting token
+    per invocation; the Python loader computes the flags (its statement says it cannot see nested
+    calls). Tests: examples/standard_agents/test/nesting.test.ts; fixtures invokes_transitive,
+    invokes_cycle, invokes_unresolved, composite_takes_invoked_flags, nested_call_covered,
+    nested_call_keeps_prerequisites and nested_call_outside_invokes.'
   concerns:
   - tools-contracts
   related:
@@ -2548,6 +2574,10 @@ questions:
   depends: The history a guard keeps and searches before each call, when that history is cleared, and
     whether a call that breaks an ordering edge is refused with V102 or only logged.
   finding: ACS-01
+  answer: 'Standard 1.2.0 §5.2.1 and §5.18 bind a safety layer over calls (RFC-0005 decisions 1 and 3).
+    History counts over the scope''s lifetime, which the layer names in its statement; a checkpoint''s
+    power to authorise ends sooner (§5.18.6). `requires` refuses (F501, F503, V102); `precedes` is
+    neither refused nor reported over calls (§5.18.5).'
 - id: ACS-Q02
   question: 'Is one checkpoint per gated step normative for every host, or host-defined? If normative:
     is it consumed before the step runs (executor) or after it succeeds (SDK adapter), and with no valid
@@ -2561,6 +2591,10 @@ questions:
   depends: Whether a guard marks a checkpoint used and when, whether a failed call gives it back, and
     whether a missing checkpoint yields F501 or a checkpoint taken on the caller's behalf.
   finding: ACS-02
+  answer: 'Normative for every host (§5.2.2, §5.18.6; RFC-0005 decision 4). Used up when the step or
+    call is allowed to start, before its effect, and whatever its outcome once started. With none valid
+    the executor has its host take one (F501 if that fails); a safety layer refuses with F501 and takes
+    none itself.'
 - id: ACS-Q03
   question: For a tool-level guard, when a model calls one tool several times with identical arguments,
     is approval one decision per call, single use as §5.14 states for a step, or one decision per digest
@@ -2571,6 +2605,8 @@ questions:
   depends: Whether the guard stores a used-decision marker per call or per digest, and whether a repeated
     identical call is refused with F502 until a person decides again.
   finding: ACS-03
+  answer: 'One decision per call, used up when the call is allowed; an identical later call needs a new
+    decision (§5.18.7; RFC-0005 decision 5).'
 - id: ACS-Q04
   question: 'Which classification applies to a tool with no capability binding: non-mutating `observe`
     at medium risk, as `ToolCapabilityMapper.map_tool` returns, or the high-risk mutation the adapter
@@ -2582,6 +2618,8 @@ questions:
   depends: Whether an unbound tool runs with no check, is refused in strict mode, or needs a checkpoint.
     The reference binding reports it as a lint warning and applies no rule to its calls.
   finding: ACS-07
+  answer: 'The strictest case: high risk, a mutation, a checkpoint and an approval (§5.18.2; RFC-0005
+    decision 2). A host that knows the tools it offers reports one as W617 UNBOUND_TOOL.'
 - id: ACS-Q05
   question: 'What may an item of a capability''s `evidence_anchors` be: a string, an `Anchor` object as
     in event_schema.yaml, or a host-defined reference such as `message:<id>`? Does an empty list satisfy
@@ -2619,6 +2657,10 @@ questions:
   depends: Whether such a tool needs a checkpoint and an approval (`mutate`, `send`) or neither (`persist`,
     `delegate`), and which capability name `requires` edges and audit records carry.
   finding: ACS-39
+  answer: '§5.18.3''s table (RFC-0005 decision 2): a write to a remote system that can be read back is
+    `mutate`; a write to the store the host provides for the agent''s own memory is `persist`, anywhere
+    else `mutate`; a message to an existing delegate is `delegate`; a tool that only signals the host is
+    control-only, never refused and recorded.'
 - id: ACS-Q08
   question: May a per-call classifier return, for one input, a capability with weaker flags than the tool's
     declared worst case, as the SDK's Bash classifier does for read-only commands, or does "cannot weaken"
@@ -2630,6 +2672,10 @@ questions:
   depends: Whether a binding gates every call of a tool by its worst case, or reads the arguments first
     and lets a read-only call through with no checkpoint or approval.
   finding: ACS-39
+  answer: 'Yes (§5.18.3; RFC-0005 decision 2). A binding''s declared capability and flags are the worst
+    case; a `classifier` may narrow one call to what its arguments do, never below the ontology flags of
+    each capability it returns. "Cannot weaken" bounds a declaration against the ontology, not each call
+    against the declaration.'
 - id: ACS-Q09
   question: Do a delegator's checkpoints and `rollback` cover what a delegate changes, as an invoked run
     "shares the caller's checkpoints" (§5.13), or does a delegate that mutates take its own?

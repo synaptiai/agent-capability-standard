@@ -14,7 +14,7 @@ import { parse } from 'yaml';
 import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { loadOntology, type Capability, type EdgeType, type Ontology } from '../data/ontology';
 import { loadCatalogEnums, loadIdentitySchema, loadTrustModel, loadWorldStateSchema } from '../data/spec-sources';
-import { chapterKey } from '../pixel/keys';
+import { chapterKey, principleKey } from '../pixel/keys';
 import { sectionBlocks, sectionFence, sectionTable, tableCodes, tableRows } from './md-sections';
 import { contractRows, tableOrder, type SchemaRow } from './views';
 import { andList, plural } from './words';
@@ -736,4 +736,32 @@ export function senderCaption(rows: { input: string; drops: boolean }[]): string
   const drop = rows.filter((r) => r.drops).map((r) => r.input);
   const mark = rows.filter((r) => !r.drops).map((r) => r.input);
   return `An item passes ${plural(rows.length, 'check', 'checks')} in turn: ${andList(drop)} can drop it, and ${andList(mark)} keeps it but may mark it always-ask.`;
+}
+
+// ------------------------------------------------ §3 design principles
+
+export interface Principle {
+  section: string;
+  name: string;
+  glyph: string;
+}
+
+/**
+ * The design principles of §3, one per H3, with the glyph the site marks
+ * each with (principleKey); the figure links each to its section.
+ */
+export function designPrinciples(text: string, where: string): Principle[] {
+  const out = sectionBlocks(text, '3. ', where).flatMap((n): Principle[] => {
+    if (n.type !== 'heading' || n.depth !== 3) return [];
+    const h = toString(n).trim();
+    const m = /^(3\.\d+) (.+)$/.exec(h);
+    if (!m) throw new Error(`${where}: §3 heading "${h}" is not numbered 3.n`);
+    return [{ section: m[1]!, name: m[2]!, glyph: principleKey(h) }];
+  });
+  if (out.length === 0) throw new Error(`${where}: §3 has no principle headings`);
+  return out;
+}
+
+export function principlesCaption(p: Principle[]): string {
+  return `${plural(p.length, 'principle', 'principles')}, each with the glyph the site marks it with: ${andList(p.map((x) => x.name))}.`;
 }

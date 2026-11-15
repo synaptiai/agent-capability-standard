@@ -235,9 +235,9 @@ class TestClearExpiredPersistence:
     def test_clear_expired_persists_active_removal(self, chk_dir: Path) -> None:
         """Expired active checkpoint is cleared from disk after clear_expired()."""
         tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
-        # Create checkpoint that is already expired
-        tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
-        # Force expiry by setting expires_at to the past
+        # Create a checkpoint, then force expiry by setting expires_at to the
+        # past (an expiry must be more than zero, STANDARD 1.2.0 §5.18.6)
+        tracker1.create_checkpoint(scope=["*"], reason="will expire")
         assert tracker1._active_checkpoint is not None
         tracker1._active_checkpoint.expires_at = datetime.now(UTC) - timedelta(
             seconds=10
@@ -257,7 +257,7 @@ class TestClearExpiredPersistence:
         """Expired history entries are removed from disk after clear_expired()."""
         tracker1 = CheckpointTracker(checkpoint_dir=chk_dir)
         # Create and consume a checkpoint (moves to history)
-        tracker1.create_checkpoint(scope=["*"], reason="will expire", expiry_minutes=0)
+        tracker1.create_checkpoint(scope=["*"], reason="will expire")
         assert tracker1._active_checkpoint is not None
         tracker1._active_checkpoint.expires_at = datetime.now(UTC) - timedelta(
             seconds=10

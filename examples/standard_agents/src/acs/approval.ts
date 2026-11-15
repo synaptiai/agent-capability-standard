@@ -16,8 +16,15 @@ import type { ThreadUser } from '@standardagents/spec';
 import { digest as digestOf, type Json } from '@synaptiai/acs-core';
 import { KEYS, type ApprovalDecision, type ApprovalRecord, type ApprovalRound, type Store } from './records.js';
 
+/**
+ * The most distinct approvers a tool's policy may require for one call: the
+ * `max_approvers` of the binding's conformance statement
+ * (`tests/conformance/calls/statements/standard_agents_binding.json`).
+ */
+export const MAX_APPROVERS = 1000;
+
 export interface ApprovalPolicy {
-  /** Distinct approvers needed: an integer of at least 1 (default 1). */
+  /** Distinct approvers needed: an integer from 1 to `MAX_APPROVERS` (default 1). */
   min_approvers?: number;
   /** Only a caller holding this application role may decide. */
   role?: string;
@@ -33,13 +40,16 @@ export interface ApprovalPolicy {
 /**
  * What is wrong with `policy`, if anything. §5.14 makes `min_approvers` an
  * "integer ≥ 1" and `expires` "a duration longer than zero"; anything else
- * could let a call run on no decision, or never expire.
+ * could let a call run on no decision, or never expire. A count above
+ * `MAX_APPROVERS` is more than this binding states it can obtain.
  */
 export function policyProblems(policy: ApprovalPolicy): string[] {
   const problems: string[] = [];
   const { min_approvers, expires_ms } = policy;
   if (min_approvers !== undefined && !(Number.isInteger(min_approvers) && min_approvers >= 1)) {
     problems.push(`approval.min_approvers must be an integer of at least 1, not ${min_approvers}`);
+  } else if (min_approvers !== undefined && min_approvers > MAX_APPROVERS) {
+    problems.push(`approval.min_approvers must be at most ${MAX_APPROVERS}, the most approvers this binding obtains for one call, not ${min_approvers}`);
   }
   if (expires_ms !== undefined && !(Number.isFinite(expires_ms) && expires_ms > 0)) {
     problems.push(`approval.expires_ms must be a finite number of milliseconds greater than zero, not ${expires_ms}`);

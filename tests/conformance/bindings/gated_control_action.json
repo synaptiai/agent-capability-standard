@@ -1,0 +1,52 @@
+{
+  "description": "A host action taken whenever a gated tool is called is F506.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    }
+  ],
+  "offered": {
+    "write": "write",
+    "save": "save"
+  },
+  "host_actions": [
+    {
+      "action": "stop",
+      "tool": "write"
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "F506",
+        "tool": "write"
+      }
+    ],
+    "warnings": [],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      },
+      "save": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

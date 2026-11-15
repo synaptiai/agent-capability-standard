@@ -61,3 +61,17 @@ export function isCapability(id: string): id is CapabilityId {
 export function prerequisites(capability: CapabilityId): CapabilityId[] {
   return REQUIRES.filter(([, to]) => to === capability).map(([from]) => from);
 }
+
+/**
+ * The prerequisites of a call that performs several capabilities
+ * (STANDARD 1.2.0 §5.18.1): the union of each one's `requires` sources, in
+ * the order of the edges.
+ */
+export function prerequisitesOf(capabilities: readonly CapabilityId[]): CapabilityId[] {
+  const wanted = new Set<CapabilityId>(capabilities);
+  const found: CapabilityId[] = [];
+  for (const [from, to] of REQUIRES) {
+    if (wanted.has(to) && !found.includes(from)) found.push(from);
+  }
+  return found;
+}

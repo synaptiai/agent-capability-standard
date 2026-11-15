@@ -1,0 +1,25 @@
+{
+  "description": "2^53 itself, and 1e21, which canonical JSON writes in exponent form, are I-JSON: the record loads.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "observe",
+      "x-build": 9007199254740992,
+      "x-scale": 1e+21
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "look": {
+        "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

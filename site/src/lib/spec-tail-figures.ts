@@ -90,8 +90,104 @@ export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
  */
 export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: string; what: string }>> = {
   'table-4.1': { section: '4.1 ', name: 'Capability fields', what: 'A capability' },
+  'table-5.18.1': { section: '5.18.1 ', name: 'Tool binding fields', what: 'A tool binding' },
   'table-6.3': { section: '6.3 ', name: 'World-state fields', what: 'A world state snapshot' },
 };
+
+// ---------------------------------------------- §5.18 code tables
+
+/**
+ * Tables of §5.18 (tool-calling hosts) whose Code column the page draws as
+ * diagnostic tiles, as it does §5.8.3's and §9's: each figure wraps the
+ * section's first table, and each code links to its entry on the
+ * diagnostics page. A code the diagnostics loader does not know fails the
+ * build (rehype-spec-slots).
+ */
+export const CODE_TABLE_FIGURES: Readonly<Record<string, { level: number; section: string; name: string }>> = {
+  'offered-tools': { level: 4, section: '5.18.2 ', name: 'What a host checks of the tools it offers' },
+  'composite-codes': { level: 4, section: '5.18.4 ', name: 'Codes of a composite tool' },
+  'edge-codes': { level: 4, section: '5.18.5 ', name: 'How each edge type applies to calls' },
+  'checkpoint-refusals': { level: 4, section: '5.18.6 ', name: 'Calls refused for want of a checkpoint' },
+  'call-refusals': { level: 4, section: '5.18.8 ', name: 'The codes a call is refused with' },
+  'capability-checks': { level: 4, section: '5.18.10 ', name: 'Capability checks and their codes' },
+};
+
+const CODE = /\b[A-Z]\d{3}\b/g;
+
+/** The codes of a code-table figure's Code column, in table order, each once, with their diagnostics. */
+export function codeTableCodes(key: string, text: string, where: string): Diagnostic[] {
+  const f = CODE_TABLE_FIGURES[key];
+  if (!f) throw new Error(`${where}: no code table figure ${key}`);
+  const rows = tableRows(sectionTable(text, f.section, 0, where));
+  const col = rows[0]!.indexOf('Code');
+  if (col === -1) throw new Error(`${where}: §${f.section.trim()}'s first table has no Code column`);
+  const byCode = new Map(loadDiagnostics().map((d) => [d.code, d]));
+  const seen: Diagnostic[] = [];
+  for (const r of rows.slice(1)) {
+    for (const c of r[col]!.match(CODE) ?? []) {
+      const d = byCode.get(c);
+      if (!d) throw new Error(`${where}: §${f.section.trim()} names ${c}, which the diagnostics loader does not know`);
+      if (!seen.includes(d)) seen.push(d);
+    }
+  }
+  if (seen.length === 0) throw new Error(`${where}: §${f.section.trim()}'s table names no code`);
+  return seen;
+}
+
+export function codeTableCaption(key: string, text: string, where: string): string {
+  const rows = tableRows(sectionTable(text, CODE_TABLE_FIGURES[key]!.section, 0, where)).length - 1;
+  const ds = codeTableCodes(key, text, where);
+  const errors = ds.filter((d) => d.severity === 'error').length;
+  const sev = errors === ds.length ? (ds.length === 1 ? 'an error' : 'all errors') : errors === 0 ? (ds.length === 1 ? 'a warning' : 'all warnings') : `${plural(errors, 'error', 'errors')} and ${plural(ds.length - errors, 'warning', 'warnings')}`;
+  return `${plural(rows, 'row', 'rows')} name ${plural(ds.length, 'code', 'codes')}, ${sev}; each tile links to the code's entry on the diagnostics page.`;
+}
+
+// ---------------------------------------------- §10.4 safety-layer fixtures
+
+export interface FixtureGroup {
+  label: string;
+  count: number;
+  dir: string;
+}
+
+const SL_FIXTURE_DIRS = [
+  { kind: 'Binding fixtures', dir: 'tests/conformance/bindings' },
+  { kind: 'Call-sequence fixtures', dir: 'tests/conformance/calls' },
+] as const;
+
+/**
+ * The safety-layer fixtures of §10.4, by kind and by the feature (`needs`)
+ * a layer must have to run them, read from the fixture files. A feature the
+ * fixtures name that §10.4 does not define fails the build.
+ */
+export function safetyLayerFixtures(text: string, where: string): FixtureGroup[] {
+  const prose = sectionBlocks(text, '10.4 ', where).map((b) => toString(b)).join(' ');
+  const out: FixtureGroup[] = [];
+  for (const { kind, dir } of SL_FIXTURE_DIRS) {
+    const groups = new Map<string, number>();
+    for (const path of trackedIn(dir, '.json')) {
+      const doc = JSON.parse(readRepoFile(path)) as { needs?: unknown };
+      const needs = Array.isArray(doc.needs) ? doc.needs.map(String) : [];
+      for (const n of needs) {
+        if (!prose.includes(n)) throw new Error(`${where}: §10.4 does not define the feature ${n} that ${path} needs`);
+      }
+      const key = needs.length === 0 ? '' : needs.join(', ');
+      groups.set(key, (groups.get(key) ?? 0) + 1);
+    }
+    if (groups.size === 0) throw new Error(`${where}: ${dir} holds no fixture`);
+    for (const [needs, count] of [...groups].sort((a, b) => (a[0] === '' ? -1 : b[0] === '' ? 1 : a[0].localeCompare(b[0])))) {
+      out.push({ label: `${kind}, ${needs === '' ? 'any layer' : `needs ${needs}`}`, count, dir });
+    }
+  }
+  return out;
+}
+
+export function safetyLayerFixturesCaption(groups: FixtureGroup[]): string {
+  const total = (kind: string) => groups.filter((g) => g.label.startsWith(kind)).reduce((a, g) => a + g.count, 0);
+  const any = groups.filter((g) => g.label.endsWith('any layer')).reduce((a, g) => a + g.count, 0);
+  const all = groups.reduce((a, g) => a + g.count, 0);
+  return `${plural(total('Binding fixtures'), 'binding fixture', 'binding fixtures')} and ${plural(total('Call-sequence fixtures'), 'call-sequence fixture', 'call-sequence fixtures')}; ${any} of the ${all} need no feature, and a layer that lacks a feature skips the fixtures that need it.`;
+}
 
 /** The caption of a field-table figure. */
 export function tableFigureCaption(key: string, text: string, where: string): string {

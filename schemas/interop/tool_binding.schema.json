@@ -114,7 +114,7 @@
         "expires": {
           "type": "string",
           "pattern": "^(\\d+(ms|s|m|h|d)|P(\\d+D)?(T(\\d+H)?(\\d+M)?(\\d+(\\.\\d{1,9})?S)?)?)$",
-          "description": "A duration (section 5.10.1). The loader also rejects an ISO form with no component or a bare T (S303)."
+          "description": "A duration (section 5.10.1) longer than zero and of at most 2^53 - 1 milliseconds. The loader also rejects an ISO form with no component or a bare T, a zero duration and a longer one (S303)."
         }
       },
       "additionalProperties": false

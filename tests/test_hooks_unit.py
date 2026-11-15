@@ -45,6 +45,21 @@ def read_entries(project_dir: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in log_file.read_text().splitlines()]
 
 
+def call(tool: str, **tool_input: Any) -> dict[str, Any]:
+    """Claude Code's PreToolUse payload for a tool call (the hook reads only
+    this JSON object, STANDARD 1.2.0 §5.18.8)."""
+    return {
+        "tool_name": tool,
+        "tool_input": tool_input,
+        "permission_mode": "default",
+        "tool_use_id": "t1",
+    }
+
+
+WRITE = call("Write", file_path="file.py")
+EDIT = call("Edit", file_path="file.py")
+
+
 def run_hook(
     script: Path,
     payload: str | dict | None = None,
@@ -96,21 +111,21 @@ class TestPreToolUseExitCodes:
     """Test each exit code path in pretooluse_require_checkpoint.sh."""
 
     def test_exit_0_for_non_mutation(self) -> None:
-        """Non-mutation commands should pass (exit 0)."""
-        result = run_hook(PRETOOLUSE_HOOK, "Read some file")
+        """A tool hooks.json does not route here passes (exit 0)."""
+        result = run_hook(PRETOOLUSE_HOOK, call("Read", file_path="x"))
         assert result.returncode == 0
 
     def test_exit_2_missing_marker(self, tmp_path: Path) -> None:
         """Mutation without marker should be blocked (exit 2)."""
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-        result = run_hook(PRETOOLUSE_HOOK, "Write to file", env)
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
         assert result.returncode == 2
         assert "missing checkpoint marker" in result.stderr.lower()
 
     def test_block_reason_opens_with_the_code(self, tmp_path: Path) -> None:
         """The reason names the rule that refused the call: F501."""
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-        result = run_hook(PRETOOLUSE_HOOK, "Write to file", env)
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
         assert result.returncode == 2
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
         assert result.stdout == ""
@@ -131,7 +146,7 @@ class TestPreToolUseExitCodes:
         marker.write_text(json.dumps(marker_data))
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-        result = run_hook(PRETOOLUSE_HOOK, "Write to file", env)
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
         assert result.returncode == 0
 
     def test_exit_2_symlink_marker(self, tmp_path: Path) -> None:
@@ -148,7 +163,7 @@ class TestPreToolUseExitCodes:
         marker.symlink_to(real_file)
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-        result = run_hook(PRETOOLUSE_HOOK, "Write to file", env)
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
         assert result.returncode == 2
         assert "symlink" in result.stderr.lower()
 
@@ -159,7 +174,7 @@ class TestPreToolUseExitCodes:
         (marker_dir / "checkpoint.ok").write_text("")
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-        result = run_hook(PRETOOLUSE_HOOK, "Edit something", env)
+        result = run_hook(PRETOOLUSE_HOOK, EDIT, env)
         assert result.returncode == 2
 
     def test_exit_2_expired_marker(self, tmp_path: Path) -> None:
@@ -174,10 +189,72 @@ class TestPreToolUseExitCodes:
         (marker_dir / "checkpoint.ok").write_text(json.dumps(marker_data))
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-        result = run_hook(PRETOOLUSE_HOOK, "Write something", env)
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
         assert result.returncode == 2
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
         assert "expired" in result.stderr.lower()
+
+    @pytest.mark.parametrize(
+        ("times", "why"),
+        [
+            # An expiry no shell integer holds once failed open.
+            ({"created_at": "NOW", "expires_at": 99999999999999999999}, "invalid"),
+            ({"created_at": "NOW", "expires_at": "1e10"}, "invalid"),
+            ({"created_at": -1, "expires_at": "LATER"}, "invalid"),
+            ({"expires_at": "LATER"}, "missing"),
+            # Valid for longer than the Standard's 30-minute cap.
+            ({"created_at": "NOW", "expires_at": "NOW+1801"}, "not possible"),
+            # Taken in the future.
+            ({"created_at": "NOW+600", "expires_at": "NOW+900"}, "not possible"),
+        ],
+    )
+    def test_exit_2_marker_with_impossible_times(
+        self, tmp_path: Path, times: dict[str, object], why: str
+    ) -> None:
+        """A marker whose times cannot be read or cannot be true blocks with
+        F501 and is removed: it never fails open."""
+        if shutil.which("jq") is None:
+            pytest.skip("jq not installed")
+        import time
+
+        now = int(time.time())
+
+        def resolve(value: object) -> object:
+            # "NOW", "NOW+<seconds>" and "LATER" (ten minutes on) are times
+            # relative to now; anything else is written as it is.
+            if value == "NOW":
+                return now
+            if value == "LATER":
+                return now + 600
+            if isinstance(value, str) and value.startswith("NOW+"):
+                return now + int(value[4:])
+            return value
+
+        resolved = {key: resolve(value) for key, value in times.items()}
+        marker = tmp_path / ".claude" / "checkpoint.ok"
+        marker.parent.mkdir()
+        marker.write_text(json.dumps({"checkpoint_id": "chk", **resolved}))
+
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        assert why in result.stderr
+        assert not marker.exists()
+
+    def test_a_marker_valid_for_exactly_30_minutes_passes(self, tmp_path: Path) -> None:
+        import time
+
+        now = int(time.time())
+        marker = tmp_path / ".claude" / "checkpoint.ok"
+        marker.parent.mkdir()
+        marker.write_text(
+            json.dumps(
+                {"checkpoint_id": "c", "created_at": now, "expires_at": now + 1800}
+            )
+        )
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "ACS_HOOK_APPROVAL": "off"}
+        assert run_hook(PRETOOLUSE_HOOK, WRITE, env).returncode == 0
 
     @pytest.mark.parametrize(
         "content", ["ok", '"just a string"', "[1, 2]", "5", "null"]
@@ -194,7 +271,7 @@ class TestPreToolUseExitCodes:
         marker.write_text(content)
 
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
-        result = run_hook(PRETOOLUSE_HOOK, "Write something", env)
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
         assert result.returncode == 2
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
         assert "not a json object" in result.stderr.lower()
@@ -210,7 +287,13 @@ class TestPreToolUseExitCodes:
         marker = tmp_path / ".claude" / "checkpoint.ok"
         marker.parent.mkdir()
         marker.write_text(
-            json.dumps({"checkpoint_id": "chk", "expires_at": int(time.time()) + 600})
+            json.dumps(
+                {
+                    "checkpoint_id": "chk",
+                    "created_at": int(time.time()),
+                    "expires_at": int(time.time()) + 600,
+                }
+            )
         )
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
@@ -222,15 +305,23 @@ class TestPreToolUseExitCodes:
             "CLAUDE_PROJECT_DIR": str(tmp_path),
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         }
-        result = run_hook(PRETOOLUSE_HOOK, "Write something", env)
+        result = run_hook(PRETOOLUSE_HOOK, WRITE, env)
         assert result.returncode == 2
-        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        assert result.stderr.startswith("R407 SAFETY_CHECK_FAILED: ")
         assert "hook failed" in result.stderr
 
-    def test_empty_payload_passes(self) -> None:
-        """Empty payload (no arg) should pass — not a mutation."""
-        result = run_hook(PRETOOLUSE_HOOK, "")
-        assert result.returncode == 0
+    @pytest.mark.parametrize(
+        "payload", ["", "Write to file.py", "[1]", '{"tool_name": 5}']
+    )
+    def test_a_payload_that_is_not_a_tool_call_is_r407(self, payload: str) -> None:
+        """Only Claude Code's JSON object is read: a plain-text payload, which
+        was once classified by its words, is blocked (STANDARD 1.2.0
+        §5.18.8)."""
+        result = run_hook(PRETOOLUSE_HOOK, payload)
+        assert result.returncode == 2
+        assert result.stderr.startswith(
+            "R407 SAFETY_CHECK_FAILED: cannot read the tool call"
+        )
 
 
 # ─── PostToolUse Hook Tests ───
@@ -276,6 +367,7 @@ class TestPostToolUseExitCodes:
             "event",
             "tool",
             "input_sha256",
+            "recorded_by",
             "prev_hmac",
             "hmac",
         }
@@ -966,8 +1058,15 @@ class TestHookPatternParity:
         """The audit hook runs after every tool call, succeeded or failed."""
         hooks_data = json.loads((ROOT / "hooks" / "hooks.json").read_text())
 
-        (group,) = hooks_data["hooks"][event]
+        logging = [
+            group
+            for group in hooks_data["hooks"][event]
+            if any(
+                h["command"].endswith("/hooks/posttooluse_log_tool.sh")
+                for h in group["hooks"]
+            )
+        ]
+        (group,) = logging
         assert group["matcher"] == "*", "`*` matches every tool"
         (hook,) = group["hooks"]
         assert hook["type"] == "command"
-        assert hook["command"].endswith("/hooks/posttooluse_log_tool.sh")

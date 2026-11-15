@@ -1,0 +1,34 @@
+{
+  "description": "A binding whose tool is not the name the host offers the tool under is V111.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    }
+  ],
+  "offered": {
+    "save2": "save"
+  },
+  "expect": {
+    "errors": [
+      {
+        "code": "V111",
+        "tool": "save2"
+      }
+    ],
+    "warnings": [],
+    "effective": {
+      "save": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

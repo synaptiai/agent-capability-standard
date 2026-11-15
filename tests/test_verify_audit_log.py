@@ -362,3 +362,71 @@ class TestVerifyLog:
         total, valid, errors = verify_log(log_path, "wrong-key")
         assert valid == 0
         assert any("HMAC mismatch" in e for e in errors)
+
+
+@pytest.mark.skipif(
+    shutil.which("jq") is None or shutil.which("openssl") is None,
+    reason="the hook needs jq and openssl",
+)
+class TestRecordedBy:
+    """Each line names the layer and its configuration (STANDARD 1.2.0
+    §5.18.8): recorded_by, which the HMAC covers like every other field."""
+
+    @staticmethod
+    def _log(tmp_path: Path, **env: str) -> Path:
+        payload = {"tool_name": "Read", "tool_input": {"file_path": "a"}}
+        result = subprocess.run(
+            [str(POSTTOOLUSE_HOOK)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "CLAUDE_PROJECT_DIR": str(tmp_path),
+                "AUDIT_HMAC_KEY": HMAC_KEY,
+                **env,
+            },
+            timeout=30,
+        )
+        assert result.returncode == 0
+        return tmp_path / ".claude" / "audit.log"
+
+    def test_lines_with_recorded_by_verify(self, tmp_path: Path) -> None:
+        self._log(tmp_path)
+        log = self._log(tmp_path, ACS_HOOK_APPROVAL="off", ACS_CHECKPOINT_MAX_AGE="600")
+        assert verify_log(log, HMAC_KEY) == (2, 2, [])
+        first, second = [json.loads(line) for line in log.read_text().splitlines()]
+        root = Path(__file__).resolve().parents[1]
+        assert first["recorded_by"] == {
+            "name": "agent-capability-standard plugin hooks",
+            "version": json.loads(
+                (root / ".claude-plugin" / "plugin.json").read_text()
+            )["version"],
+            "config_sha256": hashlib.sha256(
+                (root / "hooks" / "hooks.json").read_bytes()
+            ).hexdigest(),
+            "settings": {"approval": "ask", "checkpoint_max_age_s": 1800},
+        }
+        assert second["recorded_by"]["settings"] == {
+            "approval": "off",
+            "checkpoint_max_age_s": 600,
+        }
+        assert list(first)[-3:] == ["recorded_by", "prev_hmac", "hmac"]
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [(("config_sha256",), "0" * 64), (("settings", "approval"), "off")],
+    )
+    def test_tampering_with_recorded_by_breaks_the_chain(
+        self, tmp_path: Path, path: tuple[str, ...], value: str
+    ) -> None:
+        log = self._log(tmp_path)
+        entry = json.loads(log.read_text())
+        target = entry["recorded_by"]
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        write_log(log, [entry])
+        checked, valid, errors = verify_log(log, HMAC_KEY)
+        assert (checked, valid) == (1, 0)
+        assert errors

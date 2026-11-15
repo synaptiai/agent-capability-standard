@@ -826,7 +826,9 @@ class WorkflowEngine:
             workflow_name: Name of the containing workflow
 
         Returns:
-            Checkpoint ID if created, None if not needed or tracker unavailable
+            The id of the checkpoint the step can use: a valid one no call
+            holds, or a new one; None if the step needs none or there is no
+            tracker.
         """
         if self._checkpoint_tracker is None:
             return None
@@ -838,9 +840,11 @@ class WorkflowEngine:
         if not (flags["mutation"] or flags["requires_checkpoint"]):
             return None
 
-        # Check if a valid checkpoint already exists
-        if self._checkpoint_tracker.has_valid_checkpoint():
-            return self._checkpoint_tracker.get_active_checkpoint_id()
+        # A valid checkpoint no call holds, active or in history, serves:
+        # the one a call would hold (STANDARD 1.2.0 section 5.2.2).
+        existing = self._checkpoint_tracker.valid_checkpoint_id()
+        if existing is not None:
+            return existing
 
         # Auto-create checkpoint
         checkpoint_id = self._checkpoint_tracker.create_checkpoint(

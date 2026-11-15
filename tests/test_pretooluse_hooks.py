@@ -230,9 +230,11 @@ class TestTurnEndReleasesLeftoverReservation:
         assert not adapter.checkpoint_tracker.validate_and_reserve("probe")[0]
 
     @pytest.mark.asyncio
-    async def test_stop_releases_its_sessions_reservation(
+    async def test_stop_uses_its_sessions_hold_and_ends_validity(
         self, strict_adapter: GroundedAgentAdapter
     ):
+        """STANDARD 1.2.0 §5.18.6: a hold the layer cannot resolve counts as
+        used, and the end of a turn is an execution boundary."""
         stop_calls: list[str] = []
 
         async def caller_stop(input_data, tool_use_id, context):
@@ -245,10 +247,17 @@ class TestTurnEndReleasesLeftoverReservation:
         strict_adapter.create_checkpoint(["*"], "Test")
         await self._reserve(strict_adapter, wrapped, self._write("s1"), "denied")
 
+        tracker = strict_adapter.checkpoint_tracker
+        held = tracker.held_by("denied")
+        assert held is not None
+
         await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
 
         assert stop_calls == ["s1"]
-        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+        assert tracker.validate_and_reserve("next") == (False, None)
+        used = tracker.get_checkpoint_by_id(held)
+        assert used is not None and used.consumed
+        assert used.metadata["consumed_by"] == "unresolved hold at turn end"
 
     @pytest.mark.asyncio
     async def test_stop_of_another_session_keeps_the_reservation(
@@ -257,33 +266,45 @@ class TestTurnEndReleasesLeftoverReservation:
         wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
         strict_adapter.create_checkpoint(["*"], "Test")
         await self._reserve(strict_adapter, wrapped, self._write("s2"), "in_flight")
+        tracker = strict_adapter.checkpoint_tracker
+        held = tracker.held_by("in_flight")
 
         await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
 
-        assert not strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+        # One adapter is one scope: s1's Stop ends the validity of every
+        # checkpoint, but s2's call keeps its hold, and is refused (F501)
+        # when it is allowed.
+        assert not tracker.validate_and_reserve("next")[0]
+        assert tracker.held_by("in_flight") == held
+        assert tracker.consume_if_valid("in_flight") is None
 
     @pytest.mark.asyncio
     async def test_main_stop_keeps_a_subagents_reservation(
         self, strict_adapter: GroundedAgentAdapter
     ):
         """A background subagent can still be mid-call when the main turn
-        ends; its own SubagentStop releases what it left."""
+        ends; its own SubagentStop resolves what it left: the hold counts as
+        used (STANDARD 1.2.0 §5.18.6)."""
         wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
         strict_adapter.create_checkpoint(["*"], "Test")
         await self._reserve(
             strict_adapter, wrapped, self._write("s1", agent="sub1"), "sub_call"
         )
         tracker = strict_adapter.checkpoint_tracker
+        held = tracker.held_by("sub_call")
 
         await _fire(wrapped, "Stop", {"hook_event_name": "Stop", "session_id": "s1"})
         assert not tracker.validate_and_reserve("next")[0]
+        assert tracker.held_by("sub_call") == held
 
         await _fire(
             wrapped,
             "SubagentStop",
             {"hook_event_name": "SubagentStop", "session_id": "s1", "agent_id": "sub1"},
         )
-        assert tracker.validate_and_reserve("next")[0]
+        assert tracker.held_by("sub_call") is None
+        used = tracker.get_checkpoint_by_id(held)
+        assert used is not None and used.consumed
 
     @pytest.mark.asyncio
     @pytest.mark.asyncio
@@ -298,16 +319,19 @@ class TestTurnEndReleasesLeftoverReservation:
         call = {**self._write("s1"), "tool_use_id": "w1"}
         assert await pre(call, None, None) == {}
         tracker = strict_adapter.checkpoint_tracker
-        assert tracker.validate_and_reserve("w1")[0]  # same holder
-        assert tracker.release_reservation_in_scope(("s1", None)) == "w1"
+        held = tracker.held_by("w1")
+        assert tracker.validate_and_reserve("w1") == (True, held)  # same holder
+        assert tracker.resolve_holds_in_scope(("s1", None)) == ["w1"]
+        used = tracker.get_checkpoint_by_id(held)
+        assert used is not None and used.consumed
 
     @pytest.mark.asyncio
-    async def test_post_hook_releases_when_the_run_input_is_not_gated(
+    async def test_post_hook_consumes_when_the_run_input_is_not_gated(
         self, strict_adapter: GroundedAgentAdapter
     ):
-        """Another hook rewrote a destructive command to a read-only one:
-        PostToolUse sees the read-only input and still gives back the
-        reservation PreToolUse took for the original."""
+        """Another hook rewrote a destructive command to a read-only one: a
+        call that ran uses the hold it took, whatever input it ran with
+        (STANDARD 1.2.0 §5.18.6)."""
         wrapped = strict_adapter.wrap_options(ClaudeAgentOptions())
         strict_adapter.create_checkpoint(["*"], "Test")
         (pre,) = _hooks(wrapped.hooks["PreToolUse"][-1])
@@ -320,7 +344,10 @@ class TestTurnEndReleasesLeftoverReservation:
             for hook in _hooks(entry):
                 await hook(ran, "b1", None)
 
-        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next")[0]
+        assert strict_adapter.checkpoint_tracker.validate_and_reserve("next") == (
+            False,
+            None,
+        )
 
     @pytest.mark.asyncio
     async def test_stop_leaves_a_later_holders_reservation(
@@ -455,7 +482,9 @@ class TestPreToolUseExceptionHandling:
         result = await hook({"tool_name": "Read", "tool_input": {}}, "r1", None)
 
         assert _decision(result) == "deny"
-        assert "Rate limit check failed" in _reason(result)
+        assert _reason(result).startswith(
+            "R407 SAFETY_CHECK_FAILED: the rate limit check"
+        )
 
 
 # =============================================================================
@@ -488,19 +517,20 @@ def _run_shell_hook(
     )
 
 
-def _write_marker(project_dir: Path, expires_in: int = 1800) -> None:
+def _write_marker(
+    project_dir: Path, expires_in: int = 1800, commit: str | None = None
+) -> None:
     marker_dir = project_dir / ".claude"
     marker_dir.mkdir(exist_ok=True)
     now = int(time.time())
-    (marker_dir / "checkpoint.ok").write_text(
-        json.dumps(
-            {
-                "checkpoint_id": "chk_stdin_test",
-                "created_at": now,
-                "expires_at": now + expires_in,
-            }
-        )
-    )
+    marker: dict[str, object] = {
+        "checkpoint_id": "chk_stdin_test",
+        "created_at": now,
+        "expires_at": now + expires_in,
+    }
+    if commit is not None:
+        marker["commit"] = commit
+    (marker_dir / "checkpoint.ok").write_text(json.dumps(marker))
 
 
 @needs_bash_and_jq
@@ -525,12 +555,15 @@ class TestShellPreToolUseHookStdin:
         assert result.returncode == 2
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
 
-    def test_blocks_every_bash_call_without_marker(self, tmp_path: Path):
-        """A command is not trusted to be read-only: the hook fails closed."""
+    def test_read_only_bash_needs_no_marker(self, tmp_path: Path):
+        """A command on the read-only list, a subset of the SDK mapper's,
+        is an observe call: allowed without a marker (STANDARD 1.2.0
+        §5.18.3)."""
         result = _run_shell_hook(
             {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}, tmp_path
         )
-        assert result.returncode == 2
+        assert result.returncode == 0
+        assert result.stdout == ""
 
     def test_allows_write_with_valid_marker(self, tmp_path: Path):
         _write_marker(tmp_path)
@@ -568,3 +601,180 @@ class TestShellPreToolUseHookStdin:
             timeout=30,
         )
         assert result.returncode == 2
+
+
+def _gated_hook(
+    tool_call: dict,
+    project_dir: Path,
+    approval: str | None = None,
+    path: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["CLAUDE_PROJECT_DIR"] = str(project_dir)
+    env.pop("ACS_HOOK_APPROVAL", None)
+    if approval is not None:
+        env["ACS_HOOK_APPROVAL"] = approval
+    if path is not None:
+        env["PATH"] = path
+    return subprocess.run(
+        ["bash", str(SHELL_HOOK)],
+        input=json.dumps(tool_call),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def _bash(command: str, mode: str = "default", call: str = "b1") -> dict:
+    return {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "permission_mode": mode,
+        "tool_use_id": call,
+    }
+
+
+def _write_call(mode: str = "default", call: str = "w1") -> dict:
+    return {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "a.py"},
+        "permission_mode": mode,
+        "tool_use_id": call,
+    }
+
+
+@needs_bash_and_jq
+class TestShellHookSection518:
+    """The plugin's PreToolUse hook under STANDARD 1.2.0 §5.18: one marker
+    per gated call, approval asked in the modes that reach a person, the
+    single-command git stash classes, rollback history."""
+
+    def test_the_marker_is_used_up_by_one_write(self, tmp_path: Path):
+        _write_marker(tmp_path)
+        first = _gated_hook(_write_call(call="w1"), tmp_path, approval="off")
+        second = _gated_hook(_write_call(call="w2"), tmp_path, approval="off")
+        assert first.returncode == 0
+        assert second.returncode == 2
+        assert second.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        used = list((tmp_path / ".claude" / "checkpoints" / "used").iterdir())
+        assert [p.name.rsplit(".", 1)[0] for p in used] == ["chk_stdin_test.w1"]
+
+    def test_read_only_bash_leaves_the_marker(self, tmp_path: Path):
+        _write_marker(tmp_path)
+        assert _gated_hook(_bash("git status"), tmp_path).returncode == 0
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    def test_git_stash_create_needs_no_marker(self, tmp_path: Path):
+        result = _gated_hook(_bash('git stash create "checkpoint:x"'), tmp_path)
+        assert result.returncode == 0
+        assert result.stdout == ""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git stash store -m m 0123456789abcdef0123456789abcdef01234567",
+            "git stash pop && rm -rf x",
+            "rg --pre cat x",
+            "tree -R -H . -o out",
+            "file -C x",
+            "file -bC x",
+            "git stash show --output=f",
+            "git stash list --output=f",
+            "git log --output=f",
+            "git -C d stash list",
+        ],
+    )
+    def test_these_need_the_marker(self, tmp_path: Path, command: str):
+        result = _gated_hook(_bash(command), tmp_path)
+        assert result.returncode == 2, command
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+    def test_rollback_restores_only_a_recorded_checkpoint(self, tmp_path: Path):
+        """`git stash pop|apply <commit>` is a rollback only for the full id
+        of a commit a marker recorded: git applies any merge commit as if it
+        were a stash, so anything else is a gated mutation."""
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        other = "89abcdef0123456789abcdef0123456789abcdef"
+        for command in (f"git stash apply {sha}", "git stash pop"):
+            refused = _gated_hook(_bash(command), tmp_path)
+            assert refused.returncode == 2, command
+            assert refused.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+        _write_marker(tmp_path, commit=sha)
+        # The marker's own commit: a rollback that uses nothing.
+        kept = _gated_hook(_bash(f"git stash apply {sha}"), tmp_path)
+        assert (kept.returncode, kept.stdout) == (0, "")
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+        assert _gated_hook(_write_call(), tmp_path, approval="off").returncode == 0
+        # The marker was used; a used checkpoint can still be restored.
+        assert not (tmp_path / ".claude" / "checkpoint.ok").exists()
+        allowed = _gated_hook(_bash(f"git stash pop {sha}"), tmp_path)
+        assert (allowed.returncode, allowed.stdout) == (0, "")
+        for command in (
+            f"git stash apply {other}",
+            f"git stash apply {sha[:12]}",
+            f"git stash apply --index {sha}",
+            "git stash apply",
+            "git stash apply stash@{0}",
+        ):
+            gated = _gated_hook(_bash(command), tmp_path)
+            assert gated.returncode == 2, command
+            assert gated.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+    @pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan"])
+    def test_a_gated_call_asks_in_a_prompting_mode(self, tmp_path: Path, mode: str):
+        _write_marker(tmp_path)
+        result = _gated_hook(_write_call(mode), tmp_path)
+        assert result.returncode == 0
+        decision = json.loads(result.stdout)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "ask"
+        assert decision["permissionDecisionReason"].startswith(
+            "F502 APPROVAL_REQUIRED: Write (capability 'mutate') requires approval"
+        )
+
+    @pytest.mark.parametrize("mode", ["bypassPermissions", "auto", "dontAsk"])
+    def test_another_mode_is_f502_and_keeps_the_marker(self, tmp_path: Path, mode: str):
+        _write_marker(tmp_path)
+        result = _gated_hook(_write_call(mode), tmp_path)
+        assert result.returncode == 2
+        assert result.stderr.startswith(
+            f"F502 APPROVAL_REQUIRED: permission mode '{mode}' does not put this call to a person"
+        )
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    def test_approval_off_prints_nothing(self, tmp_path: Path):
+        _write_marker(tmp_path)
+        result = _gated_hook(_write_call("bypassPermissions"), tmp_path, approval="off")
+        assert result.returncode == 0
+        assert result.stdout == ""
+
+    def test_no_jq_is_r407(self, tmp_path: Path):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for tool in ("bash", "cat", "date", "printf"):
+            found = shutil.which(tool)
+            if found:
+                (bin_dir / tool).symlink_to(found)
+        result = _gated_hook(_write_call(), tmp_path, path=str(bin_dir))
+        assert result.returncode == 2
+        assert result.stderr.startswith(
+            "R407 SAFETY_CHECK_FAILED: cannot read the tool call"
+        )
+
+    def test_two_concurrent_writes_on_one_marker(self, tmp_path: Path):
+        """The marker is taken by one rename: exactly one call passes."""
+        import concurrent.futures
+
+        for _ in range(5):
+            _write_marker(tmp_path)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(
+                    pool.map(
+                        lambda n: _gated_hook(
+                            _write_call(call=f"c{n}"), tmp_path, approval="off"
+                        ),
+                        range(4),
+                    )
+                )
+            assert sorted(r.returncode for r in results) == [0, 2, 2, 2]

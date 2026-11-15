@@ -483,3 +483,78 @@ the foundation, axe passed and the sweep failed on two enforced pages:
 Workstreams should run `npm run check:axe` (or at least
 `node scripts/check-runs.mjs`, with `ACS_CHROMIUM` naming a Chromium) after
 `npm run build` whenever they change the Standard or the site, since CI does.
+
+## 2026-11-15 — S1 review rounds 1 and 2 (affects S4 and S5)
+
+- §10.4 now requires the capability checks of §5.18.10 of a class SL layer
+  (a bullet beside §5.18.5–§5.18.9), and a conformance statement names any
+  §5.18.10 check its layer does not apply. The statement schema
+  (`tests/conformance/calls/schema/statement.schema.json`) gains
+  `not_applied` for that.
+- Both reference statements (`grounded_agency_adapter.json`,
+  `standard_agents_binding.json`) list there (after S1 review round 2):
+  the `persist` and `audit` secret checks (F504, §6.7); the `send`
+  destination policy (F504, §4.4.2); the `transform` row and the
+  every-capability redaction row (§6.7: records, evidence and trace entries
+  the layer writes are not redacted); and, in the adapter's statement only,
+  the every-capability output-contract row (R402: a Claude Code or MCP tool
+  result is passed on unchecked). By §10.4 a layer that lists any row does
+  not conform, so neither claims class SL yet. Every text says so the same
+  way: the two layers "implement §5.18 and meet §10.4 except the §5.18.10
+  rows their conformance statements list as not applied, and claim class SL
+  once those are applied" (the Standard's Status line; SECURITY.md §5.5;
+  CONFORMANCE.md's class SL section; RFC-0005 9.1; the SDK guide's and the
+  Standard Agents guide's Conformance sections; the binding's README).
+  - **S4**, when the adapter and the binding check `persist` data and
+    `audit` records for secrets: remove the first `not_applied` line from
+    both statements. When the adapter redacts what it writes
+    (`call_records`, `diagnostics`, evidence anchors, a `transform` output
+    it records) and the binding redacts its trace entries (an output's
+    `evidence_anchors`), remove the redaction line too, and change the
+    `transform` row of SECURITY.md §5.4 from "code where a layer applies
+    §6.7" to name the redaction code. S1's `rollback` and `send` command
+    hooks now open a refusal with the code and name (§5.18.8: `F503
+    ROLLBACK_FAILED:`, `F504 CONSTRAINT_VIOLATED:`, `R407
+    SAFETY_CHECK_FAILED:` for a call they cannot read); the `persist`
+    command hook, S4's, should do the same (its test in
+    `tests/test_skill_hooks.py` takes the prefix from `OPENS`).
+  - **S5**, when both layers apply a destination policy to `send` calls
+    (reading the binding's `destination`): remove the `send` line.
+  - The adapter's output-contract line has no owning stream: Claude Code's
+    tools return no capability output, and an MCP tool's result is the
+    tool's own form. It stays until a host form for §5.18.9 exists there
+    (for example an opt-in check of a grounded MCP tool's result), so the
+    adapter claims SL only then; the binding claims it once S4 and S5 have
+    removed its lines.
+  - Whoever removes the last line of a statement drops `not_applied` from
+    it (the member stays in the schema) and rewords that layer's claim in
+    every text listed above to "claims class SL (§10.4)"; while either
+    layer still lists a row, the Status line keeps the clause.
+- The composed skills (`debug-workflow`, `capability-gap-analysis`,
+  `digital-twin-bootstrap`) take their checkpoint with `/checkpoint`, whose
+  state-saving command is what a layer counts; but `skills/checkpoint/SKILL.md`
+  still runs `git stash push`, a gated `mutate` under S1 (it needs a
+  checkpoint and approval and takes none: only a plain `git stash create`
+  is `checkpoint`). **S5's** rewrite of the checkpoint skill (S5.md 5.4,
+  `git stash create` as separate plain calls) is what makes those step 0s
+  work: until it merges, following them takes no checkpoint under either
+  layer. S5's rollback skill rewrite keeps S1's frontmatter command hook
+  (a `git stash pop|apply` must name a commit a checkpoint marker recorded,
+  F503), which its `git restore --source=<sha>` form does not trigger.
+- The plugin keeps every marker whose validity ended under
+  `.claude/checkpoints/` (`used/` for a marker a call used, `ended/` for one
+  that expired, ended with its turn or was replaced), the history a
+  `git stash pop|apply <commit>` rollback reads. The Python tracker drops a
+  loaded checkpoint dated after the load and never counts one dated after
+  the clock (S5's tracker work keeps that).
+- I-JSON numbers in both languages (binding records, F502 arguments): an
+  integer beyond ±2^53 or a float canonical JSON writes as one (1.8e16) has
+  no I-JSON form; JSON text read for a check goes through
+  `parseJsonExact` in TypeScript, which keeps 2^53 + 1 from rounding to
+  2^53. S4 or S5 code reading JSON text in TypeScript for such a check
+  should use it; Python's `grounded_agency.capabilities.bindings.i_json_problem`
+  is the Python form of the rule.
+- A tool binding record with a member that has no I-JSON form is S303 in
+  both loaders (`iJsonProblem` in `packages/acs-core/src/ijson.ts`; the
+  core's canonical JSON in Python). `iJsonProblem` is the TypeScript
+  package's one I-JSON check: S4 or S5 code that needs one should use it.

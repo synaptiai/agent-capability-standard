@@ -230,3 +230,11 @@ def format_errors_response(errors: list[ValidationError]) -> dict[str, Any]:
     (without the outer ``"error"`` wrapper).
     """
     return {"errors": [_error_to_dict(err) for err in errors]}
+
+
+def text_form(error: ValidationError) -> str:
+    """The diagnostic as text, for a channel that carries only text
+    (Section 9.8): the code, a space, the name, a colon, a space and the
+    message, e.g. ``F501 CHECKPOINT_REQUIRED: write requires a checkpoint``.
+    """
+    return f"{error.code_str} {error.name}: {error.message}"

@@ -98,7 +98,6 @@ describe('exempt runs and scope', () => {
       // Candidate's sections still awaiting their text.
       '98-diagnostic-format:c',
       '117-artifacts-of-this-version:c',
-      '518-tool-calling-hosts:a',
       '519-host-protocol:a',
       '520-grounding:a',
       '521-domain-profiles:a',

@@ -17,6 +17,12 @@
 #   - input_sha256: SHA-256 of the tool input, taken over its compact JSON
 #     with sorted keys (jq -cS .tool_input), or "unavailable" when it cannot
 #     be computed
+#   - recorded_by: the layer and the configuration that decided the call
+#     (STANDARD 1.2.0 §5.18.8): {name: "agent-capability-standard plugin
+#     hooks", version: the plugin.json version (or "unknown"), config_sha256:
+#     SHA-256 of hooks/hooks.json (or "unavailable"), settings: {approval:
+#     "ask"|"off" (ACS_HOOK_APPROVAL), checkpoint_max_age_s: the effective
+#     ACS_CHECKPOINT_MAX_AGE, 1 to 1800, default 1800}}
 #   - prev_hmac: HMAC of the previous entry (chain link)
 #   - hmac: HMAC of this entry's content
 #
@@ -97,6 +103,23 @@ if input_canonical=$(printf '%s' "$input" | jq -cS '.tool_input' 2>/dev/null); t
   fi
 fi
 
+# The layer and its configuration, as every line names it (§5.18.8): what a
+# reader needs to know which rules the call was held to. The settings are
+# the effective values, after defaults and the cap, of the two environment
+# settings that change the hooks' decisions.
+plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || echo .)}"
+plugin_version=$(jq -r '.version | strings' "${plugin_root}/.claude-plugin/plugin.json" 2>/dev/null || true)
+plugin_version="${plugin_version:-unknown}"
+config_sha256=$(sha256_hex < "${plugin_root}/hooks/hooks.json" 2>/dev/null || true)
+[[ "$config_sha256" =~ ^[0-9a-f]{64}$ ]] || config_sha256="unavailable"
+approval_setting="ask"
+[ "${ACS_HOOK_APPROVAL:-ask}" = "off" ] && approval_setting="off"
+max_age="${ACS_CHECKPOINT_MAX_AGE:-1800}"
+if ! [[ "$max_age" =~ ^[0-9]{1,4}$ ]] || (( 10#$max_age < 1 || 10#$max_age > 1800 )); then
+  max_age=1800
+fi
+max_age=$((10#$max_age))
+
 # Determine output directory using CLAUDE_PROJECT_DIR or pwd
 if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
   log_dir="${CLAUDE_PROJECT_DIR}/.claude"
@@ -147,10 +170,18 @@ _do_append() {
     --arg tool "$tool_name" \
     --arg skill "$skill" \
     --arg input_sha256 "$input_sha256" \
+    --arg version "$plugin_version" \
+    --arg config_sha256 "$config_sha256" \
+    --arg approval "$approval_setting" \
+    --argjson max_age "$max_age" \
     --arg prev_hmac "$prev_hmac" \
     '{ts: $ts, event: $event, tool: $tool}
      + (if $skill == "" then {} else {skill: $skill} end)
-     + {input_sha256: $input_sha256, prev_hmac: $prev_hmac}' 2>/dev/null)
+     + {input_sha256: $input_sha256,
+        recorded_by: {name: "agent-capability-standard plugin hooks",
+                      version: $version, config_sha256: $config_sha256,
+                      settings: {approval: $approval, checkpoint_max_age_s: $max_age}},
+        prev_hmac: $prev_hmac}' 2>/dev/null)
 
   # Guard: if jq failed, skip logging rather than corrupt the chain
   if [ -z "$entry_content" ]; then

@@ -1,0 +1,22 @@
+{
+  "description": "A record that cites a Standard version the layer does not support is V109, and is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "observe",
+      "standard": "1.9"
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "V109",
+        "tool": "look"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

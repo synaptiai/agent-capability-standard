@@ -7,6 +7,7 @@ using the real Claude Agent SDK types.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -143,7 +144,7 @@ class TestWrapOptions:
         assert _pre_decision(await pre(call, "s1", None)) is None
         second = await pre(call, "s2", None)
         assert _pre_decision(second) == "deny"
-        assert "Rate limited" in _pre_reason(second)
+        assert _pre_reason(second).startswith("F504 CONSTRAINT_VIOLATED: rate limit")
 
     async def test_callback_does_not_charge_the_rate_limit(
         self, tmp_path: Path
@@ -189,7 +190,7 @@ class TestWrapOptions:
         assert adapter.rate_limiter.allow("high")  # use the only token
         denied = await pre({"tool_name": "Write", "tool_input": {}}, "w1", None)
         assert _pre_decision(denied) == "deny"
-        assert "Rate limited" in _pre_reason(denied)
+        assert _pre_reason(denied).startswith("F504 CONSTRAINT_VIOLATED: rate limit")
         assert adapter.checkpoint_tracker.validate_and_reserve("w2")[0]
 
     def test_preserves_existing_allowed_tools(
@@ -235,11 +236,15 @@ class TestPermissionCallback:
     async def test_allows_write_with_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
-        """Write tool should be allowed with a valid checkpoint."""
+        """Write tool should be allowed with a valid checkpoint. A gated
+        call is named by its tool_use_id, under which the layer holds its
+        checkpoint (STANDARD 1.2.0 §5.18.6)."""
         adapter.create_checkpoint(scope=["*"], reason="test")
         callback = adapter._make_permission_callback()
         result = await callback(
-            "Write", {"file_path": "/tmp/test.txt", "content": "hello"}, None
+            "Write",
+            {"file_path": "/tmp/test.txt", "content": "hello"},
+            SimpleNamespace(tool_use_id="t1"),
         )
         assert _is_allowed(result)
 

@@ -6,10 +6,21 @@ This directory contains hooks that implement the VERIFY layer capabilities from 
 
 These hooks directly implement capabilities defined in the standard's VERIFY layer:
 
-| Hook | Capability | Purpose |
-|------|------------|---------|
-| `pretooluse_require_checkpoint.sh` | `checkpoint` | Require checkpoint marker before mutation operations |
-| `posttooluse_log_tool.sh` | `audit` | Log every tool call for audit trail and provenance |
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `pretooluse_require_checkpoint.sh` | PreToolUse (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) | Classify the call; one checkpoint marker per gated call; ask for approval; let a restore of a recorded checkpoint run as a rollback |
+| `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Write the checkpoint marker after a successful `git stash create`, filing a marker it replaces under `.claude/checkpoints/ended/` |
+| `stop_end_checkpoints.sh` | Stop | End the marker's validity, filing it under `.claude/checkpoints/ended/`: the end of a turn is an execution boundary |
+| `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure (every tool) | Log every tool call for audit trail and provenance, with the configuration that decided it |
+
+The hooks apply the rules of
+[STANDARD 1.2.0 §5.18](../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)
+where Claude Code lets them, and do not claim the safety-layer class SL
+([SECURITY.md §5.5](../spec/SECURITY.md#55-hooks-and-the-safety-layer-class)
+says why). The Python SDK adapter and the Standard Agents binding meet it
+except the §5.18.10 checks their conformance statements
+(`tests/conformance/calls/statements/`) list as not applied, and claim it
+once those are applied.
 
 ## How Hooks Work
 
@@ -30,15 +41,19 @@ flowchart TB
 ### Pre-Tool-Use Hooks
 
 Run **before** a tool executes and can block operations. Claude Code passes
-the tool call as JSON on stdin; exit 0 allows the call, and exit 2 blocks it,
-with the reason on stderr shown to Claude (any other non-zero exit is a
+the tool call as a JSON object on stdin; exit 0 allows the call (with an
+`ask` decision on stdout for a call that needs approval), and exit 2 blocks
+it, with the reason on stderr shown to Claude (any other non-zero exit is a
 non-blocking error, so the tool would still run). The reason opens with the
-Standard's code and name for the refusal, `F501 CHECKPOINT_REQUIRED:`.
+Standard's code and name for the refusal, such as `F501
+CHECKPOINT_REQUIRED:`. Only Claude Code's JSON object is read: a payload that
+is not one, or a system without `jq`, is blocked with `R407
+SAFETY_CHECK_FAILED:`.
 
 ```bash
 echo '{"tool_name": "Write", "tool_input": {"file_path": "a.py"}}' \
   | ./pretooluse_require_checkpoint.sh   # exit 2 without a valid marker
-./pretooluse_require_checkpoint.sh "Write a.py"   # a payload as $1 is also accepted
+./pretooluse_require_checkpoint.sh '{"tool_name": "Bash", "tool_input": {"command": "ls"}}'   # $1 also works
 ```
 
 ### Post-Tool-Use Hooks
@@ -80,6 +95,15 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_take_checkpoint.sh"
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -89,6 +113,16 @@ Hooks are configured in `hooks.json` (loaded automatically by the Claude Code pl
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"
           }
         ]
       }
@@ -105,38 +139,91 @@ Each hook entry specifies:
 
 ## Checkpoint System
 
-The `pretooluse_require_checkpoint.sh` hook enforces the `checkpoint` capability requirement:
-- Expects a marker file at `.claude/checkpoint.ok` before allowing mutation operations: every `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` call (it fails closed: a shell command is not trusted to be read-only). The marker is written outside these tools, by `CheckpointTracker` or by a person
-- Blocks with exit code 2 and the reason on stderr, which opens with `F501 CHECKPOINT_REQUIRED:` (the code and name the Standard gives a mutation without a checkpoint)
-- Validates that the marker is a JSON object with a `checkpoint_id` and a numeric `expires_at` (SEC-001); `created_at` is written for the reader and not checked. Without `jq` it checks only that the marker is under 30 minutes old
-- Rejects markers that have expired, and removes them
-- Fails closed: a marker that is not a JSON object, or any command in the hook that fails, blocks the call with exit code 2 (any other exit code would let it run)
-- Rejects symlinks to prevent bypass attacks (SEC-006)
-- Uses `CLAUDE_PROJECT_DIR` for absolute path resolution (SEC-006)
-- Maps to the spec's `requires_checkpoint: true` field on capabilities
+`pretooluse_require_checkpoint.sh` classifies each call it is routed by its
+effect (STANDARD 1.2.0 §5.18.3), with lists derived from the SDK mapper's
+(`grounded_agency/capabilities/mapper.py`; `tests/test_hook_lists_match_mapper.py`
+keeps the hook's read-only list a subset of the mapper's and its `git stash`
+table equal to it):
 
+- `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
+- `Bash`: a command with any of `` ; & | < > $ ` ( ) { } \ `` or a line
+  break may be more than one command or expand something, so it is `mutate`.
+  Otherwise it is read as one simple command: an option that writes
+  (`git ... --output`, `file -C`) is `mutate`; `git stash create` takes a
+  checkpoint; `git stash list` and `git stash show` only read; `git stash pop
+  <commit>` and `git stash apply <commit>` restore one (`rollback`) when
+  `<commit>` is the full id of a commit a checkpoint marker recorded; any
+  other `pop` or `apply`, a bare one included, is `mutate`, since git applies
+  any merge commit as if it were a stash; any other `git stash` form
+  is `mutate`; a command on the read-only list (`ls`, `cat`, `head`, `tail`,
+  `wc`, `pwd`, `grep`, `stat`, `file`, `du`, `df`, `which`, `whoami`,
+  `uname`, `echo`, `printf`, `git status`, `git log`, `git diff`, `git show`,
+  `git rev-parse`, `git ls-files`) only reads and needs nothing; anything else
+  is `mutate`.
+
+Then:
+
+- **Rollback** (`git stash pop|apply <commit>`): allowed when the marker,
+  or a marker filed under `.claude/checkpoints/used/` or
+  `.claude/checkpoints/ended/`, recorded `<commit>` as its `commit`, so the
+  checkpoint was taken in the project. It uses no checkpoint: one that was
+  used, expired, ended with its turn or was replaced can still be restored.
+  Restoring anything else is a `mutate`.
+- **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
+  file (not a symlink, SEC-006), be a JSON object with a `checkpoint_id`, a
+  `created_at` and an `expires_at` in whole seconds of at most 12 digits, the
+  first not in the future and the second at most 1800 seconds (30 minutes)
+  after it, and not have expired (SEC-001); otherwise the call is blocked
+  with `F501 CHECKPOINT_REQUIRED:`, an expired marker is filed under
+  `.claude/checkpoints/ended/` and a malformed one is removed. Unless `ACS_HOOK_APPROVAL=off`,
+  the permission mode must put the call to a person (`default`,
+  `acceptEdits` or `plan`); in any other mode the call is blocked with `F502
+  APPROVAL_REQUIRED:` and the marker is left in place. The call then **uses
+  the marker up**: one rename moves it into `.claude/checkpoints/used/`, so
+  two calls never pass on one marker (the one that loses is blocked with
+  F501). Finally, unless `ACS_HOOK_APPROVAL=off`, the hook answers
+  `permissionDecision: "ask"` with an `F502 APPROVAL_REQUIRED:` reason, so
+  Claude Code asks the person; with `off`, approval is left to Claude Code's
+  permission rules, and every audit line records that setting.
+- A failure of the hook itself blocks the call with `R407
+  SAFETY_CHECK_FAILED:` (exit 2; any other exit code would let it run).
+
+The marker is written by `posttooluse_take_checkpoint.sh` after a `git stash
+create` that succeeded (the call that saves the state takes the checkpoint,
+§5.18.6), and by `CheckpointTracker(marker_dir=".claude")` in the Python SDK.
+Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds when that is an integer from 1
+to 1800, else 1800 (the Standard caps a checkpoint's maximum age at 30
+minutes). A new marker replaces the old one, which is filed under
+`.claude/checkpoints/ended/`. `stop_end_checkpoints.sh` files the marker
+there when a turn ends: the end of a turn is an execution boundary. Each
+gated call needs its own checkpoint; every marker filed under `used/` or
+`ended/` stays the record of a checkpoint taken, which a rollback reads.
 
 ```mermaid
 ---
-title: How the checkpoint hook decides
+title: One checkpoint per gated call
 ---
 flowchart TB
-  accDescr: CheckpointTracker or a person writes the marker file outside the gated tools; on every Write, Edit, MultiEdit, NotebookEdit or Bash call the hook allows the call only when the marker is present, is not a symlink, is a JSON object with an id and an expiry, and has not expired, and otherwise blocks with exit code 2.
-  w[CheckpointTracker or a person] -->|writes| m[".claude/checkpoint.ok"]
-  call["Write, Edit, MultiEdit, NotebookEdit or Bash call"] --> h[pretooluse_require_checkpoint.sh]
-  m -.->|read by| h
-  h --> q{"Marker present, not a symlink, a JSON object with an id and an expiry, not expired?"}
-  q -->|yes| ok[Call allowed]
-  q -->|no| no[Blocked with exit code 2]
+  accDescr: A successful git stash create writes the marker; a gated call that finds a valid marker in a mode that reaches a person moves it into the used directory and asks for approval; without a valid marker it is blocked with F501; the end of a turn files the marker under the ended directory, where a rollback can still restore its commit.
+  s["git stash create succeeds"] -->|writes| m[".claude/checkpoint.ok"]
+  c["A gated call"] --> q{"Valid marker?"}
+  m -.-> q
+  q -->|no| f501["Blocked: F501"]
+  q -->|yes| mode{"Mode reaches a person?"}
+  mode -->|no| f502["Blocked: F502"]
+  mode -->|yes| used["Marker moved to used/"]
+  used --> ask["ask: the person decides"]
+  stop["The turn ends"] -->|"files under ended/"| m
 ```
 
-The marker file must contain a JSON object (`created_at` is optional):
+The marker file holds a JSON object. `checkpoint_id`, `created_at` and
+`expires_at` are checked; `commit` is what a rollback may restore (a full
+commit id, or `HEAD` for a clean tree, which no rollback names); `source` is
+written for the reader:
+
 ```json
-{"checkpoint_id": "chk_...", "created_at": 1706000000, "expires_at": 1706001800}
+{"checkpoint_id": "3f2a...", "commit": "3f2a...", "created_at": 1706000000, "expires_at": 1706001800, "source": "git stash create"}
 ```
-
-When using the Python SDK, `CheckpointTracker(marker_dir=".claude")` automatically
-manages this marker file, bridging the shell and Python safety layers.
 
 ## Audit Trail
 
@@ -157,13 +244,14 @@ Each entry holds these fields:
 | `tool` | Tool name |
 | `skill` | Skill name, on a `Skill` call only |
 | `input_sha256` | SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (none of `sha256sum`, `shasum` and `openssl` is installed, or the one used fails); the entry is written either way |
+| `recorded_by` | The layer and the configuration that decided the call (STANDARD 1.2.0 §5.18.8): `name`, `version` (from `.claude-plugin/plugin.json`), `config_sha256` (SHA-256 of `hooks/hooks.json`) and `settings`, the effective `approval` (`ask`, or `off` with `ACS_HOOK_APPROVAL=off`) and `checkpoint_max_age_s` (`ACS_CHECKPOINT_MAX_AGE`, 1 to 1800, default 1800) |
 | `prev_hmac` | HMAC of the previous entry, empty on the first |
 | `hmac` | HMAC of this entry's other fields |
 
 A `Skill` call with the input `{"skill": "checkpoint"}`, logged with `AUDIT_HMAC_KEY=example-key`:
 
 ```json
-{"ts":"2026-01-30T12:00:00Z","event":"PostToolUse","tool":"Skill","skill":"checkpoint","input_sha256":"a69e8f80ec2830e5006e68ce275a5077f299455c58def8f4d12762083815e11a","prev_hmac":"","hmac":"c8e3958eb21f82334d55b1c9c6d7d4a887ea8857fdd925573a67ca083203e19c"}
+{"ts":"2026-01-30T12:00:00Z","event":"PostToolUse","tool":"Skill","skill":"checkpoint","input_sha256":"a69e8f80ec2830e5006e68ce275a5077f299455c58def8f4d12762083815e11a","recorded_by":{"name":"agent-capability-standard plugin hooks","version":"2.0.0","config_sha256":"6c98aa16607af86666be909d5d881ee687786e34d10ad39fadd6edd5f21285e3","settings":{"approval":"ask","checkpoint_max_age_s":1800}},"prev_hmac":"","hmac":"31a1a1753e237eb9a07ee062e171b0bf0c89d5a0e1f12887c6e3bf70c706e8a6"}
 ```
 
 A reader who holds a tool input can confirm it against `input_sha256`. The
@@ -173,7 +261,8 @@ prints, and jq 1.6 and 1.7 print some numbers differently (jq 1.7 keeps
 `1.000` as written, jq 1.6 prints `1`), so an input that holds such a number
 is confirmed with the jq version that wrote the log.
 
-A log begun before the hook logged every tool call opens with entries of the
+A line written before `recorded_by` was added has no `recorded_by`, and
+verifies too. A log begun before the hook logged every tool call opens with entries of the
 earlier form (`ts`, `skill`, `args`, `prev_hmac`, `hmac`, for `Skill` calls
 only). The chain continues across the change and the verifier accepts both
 forms; the earlier entries still hold the skill arguments they were written
@@ -204,9 +293,15 @@ declare hooks of their own in the frontmatter of their `SKILL.md`. Claude Code
 registers them when the skill is invoked. Their command hooks follow the same
 contract as the hooks here: the tool call as JSON on stdin, exit 2 to block
 with the reason on stderr, and a digest in place of the tool input in what
-they log. [SECURITY.md §5.4](../spec/SECURITY.md#54-checks-enforced-by-code-and-checks-a-model-judges)
-lists which of the plugin's and the skills' checks are enforced by code and
-which are prompts a model judges.
+they log. Their prompt hooks hold only model-judged additions: a check the
+Standard requires (approval, the checkpoint, rollback history, the
+destination policy, secrets) is decided by code (STANDARD 1.2.0 §5.18.10).
+[SECURITY.md §5.4](../spec/SECURITY.md#54-checks-enforced-by-code-and-checks-a-model-judges)
+maps every condition of the skills' hooks to the Standard's checks or marks
+it a model-judged addition. The rollback skill's command hook reads the
+same markers as the hook here: a `git stash pop` or `git stash apply` that
+does not name a commit a marker recorded (the marker, `used/` or `ended/`)
+restores no checkpoint and is blocked with `F503 ROLLBACK_FAILED:`.
 
 ## Relationship to Spec
 
@@ -214,7 +309,11 @@ These hooks implement runtime enforcement of VERIFY layer requirements:
 
 | Spec Field | Hook Implementation |
 |------------|---------------------|
-| `requires_checkpoint: true` | `pretooluse_require_checkpoint.sh` blocks without checkpoint |
-| `audit` capability | `posttooluse_log_tool.sh` records tool usage |
+| `requires_checkpoint: true` | `pretooluse_require_checkpoint.sh` blocks without a valid marker and uses one up per call (F501) |
+| `requires_approval: true` | `pretooluse_require_checkpoint.sh` asks for approval in modes that reach a person, and blocks in others (F502) |
+| `checkpoint` → `rollback` (`requires`) | `pretooluse_require_checkpoint.sh` counts a restore as a rollback only for a commit a marker recorded, so a checkpoint was taken before it; any other restore is a `mutate` (F501) |
+| Taking a checkpoint (§5.18.6) | `posttooluse_take_checkpoint.sh` writes the marker after a successful `git stash create` |
+| Execution boundary (§5.18.6) | `stop_end_checkpoints.sh` removes the marker when a turn ends |
+| `audit` capability, records (§5.18.8) | `posttooluse_log_tool.sh` records every call and the configuration that decided it |
 
 See `schemas/capability_ontology.yaml` for full capability definitions.

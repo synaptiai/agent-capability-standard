@@ -1,0 +1,22 @@
+{
+  "description": "1.8e16 is a number canonical JSON writes as the integer 18000000000000000, beyond 2^53: S303, and the record is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "observe",
+      "x-build": 1.8e+16
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "look"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

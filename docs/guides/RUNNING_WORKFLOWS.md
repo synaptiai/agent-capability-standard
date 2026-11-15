@@ -117,7 +117,14 @@ digests represent every value exactly.
 
 Every action carries `id` and `frame`: the workflows of the nested runs,
 root first. A capability's output must be an object with the fields its
-ontology contract requires, or the step fails (R402).
+ontology contract requires, or the step fails (R402). When your host gets the
+output as a string (a model's reply, a sub-prompt's result, a tool's text),
+decode it by
+[Standard 1.2.0 §5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)
+before you answer: it must be the I-JSON text of the object and nothing else.
+`grounded_agency.decode_capability_output(capability, text, registry)` does
+this and raises `CapabilityOutputError` (R402) otherwise; answer the action
+with an error then.
 
 ## What the executor enforces
 
@@ -143,9 +150,12 @@ ontology contract requires, or the step fails (R402).
     gate --> ended["end: the run ends successfully"]
   ```
 - **Checkpoints.** One checkpoint authorises one step that requires one,
-  and is used only once the step is approved and about to run. When none
-  is valid, the executor asks for a new one (`CreateCheckpoint`). A
-  completed wait invalidates earlier checkpoints.
+  and is used only once the step is approved and about to run
+  ([§5.2.2](../../spec/STANDARD-v1.2.0.md#522-checkpoint-use) states the
+  rule). The newest valid one is used: once the latest is used, an earlier
+  valid one is used before a new one is asked for. When none is valid, the
+  executor asks for a new one (`CreateCheckpoint`). A completed wait
+  invalidates earlier checkpoints.
 - **Approvals.** Every step that requires approval asks for it, unless it
   is deferred. The
   decision must match the digest of what was shown, have enough distinct

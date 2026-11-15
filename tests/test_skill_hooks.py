@@ -115,11 +115,22 @@ def input_digest(tool_input: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def assert_blocked(result: subprocess.CompletedProcess[str], reason: str) -> None:
+def assert_blocked(
+    result: subprocess.CompletedProcess[str], reason: str, opens: str = "BLOCK: "
+) -> None:
     assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
-    assert result.stderr.startswith("BLOCK: ")
+    assert result.stderr.startswith(opens), result.stderr
     assert reason in result.stderr
     assert result.stdout == "", "the reason belongs on stderr"
+
+
+# A refusal on a text channel opens with the Standard's code and name
+# (STANDARD 1.2.0 §5.18.8); the rollback and send hooks' do (persist's is
+# S4's to change).
+OPENS = {
+    "rollback": "R407 SAFETY_CHECK_FAILED: ",
+    "send": "R407 SAFETY_CHECK_FAILED: ",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -136,29 +147,45 @@ class TestFrontmatterHooks:
         )
         assert declared == SKILLS_WITH_HOOKS
 
-    def test_security_md_says_what_enforces_each_check(self) -> None:
-        """SECURITY.md §5.4 has one row for each hook that can refuse a call.
+    def test_security_md_maps_every_hook(self) -> None:
+        """SECURITY.md §5.4 maps every condition of the skills' hooks to the
+        Standard's check it implements, or marks it a model-judged addition
+        (STANDARD 1.2.0 §5.18.10).
 
-        The row says whether code or a model decides: a command hook is code,
-        a prompt hook is a model's judgement.
+        Every pre-tool-use hook has at least one row, and each row of a
+        command hook says code enforces it; every row cites a section of
+        the Standard or says it is a model-judged addition.
         """
         text = SECURITY_MD.read_text(encoding="utf-8")
         start = text.index("### 5.4 ")
-        section = text[start : text.index("\n## 6. ", start)]
-        rows = [line for line in section.splitlines() if line.startswith("| ")]
-        kinds = {
-            "command": ("command hook", "Code: blocks the call"),
-            "prompt": ("prompt hook", "A model judges"),
-        }
-
+        section = text[start : text.index("### 5.5 ", start)]
+        rows = [
+            [cell.strip() for cell in line.strip("|").split("|")]
+            for line in section.splitlines()
+            if line.startswith("| `skills/")
+        ]
+        assert rows
+        for hook, condition, standard, enforced_by in rows:
+            assert condition and enforced_by, hook
+            assert "§5.18" in standard or standard.startswith(
+                "Model-judged addition"
+            ), (
+                hook,
+                condition,
+            )
+        kinds = {"command": "command hook", "prompt": "prompt hook"}
         for skill in SKILLS_WITH_HOOKS:
             for group in frontmatter(skill)["hooks"].get("PreToolUse", []):
                 for hook in group["hooks"]:
-                    kind, enforced_by = kinds[hook["type"]]
-                    where = f"`skills/{skill}/SKILL.md`, {kind} on `{group['matcher']}`"
-                    matching = [row for row in rows if where in row]
-                    assert len(matching) == 1, f"SECURITY.md §5.4: no row for {where}"
-                    assert matching[0].rstrip(" |").endswith(enforced_by), where
+                    where = (
+                        f"`skills/{skill}/SKILL.md`, {kinds[hook['type']]} on "
+                        f"`{group['matcher']}`"
+                    )
+                    matching = [row for row in rows if row[0].startswith(where)]
+                    assert matching, f"SECURITY.md §5.4: no row for {where}"
+                    if hook["type"] == "command":
+                        for row in matching:
+                            assert row[3].startswith("Code"), where
 
     @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
     @pytest.mark.parametrize(
@@ -220,7 +247,7 @@ class TestFrontmatterHooks:
         """A check that cannot read the call does not let it through."""
         command = command_hook(skill, "PreToolUse", matcher)
         result = run_command(command, "not json", tmp_path, shell)
-        assert_blocked(result, "cannot read the tool call")
+        assert_blocked(result, "cannot read the tool call", OPENS.get(skill, "BLOCK: "))
 
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
@@ -249,7 +276,7 @@ class TestFrontmatterHooks:
         result = run_command(
             command, tool_call, tmp_path, shell_path, {"PATH": str(empty_bin)}
         )
-        assert_blocked(result, "jq is required")
+        assert_blocked(result, "jq is required", OPENS.get(skill, "BLOCK: "))
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +307,11 @@ class TestSendCommandHook:
     ) -> None:
         hook = command_hook("send", "PreToolUse", "Bash")
         result = run_command(hook, bash_call(command), tmp_path, shell)
-        assert_blocked(result, "Internal network access requires explicit approval")
+        assert_blocked(
+            result,
+            "does not send to localhost or a private IPv4 address",
+            "F504 CONSTRAINT_VIOLATED: ",
+        )
 
     @pytest.mark.parametrize(
         "command",
@@ -397,7 +428,7 @@ class TestPersistCommandHook:
 
 
 # ---------------------------------------------------------------------------
-# rollback: restoring a git stash when there is none
+# rollback: a restore must name a checkpoint the project recorded
 # ---------------------------------------------------------------------------
 
 GIT_ENV = {
@@ -410,15 +441,16 @@ GIT_ENV = {
 }
 
 
-def git(repo: Path, *args: str) -> None:
-    subprocess.run(
+def git(repo: Path, *args: str) -> str:
+    return subprocess.run(
         ["git", *args],
         cwd=repo,
         env={**os.environ, **GIT_ENV},
         check=True,
         capture_output=True,
+        text=True,
         timeout=30,
-    )
+    ).stdout
 
 
 @pytest.fixture
@@ -433,29 +465,99 @@ def repo(tmp_path: Path) -> Path:
     return path
 
 
+ROLLBACK_ENV = {**GIT_ENV, "CLAUDE_PROJECT_DIR": ""}
+
+
+def checkpoint(repo: Path, where: str = "marker") -> str:
+    """Take a checkpoint as the plugin does: `git stash create` (which writes
+    no refs/stash, so `git stash list` stays empty) and a marker recording
+    its commit, live or filed under used/ or ended/."""
+    (repo / "a.txt").write_text("two\n")
+    sha = git(repo, "stash", "create", "checkpoint:x").strip()
+    assert git(repo, "stash", "list") == ""
+    record = json.dumps({"checkpoint_id": sha, "commit": sha})
+    claude = repo / ".claude"
+    if where == "marker":
+        claude.mkdir()
+        (claude / "checkpoint.ok").write_text(record)
+    else:
+        (claude / "checkpoints" / where).mkdir(parents=True)
+        (claude / "checkpoints" / where / "m.1").write_text(record)
+    return sha
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 @pytest.mark.parametrize("shell", SHELLS)
 class TestRollbackCommandHook:
-    @pytest.mark.parametrize("command", ["git stash pop", "git stash apply stash@{0}"])
-    def test_blocks_restore_without_a_stash(
+    """STANDARD 1.2.0 §5.18.6: a rollback needs a checkpoint taken earlier,
+    valid or not. In this skill a `git stash pop|apply` must name the commit
+    a checkpoint recorded (F503 otherwise), whatever `git stash list` holds."""
+
+    @pytest.mark.parametrize("where", ["marker", "used", "ended"])
+    def test_allows_restoring_a_recorded_checkpoint(
+        self, repo: Path, shell: str, where: str
+    ) -> None:
+        sha = checkpoint(repo, where)
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        for command in (f"git stash apply {sha}", f"git stash pop {sha}"):
+            result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
+            assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git stash pop",
+            "git stash apply",
+            "git stash apply stash@{0}",
+            "git stash apply HEAD",
+            "git stash apply 0123456789abcdef0123456789abcdef01234567",
+            "git stash apply --index {sha}",
+            "git stash apply {short}",
+            "git stash apply {sha} && git stash pop",
+        ],
+    )
+    def test_blocks_a_restore_of_no_recorded_checkpoint(
         self, repo: Path, shell: str, command: str
     ) -> None:
+        sha = checkpoint(repo)
         hook = command_hook("rollback", "PreToolUse", "Bash")
-        result = run_command(hook, bash_call(command), repo, shell, GIT_ENV)
-        assert_blocked(result, "No git stash found to restore")
+        text = command.replace("{sha}", sha).replace("{short}", sha[:12])
+        result = run_command(hook, bash_call(text), repo, shell, ROLLBACK_ENV)
+        assert_blocked(
+            result,
+            "restores no checkpoint taken in this project",
+            "F503 ROLLBACK_FAILED: ",
+        )
 
-    def test_allows_restore_with_a_stash(self, repo: Path, shell: str) -> None:
+    def test_an_unrelated_stash_does_not_let_a_bare_pop_through(
+        self, repo: Path, shell: str
+    ) -> None:
         (repo / "a.txt").write_text("two\n")
-        git(repo, "stash", "push", "-q", "-m", "checkpoint:chk_1:test")
-
+        git(repo, "stash", "push", "-q", "-m", "unrelated")
         hook = command_hook("rollback", "PreToolUse", "Bash")
-        result = run_command(hook, bash_call("git stash pop"), repo, shell, GIT_ENV)
-        assert result.returncode == 0, result.stderr
+        result = run_command(
+            hook, bash_call("git stash pop"), repo, shell, ROLLBACK_ENV
+        )
+        assert_blocked(result, "restores no checkpoint", "F503 ROLLBACK_FAILED: ")
+
+    def test_reads_the_markers_of_claude_project_dir(
+        self, repo: Path, tmp_path: Path, shell: str
+    ) -> None:
+        sha = checkpoint(repo)
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        call = bash_call(f"git stash apply {sha}")
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(repo)}
+        assert run_command(hook, call, elsewhere, shell, env).returncode == 0
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(elsewhere)}
+        assert run_command(hook, call, repo, shell, env).returncode == 2
 
     @pytest.mark.parametrize(
         "command",
         [
             # taking a checkpoint and listing stashes restore nothing
+            "git stash create checkpoint:x",
             "git stash push -m 'checkpoint:chk_2:before edit'",
             "git stash list",
             "git status",
@@ -465,7 +567,7 @@ class TestRollbackCommandHook:
         self, repo: Path, shell: str, command: str
     ) -> None:
         hook = command_hook("rollback", "PreToolUse", "Bash")
-        result = run_command(hook, bash_call(command), repo, shell, GIT_ENV)
+        result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
         assert result.returncode == 0, result.stderr
 
 
@@ -567,3 +669,41 @@ def test_skill_log_digest_matches_the_plugin_audit_log(tmp_path: Path) -> None:
 
     assert entry["input_sha256"] == input_digest(TOOL_INPUTS["Bash"])
     assert f"input_sha256: {entry['input_sha256']}" in skill_line
+
+
+class TestPromptHooksAreModelJudgedAdditions:
+    """STANDARD 1.2.0 §5.18.10: a check the Standard requires is decided by
+    code; a prompt hook keeps only model-judged additions."""
+
+    OPENING = "Model-judged additions (STANDARD 1.2.0 §5.18.10)"
+
+    @pytest.mark.parametrize("skill", SKILLS_WITH_HOOKS)
+    def test_every_prompt_hook_opens_with_the_model_judged_line(
+        self, skill: str
+    ) -> None:
+        for event in ("PreToolUse", "PostToolUse"):
+            for hook in hooks_of(skill, event, "prompt"):
+                assert hook["prompt"].startswith(self.OPENING), skill
+
+    @pytest.mark.parametrize(
+        ("skill", "removed"),
+        [
+            ("send", ["explicitly approved", "Checkpoint exists", "Rate limits"]),
+            ("rollback", ["has not expired", "exists and is valid"]),
+        ],
+    )
+    def test_code_decided_conditions_are_gone(
+        self, skill: str, removed: list[str]
+    ) -> None:
+        (hook,) = hooks_of(skill, "PreToolUse", "prompt")
+        conditions = hook["prompt"].split("\n\n", 1)[1]
+        for phrase in removed:
+            assert phrase.lower() not in conditions.lower(), (skill, phrase)
+
+    def test_no_skill_writes_the_checkpoint_marker(self) -> None:
+        """The marker is the safety layer's own record: a skill takes a
+        checkpoint with a state-saving command (§5.18.6) instead."""
+        for path in SKILLS_DIR.glob("*/SKILL.md"):
+            text = path.read_text(encoding="utf-8")
+            assert "Create `.claude/checkpoint.ok`" not in text, path
+            assert "Create checkpoint marker" not in text, path

@@ -8,12 +8,12 @@ and subsequent checkpoint consumption.
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 
 import pytest
 
 from grounded_agency.state.checkpoint_tracker import CheckpointTracker
+from tests.conftest import FakeClock
 
 
 @pytest.fixture
@@ -46,12 +46,12 @@ class TestValidateAndReserve:
         assert checkpoint_id is None
 
     def test_returns_false_for_expired_checkpoint(
-        self, tracker: CheckpointTracker
+        self, tmp_path: Path, fake_clock: FakeClock
     ) -> None:
-        # Create checkpoint that expires immediately
-        tracker.create_checkpoint(scope=["*"], reason="test", expiry_minutes=0)
-        # Wait a tiny bit to ensure expiry
-        time.sleep(0.01)
+        tracker = CheckpointTracker(checkpoint_dir=str(tmp_path), clock=fake_clock)
+        tracker.create_checkpoint(scope=["*"], reason="test")
+        # Past the 30-minute maximum age (STANDARD 1.2.0 §5.18.6)
+        fake_clock.advance(minutes=31)
         is_valid, checkpoint_id = tracker.validate_and_reserve()
         assert is_valid is False
         assert checkpoint_id is None
@@ -281,18 +281,33 @@ class TestReservation:
         tracker.invalidate_all()
         assert tracker.release_reservation() is False
 
-    def test_abandoned_reservation_lapses(self, tmp_path: Path) -> None:
-        tracker = CheckpointTracker(checkpoint_dir=str(tmp_path), reservation_seconds=0)
+    def test_abandoned_reservation_lapses(
+        self, tmp_path: Path, fake_clock: FakeClock
+    ) -> None:
+        """A hold that lapses counts as used (STANDARD 1.2.0 §5.18.6): the
+        layer never learned whether its call ran."""
+        tracker = CheckpointTracker(
+            checkpoint_dir=str(tmp_path), reservation_seconds=1, clock=fake_clock
+        )
         created = tracker.create_checkpoint(scope=["*"], reason="test")
         tracker.validate_and_reserve("a")
-        assert tracker.validate_and_reserve("b") == (True, created)
+        fake_clock.advance(seconds=2)
+        assert tracker.validate_and_reserve("b") == (False, None)
+        lapsed = tracker.get_checkpoint_by_id(created)
+        assert lapsed is not None and lapsed.consumed
+        assert lapsed.metadata["consumed_by"] == "lapsed hold of a"
 
-    def test_reservation_is_not_persisted(self, tmp_path: Path) -> None:
+    def test_unresolved_hold_is_used_on_reload(self, tmp_path: Path) -> None:
+        """A hold found on reload belongs to a call the layer never saw
+        finish: unresolved, so its checkpoint counts as used."""
         tracker = CheckpointTracker(checkpoint_dir=str(tmp_path))
         created = tracker.create_checkpoint(scope=["*"], reason="test")
         tracker.validate_and_reserve("a")
         reloaded = CheckpointTracker(checkpoint_dir=str(tmp_path))
-        assert reloaded.validate_and_reserve("b") == (True, created)
+        assert reloaded.validate_and_reserve("b") == (False, None)
+        used = reloaded.get_checkpoint_by_id(created)
+        assert used is not None and used.consumed
+        assert used.metadata["consumed_by"] == "unresolved hold"
 
     def test_concurrent_reservations_have_one_winner(
         self, tracker: CheckpointTracker

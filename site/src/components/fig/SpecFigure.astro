@@ -77,14 +77,14 @@ if (!def) throw new Error(`SpecFigure: no slot ${slot}`);
 const text = readRepoFile(source);
 const where = source;
 // "{figure title}, from §{n}" (visual spec 3.9).
-const titled = (name: string) => `${name}, from §${def.section.trim()}`;
+const titled = (name: string) => `${name}, from §${def.section.trim().replace(/\.$/, '')}`;
 const idOf = (name: string) => refSlugger()(`Figure: ${name}`);
 const o = loadOntology();
 const schema = loadCatalogSchema();
 const KNOWN = ['layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
 const OLDER = ['categories', ...Object.keys(T.TABLE_FIGURES)];
 const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
-const NEW = [...TAIL, 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
+const NEW = [...TAIL, ...Object.keys(T.CODE_TABLE_FIGURES), 'principles', 'sl-fixtures', 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
   'recovery-replay': 'A recovery that runs out',
@@ -149,6 +149,9 @@ const families = slot === 'families' ? T.diagnosticFamilies(text, where) : [];
 const heat = slot === 'code-heat' ? T.codeHeat(text, where) : null;
 const levels = slot === 'levels' ? T.conformanceLevels(text, where) : [];
 const suite = slot === 'suite' ? T.conformanceSuite(text, where) : [];
+const slFixtures = slot === 'sl-fixtures' ? T.safetyLayerFixtures(text, where) : [];
+const principles = slot === 'principles' ? D.designPrinciples(text, where) : [];
+const codeTable = T.CODE_TABLE_FIGURES[slot] ?? null;
 const bumps = slot === 'bumps' ? T.versionBumps(text, where) : [];
 const tree = slot === 'checkpoint-tree' ? T.decisionTree(text, where) : null;
 const pattern = slot.startsWith('pattern-') ? T.patternStrips(text, where)[Number(slot.slice(8))] : null;
@@ -700,6 +703,33 @@ const failures = slot === 'failures' ? failureBranches(text, where, schema) : []
         </li>
       ))}
     </ul>
+  </Figure>
+)}
+{slot === 'sl-fixtures' && (
+  <Figure id={idOf('the safety-layer fixtures')} n={n} title={titled('The safety-layer fixtures')} caption={T.safetyLayerFixturesCaption(slFixtures)} kind="conformance-suite">
+    <ul class="trust-bars suite">
+      {slFixtures.map((p) => (
+        <li class="trust-bars__row"><a class="suite__label" href={githubTreeUrl(p.dir)}>{p.label}</a><PixelBar value={p.count} max={Math.max(...slFixtures.map((x) => x.count))} /></li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{slot === 'principles' && (
+  <Figure id={idOf('the design principles')} n={n} title={titled('The design principles')} caption={D.principlesCaption(principles)} kind="principles">
+    <ul class="ext-tiles principle-tiles">
+      {principles.map((p) => (
+        <li class="ext-tile principle-tile" data-principle={p.glyph}>
+          <PixelGlyph name={p.glyph} />
+          <a href={sectionLink(p.section)}>§{p.section} {p.name}</a>
+        </li>
+      ))}
+    </ul>
+  </Figure>
+)}
+{codeTable && inner && (
+  <Figure id={idOf(codeTable.name)} n={n} title={titled(codeTable.name)} caption={T.codeTableCaption(slot, text, where)} kind="call-codes">
+    <Fragment set:html={inner} />
+    <p class="diag-key"><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--error" aria-hidden="true"></span>error: solid border</span><span class="diag-key__item"><span class="diag-key__swatch diag-key__swatch--warning" aria-hidden="true"></span>warning: dashed border</span></p>
   </Figure>
 )}
 {slot === 'suite' && (

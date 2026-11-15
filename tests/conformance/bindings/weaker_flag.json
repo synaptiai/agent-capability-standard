@@ -1,0 +1,36 @@
+{
+  "description": "A declared flag weaker than the ontology's has no effect and is W602, one per flag.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "flags": {
+        "risk": "low",
+        "requires_checkpoint": false
+      }
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [
+      {
+        "code": "W602",
+        "tool": "write"
+      },
+      {
+        "code": "W602",
+        "tool": "write"
+      }
+    ],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "description": "An approval.min_approvers written 1.0 is the integer 1, as JSON Schema's integer reads it: the record loads.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "approval": {
+        "min_approvers": 1.0
+      }
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}
