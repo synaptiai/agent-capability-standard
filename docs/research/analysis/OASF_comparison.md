@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-28
 **OASF Version:** 0.8.0
-**Grounded Agency Version:** 2.0.0
+**Agent Capability Standard:** Standard 1.0.0, ontology 2.0.0
 
 ## Executive Summary
 
@@ -506,4 +506,4 @@ flowchart TB
 
 ---
 
-*This comparison was generated on 2026-01-28 and reflects OASF version 0.8.0 and Grounded Agency version 2.0.0.*
+*This comparison was generated on 2026-01-28 and reflects OASF version 0.8.0, Standard 1.0.0 and ontology 2.0.0.*

@@ -1,0 +1,432 @@
+# Standard Agents binding conventions
+# Machine-readable part of the binding between the Standard Agent Specification
+# (SA) and the Agent Capability Standard (ACS). The prose is
+# docs/integrations/standard_agents.md; the rows cited here are in
+# docs/research/analysis/standard_agents_mapping/, one file per concern, and a
+# row is named <concern>#<id>.
+#
+# Every entry is taken from a reviewed row or from the integration document.
+# What they do not settle is left out. The entries are conventions of this
+# binding. They are not rules of Standard 1.1.0, which does not define a tool
+# binding.
+#
+# Ruling types:
+#   is           a use of the construct is recorded as a use of the capability
+#   carrier      the construct is the SA mechanism a tool or a host uses to
+#                perform the capability; the classification belongs to the
+#                tool or the step that uses it
+#   by_effect    the construct has no capability of its own; it takes the
+#                capability of what it does. `capabilities` then holds the
+#                capabilities the rows name for it, and may be empty
+#   audit_label  the capability is recorded for audit only; ACS has no
+#                counterpart of the construct
+
+meta:
+  version: "1.0.0"
+  date: "2026-11-14"
+  description: "Conventions of the Standard Agents binding: which ontology capability each Standard Agents construct is, the anchor reference forms, the timestamp rule and the identity field map, each with the mapping rows it rests on"
+  standard_agent_specification:
+    version: "0.2.0"
+    repository: "https://github.com/standardagents/spec"
+    commit: "faccc8be0ba5921a8af86db2fe52283773cd1583"
+    types_package:
+      name: "@standardagents/spec"
+      version: "0.45.10"
+  agent_capability_standard:
+    standard: "1.1.0"
+    ontology: "2.1.0"
+  annotation:
+    key: "acs"
+    schema: "schemas/interop/standard_agents_annotation.schema.json"
+  document: "docs/integrations/standard_agents.md"
+  rows: "docs/research/analysis/standard_agents_mapping"
+
+# ---------------------------------------------------------------------------
+# Which capability a Standard Agents construct is
+# ---------------------------------------------------------------------------
+
+capability_rulings:
+
+  subagent_create:
+    construct: "`subagent_create`, a lifecycle tool the runtime injects on a prompt-backed side with non-hidden relationships"
+    ruling: is
+    capabilities: [delegate]
+    notes: >
+      Classified by its reserved name. The runtime injects the tool, so it has
+      no definition to annotate and no `execute` to wrap. In ontology 2.1.0
+      `delegate` requires neither a checkpoint nor approval, so nothing is
+      enforced by default. `effective.fresh_context` is attested true only
+      for a child instance that the call created and that received nothing
+      but the task; multi-agent#coord-05 lists the conditions. On a
+      relationship with `blocking: true` and `maxInstances: 1` the call may
+      continue an existing instance, and it is attested false.
+    rows:
+      - tools-contracts#cls-07
+      - multi-agent#coord-01
+      - multi-agent#coord-05
+
+  subagent_message:
+    construct: "`subagent_message`, the injected lifecycle tool that addresses an existing child instance by its reference"
+    ruling: carrier
+    capabilities: [delegate]
+    notes: >
+      ACS has no way to continue an earlier delegation. A host that follows
+      up an existing child presents the follow-up as a new `delegate` call
+      and attests `effective.fresh_context` false. That settles what a host
+      records when it performs a `delegate` step this way. It does not
+      settle how a model's own call to the injected tool is classified by
+      its reserved name: tools-contracts#cls-07 records that question as
+      open, so the ruling is `carrier` and not `is`.
+    rows:
+      - multi-agent#coord-21
+      - tools-contracts#cls-07
+
+  notify_parent:
+    construct: "`state.notifyParent(content)`, a child's message to its parent"
+    ruling: carrier
+    capabilities: [send]
+    notes: >
+      One of the mechanisms a workflow host may use to perform a `send` step,
+      after the checkpoint and the approval the step requires. A
+      message a host emits while it carries out a protocol action, such as
+      reporting a run's outcome to a parent, is by inference not a `send`
+      step; the Standard does not say so. On the parent's side the message is
+      a wake-up only: the host builds the ACS event from what it reads in the
+      child's own thread through `state.getChildThread(reference)`, not from
+      the message text.
+    rows:
+      - workflow-execution#wf-29
+      - multi-agent#coord-22
+
+  prompt_tool:
+    construct: "A prompt tool: a prompt named in another prompt's `tools`"
+    ruling: by_effect
+    capabilities: []
+    not_classified_as: [invoke]
+    notes: >
+      Classified by what the sub-prompt does, for example `generate` or
+      `classify`, and not as `invoke` unless its target is itself an ACS
+      workflow. A prompt definition has no annotations, so the classification
+      is recorded in the binding's own table, and every function tool the
+      prompt can call is grounded.
+    rows:
+      - multi-agent#coord-15
+      - tools-contracts#cls-05
+
+  handoff:
+    construct: "A handoff: an agent with `exposeAsTool: true`, named in a prompt's `tools`, takes over the same thread"
+    ruling: audit_label
+    capabilities: [delegate]
+    notes: >
+      A delegation yields a separate task whose result returns to the
+      delegator; a handoff changes which agent owns the thread. A handoff
+      target is recorded as `delegate` for audit only. An ACS run ends before
+      a handoff and a new run starts under the target's `actor_identity`; a
+      saved run is not restored under the agent that took over.
+    rows:
+      - tools-contracts#cls-06
+      - multi-agent#coord-17
+
+  decide:
+    construct: "`state.decide()`: typed questions answered with probabilities"
+    ruling: carrier
+    capabilities: [classify, detect, measure, compare, ground]
+    notes: >
+      A grounded function tool of one of these capabilities may call
+      `decide()` and map the answer to the capability's output, with anchors
+      for the context it passed. A `ground` tool resolves the cited records
+      and asks whether they support the claim. The fit of `compare` is an
+      inference of tools-contracts#cls-01. A `boolean` answer has no
+      confidence member and a `score` is not a value in the caller's unit,
+      so a `detect` tool derives `confidence`, and a `measure` tool derives
+      `uncertainty` and converts the score to that unit;
+      tools-contracts#io-08 records as open whether ACS permits the
+      derivation. `decide()` is inference by a
+      model. It is never an approval decision under Standard 1.1.0 §5.14, and
+      its result never waives the approval of `execute`, `mutate` or `send`.
+    rows:
+      - tools-contracts#io-08
+      - tools-contracts#cls-01
+      - models-context-memory-security#ground-01
+      - approval-human#decision-01
+
+  run_code:
+    construct: "`state.runCode`, the code sandbox, with no bridged function or with bridged functions that only read"
+    ruling: carrier
+    capabilities: [execute]
+    notes: >
+      A runtime need not implement `runCode`; the tool detects it and returns
+      an error result where it is absent. With bridges that only read, the
+      call leaves thread state unchanged, which matches the ontology's
+      `mutation: false` on `execute`. That is a property of the bridges the
+      tool passes, not of the sandbox.
+    rows:
+      - checkpoint-rollback-state#state-18
+      - evidence-audit-observability#exec-01
+
+  run_code_with_write_bridge:
+    construct: "`state.runCode` with a bridged function that writes"
+    ruling: carrier
+    capabilities: [mutate]
+    notes: >
+      With a write bridge the same call can change persistent state, and the
+      tool is classified `mutate`. The bridge takes one restore point per
+      write.
+    rows:
+      - checkpoint-rollback-state#state-18
+
+  set_value:
+    construct: "`state.setValue(key, value)` on the thread's durable key-value store"
+    ruling: carrier
+    capabilities: [persist]
+    notes: >
+      The storage of a `persist` function tool, under a key prefix of the
+      package's own. Thread values carry no expiry and no stored-at time, so
+      the tool writes both in an envelope beside the data. A `setValue` call
+      made by a handler, a hook, an effect or a thread endpoint passes
+      through no tool and has no place to declare a capability; such calls
+      are kept inside grounded tools, apart from the binding's own records.
+    rows:
+      - checkpoint-rollback-state#state-01
+      - models-context-memory-security#remember-01
+      - tools-contracts#cls-14
+
+  get_value:
+    construct: "`state.getValue(key)` on the thread's durable key-value store"
+    ruling: carrier
+    capabilities: [recall]
+    notes: >
+      The lookup of a `recall` function tool. `found` and `stored_at` come
+      from the envelope that `persist` wrote, and an entry whose expiry has
+      passed is treated as missing. The thread store cannot be listed, so the
+      lookup is by exact key.
+    rows:
+      - checkpoint-rollback-state#state-02
+      - models-context-memory-security#remember-01
+
+  schedule_effect:
+    construct: "`state.scheduleEffect(name, args, delay)` and the effect it schedules"
+    ruling: by_effect
+    capabilities: [mutate, send]
+    notes: >
+      An effect has no annotations and no hook observes its run. A deferred
+      write or transmission is still a `mutate` or a `send`: the scheduling
+      call is treated as the act itself and is gated in the grounded tool
+      that schedules it. The effect handler reads the binding's record of the
+      scheduled act again before it acts. A `send` scheduled this way can be
+      cancelled while it is pending. A workflow host also uses an effect as
+      the timer of the executor's `Sleep` action; that effect only queues a
+      message.
+    rows:
+      - tools-contracts#eff-01
+      - checkpoint-rollback-state#state-16
+      - workflow-execution#wf-11
+
+  thread_endpoint:
+    construct: "A thread endpoint (`defineThreadEndpoint`): an HTTP route beneath a thread, whose handler is given the caller the runtime authenticated as `auth.caller`"
+    ruling: carrier
+    capabilities: [receive]
+    notes: >
+      A request to a thread endpoint is inbound traffic. The item it delivers
+      is what `receive` returns, with the sender identity built from
+      `auth.caller` as the `identity` section below describes. An endpoint
+      also carries an approval decision under Standard 1.1.0 §5.14 and
+      delivers an event to a waiting run. Apart from the binding's own
+      records, an endpoint makes no writes of its own.
+    rows:
+      - models-context-memory-security#perceive-03
+      - evidence-audit-observability#inbound-01
+      - published-api-extension-points#endpoint-01
+      - tools-contracts#cls-14
+
+# ---------------------------------------------------------------------------
+# Anchor reference forms for Standard Agents artefacts
+#
+# `ref` and `kind` are the fields of `types.Anchor` in
+# schemas/world_state_schema.yaml. A placeholder is written <name> and is
+# described under `parts`.
+# ---------------------------------------------------------------------------
+
+anchor_refs:
+
+  tool_call:
+    artefact: "A tool call and its stored result"
+    ref: "tool:<tool name>:<tool call id>"
+    kind: tool
+    parts:
+      tool name: "`HookToolCall.function.name`"
+      tool call id: "`HookToolCall.id`, which the stored result message carries as `tool_call_id`"
+    notes: >
+      The form the ACS Python SDK already writes. Call ids are assigned by
+      the model provider and SA states no uniqueness scope for them, so the
+      anchor is stored with `state.threadId`, and with
+      `state.execution.flowId` and the step count where there is an
+      execution. A tool is not given its call id; a `tool_call_done` hook
+      has it. The Standard defines no thread-qualified reference form.
+      models-context-memory-security#context-04 names a second scheme,
+      `tool_call:<id>`; this file keeps the form the SDK writes.
+    rows:
+      - evidence-audit-observability#anchors-04
+      - tools-contracts#io-09
+
+  file:
+    artefact: "A file in the thread file system, including an attachment"
+    ref: "file:<path>"
+    kind: file
+    parts:
+      path: "The file's path in the thread file system"
+    notes: >
+      The tool writes its evidence to a path the package controls and
+      anchors on that path. A path changes when a file is copied to another
+      thread, moved or renamed, and SA has no digest field: a digest is
+      computed in tool code.
+    rows:
+      - evidence-audit-observability#anchors-03
+      - models-context-memory-security#context-04
+
+  message:
+    artefact: "A persisted message"
+    ref: "message:<message id>"
+    kind: human_note
+    parts:
+      message id: "`Message.id`"
+    notes: >
+      The scheme is defined by the binding, not by the Standard.
+      `human_note` is the kind the rows give for a person's message and for
+      a message that arrives through the Thread Client API message route.
+      `Anchor.kind` has no value for a message of another origin, such as an
+      agent's report, and the rows give none. A tool result message is
+      anchored by its tool call, with the form above.
+    rows:
+      - models-context-memory-security#context-04
+      - evidence-audit-observability#anchors-04
+      - evidence-audit-observability#inbound-01
+
+# ---------------------------------------------------------------------------
+# Timestamps
+# ---------------------------------------------------------------------------
+
+timestamps:
+  acs_form: "An ISO-8601 string in UTC with the Z suffix"
+  rule: >
+    An SA timestamp is a number counted from the Unix epoch, in a unit that
+    depends on the field. It is converted to the ACS form before it enters
+    an ACS record such as an anchor, an event, an action record or a
+    provenance record. For a message:
+    `new Date(message.created_at / 1000).toISOString()`.
+  units_per_second:
+    seconds: 1
+    milliseconds: 1000
+    microseconds: 1000000
+  fields:
+    - field: "`Message.created_at`"
+      unit: microseconds
+    - field: "`ThreadStatus.since`"
+      unit: microseconds
+    - field: "`ScheduledEffect.scheduledAt`"
+      unit: microseconds
+    - field: "The `timestamp` of an `event` stream frame"
+      unit: milliseconds
+    - field: "The time fields of a thread list entry in the Thread Client API"
+      unit: seconds
+  executor_clock: >
+    The times the reference executor takes and issues, and the `delay` of
+    `scheduleEffect`, are in milliseconds.
+  rows:
+    - evidence-audit-observability#events-01
+    - evidence-audit-observability#prov-01
+    - evidence-audit-observability#action-01
+    - workflow-execution#wf-11
+
+# ---------------------------------------------------------------------------
+# Identity
+#
+# How a Standard Agents party becomes an `agent_identity`
+# (schemas/agent_identity_schema.yaml, Standard 1.1.0 §5.17). A field is
+# given as a `literal`, or as `from` a named source, with an optional
+# `prefix` for a principal.
+# ---------------------------------------------------------------------------
+
+identity:
+  schema: "schemas/agent_identity_schema.yaml"
+  namespacing: >
+    ACS compares principals by exact equality, so every principal the binding
+    mints carries a prefix that says which SA identifier it holds.
+  parties:
+
+    endpoint_caller:
+      party: "The authenticated caller of a thread endpoint: `auth.caller`, a `ThreadUser`"
+      fields:
+        principal:
+          prefix: "sa-user:"
+          from: "`auth.caller.id`"
+        kind:
+          from: "Deployment configuration"
+          asserted_by: deployment
+        role:
+          from: "The entry of `auth.caller.roles` that the approver rule matched"
+        authenticated_by:
+          literal: "x-acs.sa-caller"
+        trust_class:
+          from: "`owner` only when `auth.caller.id` equals `state.userId`; otherwise deployment configuration"
+      notes: >
+        SA authenticates a caller by a mechanism it does not disclose, and
+        `ThreadUser` has no member that says person or service.
+        `kind: human`, and with it the satisfaction of
+        `approver.kind: human`, is asserted by the deployment, not attested
+        by SA. `x-acs.sa-caller` states only that the SA runtime
+        authenticated the caller. `state.user()` is the thread's owner, not
+        the caller, and is not used as a sender.
+      rows:
+        - approval-human#identity-02
+        - approval-human#approval-22
+        - published-api-extension-points#user-01
+        - models-context-memory-security#identity-01
+        - models-context-memory-security#perceive-03
+
+    child_thread:
+      party: "A child instance whose report the host read from the child's own thread"
+      fields:
+        principal:
+          prefix: "sa-subagent:"
+          from: "`SubagentRegistryEntry.reference`, taken from `state.children`"
+        kind:
+          literal: agent
+        role:
+          from: "The role the delegation requested"
+        authenticated_by:
+          literal: "x-acs.sa-child-thread"
+        trust_class:
+          literal: own_subagent_report
+      notes: >
+        The identity describes a lookup the host made itself: the reference
+        comes from the runtime-maintained registry and the report is read
+        through `state.getChildThread(reference)`. A message's `subagent_id`
+        and the `metadata.subagent_id` convention are labels any code on the
+        thread can set, and are not relied on. Two instances of one agent
+        definition have different references and are therefore two
+        principals.
+      rows:
+        - evidence-audit-observability#prov-03
+        - multi-agent#coord-08
+        - models-context-memory-security#identity-02
+        - approval-human#identity-06
+
+  without_identity:
+    - item: "A message sent through the Thread Client API message route"
+      notes: >
+        The route authenticates the caller, and the stored message does not
+        record who that was. Such an item has no sender identity: it is
+        dropped where a workflow binds `sender_check` or
+        `accept_trust_classes`, and is always-ask otherwise.
+      rows:
+        - evidence-audit-observability#inbound-01
+        - models-context-memory-security#perceive-03
+    - item: "A child report identified only by a label on a message"
+      notes: >
+        A report known only by a message's `subagent_id`, by
+        `metadata.subagent_id` or by a reference printed in its text gets no
+        identity.
+      rows:
+        - evidence-audit-observability#prov-03
+        - approval-human#identity-06
