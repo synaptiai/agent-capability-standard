@@ -177,6 +177,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (secrets and redaction, §6.7; the destination policy, §4.4.2; for the
   adapter, the output contract of a tool's result): they meet class SL
   except those checks, and claim it once they apply them.
+- **Breaking (plugin):** two composed skills take their directory names
+  (Agent Skills requires `name` to equal the directory): the slash commands
+  `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
+  `/capability-gap-analysis` and `/digital-twin-sync-loop`. The plugin
+  release that carries this is a MAJOR version (3.0.0). No workflow,
+  ontology or schema changes. The `layer` frontmatter key is removed from
+  the 13 skills that had it (the ontology gives a capability's layer).
+- Domain profiles (Standard 1.2.0 §5.21) are now applied where they are
+  given, and refused when malformed: a `checkpoint_policy` key must be a
+  capability id or `"*"` (a label such as `before_send` is V101), the
+  members of `risk_thresholds` and `evidence_policy` are closed (another is
+  S303), and `required_anchor_types` lists anchor kinds. A third-party
+  profile written for 1.1, which nothing applied, is refused where it is
+  applied now: migrate it as the shipped profiles were (each to 2.0.0).
+  `tools/validate_profiles.py` checks profiles with the core and fails on
+  any diagnostic; its old helper functions are gone.
+- Python SDK: `grounded_agency.trust.decay_factor` counts an age below zero
+  as zero (it raised `ValueError`), and `TrustModel` reads its field
+  authorities from `field_authority.fields`, refusing a malformed entry or
+  an unknown tie-breaker. `_core.Run.start(profiles=...)` and
+  `Validator.validate(profiles=...)` apply profiles (they were refused);
+  `GroundedAgentConfig(profiles=...)` needs `approval="ask"`.
+- An ontology whose capability contract keeps a `$ref` that names nothing,
+  is cyclic or nests deeper than 12 is refused when it is loaded (it was
+  kept silently), by the CLI, Python, the executor and WebAssembly alike.
+- TypeScript package: `npm test` replays the fixtures through the
+  WebAssembly core, so run `npm run build:wasm` (which needs the
+  `wasm32-unknown-unknown` target) and `npm run build` first; the binding
+  needs only `npm run build:ts`.
 
 ### Added
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
@@ -255,7 +284,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   package: `iJsonProblem`. Python SDK: `CheckpointTracker.valid_checkpoint_id()`,
   `has_commit()` and `max_age_minutes`.
 
+- Domain profiles (Standard 1.2.0 §5.21, RFC-0010): the core loads and
+  checks them (`profile::Policy`), the validator and the executor apply
+  them (raised flags, a person for `require_human` and `block_autonomous`
+  with `person_required` on records and in the trace, F504
+  `below_minimum_confidence` and `invalid_confidence`, W606 for a
+  mandate-only step), and they are saved with a run. Python:
+  `AppliedProfiles`, `ProfileError`, `load_profile`,
+  `GroundedAgentConfig(profiles=...)`, `WorkflowRunner(profiles=...)`,
+  `_core.Validator.check_profiles`, `profile_flags`, `profile_policy`;
+  `tools/validate_workflows.py --profile`. Normative profile vectors
+  (`tests/conformance/profiles/`), 14 runtime fixtures and validator
+  fixtures with profiles (`EXPECTATIONS.json` gains `profiles`).
+- Trust (§8): `grounded_agency.trust.resolve` with the six strategies of
+  §8.2 and tie-breaking, `Candidate`, `Resolution`, `merge_trust_weights`;
+  the trust vectors are normative, with `resolve.json`. The
+  conflicting-sources benchmark resolves with `resolve` (same results).
+- Entity ids (§7.1): `grounded_agency.entities.parse_entity_id`,
+  `tests/conformance/entities/ids.json`; `entity_taxonomy.yaml`'s pattern
+  is checked against its examples.
+- Cited versions (§11.6): `grounded_agency.versions.check_cited` and
+  `CitedVersionError`; the OASF adapter refuses a mapping that cites
+  another ontology major or an unsupported Standard.
+- WebAssembly (ACS-42): the core's `wasm` feature (`core/src/wasm.rs`, a
+  JSON interface over three C-ABI exports) and the TypeScript package's
+  `./wasm` entry (`AcsCore`, `CoreContext`, `CoreRun`, `loadDocuments`),
+  which runs the validator and executor, profiles included, in process;
+  `Context::from_values` with an in-memory schema store.
+  `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
+  a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
+  `NPM_TOKEN` are set (a dry run otherwise).
+- `skills/README.md` lists each frontmatter key's owner (Agent Skills,
+  Claude Code, ACS), checked by `tests/test_skill_frontmatter.py`.
+- Standard 1.2.0 text of §4.1.2 (schema dialect), §5.21, §7.1, §8.1–§8.3,
+  §11.5–§11.7 and Appendix D.7; RFC-0010.
+
 ### Changed
+- The shipped domain profiles are version 2.0.0, cite Standard 1.2.0 and
+  ontology 2.2.0, key `checkpoint_policy` by capability id or `"*"`, and
+  list anchor kinds as `required_anchor_types`. The documentation and the
+  compliance documents say a profile setting is enforced where a profile
+  is applied; the site's domain figures follow §5.21.3.
 - Direct dependencies are at their latest releases. Python: the dev ranges are
   pytest 8.4.2–9, pytest-asyncio 1.x, mypy 1.19.1–2 and ruff 0.17 (CI runs
   ruff 0.17.4).
@@ -306,6 +375,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   not claim class SL.
 
 ### Fixed
+- A reference index beyond the platform's `usize` (`${a[18446744073709551615]}`)
+  was a parse error on a 32-bit target and a missing index on a 64-bit one;
+  it is a missing index everywhere.
 - Python SDK: `register_mcp_tool` accepted an unknown capability and a
   declared risk below the ontology's (`mutate` with `risk="low"` needed no
   checkpoint). It now refuses the first (V101) and ignores and reports the
