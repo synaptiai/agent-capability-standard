@@ -1,0 +1,123 @@
+{
+  "standard": "1.1.0",
+  "section": "8.1",
+  "status": "informative",
+  "description": "Decay factors of STANDARD v1.1.0 section 8.1. The section requires the factor to be 0.5 at an age of one half-life and recommends (SHOULD) 0.5 ** (age / half_life); the vectors at other ages follow that formula, which schemas/authority_trust_model.yaml states as recency_factor. decay_model.min_trust, when the model sets it, is a floor on this factor. Each expected value is the value of that formula, written to the precision of a binary64 number. `not_covered` lists the cases the vectors leave out because the Standard does not state their result, each with what the reference implementation does; a vector for one of them would make one reading look required. grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
+  "tolerance": 1e-12,
+  "fields": {
+    "name": "The vector's name, unique in this file.",
+    "about": "What the vector covers.",
+    "half_life": "decay_model.half_life: an ISO 8601 duration of whole days, as schemas/authority_trust_model.yaml writes it.",
+    "min_trust": "decay_model.min_trust. Absent: the model sets no floor.",
+    "age_hours": "The age of the observation, in hours.",
+    "decay_factor": "The expected decay factor. A conforming value differs from it by at most `tolerance`."
+  },
+  "not_covered": [
+    "A min_trust above 0.5. Section 8.1 requires a factor of 0.5 at one half-life and makes min_trust a floor on the factor; with a floor above 0.5 both cannot hold. The reference implementation returns max(0.5 ** (age / half_life), min_trust), the recency_factor of schemas/authority_trust_model.yaml and the benchmark scenario benchmarks/scenarios/conflicting_sources.py, which is min_trust at one half-life.",
+    "An age below zero, for an observation dated in the future. Section 8.1 does not say what it decays to, and the formula gives a factor above 1. The reference implementation refuses it.",
+    "A half-life in another form than P<n>D. Section 8.1 says the half-life is configurable and gives no format; tools/validate_canonical_schemas.py accepts P<n>D with n at least 1 only, and so does the reference implementation."
+  ],
+  "vectors": [
+    {
+      "name": "no_age",
+      "about": "An observation made now has lost nothing.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 0,
+      "decay_factor": 1.0
+    },
+    {
+      "name": "one_half_life",
+      "about": "At an age of one half-life the factor is 0.5. A time constant, exp(-age / half_life), gives 0.3679 here and does not conform.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 240,
+      "decay_factor": 0.5
+    },
+    {
+      "name": "half_of_a_half_life",
+      "about": "0.5 ** 0.5.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 120,
+      "decay_factor": 0.7071067811865476
+    },
+    {
+      "name": "a_tenth_of_a_half_life",
+      "about": "0.5 ** 0.1.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 24,
+      "decay_factor": 0.9330329915368074
+    },
+    {
+      "name": "half_an_hour",
+      "about": "An age that is a fraction of an hour: 0.5 ** (0.5 / 240).",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 0.5,
+      "decay_factor": 0.9985569855219026
+    },
+    {
+      "name": "floor_reached",
+      "about": "With the shipped values, half_life P10D and min_trust 0.25, the factor reaches the floor at two half-lives: 0.5 ** 2.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 480,
+      "decay_factor": 0.25
+    },
+    {
+      "name": "floored_at_three_half_lives",
+      "about": "0.5 ** 3 is 0.125, below min_trust: the factor is min_trust.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 720,
+      "decay_factor": 0.25
+    },
+    {
+      "name": "floored_at_a_hundred_years",
+      "about": "Age alone never takes the factor below min_trust.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": 876000,
+      "decay_factor": 0.25
+    },
+    {
+      "name": "no_min_trust_at_three_half_lives",
+      "about": "The model sets no min_trust, so nothing floors the factor: 0.5 ** 3.",
+      "half_life": "P10D",
+      "age_hours": 720,
+      "decay_factor": 0.125
+    },
+    {
+      "name": "no_min_trust_at_ten_half_lives",
+      "about": "The model sets no min_trust: 0.5 ** 10.",
+      "half_life": "P10D",
+      "age_hours": 2400,
+      "decay_factor": 0.0009765625
+    },
+    {
+      "name": "min_trust_of_zero",
+      "about": "A min_trust of 0.0 floors nothing: 0.5 ** 3.",
+      "half_life": "P10D",
+      "min_trust": 0.0,
+      "age_hours": 720,
+      "decay_factor": 0.125
+    },
+    {
+      "name": "half_life_of_one_day",
+      "about": "The half-life is configurable. With P1D, 36 hours are one and a half half-lives: 0.5 ** 1.5.",
+      "half_life": "P1D",
+      "min_trust": 0.25,
+      "age_hours": 36,
+      "decay_factor": 0.3535533905932738
+    },
+    {
+      "name": "half_life_of_thirty_days",
+      "about": "With P30D, 720 hours are one half-life.",
+      "half_life": "P30D",
+      "age_hours": 720,
+      "decay_factor": 0.5
+    }
+  ]
+}

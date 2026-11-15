@@ -4,7 +4,10 @@ Grounded Agent Adapter
 Main entry point for integrating Grounded Agency safety patterns
 with the Claude Agent SDK. Wraps SDK options to inject:
 
-- Permission callbacks for checkpoint enforcement
+- A PreToolUse hook that applies the rate limit, the checkpoint rule
+  (F501) and the approval rule (F502) to every tool call
+- A permission callback that repeats the checkpoint check and passes the
+  decision on to the host's own ``can_use_tool`` callback
 - PostToolUse hooks for evidence collection
 - Skill tracking for autonomous checkpoint creation
 
@@ -22,14 +25,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import inspect
 import logging
+import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
-from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
+from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
+from .errors import ErrorCode
 from .hooks.evidence_collector import create_evidence_collector
 from .hooks.skill_tracker import create_skill_tracker
 from .state.checkpoint_tracker import CheckpointTracker
@@ -172,6 +178,18 @@ class GroundedAgentConfig:
         checkpoint_reservation_seconds: How long a tool call holds the
             checkpoint it reserved if it never reports back (default: the
             tracker's, 600). See CheckpointTracker.validate_and_reserve.
+        approval: What happens to a tool call whose capability requires
+            approval (``requires_approval``; in the reference ontology:
+            ``execute``, ``mutate`` and ``send``), once the checkpoint rule
+            is satisfied. ``"ask"`` (default): the PreToolUse hook answers
+            ``permissionDecision: "ask"`` with a reason that begins
+            ``F502 APPROVAL_REQUIRED:``, so the host's permission flow
+            decides the call; with no ``can_use_tool`` callback on the
+            wrapped options, the call is denied. ``"off"``: the adapter
+            asks for no approval.
+        evidence_include_tool_input: If True, evidence anchors keep each
+            tool call's input, and a Bash command's text, in their
+            metadata. Off by default: inputs can hold credentials.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -187,34 +205,85 @@ class GroundedAgentConfig:
     max_turns: int | None = None
     enable_discovery: bool = False
     checkpoint_reservation_seconds: float | None = None
+    approval: Literal["ask", "off"] = "ask"
+    evidence_include_tool_input: bool = False
+
+    def __post_init__(self) -> None:
+        """Refuse an approval mode this adapter does not know."""
+        if self.approval not in ("ask", "off"):
+            raise ValueError(f"approval must be 'ask' or 'off', got {self.approval!r}")
 
 
-# What the PreToolUse safety hook assumes about a tool the mapper could
-# not classify: an unknown mutation, so the rate limit and the checkpoint
-# rule both apply (the mapper does the same for unreadable Bash input).
-_UNCLASSIFIED_TOOL = ToolMapping(
-    capability_id="mutate",
-    risk="high",
-    mutation=True,
-    requires_checkpoint=True,
-)
+def _coded(code: ErrorCode, message: str) -> str:
+    """A refusal reason for a channel that carries only text: the
+    diagnostic's code and name (STANDARD v1.1 section 9), then the message."""
+    return f"{code.value} {code.name}: {message}"
+
+
+def _subject(mapping: ToolMapping, tool_name: str) -> str:
+    """What a rule applies to: the tool and the capability it performs, or,
+    for a tool with no classification, the capability it is treated as.
+
+    The tool is the subject because a flag can come from the tool's
+    declaration and not from the capability (an ``execute`` tool declared
+    high-risk needs a checkpoint; ``execute`` does not).
+    """
+    if mapping is UNCLASSIFIED_TOOL:
+        return (
+            f"{tool_name} has no capability mapping and is treated as "
+            f"'{mapping.capability_id}', which"
+        )
+    return f"{tool_name} (capability '{mapping.capability_id}')"
 
 
 def _checkpoint_denial(
-    capability_id: str, tool_name: str, reserved_checkpoint: str | None
+    mapping: ToolMapping, tool_name: str, reserved_checkpoint: str | None
 ) -> str:
-    """Why a checkpoint-gated tool call may not proceed."""
+    """Why a checkpoint-gated tool call may not proceed (F501)."""
     if reserved_checkpoint is not None:
-        return (
-            f"Capability '{capability_id}' requires checkpoint, and checkpoint "
+        message = (
+            f"{_subject(mapping, tool_name)} requires checkpoint, and checkpoint "
             f"{reserved_checkpoint} is reserved by another in-flight mutation. "
             f"Retry {tool_name} after it completes, or create a new checkpoint."
         )
+    else:
+        message = (
+            f"{_subject(mapping, tool_name)} requires checkpoint. "
+            f"Create checkpoint before using {tool_name}. "
+            f"Use the 'checkpoint' skill or call "
+            f"adapter.checkpoint_tracker.create_checkpoint()."
+        )
+    return _coded(ErrorCode.CHECKPOINT_REQUIRED, message)
+
+
+def _approval_request(mapping: ToolMapping, tool_name: str) -> str:
+    """Why a tool call is put to the host's permission flow (F502)."""
+    return _coded(
+        ErrorCode.APPROVAL_REQUIRED,
+        f"{_subject(mapping, tool_name)} requires approval. "
+        f"It runs only if this call is approved.",
+    )
+
+
+def _approval_unavailable(mapping: ToolMapping, tool_name: str) -> str:
+    """Why a call that requires approval is refused when no one can give
+    it (F502): STANDARD v1.1 section 5.14 treats an approval no one could
+    decide as a refusal."""
+    return _coded(
+        ErrorCode.APPROVAL_REQUIRED,
+        f"{_subject(mapping, tool_name)} requires approval, and no one can "
+        f"give it: the options this session was started with have no "
+        f"can_use_tool callback. {tool_name} did not run.",
+    )
+
+
+def _is_allow(result: Any) -> bool:
+    """Whether a permission result allows the call: the SDK's
+    ``PermissionResultAllow`` (``behavior``) or the fallback type
+    (``allowed``). Anything else is not an allow."""
     return (
-        f"Capability '{capability_id}' requires checkpoint. "
-        f"Create checkpoint before using {tool_name}. "
-        f"Use the 'checkpoint' skill or call "
-        f"adapter.checkpoint_tracker.create_checkpoint()."
+        getattr(result, "behavior", None) == "allow"
+        or getattr(result, "allowed", None) is True
     )
 
 
@@ -224,7 +293,9 @@ class GroundedAgentAdapter:
     Adapts Claude Agent SDK to use Grounded Agency safety patterns.
 
     The adapter wraps SDK options to inject:
-    1. Permission callbacks that enforce checkpoint-before-mutation
+    1. A PreToolUse hook and a permission callback that enforce
+       checkpoint-before-mutation (F501) and put calls that require
+       approval to the host's permission flow (F502)
     2. PostToolUse hooks that collect evidence anchors
     3. Skill tracking that updates checkpoint state
 
@@ -243,10 +314,11 @@ class GroundedAgentAdapter:
             reason="Before refactoring"
         )
 
-        # Wrap SDK options
+        # Wrap SDK options. base_options carries the host's can_use_tool
+        # callback, which decides the calls that require approval.
         options = adapter.wrap_options(base_options)
 
-        # Now mutations are allowed
+        # Now a mutation that callback approves is allowed
         async with ClaudeSDKClient(options) as client:
             await client.query("Refactor the handler...")
     """
@@ -271,13 +343,21 @@ class GroundedAgentAdapter:
                 f"{self.config.ontology_path}. File may have been tampered with."
             )
         self.registry = CapabilityRegistry(self.config.ontology_path)
-        self.mapper = ToolCapabilityMapper(self.registry.ontology)
+        # Load now, so an ontology that cannot be read fails here and not
+        # at the first tool call.
+        _ = self.registry.ontology
+        self.mapper = ToolCapabilityMapper(self.registry)
         self.checkpoint_tracker = CheckpointTracker(
             self.config.checkpoint_dir,
             reservation_seconds=self.config.checkpoint_reservation_seconds,
         )
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
+        # Calls the PreToolUse hook asked about without reserving the
+        # checkpoint (a permission prompt tool decides them), by tool_use_id,
+        # with their (session_id, agent_id). See _make_pretooluse_safety_hook.
+        self._unreserved_asks: dict[str, tuple[Any, Any]] = {}
+        self._unreserved_lock = threading.Lock()
 
         # Lazy-initialized by _get_or_create_workflow_engine
         self._workflow_engine: Any = None
@@ -304,14 +384,24 @@ class GroundedAgentAdapter:
 
         Injects:
         - enable_file_checkpointing=True for SDK-level rollback
-        - can_use_tool callback for checkpoint enforcement
+        - a PreToolUse hook for the rate limit, the checkpoint rule and
+          the approval rule
+        - a can_use_tool callback that repeats the checkpoint check and
+          then calls the ``can_use_tool`` callback of ``base``, if it has
+          one, so the host's callback keeps deciding the calls it is asked
+          about
         - PostToolUse hooks for evidence collection
 
         ``allowed_tools`` is passed through unchanged; ``Skill`` is not
         added. The SDK approves a tool listed there without consulting
         ``can_use_tool`` (and warns that the callback is shadowed). The
-        rate limit and checkpoint checks run in the PreToolUse hook, so they
-        apply to listed tools too.
+        rate limit, checkpoint and approval checks run in the PreToolUse
+        hook, so they apply to listed tools too.
+
+        Where ``base`` names a ``permission_prompt_tool_name``, no
+        ``can_use_tool`` callback is installed: the SDK refuses the two
+        together, and that tool is then the permission flow that answers
+        the hook's ``"ask"``.
 
         Args:
             base: ClaudeAgentOptions instance
@@ -335,6 +425,7 @@ class GroundedAgentAdapter:
         evidence_hook = create_evidence_collector(
             store=self.evidence_store,
             mapper=self.mapper,
+            include_tool_input=self.config.evidence_include_tool_input,
         )
         post_hooks.append(self._wrap_hook(evidence_hook))
 
@@ -351,9 +442,11 @@ class GroundedAgentAdapter:
         failure_hooks = list(existing_hooks.get("PostToolUseFailure", []))
         failure_hooks.append(self._wrap_hook(self._make_failure_releaser()))
 
-        # PreToolUse hook: rate limit and checkpoint enforcement
+        # PreToolUse hook: rate limit, checkpoint and approval enforcement
         pre_hooks = list(existing_hooks.get("PreToolUse", []))
-        safety_pre_hook = self._make_pretooluse_safety_hook()
+        safety_pre_hook = self._make_pretooluse_safety_hook(
+            reserve_asked=not getattr(base, "permission_prompt_tool_name", None)
+        )
         safety_pre_hook._grounded_adapter = self  # see _already_wrapped
         pre_hooks.append(self._wrap_hook(safety_pre_hook))
 
@@ -373,6 +466,7 @@ class GroundedAgentAdapter:
                 registry=self.registry,
                 engine=self._get_or_create_workflow_engine(),
                 evidence_store=self.evidence_store,
+                evidence_include_tool_input=self.config.evidence_include_tool_input,
             )
             discovery_hook = create_discovery_injector(
                 pipeline=discovery_pipeline,
@@ -401,10 +495,23 @@ class GroundedAgentAdapter:
         # Build kwargs for dataclasses.replace
         kwargs: dict[str, Any] = {
             "enable_file_checkpointing": True,
-            "can_use_tool": self._make_permission_callback(),
             "hooks": merged_hooks,
             "setting_sources": setting_sources,
         }
+
+        # The permission callback. The SDK refuses can_use_tool beside a
+        # permission prompt tool, so a host that decides permissions with
+        # one keeps it; the PreToolUse hook still runs for every call.
+        if not getattr(base, "permission_prompt_tool_name", None):
+            host_callback = getattr(base, "can_use_tool", None)
+            if getattr(host_callback, "_grounded_adapter", None) is self:
+                # Options this adapter already wrapped: chain to the
+                # callback they came with, not to this adapter's own.
+                host_callback = getattr(host_callback, "_host_can_use_tool", None)
+            permission_callback = self._make_permission_callback(host_callback)
+            permission_callback._grounded_adapter = self
+            permission_callback._host_can_use_tool = host_callback
+            kwargs["can_use_tool"] = permission_callback
 
         # Inject output_format if configured and not already set
         if (
@@ -509,9 +616,12 @@ class GroundedAgentAdapter:
             context: HookContext | None,
         ) -> dict[str, Any]:
             try:
-                holder = tracker.release_reservation_in_scope(
-                    (input_data.get("session_id"), input_data.get("agent_id"))
-                )
+                scope = (input_data.get("session_id"), input_data.get("agent_id"))
+                with self._unreserved_lock:
+                    for held, held_scope in list(self._unreserved_asks.items()):
+                        if held_scope == scope:
+                            del self._unreserved_asks[held]
+                holder = tracker.release_reservation_in_scope(scope)
                 if holder is not None:
                     logger.info(
                         "Turn ended: released the reservation left by %s", holder
@@ -522,10 +632,10 @@ class GroundedAgentAdapter:
 
         return release_at_turn_end
 
-    def _make_pretooluse_safety_hook(self) -> Any:
+    def _make_pretooluse_safety_hook(self, reserve_asked: bool = True) -> Any:
         """
-        Create the PreToolUse hook that enforces the rate limit and
-        checkpoint-before-mutation.
+        Create the PreToolUse hook that enforces the rate limit,
+        checkpoint-before-mutation and approval.
 
         The checkpoint check is the Python-layer equivalent of the shell
         hook ``pretooluse_require_checkpoint.sh``, providing defense-in-depth
@@ -533,22 +643,37 @@ class GroundedAgentAdapter:
         using the SDK programmatically).
 
         PreToolUse runs for every tool call, including pre-approved ones in
-        ``allowed_tools`` that never reach ``can_use_tool``, so both checks
+        ``allowed_tools`` that never reach ``can_use_tool``, so the checks
         live here:
 
         - Rate limit (SEC-010): a call over its risk level's limit, or one
           whose limit check raises, is denied in strict and non-strict mode
           alike. This runs first, so a call this check denies reserves
           nothing.
-        - Checkpoint (SEC-007): a checkpoint-gated call reserves the active
-          checkpoint, keyed by its ``tool_use_id``. In strict mode the call
-          is denied when there is no valid checkpoint or another call holds
-          it.
-        - A tool the mapper fails to classify is treated as a high-risk
-          mutation, so both checks above apply to it. Any other error (for
-          example in the reservation) denies the call in strict mode and is
-          logged in non-strict mode. For a tool in ``allowed_tools`` this
-          hook is the only check that runs.
+        - Checkpoint (SEC-007, F501): a checkpoint-gated call reserves the
+          active checkpoint, keyed by its ``tool_use_id``. In strict mode
+          the call is denied when there is no valid checkpoint or another
+          call holds it.
+        - Approval (F502): with ``approval="ask"``, a call whose mapping
+          requires approval, and which the checks above did not deny, is
+          answered with ``permissionDecision: "ask"``. Claude Code then
+          puts the call to the host's permission flow (the ``can_use_tool``
+          callback, or a permission prompt tool) with the reason, and
+          denies it where there is none. ``strict_mode`` does not switch
+          this rule off. A mapping that requires no approval, such as a
+          read-only Bash command, is not asked about.
+        - With ``reserve_asked=False`` (the options name a permission prompt
+          tool, so the adapter installs no ``can_use_tool``), a call the hook
+          asks about is not reserved for: if the prompt tool denies it,
+          nothing tells the adapter, and the reservation would refuse the
+          next mutation. The hook checks that a checkpoint is free, and the
+          PostToolUse hook takes and consumes it once the call has run.
+        - A tool the mapper does not know, or fails to classify, is treated
+          as a high-risk mutation that requires approval, so every check
+          above applies to it. Any other error (for example in the
+          reservation) denies the call in strict mode and is logged in
+          non-strict mode. For a tool in ``allowed_tools`` this hook is the
+          only check that runs.
 
         They share one hook so the rate check is guaranteed to run before
         the reservation. With two hooks nothing fixes their order, and a
@@ -556,7 +681,12 @@ class GroundedAgentAdapter:
         later hook releases.
 
         A denial is ``hookSpecificOutput`` with
-        ``permissionDecision: "deny"``.
+        ``permissionDecision: "deny"``. A checkpoint denial's reason begins
+        ``F501 CHECKPOINT_REQUIRED:`` and an approval request's
+        ``F502 APPROVAL_REQUIRED:``: the reason is the only channel to the
+        model and the host, so the diagnostic's code and name come first.
+        The Standard has no code for a rate limit or for a failure of this
+        hook itself; those reasons carry none.
 
         Returns:
             Async hook callback function
@@ -565,23 +695,34 @@ class GroundedAgentAdapter:
         mapper = self.mapper
         strict = self.config.strict_mode
         limiter = self.rate_limiter
+        # Anything but an explicit "off" asks.
+        asks = self.config.approval != "off"
+        unreserved_asks = self._unreserved_asks
+        unreserved_lock = self._unreserved_lock
 
-        def deny(message: str) -> dict[str, Any]:
-            logger.warning("PreToolUse denied: %s", message)
+        def decide(decision: str, message: str) -> dict[str, Any]:
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
+                    "permissionDecision": decision,
                     "permissionDecisionReason": message,
                 }
             }
+
+        def deny(message: str) -> dict[str, Any]:
+            logger.warning("PreToolUse denied: %s", message)
+            return decide("deny", message)
 
         async def check_before_tool(
             input_data: dict[str, Any],
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
-            """PreToolUse hook: rate limit, then checkpoint before mutations."""
+            """PreToolUse hook: rate limit, checkpoint before mutations,
+            then approval."""
+            tool_name = ""
+            # Until the call is classified, assume the strictest case.
+            mapping = UNCLASSIFIED_TOOL
             try:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
@@ -593,7 +734,7 @@ class GroundedAgentAdapter:
                         "Could not classify %s; treating it as a high-risk mutation",
                         tool_name,
                     )
-                    mapping = _UNCLASSIFIED_TOOL
+                    mapping = UNCLASSIFIED_TOOL
 
                 try:
                     within_limit = limiter.allow(mapping.risk)
@@ -609,25 +750,29 @@ class GroundedAgentAdapter:
                         f"Too many invocations — please wait."
                     )
 
-                if not mapping.requires_checkpoint:
-                    return {}
-
-                holder = tool_use_id or input_data.get("tool_use_id")
-                reserved, checkpoint_id = tracker.validate_and_reserve(
-                    holder,
-                    scope=(input_data.get("session_id"), input_data.get("agent_id")),
-                )
-                if reserved:
-                    return {}
-
-                message = "PreToolUse: " + _checkpoint_denial(
-                    mapping.capability_id, tool_name, checkpoint_id
-                )
-
-                if strict:
-                    return deny(message)
-
-                logger.warning("PreToolUse warning (non-strict): %s", message)
+                if mapping.requires_checkpoint:
+                    holder = tool_use_id or input_data.get("tool_use_id")
+                    scope = (input_data.get("session_id"), input_data.get("agent_id"))
+                    unreserved = (
+                        not reserve_asked
+                        and asks
+                        and mapping.requires_approval
+                        and holder is not None
+                    )
+                    if unreserved:
+                        reserved, checkpoint_id = tracker.can_reserve(holder)
+                    else:
+                        reserved, checkpoint_id = tracker.validate_and_reserve(
+                            holder, scope=scope
+                        )
+                    if not reserved:
+                        message = _checkpoint_denial(mapping, tool_name, checkpoint_id)
+                        if strict:
+                            return deny(message)
+                        logger.warning("PreToolUse warning (non-strict): %s", message)
+                    elif unreserved:
+                        with unreserved_lock:
+                            unreserved_asks[str(holder)] = scope
 
             except Exception:
                 # The detail stays in the log: the deny reason goes back to
@@ -635,6 +780,13 @@ class GroundedAgentAdapter:
                 logger.exception("PreToolUse safety check failed")
                 if strict:
                     return deny("PreToolUse safety check failed")
+
+            # Approval is a rule of its own: non-strict mode does not
+            # switch it off, and neither does an error it let through.
+            if asks and mapping.requires_approval:
+                message = _approval_request(mapping, tool_name)
+                logger.info("PreToolUse asks: %s", message)
+                return decide("ask", message)
 
             return {}
 
@@ -649,7 +801,10 @@ class GroundedAgentAdapter:
         mutation completes, its checkpoint is consumed, requiring a new
         checkpoint for subsequent mutations. Only the checkpoint reserved
         under the call's ``tool_use_id`` is touched, so a call that held no
-        reservation cannot consume another call's checkpoint.
+        reservation cannot consume another call's checkpoint. The exception
+        is a call the PreToolUse hook asked about without reserving (a
+        permission prompt tool decided it): having run, it takes the active
+        checkpoint now and consumes it, unless another call holds it.
 
         Returns:
             Async hook callback function
@@ -664,6 +819,8 @@ class GroundedAgentAdapter:
         ) -> dict[str, Any]:
             """PostToolUse hook: consume the call's reserved checkpoint, or
             release it if the tool reported an error."""
+            with self._unreserved_lock:
+                unreserved_scope = self._unreserved_asks.pop(tool_use_id or "", None)
             try:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
@@ -691,6 +848,10 @@ class GroundedAgentAdapter:
                     logger.info("%s changed nothing, checkpoint preserved", tool_name)
                     return {}
 
+                if unreserved_scope is not None:
+                    # Asked about without a reservation; it ran, so take
+                    # the checkpoint now.
+                    tracker.validate_and_reserve(tool_use_id, scope=unreserved_scope)
                 consumed_id = tracker.consume_checkpoint(tool_use_id)
                 if consumed_id is not None:
                     logger.info(
@@ -723,6 +884,8 @@ class GroundedAgentAdapter:
             """PostToolUseFailure hook: release the call's reservation."""
             try:
                 holder = tool_use_id or input_data.get("tool_use_id")
+                with self._unreserved_lock:
+                    self._unreserved_asks.pop(holder or "", None)
                 if holder and tracker.release_reservation(holder):
                     logger.info(
                         "%s failed, checkpoint reservation released",
@@ -734,14 +897,32 @@ class GroundedAgentAdapter:
 
         return release_after_failure
 
-    def _make_permission_callback(self) -> Any:
+    def _make_permission_callback(self, host_can_use_tool: Any = None) -> Any:
         """
-        Create permission callback that enforces checkpoint requirements.
+        Create the permission callback (``can_use_tool``).
 
-        Mutations are blocked unless a valid checkpoint exists. The rate
-        limit is enforced in the PreToolUse hook instead, which also sees
-        tools in ``allowed_tools`` that never reach this callback; checking
-        it here as well would charge a call twice.
+        Claude Code calls it for a tool call its permission rules do not
+        settle, and for one a PreToolUse hook answered with ``"ask"``. The
+        callback:
+
+        1. Repeats the checkpoint check (F501). Mutations are blocked
+           unless a valid checkpoint exists.
+        2. Hands the decision to ``host_can_use_tool`` when there is one,
+           and returns its result unchanged. A result that is not an allow
+           releases the call's checkpoint reservation.
+        3. With no host callback: denies a call whose mapping requires
+           approval (F502) when ``approval`` is ``"ask"``, because no one
+           can give that approval, and allows every other call.
+
+        The rate limit is enforced in the PreToolUse hook instead, which
+        also sees tools in ``allowed_tools`` that never reach this
+        callback; checking it here as well would charge a call twice.
+
+        Args:
+            host_can_use_tool: The ``can_use_tool`` callback of the options
+                being wrapped, or None. It receives the tool name, the
+                input and the SDK's ``ToolPermissionContext``, whose
+                ``decision_reason`` holds the hook's ``F502`` reason.
 
         Returns:
             Async permission callback function
@@ -750,6 +931,8 @@ class GroundedAgentAdapter:
         tracker = self.checkpoint_tracker
         mapper = self.mapper
         strict = self.config.strict_mode
+        # Anything but an explicit "off" asks.
+        asks = self.config.approval != "off"
 
         # Try to import SDK permission types
         try:
@@ -759,7 +942,7 @@ class GroundedAgentAdapter:
         except ImportError:
             has_sdk_types = False
 
-        def deny(message: str, holder: str | None) -> Any:
+        def release(holder: str | None) -> None:
             # A denied call never runs, so neither PostToolUse nor
             # PostToolUseFailure ends the reservation its PreToolUse hook
             # took: release it here, or the checkpoint stays blocked for
@@ -770,6 +953,9 @@ class GroundedAgentAdapter:
                     tracker.release_reservation(holder)
                 except Exception as e:  # deny regardless; the hold lapses
                     logger.error("Could not release reservation: %s", e)
+
+        def deny(message: str, holder: str | None) -> Any:
+            release(holder)
             if has_sdk_types:
                 return PermissionResultDeny(message=message)
             return FallbackPermissionDeny(message=message)
@@ -780,7 +966,7 @@ class GroundedAgentAdapter:
             context: HookContext | None,
         ) -> Any:
             """
-            Permission callback for checkpoint enforcement.
+            Permission callback: checkpoint check, then the host's decision.
 
             Args:
                 tool_name: Name of tool being invoked
@@ -788,7 +974,8 @@ class GroundedAgentAdapter:
                 context: ToolPermissionContext from SDK
 
             Returns:
-                PermissionResultAllow or PermissionResultDeny
+                PermissionResultAllow or PermissionResultDeny, or whatever
+                the host's callback returned
             """
             holder = getattr(context, "tool_use_id", None)
             try:
@@ -812,9 +999,7 @@ class GroundedAgentAdapter:
                     else:
                         is_valid, checkpoint_id = tracker.validate_and_reserve(holder)
                     if not is_valid:
-                        message = _checkpoint_denial(
-                            mapping.capability_id, tool_name, checkpoint_id
-                        )
+                        message = _checkpoint_denial(mapping, tool_name, checkpoint_id)
 
                         if strict:
                             return deny(message, holder)
@@ -827,6 +1012,26 @@ class GroundedAgentAdapter:
                         logger.info(
                             "%s allowed with checkpoint %s", tool_name, checkpoint_id
                         )
+
+                # The host's permission flow decides what it is asked.
+                if host_can_use_tool is not None:
+                    result = host_can_use_tool(tool_name, input_data, context)
+                    if inspect.isawaitable(result):
+                        result = await result
+                    if not _is_allow(result):
+                        release(holder)
+                    return result
+
+                # No one to ask. An approval no one can give is a refusal
+                # (STANDARD v1.1 section 5.14, F502).
+                if asks and mapping.requires_approval:
+                    logger.warning(
+                        "%s requires approval and the wrapped options have no "
+                        "can_use_tool callback; denying. Pass one, or set "
+                        "GroundedAgentConfig(approval='off').",
+                        tool_name,
+                    )
+                    return deny(_approval_unavailable(mapping, tool_name), holder)
 
                 # Allow the tool
                 if has_sdk_types:

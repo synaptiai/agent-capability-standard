@@ -119,3 +119,39 @@ class TestDiscoveryPipelineWithEvidenceStore:
         result = await pipeline.discover("Search for files")
         for anchor_dict in result.evidence_anchors:
             assert "ref" in anchor_dict
+
+    @pytest.mark.asyncio
+    async def test_task_description_is_not_kept_by_default(
+        self, registry, engine, mock_llm_fn, evidence_store: EvidenceStore
+    ):
+        """The task description is the user's prompt and can hold
+        credentials; the classifier's own result is kept."""
+        pipeline = DiscoveryPipeline(
+            registry, engine, llm_fn=mock_llm_fn, evidence_store=evidence_store
+        )
+        await pipeline.discover("Search for files with token sk-test-123")
+
+        (discovery,) = evidence_store.search_by_ref_prefix("tool:DiscoveryPipeline:")
+        assert "tool_input" not in discovery.metadata
+        assert "sk-test-123" not in str(evidence_store.to_list())
+        matches = evidence_store.search_by_ref_prefix("tool:CapabilityClassifier:")
+        assert matches
+        for match in matches:
+            assert set(match.metadata["tool_input"]) == {"capability_id", "confidence"}
+
+    @pytest.mark.asyncio
+    async def test_task_description_is_kept_when_asked(
+        self, registry, engine, evidence_store: EvidenceStore
+    ):
+        pipeline = DiscoveryPipeline(
+            registry,
+            engine,
+            evidence_store=evidence_store,
+            evidence_include_tool_input=True,
+        )
+        await pipeline.discover("Search for files")
+
+        (discovery,) = evidence_store.search_by_ref_prefix("tool:DiscoveryPipeline:")
+        assert discovery.metadata["tool_input"] == {
+            "task_description": "Search for files"
+        }

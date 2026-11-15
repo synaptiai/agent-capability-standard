@@ -1,0 +1,1275 @@
+# Packaging, versions, diagnostics, conformance and governance
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: packaging-conformance-governance
+title: Packaging, versions, diagnostics, conformance and governance
+rows:
+- id: pkg-01
+  relation: fits
+  acs:
+    concept: 'Distribution unit: a Claude Code plugin (skills directory and hooks), a Python package built
+      around a Rust core, and plain schema files'
+    refs:
+    - .claude-plugin/plugin.json (whole file, lines 1-22)
+    - pyproject.toml [build-system] and [project] (lines 1-15)
+    - core/Cargo.toml [package] (line 8, `publish = false`)
+    - spec/ROADMAP.md intro (lines 3-6)
+    quote: '"skills": "./skills/"'
+  sa:
+    concept: 'Distribution unit: a packed agent, an npm package whose entry point exports definition registries
+      and `__meta`'
+    refs:
+    - content/0.2.0/distribution/packaging.md intro (lines 3-5), 'Entry Point Exports' (lines 27-108),
+      'PackedExports Interface' (lines 121-147), 'package.json Requirements' (lines 149-187), 'Visibility
+      Rules' (lines 221-230)
+    - content/0.2.0/specification/agents.md §6 Required Parent Hooks (lines 132-167), §7 Human-in-the-Loop
+      Composition (lines 169-191)
+    - content/0.2.0/specification/hooks.md intro (line 5), §5.1 tool_call_started (line 382)
+    - '@standardagents/spec 0.45.10 index.d.ts line 5113 (`parentHooks` on AgentDefinition)'
+    quote: Standard Agents can be packaged into self-contained npm packages, making them installable and
+      distributable.
+  explanation: 'ACS ships as a Claude Code plugin (plugin.json points at ./skills/), a Python package
+    built with maturin around a Rust core (requires-python >=3.14; the crate sets publish = false), and
+    YAML and JSON schema files. SA''s unit is an npm package whose entry point exports `agents`, `handlers`,
+    `prompts`, `tools`, `models`, `hooks`, optional `effects` and `threadEndpoints`, and `__meta`. They
+    fit together because they sit at different layers: ACS says what a capability is and what must hold
+    around its use; SA says how an agent definition is shipped and executed. The SA text lists a packed
+    agent''s dependencies as definition kinds and does not say whether ordinary library code is bundled
+    into the module or declared as an npm dependency: its entry-point example imports `@standardagents/openai`,
+    which the example package.json beside it does not list.'
+  combined: '(a) Library form: compile ACS helper source (generated ontology constants, guard helpers)
+    into the package''s own module; do not rely on a runtime resolving a third-party npm dependency of
+    a packed agent, which packaging.md does not specify. (b) Agent form: an ACS-provided package whose
+    entry agent sets `exposeAsTool: true` can contribute thread-scoped hooks shipped in the same package
+    to a direct parent through `parentHooks`, and can offer an approval-gate child in the shape of agents.md
+    §7 (an example, not a requirement). Form (b) gives opt-in observation during prompt turns only: no
+    hook can refuse a tool call, hook failures are non-fatal, requirements do not propagate transitively,
+    and the Visibility Rules give outside code no access to a package''s tools. Enforcement stays inside
+    each tool''s own `execute` (pkg-03).'
+  see_also:
+  - published-api-extension-points#hooks-01
+  - safety-enforcement#flags-02
+  - safety-enforcement#trust-01
+  - evidence-audit-observability#collect-03
+  - multi-agent#coord-18
+  - models-context-memory-security#hooks-01
+- id: pkg-02
+  relation: partial
+  acs:
+    concept: 'Manifest: plugin.json (name, version, description, author, homepage, repository, license,
+      keywords, skills) and the ontology''s `meta` block'
+    refs:
+    - .claude-plugin/plugin.json (lines 2-21)
+    - schemas/capability_ontology.yaml `meta` (lines 6-23)
+    quote: '"license": "Apache-2.0",'
+  sa:
+    concept: 'Manifest: package.json `standardagent` field and "standardagent" keyword, the `__meta` export
+      (`PackedMeta`), and packaging metadata on `AgentDefinition`'
+    refs:
+    - content/0.2.0/distribution/packaging.md 'package.json Requirements' (lines 149-187), 'PackedMeta'
+      (lines 189-215)
+    - content/0.2.0/specification/agents.md §2.2 Optional (line 95)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5778-5795 (PackedMeta), 5061-5083 (packageName, version,
+      author, license)'
+    quote: 'The `standardagent` field marks this as a Standard Agent package. Its sub-fields:'
+  explanation: 'The SA 0.2.0 text requires only the `standardagent` field and the "standardagent" keyword;
+    the other package.json fields are ordinary npm fields shown in a non-normative example. Agent-specific
+    facts live in the sub-fields (`entryAgents`, optional `effects`, `threadEndpoints`, `parentHooks`),
+    in `__meta` (`packageId`, `version`, `entryAgents`, `packedAt`, optional `description` and `parentHooks`)
+    and in four `AgentDefinition` members ''consumed only when the agent is packed for distribution''.
+    No package-level slot for third-party metadata was found, and the text does not say whether unknown
+    `standardagent` sub-fields, extra `__meta` keys or extra entry-point exports are permitted or preserved.
+    The published `PackedMeta` has no index signature, so a typed literal rejects unknown keys; declaration
+    merging can add one, which the text does not offer as an extension point. Searched (packaging.md):
+    annotation, additional, unknown, extension, extra, custom. Searched (content/0.2.0): unknown field,
+    extra key, additional propert.'
+  combined: 'Use npm fields for what they already express (`name`, `version`, `license`, and `keywords`
+    including "standardagent"). An author who writes package.json by hand should set licence and author
+    there: the only packer duty the text states concerns `parentHooks`, so nothing requires a packer to
+    copy `license` or `author` from the `AgentDefinition`. ACS package facts (Standard and ontology versions,
+    a domain profile) have no SA-defined home. They can be repeated on each function tool through `annotations`
+    (pkg-03), or kept outside SA''s contract in the README or in a top-level package.json key the package
+    owns. An experiment with Node showed that such a key and an extra named export are both readable,
+    but SA defines neither and does not promise that a packer or runtime preserves them.'
+- id: pkg-03
+  relation: fits
+  acs:
+    concept: 'Capability classification: ontology node fields `id`, `layer`, `risk`, `mutation`, `requires_checkpoint`,
+      `requires_approval`, acted on as effective flags'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (lines 109-127)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 270-284)
+    - schemas/capability_ontology.yaml node `mutate` (lines 1095-1101)
+    quote: '| `requires_checkpoint` | boolean | No | A checkpoint must precede each use (default false)
+      |'
+  sa:
+    concept: 'Tool `annotations`: an opaque object of owner-keyed hints on a function tool definition'
+    refs:
+    - content/0.2.0/specification/tools.md §1 Tool Categories (lines 5-11), §8 Annotations (lines 123-146),
+      §9 Conformance Notes (lines 148-156)
+    - content/0.2.0/infrastructure/runtime.md §5.3 Tool Classes (lines 94-100)
+    - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (line 23, `flowId`)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 412, 424, 532 (annotations), 443 and 549 (`executionMode`;
+      not in the 0.2.0 text)'
+    - '@standardagents/spec 0.45.10 index.js lines 145-165 (defineTool)'
+    quote: '- `defineTool()` **MUST** return `annotations` unchanged on the tool definition.'
+  explanation: 'SA defines no capability taxonomy or risk vocabulary for tools, only an extension object
+    on function tools: ''This specification defines no annotation keys, and their meaning belongs to whoever
+    owns the key.'' The carrier is guaranteed (`defineTool()` MUST return it unchanged; implementations
+    MUST preserve it) and declarative only: ''Annotations **MUST NOT** change argument validation, execution,
+    the tool''s results, or what is sent to the model.'' Inference: a conforming runtime may display an
+    ACS classification but may not gate a call on it, so the safety layer of ACS §5.2.1 has to be package
+    code. Only function tools carry annotations: prompt tools, agent tools and the runtime-injected lifecycle
+    tools have none, so an ACS `delegate` classification on `subagent_create` has no carrier. Searched
+    (content/0.2.0): ontolog, risk, checkpoint, rollback, evidence (no matches); taxonomy (once, in another
+    sense).'
+  combined: 'On each function tool, set the `acs` annotation key to the object defined by `schemas/interop/standard_agents_annotation.schema.json`
+    (`standard`, `ontology`, `capability`, `layer`, `risk`, `mutation`, `requires_checkpoint`, `requires_approval`).
+    The annotation is self-declared disclosure; enforcement is the tool''s own `execute`, which returns
+    an error result when no checkpoint record exists. That covers only locally executed function tools
+    the package wrote: prompt tools, handoff agents, lifecycle tools and tools with `executionMode: ''provider''`
+    (published types only) run no package code first. Scope the checkpoint record, for example by `state.execution.flowId`
+    or by consuming it on use: a thread has no run boundary, and its key-value store is writable by all
+    code that holds the thread''s `ThreadState`, including required parent hooks of composed children.'
+  see_also:
+  - tools-contracts#cls-02
+  - tools-contracts#cls-03
+  - tools-contracts#cls-07
+  - tools-contracts#cls-08
+  - tools-contracts#cls-14
+  - tools-contracts#dom-01
+  - tools-contracts#eff-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#thread-05
+  - published-api-extension-points#tools-02
+  - published-api-extension-points#tools-03
+  - published-api-extension-points#tools-06
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#flags-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-20
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-02
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - evidence-audit-observability#audit-03
+  - multi-agent#coord-20
+  - models-context-memory-security#profile-06
+- id: pkg-04
+  relation: partial
+  acs:
+    concept: 'Classification is static data: a capability''s flags can be read from the ontology without
+      executing anything'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (line 111)
+    - schemas/capability_ontology.yaml (capability nodes)
+    - site/src/pages/api/v1/capabilities/[value].json.ts (static JSON data API, in the site source)
+    - site/src/lib/api.ts `capabilityResource` (lines 80-95)
+    quote: 'A capability MUST define:'
+  sa:
+    concept: 'Code-free disclosure in package.json: `standardagent.parentHooks` duplicates the executable
+      declaration'
+    refs:
+    - content/0.2.0/distribution/packaging.md 'package.json Requirements' (lines 153-185), 'PackedMeta'
+      (lines 210-215), 'Discovery' (lines 255-259)
+    - content/0.2.0/specification/threads/client-api.md §5 Listing Agents (lines 104-138)
+    - content/0.2.0/specification/threads.md §2.1-§2.2 (lines 190-206)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2872-2888 (loadModel, loadPrompt, loadAgent)'
+    quote: entry agent so a marketplace or installer can show composition effects
+  explanation: 'SA recognises that an installer needs some facts before it imports package code, and solves
+    this for one fact: packers MUST reproduce `parentHooks` in both `__meta.parentHooks` and `package.json.standardagent.parentHooks`.
+    Nothing equivalent was found for tools. A tool''s `annotations` can be reached only by importing the
+    package and awaiting the tool''s loader; the Thread Client API''s `AgentListEntry` carries no tool
+    or annotation member; and `ThreadState` loads models, prompts and agents by name but has no tool loader.
+    An ACS classification therefore travels with the code but is not visible at install time. Searched
+    (content/0.2.0): annotation (tools.md only). Searched (content/0.2.0 and index.d.ts): loadTool (no
+    match).'
+  combined: Not possible within SA-defined fields in 0.2.0. A package can generate a static JSON summary
+    at build time (tool name to ACS capability and effective flags). With the `exports` map the Packaging
+    page shows (only `"."`), a JSON file in the tarball cannot be imported as a subpath (Node reported
+    ERR_PACKAGE_PATH_NOT_EXPORTED in an experiment), so the summary needs its own `exports` and `files`
+    entries, or a top-level package.json key the package owns, which can be read the way discovery step
+    1 reads package.json. No SA runtime, installer or marketplace is required to read either, and a packer
+    that generates package.json is not required to keep the key. See the SA gap on package-level annotations.
+- id: pkg-05
+  relation: partial
+  acs:
+    concept: 'Skills: one `skills/<name>/SKILL.md` per atomic capability (36) plus 6 composed skills,
+      each with YAML frontmatter'
+    refs:
+    - skills/README.md 'Skill Layers' total (line 20), 'Skill Structure' (lines 148-159)
+    - skills/mutate/SKILL.md frontmatter (lines 1-11)
+    - 'skills/capability-gap-analysis/SKILL.md frontmatter (line 2, `name: gap-analysis-workflow`)'
+    - 'skills/digital-twin-sync-loop/SKILL.md frontmatter (line 2, `name: digital-twin-sync-workflow`)'
+    quote: '**Total: 36 atomic capabilities + 6 composed skills = 42 skills**'
+  sa:
+    concept: Agent Skills library on `ThreadState.skills` (list, get, readFile, install, setEnabled, remove)
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, Skills table (lines 161-170), §7.4 Agent
+      Skills (lines 447-465)
+    - content/0.2.0/distribution/packaging.md intro (line 3), 'PackedExports Interface' (lines 136-146)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1829-1880 (SkillMetadata, SkillsNamespace), 3249
+      (`skills: SkillsNamespace;`)'
+    quote: A skill's identity **MUST** come from its `SKILL.md` frontmatter — never from a caller-supplied
+      name — and installs **MUST** validate the frontmatter against the standard.
+  explanation: 'Both use the SKILL.md format. SA restates two frontmatter rules: `name` (lowercase kebab-case,
+    at most 64 characters) and `description` (at most 1024); all 42 ACS files meet both (script check;
+    longest description 292). Differences: (1) SA skills are a principal-scoped, server-side library,
+    not package content. (2) ACS frontmatter carries keys beyond those two (`argument-hint`, `disable-model-invocation`,
+    `user-invocable`, `allowed-tools`, `context`, `agent` on all 42; `layer` on 13; `hooks` on 6), and
+    its `allowed-tools` values name Claude Code tools; which keys the Agent Skills standard defines was
+    not checked. (3) Two directories differ from their frontmatter `name`, which is the identity under
+    SA. (4) Atomic skill names are generic (`mutate`, `plan`), and SA gives an owner-scoped skill precedence
+    over a shared one of the same name. Searched (packaging.md): skill (no match).'
+  combined: Treat skills as an optional, user-side convenience. Where a runtime exposes `state.skills`
+    (a required member in the published types; no page of the text requires it) and the principal chooses
+    to install them, ACS SKILL.md files may be installed with `state.skills.install(...)`. Installs need
+    mutation authorization and change the calling principal's library, so a packed agent should not install
+    silently; whether install-time validation accepts the extra ACS keys is untested. Reaching the model
+    is a SHOULD (progressive disclosure). No mechanism for a packed agent to declare or bundle skills
+    was found, so ship any procedure text the agent relies on inside the package, as prompt text or behind
+    a function tool that returns the bundled text. Do not load safety-relevant instructions by skill name.
+  see_also:
+  - tools-contracts#skl-01
+  - models-context-memory-security#prompts-02
+- id: pkg-06
+  relation: acs_only
+  acs:
+    concept: 'Workflow catalogs and domain profiles: YAML documents validated against the ontology'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.1 Catalog and Workflow Definition (lines 201-230)
+    - spec/STANDARD-v1.1.0.md §5.9 Workflow Extensions (lines 534-536)
+    - spec/STANDARD-v1.1.0.md §11.5 Version Declaration (lines 1492-1516)
+    - schemas/profiles/profile_schema.yaml
+    - schemas/workflow_catalog.yaml
+    - 'pyproject.toml (lines 1-15: build needs Python >=3.14 and a Rust toolchain)'
+    quote: A catalog is a YAML mapping of workflow name to workflow. A top-level key
+  sa:
+    concept: No step-list workflow document and no policy or profile document; package contents are definition
+      registries plus `__meta`
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Entry Point Exports' (line 29), 'PackedExports Interface'
+      (lines 135-147)
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 220-225)
+    quote: 'The package entry point exports named registries for each definition type, plus a `__meta`
+      export with package metadata:'
+  explanation: 'SA 0.2.0 defines agents and prompts declaratively, but no step-list workflow document
+    and no policy or profile document was found, and packaging.md does not mention data files. An ACS
+    catalog or profile can therefore travel only as data compiled into the package''s code. On a prompt-backed
+    side the model, not the catalog, chooses the order of tool calls, so a bundled catalog is advisory
+    there. A profile should not be resolved through `state.env()`: thread-level values take precedence
+    over agent defaults (''1. Thread environment variables'' is first in the resolution order), so whoever
+    creates the thread could replace the policy. Searched (packaging.md): asset, data file, static, extra,
+    custom, additional (no matches). Searched (content/0.2.0): workflow (prose, package ids and a GitHub
+    Actions example only).'
+  combined: A bundled catalog can do three things today. (1) Be validated by the ACS validator before
+    packing, which brings Python >=3.14 and a Rust toolchain into the build, and be compiled in as a JSON
+    or TypeScript constant; a top-level `x-` key may carry SA-specific hints, which ACS treats as vendor
+    data. (2) Feed order guards inside tools from the ontology's `requires` edges, such as checkpoint
+    before mutate; this is the part enforceable without an executor. (3) Be executed step by step only
+    by a handler-backed side that implements the DSL itself or runs a future JavaScript or WebAssembly
+    build of the reference executor; that code is then the consumer and must refuse a catalog whose `workflow_extensions.requires`
+    names an extension it does not implement (§5.9). Keep the profile as a compiled constant.
+  see_also:
+  - published-api-extension-points#handler-01
+  - safety-enforcement#exec-01
+  - checkpoint-rollback-state#state-15
+  - evidence-audit-observability#audit-03
+  - workflow-execution#wf-04
+  - workflow-execution#wf-05
+  - workflow-execution#wf-22
+  - workflow-execution#wf-25
+  - multi-agent#coord-26
+- id: pkg-07
+  relation: fits
+  acs:
+    concept: 'Reference implementation boundary: validator and executor in a Rust core reached from Python;
+      the executor performs no I/O and asks a host to act'
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md intro (lines 3-14)
+    - pyproject.toml (lines 1-15)
+    - core/Cargo.toml [features] (lines 14-17)
+    - core/src/validate/mod.rs line 99 (`load` takes file paths)
+    - spec/ROADMAP.md 'Standards and scale' (line 86)
+    quote: The executor does no I/O. It tells your code what to do next (an
+  sa:
+    concept: Portability requirements for packed agents
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 7-25)
+    - content/0.2.0/specification/threads.md §10.1 Portability (line 554)
+    - content/0.2.0/specification/hooks.md intro (line 5), §5.1 (line 382)
+    quote: by this specification. Packed definitions MUST NOT require private runtime
+  explanation: 'SA requires a packed agent''s required behaviour to be expressible through specification
+    surfaces: no private RPCs, runtime-specific storage, ''sidecar services that substitute for runtime
+    behavior'', or `_notPackableRuntimeContext`. ACS obliges no one to use its reference implementation,
+    so there is no conflict. The reference validator and executor are not available to JavaScript (Python
+    >=3.14 plus a Rust extension; no npm or WebAssembly build); ROADMAP lists ''Multi-language SDKs (TypeScript,
+    Rust, Go, Java)'' as open. In an experiment the crate type-checked for wasm32-unknown-unknown without
+    the `python` feature, but it exports nothing callable and its validator loads the ontology from file
+    paths. Inference: the executor''s no-I/O design suits the role `ThreadState` plays in SA. Searched
+    (ACS tree outside the excluded files): wasm, webassembly (lock files and one site script only); wasm_bindgen
+    in core/src (no match).'
+  combined: 'Run ACS validation where the reference implementation exists, at build or CI time, before
+    packing. At run time use SA surfaces by role: enforcement in a tool''s `execute` with `state.getValue`
+    and `state.setValue`; observation in hooks, which cannot refuse a tool call and whose failures are
+    non-fatal. A package whose core behaviour depends on an external ACS checkpoint, approval or audit
+    service meets SA''s portability requirements only if the service is declared ''as part of the agent''s
+    purpose rather than as a replacement for a'' missing runtime capability; a service that stands in
+    for a checkpoint, approval or audit primitive SA lacks reads as such a replacement, which is an inference,
+    because the text does not classify these services (workflow-execution#wf-25 and multi-agent#coord-27
+    leave the question to SA). Where SA lacks a primitive the binding needs, the text asks for the primitive
+    to be specified (packaging.md lines 17-19), so propose it upstream.'
+  see_also:
+  - published-api-extension-points#erase-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-15
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#retention-01
+  - evidence-audit-observability#store-02
+  - workflow-execution#wf-25
+  - multi-agent#coord-27
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+- id: pkg-08
+  relation: partial
+  acs:
+    concept: 'Declared dependencies between capabilities: `requires` edges, checked by the validator (V102)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-88)
+    - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 145-171)
+    quote: '| `requires` | For every `to` step, some `from` step runs before it | V102 per `to` step |'
+  sa:
+    concept: 'Declared invocation dependencies of a function tool: `uses`, required for packed tools and
+      enforced by the runtime'
+    refs:
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (lines 36-44)
+    - content/0.2.0/distribution/packaging.md intro (line 5)
+    quote: A packed tool **MUST** declare the targets it invokes by name. A package **MUST** include its
+      required tool dependencies. When a `uses` list is supplied, the runtime **MUST** reject an invocation
+      of a target outside the list.
+  explanation: 'Both are declared, machine-checked dependency lists, about different things. An ACS `requires`
+    edge is an ordering rule between capabilities in a workflow: some `checkpoint` step must run before
+    each `mutate`. SA''s `uses` is a call allow-list for one tool: the names it may invoke through `state.invokeTool()`
+    or `state.queueTool()`. A packer reads it to decide what to include (''Packers discover a tool''s
+    named invocation dependencies from its `uses` declaration.''), and a runtime enforces it by rejecting
+    undeclared targets. `uses` says nothing about order, and an ACS edge says nothing about which code
+    calls which. It is still the closest SA analogue of a declared prerequisite, and it applies to any
+    guard tool that calls another tool by name.'
+  combined: A packed ACS guard tool that calls another tool by name (for example a `mutate`-classified
+    tool that invokes the package's checkpoint or audit tool) MUST list that tool in `uses`; with the
+    list supplied, `invokeTool()` 'returns an error result for an undeclared target'. Generate the `uses`
+    list of a guarded tool from the ontology's `requires` edges for its capability, so that the declared
+    call targets and the ACS prerequisites stay in step. Ordering itself (checkpoint before mutate) is
+    still enforced by the guard code (pkg-03), not by `uses`.
+  see_also:
+  - tools-contracts#cls-13
+  - published-api-extension-points#tools-05
+  - safety-enforcement#gate-03
+  - workflow-execution#wf-26
+- id: pkg-09
+  relation: acs_only
+  acs:
+    concept: 'Classification is available to every safety layer: validators, executors and safety layers
+      act on effective flags looked up by capability id'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 279-284)
+    - hooks/hooks.json (PreToolUse and PostToolUse hooks of the Claude Code plugin)
+    quote: Validators, executors and safety layers MUST act on effective flags. A
+  sa:
+    concept: 'What a tool hook receives: `HookToolCall` (id, type, function name and arguments) and `HookToolResult`;
+      no access to the tool definition or its `annotations`'
+    refs:
+    - content/0.2.0/specification/hooks.md §5.1-§5.5 (lines 367-444), §6.2 HookToolCall (lines 465-476)
+    - 'content/0.2.0/specification/threads.md §2.1-§2.2 (lines 190-206: loadModel, loadPrompt, loadAgent
+      and name listings)'
+    - content/0.2.0/specification/tools.md §8 (line 145)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2872-2888 (loaders), 5951-5963 (HookToolCall)'
+    quote: '(state: ThreadState, toolCall: HookToolCall, toolResult: HookToolResult) => Promise<void>'
+  explanation: 'In ACS every layer that acts on a step can look up its flags by capability id. In SA the
+    annotation carrier of pkg-03 can be read by a runtime and by code that imports the tool''s module,
+    but not through any hook argument: a tool hook receives the call''s id, name and JSON arguments and,
+    afterwards, the result. `ThreadState` loads models, prompts and agents by name and has no tool loader.
+    A hook in the same package can import a build-time table of classifications; a hook contributed from
+    another package through `parentHooks` cannot classify the parent''s tools at all. The text lets a
+    runtime read annotations (''**MAY** read keys it understands, typically to choose how it displays
+    a tool call'') and gives hooks no equivalent. Searched (content/0.2.0 and index.d.ts): loadTool, getToolNames
+    (no matches).'
+  combined: 'Within one package: generate a constant map from tool name to its `acs` annotation at build
+    time and import it from the audit hook (`tool_call_done`), keyed by `toolCall.function.name`. Do not
+    present a hook from an ACS-provided child package as able to classify or audit a parent''s tools by
+    capability; it can record names, arguments and results only. See the SA gap on giving tool hooks the
+    called tool''s annotations.'
+  see_also:
+  - tools-contracts#cls-04
+  - published-api-extension-points#thread-02
+- id: naming-01
+  relation: partial
+  acs:
+    concept: 'Identifier rules and reserved identifiers: capability `id`, `store_as`, workflow names,
+      Appendix B'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (line 115)
+    - spec/STANDARD-v1.1.0.md §5.2 Step Definition (lines 242-243)
+    - 'spec/STANDARD-v1.1.0.md Appendix B: Reserved Identifiers (lines 1721-1730)'
+    - schemas/workflow_catalog.yaml, schemas/workflows/*.yaml, examples/digital_twin_sync_loop.workflow_catalog.yaml
+      (workflow names, checked by script)
+    quote: '| `id` | string | Yes | Unique identifier (lowercase, hyphens allowed) |'
+  sa:
+    concept: 'Naming conventions and reserved names: snake_case definition names, hook ids, reserved lifecycle
+      tool names, reserved thread endpoint paths, `/` reserved for qualification'
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Qualified Names' (line 236), 'Naming Conventions' (lines
+      261-266)
+    - content/0.2.0/specification/hooks.md §1.2 Hook Definition (line 63), §1.3 Hook Scoping (line 95)
+    - content/0.2.0/specification/effects.md §1.3 Naming (lines 51-55)
+    - content/0.2.0/specification/subagents.md §1 (line 47), §2.4 Reserved Names (lines 76-78)
+    - content/0.2.0/specification/prompts.md §3.4 (line 176)
+    - content/0.2.0/specification/threads/client-api.md §2 item 2 (line 35)
+    - 'content/0.2.0/specification/threads.md §2.1 (lines 195-197: hyphenated names in an example)'
+    - '@standardagents/spec 0.45.10 index.js lines 140-144, 186-188, 258, 408-416 (published implementation)'
+    quote: '- The `id` property **MUST** be unique across all hooks and follow `snake_case` format.'
+  explanation: 'ACS capability ids are lowercase with hyphens allowed. SA definition names ''use `snake_case`''
+    (no requirement keyword), effect names SHOULD, and only hook ids MUST; the text''s own examples use
+    hyphenated prompt, agent and model names. All 36 ACS capability ids match `^[a-z]+$`, and all 31 workflow
+    names (12 in schemas/workflow_catalog.yaml, 16 under schemas/workflows/, 3 in an example catalog)
+    match `^[a-z][a-z0-9_]*$`, so each is legal on both sides. Reserved sets do not collide: ACS reserves
+    ids starting with `_`, `system-` and `internal-`; SA reserves `subagents`, `subagent_create` and `subagent_message`
+    in the tool namespace and the thread endpoint paths `messages`, `fs`, `stop` and `stream`. The text
+    has one character rule for the tool namespace: relationship names ''cannot contain a slash''. The
+    rejection of `/` in function tool, prompt and agent names and the hook-id pattern are in the published
+    implementation only.'
+  combined: 'Name an SA tool after the domain action it performs or after the ACS capability (`update_ticket`,
+    `mutate`); the classification goes in `annotations`, so the tool name is free. Use snake_case hook
+    ids. A prefix such as `acs_` is a convention, not a namespace: child hook ids resolve in the child''s
+    package namespace, so uniqueness is per package. Never use `/`, `subagents`, `subagent_create` or
+    `subagent_message` as a tool or relationship name, and do not mount thread endpoints at the reserved
+    paths. Map hyphens in ACS composed-skill names (`debug-workflow`) to underscores when a name becomes
+    a hook id; the published `defineHook` rejects a hyphenated id.'
+- id: naming-02
+  relation: sa_only
+  acs:
+    concept: 'Namespacing: one flat capability namespace; workflows addressed by bare name within the
+      loaded catalog (`workflow_id`)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.1 (line 203)
+    - spec/STANDARD-v1.1.0.md §5.2 Step Definition (line 261, `workflow_id`)
+    - spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (lines 659-663)
+    - spec/STANDARD-v1.1.0.md §9.7 Warnings (line 1337)
+    - schemas/capability_ontology.yaml nodes `delegate` (description, line 1445) and `invoke` (description,
+      line 1611)
+    quote: '| W607 | UNRESOLVED_WORKFLOW | invoke target not in the loaded catalog |'
+  sa:
+    concept: Qualified names `{packageId}/{name}` and package visibility rules
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Namespace Isolation', 'Visibility Rules', 'Qualified Names'
+      (lines 217-236)
+    - content/0.2.0/specification/type-registry.md §1.2 Registries (line 45)
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (line 38)
+    - content/0.2.0/specification/subagents.md §1 property table (lines 35-36, 45, 47), §3.1 Creation
+      Paths (lines 88-94)
+    - content/0.2.0/infrastructure/runtime.md §7.3 (line 143)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4546 (SubagentRelationship), 5872 (parseQualifiedName)'
+    quote: A qualified name has the form `{packageId}/{name}`. Code outside a package uses a qualified
+      name for a packed definition.
+  explanation: 'SA isolates each package''s definitions and lets outside code address only a package''s
+    entry agents by qualified name: ''- **Internal tools/prompts** in a package are hidden from outside''.
+    ACS has no package or namespace concept for catalogs: a workflow is a key in a YAML mapping, and `invoke`
+    names it by `workflow_id` within the loaded catalog. Consequence: an ACS helper cannot be published
+    as a Standard Agent package that offers tools (a `checkpoint` or `audit` tool) to other packages''
+    prompts, because tools never cross the package boundary. Shared ACS code has to be ordinary library
+    code that each agent package imports; SA 0.2.0 does not say whether it is bundled or declared as an
+    npm dependency (pkg-01). Searched (STANDARD-v1.1.0.md): qualified (no match); namespace (canonical
+    events, world ids and entities only).'
+  combined: 'Map ACS `delegate` (''Assign task to another agent'') to a `SubagentRelationship` whose `agent`
+    is the qualified name of a packed entry agent; `as` defaults to the unqualified part, and relationship
+    names cannot contain a slash. Map `invoke` (''Execute a composed workflow'') only when the target
+    workflow is published as an entry agent; ACS''s catalog checks (W607, V105) do not apply across that
+    boundary. On a prompt-backed side the child is spawned by the runtime-injected `subagent_create`,
+    which runs no package code. Where a delegation needs a guard, declare that relationship and every
+    other relationship on the side `hidden: true` (multi-agent#coord-20) and spawn it from a package function
+    tool: a hidden relationship ''stays declared and spawnable by runtime code'' and its tool ''**MUST
+    NOT** appear in any LLM request''s tool list''. The call that code makes is only partly specified
+    (subagents.md §3.1).'
+  see_also:
+  - tools-contracts#cls-07
+  - published-api-extension-points#hooks-01
+  - safety-enforcement#scope-01
+  - checkpoint-rollback-state#state-07
+  - approval-human#approval-16
+  - workflow-execution#wf-26
+  - multi-agent#coord-20
+- id: naming-03
+  relation: partial
+  acs:
+    concept: 'Vocabulary: capability, handler (step), hook (plugin), skill, workflow'
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms (lines 55-56)
+    - spec/STANDARD-v1.1.0.md §5.11 Handler Steps (lines 609-611)
+    - hooks/hooks.json (PreToolUse, PostToolUse)
+    quote: '| **Capability** | An atomic primitive with single purpose, composable with explicit I/O contracts
+      |'
+  sa:
+    concept: 'Vocabulary: capability (tool, model and runtime senses), handler (side backing), hook (lifecycle
+      interception), skill, effect'
+    refs:
+    - content/0.2.0/specification/tools.md intro (line 3)
+    - content/0.2.0/specification/handlers.md intro (line 3)
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (lines 17-36), §5.1 tool_call_started
+      (line 369)
+    - content/0.2.0/specification/providers.md §2.2 Reasoning Levels (line 255)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (line 15)
+    - content/0.2.0/specification/threads/runtime-streams.md intro (lines 3-6)
+    - content/0.2.0/specification/users.md §7 Lifecycle Hooks (lines 207-215; draft page)
+    - '@standardagents/spec 0.45.10 index.js lines 230-248 (VALID_HOOKS)'
+    quote: Tools are callable capabilities exposed to models during execution.
+  explanation: 'The same words carry different meanings. ''Capability'': in ACS, one of 36 ontology nodes
+    with an I/O contract; in SA, an informal word for what tools provide, for model features (`capabilities.reasoningLevels`),
+    for optional runtime surfaces (''capability-detected'') and for runtime-stream names. ''Handler'':
+    in ACS, an `invoke` step marked `handler: true` that runs only as an escalation target; in SA, ''a
+    function that takes one side''s turns in a conversation''. ''Hook'': in the ACS plugin, Claude Code
+    PreToolUse and PostToolUse shell hooks; in SA, 14 thread hooks (hooks.md §1.1) plus three user-scope
+    hooks on the draft Users page (the published `VALID_HOOKS` lists 17 names). ''Skill'' means SKILL.md
+    on both sides, with different loading models (pkg-05). ''Conformance'' and ''package'' differ too
+    (conf-01, pkg-01). No requirement conflicts, but a combined document that uses these words unqualified
+    will be misread.'
+  combined: 'In the integration document and in annotation schemas, always qualify: ''ACS capability'',
+    ''SA tool'', ''ACS handler step'', ''SA handler'', ''SA hook'', ''Claude Code hook''. Do not call
+    an SA tool a capability without stating the mapping.'
+- id: disc-01
+  relation: fits
+  acs:
+    concept: 'Discovery: Claude Code plugin marketplace; documentation site with a read-only JSON data
+      API carrying version information'
+    refs:
+    - README.md install instructions (lines 14-18)
+    - site/src/lib/api.ts version envelope (lines 44-62)
+    - site/src/pages/api/v1/ (capabilities, edges, workflows, profiles, diagnostics, layers)
+    - .claude-plugin/plugin.json keywords (lines 12-20)
+    quote: claude plugin marketplace add synaptiai/synapti-marketplace
+  sa:
+    concept: 'Discovery: npm keyword and `standardagent` field; runtime scan of node_modules and a local
+      packed directory'
+    refs:
+    - content/0.2.0/distribution/packaging.md 'package.json Requirements' (line 187), 'Discovery' (lines
+      253-259)
+    quote: The `keywords` array **MUST** include `"standardagent"` for discovery.
+  explanation: 'Each project has its own channel and neither refers to the other. SA discovery has two
+    levels: people find packages through the npm keyword, and runtimes find installed packages by the
+    `standardagent` field and then import `__meta` (the three discovery steps are descriptive text without
+    requirement keywords). Neither specification lets a consumer find agents built on ACS: SA has no capability
+    or classification index, and ACS defines no public index of agents built on it (its Python package
+    has an in-process registry used for delegation; disc-03). The ACS site source does publish the ontology
+    as static JSON with a version envelope (Standard, ontology and plugin versions), which gives SA-side
+    build tooling a stable source of capability data; whether that API is deployed was not checked offline.'
+  combined: 'A grounded SA package is discovered like any other: keep "standardagent" in `keywords` and
+    the `standardagent` field. By convention only, since neither specification defines it, add a second
+    keyword such as `agent-capability-standard` so the set is searchable on npm; the MUST permits further
+    keywords. Choose a keyword that states a fact (the package carries ACS annotations), not conformance,
+    since neither side defines a claim (conf-03). The ACS plugin''s own keywords do not include `agent-capability-standard`,
+    so the keyword is new on both sides and should be documented where ACS documents the binding.'
+- id: disc-02
+  relation: same
+  acs:
+    concept: 'Documentation entry point for coding agents: llms.txt, Markdown copies of pages and a read-only
+      docs MCP server'
+    refs:
+    - README.md (line 10)
+    - CLAUDE.md 'Documentation site' (lines 152-170; contributor guidance, not the Standard)
+    quote: Coding agents can start from [acs.synapti.ai/llms.txt](https://acs.synapti.ai/llms.txt).
+  sa:
+    concept: 'Documentation index for coding agents: llms.txt, llms-full.txt and raw Markdown endpoints'
+    refs:
+    - README.md 'Documentation' (line 20)
+    - AGENTS.md 'Source Structure' (lines 150-152; contributor guidance), 'Content Collections' (lines
+      105-107)
+    quote: The [documentation index for coding agents](https://standardagentspec.org/llms.txt) links to
+      the current specification pages.
+  explanation: 'Both projects publish an llms.txt index so that a coding agent can find the current specification
+    pages, and both sites serve raw Markdown copies of pages. SA also builds `llms-full.txt` (''Every
+    latest-version page in one markdown file''). The ACS site build writes per-section llms.txt files
+    and `llms-full.txt` and runs a read-only docs MCP server at `/mcp`, according to the repository''s
+    contributor guidance. Neither index is normative and neither refers to the other project. The correspondence
+    is practical: an agent asked to build a grounded SA package can load both indexes without scraping
+    HTML. Whether either site is deployed at the stated address was not checked offline.'
+  combined: 'In integration documentation, link both indexes instead of copying specification text, and
+    pin the versions and commit cited (ver-01), because the SA index always points at the latest version:
+    ''the version selector and `llms.txt` derive the latest'' version from the folder names.'
+- id: disc-03
+  relation: partial
+  acs:
+    concept: 'Run-time agent listing in the reference implementation: `AgentRegistry`, which validates
+      declared capability ids against the ontology (Python package, not the Standard)'
+    refs:
+    - grounded_agency/coordination/registry.py `AgentRegistry` (lines 114-122)
+    - spec/RFC-0004-agent-identity.md (line 39)
+    quote: Validates declared capabilities against the
+  sa:
+    concept: 'Agent listing over HTTP: `GET {runtime_prefix}/agents` and the caller''s creatable set'
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §5 Listing Agents (lines 104-138)
+    - content/0.2.0/infrastructure/runtime.md §15 Thread Client API (line 366)
+    quote: 6. The caller's **creatable set** is every agent for which the caller may create a thread (§6).
+      Of a [packed](/0.2.0/distribution/packaging) package's agents, only its entry agents are in it.
+      A non-primary agent is in it.
+  explanation: 'Both sides can enumerate agents at run time, for different readers. The ACS reference
+    implementation keeps an in-process registry for delegation whose entries declare capability ids that
+    are checked against the ontology; the Standard itself defines no agent listing (RFC-0004 refers to
+    ''the reference implementation''s agent registry''). SA specifies an HTTP listing for clients, which
+    a runtime SHOULD expose: each `AgentListEntry` carries id, name, title, description, icon, `primary`
+    and the two side backings, and nothing about tools, annotations or capabilities. An SA client therefore
+    cannot filter agents by ACS capability, and the ACS registry knows nothing of SA packages.'
+  combined: 'No binding is needed for a grounded package to work. A host that wants a capability view
+    of installed SA agents has to build it from package code: import each package, await its tool loaders
+    and read the `acs` annotations (pkg-04). The result is host tooling outside both specifications.'
+- id: type-01
+  relation: fits
+  acs:
+    concept: 'Reference checking by the validator: capability ids are checked against the ontology (V101);
+      no compile-time types'
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.2 Validation Errors (line 1276)
+    - spec/STANDARD-v1.1.0.md §10.2 L1 (lines 1389-1396)
+    - schemas/capability_ontology.schema.json
+    quote: '| V101 | UNKNOWN_CAPABILITY | Capability ID not found in ontology |'
+  sa:
+    concept: 'Type Registry: the `StandardAgentSpec` global namespace, narrowed by generated declaration
+      merging'
+    refs:
+    - content/0.2.0/specification/type-registry.md intro (line 3), §1 (lines 5-45), §4 Implementation
+      Requirements (lines 222-283)
+    - '@standardagents/spec 0.45.10 index.d.ts line 412 (`type ToolAnnotations = Record<string, unknown>;`)'
+    quote: 'Implementations **SHOULD** generate type declarations at build time by:'
+  explanation: Both catch a misspelled reference before run time, by different means and for different
+    names. SA narrows the names of models, prompts, agents, tools, callables, hook ids and handlers through
+    TypeScript declaration merging generated at build time, and requires regeneration to be non-additive.
+    ACS checks capability ids, bindings and types in its validator and reports coded diagnostics. SA's
+    seven registries are fixed by the specification; there is no registry for a third-party vocabulary,
+    and the text does not say whether others may add interfaces to the `StandardAgentSpec` namespace (it
+    says only that 'implementations can populate type registries').
+  combined: 'Generate a TypeScript union of the 36 capability ids from `capability_ontology.yaml` and
+    use it to type the ACS annotation in a helper that builds the annotation value, so that an unknown
+    capability id is a compile error for authors who use the helper. Keep these types in ACS''s own module
+    rather than augmenting `StandardAgentSpec`. Limits: `annotations` is `Record<string, unknown>`, so
+    a hand-written annotation with an unknown id still compiles, and a union type is erased at run time.
+    This is not an equivalent of V101; a schema or lint check over the built package is still needed.
+    A helper that wraps `defineTool` itself must forward its generics or it loses the `uses` narrowing.'
+  see_also:
+  - tools-contracts#cls-12
+  - published-api-extension-points#registry-01
+- id: ver-01
+  relation: partial
+  acs:
+    concept: 'Versioning policy of the standard: Semantic Versioning 2.0.0, deprecation policy, compatibility
+      guarantees, schema evolution table'
+    refs:
+    - spec/STANDARD-v1.1.0.md §11.1-§11.4 (lines 1437-1490)
+    - spec/GOVERNANCE.md 'Versioning' and 'Compatibility rules' (lines 6-15)
+    quote: 'This standard follows Semantic Versioning 2.0.0:'
+  sa:
+    concept: Versioned specification folders; published versions stay available and do not change; no
+      stated bump policy
+    refs:
+    - src/data/community.md 'How Changes Are Made' (line 45)
+    - README.md 'About' (line 16)
+    - AGENTS.md 'Content Collections' (lines 34-35, 105-107; contributor guidance, not specification text)
+    - content/0.1.0/specification/agents.md §1.2 Optional (line 25), §2 Agent Types (lines 39-52)
+    - content/0.2.0/specification/agents.md §2.1 Required (lines 70-78)
+    quote: The maintainers review each proposal and publish accepted changes in a new version of the specification.
+      Published versions stay available and do not change.
+  explanation: 'ACS states a policy: SemVer, deprecation in a MINOR release with a warning code and removal
+    in the next MAJOR after at least six months, and explicit forward and backward compatibility rules.
+    SA publishes numbered versions side by side and says published versions do not change, but states
+    no policy for what a version step means. The step from 0.1.0 to 0.2.0 was breaking: the agent `type`
+    field (`ai_human`, `dual_ai`) was removed and `sideB` became required; the pages Handlers, Subagents,
+    Decisions, Thread Client API and Examples were added. SemVer permits that for 0.x, but SA does not
+    say it follows SemVer. ACS is not spotless either: §11.4 records a breaking type change shipped in
+    a MINOR release. Searched (content/0.2.0, src/data, README.md): semantic version, breaking, deprecat,
+    migration, changelog (no matches); semver (once, for package versions).'
+  combined: 'Pin every reference to SA by version and commit (0.2.0 at faccc8b) and name the types package
+    version used (0.45.10). The commit pin is necessary: the Community page says published versions do
+    not change, while the contributor guidance says ''Edit only the current'' version''s folder and README.md
+    calls 0.2.0 the current version, so the 0.2.0 text can change without a version step. Treat any SA
+    version change as potentially breaking and re-verify the binding. On the ACS side, mark the binding
+    with the Standard and ontology versions it was written against.'
+- id: ver-02
+  relation: partial
+  acs:
+    concept: 'Version declaration by artifacts: `spec_version` or a `# Standard version:` header, with
+      W605, V109 and W616'
+    refs:
+    - spec/STANDARD-v1.1.0.md §11.5 Version Declaration (lines 1492-1516)
+    - spec/STANDARD-v1.1.0.md §9.2 (line 1284, V109)
+    - spec/STANDARD-v1.1.0.md §9.7 (lines 1335 and 1346, W605 and W616)
+    quote: A workflow declares the standard version it targets with `spec_version`
+  sa:
+    concept: 'Version signalling: `specificationVersion: ''1''` on provider interfaces; a `peerDependencies`
+      range in an example; a `SPEC_VERSION` constant in the published types'
+    refs:
+    - content/0.2.0/specification/providers.md §1 Provider Interface (line 15), TypeScript reference (line
+      661)
+    - content/0.2.0/specification/threads/decisions.md (line 174)
+    - content/0.2.0/distribution/packaging.md 'package.json Requirements', JSON example (line 173; non-normative
+      example), 'PackedMeta' (lines 194-207)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 731, 1310, 3521 (specificationVersion), 6475-6477
+      (issue codes, including `agent_legacy_type`), 6524-6528 (SPEC_VERSION)'
+    quote: '"@standardagents/spec": ">=0.2.0"'
+  explanation: 'ACS lets each workflow or catalog file declare the Standard version it targets and defines
+    what a validator does when the declaration is missing (W605), unsupported (V109) or inconsistent with
+    the features used (W616). In SA 0.2.0, providers declare `readonly specificationVersion: ''1'';`,
+    a literal the prose does not explain. No equivalent member was found for a package, agent or runtime:
+    `PackedMeta.version` is the package''s own version, and nothing on `ThreadState` reports the specification
+    version a runtime implements. The published types add `SPEC_VERSION = "0.2.0"` with the comment ''Implementations
+    report conformance against exactly one version.'', which the text does not mention. A runtime cannot
+    detect a 0.1.0 package from a declaration; the published helper recognises removed fields one by one
+    (`agent_legacy_type`). Searched (content/0.2.0): specVersion, spec_version, SPEC_VERSION, spec version,
+    specification version (no matches); specificationVersion (provider interfaces only).'
+  combined: 'Declare the ACS versions in the annotation in the form the schema file requires (`standard:
+    ''1.1.0''`, `ontology: ''2.1.0''`), and keep `spec_version` or the catalog header in any bundled catalog.
+    For SA, declare a bounded `peerDependencies` range that includes the version built against (for 0.45.10,
+    `>=0.45.10 <0.46.0`), and record text version, commit and types version in the package README. SA
+    0.2.0 gives package code no way to learn which specification version the runtime implements: `SPEC_VERSION`
+    exists only in the published types and describes the copy of `@standardagents/spec` the package was
+    built with. Its type is the literal "0.2.0", so comparing it with another literal is a compile error
+    unless it is widened to `string` first.'
+  see_also:
+  - tools-contracts#cls-02
+  - tools-contracts#dom-01
+  - published-api-extension-points#tools-02
+  - safety-enforcement#flags-01
+  - approval-human#approval-02
+  - models-context-memory-security#profile-06
+- id: ver-03
+  relation: partial
+  acs:
+    concept: The specification version is numbered separately from implementation versions
+    refs:
+    - spec/ROADMAP.md intro (lines 3-6)
+    - README.md 'Versioning' note (line 12)
+    - spec/STANDARD-v1.1.0.md Appendix C (line 1786, ontology 2.1.0)
+    - .claude-plugin/plugin.json (line 3)
+    - pyproject.toml (line 11)
+    - schemas/capability_ontology.yaml (line 8)
+    quote: The Standard and the plugin have separate version numbers. The Standard is the
+  sa:
+    concept: Specification text 0.2.0 versus npm package `@standardagents/spec` 0.45.10
+    refs:
+    - README.md 'About' (line 16)
+    - 'package.json ("version": "0.2.0")'
+    - content/0.2.0/distribution/packaging.md JSON example (line 173; non-normative example)
+    - content/0.2.0/getting-started/examples.md §8 Packaging, host project package.json example (line
+      1281; non-normative example)
+    - content/0.2.0/specification/threads/runtime-streams.md §4 example (line 82)
+    - '@standardagents/spec 0.45.10 package.json ("version": "0.45.10")'
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4969 (`title` deprecated), 6516-6528'
+    quote: '"@standardagents/spec": "^0.44.0"'
+  explanation: 'SA numbers its text independently of its npm package: the text is 0.2.0; the published
+    package is 0.45.10 and exports `SPEC_VERSION = "0.2.0"`. The text does not explain how npm versions
+    relate to the text version. The Packaging page gives a packed package a `peerDependencies` range `>=0.2.0`;
+    the Examples page gives a host project `^0.44.0`, which by npm''s semver rules does not admit 0.45.10.
+    The package says of itself ''It serves as the source of truth'', while the README places the specification
+    text in `content/`; which governs when they differ is not stated. Found only in the types at 0.45.10:
+    `SPEC_VERSION`, `validateAgentDefinition` and its codes, `ToolResult.error_data`, `PackedMetadata.__readonly`,
+    `executionMode`, and `title` marked deprecated; `error_code` appears in the text once, in an example.
+    ACS has the same separation with more numbers (Standard 1.1.0, ontology 2.1.0, plugin 2.0.0, Python
+    package 0.1.0).'
+  combined: 'In the integration document cite three SA coordinates together: text version, commit, and
+    types package version. Mark every SA-side claim as resting on the text, on the published types, or
+    on inference. Cite ACS as Standard 1.1.0 with ontology 2.1.0.'
+- id: ver-04
+  relation: partial
+  acs:
+    concept: 'Forward compatibility and extensions: must-understand `workflow_extensions.requires`, unknown
+      fields reported as W604, `x-` vendor fields'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.9 Workflow Extensions (lines 526-560)
+    - spec/STANDARD-v1.1.0.md §11.3 Compatibility Guarantees (lines 1454-1469)
+    - spec/STANDARD-v1.1.0.md Appendix B (line 1730)
+    quote: consumer that does not implement a listed extension MUST reject the
+  sa:
+    concept: Optional surfaces found by feature detection; declared variables, invocation targets and
+      parent hooks; opaque annotations that unknown readers ignore
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 15-19), sub-fields (lines
+      183-185)
+    - content/0.2.0/infrastructure/runtime.md §1 Overview (lines 15-17), §5.2 Error Handling (line 92),
+      §16 Conformance Summary (line 391)
+    - content/0.2.0/specification/threads.md §2.3 (lines 212, 227-234, `instanceEnv`)
+    - content/0.2.0/specification/tools.md §2.1 (lines 38-44), §3 Variable Declarations (lines 46-64),
+      §8 (line 145)
+    - content/0.2.0/specification/threads/runtime-streams.md §4 (lines 71-73)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2809 (`runtimeStreams?`), 2947 (`instanceEnv?`)'
+    quote: Runtime-specific enhancements MAY be capability-detected and optional, but the
+  explanation: 'Both let a consumer cope with features it does not know, in opposite styles. ACS is declarative:
+    a workflow lists the extensions it depends on, and a consumer that lacks one MUST refuse the whole
+    workflow. SA is imperative for optional runtime surfaces: `runtimeStreams` and `instanceEnv` are detected
+    by code that tests for the member, and `runCode`''s contract applies ''when `ThreadState.runCode`
+    is exposed''. SA does declare some needs ahead of time: required variables (''`required: true` means
+    execution cannot continue until a value resolves.''), invocation targets in `uses`, and `parentHooks`.
+    No declaration of the optional runtime surfaces a package needs was found, so an installer cannot
+    warn before the first call fails. ACS''s must-understand rule has no SA counterpart: unknown annotation
+    keys MUST be ignored, so a runtime that ignores an ACS annotation is behaving correctly.'
+  combined: Because nothing in SA can be made must-understand, do not rely on the runtime for any ACS
+    rule. Implement each ACS extension the agent uses inside package code; that code is the consumer of
+    any bundled catalog and must refuse one that requires an extension it does not implement (§5.9), at
+    build time and at load. Feature-detect optional SA surfaces (`if (!state.instanceEnv)`) and fail closed,
+    as threads.md §2.3 asks of consumers that need a trust boundary. Inside a tool, failing closed means
+    returning an error result, and the loop continues ('Tool errors **MUST** be persisted as tool results
+    and **MUST NOT** crash the execution loop.'; diag-03). Declare any configuration the guard needs as
+    a `required` variable, so that its absence stops execution before the guard runs.
+  see_also:
+  - published-api-extension-points#ext-01
+  - published-api-extension-points#thread-07
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - evidence-audit-observability#audit-02
+  - workflow-execution#wf-05
+  - multi-agent#coord-19
+  - models-context-memory-security#portability-01
+  - models-context-memory-security#profile-01
+- id: ver-05
+  relation: partial
+  acs:
+    concept: 'Change records: an appendix of changes from the previous version and a specification changelog'
+    refs:
+    - 'spec/STANDARD-v1.1.0.md Appendix C: Changes from 1.0.0 (line 1732 onward)'
+    - spec/ROADMAP.md (lines 8-9)
+    - spec/CHANGELOG.md
+    quote: '## Appendix C: Changes from 1.0.0'
+  sa:
+    concept: No change record between versions; contributor guidance rules out per-version changelog pages;
+      the published package links to a changelog page the repository does not contain
+    refs:
+    - AGENTS.md 'Content Collections' (lines 109-110; contributor guidance)
+    - content/0.2.0/getting-started/ (contains only examples.md)
+    - public/_redirects (five rules)
+    - astro.config.mjs (line 12)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1973, 2090, 4235, 4666, 4675, 4682, 4704, 4977'
+    - '@standardagents/spec 0.45.10 index.js line 375 (MIGRATION_URL)'
+    quote: Do not add per-version changelog pages. Document behavior in the relevant
+  explanation: 'ACS records what changed between versions in the Standard itself (Appendix C) and in a
+    specification changelog. SA keeps each version''s pages side by side, and its contributor guidance
+    says ''Do not add per-version changelog pages.'', so a reader tracking the specification has to compare
+    two content trees (ver-01 lists what such a comparison found). The published package does point to
+    a migration guide: eight JSDoc comments and the `MIGRATION_URL` constant used in the helper''s error
+    messages name `/0.2.0/getting-started/changelog` on standardagentspec.com. The repository at faccc8b
+    has no such page and no redirect for it, and its configured site origin is standardagentspec.org.
+    Whether the URL resolves on the live site was not checked (no network access). Searched (content/0.2.0,
+    src/data, README.md): changelog, migration (no matches).'
+  combined: When the binding is re-verified against a new SA version, diff the two `content/<version>/`
+    trees and the two published `index.d.ts` files, and record the result in the ACS mapping's own change
+    log. Do not cite the changelog URL from the types package as a source.
+- id: diag-01
+  relation: partial
+  acs:
+    concept: 'Diagnostic record: `code`, `name`, `severity`, `message`, `location` (workflow, step, capability,
+      field and further keys), optional `suggestion`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.1 Categories and Severity (lines 1257-1270)
+    - spec/STANDARD-v1.1.0.md §9.8 Diagnostic Format (lines 1348-1370)
+    - core/src/diag.rs (lines 110-132)
+    - core/src/validate/mod.rs (line 505, zero-based step index)
+    quote: 'Diagnostics MUST be returned in this format:'
+  sa:
+    concept: 'Definition-time validation issue: `code`, `severity`, `message`, `path`'
+    refs:
+    - content/0.2.0/specification/agents.md §8 Definition-Time Errors (lines 193-205)
+    - content/0.2.0/specification/prompts.md §9 Validation (lines 279-296)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 152)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6485-6494 (DefinitionIssue), 6510 (validateAgentDefinition)'
+    quote: Validation issues **SHOULD** be reported as a structured list (`code`, `severity`, `message`,
+      `path`) so tooling can surface every problem in one pass.
+  explanation: 'Three of SA''s four members have the same name and role in ACS: `code`, `severity`, `message`.
+    ACS severities are `error` and `warning`, fixed per code; the SA text names `severity` without listing
+    values (the published type is `''error'' | ''warning''`). Location differs: ACS has an object `location`
+    with named keys; SA has one string `path` (published types: ''Dot/bracket path to the offending field'').
+    ACS adds `name` and `suggestion`. Strength and scope differ: ACS diagnostics MUST use its format and
+    describe workflows; SA says SHOULD, and only for validation of one agent definition (prompts.md §9
+    and tools.md §9 require validation without a report format). ACS §9.8 shows the `location` keys by
+    example without defining them; in an experiment the reference validator emitted a zero-based `step`
+    and a dotted `field` relative to the step. Searched (content/0.2.0): severity (one match).'
+  combined: 'Keep the ACS object as the record of truth, since ACS requires that format, and derive an
+    SA-shaped view for tooling: `{ code, severity, message, path }`, with `path` built as `<workflow>.steps[<step>].<field>`
+    from what the reference validator emits today (a fact about the implementation, not a rule of §9.8).
+    Do not type the view as the published `DefinitionIssue`, whose `code` is a closed union of SA codes.
+    No SA interface accepts third-party issues, so the view is a formatting convention with no specified
+    consumer. Its `path` is rooted at a catalog, while `DefinitionIssue.path` is rooted at one agent definition,
+    so a merged list has to say which root each entry uses.'
+  see_also:
+  - published-api-extension-points#valid-01
+- id: diag-02
+  relation: partial
+  acs:
+    concept: 'Code vocabulary: fixed families V1xx, B2xx, S3xx, R4xx, F5xx and W6xx, listed normatively'
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.1-§9.7 (lines 1257-1346)
+    - core/src/diag.rs (lines 46-98)
+    quote: Severity is fixed per code. A workflow is valid when it has no errors. A
+  sa:
+    concept: 'Definition issue codes: required to exist, enumerated only in the published types; other
+      code vocabularies that the text does enumerate'
+    refs:
+    - content/0.2.0/specification/subagents.md §2.4 Reserved Names (line 78)
+    - content/0.2.0/specification/agents.md §8 (lines 195-205)
+    - content/0.2.0/specification/providers.md §7.1 Error Codes (lines 430-439)
+    - content/0.2.0/specification/threads/client-api.md §3.2 Bodies and errors, item 3 (line 52)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (lines 105-114)
+    - content/0.2.0/specification/threads/code-execution.md §4.1 Status Values (line 278)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6475-6481 (DEFINITION_ISSUE_CODES)'
+    quote: a colliding `as` **MUST** be rejected with a dedicated validation code.
+  explanation: 'ACS lists every code with its name and severity in the Standard, 46 in all, in six families.
+    The SA text lists the conditions an implementation MUST reject (agents.md §8, items 1 to 7) and once
+    requires ''a dedicated validation code'', but names no definition-issue code; the published types
+    define 26 snake_case codes. The text does enumerate other vocabularies: run stop reasons (diag-04),
+    six provider error codes, code-execution status values, and a client API error body whose `code` and
+    `message` values ''are informational''. The ACS and SA vocabularies are disjoint and describe different
+    subjects, so there is nothing to merge; the practical question is whether one issue list may hold
+    both. The text does not restrict `code`; the published type does. Searched (content/): agent_both_sides_human,
+    subagent_relationship_reserved_name, DEFINITION_ISSUE_CODES, DefinitionIssue, validateAgentDefinition
+    (no matches).'
+  combined: 'Report ACS codes unchanged (`F501`, `W602`) in any combined list; they cannot be mistaken
+    for SA''s snake_case codes. A tool that merges both lists must declare its own type for the union:
+    in a compiler experiment a list typed as the union of `DefinitionIssue` and an ACS view type was accepted,
+    while `code: ''F501''` on a value typed `DefinitionIssue` was rejected.'
+- id: diag-03
+  relation: partial
+  acs:
+    concept: 'Runtime and safety errors: R4xx and F5xx raised by an executor'
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.5 Runtime Errors (lines 1306-1315)
+    - spec/STANDARD-v1.1.0.md §9.6 Safety Errors (lines 1317-1325)
+    quote: '| F501 | CHECKPOINT_REQUIRED | Mutation without checkpoint |'
+  sa:
+    concept: 'Tool failure reporting: `status: ''error''` results persisted as tool messages'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 155)
+    - content/0.2.0/specification/hooks.md §5.2-§5.5 (lines 386-444), §6.3 HookToolResult (lines 478-490)
+    - content/0.2.0/specification/threads/runtime-streams.md §4 example (line 82)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 19, 29)
+    - 'content/0.2.0/specification/threads.md §1.2.2 Methods (line 120: `ToolResult` named, not defined)'
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (line 114, `repeated_tool_error`)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 211-249 (ToolResult), 3033 (invokeTool), 5967-5984
+      (HookToolResult)'
+    quote: Tool errors **MUST** be persisted as tool results and **MUST NOT** crash the execution loop.
+  explanation: 'ACS runtime and safety codes say why an executor stopped or refused a step. For tool results
+    the SA text has no coded error model: a failed tool yields `status: ''error''` and an `error` string,
+    stored as a tool message and returned to the model, and the loop continues. The value `execute` returns
+    is never defined in the text; `status` and `error` appear in examples and in `HookToolResult`. The
+    published `ToolResult` adds `error_code` (''Machine-readable error code for structured handling.'')
+    and `error_data`; the text shows `error_code` once, in an example. `HookToolResult` has neither, and
+    the message record has `tool_status` and a free-form `metadata` but no member for a code. So an ACS
+    refusal does not by itself stop an SA run, and the model may try another route. Searched (content/0.2.0):
+    interface ToolResult, error_data (no match); error_code (one example).'
+  combined: 'Return `{ status: ''error'', error: ''F501 CHECKPOINT_REQUIRED: <message>'' }` from the tool''s
+    `execute`; this is the shape the text''s examples and `HookToolResult` show. Also set `error_code:
+    ''F501''` and put the ACS diagnostic in `error_data`, labelled as published types only: they reach
+    a caller of `state.invokeTool()` but not hooks or stored messages. The prefix is a convention and
+    is not tamper-proof: `after_tool_call_failure` ''Can return modified error or null for original.'',
+    `before_store_tool_result` may transform results, and the text does not say which version `tool_call_done`
+    receives. A refusal does not stop the run (diag-04). A runtime may end a run after repeated refusals:
+    `repeated_tool_error` is among the reason codes runtimes SHOULD use.'
+  see_also:
+  - tools-contracts#io-06
+  - published-api-extension-points#tools-04
+  - safety-enforcement#err-01
+  - checkpoint-rollback-state#state-07
+  - approval-human#approval-01
+  - workflow-execution#wf-15
+- id: diag-04
+  relation: partial
+  acs:
+    concept: 'Run termination codes: a run that cannot continue ends with a diagnostic code (R4xx, F5xx)
+      or with the outcome `escalated`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.11 Handler Steps (lines 609-612)
+    - spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (lines 674-689)
+    - spec/STANDARD-v1.1.0.md §9.5-§9.6 (lines 1306-1325)
+    quote: '| No loop (prose or absent `recovery`) | The run ends with the step''s code; a failure mode
+      fired by `when` on a step that did not fail ends it R402 ("failure mode N fired") |'
+  sa:
+    concept: Run status (`idle`, `running`, `failed`) with stop reason codes; `state.execution.stop()`
+      and `state.stopSession()`
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §3 Controlling Execution (line 70), §4 Run
+      Status (lines 72-114), §4.2 Reasons (lines 105-114)
+    - content/0.2.0/infrastructure/runtime.md §8.3 Status Updates (line 217)
+    - content/0.2.0/specification/threads.md §9.3 Parent Messaging (line 540)
+    - content/0.2.0/specification/agents.md §4 Stop Semantics (lines 115-124), §8 item 6 (line 202)
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (lines 69-77)
+    - content/0.2.0/specification/hooks.md §3.3 Note (line 273)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2659-2680 (StopSessionOptions), 3010 (stopSession)'
+    quote: '`reason` is the run''s stop reason code. Runtimes **SHOULD** use these codes'
+  explanation: 'This is the nearest SA counterpart of ACS R4xx and F5xx: both record why a run stopped.
+    SA''s vocabulary is open (runtimes SHOULD use the listed codes and MAY add others) and is set by the
+    runtime. Package code can call `state.execution.stop()`, which ''stops the current execution loop.'',
+    and `state.stopSession()`, of which the text says ''Implementations should treat this as a successful
+    terminal child run for blocking and non-blocking subagent lifecycle handling.''; its reason `state_stop_session`
+    settles as `idle`. No `ThreadState` method that ends a session as failed was found (`sessionFail`
+    is a prompt-side tool binding), so an ACS rule that fails a run on a safety error has no direct SA
+    primitive. `hook_blocked` is a listed reason, but refusing a request from a hook is only a lower-case
+    ''may'' in a Note. Searched (content/0.2.0, index.d.ts): failSession (no match); sessionFail (a side
+    binding, not a `ThreadState` method).'
+  combined: 'Where an ACS rule requires the run to stop, call `state.execution.stop()` to stop the loop
+    and `state.stopSession({ result, notifyParent })` to end the agent session, passing the ACS code in
+    `result` and in `notifyParent` so that a blocking and a non-blocking parent can read it; `status`
+    is left unset, because the registry field also receives the session''s own transition to `idle` or
+    `failed` and the text does not say which write remains (workflow-execution#wf-12). Because ''the thread
+    remains addressable and a later message starts a new session with history intact'', also persist a
+    ''blocked'' record that the guarded tools check. Say plainly that the outcome is recorded as a successful
+    stop: a failed-session outcome is not available to code in 0.2.0, and the text does not say whether
+    tool calls already returned in the same model response are skipped. On a prompt-backed side, a `sessionFail`
+    tool binding lets the model end the session as failed (reason `session_fail`).'
+  see_also:
+  - safety-enforcement#err-02
+  - workflow-execution#wf-12
+- id: conf-01
+  relation: fits
+  acs:
+    concept: Conformance levels L1 to L4, defined for validators
+    refs:
+    - spec/STANDARD-v1.1.0.md §3 Design Principles (line 74)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (line 279)
+    - spec/STANDARD-v1.1.0.md §10.1-§10.2 (lines 1376-1412)
+    - spec/STANDARD-v1.1.0.md §10.3 Conformance Testing (lines 1414-1431)
+    - spec/CONFORMANCE.md (lines 6-48)
+    quote: 'An implementation is conformant at a given level if it:'
+  sa:
+    concept: 'Runtime conformance: requirement lists on seven pages and a summary; package and packer
+      requirements without a conformance section'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §1 Overview (lines 7-17), §14.9 Conformance Checklist (lines
+      321-342), §16 Conformance Summary (lines 382-395), headings at lines 253 and 344 (both numbered
+      14)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 148-156)
+    - content/0.2.0/specification/threads.md §11 Conformance Requirements (lines 584-609)
+    - content/0.2.0/specification/threads/client-api.md §17 Conformance (lines 471-488)
+    - content/0.2.0/specification/threads/messages.md §7 Conformance Scenarios (lines 188-200)
+    - content/0.2.0/specification/threads/runtime-streams.md §5 Conformance (line 115)
+    - content/0.2.0/specification/users.md §8 Conformance (lines 383-397; draft page)
+    - 'content/0.2.0/distribution/packaging.md (lines 5, 10, 16, 22, 187, 210-213: package and packer
+      requirements)'
+    quote: A conforming runtime executes conversations deterministically around non-deterministic model
+      output.
+  explanation: 'The two conformance models have different subjects, so neither subsumes the other. ACS
+    levels L1 to L4 describe what a workflow validator checks; §3 and §5.2.1 also bind executors and safety
+    layers (''An implementation that violates them is non-conformant.''), but execution is exercised only
+    by runtime fixtures that §10.3 calls ''informative for implementations that execute workflows''. SA
+    conformance describes what a runtime does (step order, persistence, queueing, isolation), in conformance
+    sections on seven pages, without levels. SA states MUST-level requirements for packages and packers
+    in packaging.md but gives them no conformance section, identifiers or claim. Neither side defines
+    a conformance class for an agent package, which is the artifact a grounded SA agent is. Editorial:
+    runtime.md has two sections numbered 14, so a citation such as ''Runtime §14.1'' is ambiguous.'
+  combined: 'State the two claims separately. For ACS: which validator level was applied to any bundled
+    catalog, and which ACS rules the package code enforces (a self-declaration; §10 defines levels for
+    validators only). For SA: list the MUSTs the binding uses, cited by page and heading text rather than
+    by section number alone in runtime.md: tools.md §8 and §9 (annotations returned and preserved); runtime.md
+    ''Durable Key-Value Store'', items 1 to 3; runtime.md §5.1 and §5.2; hooks.md §5.5 (`tool_call_done`
+    once per tool call); agents.md §6 where `parentHooks` is used. List separately what the binding uses
+    without a MUST: the outcome of `stopSession`, `state.skills`, how hook failures are handled, and the
+    `error_code` member.'
+- id: conf-02
+  relation: partial
+  acs:
+    concept: 'Conformance test suite: positive, negative and patch fixtures with exact expected codes;
+      language-neutral expression and runtime fixtures'
+    refs:
+    - spec/STANDARD-v1.1.0.md §10.3 Conformance Testing (lines 1414-1431)
+    - spec/CONFORMANCE.md 'Test suite requirements' (lines 56-110)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (line 81 onward; a guide, non-normative)
+    - tests/conformance/runtime/ (175 JSON fixtures), tests/conformance/expressions/
+    quote: 'Conformance tests MUST include:'
+  sa:
+    concept: Conformance scenarios and checklists in prose; no test suite found
+    refs:
+    - content/0.2.0/specification/threads/messages.md §7 Conformance Scenarios (lines 188-200)
+    - content/0.2.0/infrastructure/runtime.md §14.9 Conformance Checklist (lines 321-342)
+    - tests/ (site.test.mjs, home-cta.test.mjs, models-guide.test.mjs)
+    - src/data/home.md (line 3)
+    quote: A conforming runtime **MUST** satisfy these portable scenarios.
+  explanation: 'ACS requires fixtures and ships them, with expected codes matched exactly, plus JSON fixtures
+    another implementation can replay. SA describes observable scenarios in tables (seven for message
+    injection) and a 12-item checklist for code execution, but its repository contains no conformance
+    tests: `tests/` holds three files that check the built website. The home page nevertheless says agents
+    ''are guaranteed to execute faithfully in all spec-compliant runtimes''; nothing published lets a
+    second runtime check that. On the ACS side, each of the 175 runtime fixtures scripts a run of the
+    reference executor in an action vocabulary (`InvokeCapability`, `Completed`) that is defined in a
+    guide, not in the Standard. Searched (SA content/, src/data/, README.md, AGENTS.md): test suite, test-suite,
+    conformance test, test kit, testkit, badge (no matches); certif (only the two sentences saying a listing
+    does not certify).'
+  combined: A package that executes workflows with a port or a WebAssembly build of the reference executor,
+    if one is written, can replay `tests/conformance/runtime/*.json`. A guard-style binding has nothing
+    to replay; its ACS-side tests are its own unit tests of the rules it enforces (checkpoint before mutate,
+    approval before a flagged call). The language-neutral expression fixtures under `tests/conformance/expressions/`
+    can be reused by any expression evaluator. There is no SA-side suite to run the resulting agent against;
+    test against the runtime in use and record which one and which version.
+- id: conf-03
+  relation: partial
+  acs:
+    concept: 'Certification and conformance claims: none defined; a certification programme is a roadmap
+      item'
+    refs:
+    - spec/ROADMAP.md 'Standards and scale' (line 87)
+    - spec/STANDARD-v1.1.0.md §10 Conformance (lines 1374-1431; no statement format)
+    - spec/CONFORMANCE.md (line 47)
+    quote: '- [Certification program for AI agents]'
+  sa:
+    concept: A runtime listing that explicitly does not certify; no conformance claim format in the text
+    refs:
+    - src/data/runtimes.md (line 24), 'Submit a Runtime' (lines 26-37)
+    - AGENTS.md 'Content Collections' (lines 83-84; contributor guidance)
+    - content/0.2.0/specification/tools.md §8 Annotations (line 143)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6524-6528'
+    quote: A listing is not an endorsement, and it does not certify conformance.
+  explanation: 'Neither project certifies anything today, and neither defines a machine-readable conformance
+    statement. SA lists runtimes after a review ''for accuracy only''. The published types hint at a reporting
+    rule (''Implementations report conformance against exactly one version.'') that the text does not
+    contain. ACS has no statement format for a validator, executor, host or agent; it does make a prose
+    claim (''**Reference implementation:** L4''). Searched (ACS spec/, docs/guides/, README.md, docs/FAQ.md):
+    conformance statement, conformance claim, conformance class, claims conformance (no matches).'
+  combined: 'An ACS conformance statement for an SA agent cannot be placed in a slot that either specification
+    defines. The per-tool `acs` annotation is a classification, not a conformance statement: it is unverified
+    by construction (''Annotations are non-normative.''), and the published annotation schema has no member
+    for the enforcement a tool performs. Keep the description of what the package''s code enforces in
+    the README, as prose with the versions pinned, and avoid ''conformant'' and ''certified'' until ACS
+    defines a class for hosts or packages and SA defines a way to report conformance (see the gaps on
+    both sides). A statement about an SA runtime can only be prose.'
+- id: gov-01
+  relation: partial
+  acs:
+    concept: 'Change process: RFC with motivation, alternatives, compatibility analysis and conformance
+      test updates; a small core team merges'
+    refs:
+    - spec/GOVERNANCE.md 'Decision-making' and 'Maintainers' (lines 17-27)
+    - CONTRIBUTING.md 'Proposing Changes' (lines 21-45), 'Perspective Validation Checklist (PVC)' (lines
+      91-93)
+    - tools/validate_rfcs.py
+    quote: '1. Open an RFC issue describing:'
+  sa:
+    concept: 'Change process: Discord for early ideas, GitHub issues and pull requests for specific changes;
+      maintainers decide; no formal proposal process'
+    refs:
+    - src/data/community.md 'Governance' (lines 36-53)
+    - README.md 'Contributing' (line 35)
+    - AGENTS.md (lines 112-114 and 325-330; contributor guidance, not specification text)
+    quote: A conversation or a pull request is enough to propose a change.
+  explanation: 'Both are maintainer-led and accept outside proposals through GitHub. ACS is formal: a
+    change to the Standard needs an RFC covering motivation, alternatives, backward compatibility and
+    conformance tests; RFC structure is machine-checked (`tools/validate_rfcs.py`); and changes under
+    `schemas/`, `spec/` and similar paths call for a PVC report. SA is deliberately light: ''It has no
+    working groups, formal proposal process, or foundation structure of the kind you might expect from
+    a large standards body.'' Its repository tracks no CONTRIBUTING file or issue templates (git ls-files
+    at faccc8b). Its contributor guidance does set expectations: ''Keep specification contracts provider-
+    and runtime-neutral.'', and a missing runtime capability is to be specified as a ''runtime-neutral
+    primitive and its conformance requirements before a product'' depends on an implementation. SA states
+    an intention to donate the specification to a steward later.'
+  combined: 'Upstream: file one GitHub issue per change at standardagents/spec, each naming the page and
+    section, the exact text proposed, the conformance impact, and why it helps SA users generally; keep
+    ACS terms out of the proposed normative wording. Order the issues by how little design agreement each
+    needs: editorial defects first (the duplicate section 14 and dangling anchors, the migration URL,
+    the example range, the missing LICENSE), then alignment of text with types (ToolResult, definition
+    issue codes), then new surface. Raise larger design questions on Discord first, as the Community page
+    asks. Downstream: a mapping file under `schemas/interop/` follows the OASF precedent and falls under
+    CONTRIBUTING.md''s ''include a **PVC report**'' rule for `schemas/`; any change to the Standard''s
+    text goes through an ACS RFC.'
+- id: gov-02
+  relation: partial
+  acs:
+    concept: 'Licence and maturity: Apache-2.0; Candidate Standard 1.1.0 with 1.0.0 still supported'
+    refs:
+    - LICENSE
+    - NOTICE
+    - spec/STANDARD-v1.1.0.md header (lines 3-10)
+    - spec/ROADMAP.md 'Standard' table (lines 13-17)
+    quote: '**Status:** Candidate Standard — accepted by'
+  sa:
+    concept: 'Licence and maturity: MIT; early-stage 0.2.0; one page marked Draft'
+    refs:
+    - README.md 'License' (line 55)
+    - src/data/community.md (lines 3, 30, 47-53)
+    - content/0.2.0/specification/users.md (line 3)
+    - src/data/runtimes.md 'Available Runtimes' (lines 7-22)
+    - '@standardagents/spec 0.45.10 LICENSE (line 3)'
+    quote: The Standard Agent Specification is an early-stage open standard maintained by a team of engineers
+      actively building production agents for customers.
+  explanation: 'Both are open and permissively licensed, under different licences: ACS under Apache-2.0
+    (LICENSE and NOTICE in the repository); SA under MIT (stated in README.md; the npm package ships a
+    LICENSE file reading ''Copyright (c) 2025 FormKit Inc.''; the specification repository itself tracks
+    no licence file at faccc8b). Maturity differs in kind. ACS 1.1.0 is a Candidate Standard with a supported
+    previous version and a stated compatibility policy. SA calls itself early-stage, is at 0.2.0 after
+    a breaking step from 0.1.0, lists one runtime (from the maintainers), and marks its Users page ''Not
+    yet part of the frozen specification surface.'' Inference: that phrase implies the remaining pages
+    are frozen, yet the contributor guidance says to edit the current version''s folder, so whether the
+    0.2.0 text can still change is unclear (an open question).'
+  combined: A package that combines ACS-derived data (Apache-2.0) with a dependency on `@standardagents/spec`
+    (MIT) should carry the ACS NOTICE and state both licences; this is a factual note, not legal advice.
+    Build only on SA surfaces outside the Draft Users page, and pin the commit.
+- id: gov-03
+  relation: acs_only
+  acs:
+    concept: 'Responsible disclosure: a private reporting address and a response timeline'
+    refs:
+    - spec/SECURITY.md §7 Responsible Disclosure (lines 329-363)
+    quote: 'Please report security vulnerabilities privately:'
+  sa:
+    concept: No private channel for security reports found; the named channels are Discord and public
+      GitHub issues and pull requests
+    refs:
+    - README.md 'Contributing' (line 35)
+    - src/data/community.md 'How Changes Are Made' (lines 40-45)
+    - git ls-files at faccc8b (124 tracked files; none named SECURITY)
+    quote: '- **GitHub** is the place for specific problems and proposed changes, through issues and pull
+      requests.'
+  explanation: 'ACS publishes a private address for vulnerability reports and target times for acknowledgement,
+    assessment and a fix. No equivalent was found for SA: the README and the Community page name Discord
+    and public GitHub issues and pull requests, and the repository tracks no SECURITY file. A flaw in
+    a security-relevant rule of the specification (credential grants, parent hooks that run with a parent''s
+    `ThreadState`, code-execution isolation) or in the published helper package would have to be raised
+    in public. This matters to a binding because ACS safety claims made on top of SA depend on those rules.
+    Searched (README.md, AGENTS.md, src/data, content/0.2.0): vulnerab, responsible disclosure, security@,
+    security issue, security polic, report a security (no relevant match; one unrelated use of ''vulnerability''
+    in a model recommendation).'
+  combined: Report defects in the ACS binding through the address in spec/SECURITY.md §7. For a suspected
+    security defect in SA, ask the maintainers for a private channel before describing it, until SA names
+    one. In the integration document, say which side owns each safety property, so that a reporter knows
+    where to go.
+- id: prov-01
+  relation: fits
+  acs:
+    concept: 'Provenance and audit: traceability records for claims and transformations'
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms (line 60)
+    - spec/STANDARD-v1.1.0.md §3.2 Auditable Transforms (lines 79-82)
+    quote: '| **Provenance** | Traceability record for claims and transformations |'
+  sa:
+    concept: Package provenance (`PackageSignature`), hook execution provenance, and message provenance
+      metadata conventions
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Package Signature' (lines 238-251)
+    - content/0.2.0/specification/hooks.md §2.4 Execution Provenance (lines 171-196)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (line 29), §1.1 Provenance
+      Metadata Conventions (lines 40-49)
+    - content/0.2.0/specification/threads.md §1.2.1 Properties (lines 40-41), §1.2.2 Methods (lines 65,
+      76)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5065 (version changed at re-pack), 5669-5678 (PackageSignature),
+      5727-5738 (PackedMetadata), 5918-5934 (HookExecutionSource)'
+    quote: 'Each packed definition receives a signature marking its package membership:'
+  explanation: 'SA records where a definition came from: `PackageSignature` holds `packageId`, `version`,
+    `source` (''npm'' or ''local'') and `packedAt`, injected at load time. The interface has no digest
+    or key member, so it is a membership marker and not a cryptographic signature (inference from the
+    interface). The text exposes it to running code in one place: the final argument of a thread hook,
+    `context.source.package`, on the `kind: ''child''` variant only, optional, with a conditional MUST
+    (''present, **MUST** identify the namespace from which the child hook was loaded.''). A tool''s `execute`
+    receives `ThreadState`, which carries no package identity. Closer to ACS provenance, a record about
+    content, is messages.md §1.1: runtimes SHOULD set `metadata.subagent_id` and `metadata.forwarded_from`
+    on messages that crossed a thread boundary. Searched (content/0.2.0): PackageSignature, packageId
+    (packaging.md and hooks.md only).'
+  combined: 'In ACS audit and evidence records written by package code, record `state.threadId`, `state.agentId`
+    and, inside hooks, the members of `context.source` after narrowing on `kind` (`package` may be absent).
+    Label package id and version in records written by tools as self-reported build constants: signatures
+    are ''injected at load time, not embedded in source'', and the published types say a packer may change
+    the version at pack time, so compiled-in constants can differ from the signature the runtime holds.
+    The record goes to stores that any code on the thread can rewrite or delete (`setValue`, `unlinkFile`,
+    `deleteMessage`), so SA surfaces give a log, not an append-only one; tamper evidence, where ACS needs
+    it, has to come from the record format (for example a hash chain).'

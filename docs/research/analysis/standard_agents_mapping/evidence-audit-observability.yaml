@@ -1,0 +1,1580 @@
+# Evidence, provenance, audit and observability
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: evidence-audit-observability
+title: Evidence, provenance, audit and observability
+rows:
+- id: anchors-01
+  relation: acs_only
+  acs:
+    concept: 'Capability output contract: `evidence_anchors` (required on all 36 capabilities) and `confidence`
+      (required on 23 of them)'
+    refs:
+    - schemas/capability_ontology.yaml meta.principles (line 13); nodes[*].output_schema.required (36
+      of 36 list `evidence_anchors`, 23 list `confidence`, none gives `evidence_anchors` an `items` schema)
+    - templates/SKILL_TEMPLATE_ENHANCED.md Output Contract field table (line 75)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 118-120; informative guide)
+    - core/src/exec/machine.rs fn output (lines 1399-1408)
+    quote: Every capability returns evidence anchors and confidence
+  sa:
+    concept: 'Function tool result: `ToolResult` / `HookToolResult` (`status`, one `result` string, `error`,
+      `stack`, `attachments`)'
+    refs:
+    - content/0.2.0/specification/hooks.md §5.2 before_store_tool_result (lines 386-398; quote at line
+      397, a 'Use cases' bullet), §6.3 HookToolResult (lines 478-490)
+    - content/0.2.0/specification/tools.md §2 Function Tool Definition (lines 15-34), §9 Conformance Notes
+      (lines 148-156)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (line 120), §6.2 Per-Execution Context (lines
+      372-392)
+    - content/0.2.0/specification/threads/runtime-streams.md §4 Neutral Example (line 82; `error_code`
+      used in an example)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 211-249 (ToolResult), 5967-5984 (HookToolResult)'
+    quote: '- Add metadata to tool results'
+  explanation: 'Spec text: a function tool returns a status, one `result` string and optional file `attachments`;
+    hooks.md §6.3 lists exactly `status`, `result`, `error`, `stack`, `attachments`. §5.2 names ''Add
+    metadata to tool results'' in a non-normative use-case list, but no result type has a metadata member.
+    The 0.2.0 text uses the name `ToolResult` without defining it. Published types: `ToolResult` adds
+    `error_code` and `error_data` (the text uses `error_code` once, undefined, in an example); `HookToolResult`
+    has neither, and `metadata` is a compile error on both. ACS: every ontology node requires `evidence_anchors`,
+    typed as a bare `array`. SA validates tool arguments, not results. Inference: on the result object
+    an ACS output crosses an SA tool boundary only as text in `result`. Searched: metadata (hooks.md §6.3:
+    not found), interface ToolResult (content/0.2.0: not found).'
+  combined: 'Works today as a transport convention: the tool returns `{ status: ''success'', result: JSON.stringify(output)
+    }`. No ACS executor runs in TypeScript (the reference executor is a Rust core with a Python binding),
+    and its own check is key presence only, so the wrapper that defines the tool checks the capability''s
+    required output keys itself and returns `status: ''error''` otherwise. Anchors can stay out of model-visible
+    text by (a) `state.setValue` inside `execute` plus a short handle in `result`, or (b) a `before_create_message`
+    hook that moves them from the tool message''s `content` to `metadata.acs`; (b) fails open when the
+    hook throws. Unavailable: a metadata member on the tool result object.'
+  see_also:
+  - tools-contracts#io-03
+  - tools-contracts#io-05
+- id: anchors-02
+  relation: partial
+  acs:
+    concept: 'Evidence anchors attached to a stored claim or observation (`Anchor`: `ref`, `kind`, `timestamp`,
+      `excerpt`; `ProvenanceRecord.anchors`)'
+    refs:
+    - schemas/event_schema.yaml types.Anchor (lines 13-36)
+    - schemas/world_state_schema.yaml types.Anchor (lines 62-85), types.ProvenanceRecord (lines 151-188)
+    - spec/STANDARD-v1.1.0.md §6.2 Observation Requirements (lines 1121-1139; quote at line 1138)
+    quote: '| `anchors` | array | Yes | Links to original evidence |'
+  sa:
+    concept: '`Message.metadata`, settable through `before_create_message`, `injectMessage` and `updateMessage`
+      (and, in the published types only, `queueMessage`)'
+    refs:
+    - content/0.2.0/specification/threads/messages.md introductory Note (line 7), §1 Message Structure
+      (line 29), §3 Injecting Messages (line 111), §5 Updating Messages (line 176)
+    - content/0.2.0/specification/hooks.md §4.1 before_create_message (lines 310-322), §6.1 HookMessage
+      (lines 448-463), §8.6 (lines 743-762, example)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 154)
+    - content/0.2.0/specification/handlers.md §1 Handler Definition (line 28)
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (line 9), §11 Reading Messages (line
+      325), §16.1 Server frames (line 438)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2027-2042 (Message.metadata), 2101-2139 (InjectMessageInput,
+      QueueMessageInput, MessageUpdates), 5947 (`type HookMessage = Message;`)'
+    quote: '| `metadata` | `Record<string, unknown>` | Custom metadata (may include runtime status markers
+      such as `status_kind`) |'
+  explanation: 'Spec text: every message record has a free-form `metadata` object, and for `before_create_message`
+    ''The returned object **MUST** be used for insertion''. With tools.md §9 (''persist tool results as
+    messages before advancing'') this covers tool-result messages (inference). A `message_data` frame
+    carries every member a message read returns, and handlers receive the full message including metadata.
+    Not found: how `updateMessage` combines metadata (only the published types say ''merged with existing'');
+    which keys the runtime reserves (it writes `status_kind`, `subagent_id`, `forwarded_from`; the types
+    add `queued`, `subagent_event`); whether metadata is sent to a model. Inconsistencies: the Note at
+    messages.md line 7 calls `before_create_message` non-destructive; hooks.md §6.1 omits `metadata` from
+    `HookMessage`; the §8.6 example does not compile. Client visibility depends on the Thread Client API,
+    a SHOULD. Searched: metadata (every hit in content/0.2.0), merge.'
+  combined: 'Works today as a display copy of the evidence, not as the system of record. A `before_create_message`
+    hook, for `role: ''tool''` messages, takes the anchors from the message itself (it parses `message.content`,
+    the ACS tool''s own result) and returns `{ ...message, metadata: { ...message.metadata, acs: { capability,
+    evidence_anchors, confidence } } }`. The spread is required: the published `metadata` is optional
+    and the runtime writes its own keys there. Code paths use `state.injectMessage({ ..., metadata })`
+    or `state.updateMessage(id, { metadata })`. For assistant messages the hook writes only what it can
+    know (anchor ids recorded so far), not a grounding verdict. Not guaranteed: merge behaviour on update,
+    survival against other hooks or `deleteMessage`, and insertion of the annotated message when the hook
+    throws (audit-04).'
+  see_also:
+  - tools-contracts#io-09
+  - published-api-extension-points#drift-02
+  - published-api-extension-points#hooks-03
+  - checkpoint-rollback-state#state-26
+  - models-context-memory-security#context-04
+- id: anchors-03
+  relation: fits
+  acs:
+    concept: 'Evidence payload behind an anchor of `kind: file`, including evidence that must travel with
+      a delegated result'
+    refs:
+    - schemas/world_state_schema.yaml types.Anchor (lines 62-85; quote at line 70)
+    - schemas/event_schema.yaml types.Anchor (lines 13-36)
+    quote: 'description: Pointer like file:line, URL, tool-output-id'
+  sa:
+    concept: Tool and message `attachments` (`ToolAttachment`, `AttachmentRef`) and files in the thread
+      file system
+    refs:
+    - content/0.2.0/specification/hooks.md §6.3 HookToolResult (lines 478-490)
+    - content/0.2.0/specification/threads/messages.md §1.2 Attachment References (lines 51-67)
+    - content/0.2.0/specification/threads/filesystem.md introduction (line 3), §1 File Record (lines 7-21),
+      §2 Writing Files (lines 23-40), §5 Moving and Renaming (line 78), §9.4 Behavior (line 178)
+    - content/0.2.0/specification/subagents.md §5.1 Persistent Invocation Arguments (lines 173-174), §7
+      Attachment Copying (lines 230-237)
+    - content/0.2.0/specification/agents.md §3 SessionToolBinding (lines 109-111)
+    - content/0.2.0/specification/threads/client-api.md §14 Reading a File (lines 383-395)
+    - 'content/0.2.0/getting-started/examples.md line 1092 (`id: file.path`; non-normative)'
+    - '@standardagents/spec 0.45.10 index.d.ts lines 188-207 (AttachmentRef), 246 (ToolResult.attachments
+      comment), 2253-2287 (FileRecord, WriteFileOptions), 3261 (writeFile)'
+    quote: The destination thread **MUST** receive destination-local attachment paths.
+  explanation: 'SA gives files a client-readable home, and attachments are the only structured payload
+    the text requires a runtime to carry from child to parent (subagents.md §7; from parent to child the
+    validated `arguments` object is also carried by MUST). ACS says only that an anchor `ref` is a pointer.
+    The two fit: SA stores the bytes, the anchor points at them. Limits: `AttachmentRef` has no digest
+    or source-URL member; it requires an `id` that `FileRecord` lacks, and the text gives no rule for
+    it (the examples page writes `id: file.path`); a path changes when a file is copied to another thread,
+    moved or renamed; filesystem.md states no persistence requirement (its one MUST is chunk ordering).
+    Searched (content/0.2.0): hash, checksum, sha256, digest, integrity (only the effect name `send_digest`).'
+  combined: 'Works today. A tool writes its evidence bundle with `state.writeFile(''/acs/evidence/<id>.json'',
+    data, ''application/json'')` to a path the package controls and anchors on it: `{ ref: ''file:'' +
+    path, kind: ''file'' }`. An attachment is needed only to cross a thread boundary or to show the file;
+    an `AttachmentRef` then follows the examples page (`id: file.path`), which is an example, not a rule.
+    For a child agent the `attachmentsProperty` of `sessionStop` names a tool argument, so on a prompt-backed
+    side the model chooses the path; only the copy is a MUST. The parent reads anchors from the copied
+    bundle file, never from model-typed text, and treats the bundle as unverified unless a digest kept
+    outside the child matches. A digest is computed in tool code: SA has no field for it.'
+- id: anchors-04
+  relation: fits
+  acs:
+    concept: Anchor reference convention (`ref` strings such as `tool:<name>:<tool_use_id>` and `file:<path>`)
+    refs:
+    - grounded_agency/state/evidence_store.py EvidenceAnchor.from_tool_output (lines 177-206; quote at
+      line 198), from_file (lines 208-235), kind priorities (lines 140-143)
+    - docs/integrations/claude_agent_sdk.md 'Evidence Format' (lines 364-371)
+    - templates/SKILL_TEMPLATE_ENHANCED.md Output Contract (line 65)
+    - schemas/event_schema.yaml types.Anchor.kind (lines 21-30), event.source.kind (lines 94-102)
+    - grounded_agency/coordination/delegation.py line 146 (anchor kind `coordination`)
+    quote: ref=f"tool:{tool_name}:{tool_use_id}",
+  sa:
+    concept: 'Identifiers available to package code: `HookToolCall.id` / `Message.tool_call_id`, `Message.id`,
+      `ThreadState.threadId`, `execution.flowId`, file `path`'
+    refs:
+    - content/0.2.0/specification/hooks.md §6.2 HookToolCall (lines 465-476)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 13, 17, 18)
+    - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (lines 19-32; quote
+      at line 23)
+    - content/0.2.0/specification/threads.md §1.2.1 Properties (line 40)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 42-50)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2578-2622 (ExecutionState), 5951-5963 (HookToolCall)'
+    quote: '| `flowId` | `string` | Unique execution ID |'
+  explanation: 'ACS''s reference implementation names a tool-output anchor by tool name and call id; SA
+    gives every tool hook those two values (`toolCall.function.name`, `toolCall.id`) and stores the call
+    id on the result message (`tool_call_id`). SA adds thread, execution (`flowId`) and step identifiers
+    that ACS has no slot for. SA: a tool''s `execute(state, args)` is not handed its call id; it can sometimes
+    derive it from the persisted assistant message''s `tool_calls` (runtime.md §3 persists that message
+    before tools run), while a hook always has it. The uniqueness scope of message ids and call ids is
+    not stated. ACS: no thread-qualified reference form; `Anchor.kind` has no value for a message or an
+    agent report (agent and human origins exist only on `event.source.kind`); the Python kinds (`tool_output`,
+    `file`, `command`, `mutation`, `coordination`) differ from the schema enum. Searched: tool_call_id,
+    toolCall (tools.md, execution-state.md: not found).'
+  combined: 'Works today by convention: `ref: ''tool:'' + toolCall.function.name + '':'' + toolCall.id`
+    (the existing ACS form), `kind: ''tool''`, always stored with `state.threadId`, because call ids are
+    provider-assigned with no stated uniqueness scope, plus `state.execution?.flowId` and `stepCount`.
+    `tool_call_done` is not given the result message id; it comes from `after_create_message` for the
+    `role: ''tool''` message with the same `tool_call_id`, so a reader can resolve the anchor through
+    `GET {runtime_prefix}/threads/{threadId}/messages`. A portable thread-qualified scheme has to be defined
+    by ACS (see ACS gaps).'
+- id: collect-01
+  relation: partial
+  acs:
+    concept: Evidence collection after each tool execution (SDK `PostToolUse` hook `create_evidence_collector`)
+    refs:
+    - grounded_agency/hooks/evidence_collector.py create_evidence_collector (lines 22-127; quote at line
+      27; except branch at lines 120-122)
+    - docs/integrations/claude_agent_sdk.md 'PreToolUse Hook Enforcement', PostToolUse bullet (line 273)
+    quote: Create a PostToolUse hook that collects evidence anchors.
+  sa:
+    concept: '`after_create_message` on the tool-result message (the stored result) and `tool_call_done`
+      (observational, once per call)'
+    refs:
+    - content/0.2.0/specification/hooks.md §4.2 after_create_message (lines 324-336), §5.5 tool_call_done
+      (lines 430-444; quote at line 440)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 154-155)
+    - content/0.2.0/infrastructure/runtime.md '14. Durable Key-Value Store' §14.2 Capacity and Errors
+      (line 362)
+    quote: Implementations **MUST** call this hook once per tool call, whether it succeeded or failed.
+  explanation: 'The observation point matches closely: both run after the tool, receive the call id, tool
+    name, arguments and result, and are observational (ACS code comment: ''Fail silently - evidence collection
+    is observational'', followed by a warning log; SA: ''The return value **MUST** be ignored; the hook
+    cannot modify the result.''). Among the tool hooks, hooks.md states a MUST to invoke only for `tool_call_done`
+    and `tool_call_started`. A second, MUST-backed view exists: tool results are persisted as messages
+    (tools.md §9) and `after_create_message` runs ''after successful insertion'', so the tool-result message
+    shows what was stored after every rewriting hook, with `tool_call_id` and the message id (inference:
+    no sentence names tool-result messages). Differences: the ACS collector is SDK reference code, not
+    a normative part of the standard; it receives parsed input, the SA hook JSON strings. Rated partial
+    because of the open points in collect-02.'
+  combined: 'Works today. Primary record: `defineHook({ hook: ''after_create_message'', id: ''acs_record_tool_result'',
+    ... })` acting on `role: ''tool''` messages, which sees the stored content. Supplement: `defineHook({
+    hook: ''tool_call_done'', id: ''acs_collect_evidence'', execute: async (state, toolCall, toolResult,
+    context) => { ... } })`, which adds the arguments and fires for failures. Both append to the store
+    of store-01; both signatures, with a `state.setValue` call inside, type-check against @standardagents/spec
+    0.45.10. They run only when they are in the resolved hook set for the active prompt (collect-03).
+    A hook that fails or times out is silent, and so is a `setValue` rejected for a capacity cap.'
+  see_also:
+  - published-api-extension-points#hooks-02
+  - safety-enforcement#flags-02
+  - safety-enforcement#hook-01
+  - safety-enforcement#hook-02
+  - models-context-memory-security#security-02
+- id: collect-02
+  relation: partial
+  acs:
+    concept: Recording the inputs and outcome a tool actually ran with (anchor metadata `tool_name`, `tool_input`,
+      `has_response`; approval bound to a digest of what was shown)
+    refs:
+    - grounded_agency/state/evidence_store.py from_tool_output (lines 177-206; quote at line 204)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces', Approvals (lines 149-166; informative
+      guide)
+    quote: '"has_response": tool_response is not None,'
+  sa:
+    concept: What each tool hook is given (`HookToolCall.function.arguments`, `HookToolResult`), in what
+      order, and for which calls
+    refs:
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 76-85), §4.1 (lines 320-321), §5.1
+      tool_call_started (lines 367-384; quote at line 378), §5.2-§5.5 (lines 386-444)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 148-156)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 42-50), §5.3 Tool Classes (lines 94-100)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (line 17)
+    - content/0.2.0/getting-started/examples.md line 547 (non-normative)
+    quote: Its name is known, but `toolCall.function.arguments` **MAY** be an incomplete JSON fragment
+      (or empty), and `progress` is `undefined`.
+  explanation: 'Spec text settles three things: `tool_call_started` may see incomplete arguments and cannot
+    change the call; tool arguments are validated against the declared schema; results are persisted as
+    messages before the loop advances. No tool hook runs between validation and `execute`. For model-initiated
+    calls a message lifecycle hook on the assistant message can record the model-emitted arguments beforehand
+    (inference from runtime.md §3, hooks.md §4.1 and messages.md §1). Left open: (1) whether `function.arguments`
+    in post-execution hooks is complete, and model text or validated value; (2) the order of the post-execution
+    tool hooks and the tool message''s lifecycle hooks; (3) which result `tool_call_done` receives; (4)
+    which calls fire tool hooks: prompt tools, handoff tools, lifecycle tools, `invokeTool` / `queueTool`,
+    provider-executed tools. Searched (hooks.md): invokeTool, queueTool: not found; provider: only provider
+    request and provider-message transformation.'
+  combined: 'Today: the stored result comes from the tool message in `after_create_message` (collect-01)
+    and the arguments from `tool_call_done`, with `JSON.parse(toolCall.function.arguments)` inside try/catch
+    and the raw string kept when parsing fails. `toolResult.result` in `tool_call_done` is not assumed
+    to equal the persisted content. A record of what is about to happen is written by the tool itself
+    at the top of `execute`, which has the validated `args`. Digests rely on the host JavaScript environment;
+    SA specifies no hash primitive. The examples page says of `before_store_tool_result` ''The hook runs
+    for the results of every tool in the prompt.'', which is a hint, not a requirement. A complete, portable
+    audit of tool activity cannot be claimed from the 0.2.0 text alone.'
+  see_also:
+  - tools-contracts#cls-04
+  - tools-contracts#io-03
+  - tools-contracts#io-06
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#hooks-02
+  - published-api-extension-points#shown-01
+  - published-api-extension-points#tools-04
+  - safety-enforcement#appr-01
+  - safety-enforcement#exec-01
+  - safety-enforcement#hook-02
+  - safety-enforcement#hook-03
+  - checkpoint-rollback-state#state-19
+  - approval-human#approval-06
+  - workflow-execution#wf-07
+  - multi-agent#coord-20
+- id: collect-03
+  relation: partial
+  acs:
+    concept: Session-wide capture (the SDK adapter injects its hooks for every tool call; plugin hooks
+      are configured once in hooks.json)
+    refs:
+    - docs/integrations/claude_agent_sdk.md 'PreToolUse Hook Enforcement' (line 270)
+    - hooks/hooks.json
+    quote: 'The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and SubagentStop hooks:'
+  sa:
+    concept: Hook scoping (a prompt's hook list replaces the agent's fallback list; at rest only the agent
+      list applies), required parent hooks (`parentHooks`) and package visibility
+    refs:
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 70-100), §2.4 Execution Provenance
+      (lines 171-196)
+    - content/0.2.0/specification/prompts.md §8 Hook Scoping (lines 270-273; quote at line 272)
+    - content/0.2.0/specification/agents.md §2.2 Optional (lines 89-93), §6 Required Parent Hooks (lines
+      132-167)
+    - content/0.2.0/infrastructure/runtime.md §7.3.1 Required Parent-Hook Composition (lines 147-163)
+    - content/0.2.0/distribution/packaging.md 'Visibility Rules' (lines 221-230)
+    - content/0.2.0/specification/threads.md §1.1 Agent Assignment (lines 22-26)
+    - '@standardagents/spec 0.45.10 index.d.ts line 6477 (`DEFINITION_ISSUE_CODES` includes `agent_tool_description_missing`;
+      the check is in the package''s index.js, lines 631-637)'
+    quote: '- When `hooks` is non-empty, only those hooks form the prompt base set'
+  explanation: 'In the ACS integrations capture is installed once for the whole session. In SA no hook
+    is global: a prompt''s non-empty `hooks` array replaces the agent''s list, which is only a fallback,
+    and ''At-rest operations have no active prompt.'', so they use the agent-level list alone. A hook
+    inside an installed package cannot be listed by a host prompt (''**Global code** sees unpacked definitions
+    and packed entry agents''). The mechanism that reaches every prompt on both sides is `parentHooks`:
+    a composed child''s required hooks run against the parent, and composition MUST fail closed when one
+    cannot load. It covers direct parents only, is composed ''For each active prompt'' (nothing says it
+    applies at rest or in handler turns), and carries a package signature only for packed children. Inference:
+    after a handoff, hooks resolve from the new agent.'
+  combined: 'Works today, two ways. (a) Same namespace only: the capture hooks are listed in every prompt''s
+    `hooks`, in every prompt used as a tool, and in the agent''s `hooks` (for at-rest operations), and
+    a build step checks this. (b) Across packages: the hooks ship with an entry agent that has `exposeAsTool:
+    true`, a `toolDescription` (the published validator reports `agent_tool_description_missing` without
+    one) and `parentHooks`, declared as a `hidden: true` relationship on each agent to be covered. This
+    is MUST-level for every prompt on either side and for fail-closed loading, never transitive, not provided
+    for at-rest operations (hooks.md §1.3 names only the agent-level array there) and unspecified for
+    handler turns. The declaration is the audited agent author''s choice, and composition UIs MUST disclose
+    the hook id, reason and stage.'
+  see_also:
+  - published-api-extension-points#hooks-01
+  - published-api-extension-points#hooks-02
+  - safety-enforcement#flags-02
+  - safety-enforcement#hook-01
+  - safety-enforcement#hook-02
+  - safety-enforcement#trust-01
+  - multi-agent#coord-18
+  - packaging-conformance-governance#pkg-01
+  - models-context-memory-security#hooks-01
+  - models-context-memory-security#security-02
+- id: store-01
+  relation: fits
+  acs:
+    concept: 'Evidence store (`EvidenceStore`: bounded, in-memory, queried by kind, capability and ref
+      prefix)'
+    refs:
+    - grounded_agency/state/evidence_store.py class EvidenceStore (lines 316-353; quote at line 318; DEFAULT_MAX_ANCHORS
+      at line 341)
+    quote: In-memory store for evidence anchors with bounded size.
+  sa:
+    concept: Durable per-thread key-value store (`getValue` / `setValue`), the thread file system and,
+      in the published types only, user-scope values
+    refs:
+    - content/0.2.0/specification/threads.md §7 Durable Key-Value Store (lines 408-445)
+    - content/0.2.0/infrastructure/runtime.md '14. Durable Key-Value Store' §14.1 Runtime Semantics (lines
+      348-358; quote at line 353), §14.2 Capacity and Errors (line 362); the page has two sections numbered
+      14
+    - content/0.2.0/specification/threads/filesystem.md introduction (line 3)
+    - content/0.2.0/specification/subagents.md §5.1 Persistent Invocation Arguments (lines 173-174); content/0.2.0/specification/tools.md
+      §8 Annotations (line 144)
+    - content/0.2.0/specification/threads/client-api.md §2 Routes (lines 18-32), §10 Deleting a Thread
+      (line 296)
+    - content/0.2.0/specification/users.md §2 UserState (line 56; draft page)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3152-3167 (getValue, setValue), 3179-3204 (getUserValue,
+      setUserValue, listUserValues)'
+    quote: Values **MUST** round-trip with JSON-equivalent structure (objects, arrays, strings, numbers,
+      booleans, `null`).
+  explanation: 'ACS''s reference store defines what is held and how it is queried, but it is process memory
+    that evicts beyond 10,000 anchors, and STANDARD-v1.1.0.md sets no persistence requirement for it.
+    SA defines durable per-thread storage: persistence across restarts and redeploys, visibility to every
+    later tool, hook and endpoint of the thread, and JSON round-trip are MUSTs. It is the only general-purpose
+    store writable at any time with a stated JSON round-trip (thread `arguments` and tool `annotations`
+    are also preserved by MUST). Limits: no key listing, append or compare-and-set at thread scope; the
+    key space is isolated between threads, not between packages; size caps are implementation-defined
+    (MAY); a thread delete removes it. Published types only: `getUserValue`, `setUserValue` and `listUserValues`
+    give listable storage shared by one user''s threads. Searched: evidence store, EvidenceStore (STANDARD-v1.1.0.md);
+    getUserValue, setUserValue, listUserValues (content/0.2.0): not found.'
+  combined: 'Works today as the primary store. `await state.setValue(''<package-id>.acs.evidence.'' +
+    id, record)` per anchor (the prefix is a convention; any code on the thread can overwrite the key),
+    plus an index chunked per execution, because keys cannot be listed and one growing array meets a value-size
+    cap first. A write from a hook is best effort: a rejection is caught, noted in `state.context` and
+    reported from the next ACS tool call. Read-modify-write of an index can race with endpoints and effects.
+    Files under `/acs/evidence/` suit large bundles but are client-readable and writable by any file tool
+    the model has. Records are exposed through a packaged thread endpoint: the Thread Client API has no
+    route for stored values. Lost: cross-thread queries and atomic append.'
+  see_also:
+  - published-api-extension-points#thread-01
+  - safety-enforcement#ckpt-02
+  - checkpoint-rollback-state#state-01
+  - checkpoint-rollback-state#state-04
+  - approval-human#approval-13
+  - workflow-execution#wf-09
+- id: store-02
+  relation: partial
+  acs:
+    concept: Evidence reaching later steps (typed bindings to an earlier step's output; `EvidenceStore.get_for_capability_output`)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.3 Binding Syntax (lines 286-292; quote at line 288)
+    - grounded_agency/state/evidence_store.py get_for_capability_output (lines 532-544)
+    - spec/ROADMAP.md 'Standards and scale' (line 86, multi-language SDKs)
+    quote: 'Bindings reference prior step outputs and workflow inputs:'
+  sa:
+    concept: 'What later tools, the model and clients can see: `execution.messageHistory`, `getMessages`,
+      `state.context`, the prompt options `includeChat` and `includePastTools`, request-context hooks,
+      `message_data` frames'
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §2.2 Live execution history (lines 43-51)
+    - content/0.2.0/specification/threads/messages.md §3.3 Same-execution visibility (lines 132-136; quote
+      at line 134)
+    - content/0.2.0/specification/threads.md §6.2 Per-Execution Context (lines 372-395), §6.3 Context
+      Limitations (lines 397-404)
+    - content/0.2.0/specification/prompts.md §1.2 Optional Properties (lines 26-27), §3.3 Sub-Prompt Tool
+      Configuration (line 159)
+    - content/0.2.0/specification/hooks.md §3.4 Stored history and the request context (lines 291-306)
+    - content/0.2.0/specification/threads/client-api.md §11 Reading Messages (lines 302-332), §16.2 Delivery
+      (line 449)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 21-25)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2593-2598 (ExecutionState.messageHistory)'
+    quote: During an active execution, a successfully injected message **MUST** become observable to subsequent
+      tools and hooks in that execution.
+  explanation: 'ACS passes evidence forward explicitly: a later step binds an earlier step''s output,
+    the validator type-checks the reference and the executor copies the value. SA has no step-to-step
+    data flow; a later step sees the conversation. Later tools and hooks can read every persisted message
+    with its `metadata` through `state.execution.messageHistory` or `state.getMessages()`; `state.context`
+    is scratch for one execution (''Mutations are lost after execution ends''). Whether the model sees
+    earlier tool results is a prompt setting: `includeChat` and `includePastTools` both default to `false`,
+    and for a prompt used as a tool `includeToolCalls` decides whether its tool calls and results are
+    serialised into the result string; `filter_messages` or `prefilter_llm_history` may trim further.
+    An anchor reaches a later tool only as a model-written argument, which the model can alter or invent.
+    Published types only: with a prompt''s `historyLimit`, `messageHistory` holds ''only its newest window''.'
+  combined: 'Works today with stated preconditions. Anchors the model must cite go into the tool `result`
+    JSON and reach later turns only when the prompt sets `includePastTools: true`. Anchors that code relies
+    on go into the key-value store (store-01), not `messageHistory`. A tool that receives anchors or evidence
+    ids as arguments resolves them against the evidence store and rejects unknown ones; it does not trust
+    evidence text pasted by the model. `state.context` only correlates hooks within one execution (for
+    example a map keyed by `toolCall.id`). Typed bindings between steps exist only when an ACS executor
+    drives the run, which today means a Python process outside the SA runtime that a packed agent would
+    have to declare as an external service.'
+  see_also:
+  - published-api-extension-points#erase-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-15
+  - workflow-execution#wf-25
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-07
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+- id: audit-01
+  relation: partial
+  acs:
+    concept: '`audit` capability and audit trail (record what happened and why; `recorded`, `audit_id`,
+      `timestamp`; the audit skill''s record)'
+    refs:
+    - schemas/capability_ontology.yaml node audit (lines 1336-1375; quote at line 1338)
+    - spec/STANDARD-v1.1.0.md §4.4 Safety-Critical Capabilities (lines 191-195)
+    - skills/audit/SKILL.md Procedure step 6 (lines 91-95), Output Contract (lines 104-130)
+    - hooks/posttooluse_log_tool.sh (lines 1-17); hooks/README.md (line 128)
+    - grounded_agency/coordination/audit.py class CoordinationEvent (lines 28-55), class CoordinationAuditLog
+      (lines 71-79)
+    - schemas/world_state_schema.yaml types.ActionRecord (lines 329-430)
+    quote: 'description: Record what happened and why'
+  sa:
+    concept: A mandatory persisted message record of model and tool activity, but no audit log or trace
+      surface; several passages presuppose a runtime log that is not defined
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §1 Overview (lines 9-13), §3 Step Cycle (lines 42-50), §5.2
+      Error Handling (line 92), §7.1 Parent/Child Threading (lines 117-120), §8.2 (line 209)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 13-29), §1.3 Reasoning
+      (line 73)
+    - content/0.2.0/specification/hooks.md introduction (line 3), §1.1 Available Hooks (lines 23-24),
+      §4.2 (line 334), §4.4 (line 362), §5.5 (line 440)
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (line 73)
+    - content/0.2.0/specification/providers.md §7 Error Handling (lines 425-426), §9.5 Implementation
+      Notes (line 566)
+    - content/0.2.0/specification/threads.md §9.3 Parent Messaging (line 542); content/0.2.0/specification/agents.md
+      §1.2 SideConfig (lines 30, 39, 54)
+    - content/0.2.0/specification/subagents.md §2.2 Single Owner (line 58; the one 'audit' hit)
+    - content/0.2.0/specification/users.md §6 Credential Grants (line 203; draft page)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 831, 1100-1102, 5549'
+    quote: '- The turn is marked failed. The error **MUST** be surfaced on the runtime''s request/execution
+      log as a runtime-origin failure — a throwing handler never silently swallows a message.'
+  explanation: 'SA mandates a persisted, client-readable record of what the model and tools did: runtimes
+    MUST persist assistant responses, tool results and tool errors as messages, with `tool_calls`, `tool_call_id`,
+    `tool_status`, `created_at`, `prompt` and the model''s reasoning. That record is mutable and deletable
+    (audit-02). Not found in SA 0.2.0: an audit log, a record of runtime decisions, or an API to read
+    a log. `ThreadState` has no log member, although handlers.md §5 (a MUST), providers.md §7 and §9.5,
+    threads.md §9.3, runtime.md §8.2 and draft users.md §6 presuppose runtime logs. ACS: the capability
+    is normative, but ''audit log'', ''audit trail'' and ''audit record'' do not occur in STANDARD-v1.1.0.md;
+    record formats exist only in implementations (the audit skill''s contract, the plugin hook''s HMAC-chained
+    line, `CoordinationEvent`, `ActionRecord`, the executor trace). Searched (content/0.2.0 and index.d.ts):
+    audit, trace, tracing, telemetry, observab, getLogs, listLogs, log.'
+  combined: 'Works today, ACS supplying the semantics and SA the mechanics. (1) `audit` as a function
+    tool whose `execute` appends a record and returns the capability''s contract (`recorded`, `audit_id`,
+    `timestamp`, `evidence_anchors`) as JSON in `result`. The model decides whether to call it unless
+    the agent makes it unavoidable, for example by binding it as `sessionStop` with `stopOnResponse: false`,
+    or by calling it from a handler. (2) An ambient trail from three MUST-invoked hooks: `after_create_message`
+    (on `role: ''tool''` messages, the as-stored record), `after_update_message` and `tool_call_done`,
+    each writing an ACS `ActionRecord` (action-01) to the key-value store. `after_thread_created` and
+    `after_subagent_created` have no behaviour section and are optional extras; `state.children` already
+    holds the child link. Cannot be done: reading the runtime''s own log, or observing a message deletion
+    or the end of a run from a hook.'
+  see_also:
+  - published-api-extension-points#erase-01
+  - published-api-extension-points#hooks-02
+  - safety-enforcement#hook-02
+  - checkpoint-rollback-state#state-19
+  - models-context-memory-security#context-02
+- id: audit-02
+  relation: acs_only
+  acs:
+    concept: Append-only, tamper-evident records (immutable events; HMAC-chained audit log; signed run
+      snapshot)
+    refs:
+    - schemas/event_schema.yaml schema.principles (line 8)
+    - spec/STANDARD-v1.1.0.md §2 Terms, 'Observation' (line 58)
+    - hooks/posttooluse_log_tool.sh (lines 1-17)
+    - skills/audit/SKILL.md Safety Constraints (line 315)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Driving a run yourself' (lines 270-271; informative guide)
+    quote: Events are immutable and append-only.
+  sa:
+    concept: Mutable, deletable thread storage; no hook for a deletion and no stream frame for a message
+      deletion; `instanceEnv` as a trust anchor
+    refs:
+    - content/0.2.0/specification/threads/messages.md §5 Updating Messages (lines 169-178), §6 Deleting
+      Messages (lines 180-186)
+    - content/0.2.0/specification/threads/client-api.md §10 Deleting a Thread (lines 292-298; quote at
+      line 296), §13 Deleting a Message (line 381)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (line 76), §2.3 Environment Variable Resolution
+      (lines 227-234)
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (lines 21-36)
+    - content/0.2.0/specification/threads/code-execution.md line 54; content/0.2.0/specification/models.md
+      line 284 (the unrelated 'append-only' and 'Retention' hits)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2616-2622 (abortSignal), 2940-2947 (instanceEnv)'
+    quote: 5. The runtime **MUST** delete the messages, files, and stored values of every thread in the
+      deletion set.
+  explanation: 'Not found in SA 0.2.0: an append-only store, an integrity or hash primitive, or a retention
+    rule for thread data. Everything a package writes can be changed by any code holding the `ThreadState`
+    (`updateMessage`, `deleteMessage`, `unlinkFile`, `setValue(key, null)`), and deleting a thread destroys
+    messages, files and values by MUST. No hook fires for a deletion. A message deletion has no stream
+    frame (''This section defines no stream frame for a deletion.''); a thread deletion is visible to
+    clients (streams closed with code `1000`, then 404) and, in the published types, to code in flight
+    through the abort signal. No MUST on either side is contradicted (STANDARD-v1.1.0.md sets no tamper-evidence
+    requirement), but a trail kept inside a thread is only as durable and trustworthy as the thread. Searched
+    (content/0.2.0): append, immutable, tamper, integrity, hash, checksum, sha256, signature, retention;
+    the hits are unrelated or say retention is runtime-defined.'
+  combined: Partly today, and beyond what the ACS standard requires. Records can be chained in hook code
+    (`prev_hmac`, `hmac`, as the ACS plugin hook does) with a key read through `state.instanceEnv?.('ACS_AUDIT_HMAC_KEY')`.
+    A keyed chain detects edits and mid-chain removal by clients and by the model. It does not detect
+    changes by other code in the runtime (every package on the instance can read the key), removal of
+    the newest records unless the chain head is kept elsewhere, or thread deletion. Without `instanceEnv`,
+    threads.md §2.3 says consumers that require the boundary 'must feature-detect the method and fail
+    closed'; the binding either fails closed or labels the records as unchained, never as tamper-evident.
+    Hashing comes from the host JavaScript environment, not from SA.
+  see_also:
+  - published-api-extension-points#options-01
+  - published-api-extension-points#thread-07
+  - safety-enforcement#audit-01
+  - checkpoint-rollback-state#state-15
+  - checkpoint-rollback-state#state-19
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - approval-human#users-01
+  - workflow-execution#wf-05
+  - multi-agent#coord-19
+  - multi-agent#coord-26
+  - packaging-conformance-governance#ver-04
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+  - models-context-memory-security#profile-01
+- id: retention-01
+  relation: acs_only
+  acs:
+    concept: Retention declarations (`audit` input `retention`; world-state `retention_policy`; the healthcare
+      profile's `audit_retention_days`)
+    refs:
+    - schemas/capability_ontology.yaml audit.input_schema.retention (lines 1357-1359)
+    - spec/STANDARD-v1.1.0.md §6.3 World State Requirements (line 1167)
+    - schemas/world_state_schema.yaml retention_policy (lines 559-586)
+    - schemas/profiles/healthcare.yaml compliance (lines 101-106)
+    - 'schemas/workflows/healthcare_workflows.yaml line 179 (`retention: 2555d`)'
+    quote: '| `retention_policy` | object | No | How long to retain |'
+  sa:
+    concept: Retention is runtime-defined and out of scope
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (line 14), §10 Deleting a Thread (line
+      296)
+    - content/0.2.0/infrastructure/runtime.md §10 Termination Semantics (line 235)
+    - content/0.2.0/specification/subagents.md §4.1 Persistence Is Universal (line 124)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 21-25)
+    - content/0.2.0/specification/users.md status line (line 3), §7.1 (lines 284-285); draft page
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3181-3192 (setUserValue)'
+    quote: 6. Thread retention is runtime-defined.
+  explanation: 'ACS carries retention declarations at three levels: the `audit` capability takes a `retention`
+    input (''How long to retain''), world state has an optional `retention_policy` with `observations`,
+    `audit_logs` and `snapshots`, and the healthcare profile sets `audit_retention_days: 2555` (a key
+    profile_schema.yaml does not define) with `retention: 2555d` on its audit steps. No reference component
+    reads them; they are declarations a host is expected to honour. SA 0.2.0 leaves retention to the runtime
+    in three places and defines no retention field, archive or export, and a thread delete removes messages,
+    files and stored values by MUST. A trail kept only inside a thread therefore cannot honour an ACS
+    retention declaration on a conforming SA runtime. Searched: retention (content/0.2.0: client-api.md
+    line 14, runtime.md line 235, subagents.md line 124, and the unrelated ''Zero Data Retention''; core/src
+    and grounded_agency: only evidence-store eviction priority).'
+  combined: A deployment that declares retention (for example with the healthcare profile) needs a sink
+    outside the thread. The option that depends on no draft surface is an external service the package
+    declares as part of its purpose (packaging.md 'Portability requirements'). The published types also
+    offer user-scope values (`setUserValue`), which are account-wide and so outlive a thread delete (inference),
+    but are absent from the 0.2.0 text, reject writes on threads without a user, and sit beside 'client-writable
+    value routes' on the draft Users page; they suit a chain head or an index, not a tamper-resistant
+    archive. The `retention` input is passed through to the sink; SA gives it no meaning.
+  see_also:
+  - published-api-extension-points#erase-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-15
+  - checkpoint-rollback-state#state-17
+  - workflow-execution#wf-25
+  - workflow-execution#wf-27
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-07
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+- id: audit-03
+  relation: partial
+  acs:
+    concept: Executor trace, action records for approval steps, and signed run snapshot
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces' (lines 250-256; quote at line 255),
+      'Driving a run yourself' (lines 270-271); informative guide
+    - core/src/exec/machine.rs fn trace (lines 167-177)
+    - spec/STANDARD-v1.1.0.md §10.3 Conformance Testing (lines 1427-1431)
+    - grounded_agency/workflows/tracer.py module docstring (lines 1-6)
+    - spec/ROADMAP.md 'Standards and scale' (line 86)
+    quote: '`action_id` of its queued action) and the trace (every decision the'
+  sa:
+    concept: 'Run status (`ThreadStatus`: `state`, `since`, `reason`), `thread_status` frames, `ExecutionState`
+      counters, `ErrorOrigin`, optional status messages'
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (lines 19-32), §4.2
+      Reasons (lines 105-114), §4.3 Requirements (lines 116-122; quote at line 119)
+    - content/0.2.0/specification/threads/client-api.md §16.1 Server frames (line 437), §16.2 Delivery
+      (lines 447-448)
+    - content/0.2.0/specification/providers.md §7 Error Handling (lines 399-404, 423-428)
+    - content/0.2.0/specification/threads.md §9.2 Lifecycle Status Messages (line 524); content/0.2.0/infrastructure/runtime.md
+      §12 Status Messages (line 243)
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (lines 21-36)
+    - content/0.2.0/specification/threads/runtime-streams.md §4 Neutral Example (line 82)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 230 (ToolResult.error_code), 3410 (`execution: ExecutionState
+      | null`)'
+    quote: '- Runtimes **MUST** persist the status with the thread so it survives restarts.'
+  explanation: 'ACS''s reference executor produces an ordered decision trace (events `{seq, at, kind,
+    frame, step, detail}`, with kinds such as `step_started`, `approval_requested`, `checkpoint_consumed`,
+    `step_failed`), action records ''for every step that required'' approval, and a canonical, HMAC-signed
+    snapshot. The trace is reference-executor output described in an informative guide and exercised by
+    fixtures the standard calls informative; its format is not normative. SA persists what the model and
+    tools did (messages, audit-05) and the last stop reason (''Runtimes **SHOULD** use these codes''),
+    pushed to clients as `thread_status` frames, but no decision trace: nothing records hook failures,
+    retries or why a turn went to a side. Error attribution exists (`ErrorOrigin`) but is routed to ''logs
+    and operator interfaces''. Runtimes ''may persist synthesized status messages'' for lifecycle events,
+    an optional channel. hooks.md §1.1 lists no hook for the start or end of a run.'
+  combined: 'Today, a run that no ACS executor drives can be reconstructed only from hook records (audit-01),
+    with `state.execution?.flowId` as the correlation id (the property is null at rest), and its outcome
+    from `ThreadStatus`, whose `reason` codes are a SHOULD. Executor traces, action records and signed
+    snapshots are available only from a Python executor process outside the runtime, which a packed agent
+    would have to declare as an external service, and which packaging.md admits only ''as part of the
+    agent''s purpose rather than as a replacement for a missing runtime capability'' (packaging-conformance-governance#pkg-07);
+    an in-process build is future work (ROADMAP.md lists multi-language SDKs). One integration needs no
+    executor in the runtime: hook records exported through an endpoint can be scored by ACS''s observe-only
+    `WorkflowTracer` (Python). A failed run''s diagnostic code can be mapped into a tool''s `error` text
+    and into `error_code`, which the published types declare and the text uses once, undefined, in an
+    example.'
+  see_also:
+  - published-api-extension-points#erase-01
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#thread-05
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#exec-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-15
+  - workflow-execution#wf-04
+  - workflow-execution#wf-05
+  - workflow-execution#wf-22
+  - workflow-execution#wf-25
+  - multi-agent#coord-26
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-03
+  - packaging-conformance-governance#pkg-06
+  - packaging-conformance-governance#pkg-07
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+- id: audit-04
+  relation: partial
+  acs:
+    concept: Capture that an action depends on (`audit_required` for manual trust overrides; the `audit`
+      output's required `recorded`); in practice the SDK collector and the plugin hook fail open
+    refs:
+    - schemas/authority_trust_model.yaml overrides (lines 78-81)
+    - schemas/capability_ontology.yaml audit.output_schema (lines 1360-1366)
+    - skills/audit/SKILL.md Procedure step 6 (line 95)
+    - grounded_agency/hooks/evidence_collector.py (lines 120-122; quote at line 121)
+    - hooks/posttooluse_log_tool.sh (lines 25-28)
+    - spec/SECURITY.md §1.1 Mutation Requires Checkpoint (line 16)
+    - schemas/workflow_catalog.yaml line 430
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 97-98; informative guide)
+    quote: '# Fail silently - evidence collection is observational'
+  sa:
+    concept: Hook failure and timeout semantics
+    refs:
+    - content/0.2.0/specification/hooks.md introduction (lines 5, 8), §1.2 (lines 65-68), §2.1 (line 136),
+      §2.2 (line 140), §3.3 Note (line 273), §4.1-§4.4 (lines 322, 335, 350, 363), §5.4 (line 428)
+    - content/0.2.0/specification/threads/execution-state.md §1 Availability (lines 9-11), §3 Controlling
+      Execution (line 70), §4.2 Reasons (line 113)
+    - content/0.2.0/specification/threads.md §1.2.1 Properties (line 49)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 154-155)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6109-6112, 6161-6164'
+    quote: it runs around steps and messages, its failures are non-fatal to the decorated turn, and it
+      may not own a side
+  explanation: 'Both sides, as implemented, capture evidence fail-open: the ACS SDK collector catches
+    its own exceptions and logs a warning, the plugin audit hook exits 0 without `jq`, and SA defines
+    hooks as decorations whose failure does not fail the turn. Spec text: only the two `before_*_message`
+    hooks say a failure SHOULD prevent the write; the `after_*` hooks say failures SHOULD NOT affect it;
+    the tool hooks state no runtime behaviour, though ''Hooks accessing external services **MUST** handle
+    failures gracefully.'' binds authors. Published types add that after a throwing `before_create_message`
+    a runtime can still insert a model-step or tool-result message ''with the last good message''. ACS
+    signals a failed audit write in band: the `audit` output requires `recorded`, and the audit skill
+    sets `recorded: false`; the Standard''s text has no rule for ambient capture. hooks.md calls `execution`
+    ''Always present in hooks''; elsewhere the text makes it null at rest.'
+  combined: 'Today: records that must exist before an effect is accepted are written inside the tool''s
+    own `execute`, because hooks fail open. An SA `audit` tool returns a success result whose JSON has
+    `recorded: false` and the reason when the write fails, so an ACS workflow can gate on it; `status:
+    ''error''` corresponds to a failed step (R402). Hooks stay for ambient, best-effort capture and read
+    `state.execution?.flowId`. Gaps are found by reconciliation, not by a counter the same hook writes:
+    evidence records are compared with the thread''s persisted `role: ''tool''` messages by `tool_call_id`,
+    for example in the tool bound to `sessionStop` or in an endpoint. On a capture failure a hook can
+    call `state.execution?.stop()` as a best-effort fail-stop; the text describes it without a MUST, and
+    it cannot help when the hook never runs.'
+  see_also:
+  - published-api-extension-points#hooks-02
+  - safety-enforcement#flags-02
+  - safety-enforcement#hook-01
+  - safety-enforcement#hook-02
+  - models-context-memory-security#security-02
+- id: audit-05
+  relation: partial
+  acs:
+    concept: The 'why' of an audit record (`explain` enables `audit`; the audit skill's `decision_rationale`)
+    refs:
+    - schemas/capability_ontology.yaml edges `explain` to `audit` (lines 1929-1932, `enables`) and `verify`
+      to `audit` (lines 1985-1988, `precedes`)
+    - skills/audit/SKILL.md Output Contract (lines 104-130; quote at line 123)
+    quote: 'decision_rationale: string # Why these actions were taken'
+  sa:
+    concept: Persisted assistant messages with their tool calls and the model's reasoning (`reasoning_content`,
+      `reasoning_details`)
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 17-23), §1.3 Reasoning
+      (lines 69-77; quote at line 73)
+    - content/0.2.0/infrastructure/runtime.md §1 Overview (line 11), §3 Step Cycle (lines 47-49)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 154-155)
+    - content/0.2.0/specification/threads/client-api.md §16.2 Delivery (lines 459-460)
+    quote: '1. When a model returns reasoning with an assistant message, the runtime **MUST** persist
+      it with that message: the reasoning text in `reasoning_content`, and any provider-specific reasoning
+      data in `reasoning_details`.'
+  explanation: 'ACS''s `audit` records what happened and why: the ontology links `explain` to `audit`
+    (''Explanations become part of audit trail'') and the audit skill''s record has a `decision_rationale`
+    field. SA has no rationale field, but it mandates the raw material: a runtime MUST persist each assistant
+    response with its `tool_calls`, each tool result and tool error as a message, and the reasoning a
+    model returns, and MUST carry that reasoning identically in message reads and `message_data` frames.
+    This is the nearest SA counterpart of an activity record with reasons. Differences: the reasoning
+    is the model''s own text, provider-specific in `reasoning_details`, and present only when the model
+    returns it; it is not an `explain` output and carries no evidence anchors; and the record is mutable
+    and deletable (audit-02).'
+  combined: 'Works today: an `audit` tool or an `after_create_message` hook cites the assistant message
+    that issued a tool call as the rationale source, with an anchor that names the thread and message
+    id, instead of asking the model to restate its reasons. `reasoning_content` is copied into an audit
+    record only after the redaction step of privacy-01, since reasoning can quote tool output. Persisted
+    reasoning does not replace an `explain` step where an ACS workflow has one.'
+- id: action-01
+  relation: partial
+  acs:
+    concept: '`ActionRecord` (world state `actions[]`: `action_id`, `timestamp`, `actor`, `actor_identity`,
+      `intent`, `status`, `approval`, `anchors`)'
+    refs:
+    - schemas/world_state_schema.yaml types.ActionRecord (lines 329-430)
+    - spec/STANDARD-v1.1.0.md §6.3 World State Requirements (lines 1165, 1169-1170)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces' (lines 252-254; informative guide)
+    quote: '| `actions` | array | Yes | Action records |'
+  sa:
+    concept: Tool-result message fields (`tool_call_id`, `name`, `tool_status`, `created_at`) and the
+      `tool_call_done` arguments
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 16-19, 25; quote at
+      line 19)
+    - content/0.2.0/specification/hooks.md §5.5 tool_call_done (lines 430-444), §6.2 HookToolCall (lines
+      465-476), §6.3 HookToolResult (lines 478-490)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/threads/client-api.md §3.3 Timestamps (line 71)
+    quote: '| `tool_status` | `''success'' \| ''error'' \| null` | Outcome of the tool call (for results)
+      |'
+  explanation: 'ACS already has a schema-defined record of an action: `ActionRecord`, required of world
+    state by §6.3, with a status enum (`planned`, `approved`, `rejected`, `expired`, `executed`, `failed`,
+    `rolled_back`), an optional approval digest, `actor_identity` and an `anchors` list. The reference
+    executor produces these records only ''for every step that required'' approval, so they are not a
+    full action log. SA has no action record, but each completed tool call leaves the fields one needs:
+    the call id, the tool name, a success or error status and a time on the persisted tool-result message,
+    and the arguments in `tool_call_done`. SA has no counterpart for `intent`, `approval`, `plan_ref`
+    or `rolled_back`; ACS has no slot for thread, execution or step identifiers, which fit only in `action_id`
+    or in anchors.'
+  combined: 'Works today with no change to either standard: the guard wrapper writes the `ActionRecord`
+    of a grounded call, before the effect and again after it (published-api-extension-points#hooks-02),
+    and for calls no wrapper sees the hooks of collect-01 emit a best-effort `ActionRecord` per tool call,
+    with `action_id` built from the thread id and `tool_call_id`, `timestamp` converted from the message''s
+    microsecond `created_at`, `status` `executed` or `failed` from `tool_status`, `actor` and `actor_identity`
+    from the binding''s own configuration (SA attests no actor identity), `intent` from the tool-to-capability
+    mapping, and `anchors` pointing at the tool-result message. Records go to the store of store-01. The
+    `approval` member is filled only where the tool itself ran an approval step.'
+  see_also:
+  - published-api-extension-points#hooks-02
+  - safety-enforcement#flags-02
+  - safety-enforcement#hook-01
+  - safety-enforcement#hook-02
+  - models-context-memory-security#security-02
+- id: prov-01
+  relation: partial
+  acs:
+    concept: '`ProvenanceRecord` (`claim_id`, `created_at`, `agent`, `capability`, `anchors`, `transformations`,
+      `assumptions`, optional `agent_identity`)'
+    refs:
+    - schemas/world_state_schema.yaml types.ProvenanceRecord (lines 151-188)
+    - spec/STANDARD-v1.1.0.md §2 Terms, 'Provenance' (line 60)
+    quote: '| **Provenance** | Traceability record for claims and transformations |'
+  sa:
+    concept: 'Message record fields that say where a message came from: `role`, `prompt`, `name`, `tool_call_id`,
+      `parent_id`, `depth`, `created_at`, `subagent_*`'
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 13-38; quote at line
+      24), §4 Queueing Messages (lines 157-160)
+    - content/0.2.0/specification/threads/client-api.md §3.3 Timestamps (lines 65-73), §12 Sending a Message
+      (line 342)
+    - content/0.2.0/specification/threads.md §1.1 Agent Assignment (line 22)
+    quote: '| `prompt` | `string \| null` | Name of the prompt that produced the message |'
+  explanation: 'SA records for each persisted message where it came from in conversational terms: a perspective
+    (`role`), a prompt, a tool call, a nesting level, a time and, for cross-thread traffic, a child. ACS
+    provenance answers a different question: which evidence supports a claim, which capability produced
+    it, what was transformed or assumed. SA has no field for a claim, a capability id, a transformation
+    list or assumptions; ACS has no field for prompt, side, depth or model. Limits of the SA fields as
+    provenance: `role` is the perspective a message was written to, chosen by whoever created it (a client
+    may send `''assistant''` or `''system''`); the record has no agent field although ''The agent assigned
+    to a thread can change over time''; the message names the prompt but not the model that ran; one assistant
+    message can hold many claims.'
+  combined: 'Works today: the record is derived at creation time in an `after_create_message` hook, which
+    stores `state.agentId` and `message.prompt` then, because both can differ later. `claim_id = message.id`
+    is used for tool-result messages only; claims inside an assistant message get their own ids when a
+    `ground` tool extracts them. `created_at = new Date(message.created_at / 1000).toISOString()` (SA
+    message timestamps are microseconds). `agent` names the agent and prompt, not the model, which cannot
+    be read from the message. `capability` comes from the tool-to-capability mapping the package ships,
+    `anchors` from the evidence store; `tool_call_id`, `parent_id` and `depth` are kept as extra fields.
+    `ProvenanceRecord` is a schema type; STANDARD-v1.1.0.md does not require one per message.'
+- id: prov-02
+  relation: fits
+  acs:
+    concept: Canonical event `provenance` (`transformer`, `transform_version`, `ruleset_id`)
+    refs:
+    - schemas/event_schema.yaml event.required (lines 79-81), event.properties.provenance (lines 160-170)
+    - spec/STANDARD-v1.1.0.md §6.2 Observation Requirements (line 1139)
+    quote: '| `provenance` | object | Yes | Traceability record |'
+  sa:
+    concept: Hook execution provenance (`HookExecutionContext.source`, `PackageSignature`)
+    refs:
+    - content/0.2.0/specification/hooks.md §2.4 Execution Provenance (lines 171-196; quote at line 195)
+    - content/0.2.0/distribution/packaging.md 'Package Signature' (lines 238-251)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5918-5940 (HookExecutionSource, HookExecutionContext)'
+    quote: context is deterministic runtime metadata and must not be inferred from mutable
+  explanation: 'ACS requires a `provenance` member on every canonical event (STANDARD §6.2); the schema
+    allows null and makes `transformer`, `transform_version` and `ruleset_id` optional, leaving the values
+    to the producer. SA hands every thread hook a runtime-supplied statement of why it is running (prompt,
+    agent or child relationship) and, for packed children, the package id, version, source and pack time;
+    package provenance, when present, ''**MUST** identify the namespace from which the child hook was
+    loaded''. That is host-supplied provenance for the record writer, which ACS cannot obtain on its own.
+    Limits: `package` exists only on the `child` source and is optional there; a prompt- or agent-selected
+    hook gets no package signature; the context does not carry the hook''s own id.'
+  combined: 'Works today. An evidence or audit hook fills `provenance.transformer` with its own hook id
+    (a constant in its module) plus `context.source.kind` and the prompt, agent or relationship name,
+    and `provenance.transform_version` with `context.source.kind === ''child'' ? context.source.package?.version
+    : undefined`, falling back to the binding package''s version constant. Reading `context.source.package`
+    without narrowing to the `child` member does not compile against the published types. Using a hook
+    id as `transformer` is this document''s convention, not an ACS rule.'
+- id: prov-03
+  relation: partial
+  acs:
+    concept: Sender identity and trust class of received items (`sender`, `sender_identity`; `trust_class`
+      such as `own_subagent_report`)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity (lines 1021-1075; quote at line 1060), §8.3 Trust
+      Classes (lines 1241-1251)
+    - schemas/agent_identity_schema.yaml authenticated_by (lines 35-41)
+    - schemas/capability_ontology.yaml receive.output_schema (lines 255-281)
+    - schemas/authority_trust_model.yaml trust_classes (lines 32-40)
+    quote: and each item it returns MUST carry the `sender_identity` it applied them
+  sa:
+    concept: 'Cross-thread provenance: `metadata.subagent_id`, `metadata.forwarded_from`, the top-level
+      `subagent_*` message fields, and the runtime-maintained `ThreadState.children` registry'
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 30-38), §1.1 Provenance
+      Metadata Conventions (lines 40-49; quote at line 49)
+    - content/0.2.0/specification/subagents.md §4.2 Registry (lines 126-150), §6.5 Provenance Metadata
+      (lines 221-228)
+    - content/0.2.0/infrastructure/runtime.md §7.1 Parent/Child Threading (lines 117-120)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (lines 94, 159)
+    - content/0.2.0/specification/threads/endpoints.md §4 Access and Authentication (lines 100-105)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2035-2040, 2979-2980'
+    quote: 'These are conventions, not requirements: consumers **MUST** tolerate their absence, and runtimes
+      **MUST NOT** rely on them for routing correctness.'
+  explanation: 'ACS expects the host to say who delivered each item and how the host authenticated and
+    classified that party; the trust class then sets the evidence weight (0.7 for `own_subagent_report`).
+    ACS leaves the method to the host (''the standard does not say how a party is authenticated or'' classified)
+    and calls the identity the host''s attestation, not a credential. SA can identify a child instance
+    (registry `reference`, the `subagent_id` message field, the SHOULD-level `metadata.subagent_id`) and
+    the thread''s user, but states no authentication method or trust classification, and its provenance
+    keys are explicitly optional. Ambiguities: a top-level `subagent_id` and a `metadata.subagent_id`
+    with no statement of which is authoritative; `metadata.forwarded_from` is an ''origin thread or message''
+    in the text and ''the source thread id'' in the published types. No rule was found that stops package
+    code writing these keys, so they are labels, not attestations.'
+  combined: 'Today, by binding policy rather than SA guarantee. Child reports: the origin is established
+    by lookup, not by label. A `reference` taken from `state.children` (the registry is runtime-maintained)
+    is resolved with `state.getChildThread(reference)` and the result is read from the child thread; then
+    `{ principal: ''sa-subagent:'' + reference, kind: ''agent'', authenticated_by: ''x-acs.sa-child-thread'',
+    trust_class: ''own_subagent_report'' }` describes a lookup the host made itself (the `x-` value is
+    this document''s suggestion, allowed by the ACS vendor pattern). A report identified only by a message
+    label gets no identity. Human messages through the generic route get none either: `state.user()` is
+    the thread''s user, not the sender. ACS §5.17 then drops such items, or marks them always-ask, when
+    the workflow binds the identity inputs. Only a packaged endpoint''s `auth.caller` is caller-authenticated
+    (inbound-01).'
+  see_also:
+  - tools-contracts#io-04
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#user-01
+  - safety-enforcement#appr-03
+  - approval-human#approval-13
+  - approval-human#identity-02
+  - approval-human#identity-03
+  - approval-human#identity-06
+  - workflow-execution#wf-09
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - multi-agent#coord-08
+  - multi-agent#coord-22
+  - models-context-memory-security#identity-01
+  - models-context-memory-security#identity-02
+  - models-context-memory-security#perceive-03
+- id: prov-04
+  relation: partial
+  acs:
+    concept: Evidence returned across a delegation or a wait (`delegate` output `result` and `evidence_anchors`;
+      an awaited event's `anchors`; the SDK's cross-agent evidence bridge)
+    refs:
+    - schemas/capability_ontology.yaml delegate.output_schema (lines 1503-1538)
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 753-761; quote at line 760)
+    - core/src/exec/machine.rs lines 1640-1666
+    - grounded_agency/coordination/evidence_bridge.py (lines 1-8, 26, 59)
+    quote: The step's output is the delegation's output with the matching event as
+  sa:
+    concept: Child to parent result delivery (completion message, copied attachments, `stopSession`) and
+      key-value isolation
+    refs:
+    - 'content/0.2.0/specification/subagents.md §3.3 Blocking and Create-or-Continue (line 108), §5.1
+      Persistent Invocation Arguments (lines 173-174), §6.2 Child → Parent: Completion and Failure (lines
+      195-205), §6.4 (lines 211-219), §7 Attachment Copying (lines 230-237)'
+    - content/0.2.0/infrastructure/runtime.md §7.1 (lines 117-120), §8.2 Child -> Parent (lines 199-211),
+      §8.3 Status Updates (line 217), '14. Durable Key-Value Store' §14.1 items 3 and 8 (lines 352, 357;
+      quote at line 352)
+    - content/0.2.0/specification/agents.md §3 SessionToolBinding (lines 109-113)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (lines 94-95, 98)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2659-2672 (StopSessionOptions)'
+    quote: Each thread **MUST** maintain its own isolated key space. Values **MUST NOT** be readable by
+      any other thread, including parent, child, or sibling threads.
+  explanation: In ACS a delegated result arrives as a structured event. For `receive` and `synchronize`
+    waits the reference executor copies the event's `anchors` into `evidence_anchors`; for a waiting `delegate`
+    the event, anchors included, is delivered as `result`. The Python SDK also has a `CrossAgentEvidenceBridge`
+    that shares anchors with a trust decay. In SA a child's result reaches the parent as a queued silent
+    message (a fixed sentence plus the result text, shown without a normative keyword; runtime.md says
+    the content 'should include subagent reference and result summary'), or as the `subagent_create` result
+    when the relationship is `blocking`. Only attachment copying is a MUST. On a prompt-backed child the
+    `messageProperty` value is a model-written tool argument. Message metadata of the child's own messages
+    is not said to travel, and the child's key-value store is isolated by MUST, although subagents.md
+    §6.4 suggests delivery through 'the parent's key-value store'.
+  combined: 'Code, not the model, should author the result. A child-side tool builds the payload from
+    the child''s evidence store, writes the bundle as a file and calls `state.stopSession({ result, notifyParent
+    })` (runtime.md §8.3: implementations ''should treat this as a successful terminal child run''), or
+    the parent pulls the bundle through `state.getChildThread(reference)` with a `reference` from `state.children`.
+    If a `sessionStop` binding is used, its text is an untrusted pointer and anchors are read only from
+    the copied bundle file, the MUST-level channel. From parent to child, the validated `arguments` object
+    is carried by MUST. Every imported anchor is qualified with the child `reference` and re-based on
+    destination-local paths. Reading or writing another thread''s stored values through a `ThreadState`
+    handle is not relied on until SA settles whether it is permitted.'
+  see_also:
+  - tools-contracts#io-04
+  - published-api-extension-points#thread-01
+  - safety-enforcement#scope-01
+  - approval-human#approval-07
+  - approval-human#identity-06
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - multi-agent#coord-22
+  - multi-agent#coord-23
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#remember-02
+- id: trust-01
+  relation: acs_only
+  acs:
+    concept: Authority trust model (source ranking, half-life decay, field authority, conflict resolution,
+      trust-class weights)
+    refs:
+    - spec/STANDARD-v1.1.0.md §8 Authority Trust Model (lines 1207-1251)
+    - schemas/authority_trust_model.yaml (quote at line 69)
+    - schemas/profiles/profile_schema.yaml trust_weights (lines 25-30)
+    - grounded_agency/coordination/evidence_bridge.py (line 26, per-hop trust decay)
+    quote: 'formula: score = trust_weight(source) * confidence * recency_factor'
+  sa:
+    concept: No counterpart found; the only statements about untrusted input concern prompt injection
+    refs:
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 231-234)
+    - content/0.2.0/specification/users.md §1 'Application roles' (line 30), §2.3 Environment (line 104);
+      draft page
+    - content/0.2.0/specification/prompts.md §2.1 String Prompts (line 50)
+    - content/0.2.0/specification/hooks.md §3.3 prefilter_llm_history (line 271)
+    - content/0.2.0/specification/handlers.md §1 (line 28); content/0.2.0/specification/threads/decisions.md
+      §4.1 (line 156)
+    - content/0.2.0/specification/threads/client-api.md §3.3 Timestamps (line 71), §16.2 (line 457)
+    quote: Implementations **MUST** sanitize prompt content that incorporates untrusted input to prevent
+      injection.
+  explanation: 'Not found in SA 0.2.0: any notion of source authority, evidence weight, recency decay
+    or conflict resolution between sources. Hits, none about source authority: ''trust boundary'' for
+    `instanceEnv` (threads.md §2.3, users.md §2.3); the ''trusted identity authority'' that supplies user
+    roles; ''handlers are trusted definition code''; untrusted code in the sandbox; an ''Authoritative
+    run status'' and an ''authoritative'' `message_data` frame; ''probability-weighted'' (decisions);
+    unrelated ''stale'' and ''freshness''. SA''s only rules about untrusted content are prompts.md line
+    50 and hooks.md line 271, both about prompt injection. SA does supply inputs the ACS formula needs:
+    a creation time on every message, an origin (prompt, child reference, user) and places to keep per-source
+    weights. Searched (content/0.2.0, examples page aside, and index.d.ts): trust, authorit, weight, decay,
+    conflict, reliab, recency, stale, freshness; no hits for decay, conflict, reliab, recency.'
+  combined: 'Works today entirely in package code: `integrate` and conflict resolution are function tools
+    that read anchors from the evidence store, compute age from `Message.created_at` (microseconds, converted
+    to the ISO-8601 the ACS schemas use), take `trust_weight` from the ACS domain profile shipped with
+    the package and apply `max(0.5 ** (age/half_life), min_trust)`. Where an item has both a trust class
+    and a source type, the lower of the two weights applies (STANDARD §8.3). The class weight rests on
+    prov-03''s classification, which SA does not attest, and the tools run only when the model calls them.
+    SA neither helps nor hinders.'
+  see_also:
+  - models-context-memory-security#profile-05
+- id: trust-02
+  relation: partial
+  acs:
+    concept: '`confidence` (0 to 1) on capability outputs and `Uncertainty`; §3.1''s requirement that
+      an ungrounded claim state an `inference_method` and a `confidence`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.1 Grounded Claims (lines 76-77), §8.1 Trust Score Calculation (line 1218)
+    - schemas/event_schema.yaml types.Uncertainty (lines 37-55)
+    - schemas/capability_ontology.yaml ground.input_schema.required_strength (lines 853-858)
+    - schemas/profiles/profile_schema.yaml evidence_policy.minimum_confidence (lines 71-75)
+    quote: Every claim MUST be evidence-backed or explicitly marked as inferred. Ungrounded claims MUST
+      include an `inference_method` and `confidence` score.
+  sa:
+    concept: 'Decision inference (`ThreadState.decide()`): typed questions answered with probabilities
+      and provider-reported confidence'
+    refs:
+    - content/0.2.0/specification/threads/decisions.md §1 Thread Interface (lines 10-27), §3 Question
+      Types (lines 68-96), §4 Result Types (lines 113-124), §4.1 Answer Semantics (lines 153-162; quote
+      at line 158), §6 Conversation Semantics (lines 200-210)
+    - content/0.2.0/infrastructure/runtime.md §1.1 Decision Inference (lines 21-25)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1263-1282 (answer types), 1299-1302 (DecisionResult.model),
+      1316-1323 (DecisionProviderFactory, DecideOptions)'
+    quote: '- Probabilities and `confidence` values are numbers in **[0, 1]**. Confidence is provider-reported
+      and is distinct from an individual outcome probability.'
+  explanation: 'ACS says a confidence value must exist and where; §8.1 describes it as ''Self-reported
+    confidence from source'' and gives no method. `inference_method` has no field in any ACS schema. SA
+    offers a mechanism ACS lacks: a runtime MUST expose `decide()`, which evaluates caller-supplied context
+    against boolean, choice or score questions and returns complete probability distributions; the result
+    names the evaluating model. Two cautions. A boolean answer carries only `probability`, which is P(true);
+    `confidence` is separate, optional and present only on choice and score answers. And `decide()` takes
+    a `provider` factory from the caller: the runtime supplies no decision model, and the text names none.
+    `decide()` reads and writes no messages, so an answer is persisted only if code stores it. Searched:
+    inference_method (spec, schemas, core/src, grounded_agency, skills, docs/guides, hooks, templates,
+    tools): only STANDARD §3.1, STANDARD-v1.0.0.md and SECURITY.md §1.3.'
+  combined: Works where the package ships a decision-provider factory and credentials. `ground` and `verify`
+    are function tools that load the evidence by anchor id from the store (not from model-written arguments)
+    and call `state.decide(...)` with a `score` question whose `levels` are ACS's `required_strength`
+    scale (weak, moderate, strong). `grounded` is set from the probability mass at or above the requested
+    level; `confidence` from the answer's provider-reported `confidence` when present, otherwise from
+    that mass, with a record of which was used and of `result.model` under a binding-specific key. That
+    key is a binding extension, not §3.1's `inference_method`, which is for ungrounded claims. `evidence_policy.minimum_confidence`
+    is read by no ACS reference component, so applying it is binding behaviour (policy-01). Without a
+    decision provider the tool returns an error result.
+  see_also:
+  - tools-contracts#io-08
+  - published-api-extension-points#decide-01
+  - models-context-memory-security#ground-01
+  - models-context-memory-security#profile-04
+- id: trust-03
+  relation: acs_only
+  acs:
+    concept: Grounded claims (§3.1) and the reserved diagnostic F505 PROVENANCE_MISSING
+    refs:
+    - spec/STANDARD-v1.1.0.md Status line (lines 4-8), §3.1 Grounded Claims (lines 76-77), §4.3 (line
+      169), §9.6 Safety Errors (line 1325)
+    - spec/CONFORMANCE.md coverage gaps (lines 107-110)
+    - spec/SECURITY.md §1.3 Claims Must Be Grounded (lines 46-53)
+    - schemas/profiles/profile_schema.yaml evidence_policy.require_grounding (lines 76-80)
+    - schemas/capability_ontology.yaml `soft_requires` edges into `ground` (lines 1803-1839)
+    quote: '| F505 | PROVENANCE_MISSING | Claim without provenance (§3.1). Reserved: the reference validator
+      and executor do not check it yet |'
+  sa:
+    concept: No counterpart found; message lifecycle hooks, a second prompt-backed side and a handler-backed
+      side are the available enforcement points
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 15, 22), §1.3 Reasoning
+      (lines 69-77)
+    - content/0.2.0/specification/hooks.md §4.1 before_create_message (lines 320-322), §4.2 (lines 334-335)
+    - content/0.2.0/specification/agents.md §9.2 Worker / Reviewer (line 221)
+    - content/0.2.0/specification/handlers.md §3 Execution Model (lines 44-55), §6 Capabilities (lines
+      79-88)
+    quote: '- Implementations **MUST** call this hook before inserting any message, including every `injectMessage()`
+      path'
+  explanation: 'Not found in SA 0.2.0: any concept of a claim, a citation, or a requirement that model
+    output be supported by tool results. An assistant message is free text plus optional reasoning. ACS
+    states the requirement as a MUST in §3.1 (SECURITY.md words the output rule as SHOULD), but by its
+    own status line the reference validator and executor do not check §3.1''s grounding, and F505 is reserved;
+    the only grounding rule the reference validator applies is the `soft_requires` ordering into `ground`
+    (warning W601), which concerns step order, not content. So neither project rejects an unanchored assistant
+    message: ACS defines the obligation and the contracts (`ground`, `evidence_anchors`), SA provides
+    places where a check can run. Searched (content/0.2.0): evidence, citation, cite, grounded, grounding,
+    claim, hallucinat, source reference: no hit (the only `cite` matches are inside `AsyncIterable`).'
+  combined: 'Works today as package-level policy. (a) Annotation: a `before_create_message` hook for assistant
+    messages writes `metadata.acs.evidence_available` with the anchor ids recorded in the thread so far.
+    It is named for what it shows (tools ran), never `grounded`; it does not block, because a hook failure
+    is not a reliable gate (audit-04), and `state.execution` is null for at-rest injections. (b) Enforced
+    gate: the reviewing side is backed by a handler. Code checks the worker''s message against the evidence
+    store and either injects a rejection or calls `state.stopSession({ result })`. A prompt-backed reviewer
+    is weaker: the model can call the `sessionStop` tool without calling `ground` or `verify`. Not possible:
+    a runtime-enforced rule that rejects an assistant message without anchors.'
+- id: policy-01
+  relation: acs_only
+  acs:
+    concept: Domain-profile `evidence_policy` (`required_anchor_types`, `minimum_confidence`, `require_grounding`)
+    refs:
+    - schemas/profiles/profile_schema.yaml evidence_policy (lines 62-80; quote at line 70)
+    - schemas/profiles/healthcare.yaml evidence_policy (lines 63-72)
+    - tools/validate_profiles.py lines 216-258 (shape checks)
+    quote: 'description: Types of evidence anchors expected in this domain'
+  sa:
+    concept: No counterpart found; layered `env` values and package constants are the available configuration
+      slots
+    refs:
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 220-225)
+    - content/0.2.0/specification/agents.md §2.2 Optional (line 91; quote)
+    quote: '| `env` | `Record<string, string>` | - | Agent-level default variable values |'
+  explanation: 'An ACS domain profile declares which anchor types a domain expects, a minimum confidence
+    ''for actions'' and which capabilities ''require explicit grounding''. Two limits on the ACS side:
+    the anchor-type values (for example `clinical_data_point`, `guideline_reference`, `audit_trail` in
+    the healthcare profile) match no `Anchor.kind` in either schema, and the three keys are checked for
+    shape by tools/validate_profiles.py and read by nothing in core/src or grounded_agency. SA 0.2.0 has
+    no notion of an evidence policy or a domain profile; the configuration it defines is layered `env`
+    values (strings) resolved from thread, agent, prompt, user and instance. Searched: evidence, grounding,
+    grounded (content/0.2.0): not found; required_anchor_types, minimum_confidence, require_grounding
+    (core/src, grounded_agency): not found.'
+  combined: 'A binding that applies a profile defines behaviour the ACS reference implementation does
+    not have, and should say so. The profile ships as data inside the package (JSON or a TypeScript constant),
+    is selected by `await state.instanceEnv?.(''ACS_PROFILE'')` with the bundled profile as the fallback,
+    never by `state.env()` (models-context-memory-security#profile-01), and is applied in the tool wrappers:
+    `require_grounding` as the list of capabilities whose wrapper rejects an output with empty `evidence_anchors`,
+    and `minimum_confidence` as the threshold of trust-02. `required_anchor_types` cannot be checked mechanically
+    until ACS relates its values to `Anchor.kind` (see ACS gaps).'
+  see_also:
+  - published-api-extension-points#thread-07
+  - approval-human#approval-21
+  - models-context-memory-security#profile-01
+- id: transform-01
+  relation: partial
+  acs:
+    concept: Auditable transforms (§3.2), `mapping_ref` transform steps and the canonical event's `raw`
+      and `canonical` pair
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.2 Auditable Transforms (lines 79-82; quote at line 82), §5.2 Step Definition
+      (line 258), §6.2 Observation Requirements (lines 1136-1137)
+    - schemas/event_schema.yaml event.properties.raw (lines 147-149), provenance (lines 160-170)
+    - schemas/world_state_schema.yaml ProvenanceRecord.transformations (lines 179-183)
+    - schemas/transforms/transform_coercion_registry.yaml principles (lines 6-10)
+    quote: '- Documented with explicit loss (what information is discarded)'
+  sa:
+    concept: Result- and history-rewriting hooks (`after_tool_call_success`, `after_tool_call_failure`,
+      `before_store_tool_result`, `before_create_message`, `filter_messages`, `prefilter_llm_history`)
+    refs:
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 76-85), §3.2-§3.4 (lines 217-306),
+      §4.1 (lines 310-322), §5.2 (lines 386-398), §5.3 (lines 400-412; quote at line 411), §8.7 (lines
+      764-784, example)
+    - content/0.2.0/infrastructure/runtime.md §7.3.1 Required Parent-Hook Composition (lines 161-163)
+    - content/0.2.0/specification/threads/messages.md introductory Note (line 7)
+    quote: '- If hook returns a result, it replaces the original'
+  explanation: 'SA lets hooks rewrite what is stored (tool results, messages) and, separately, what the
+    model sees (request context). It keeps no record that a rewrite happened or of the original value.
+    ACS requires every transformation to be deterministic or to document what it discards, names a mapping
+    file for a `transform` step (`mapping_ref`), states ''Never drop raw payload'' in its coercion registry,
+    and requires a canonical event to keep `raw` (''Original unmodified data''). An SA rewriting hook
+    corresponds to such a mapping. A redaction hook (hooks.md §8.7, an example) deliberately destroys
+    the original. Ordering fixed by the text: child `before_parent` hooks, then the parent''s set, then
+    child `after_parent` hooks; the order within one `hooks` array is not stated. messages.md line 7 calls
+    `before_create_message` non-destructive, against hooks.md §4.1.'
+  combined: 'Today: the rewriting hook''s rule set is named in the event''s `provenance.ruleset_id`, or
+    the loss is recorded in a `ProvenanceRecord.transformations` entry (the canonical event''s `provenance`
+    has no transformation list). Recording a redacted value as `raw` deviates from §6.2''s ''Original
+    unmodified data'' until ACS decides otherwise (open question). For a digest of the original value
+    the hook ships through `parentHooks` with `stage: ''before_parent''`; for the stored value, `after_parent`
+    or the tool message in `after_create_message`. Stored history and request context differ by design,
+    so an audit of what a decision was based on can also digest the final provider request in a `prefilter_llm_history`
+    hook at `after_parent` (''The returned array **MUST** be the provider request history.'').'
+  see_also:
+  - tools-contracts#io-03
+  - tools-contracts#io-06
+  - published-api-extension-points#tools-04
+  - safety-enforcement#hook-03
+  - checkpoint-rollback-state#state-19
+- id: events-01
+  relation: partial
+  acs:
+    concept: Canonical event / observation (`event_id`, `timestamp`, `source`, `event_type`, `raw`, `canonical`,
+      `anchors`, `provenance`)
+    refs:
+    - spec/STANDARD-v1.1.0.md §6.2 Observation Requirements (lines 1121-1143; quote at line 1133)
+    - schemas/event_schema.yaml event (lines 69-170)
+    quote: '| `timestamp` | string | Yes | ISO-8601 time of observation |'
+  sa:
+    concept: Thread events (`state.emit`) and the `event` stream frame; SA timestamp units
+    refs:
+    - content/0.2.0/specification/threads.md §5 Events (lines 324-348)
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (line 9), §3.3 Timestamps (lines 65-73),
+      §16.1 item 7 (line 442), §16.2 item 9 (line 455)
+    - '@standardagents/spec 0.45.10 index.d.ts line 3115 (emit)'
+    quote: 9. Delivery is at-most-once. The stream carries no history and no acknowledgements.
+  explanation: 'Both are named, timestamped, JSON-carrying events, but they serve different ends. An ACS
+    canonical event is a durable observation that must record its source, raw and normalised payload,
+    anchors and provenance, and feeds world state. An SA thread event is a transient notification to whichever
+    clients are connected: at most once, no history, no acknowledgement, ''Events **SHOULD NOT** contain
+    sensitive information'', and nothing in threads.md §5 or client-api.md §16 says it is persisted. The
+    durable SA counterpart of an ACS observation is a persisted message or a stored value, not an emitted
+    event. Units differ: ACS timestamps are ISO-8601 strings; SA uses milliseconds on `event` frames,
+    microseconds on messages and `ThreadStatus.since`, and seconds on thread list fields. The `event`
+    frame is required only of runtimes that expose the Thread Client API, which is a SHOULD.'
+  combined: 'Works today for live display only: after persisting a canonical event (store-01), code calls
+    `state.emit(''acs_evidence_recorded'', { event_id, event_type, anchor_refs })`; clients receive `{
+    type: ''event'', eventType: ''acs_evidence_recorded'', data, timestamp }` and fetch the full record
+    from the packaged thread endpoint. The payload is kept to identifiers. The name follows threads.md
+    §5.2 (lowercase with underscores). The stream is never the record.'
+  see_also:
+  - approval-human#event-01
+- id: events-02
+  relation: sa_only
+  acs:
+    concept: Real-time evidence events (roadmap items; not in the standard)
+    refs:
+    - spec/ROADMAP.md 'Runtime and ecosystem' (line 77), 'Under consideration' (line 101)
+    quote: '- [Streaming events for real-time evidence collection](https://github.com/synaptiai/agent-capability-standard/issues/77)'
+  sa:
+    concept: 'Live tool and message stream: `tool_call_started` / `tool_call_done` hooks and thread events,
+      `message_data`, `message_chunk`, `progressArgument`'
+    refs:
+    - content/0.2.0/specification/hooks.md §5.1 tool_call_started (lines 367-384), §5.5 tool_call_done
+      (lines 430-444; quote at line 443)
+    - content/0.2.0/specification/tools.md §7 Progress Reporting (lines 97-121)
+    - content/0.2.0/specification/threads.md §5.1 Emitting Events (line 338)
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (line 9), §16 Thread Stream (lines 415-420),
+      §16.1 Server frames (lines 425-443), §16.2 Delivery (lines 445-462)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6297-6298, 6323-6325'
+    quote: '- Runtimes **SHOULD** also broadcast a matching `tool_call_done` thread event to connected
+      clients with `{ id, name, status }` at the same moment.'
+  explanation: 'ACS 1.1.0 defines no streaming of evidence or tool progress; it is a roadmap item, with
+    ''Runtime telemetry and observability hooks'' under consideration. SA specifies it: every message
+    creation and update is pushed as a full `message_data` record (MUST, for runtimes that expose the
+    Thread Client API), assistant content streams as `message_chunk`, and tool start and finish are hooks
+    with SHOULD-level client events (the published type comments say ''Conforming runtimes also broadcast'');
+    `progressArgument` lets a tool surface what it is about to do before its arguments finish streaming.
+    Gap inside SA: the two tool-call thread events are named in hooks.md and tools.md, but the `ThreadStreamFrame`
+    union has no member for them, so their wire shape is undefined (threads.md §5 suggests `event` frames;
+    the text does not say). Searched: stream, progress (STANDARD-v1.1.0.md): not found.'
+  combined: 'Works today without an extra channel on runtimes that expose the Thread Client API: a tool-result
+    message is a persisted message, so its `message_data` frame already delivers anchors to clients when
+    they are in `metadata.acs` or in the result content. Connections filter by `depth` (default 0) and
+    `includeSilent`, so tool messages of nested prompts and silent messages are not delivered by default.
+    Where a runtime sends them, `tool_call_done` thread events give a client the call id and status to
+    key a ''sources consulted'' list.'
+- id: events-03
+  relation: sa_only
+  acs:
+    concept: No counterpart found
+    refs:
+    - 'spec/STANDARD-v1.1.0.md (searched for ''stream'': not found)'
+    - schemas/event_schema.yaml types.Anchor.kind (lines 21-30); schemas/world_state_schema.yaml types.Anchor.kind
+      (lines 71-79)
+  sa:
+    concept: 'Runtime streams (`ThreadState.runtimeStreams`): optional, live, opaque byte streams to an
+      execution host'
+    refs:
+    - content/0.2.0/specification/threads/runtime-streams.md §2 Optional Capability (lines 43-51; quote
+      at line 48), §3 Direction and Lifetime (lines 53-58), §5 Conformance (lines 115-122)
+    - content/0.2.0/infrastructure/runtime.md §13 Runtime Streams (lines 245-250)
+    quote: Capability names and metadata are opaque to this specification.
+  explanation: 'Runtime streams are not an evidence or metadata channel. They are optional (''Existing
+    runtimes may omit it and remain'' conformant), non-durable (''Streams are live, non-durable resources.''),
+    carry opaque bytes, and the page says, in lowercase, that a runtime must not interpret the request
+    `metadata` in a shared layer. ACS has nothing comparable. For grounding they matter only as a source:
+    bytes read from a stream are an observation with no SA-provided identity, time or integrity. Searched:
+    stream (STANDARD-v1.1.0.md): not found.'
+  combined: 'A tool that reads from a runtime stream anchors what it read itself: an anchor of kind `sensor`
+    (or `api`, a kind that exists in event_schema.yaml only) with its own timestamp and a digest of the
+    bytes, recorded through the same evidence store as any other tool output. Nothing in the stream contract
+    can carry or preserve ACS metadata.'
+- id: inbound-01
+  relation: partial
+  acs:
+    concept: Inbound items with provenance (`receive` output items carrying `sender` and `sender_identity`;
+      an awaited event's `anchors`)
+    refs:
+    - schemas/capability_ontology.yaml receive.output_schema (lines 255-281; quote at line 268)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses', AwaitEvent row (line 90; informative guide)
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity (lines 1021-1061)
+    quote: 'description: The host-authenticated principal that sent the item'
+  sa:
+    concept: 'Inbound messages: Thread Client API `SendMessageRequest`, `queueMessage`, `injectMessage`,
+      thread endpoints'
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (lines 11-12), §3.1 Authentication and
+      access (line 46), §7 Listing Threads (line 209), §12 Sending a Message (lines 334-370; quote at
+      line 368)
+    - content/0.2.0/specification/threads/messages.md §3 Injecting Messages (lines 106-112), §4 Queueing
+      Messages (lines 149-155)
+    - content/0.2.0/specification/threads/endpoints.md §4 Access and Authentication (lines 89-105)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 99-100)
+    - content/0.2.0/specification/agents.md §1.1 The Three Backings (line 19)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2101-2130 (InjectMessageInput, QueueMessageInput),
+      5367-5371 (ThreadEndpointAuth)'
+    quote: 7. The runtime **MUST** deliver the accepted message with the semantics of [`queueMessage`](/0.2.0/specification/threads/messages#4-queueing-messages).
+  explanation: 'An ACS host hands the executor each inbound item with the authenticated principal and
+    identity that delivered it and any anchors. SA''s portable inbound path is the message route, whose
+    request body has `role`, `content` and `attachments` only: no metadata and no declared origin, and
+    the caller chooses `role`, including `''assistant''` and `''system''` (the published `QueueMessageInput.role`
+    admits only `''user''` and `''assistant''`). The route authenticates the caller, but the persisted
+    message does not record who that was; the specification ''deliberately does **not** define who the
+    person is or how their input arrives''. A message created by an at-rest operation runs only agent-level
+    lifecycle hooks. In-process, the published types let `injectMessage` and `queueMessage` carry `metadata`;
+    the text shows it once, in an `injectMessage` example, and defines neither input type. Searched: author,
+    sender, caller (messages.md): no such field.'
+  combined: 'Today: an external system that delivers observations calls a packaged thread endpoint (a
+    file-based route such as `acs/observations.post.ts`) instead of the generic message route. The endpoint
+    has `auth.caller` (MUST-level for `authenticated` endpoints), builds the ACS canonical event with
+    `source`, `anchors` and `sender_identity`, stores it, and calls `state.queueMessage({ role: ''user'',
+    content, metadata: { acs: { event_id } } })` (`metadata` here is in the published types only). The
+    authentication mechanism is implementation-defined, so `authenticated_by` is an `x-` value or deployment
+    configuration, and `trust_class` comes from configuration. Messages that arrive through the generic
+    route get an anchor of `kind: ''human_note''` and no sender identity.'
+  see_also:
+  - approval-human#identity-01
+  - workflow-execution#wf-30
+  - multi-agent#coord-08
+- id: provider-01
+  relation: partial
+  acs:
+    concept: 'Evidence from search and retrieval (`search` and `retrieve` outputs with `evidence_anchors`;
+      anchor `kind: url`)'
+    refs:
+    - schemas/capability_ontology.yaml node retrieve (lines 98-139; quote at line 135), node search (line
+      140)
+    quote: 'description: Source references'
+  sa:
+    concept: Provider-executed tools (web search, file search, code interpreter) and what is recorded
+      of them
+    refs:
+    - content/0.2.0/specification/providers.md §6 Streaming (lines 377-392), §10.1 Overview (line 602),
+      §10.3 Tool Definitions with Variables (lines 617-635)
+    - content/0.2.0/specification/models.md `providerTools` (lines 34, 184, 473)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 153)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (lines 104-105)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 443 (executionMode), 1014-1021 (ProviderResponse.providerTools),
+      1071-1088 (ProviderWebSearchResult), 1096-1139 (ProviderExecutedToolResult), 1172-1178 (stream chunks)'
+    quote: Providers can embed built-in tools that leverage provider-specific capabilities. For example,
+      OpenAI provides web search, file search, code interpreter, and image generation tools that execute
+      server-side.
+  explanation: 'A provider-executed web search is, in ACS terms, a `search` whose evidence is its list
+    of sources. Spec text: provider tools run server-side; nothing says what the runtime records of them
+    or whether any hook fires (tools.md §9 limits its sequential-execution MUST to ''local tools''). Published
+    types: a provider can return `providerTools?: ProviderExecutedToolResult[]` (''Provider-executed tool
+    calls surfaced for logging and inspection.''), with `sources` (`url`, `title`) under `result.actions`,
+    and stream chunks `web-search-done` and `provider-tool-done`. None of these appears in the 0.2.0 text.
+    No hook signature receives these results and no `Message` field is defined for them. Inference: evidence
+    the model obtains through provider tools bypasses a hook-based grounding layer, and package code cannot
+    tell that a given answer relied on one. Searched (content/0.2.0): providerTools (only the model definition''s
+    `string[]`), web-search-done, provider-tool-done, ProviderExecutedToolResult: not found.'
+  combined: 'Cannot be done portably in 0.2.0. A grounded agent that needs anchored web evidence uses
+    a local function tool for search and retrieval (it fires `tool_call_done`, its result is a persisted
+    message, and it returns its own `evidence_anchors`) and leaves the model definition''s `providerTools`
+    empty. Otherwise the binding detects the case statically: when the active prompt''s model definition
+    declares `providerTools` (`state.loadPrompt`, then `state.loadModel`), every answer of that prompt
+    is marked as possibly resting on unanchored provider-side evidence.'
+  see_also:
+  - tools-contracts#cls-08
+  - safety-enforcement#surface-01
+  - approval-human#approval-15
+  - models-context-memory-security#perceive-02
+- id: exec-01
+  relation: partial
+  acs:
+    concept: '`execute` output (`result`, `stdout`, `stderr`, `exit_code`, `evidence_anchors`)'
+    refs:
+    - schemas/capability_ontology.yaml execute.output_schema (lines 1076-1094; quote at line 1087)
+    quote: 'description: Standard output'
+  sa:
+    concept: '`CodeExecutionResult` from `state.runCode` (`status`, `result`, `reports`, `logs`, `error`,
+      `durationMs`)'
+    refs:
+    - content/0.2.0/specification/threads/code-execution.md §4 CodeExecutionResult (lines 254-276), §11
+      Security Considerations (lines 552, 555; quote at line 555)
+    quote: '- **Log redaction**. Captured `logs` may contain values derived from `globals`. Treat `logs`
+      with the same confidentiality level as the most sensitive input passed into `globals` or `imports`.'
+  explanation: 'Both describe the outcome of running code. ACS''s `execute` output has `result`, `stdout`,
+    `stderr`, `exit_code` and required `evidence_anchors`. SA''s sandbox returns to the calling tool a
+    structured `CodeExecutionResult`: an outcome status with five values, the selected export''s value,
+    values emitted through the `report` bridge in call order, captured `console.*` logs, an error object
+    and a wall-clock duration. It has no exit code and no stdout/stderr split (log entries carry a level
+    instead), and no anchor or identifier for the run. The result is received in process by the tool that
+    called `runCode`; nothing in the text says it is persisted or shown to hooks unless the tool returns
+    it. The page warns that captured logs may contain values derived from sensitive inputs.'
+  combined: 'Works today inside the tool that calls `state.runCode`: `status` maps to `exit_code` (0 for
+    `success`, non-zero otherwise; a convention of this document), `logs` of level `error` and `warn`
+    to `stderr` and the rest to `stdout`, and `result` to `result`. The tool builds the evidence bundle
+    itself (a digest of the source it ran, `reports`, the duration), and the `tool_call_done` hook supplies
+    the call id for the anchor `ref` (anchors-04). The redaction step of privacy-01 applies to `logs`
+    before they enter an anchor excerpt or an audit record.'
+  see_also:
+  - tools-contracts#cls-10
+  - tools-contracts#cls-15
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-18
+- id: order-01
+  relation: acs_only
+  acs:
+    concept: Ordering rules around audit and grounding (`verify` precedes `audit`; `soft_requires` edges
+      into `ground`, warning W601)
+    refs:
+    - schemas/capability_ontology.yaml edge `verify` to `audit` (lines 1985-1988; quote at line 1988),
+      `soft_requires` edges into `ground` (lines 1803-1839)
+    - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 145-171)
+    - spec/EDGE_TYPES.md
+    quote: 'rationale: Verification results must be audited'
+  sa:
+    concept: No ordering constraint between tools found; tool calls execute sequentially in the order
+      the model returned them
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88)
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (lines 36-44), §9 Conformance Notes
+      (line 153)
+    - content/0.2.0/specification/agents.md §4 Stop Semantics (lines 117-122)
+    - content/0.2.0/specification/hooks.md §5.1 tool_call_started (line 382)
+    quote: Tool calls **MUST** execute sequentially in the returned order.
+  explanation: 'ACS constrains the order of capabilities statically: when a workflow has both, `verify`
+    must run before `audit` (a `precedes` edge, V102), and `ground` is expected after at least one of
+    `observe`, `detect`, `predict`, `attribute`, `explain`, `retrieve` or `search` (`soft_requires`, warning
+    W601). The validator checks these against a declared workflow before anything runs. SA defines no
+    workflow and no ordering constraint between tools: the model chooses the calls and the runtime executes
+    them ''sequentially in the returned order''. The nearest SA constructs are `uses` (which targets a
+    tool may invoke, not their order) and the stop-evaluation order of a side. Searched (content/0.2.0,
+    examples page aside): prerequisite, depends on, dependenc, must run before, run before, precede: only
+    tool and package dependencies and env precedence.'
+  combined: 'Two routes today. Build time: the agent''s intended tool sequence is described as an ACS
+    workflow and checked by the ACS validator in CI; this checks the design, not what the model does at
+    run time. Run time: each ACS tool wrapper checks its own preconditions against the evidence store
+    (for example, `audit` looks for a `verify` record in the current execution and `ground` for at least
+    one observation anchor) and returns an error result or a warning field when they are missing. Hooks
+    cannot enforce order: `tool_call_started`, the only tool hook that runs before execution, cannot modify
+    the call.'
+- id: privacy-01
+  relation: partial
+  acs:
+    concept: 'Redaction of sensitive data in anchors and audit records: rules exist in skill instructions
+      only (anchors may carry `excerpt`; the SDK anchor stores `tool_input`)'
+    refs:
+    - skills/audit/SKILL.md Procedure step 6 (line 92), Safety Constraints (line 314)
+    - skills/perspective-validation/SKILL.md line 149; skills/persist/SKILL.md lines 362-363; skills/receive/SKILL.md
+      line 346; skills/recall/SKILL.md line 297
+    - schemas/event_schema.yaml types.Anchor.excerpt (lines 34-36)
+    - grounded_agency/state/evidence_store.py metadata limits (lines 24-27), _sanitize_metadata (lines
+      82-128), from_tool_output (lines 201-205)
+    - spec/SECURITY.md lines 85, 294 (the two unrelated 'sensitive' hits)
+    quote: '- Redact sensitive information (credentials, PII) from audit output'
+  sa:
+    concept: 'Redaction and disclosure rules: `envType` secret/text classification, sanitising results
+      in `before_store_tool_result`, limits on events, hook logs, prompts and sandbox bridges'
+    refs:
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (line 236), §5.2 Event
+      Guidelines (line 348)
+    - content/0.2.0/specification/hooks.md §1.2 (line 68), §4.2 (lines 334-335), §5.2 (lines 386-398),
+      §8.7 (lines 764-784, example)
+    - content/0.2.0/specification/prompts.md §2.1 String Prompts (line 50); content/0.2.0/specification/subagents.md
+      §3.2 Immediate Spawning (lines 103-104)
+    - content/0.2.0/specification/threads/code-execution.md §11 Security Considerations (lines 552, 555)
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (line 11), §2 Routes (lines 18-32)
+    - content/0.2.0/specification/users.md §6 Credential Grants (lines 199, 203; draft page)
+    quote: Values marked `secret` should be redacted from tool output and logs; values marked `text` may
+      be displayed.
+  explanation: 'Anchors and audit records copy data out of tool calls into places with wider visibility:
+    message metadata and files reach clients through message reads, `message_data` frames and the file
+    route; events reach every connected client. SA has rules for this in the specification text: a per-variable
+    secret/text classification that code can query, a hook position meant for sanitising results before
+    storage, ''Events **SHOULD NOT** contain sensitive information'', and MUST-level rules for hooks (''Hooks
+    **MUST NOT** expose sensitive data in logs or error messages.''), prompts, scoped env values and sandbox
+    bridges. ACS has redaction rules in skill instructions (audit, persist, receive, recall, perspective-validation)
+    but none in STANDARD-v1.1.0.md, SECURITY.md, the schemas or the SDK collector, which copies `tool_input`
+    into anchor metadata (truncated above 1 KB, not redacted). Neither side enforces these rules for anchors.
+    Searched (STANDARD-v1.1.0.md, SECURITY.md, event and world-state schemas, evidence_store.py; then
+    skills/): redact, sensitive, PII.'
+  combined: 'Today: the stored value is observed in `after_create_message` for the `role: ''tool''` message,
+    which sees the content after every rewriting hook, and anchors are built from that. Argument values
+    are not copied into anchors unless the tool''s capability mapping marks them safe. The value of a
+    variable for which `await state.envType(name)` returns ''secret'' is never included; a hook cannot
+    read a tool''s `variables` declaration, so the names come from a configured list. Full records stay
+    in the key-value store and only `ref`, `kind` and `timestamp` go into `metadata.acs`. The specified
+    client API has no route for stored values, but a runtime MAY add routes and another package''s endpoint
+    on the same thread can expose them.'
+  see_also:
+  - tools-contracts#var-01
+  - models-context-memory-security#secrets-01
+- id: entity-01
+  relation: acs_only
+  acs:
+    concept: 'Identity resolution policy for world-state entities (§7): hierarchical entity ids, alias
+      matching by weighted feature scoring, and merge and split rules with hard constraints; with the
+      entity taxonomy, two of the five required canonical schema files of §6.1'
+    refs:
+    - 'spec/STANDARD-v1.1.0.md §7 Identity Resolution Policy (lines 1174-1203): §7.1 Entity Identification
+      (lines 1176-1182), §7.2 Alias Confidence Scoring (lines 1184-1193; quote at line 1186), §7.3 Merge/Split
+      Rules (lines 1195-1203)'
+    - spec/STANDARD-v1.1.0.md status header (lines 6-8), §1 Scope, item 5 (line 22), §6.1 Required Schema
+      Files (lines 1113 and 1115)
+    - schemas/identity_resolution_policy.yaml alias_confidence_scoring (lines 15-53), merge_rules (lines
+      54-68), split_rules (lines 69-81)
+    - schemas/entity_taxonomy.yaml id_convention (lines 12-13)
+    - schemas/workflow_catalog.yaml header comment (line 18), `integrate` step purpose (line 588)
+    - skills/integrate/SKILL.md step 3, 'Resolve entity identity' (lines 56-59)
+    quote: 'Alias matching MUST use weighted feature scoring:'
+  sa:
+    concept: 'None. SA 0.2.0 defines no entity records. The section''s words mean other things there:
+      ''identity'' is the user a request resolves to (Draft Users page), an ''alias'' is a second relationship
+      name for one child agent, and a ''namespace'' is a package''s definition scope or the TypeScript
+      `StandardAgentSpec` namespace'
+    refs:
+    - content/0.2.0 (whole tree), src/data, README.md and @standardagents/spec 0.45.10 index.d.ts searched;
+      terms in the explanation
+    - content/0.2.0/specification/users.md status banner (line 3), §1 Identity (lines 7-25; quote at line
+      9); Draft
+    - content/0.2.0/specification/subagents.md §2.3 Aliases (lines 60-74)
+    - content/0.2.0/distribution/packaging.md 'Namespace Isolation' (lines 217-219), 'Qualified Names'
+      (lines 232-236)
+    - content/0.2.0/specification/type-registry.md §1.1 Overview (lines 7-9)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 Runtime Semantics, items 1 and 4 (lines 350 and 353)
+    quote: A runtime MUST resolve every authenticated request to a stable user id.
+  explanation: 'ACS §7 governs records about things in the modelled world: an entity id has the form `namespace:type:id`,
+    alias matching uses weighted feature scoring, and a merge must not join conflicting unique identifiers
+    or incompatible types and is always recorded in lineage. SA 0.2.0 has no entity records, so nothing
+    corresponds. Its user identity maps to ACS §5.17 (models-context-memory-security#identity-01), not
+    to §7; its aliases are relationship names; its namespaces scope definitions. The Standard''s status
+    header says the reference validator and executor do not check §7. Searched (content/0.2.0, src/data,
+    README.md, index.d.ts): entity, entities, identity resolution, dedup, fuzzy, lineage (no match); alias,
+    merge, split, taxonomy, canonical (unrelated uses).'
+  combined: 'Identity resolution stays in package code. Entities are part of the world-state snapshot
+    that checkpoint-rollback-state#state-14 keeps in thread storage; of that storage SA requires of every
+    runtime that key-value entries persist and round-trip as JSON. The work belongs to a function tool
+    classified `integrate` (the ACS catalog composes identity resolution as `detect`, `classify`, `integrate`):
+    it applies identity_resolution_policy.yaml, compiled into the package as a constant (packaging-conformance-governance#pkg-06),
+    refuses a merge the hard constraints forbid, and records each merge or split in the snapshot''s lineage
+    and as an action record. ACS writes the id form two ways (`namespace:type:id` in §7.1, `<class>:<namespace>/<local_id>`
+    in entity_taxonomy.yaml); the package states which it uses. SA user ids, relationship names and qualified
+    names are not entity ids.'

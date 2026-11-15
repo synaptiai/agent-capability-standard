@@ -3,7 +3,8 @@
 MCP Capability-Aware Tools Demo
 
 Demonstrates registering MCP tools with capability metadata
-so that safety enforcement (checkpoints, rate limits) applies.
+so that safety enforcement (checkpoints, approval, rate limits) applies.
+A tool's flags are the stricter of its declaration and the ontology's.
 
 Usage:
     python examples/mcp_tools_demo.py
@@ -18,6 +19,30 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+
+async def approve(tool_name: str, tool_input: dict, context: object) -> object:
+    """Stand-in for the host's ``can_use_tool`` callback: approves every call.
+
+    A real host shows the person the tool and its input and returns their
+    decision. Without such a callback, a call whose capability requires
+    approval is denied with F502 (APPROVAL_REQUIRED).
+    """
+    try:
+        from claude_agent_sdk import PermissionResultAllow
+    except ImportError:
+        from grounded_agency import FallbackPermissionAllow
+
+        return FallbackPermissionAllow(updated_input=tool_input)
+    return PermissionResultAllow(updated_input=tool_input)
+
+
+def is_allowed(result: object) -> bool:
+    """An SDK permission result (``behavior``) or the fallback (``allowed``)."""
+    return (
+        getattr(result, "behavior", None) == "allow"
+        or getattr(result, "allowed", None) is True
+    )
 
 
 async def demo_dynamic_tool_registration():
@@ -49,26 +74,50 @@ async def demo_dynamic_tool_registration():
         requires_checkpoint=True,
     )
 
+    # A declaration weaker than the ontology has no effect: mutate is
+    # high-risk and needs a checkpoint whatever the tool says (W602).
     adapter.mapper.register_mcp_tool(
         tool_name="mcp__db__insert",
         capability_id="mutate",
-        risk="high",
+        risk="low",
+        requires_checkpoint=False,
     )
 
-    # Show mappings
+    # Show mappings. The last tool is not registered: it gets the
+    # strictest flags.
     tools = [
         "mcp__search__query",
         "mcp__deploy__push",
         "mcp__db__insert",
+        "mcp__other__tool",
     ]
 
-    print(f"{'Tool':<25} {'Capability':<12} {'Risk':<8} {'Checkpoint'}")
-    print("-" * 60)
+    print(
+        f"{'Tool':<25} {'Capability':<12} {'Risk':<8} {'Checkpoint':<11} {'Approval'}"
+    )
+    print("-" * 68)
 
     for tool_name in tools:
         mapping = adapter.mapper.map_tool(tool_name, {})
         checkpoint = "Yes" if mapping.requires_checkpoint else "No"
-        print(f"{tool_name:<25} {mapping.capability_id:<12} {mapping.risk:<8} {checkpoint}")
+        approval = "Yes" if mapping.requires_approval else "No"
+        print(
+            f"{tool_name:<25} {mapping.capability_id:<12} {mapping.risk:<8} "
+            f"{checkpoint:<11} {approval}"
+        )
+
+    print("\nDeclarations that had no effect:")
+    for warning in adapter.mapper.warnings:
+        print(
+            f"  {warning.code_str} {warning.name} "
+            f"({warning.location['tool']}): {warning.message}"
+        )
+
+    # A capability the ontology does not define is refused.
+    try:
+        adapter.mapper.register_mcp_tool("mcp__db__drop", capability_id="destroy")
+    except ValueError as exc:
+        print(f"\nRefused: {exc}")
 
 
 async def demo_permission_enforcement():
@@ -99,32 +148,19 @@ async def demo_permission_enforcement():
             requires_checkpoint=True,
         )
 
-        callback = adapter._make_permission_callback()
+        # execute requires approval, so the host's callback (here:
+        # approve) decides the call once the checkpoint rule is satisfied.
+        callback = adapter._make_permission_callback(approve)
 
         # Without checkpoint
         result = await callback("mcp__deploy__push", {}, None)
-        # SDK types use 'behavior' attr; fallback types use 'allowed'
-        behavior = getattr(result, "behavior", None)
-        if behavior is not None:
-            is_blocked = behavior != "allow"
-        else:
-            is_allowed = getattr(result, "allowed", None)
-            if is_allowed is None and isinstance(result, dict):
-                is_allowed = result.get("allowed")
-            is_blocked = not is_allowed
-        print(f"Without checkpoint: {'BLOCKED' if is_blocked else 'allowed'}")
+        print(f"Without checkpoint: {'allowed' if is_allowed(result) else 'BLOCKED'}")
+        print(f"  {getattr(result, 'message', '')}")
 
         # With checkpoint
         adapter.create_checkpoint(["*"], "Before deploy")
         result = await callback("mcp__deploy__push", {}, None)
-        behavior = getattr(result, "behavior", None)
-        if behavior is not None:
-            is_allowed = behavior == "allow"
-        else:
-            is_allowed = getattr(result, "allowed", None)
-            if is_allowed is None and isinstance(result, dict):
-                is_allowed = result.get("allowed")
-        print(f"With checkpoint: {'ALLOWED' if is_allowed else 'blocked'}")
+        print(f"With checkpoint: {'ALLOWED' if is_allowed(result) else 'blocked'}")
 
 
 async def demo_mcp_server_factory():
@@ -138,10 +174,9 @@ async def demo_mcp_server_factory():
     print("  from claude_agent_sdk import tool")
     print("  from grounded_agency import create_grounded_mcp_server")
     print()
-    print("  @tool")
-    print("  def search_docs(query: str) -> str:")
-    print('      """Search documentation."""')
-    print('      return "results..."')
+    print('  @tool("search_docs", "Search documentation.", {"query": str})')
+    print("  async def search_docs(args):")
+    print('      return {"content": [{"type": "text", "text": "results..."}]}')
     print()
     print("  search_docs.metadata = {")
     print('      "capability_id": "search",')
@@ -155,8 +190,9 @@ async def demo_mcp_server_factory():
     print("      adapter=adapter,")
     print("  )")
     print()
-    print("  # search_docs is now registered with capability metadata")
-    print("  # Safety enforcement applies automatically")
+    print("  # mcp__doc-tools__search_docs is now registered as 'search'.")
+    print("  # Metadata naming a capability the ontology does not define")
+    print("  # raises ValueError (V101) and no server is created.")
 
 
 async def main():

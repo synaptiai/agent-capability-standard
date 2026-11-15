@@ -1,5 +1,5 @@
 {
-  "description": "One checkpoint authorises one mutation; the second asks for a new one.",
+  "description": "One checkpoint authorises one mutation; the second asks for a new one. Neither mutate step has an approval field: each request asks a human in session, shows the step's resolved inputs in an array and has no expiry.",
   "catalog": {
     "w": {
       "goal": "g",
@@ -85,6 +85,9 @@
       "expect": {
         "kind": "RequestApproval",
         "step": 2,
+        "approver": {
+          "kind": "human"
+        },
         "mode": "in_session",
         "shown": [
           {
@@ -93,7 +96,8 @@
               "set": 1
             }
           }
-        ]
+        ],
+        "expires_at": null
       },
       "respond": {
         "kind": "Decision",
@@ -122,7 +126,20 @@
     {
       "expect": {
         "kind": "RequestApproval",
-        "step": 3
+        "step": 3,
+        "approver": {
+          "kind": "human"
+        },
+        "mode": "in_session",
+        "shown": [
+          {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          }
+        ],
+        "expires_at": null
       },
       "respond": {
         "kind": "Decision",

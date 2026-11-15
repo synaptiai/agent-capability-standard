@@ -39,6 +39,8 @@ python tools/validate_transform_refs.py
 python tools/validate_benchmark_deps.py
 python tools/sync_skill_schemas.py --check
 python scripts/gen_runtime_fixtures.py --check
+python scripts/gen_standard_agents_binding.py --check
+python scripts/gen_capability_json_schemas.py --check
 pytest tests/ -v --tb=short
 ```
 
@@ -49,6 +51,14 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --features python -- -D warnings
 cargo test
+```
+
+Standard Agents binding, from `examples/standard_agents/`:
+
+```bash
+npm ci
+npm run check
+npm test
 ```
 
 Documentation site, from `site/` (Node version in `site/.nvmrc`):
@@ -68,6 +78,9 @@ npm run check:axe
   Capabilities" in CLAUDE.md step by step.
 - After editing the ontology or the workflow catalog, run
   `python tools/sync_skill_schemas.py` to regenerate the skill-local copies.
+  After editing the ontology, also run
+  `python scripts/gen_standard_agents_binding.py` and
+  `python scripts/gen_capability_json_schemas.py`: CI checks their output.
 - No YAML file under `site/`. Every new public Markdown file needs a route in
   `site/src/lib/routes.ts` or an entry in its `EXCLUSIONS` list.
 - Do not type counts (capabilities, layers, workflows) into site code; the site

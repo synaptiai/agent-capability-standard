@@ -597,6 +597,29 @@ class CheckpointTracker:
             )
             return True, checkpoint.id
 
+    def can_reserve(self, holder: str | None = None) -> tuple[bool, str | None]:
+        """What ``validate_and_reserve(holder)`` would return, without
+        reserving: whether there is a valid checkpoint that no other holder
+        has reserved.
+
+        For a caller that cannot learn whether the call it checks for runs,
+        so that a reservation it took could be left behind; it takes the
+        checkpoint once the call has run.
+        """
+        with self._lock:
+            checkpoint = self._active_checkpoint
+            if checkpoint is None or not checkpoint.is_valid():
+                return False, None
+            r = self._reservation
+            if (
+                holder is not None
+                and r is not None
+                and r.holder == holder
+                and r.checkpoint_id == checkpoint.id
+            ):
+                return True, checkpoint.id
+            return (not self._reserved()), checkpoint.id
+
     def release_reservation(self, holder: str | None = None) -> bool:
         """End a reservation without consuming the checkpoint, e.g. after the
         mutation failed. With ``holder``, only that holder's reservation is

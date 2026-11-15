@@ -7,6 +7,10 @@
 # specialization. Capability domain parameters use modality-specific prefixes
 # (e.g., domain: image.object, domain: audio.speech).
 # See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
+#
+# Status: informative data for hosts and workflow authors. No shipped component
+# loads or selects this profile; see "Status of Domain Profiles" in
+# docs/domains/README.md.
 
 domain: multimodal
 version: "1.0.0"

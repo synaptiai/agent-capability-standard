@@ -1,0 +1,34 @@
+{
+  "name": "standardagent-acs-config-steward",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference binding of the Agent Capability Standard for the Standard Agent Specification, with a worked example",
+  "license": "Apache-2.0",
+  "keywords": [
+    "standardagent"
+  ],
+  "standardagent": {
+    "entryAgents": [
+      "config_steward"
+    ],
+    "threadEndpoints": [
+      "acs/approvals.get",
+      "acs/approvals.post"
+    ]
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@standardagents/openrouter": "0.45.10",
+    "@standardagents/spec": "0.45.10",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}

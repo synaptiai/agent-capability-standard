@@ -332,24 +332,33 @@ add(
     ["gate_fired", "rolled_back"],
 )
 
+
+def default_approval_request(step):
+    """What the executor asks for a `mutate()` step that needs approval and
+    has no `approval` field (core/src/exec/machine.rs): a human, in session,
+    shown the step's resolved inputs in an array, with no expiry. Fixture
+    matching is by subset, so `approver` is pinned to its `kind` and
+    tests/test_approval_vectors.py checks that it has no other key."""
+    return {
+        "kind": "RequestApproval",
+        "step": step,
+        "approver": {"kind": "human"},
+        "mode": "in_session",
+        "shown": [{"target": "config", "operation": {"set": 1}}],
+        "expires_at": None,
+    }
+
+
 add(
     "checkpoint_per_mutation",
-    "One checkpoint authorises one mutation; the second asks for a new one.",
+    "One checkpoint authorises one mutation; the second asks for a new one. Neither mutate step has an approval field: each request asks a human in session, shows the step's resolved inputs in an array and has no expiry.",
     {"w": wf([CP, POLICY, mutate("m1"), mutate("m2")])},
     [
         {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
         {"expect": inv("constrain"), "respond": out(compliant=True)},
-        {
-            "expect": {
-                "kind": "RequestApproval",
-                "step": 2,
-                "mode": "in_session",
-                "shown": [{"target": "config", "operation": {"set": 1}}],
-            },
-            "respond": approve("d1"),
-        },
+        {"expect": default_approval_request(2), "respond": approve("d1")},
         {"expect": inv("mutate", step=2), "respond": out(success=True)},
-        {"expect": {"kind": "RequestApproval", "step": 3}, "respond": approve("d2")},
+        {"expect": default_approval_request(3), "respond": approve("d2")},
         {
             "expect": {"kind": "CreateCheckpoint", "step": 3},
             "respond": {"kind": "Checkpoint", "checkpoint_id": "cp2"},

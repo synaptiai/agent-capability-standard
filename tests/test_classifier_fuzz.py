@@ -229,12 +229,13 @@ class TestKnownEvasionAttempts:
 
 
 class TestCompoundCommandClassification:
-    """Two-pass compound command classifier (Issue #72).
+    """Compound command classifier (Issue #72).
 
-    Compound commands (&&, ||, ;) are split into sub-commands.
-    Each sub-command is classified independently. If ALL are
-    low-risk, the compound is low-risk. If ANY is high-risk,
-    the compound is high-risk.
+    A command line is read with shell quoting and split into simple
+    commands at &&, ||, ;, | and &. Each is classified independently. If
+    ALL are low-risk, the line is low-risk. If ANY is high-risk, the line
+    is high-risk; so is a line with a redirection that writes, a subshell
+    or a quote it cannot read.
     """
 
     @pytest.mark.parametrize(
@@ -251,10 +252,9 @@ class TestCompoundCommandClassification:
             ("echo hello || rm -rf /", "high"),
             # Unknown commands in compound → high-risk (default-deny)
             ("make test && make deploy", "high"),
-            # Quoted strings with operators are split incorrectly (fail-safe).
-            # echo "a && b" becomes fragments ["echo \"a", "b\""] — neither
-            # matches the read-only allowlist, so the result is high-risk.
-            ('echo "a && b"', "high"),
+            # Quoted text is one word: the operator inside is data.
+            ('echo "a && b"', "low"),
+            ("grep -E 'a|b' file", "low"),
             # Multi-command compounds (3+ sub-commands)
             ("ls ; pwd ; cat foo", "low"),
             ("ls || pwd || cat foo", "low"),
@@ -262,6 +262,45 @@ class TestCompoundCommandClassification:
             # Single command regression tests
             ("ls", "low"),
             ("rm -rf /", "high"),
+            # Pipelines and background jobs: every command must be read-only.
+            ("cat file | grep x | head -5", "low"),
+            ("ls | sh", "high"),
+            ("echo rm -rf / | bash", "high"),
+            ("ls | xargs rm", "high"),
+            ("ls & rm -rf x", "high"),
+            # Any semicolon separates, with or without a space.
+            ("ls ;/bin/rm -rf x", "high"),
+            # A comment is not recognised: the rest is still checked.
+            ("ls # ; rm x", "high"),
+            # Redirections: only /dev/null and descriptor duplication are harmless.
+            ("ls 2>/dev/null", "low"),
+            ("ls 2>&1 | head", "low"),
+            ("sort < file", "low"),
+            ("echo x >~/.bashrc", "high"),
+            ("echo x >| file", "high"),
+            ("echo x 2>file", "high"),
+            ("cat <<EOF", "high"),
+            # Subshells and unbalanced quotes are not read.
+            ("(rm x)", "high"),
+            ("echo 'unterminated", "high"),
+            # Commands that run another command, or can write whatever their options.
+            ("env rm -rf /tmp/x", "high"),
+            ("sed -n 1p file", "high"),
+            ("awk '{print}' file", "high"),
+            # Allow-listed commands given an option that writes.
+            ("find . -name '*.py'", "low"),
+            ("find . -delete", "high"),
+            ("find . -exec rm {} ;", "high"),
+            ("sort -o out in", "high"),
+            ("uniq in out", "high"),
+            ("git diff --output=patch", "high"),
+            ("git branch", "low"),
+            ("git branch -a", "low"),
+            ("git branch new-branch", "high"),
+            ("git remote -v", "low"),
+            ("git remote set-url origin https://example.com/x.git", "high"),
+            # Names are case-sensitive: LS is not ls.
+            ("LS", "high"),
         ],
     )
     def test_compound_command_classification(

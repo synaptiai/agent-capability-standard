@@ -28,7 +28,7 @@ The framework provides three built-in telemetry sources that form the foundation
 
 | Telemetry Source | Data Collected | Collection Method | Storage |
 |-----------------|---------------|-------------------|---------|
-| **Audit log** (`.claude/audit.log`) | All skill invocations with timestamps | PostToolUse hook (`posttooluse_log_tool.sh`) | Append-only log file |
+| **Audit log** (`.claude/audit.log`) | Every tool call that runs: timestamp, tool name, skill name on a `Skill` call, digest of the tool input | PostToolUse hook (`posttooluse_log_tool.sh`) | Append-only log file |
 | **EvidenceStore** (`grounded_agency/state/evidence_store.py`) | Evidence anchors, confidence scores, provenance records | Programmatic via SDK adapter | In-memory with persistence API |
 | **CheckpointTracker** (`grounded_agency/state/checkpoint_tracker.py`) | Checkpoint creation, validation, expiry, rollback events | Programmatic via SDK adapter | Checkpoint metadata store |
 
@@ -54,6 +54,8 @@ Beyond existing telemetry, the following data points should be collected at the 
 | Domain profile override frequency | Count of risk threshold overrides per period | Weekly | Audit log + profile config |
 | Error and exception rate | Capability execution failures, timeout events | Continuous | SDK error handling |
 | Human escalation rate | % of actions requiring human intervention vs. automated | Daily | Audit log (inquire events) |
+
+The trust weight drift and profile override rows presuppose a host that applies a domain profile. No shipped component loads or selects a profile, applies its risk thresholds or records an override; `grounded_agency/trust.py` applies a profile's `trust_weights` only when the host passes them. A profile is informative data ([Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles)).
 
 ## 4. Monitoring Cadence
 
@@ -108,7 +110,7 @@ In addition to scheduled monitoring, the following events trigger immediate moni
 |-----|-----------|--------|-------------------|-----------------|
 | **Validator pass rate** | % of validation runs passing all checks | 100% | `tools/validate_*.py` outputs | < 100% |
 | **Profile configuration compliance** | % of deployed profiles matching approved configurations | 100% | Profile hash comparison | Any mismatch |
-| **Audit log completeness** | % of skill invocations captured in audit log | 100% | Audit log count vs. SDK invocation count | < 100% |
+| **Audit log completeness** | % of tool calls that ran captured in audit log | 100% | Audit log count vs. SDK invocation count | < 100% |
 | **Corrective action closure rate** | % of identified nonconformities resolved within SLA | ≥ 95% | AIMS-NCR-001 corrective action register | < 90% |
 
 ## 6. Escalation Levels
@@ -223,7 +225,7 @@ Monitoring Data → KPI Analysis → Threshold Check
 | Incident reports | 10 years (or longer per regulatory requirement) | Art. 62 records | Incident management system |
 | KPI trend data | 10 years | Performance baseline for drift detection | Time-series database |
 
-**Healthcare domain override:** `compliance.audit_retention_days: 2555` (7 years) is the minimum per healthcare profile; the 10-year EU AI Act requirement supersedes this where applicable. **Action required:** Deployers in high-risk contexts should override `audit_retention_days` to at least 3650 (10 years) in their deployed profile configuration to meet Art. 12(3) requirements.
+**Healthcare domain override:** `compliance.audit_retention_days: 2555` (7 years) is the minimum per healthcare profile; the 10-year EU AI Act requirement supersedes this where applicable. **Action required:** Deployers in high-risk contexts should override `audit_retention_days` to at least 3650 (10 years) in their deployed profile configuration to meet Art. 12(3) requirements. The value is a declaration: no shipped component reads `audit_retention_days` or keeps or deletes logs by it, so the deployer's log storage has to apply the period.
 
 ## 10. Plan Review and Update
 

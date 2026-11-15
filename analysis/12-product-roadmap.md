@@ -120,7 +120,7 @@ The plugin delivers safety enforcement through Claude Code hooks:
 | Hook | File | Enforcement |
 |------|------|-------------|
 | PreToolUse (Write/Edit) | `pretooluse_require_checkpoint.sh` | Requires checkpoint marker before mutations |
-| PostToolUse (Skill) | `posttooluse_log_tool.sh` | Logs skill invocations to `.claude/audit.log` |
+| PostToolUse and PostToolUseFailure (every tool) | `posttooluse_log_tool.sh` | Logs every tool call to `.claude/audit.log` |
 
 Configuration is managed through `hooks/hooks.json` with shell-based enforcement scripts.
 

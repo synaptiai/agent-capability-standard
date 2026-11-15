@@ -147,14 +147,18 @@ Similarly:
 
 ## Skill Structure
 
-Each skill follows the SKILL.md format:
+Each skill is a directory `skills/<name>/` that holds a `SKILL.md`: YAML
+frontmatter, then the instructions.
 
 ```markdown
 ---
 name: skill-name
 description: Brief description with trigger keywords
-layer: LAYER_NAME
+argument-hint: "[argument] [argument]"
+disable-model-invocation: false
+user-invocable: true
 allowed-tools: Read, Grep, ...
+context: fork
 agent: explore | general-purpose
 ---
 
@@ -173,6 +177,21 @@ YAML schema for outputs
 ## Safety Constraints
 Risk level and rules
 ```
+
+The eight frontmatter keys shown are in all 42 skills, and so are the five
+sections. Two more keys are in some skills only:
+
+| Key | In | What it holds |
+|-----|----|---------------|
+| `layer` | 13 skills: 12 capability skills and `discover-capabilities` | A cognitive layer. The other 29 skills have no such key, and neither does the template (`templates/SKILL_TEMPLATE_ENHANCED.md`). A capability's layer is the one the ontology gives it (`layers` in `schemas/capability_ontology.yaml`), which each capability skill's generated `schemas/output_schema.yaml` repeats; do not read it from the frontmatter |
+| `hooks` | 6 skills: `audit`, `checkpoint`, `persist`, `rollback`, `send`, `transform` | Claude Code hooks the skill declares |
+
+No skill declares a version.
+
+The frontmatter `name` is the directory name, except in two composed skills:
+`skills/capability-gap-analysis/` declares `gap-analysis-workflow`, and
+`skills/digital-twin-sync-loop/` declares `digital-twin-sync-workflow`. The
+[Composed Skills](#composed-skills-6) table lists the frontmatter names.
 
 ## Layer Execution Flow
 

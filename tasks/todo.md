@@ -1,3 +1,140 @@
+# Standard Agent Specification interoperability
+
+Branch `claude/gallant-hypatia-wbucn3`. Request: map the Agent Capability
+Standard against the Standard Agent Specification v0.2.0
+(standardagentspec.org, github.com/standardagents/spec at `faccc8b`), say how
+each can improve and how they combine, show a grounded agent built on their
+standard, write the integration document, and prepare upstream issues.
+
+- [x] 1. Read both specifications from source: their `content/0.2.0/` and the
+      published `@standardagents/spec` types (0.45.10); our STANDARD v1.1.0,
+      ontology, RFCs, executor and SDK
+- [x] 2. Map by concern (ten concerns). Each mapping read by a citation
+      reviewer and an implementability reviewer and reconciled with both;
+      then a consistency check across concerns, a coverage check of both
+      standards, and one merged, re-verified findings list per standard.
+      319 rows, published in `docs/research/analysis/standard_agents_mapping/`
+- [x] 3. Design the binding: annotation contract, in-tool enforcement,
+      checkpoint and approval records, evidence, workflow hosting
+- [x] 4. Reference binding and worked example in TypeScript
+      (`examples/standard_agents/`), type-checked against their published
+      types and tested against an in-memory thread
+- [x] 5. Integration document `docs/integrations/standard_agents.md` with a
+      site route; annotation schema under `schemas/interop/`
+- [x] 6. Upstream proposals in their house format, product-neutral
+      (`tasks/standard-agents-upstream/`). **Not filed:** this session has no
+      write access to `standardagents/spec`
+- [x] 7. Review: every quotation re-checked mechanically against the source;
+      repository validators, site build and tests pass
+- [x] 8. Review section below
+
+## Review
+
+**Delivered.**
+- `docs/integrations/standard_agents.md`: the mapping in eight tables, how to
+  build a grounded agent on Standard Agents today, what it guarantees and
+  what it does not, and the changes proposed to each standard.
+- `docs/research/analysis/standard_agents_mapping/`: 319 rows in ten files,
+  each with references and verbatim quotes from both sides; 83 findings about
+  the Standard Agent Specification and 64 about ACS; an index. A test keeps
+  them well formed.
+- `examples/standard_agents/`: the reference binding (`groundedTool`,
+  approval records and endpoints, audit hook, prompt and agent checks) with
+  43 tests (80 after round 2), the annotation schema, a generator with `--check`, a CI job.
+- `tasks/standard-agents-upstream/`: nine issue texts for `standardagents/spec`.
+
+**Checked.**
+- Each of the ten mappings had two independent reviews (citations;
+  implementability) and a reconciliation. A consistency check across concerns
+  changed the text of 43 rows and the relation of 16; a coverage check of
+  every section of both standards added two rows.
+- Every quotation in the rows, the findings, the document and the proposals
+  is compared mechanically with the source trees (the documents under review
+  excluded).
+- A separate fact-check of the document and the first six proposals
+  confirmed 340 statements and found 6 errors, 18 imprecise statements and 11
+  omissions, all corrected. Proposals 07 to 09 were drafted from verified
+  findings and each fact-checked adversarially (40 problems found, 39 fixed
+  and one judged outside the issue's scope).
+- The binding compiles against `@standardagents/spec` 0.45.10 under strict
+  TypeScript; its approval digest equals the reference executor's on ten
+  vectors (16 after round 2). The mapping changed three of its rules: a rejection cannot be lost
+  to a simultaneous approval (a test showed the old code lost it), a call is
+  recorded before its tool runs, and a checkpoint is valid for ten minutes at
+  most and never outside an execution.
+- Python suite, validators, site check, site tests and site build pass.
+
+**Not done.**
+- Upstream issues are drafted, not filed: this session has no write access to
+  `standardagents/spec`. File 06 first, then 01. Eleven further findings are
+  marked as candidates for issues and are not drafted.
+- The example has not run in a Standard Agents runtime.
+- Found on our side and not fixed here (the full list is
+  `findings_agent_capability_standard.yaml`; seven are rated blocker). The
+  one code defect among them: `ToolCapabilityMapper.register_mcp_tool`
+  accepts a declared risk below the ontology's (`mutate` with `risk="low"`
+  needs no checkpoint) and an unknown capability id, against STANDARD §5.2.1.
+  Fixed in round 2 (ACS-07).
+
+## Round 2: fix our side, pull request, merge
+
+Request: fix the issues identified on our end, file the upstream issues, open
+the pull request, review and fix, merge.
+
+Scope decision. Standard 1.1.0 is released, and GOVERNANCE routes normative
+changes through an RFC. So this round changes no normative requirement: it
+fixes implementation defects and inconsistencies, adds informative material
+(fixtures, renderings, guides), and puts the normative gaps a binding needs
+into a Draft RFC for Standard 1.2.0. Every finding gets a status in the
+published findings file: fixed, proposed (RFC) or open.
+
+- [x] A. Python SDK: mapper fails closed and cannot weaken ontology flags;
+      the adapter asks for the approval the ontology requires; deny reasons
+      carry the diagnostic code; tool input in anchors is opt-in (ACS-07, 03,
+      08, 23)
+- [x] B. Hooks and skills: blocking exit code in skill command hooks and in
+      SECURITY.md; audit hook logs every tool call with a digest, not the
+      arguments (ACS-36, 55, 23, 08)
+- [x] C. Interop data: `schemas/interop/standard_agents_mapping.yaml`; one
+      version table; OASF files name the two versions (ACS-43, 25)
+- [x] D. Documentation: profiles are informative and the compliance documents
+      say so; trace kinds listed and tested; delegation mapped to a host;
+      modality guide and glossary (ACS-05, 59, 60, 61, 62, 63)
+- [x] E. Conformance vectors: approval digests and trust scores, language
+      neutral, with a reference function (ACS-10, 11, 56)
+- [x] F. Strict JSON Schema 2020-12 rendering of the ontology's contracts,
+      generated and checked in CI (ACS-28)
+- [x] G. RFC-0005 (Draft): tool-calling hosts. Safety layer over tool calls,
+      checkpoint lifetime, approval for a call, tool binding record, evidence
+      anchor item (ACS-01, 02, 03, 06, 08, 38, 39, 41, 57)
+- [x] H. Upstream issues: re-verify against their latest commit; a script
+      that files them in order (this session cannot write to their repository)
+- [x] I. Pull request, review of the whole diff, fixes, CI green, merge
+
+**Round 2 review.** Three reviewers on a clean merge of the branch with main
+(CI and tests; documents against code; behaviour and security), each
+reporting only what it reproduced. Found and fixed:
+- The SDK's Bash classifier read only the first word of each `&&`/`||`/`;`
+  part: `env rm`, `ls | sh`, `ls & rm`, `>file` and `find -delete` passed as
+  read-only. It now reads the line with shell quoting and checks every
+  command; `sed`, `awk` and `env` left the allow-list.
+- The plugin checkpoint hook exited 5 (non-blocking) on a marker that was not
+  a JSON object; it now fails closed on any error.
+- The binding accepted approvals after the deadline, extending the window.
+- With a permission prompt tool, a denied call kept the checkpoint reserved.
+- persist's path block (`//`, `..`), send's address match (case, false
+  positives), the verifier's line splitting.
+- The figure-gap sweep failed on the SDK guide and the domains index: two
+  diagrams added, a third moved, the profile-status section tightened and
+  moved.
+- Documentation drift: the audit skill's procedure, the hooks README, mapping
+  rows and finding resolutions, W602 wording, AGENTS.md, a version literal in
+  a binding test, CHANGELOG upgrading notes.
+
+Checks: Python 2222 passed, mypy and ruff (CI paths) clean, all validators
+and generator checks pass, the binding's 80 tests pass, the site builds and
+its checks pass on the changed pages.
+
 # Issue #120: documentation site
 
 Epic: https://github.com/synaptiai/agent-capability-standard/issues/120

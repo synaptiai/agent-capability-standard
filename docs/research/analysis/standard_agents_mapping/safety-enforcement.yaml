@@ -1,0 +1,1418 @@
+# Safety flags, ontology edges and enforcement
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: safety-enforcement
+title: Safety flags, ontology edges and enforcement
+rows:
+- id: gate-01
+  relation: acs_only
+  acs:
+    concept: Denying a tool call before it runs. In ACS this is what the reference safety layers do (the
+      Claude Code PreToolUse hook, the SDK adapter's PreToolUse hook in strict mode, skill-scoped hooks);
+      the Standard itself names 'safety layers' once and does not define them
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (line 279)
+    - spec/SECURITY.md §5.1 Pre-Tool Use Hooks (lines 276-280)
+    - hooks/hooks.json PreToolUse matcher (lines 3-13)
+    - hooks/pretooluse_require_checkpoint.sh exit-code contract (lines 9-11)
+    - grounded_agency/adapter.py lines 525-641 (_make_pretooluse_safety_hook; strict-mode deny at lines
+      627-630; strict_mode default at line 178)
+    - skills/send/SKILL.md frontmatter hooks (lines 9-46)
+    quote: Validators, executors and safety layers MUST act on effective flags.
+  sa:
+    concept: '`tool_call_started`: the only tool hook that fires before execution, and observational.
+      `before_create_message` and the request-context hooks also run before a tool executes, but nothing
+      says they can stop or change a tool call'
+    refs:
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (lines 21-36)
+    - content/0.2.0/specification/hooks.md §5.1 tool_call_started (lines 367-384; quote at line 382)
+    - content/0.2.0/specification/hooks.md §4.1 before_create_message (lines 310-322)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 42-50), §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/providers.md §10.1 Overview (line 602)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6283-6315 (HookSignatures.tool_call_started), 6109-6112
+      (before_create_message comment), 6359 (HookName)'
+    quote: The return value **MUST** be ignored; the hook cannot modify the tool call.
+  explanation: 'SA 0.2.0 lists 14 thread hooks. Of the five tool hooks only `tool_call_started` fires
+    before execution: its return value MUST be ignored, and without a `progressArgument` its arguments
+    MAY be an incomplete JSON fragment. The text does not say the runtime waits for it. `before_create_message`
+    runs on the assistant message that carries the tool calls (Runtime §3, steps 4 and 5) and the request-context
+    hooks run before the model call; none is specified to stop a call the model returned. The published
+    `HookSignatures` has no pre-execution hook with a meaningful return. On the ACS side the SDK hook
+    denies a missing checkpoint only in strict mode (the default). Searched: before_tool, pre_tool, before_execute,
+    veto, deny, permission, guard, intercept, prevent, refus, authoriz, confirm, consent, approv, block:
+    no pre-execution veto hook found.'
+  combined: 'Not possible with a hook in SA 0.2.0. For a locally executed function tool, the decision
+    point every conforming runtime honours is the tool''s own `execute`: a wrapper around `defineTool()`
+    runs the ACS guard first and returns `{ status: ''error'', error }` without performing the effect;
+    Runtime §5.2 requires the error to be persisted as the tool result and the loop to continue. That
+    guard runs on every invocation path of the tool (model call, `invokeTool`, `queueTool`). A prompt
+    tool or an agent can be fronted by a guard tool that alone is offered to the model and reaches the
+    target through `state.invokeTool` under `uses`; this relies on runtimes not executing unoffered calls,
+    which 0.2.0 does not state. Provider-executed tools and injected lifecycle tools cannot be guarded.'
+  see_also:
+  - published-api-extension-points#tools-06
+  - checkpoint-rollback-state#state-07
+  - approval-human#approval-01
+  - workflow-execution#wf-14
+- id: gate-02
+  relation: partial
+  acs:
+    concept: 'Contract checks made before any host code runs: typed bindings between workflow steps, checked
+      by the validator (B201 to B203)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.5 Explicit Contracts (line 102)
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition, `input_schema` (line 118)
+    - spec/STANDARD-v1.1.0.md §5.5 Consumer Contract Checking (lines 335-361)
+    - schemas/capability_ontology.yaml lines 1102-1116 (mutate input_schema)
+    quote: '- Type mismatches MUST be detected at validation time'
+  sa:
+    concept: 'Built-in rejections a runtime applies before a tool or child runs, none of which evaluates
+      an author-supplied predicate at call time: argument validation, the `uses` list, undeclared or disabled
+      relationships, required subagent arguments, `maxInstances`, a terminated thread'
+    refs:
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 148-156; quote at line 152)
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (line 44), §3 Variable Declarations
+      (line 61)
+    - content/0.2.0/specification/prompts.md §5.2 Schema Usage (line 218)
+    - content/0.2.0/specification/subagents.md §1 (lines 38, 44), §3.3 (line 110), §5 Lifecycle Tools
+      (line 163), §5.1 (line 175)
+    - content/0.2.0/infrastructure/runtime.md §7.2 Lifecycle Tooling (line 131), §7.3 (lines 139-140),
+      §10 Termination Semantics (line 232)
+    - content/0.2.0/specification/threads.md §2.3 (line 238), §8 Lifecycle (line 473)
+    quote: '- validate tool args against the declared schema.'
+  explanation: 'SA''s pre-execution rejections are fixed and declarative. Implementations MUST validate
+    tool args against the declared schema (the text does not say a failing call is not executed) and prompt-tool
+    inputs against `requiredSchema`; MUST reject an invocation outside a supplied `uses` list; MUST reject
+    lifecycle invocations that target undeclared or disabled relationships; MUST reject creation when
+    required subagent arguments are missing. Creation beyond `maxInstances` MUST return tool errors in
+    Runtime §7.2 but SHOULD in Subagents §1, with create-or-continue for a blocking single-instance relationship.
+    A `required: true` variable ''means execution cannot continue until a value resolves'' (no uppercase
+    keyword). None of these evaluates a predicate the agent author supplies at call time, and none performs
+    ACS''s type checks between steps.'
+  combined: 'Keep each SA tool''s own `args` schema; do not replace it with the capability''s ontology
+    `input_schema`, which is generic (for `mutate`: a `target` string and an untyped `operation` object).
+    Bind by capability id and let the wrapper build the ACS-shaped input for its action record. For contract
+    checks between steps, write the sequence as an ACS workflow and validate it offline with the ACS validator
+    (edge-01, route 1). Do not use an `optional` relationship flag as an approval gate: the flag is not
+    single-use, `setEnv` propagates to active descendants, and Runtime §7.3 says only that runtimes ''should
+    evaluate relationship flags before exposing/executing them''.'
+- id: gate-03
+  relation: fits
+  acs:
+    concept: 'Closed composition: a workflow''s steps are a declared list of capabilities, each checked
+      against the ontology before the run (V101)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2 Step Definition (lines 232-243)
+    - spec/STANDARD-v1.1.0.md §9.2 Validation Errors, V101 (line 1276)
+    quote: '| V101 | UNKNOWN_CAPABILITY | Capability ID not found in ontology |'
+  sa:
+    concept: '`uses`: a runtime-enforced allow-list of the tools, prompts and agents a function tool may
+      invoke by name through `state.invokeTool()` or `state.queueTool()`. It bounds composition, not side
+      effects'
+    refs:
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (lines 36-44; quote at line 44)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 449-484 (DefineToolOptions.uses; comment at line
+      456), 359-399 (UsesConstrainedState, EmptyUsesState at line 391)'
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2913, 2919 (getChildThread and getParentThread return
+      ThreadState)'
+    quote: When a `uses` list is supplied, the runtime **MUST** reject an invocation of a target outside
+      the list.
+  explanation: '`uses` is a static, runtime-enforced bound on what one tool can invoke by name: an empty
+    list permits no targets, a packed tool MUST declare its targets, and when `uses` is omitted the restriction
+    does not apply. It says nothing about order or preconditions and does not apply to calls the model
+    makes. It does not make a tool non-mutating: the published `EmptyUsesState` removes only `queueTool`
+    and `invokeTool`, so file, key-value, environment, message and effect methods remain, and `getChildThread()`
+    returns an unconstrained `ThreadState`. Text and types differ on the failure shape: the text says
+    `invokeTool()` returns an error result and `queueTool()` throws; the type comment says unlisted calls
+    ''will throw an error''. Compile-time narrowing applies only when the list is written `as const`.'
+  combined: 'A function tool that implements an ACS workflow declares `uses` as exactly the tools bound
+    to its steps'' capabilities, so the runtime rejects any other target. It wraps each `invokeTool` call
+    in try/catch and also checks `status`, because text and types disagree on how a rejection surfaces.
+    `uses: []` on a tool bound to a non-mutating capability shows that it cannot invoke a mutating tool
+    by name; it shows nothing about the tool''s own code. Not stated in 0.2.0: whether lifecycle names
+    such as `subagent_create` are valid `uses` targets, which a guarded tool that spawns a child (scope-01)
+    would need.'
+  see_also:
+  - tools-contracts#cls-07
+  - tools-contracts#cls-13
+  - published-api-extension-points#thread-06
+  - published-api-extension-points#tools-05
+  - approval-human#approval-16
+  - workflow-execution#wf-20
+  - workflow-execution#wf-26
+  - multi-agent#coord-01
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-08
+- id: gate-04
+  relation: partial
+  acs:
+    concept: Read-only delegation (`delegate.read_only`, attested by the host as `effective.read_only`)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 917-922; quote at line 921)
+    quote: standard does not say how a host enforces `read_only`, only that
+  sa:
+    concept: 'What a prompt offers the model: the prompt `tools` list, `toolChoice: ''none''`, `hidden`
+      relationships that never appear in a model request, and the model definition''s `providerTools`'
+    refs:
+    - content/0.2.0/specification/prompts.md §3 Tool Configuration (lines 93-176), §4.2 Tool Choice Behavior
+      (lines 190-199)
+    - content/0.2.0/infrastructure/runtime.md §7.3 (line 143)
+    - content/0.2.0/specification/subagents.md §1 `hidden` (line 45), §5 Lifecycle Tools (line 163)
+    - content/0.2.0/specification/models.md §1.2 Optional Properties, `providerTools` (line 34)
+    - content/0.2.0/specification/agents.md §5 Tool Exposure (line 128)
+    - '@standardagents/spec 0.45.10 index.d.ts line 391 (EmptyUsesState)'
+    quote: '- `hidden`: the relationship stays declared and spawnable by runtime code (`invokeTool`/`queueTool`
+      from hooks, tools, and handlers), but the tool **MUST NOT** appear in any LLM request''s tool list'
+  explanation: 'An agent whose prompts offer only tools classified non-mutating exposes no mutating tool
+    to the model, and a hidden relationship MUST NOT appear in any request''s tool list. Whether the agent
+    is read-only also depends on the code of those tools and of its hooks, handlers and effects, which
+    all hold a full `ThreadState`; on provider tools named in the model definition; and on handoff agents
+    listed in `tools`. No sentence requires a runtime to refuse a model tool call that names a tool it
+    was not offered; for `toolChoice: ''none''` the requirement is placed on the LLM. Searched: tool list,
+    not in the, unlisted, unknown tool, no such tool, unrecogni, hallucinat, undeclared, not offered,
+    not exposed, invalid tool, nonexistent: no such sentence found.'
+  combined: 'Bind `read_only: true` to a child agent whose prompts offer only tools bound to capabilities
+    with `mutation: false`, whose tools declare `uses: []`, whose model lists no `providerTools`, whose
+    prompts list no handoff agents, and whose tool, hook, effect and handler code has been reviewed (or
+    lint-checked) to make no external write. Report `effective.read_only: true` only with that review;
+    otherwise report `false`. The attestation rests on the author''s review, not on an SA mechanism, and
+    on runtimes not executing unoffered tool calls, which 0.2.0 does not state.'
+  see_also:
+  - published-api-extension-points#thread-06
+  - multi-agent#coord-06
+  - multi-agent#coord-10
+  - models-context-memory-security#secrets-03
+- id: gate-05
+  relation: partial
+  acs:
+    concept: 'Workflow gates that stop a run before a step (`action: stop`, R403) and the recommended
+      `constrain` before acting (W601)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.6 Gate Semantics (lines 363-392)
+    - spec/STANDARD-v1.1.0.md §9.5 Runtime Errors, R403 (line 1312)
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 89-92)
+    - spec/STANDARD-v1.1.0.md §4.3, `soft_requires` row (line 169)
+    quote: '| R403 | GATE_BLOCKED | A gate stopped the run, or a condition was false with `skip_if_false:
+      false` |'
+  sa:
+    concept: 'Ways a hook can stop progress: request-context hooks as optional ''policy gates'', the undefined
+      `hook_blocked` stop reason, `before_create_message` failures, and `state.execution.stop()` called
+      from a hook'
+    refs:
+    - content/0.2.0/specification/hooks.md §3.3 prefilter_llm_history, Note (line 273)
+    - content/0.2.0/specification/hooks.md introduction (line 5), §2.1 (line 136), §4.1 (line 322)
+    - content/0.2.0/specification/threads/execution-state.md §3 Controlling Execution (lines 57-70), §4.2
+      Reasons (lines 105-114)
+    - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store, Runtime Semantics item 2 (line
+      351)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2199-2202 and 2229-2236 (run-state comments), 2609-2614
+      (ExecutionState.stop)'
+    quote: Runtimes may support request-context hooks acting as **policy gates** — refusing to let a request
+      proceed (for example, a moderation gate erroring out of `prefilter_llm_history`).
+  explanation: ACS gates belong to a declared workflow; a model-driven SA loop declares none. The nearest
+    SA analogue, a request-context hook that refuses a model request, rests on a note with a lowercase
+    'may' (SA states no keyword convention, so reading it as optional is an inference), acts before the
+    model has produced the call it would judge, and signals by 'erroring out' on a page that calls hook
+    failures non-fatal. `hook_blocked` occurs once in the text and once in the published types, which
+    also say 'a hook block'; nothing says what produces it. `before_create_message` failures SHOULD prevent
+    message creation. Every thread hook can call `state.execution.stop()`; its effect on tool calls already
+    returned in the same response is not stated.
+  combined: 'Workflow gates need no SA mechanism: the ACS executor evaluates them when SA code hosts it
+    (exec-01). For a coarse stop in a model-driven agent use a latch: the guard writes a key such as `acs.halted`
+    with `state.setValue`, and every grounded tool refuses while it is set (visibility across tools, hooks
+    and endpoints is a MUST of the key-value store). The guard may also call `state.execution.stop()`.
+    Treat a `prefilter_llm_history` policy gate only as an optional extra on runtimes that support it:
+    a conforming runtime may treat the thrown error as a non-fatal hook failure and send the request.'
+- id: ckpt-01
+  relation: acs_only
+  acs:
+    concept: A checkpoint before every `mutate`, `send` and `rollback` (the ontology's `requires` edges,
+      V102) and before any step whose effective `requires_checkpoint` is true (F501). Both are validator
+      diagnostics; at run time the reference executor asks the host for a checkpoint and raises F501 only
+      when none can be taken
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-88)
+    - spec/STANDARD-v1.1.0.md §4.4 Safety-Critical Capabilities (lines 182-188)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 279-284)
+    - spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (lines 681-682), §9.6 Safety Errors (lines
+      1321, 1323)
+    - spec/EDGE_TYPES.md §1 requires (lines 30-48)
+    - schemas/capability_ontology.yaml lines 1763-1771 (requires edges), 1095-1101 (mutate flags), 1247-1251
+      (rollback has no requires_checkpoint)
+    - core/src/validate/semantics.rs line 385; core/src/exec/machine.rs lines 644-677 (rollback, checkpoint),
+      2044-2056 (F501 when the host cannot take a checkpoint)
+    - spec/SECURITY.md §1.1 Mutation Requires Checkpoint (line 13)
+    quote: '- A `checkpoint` MUST run before every `mutate`, `send` and `rollback` (the'
+  sa:
+    concept: 'No counterpart. Nearest building blocks: the durable per-thread key-value store and the
+      thread file system'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store, Runtime Semantics (lines 348-358;
+      quote at line 350)
+    - content/0.2.0/specification/threads.md §7 Durable Key-Value Store (lines 408-445)
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (line 74)
+    quote: 1. Values **MUST** be persisted to durable per-thread storage that survives execution boundaries,
+      process restarts, and runtime redeploys.
+  explanation: 'SA has no concept of a restore point and no rule tying one tool to an earlier one. The
+    ACS rule differs by capability: `mutate` and `send` carry `requires_checkpoint`; `rollback` does not,
+    its rule is the `requires` edge (V102 statically), and at run time a rollback with no checkpoint is
+    F503, not F501. ACS''s layers also differ at run time: the plugin hook and the SDK adapter deny a
+    call that lacks a checkpoint, while the executor asks the host to create one. Searched content/0.2.0
+    and the published types: checkpoint, rollback, roll back, revert, backup, transaction, savepoint,
+    compensat: not found; ''rolled back'' once (handlers.md §5); ''undo'' only inside ''undocumented'';
+    restor: subagent arguments and, on the draft Users page, sockets.'
+  combined: 'Bind `checkpoint` to a function tool that saves what the agent''s mutating tools can change
+    and writes a marker with `state.setValue`; its scope is fixed in code, or recorded so that the guard
+    can check that it covers the call''s target. Tools bound to `mutate`, `send`, or a capability with
+    a raised `requires_checkpoint` return an error result carrying F501 when no valid marker exists; this
+    follows the ACS hooks (deny), not the executor (create). The tool bound to `rollback` returns F503
+    when no checkpoint record exists. Coverage: wrapped tools only; nothing for unwrapped tools, provider-executed
+    tools or tools inside packed children. The marker shows that code in this thread wrote the key, no
+    more (trust-01).'
+  see_also:
+  - published-api-extension-points#thread-05
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-05
+  - checkpoint-rollback-state#state-20
+  - approval-human#approval-09
+  - approval-human#approval-19
+- id: ckpt-02
+  relation: fits
+  acs:
+    concept: 'Checkpoint lifetime: one checkpoint authorises one step that requires one, is consumed when
+      that step is about to run, and no longer authorises anything after a wait or delay (W608); `rollback`
+      uses the latest checkpoint whether or not it was consumed'
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces', Checkpoints (lines 145-148; an informative
+      guide)
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 777-790, 792-802)
+    - core/src/exec/machine.rs lines 644-677 (rollback, checkpoint), 865-884 (invalidate_checkpoints)
+    - grounded_agency/adapter.py lines 543-546 (reservation by tool_use_id), 643-699 (consumed after a
+      successful call, released after an error)
+    - tests/conformance/runtime/checkpoint_per_mutation.json line 2 (an informative runtime fixture)
+    quote: '- **Checkpoints.** One checkpoint authorises one step that requires one,'
+  sa:
+    concept: 'Storage and ordering a marker can rely on: the durable per-thread key-value store, `execution.flowId`,
+      and sequential execution of model-issued tool calls within a thread'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store, Runtime Semantics (lines 348-358;
+      quote at line 351)
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88), §11 Concurrency (line 239)
+    - content/0.2.0/specification/threads/execution-state.md §1 Availability (lines 9-11), §2 Execution
+      Properties (line 23), §4.1 States (lines 99-103)
+    - content/0.2.0/specification/threads.md §1.2.1 Properties (line 49), §6.2 Per-Execution Context and
+      §6.3 (lines 372-406)
+    quote: 2. A value written by `setValue(key, value)` **MUST** be visible to every subsequent `getValue(key)`
+      on the same thread, across any execution context (tools, hooks, endpoints).
+  explanation: 'SA has no checkpoint concept but supplies what a marker needs. Tool calls MUST execute
+    sequentially and a thread MUST NOT execute concurrent flows, so check-then-consume inside one model-issued
+    call cannot race another model-issued call of that thread. Not covered: the same tool invoked from
+    a thread endpoint or an effect, or several `invokeTool` calls awaited together; `setValue` has no
+    compare-and-set, and the only cross-thread store with a serialisation guarantee is the user scope
+    of the draft Users page (edge-02). To mirror ACS''s rule that a wait invalidates checkpoints, the
+    marker is stamped with `execution.flowId`; that a later human turn starts a new flow is an inference.
+    `state.context` is no substitute: its sharing across tool calls is described without MUST.'
+  combined: 'Checkpoint tool: `state.setValue(''acs.checkpoint'', { checkpoint_id, flowId, valid: true,
+    scope })`, with `const flowId = state.execution?.flowId` (the property is typed `ExecutionState |
+    null`); deny when it is absent. Guard for `mutate`, `send` and a raised `requires_checkpoint`, in
+    the executor''s order: approval decision first, then require `valid` and the same `flowId`, write
+    `valid: false`, then perform the effect. This consumes before the effect, as the executor does; the
+    SDK adapter consumes only after a successful call. The rollback tool requires only that a checkpoint
+    record exists in the thread, with any `valid` and any `flowId`, and does not consume it. Wrap the
+    guard in try/catch and deny on error. A child thread needs its own checkpoint (scope-01).'
+  see_also:
+  - tools-contracts#cls-14
+  - tools-contracts#eff-01
+  - tools-contracts#io-07
+  - tools-contracts#rec-01
+  - published-api-extension-points#consume-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#thread-05
+  - published-api-extension-points#tools-04
+  - checkpoint-rollback-state#state-01
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-06
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-09
+  - checkpoint-rollback-state#state-16
+  - checkpoint-rollback-state#state-20
+  - approval-human#approval-04
+  - approval-human#approval-10
+  - approval-human#approval-13
+  - approval-human#approval-19
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#store-01
+  - workflow-execution#wf-06
+  - workflow-execution#wf-09
+  - multi-agent#coord-13
+  - packaging-conformance-governance#pkg-03
+- id: ckpt-03
+  relation: acs_only
+  acs:
+    concept: 'Rollback to the latest checkpoint: the `rollback` capability, the gate and failure-mode
+      action, and F503'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.6 Gate Semantics (lines 389-392)
+    - spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (line 681)
+    - spec/STANDARD-v1.1.0.md §9.6 Safety Errors, F503 (line 1323)
+    - core/src/exec/machine.rs lines 644-661 (rollback)
+    - core/src/exec/mod.rs lines 120-123 (Body::Rollback)
+    quote: '| `rollback` | Roll back to the latest checkpoint; with none, or if the host fails it, the
+      run ends F503 |'
+  sa:
+    concept: No restore operation; failures leave persisted state in place
+    refs:
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (lines 69-77; quote at line 74)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/hooks.md §5.4 after_tool_call_failure (lines 414-428), §6.3 HookToolResult
+      (lines 478-488)
+    quote: '- The inbound message stays persisted. Nothing is rolled back.'
+  explanation: 'SA defines no operation that restores thread messages, files, key-value data or external
+    state (search terms as in ckpt-01). A failed tool yields a persisted error result and the loop continues;
+    a failed handler turn leaves everything as it was. Rollback in an SA agent is therefore the agent
+    author''s code. A hook is the wrong trigger for automatic rollback: `after_tool_call_failure` receives
+    a `HookToolResult` without an error code, so it cannot tell a guard''s denial (nothing changed) from
+    a failed effect, and the text does not say whether a returned error result, as opposed to a thrown
+    exception, reaches that hook. ACS''s own tool-call layers do not roll back automatically either: automatic
+    rollback is a declared failure mode of a workflow step.'
+  combined: '`rollback` is an ordinary function tool that restores what its paired `checkpoint` tool saved
+    (thread files with `writeFile` and `unlinkFile`; external systems through their own APIs) and returns
+    an error result carrying F503 when there is no checkpoint or the restore fails. A restore made of
+    several file calls is not atomic, so a partial restore is reported as F503. If automatic rollback
+    is wanted, do it in the guard wrapper, which knows whether the inner `execute` started the effect,
+    and only for a failure after that point. Declared `action: rollback` failure modes are the executor''s
+    job when SA code hosts it (exec-01).'
+  see_also:
+  - published-api-extension-points#thread-03
+  - checkpoint-rollback-state#state-06
+  - checkpoint-rollback-state#state-16
+  - checkpoint-rollback-state#state-23
+  - checkpoint-rollback-state#state-26
+  - workflow-execution#wf-08
+- id: appr-01
+  relation: partial
+  acs:
+    concept: 'Approval before a step whose effective `requires_approval` is true (in the ontology: `execute`,
+      `mutate`, `send`): the decision is bound to a digest of the shown values, needs `min_approvers`
+      distinct approvers, expires and is single-use (F502)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (line 123)
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 804-902; validity rule at lines 831-833)
+    - spec/STANDARD-v1.1.0.md §9.6 Safety Errors, F502 (line 1322)
+    - 'schemas/capability_ontology.yaml lines 1058, 1101, 1139 (`requires_approval: true` on execute,
+      mutate, send)'
+    - core/src/exec/machine.rs lines 688-783 (approval; default shown values at lines 717-722), 983-1076
+      (decide)
+    - grounded_agency/capabilities/mapper.py lines 153-167 (ToolMapping has no approval field)
+    - skills/send/SKILL.md lines 10-31 (a model-judged PreToolUse prompt)
+    quote: '| `requires_approval` | boolean | No | Each use needs approval (default false) |'
+  sa:
+    concept: 'Human-in-the-loop composition: a child agent with a human side parks `awaiting_human`, and
+      the text names an approval gate as the canonical use. It defines the waiting state, not the decision'
+    refs:
+    - content/0.2.0/specification/agents.md §7 Human-in-the-Loop Composition (lines 169-191; quote at
+      line 189)
+    - content/0.2.0/specification/subagents.md §4.3 (line 153), §5 Lifecycle Tools (lines 157-163), §6.1
+      (line 191), §6.2 (lines 197-203)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 11-38)
+    - content/0.2.0/specification/threads/client-api.md §12 Sending a Message (lines 334-366)
+    - content/0.2.0/specification/threads/endpoints.md §4 Access and Authentication (lines 96-103)
+    quote: The runtime does not define who sees the parked session or through which interface they answer
+      — only the waiting state and its fulfillment.
+  explanation: 'SA defines the waiting state and its fulfilment; no tool is required to pass the gate.
+    A message-based answer cannot carry an ACS decision: parent traffic and the approver''s reply enter
+    the child on the same perspective (`role: ''user''`), the message record has no sender field, and
+    a client may send any of three roles, so an echoed digest shows that the child saw the request, not
+    who approved (inference from those facts). What can carry it is a thread endpoint, whose `auth.caller`
+    MUST be the authenticated identity (appr-03). On the ACS side the §5.14 protocol is enforced only
+    by the workflow executor; the plugin hook enforces none, the SDK adapter (since ACS-03 was fixed) obtains one host decision per call without the rest of §5.14, and the `send` skill adds
+    a model-judged prompt. Searched: approver, digest, expire, mandate, consent, confirmation, sign-off:
+    no decision record found.'
+  combined: Use a recorded decision, not a blocking wait. The guard computes the ACS digest of the shown
+    values (`[{action, capability, args}]`, so that a decision covers one tool and capability and not every tool that takes the same arguments; RFC-0005 5.2) and looks up
+    a decision with `state.getValue`. With none valid it writes a pending request (digest, shown values,
+    expiry, `min_approvers`), returns an error result carrying F502, and may call `state.execution.stop()`.
+    An authenticated thread endpoint records the decision for the request's current round (appr-03). On the retried call the guard requires
+    a digest match, enough distinct approvers, not expired and not used, goes on to the checkpoint check,
+    and marks the record used only when that check has passed as well, so that a call refused F501 leaves
+    the approval unused (published-api-extension-points#tools-04). A human-sided child stays useful for
+    asking inside the conversation; if used, declare it `hidden` with a handler-backed side A, and do
+    not treat its reply as the decision record.
+  see_also:
+  - published-api-extension-points#hitl-01
+  - published-api-extension-points#shown-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#thread-05
+  - published-api-extension-points#tools-04
+  - approval-human#approval-01
+  - approval-human#approval-03
+  - approval-human#approval-04
+  - approval-human#approval-06
+  - approval-human#approval-07
+  - approval-human#approval-19
+  - approval-human#approval-24
+  - approval-human#identity-01
+  - evidence-audit-observability#collect-02
+  - workflow-execution#wf-07
+  - workflow-execution#wf-09
+  - workflow-execution#wf-30
+  - multi-agent#coord-08
+  - multi-agent#coord-22
+  - models-context-memory-security#perceive-03
+- id: appr-02
+  relation: acs_only
+  acs:
+    concept: 'Attendance and the `when_unattended` plan: an unattended run that needs a human approval
+      fails (F502, the default), skips, or defers to a queue; W606 at validation'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.10 Triggers, `attendance` (line 577), W606 (lines 591-595)
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 825, 839-849)
+    - core/src/exec/machine.rs lines 785-822 (unattended)
+    quote: '| `when_unattended` | `fail` (default), `skip` or `defer_to_queue` |'
+  sa:
+    concept: No attendance concept. Runs can start with nobody present (a scheduled effect, a queued tool,
+      two prompt-backed sides), and execution state does not expose what started a run
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §2 Invocation Triggers (lines 27-38)
+    - content/0.2.0/specification/effects.md §3 Execution Semantics (lines 81-90; quote at line 90)
+    - content/0.2.0/specification/agents.md §1.2 SideConfig (line 29), §9.2 Worker / Reviewer (lines 221-256)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (lines 106, 159), §2.3 Environment Variable
+      Resolution (lines 220-225)
+    - content/0.2.0/specification/users.md status note (line 3), §2 (line 63), §7 Lifecycle Hooks (lines
+      213-214)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2578-2634 (ExecutionState)'
+    quote: Effect execution is runtime-managed and may occur after the invoking conversation has completed.
+  explanation: 'ACS attendance is a property of the trigger: `manual` is attended, `schedule` and `event`
+    are unattended, `invoke` inherits. SA lists four invocation triggers, but the published `ExecutionState`
+    exposes none of them, so tool code cannot tell which one started the run. A guard can observe weaker
+    signals: whether the agent has a human-backed side (`state.loadAgent(state.agentId)`), whether the
+    thread has a user (`state.user()` resolves `null` for user-less threads), and, on runtimes that implement
+    the draft Users page, whether a client is attached. None states that a person will answer. A run started
+    by a scheduled effect or `queueTool` corresponds to ACS''s `schedule` and `event` triggers. Searched
+    content/0.2.0 and the published types: attended, unattended, attendance: not found.'
+  combined: 'Decide attendance by configuration and default to unattended, which fails closed: treat a
+    run as attended only when the agent has a human-backed side and a flag in configuration bundled with
+    the package, or in `state.instanceEnv` where the runtime offers it, says so; `state.env()` is not
+    used, because a thread value overrides an `agent.env` default (approval-human#approval-21). With the
+    recorded decision of appr-01, `fail` is the F502 denial and `defer_to_queue` is the pending request
+    written with `state.setValue`; a person who approves later through the endpoint is ACS''s out-of-band
+    case. SA limit: code that starts an unattended run (an effect, an endpoint calling `queueTool`) has
+    no specified way to mark that run for the guard.'
+  see_also:
+  - published-api-extension-points#agent-01
+  - published-api-extension-points#options-01
+  - published-api-extension-points#thread-07
+  - approval-human#approval-11
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - approval-human#identity-04
+  - workflow-execution#wf-02
+  - workflow-execution#wf-13
+- id: appr-03
+  relation: partial
+  acs:
+    concept: 'Who approved: a valid decision needs at least `min_approvers` distinct approvers, and the
+      approvers are recorded on the action record'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 819, 831-833, 898-902; quote at line 832)
+    quote: canonical JSON of the shown values matches, at least `min_approvers` distinct approvers agree,
+      it
+  sa:
+    concept: 'Thread endpoint authentication context: `auth.caller` is the authenticated caller, the only
+      place in the frozen 0.2.0 pages where definition code learns who made a request'
+    refs:
+    - content/0.2.0/specification/threads/endpoints.md §3 Handler Signature (lines 58-69), §4 Access and
+      Authentication (lines 89-105; quote at line 100), §5 Endpoint Context (line 109)
+    - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store, Runtime Semantics item 2 (line
+      351)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 11-38)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5367-5372 (ThreadEndpointAuth), 5508 (ThreadEndpointHandler),
+      1892-1905 (ThreadUser)'
+    quote: '**MUST** be the authenticated identity when the request presented credentials the runtime
+      verified, and `null` otherwise.'
+  explanation: 'For an endpoint with the default `authenticated` access level the runtime MUST authenticate
+    the request and enforce its thread access policy before invoking the handler, and `caller` is always
+    non-null. The text separates `caller` (who is making the request) from the thread''s owner. A decision
+    that such an endpoint writes with `state.setValue` is visible to a tool''s later `getValue` by a MUST
+    of the key-value store. This gives ACS §5.14 a verifiable approver and a count of distinct approvers,
+    which a human-side message cannot give (the message record has no sender field). Not provided by SA:
+    how the caller was authenticated, which callers the runtime''s thread access policy admits, and any
+    notion of approval, digest, expiry or single use; those stay in the binding''s code.'
+  combined: 'A thread endpoint with `authenticated` access (for example a file `approve.post.ts`) reads
+    `{ digest, round, decision }`, refuses a round that has closed (409), rejects a digest that differs from the pending request the guard wrote, de-duplicates
+    approvers by `auth.caller.id`, may check `auth.caller.roles` against the ACS approver role, and writes
+    the decision under a key of its own (the request''s digest, its round and `auth.caller.id`) with `state.setValue`,
+    a rejection as an idempotent flag, so that two approvers deciding at once cannot overwrite each other:
+    the store has no conditional write and the text does not serialise endpoint requests (approval-human#approval-04).
+    The guard reads it on the retried tool call (appr-01). The endpoint runs with `state.execution` null:
+    it records and returns, and does not perform the effect. Record `auth.caller.id` as the ACS approver.
+    State that admission to the endpoint is governed by the runtime''s thread access policy, which SA
+    leaves to the runtime.'
+  see_also:
+  - published-api-extension-points#consume-01
+  - published-api-extension-points#endpoint-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#user-01
+  - approval-human#approval-04
+  - approval-human#approval-10
+  - approval-human#approval-13
+  - approval-human#approval-17
+  - approval-human#approval-19
+  - approval-human#identity-02
+  - approval-human#identity-03
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - workflow-execution#wf-09
+  - models-context-memory-security#identity-01
+  - models-context-memory-security#identity-02
+  - models-context-memory-security#perceive-03
+- id: flags-01
+  relation: fits
+  acs:
+    concept: 'Per-capability safety metadata: `risk`, `mutation`, `requires_checkpoint`, `requires_approval`,
+      resolved to effective flags that safety layers MUST act on'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (lines 109-124; quote at line 120)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 270-284)
+    - spec/STANDARD-v1.1.0.md §2 Terms, Effective flag (line 67)
+    - schemas/capability_ontology.yaml (flags on each capability node, for example lines 1095-1101)
+    - schemas/interop/standard_agents_annotation.schema.json (the `acs` annotation key; added with the
+      reference binding after this mapping was drafted, cited only for the key name)
+    quote: '| `risk` | enum | No | `low` (default), `medium`, `high` |'
+  sa:
+    concept: 'Tool `annotations`: implementation-specific hints with no normative meaning, available on
+      function tools only'
+    refs:
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146; quote at line 146)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 156)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, Resource Loading (lines 100-113)
+    - content/0.2.0/distribution/packaging.md Visibility Rules (lines 221-230)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 412 (ToolAnnotations), 424 (DefineToolOptions.annotations)'
+    quote: Annotations **MUST NOT** change argument validation, execution, the tool's results, or what
+      is sent to the model.
+  explanation: 'SA tool definitions have no field for risk, side effects or approval. `annotations` is
+    the only open metadata slot: `defineTool()` MUST return it unchanged, a runtime MUST ignore keys it
+    does not understand, and annotations MUST NOT change execution. So annotations may publish ACS flags,
+    but an SA runtime must not act on them; enforcement has to be author-supplied code generated from
+    the same source. Applying ACS §5.2.1 to a tool-level layer is an inference: the Standard defines the
+    effective flag for a workflow step. No `ThreadState` method returns a tool definition; a hook in the
+    same project could import the tool module (inference), but not a package''s internal tools. Searched:
+    risk, destructive, read-only, side effect, mutat, idempoten, dangerous, irreversib, hint, loadTool,
+    getToolNames: no such field or method found.'
+  combined: 'Declare the binding under the `acs` annotation key, for example `annotations: { acs: { capability:
+    ''mutate'', ... } }`, as a declaration only. The same wrapper that writes it closes over the capability''s
+    flags and enforces them in `execute`. Flags come from the ontology by capability id; a tool-level
+    value may only be stricter (ACS §5.2.1), so the wrapper computes the effective flags itself. Limits
+    to state: only function tools carry annotations, so prompt tools, handoff agents and lifecycle tools
+    cannot be declared this way; a lint must compare the enforced flags with the annotation; and nothing
+    checks the author''s choice of capability id (binding a writing tool to `retrieve` weakens it silently).'
+  see_also:
+  - tools-contracts#cls-02
+  - tools-contracts#cls-03
+  - tools-contracts#dom-01
+  - published-api-extension-points#tools-02
+  - published-api-extension-points#tools-03
+  - approval-human#approval-02
+  - packaging-conformance-governance#pkg-03
+  - packaging-conformance-governance#ver-02
+  - models-context-memory-security#profile-06
+- id: flags-02
+  relation: partial
+  acs:
+    concept: 'Effective flags: a declaration may strengthen but never weaken the ontology''s safety flags
+      (W602)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (line 93)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 272-277)
+    - spec/STANDARD-v1.1.0.md §9.7 Warnings, W602 (line 1332)
+    - grounded_agency/capabilities/mapper.py lines 304-337 (register_mcp_tool takes caller-chosen flags)
+    quote: '- A workflow cannot weaken a capability''s safety flags (§5.2.1)'
+  sa:
+    concept: 'Hook scoping: a non-empty prompt `hooks` array replaces the agent''s hooks for that prompt;
+      only `parentHooks` are mandatory and fail closed'
+    refs:
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 70-100)
+    - content/0.2.0/specification/prompts.md §8 Hook Scoping (lines 258-277; quote at line 272)
+    - content/0.2.0/specification/agents.md §6 Required Parent Hooks (lines 132-167)
+    - content/0.2.0/infrastructure/runtime.md §7.3.1 Required Parent-Hook Composition (lines 147-163)
+    quote: '- When `hooks` is non-empty, only those hooks form the prompt base set'
+  explanation: 'In SA the hooks that run are chosen per prompt: a non-empty prompt `hooks` array is the
+    base set and the agent''s `hooks` array is the fallback (it also serves at-rest operations), so adding
+    one hook to a prompt drops every agent-level hook for that prompt, including an audit or redaction
+    hook. The one mandatory mechanism is `parentHooks`: composing a child MUST activate its required hooks
+    on the direct parent for every prompt on either side, and a missing, invalid or unloadable hook MUST
+    fail composition closed. An in-tool guard cannot be dropped by a prompt, so a no-weakening rule can
+    hold for wrapped tools, provided the wrapper computes effective flags itself. ACS''s own Python mapper
+    does not: `register_mcp_tool` accepts caller-chosen flags without combining them with the ontology''s.'
+  combined: 'Keep enforcement in the tool. For audit hooks that must not be dropped, the primary route
+    is to list them in every prompt''s `hooks` and lint for it. A workaround uses composition: a carrier
+    agent with `exposeAsTool: true` (the text grants `parentHooks` to exposed agents, and the published
+    validator reports `agent_parent_hooks_invalid` otherwise), a `toolDescription`, and `parentHooks:
+    [{ hook, reason, stage }]` naming a thread-scoped hook in the carrier''s own package namespace, composed
+    as `{ agent, hidden: true }`. Composition then activates the hook for every prompt of the parent and
+    fails closed when it cannot load; composition UIs MUST disclose the hook ID, reason and stage. The
+    text does not describe this use, and such a hook still fails non-fatally.'
+  see_also:
+  - published-api-extension-points#hooks-01
+  - published-api-extension-points#hooks-02
+  - evidence-audit-observability#action-01
+  - evidence-audit-observability#audit-04
+  - evidence-audit-observability#collect-01
+  - evidence-audit-observability#collect-03
+  - multi-agent#coord-18
+  - packaging-conformance-governance#pkg-01
+  - models-context-memory-security#hooks-01
+  - models-context-memory-security#security-02
+- id: flags-03
+  relation: acs_only
+  acs:
+    concept: '`mutation_overridable`: the one case in which a declaration lowers an ontology flag. A step
+      may declare `mutation: false` on a capability so marked (in the reference ontology, `audit`), and
+      an ontology that sets the marker outside the allowed cases MUST be rejected when loaded'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition (line 124)
+    - spec/STANDARD-v1.1.0.md §4.4 Safety-Critical Capabilities (lines 191-195)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 272-277; quote at line 277)
+    - schemas/capability_ontology.yaml nodes[id=audit] (lines 1336-1345)
+    - core/src/ontology.rs load-time check (lines 142-154); core/src/validate/semantics.rs W602 condition
+      (lines 266-268)
+    - examples/standard_agents/src/acs/ontology.ts effectiveFlags; examples/standard_agents/src/acs/grounded.ts;
+      examples/standard_agents/test/grounded.test.ts
+    quote: '`mutation: false` on a `mutation_overridable` capability (§4.4) is honoured.'
+  sa:
+    concept: 'None for the flag or the exception. The premise of the exception, a capability whose writes
+      are append-only, has no SA storage primitive: definition code can replace or delete thread key-value
+      entries, files and messages. A tool-level declaration travels in `annotations`, which must not affect
+      execution'
+    refs:
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146), §9 Conformance Notes (line
+      156)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14)
+      §14.1 Runtime Semantics, item 6 (line 355)
+    - 'content/0.2.0/specification/threads.md §1.2.2 Methods (line 65: `deleteMessage`; line 76: `unlinkFile`),
+      §7.2 Semantics (line 432)'
+    - 'content/0.2.0/specification/threads/code-execution.md §2.2 CodeExecution Handle (line 54: the one
+      occurrence of ''append-only'')'
+    - 'content/0.2.0/specification/providers.md §1.3 ''Config Slots'' (lines 112-134), §11 TypeScript
+      Reference (line 707): `overridable` on a provider config slot, unrelated'
+    quote: '`setValue(key, null)` and `setValue(key, undefined)` **MUST** delete the key so that subsequent
+      `getValue(key)` calls return `null`.'
+  explanation: 'safety-enforcement#flags-01 and safety-enforcement#flags-02 give the rule that a declaration
+    may only be stricter than the ontology. §5.2.1 has one exception: `mutation: false` is honoured, without
+    W602, on a capability marked `mutation_overridable`. §4.4 permits the marker only where `mutation`
+    is true, `risk` is low and neither a checkpoint nor approval is required, and ties it to append-only
+    writes. SA 0.2.0 has no flag to weaken and no append-only store: `setValue(key, null)` deletes a key,
+    `unlinkFile` a file, `deleteMessage` a message. SA''s `overridable` is a provider config-slot option.
+    Searched (content/0.2.0, index.d.ts): append-only (one hit, the sandbox `reports` view), immutable
+    (thread metadata, types only), write-once, tamper (no match).'
+  combined: 'A tool classified `audit` may declare `mutation: false`. The reference binding''s `effectiveFlags`
+    accepts that declaration only for a capability its ontology table marks `mutation_overridable`; on
+    any other mutating capability it reports W602 and `groundedTool` throws. Whatever builds that table
+    from an ontology applies the §4.4 load-time rule (inference: it is the loader). The value is published
+    in `annotations.acs`; an SA runtime MUST preserve annotations and never let them affect execution.
+    In the binding `mutation` gates nothing: of the four flags its wrapper acts on `requires_checkpoint`
+    and `requires_approval`, and §4.4 keeps the marker off capabilities that carry either. Append-only
+    is the tool''s own discipline; other code on the thread can rewrite its entries (evidence-audit-observability#audit-02).'
+- id: edge-01
+  relation: fits
+  acs:
+    concept: 'Ordering edges checked over a workflow''s declared step list: `requires` (some `from` runs
+      before every `to`), `precedes` (only when both are present), `soft_requires` (a warning)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 145-180; quote at line 167)
+    - spec/EDGE_TYPES.md §1 requires (lines 30-48), §2 soft_requires (lines 52-80), §4 precedes (lines
+      104-134)
+    - 'schemas/capability_ontology.yaml edges: 3 `requires`, all from `checkpoint` (lines 1763-1771);
+      18 `precedes`; 10 `soft_requires`'
+    quote: '| `requires` | For every `to` step, some `from` step runs before it | V102 per `to` step |'
+  sa:
+    concept: 'Step cycle: the model chooses the tool calls; the runtime executes them one at a time in
+      the returned order and places no constraint on which tool may follow which'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 40-50), §5.1 Ordering (line 88)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 152-155)
+    - content/0.2.0/specification/subagents.md §5 Lifecycle Tools (line 159)
+    quote: Tool calls **MUST** execute sequentially in the returned order.
+  explanation: 'SA fixes how returned calls are executed (in order, results persisted before advancing),
+    not which tool may follow which; the one ordering statement found is guidance to the model (injected
+    descriptions SHOULD direct it to call `subagents` before `subagent_create`). ACS defines its edges
+    over a step list validated before the run, not over a model-driven loop. Read online, `requires` becomes
+    a prefix check at each `to` call. `precedes` applies only ''If the workflow contains both'', so it
+    is decidable only when a `from` call follows a `to` call that had no earlier `from`; refusing that
+    late call would stop the wrong call, so reporting is the only useful action (reasoning from the rule,
+    not text). Searched: prerequisite, precondition, depends on, must be called before, only after, must
+    precede: no ordering constraint found.'
+  combined: 'Route 1, deterministic: write the sequence as an ACS workflow, validate it at build time
+    with the ACS validator, and run its steps from one function tool or handler in that order, with `uses`
+    listing the step tools; the model cannot reorder it. Route 2, model-driven: the ontology''s three
+    `requires` edges all start at `checkpoint`, so enforce a valid marker before `mutate` and `send` and
+    an existing checkpoint record before `rollback` (ckpt-01, ckpt-02). Write each grounded call''s capability
+    into its audit record; report a `precedes` violation when a `from` call follows an unpreceded `to`,
+    and W601 for a `to` with no `soft_requires` source earlier in the flow. `execution.messageHistory`
+    can serve as the trace within one execution (trace-01).'
+- id: edge-02
+  relation: partial
+  acs:
+    concept: '`conflicts_with`: two capabilities never share a `parallel_group` (F504); in the ontology,
+      rollback/persist and mutate/rollback'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.3 (line 170), §5.2 `parallel_group` (line 256)
+    - spec/EDGE_TYPES.md §5 conflicts_with (lines 138-158; quote at line 143)
+    - schemas/capability_ontology.yaml lines 2021-2036 (conflicts_with edges)
+    - 'core/src/exec/ (searched for `parallel`: no match)'
+    quote: '- The `from` and `to` capabilities MUST NOT share a `parallel_group`'
+  sa:
+    concept: No concurrent execution of model-issued tool calls inside a thread; `parallelToolCalls` is
+      a provider option; cross-thread concurrency is allowed, with no exclusion primitive in the frozen
+      pages
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88), §11 Concurrency (line 239), §16
+      Conformance Summary (lines 384-388)
+    - content/0.2.0/specification/prompts.md §1.2 Optional Properties (lines 28, 38)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 153)
+    - content/0.2.0/specification/effects.md §1.1 Purpose (line 13)
+    - content/0.2.0/specification/users.md status note (line 3), §2.1 Serialization (line 79)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, User identity (line 159)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4341-4346 (parallelToolCalls), 1561-1583 (UserHandle),
+      3231 (ThreadState.user)'
+    quote: A single thread **MUST NOT** execute multiple concurrent flows. Cross-thread concurrency is
+      allowed.
+  explanation: 'For model-issued tool calls the ACS rule holds inside one SA thread: calls MUST execute
+    sequentially in the returned order and a thread MUST NOT execute concurrent flows. The table gloss
+    of `parallelToolCalls` (''Allow parallel tool execution'') is in tension with that; the one normative
+    sentence says an explicit value ''controls the provider option''. Not serialised by the text: an endpoint
+    or effect acting during an execution, a tool awaiting several `invokeTool` calls together, and other
+    threads. The frozen pages have no cross-thread exclusion; the draft Users page requires per-user serialised
+    endpoint execution, which the published types expose to a thread through `state.user()` (typed `ThreadUser`
+    on the frozen Threads page, `UserHandle` in the types). Searched: lock, mutex, semaphore, serializ,
+    lease, atomic: none in the frozen pages.'
+  combined: 'Model-issued calls of one thread need nothing. For the other in-thread paths (endpoints,
+    effects, concurrent `invokeTool`), a grounded mutating or rollback tool takes a lease: best effort
+    in the thread''s key-value store, which has no compare-and-set, or in the external system. Across
+    threads only an external lock works on the frozen surface; on a runtime that implements the draft
+    Users page, a user endpoint called through the user handle''s `call()` can hold the lease for the
+    threads of one user. Setting `parallelToolCalls: false` on prompts that hold mutating tools lets the
+    model see each result before it chooses its next call; it is an optional recommendation and a provider
+    option, not something the guard depends on.'
+  see_also:
+  - published-api-extension-points#consume-01
+  - published-api-extension-points#thread-01
+  - checkpoint-rollback-state#state-09
+  - checkpoint-rollback-state#state-21
+  - approval-human#approval-04
+  - approval-human#approval-10
+  - workflow-execution#wf-06
+  - multi-agent#coord-13
+- id: trace-01
+  relation: fits
+  acs:
+    concept: '''Runs before'': the order relation the edge rules are evaluated over, defined on a workflow''s
+      step list'
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms, Runs before (line 68)
+    - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 159-161)
+    quote: '| **Runs before** | Step A runs before step B when A comes earlier in the step list and is
+      not in B''s parallel group (§4.3) |'
+  sa:
+    concept: '`execution.messageHistory`: the live persisted history of the current execution, including
+      the assistant message with its `tool_calls` (persisted before the calls execute) and tool results
+      with `tool_status`'
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (line 30), §2.2 Live
+      execution history (lines 43-49; quote at line 45)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 17-19), §3.3 Same-execution
+      visibility (lines 132-136), §5 and §6 (lines 169-186)
+    - content/0.2.0/infrastructure/runtime.md §3 Step Cycle (lines 47-49)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2593-2598 (messageHistory comment), 4416-4428 (PromptDefinition.historyLimit)'
+    quote: '`execution.messageHistory` **MUST** represent live chronological persisted execution history.'
+  explanation: 'SA already keeps a trace a guard can read: the step cycle persists the assistant response
+    before executing its tool calls, each `tool_calls` entry carries an id, a name and arguments, and
+    tool results carry `tool_status`. Within one execution this supports an online `requires` prefix check
+    without a wrapper-written trace, and lets a tool find candidate ids for the call it is serving (by
+    inference; it fails for two identical calls in one response and for `invokeTool` or `queueTool` calls).
+    Limits: one execution only; records can be changed by `updateMessage` and `deleteMessage`; and the
+    published types say that with a prompt''s `historyLimit`, which does not occur in the 0.2.0 text,
+    the history is only its newest window.'
+  combined: 'Use `state.execution?.messageHistory` as a convenience trace for reporting `precedes` and
+    `soft_requires` findings within one execution. Do not base a denial on it: checkpoint and approval
+    decisions rest on the guard''s own records (ckpt-02, appr-01), which also span executions. Where a
+    wider scope matters (a session, or the thread''s lifetime), the wrapper keeps its own trace, writing
+    each grounded call''s capability under one key per call.'
+- id: hook-01
+  relation: partial
+  acs:
+    concept: 'Fail-safe evaluation: an erroring gate fires (except an `end` gate), an erroring condition
+      is false, an erroring failure-mode `when` does not fire; the strict-mode SDK adapter denies on internal
+      error'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.8.2 Evaluation (lines 491-495; quote at line 492)
+    - core/src/exec/machine.rs lines 614-627 (gate_fires)
+    - grounded_agency/adapter.py lines 590-596 (an unclassifiable tool is treated as a high-risk mutation),
+      627-637 (deny in strict mode)
+    - grounded_agency/capabilities/mapper.py lines 369-375 (an unknown tool name is mapped to `observe`)
+    quote: 'trace. Its effect is fail-safe by site: a **gate** whose `when` errors'
+  sa:
+    concept: Hook failures are non-fatal to the decorated turn; per-hook failure rules are SHOULD-level
+      for message hooks and absent for tool hooks; only composition fails closed by a MUST
+    refs:
+    - content/0.2.0/specification/hooks.md introduction (line 5)
+    - content/0.2.0/specification/hooks.md §1.2 (lines 65-68), §1.3 (lines 96-97)
+    - content/0.2.0/specification/hooks.md §4.1 to §4.4 (lines 322, 335, 350, 363), §5.4 (line 428)
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (line 77)
+    - content/0.2.0/getting-started/examples.md §3 Hooks (line 550)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6109-6112 (before_create_message comment)'
+    quote: its failures are non-fatal to the decorated turn
+  explanation: 'The defaults point in opposite directions. In SA, `before_create_message` and `before_update_message`
+    failures SHOULD prevent the creation or update; failures of the two `after_` message hooks SHOULD
+    NOT affect the message; for the five tool hooks the text gives no outcome for a throw or a timeout,
+    so by the page''s general statement such a failure is non-fatal (an ACS check placed there would fail
+    open; inference). Composition is the exception: a missing required parent hook MUST fail closed. The
+    published types add that a runtime can still insert a tool result message when `before_create_message`
+    throws. ACS''s own layers are not uniformly fail-safe: the SDK mapper classifies an unknown tool name
+    as non-mutating `observe`, and non-strict mode only logs a missing checkpoint.'
+  combined: 'Never put a check whose failure must block into a hook. Put it in the tool''s `execute`,
+    perform the effect as the last thing the function does, catch the guard''s own errors, and return
+    an error result (deny) on any internal failure. A throw from `execute` before the effect is covered
+    by the same MUST as a returned error: tool errors are persisted as tool results and do not crash the
+    loop.'
+  see_also:
+  - published-api-extension-points#hooks-02
+  - evidence-audit-observability#action-01
+  - evidence-audit-observability#audit-04
+  - evidence-audit-observability#collect-01
+  - evidence-audit-observability#collect-03
+  - models-context-memory-security#security-02
+- id: hook-02
+  relation: partial
+  acs:
+    concept: 'Observing tool use for an audit trail: the plugin''s PostToolUse log of `Skill` invocations,
+      skill-scoped PostToolUse logs, the SDK adapter''s evidence collector, and workflow action records'
+    refs:
+    - hooks/hooks.json PostToolUse matcher (lines 14-24)
+    - hooks/posttooluse_log_tool.sh (lines 1-12; quote at line 2)
+    - spec/SECURITY.md §5.2 Post-Tool Use Hooks (lines 282-286)
+    - grounded_agency/adapter.py lines 335-339 (evidence collector, no matcher), 349-352 (a separate failure
+      hook)
+    - skills/send/SKILL.md lines 41-46 (skill-scoped PostToolUse log)
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 898-902, the action record)
+    - schemas/capability_ontology.yaml line 1336 (the `audit` capability)
+    quote: '# Append a skill usage line to .claude/audit.log with HMAC integrity chain.'
+  sa:
+    concept: '`tool_call_done` (observational; MUST be called once per tool call, on success and on failure),
+      with `after_tool_call_success` and `after_tool_call_failure`'
+    refs:
+    - content/0.2.0/specification/hooks.md §5.5 tool_call_done (lines 430-444; quote at line 440)
+    - content/0.2.0/specification/hooks.md §5.3 and §5.4 (lines 400-428), §6.2 and §6.3 (lines 465-490),
+      §1.2 (line 68), §1.3 (line 87)
+    - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store, Capacity and Errors (line 362)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5967-5984 (HookToolResult), 211-249 (ToolResult),
+      2280-2287 (WriteFileOptions)'
+    quote: Implementations **MUST** call this hook once per tool call, whether it succeeded or failed.
+  explanation: 'For its firing guarantee SA is the stronger side: `tool_call_done` MUST be called once
+    per tool call with the call (id, name, JSON arguments) and its result, whereas the Claude SDK needs
+    separate success and failure hooks and the ACS plugin hook matches `Skill` invocations only. Limits
+    for an ACS audit record: the hook runs only where a prompt or agent lists it (flags-02); its failure
+    is non-fatal; the text does not say whether it receives the tool''s original result or a rewritten
+    one, nor whether it fires for tools run through `invokeTool` or `queueTool` or for provider-executed
+    tools; and `HookToolResult` has no `error_code`, although the published `ToolResult` does. The comparison
+    concerns firing, not the integrity of what is stored (audit-01).'
+  combined: 'The guard wrapper writes the authoritative record for every grounded call (allowed, denied,
+    approved) under its own key, or sends it to an external sink, because only it knows the capability,
+    the code and the decision. A `tool_call_done` hook (`defineHook({ hook: ''tool_call_done'', id: ''acs_audit'',
+    execute })`) adds coverage for calls the wrapper does not see, writing one key or file per `toolCall.id`:
+    neither `setValue` nor `writeFile` appends, and key-value caps are implementation-defined. Arguments
+    may hold secrets, and hooks MUST NOT expose sensitive data in logs. State that completeness depends
+    on which invocation paths fire the hook, which 0.2.0 does not say.'
+  see_also:
+  - tools-contracts#cls-04
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#hooks-02
+  - evidence-audit-observability#action-01
+  - evidence-audit-observability#audit-01
+  - evidence-audit-observability#audit-04
+  - evidence-audit-observability#collect-01
+  - evidence-audit-observability#collect-02
+  - evidence-audit-observability#collect-03
+  - multi-agent#coord-20
+  - models-context-memory-security#security-02
+- id: audit-01
+  relation: acs_only
+  acs:
+    concept: 'Tamper-evident audit log: each entry of the plugin''s log carries an HMAC of the previous
+      entry'
+    refs:
+    - hooks/posttooluse_log_tool.sh (lines 2-17; quote at line 11)
+    - spec/SECURITY.md §5.2 Post-Tool Use Hooks (lines 282-286)
+    quote: '# The HMAC chain ensures tamper detection: modifying or deleting'
+  sa:
+    concept: 'No counterpart. Persisted message history is mutable: code can update and delete messages,
+      clients can delete them, and message hooks return the record that is stored'
+    refs:
+    - content/0.2.0/specification/threads/messages.md introductory note (line 7), §5 Updating Messages
+      (lines 169-178), §6 Deleting Messages (lines 180-186; quote at line 186)
+    - content/0.2.0/specification/threads/client-api.md §13 Deleting a Message (lines 372-378)
+    - content/0.2.0/specification/hooks.md §4.1 (lines 320-321), §4.3 (lines 348-349)
+    quote: Returns `true` if the message was found and removed, `false` otherwise. Tool-result messages
+      cascade with their parent assistant message.
+  explanation: 'SA''s stored tool-call history is not an append-only record. `updateMessage` and `deleteMessage`
+    are on `ThreadState`, deleting an assistant message removes its tool results with it, the Thread Client
+    API lets a client delete a message, and `before_create_message` and `before_update_message` return
+    the object that is stored. Thread files and key-value entries can likewise be overwritten by any code
+    in the thread. SA defines no integrity mechanism for any of them. The ACS plugin log is hash-chained,
+    with the stated caveat that its default key, derived from the hostname, protects against accidental
+    corruption only. Searched content/0.2.0 and the published types: append-only (a code-execution report
+    view only), tamper, immutab, integrity, hmac, hash chain: no integrity mechanism for messages, files
+    or key-value data found.'
+  combined: An ACS audit binding writes its own record and does not rely on message history as evidence.
+    Where tamper evidence matters, the guard wrapper chains each record to the previous one (an HMAC or
+    hash of the prior entry, as the plugin log does) and sends it to a sink outside the thread, since
+    anything stored in the thread can be rewritten by co-located code (trust-01). Message history remains
+    useful as a convenience trace (trace-01).
+  see_also:
+  - checkpoint-rollback-state#state-19
+  - evidence-audit-observability#audit-02
+  - models-context-memory-security#context-02
+- id: hook-03
+  relation: fits
+  acs:
+    concept: 'Checks after a step (after-gates, `verify`, failure modes): they cannot prevent the step;
+      they can stop, redirect, or roll back to the latest checkpoint. Capability outputs are objects checked
+      against an `output_schema`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.6 Gate Semantics (lines 383-392; quote at line 388)
+    - spec/STANDARD-v1.1.0.md §4.3 Edge Types and Dependency Semantics (lines 175-178)
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition, `output_schema` (line 119)
+    - schemas/capability_ontology.yaml lines 1117-1121 (mutate output requires `success` and `evidence_anchors`)
+    quote: '- An after-gate cannot `skip` (S303): the step has already run.'
+  sa:
+    concept: Hooks that replace a tool result after execution (`after_tool_call_success`, `after_tool_call_failure`,
+      `before_store_tool_result`); tool results are strings
+    refs:
+    - content/0.2.0/specification/hooks.md §5.2 before_store_tool_result (lines 386-398)
+    - content/0.2.0/specification/hooks.md §5.3 after_tool_call_success (lines 400-412; quote at line
+      411)
+    - content/0.2.0/specification/hooks.md §5.4 after_tool_call_failure (lines 414-428)
+    - content/0.2.0/getting-started/examples.md §3 Hooks (lines 544-550)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 211-249 (ToolResult; `result?: string` at line 221)'
+    quote: If hook returns a result, it replaces the original
+  explanation: 'These hooks run after the tool has executed, so like an ACS after-gate they cannot prevent
+    the effect; they control what is stored and therefore what the model sees next. Their strength is
+    limited: §5.2 gives `before_store_tool_result` a signature and use cases but no behaviour statement,
+    §5.3''s replacement rule has no uppercase MUST or SHOULD, and the statement that the returned object
+    is what the runtime stores is on the examples page, which uses no requirement keyword. `after_tool_call_failure`
+    may return a replacement result, so a hook could turn a guard''s denial into an apparent success in
+    stored history (inference from the return type; the effect still did not happen). Turning a successful
+    mutating call into an error after the effect invites the model to retry and repeat it.'
+  combined: 'Check outputs in the wrapper, not in a hook. SA tool results are strings (`result?: string`),
+    while ACS capability outputs are objects with required fields such as `evidence_anchors`: every grounded
+    tool returns JSON text, and after the inner `execute` returns the wrapper parses it and validates
+    it against the capability''s `output_schema`. For a non-mutating capability it returns an error result
+    when validation fails. For a mutating capability it returns success with the finding in the result
+    and in the record, never an error, because the effect has happened. Use `after_tool_call_success`
+    only for tools that cannot be wrapped (prompt tools), as best effort; never rely on it for checkpoint
+    or approval rules.'
+  see_also:
+  - tools-contracts#io-03
+  - tools-contracts#io-06
+  - published-api-extension-points#tools-04
+  - checkpoint-rollback-state#state-19
+  - evidence-audit-observability#collect-02
+  - evidence-audit-observability#transform-01
+- id: trust-01
+  relation: partial
+  acs:
+    concept: 'The safety layer''s own state is kept outside the tools it governs: the plugin hook checks
+      every Write, Edit, MultiEdit, NotebookEdit and Bash call and, by its own comment, its checkpoint
+      marker is written outside those tools'
+    refs:
+    - hooks/pretooluse_require_checkpoint.sh (lines 36-41; quote at line 40)
+    - hooks/hooks.json PreToolUse matcher (lines 3-13)
+    quote: '# is not trusted to be. The marker itself is written outside these tools'
+  sa:
+    concept: 'A per-thread key-value store with no access control inside the thread: every tool, hook,
+      endpoint and effect of the thread, and hooks contributed by a composed child, can read and write
+      the guard''s records'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store, Runtime Semantics items 2 and 3
+      (lines 351-352)
+    - content/0.2.0/specification/agents.md §6 Required Parent Hooks (lines 155, 163; quote at line 163)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 95-97)
+    - content/0.2.0/specification/threads.md §1.2 ThreadState Interface (line 34), §7.2 Semantics (lines
+      424-433)
+    quote: The hook receives the parent's `ThreadState` and remains active for the lifetime of the enabled
+      relationship.
+  explanation: 'SA isolates key-value data between threads (values MUST NOT be readable by any other thread)
+    and has no access control inside a thread: `ThreadState` is one interface for tools, hooks and endpoints,
+    so any of them can write the checkpoint marker, the approval record or the halt latch. A model-callable
+    checkpoint tool with a model-chosen scope can also checkpoint nothing. Hooks that a composed child
+    requires run with the parent''s `ThreadState`, so composing a child with `parentHooks` lets code from
+    its package rewrite the parent''s tool results and markers. The in-tool guard therefore controls model-chosen
+    calls; it is not a boundary against code running in the same thread. Searched content/0.2.0 and the
+    published types: access control, per-key, ACL, read-only key: no per-key protection found.'
+  combined: 'State the trust limit in the binding: the guard constrains what the model can cause through
+    grounded tools, on the assumption that all definition code in the thread (tools, hooks, handlers,
+    effects, endpoints, and hooks contributed by composed children) is trusted. Fix the checkpoint tool''s
+    scope in code. Review the `parentHooks` a package discloses before composing it; composition UIs MUST
+    disclose the hook ID, reason and stage. Where co-located code is not trusted, keep the decision record
+    outside the thread, in an external store the grounded tools consult, rather than in the key-value
+    store; for a packed agent such a store is an external service its core behaviour depends on, which
+    falls under packaging.md ''Portability requirements'' (packaging-conformance-governance#pkg-07).'
+  see_also:
+  - tools-contracts#rec-01
+  - published-api-extension-points#erase-01
+  - published-api-extension-points#hooks-01
+  - published-api-extension-points#thread-01
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-15
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#collect-03
+  - evidence-audit-observability#retention-01
+  - evidence-audit-observability#store-02
+  - workflow-execution#wf-25
+  - multi-agent#coord-18
+  - multi-agent#coord-19
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-01
+  - packaging-conformance-governance#pkg-07
+  - models-context-memory-security#context-02
+  - models-context-memory-security#hooks-01
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#portability-01
+  - models-context-memory-security#remember-02
+- id: err-01
+  relation: partial
+  acs:
+    concept: Safety diagnostics with fixed codes and a fixed JSON format (F501, F502, F503, F504)
+    refs:
+    - spec/STANDARD-v1.1.0.md §9.6 Safety Errors (lines 1317-1325; quote at line 1321)
+    - spec/STANDARD-v1.1.0.md §9.8 Diagnostic Format (lines 1348-1370)
+    - grounded_agency/adapter.py lines 203-218 (_checkpoint_denial returns prose)
+    - grounded_agency/errors.py lines 1-12, 73 (the §9 codes and format)
+    quote: '| F501 | CHECKPOINT_REQUIRED | Mutation without checkpoint |'
+  sa:
+    concept: Tool error results, persisted as tool messages; `error_code` and `error_data` exist in the
+      published types only
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 155)
+    - content/0.2.0/specification/hooks.md §6.3 HookToolResult (lines 478-488)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 19, 29)
+    - content/0.2.0/specification/threads/runtime-streams.md line 82 (an example that returns `error_code`)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 211-249 (ToolResult; error_code at line 230, error_data
+      at line 236), 1001-1007 (ProviderToolResultContent)'
+    quote: Tool errors **MUST** be persisted as tool results and **MUST NOT** crash the execution loop.
+  explanation: 'An in-tool denial maps cleanly onto an SA error result: it MUST be persisted and the loop
+    MUST continue, so the model sees the reason and can take a checkpoint or seek approval, the same recovery
+    path the Claude Code hook gives. The 0.2.0 text never defines the `ToolResult` object that `execute`
+    returns (it appears only as a type name); the published types define it with `error_code` and `error_data`.
+    The persisted message has `tool_status` but no code field, and no hook receives a code. The SA binding
+    would be more structured than ACS''s own SDK layer, whose denial is prose without a code. The consequences
+    differ: an unhandled F501 or F502 ends an ACS workflow run, while in SA the loop continues until `maxSteps`
+    or a runtime cap.'
+  combined: 'The guard returns `{ status: ''error'', error: ''F501 CHECKPOINT_REQUIRED: take a checkpoint
+    first'', error_code: ''F501'', error_data: <the §9.8 diagnostic> }`. Keep the code and the remedy
+    in `error`: `status` and `error` are in the text, and the published provider tool-result content type
+    has an error string and no code field. For `error_data` use the §9.8 diagnostic unchanged with `location:
+    { capability, tool }` (its `location` MAY carry further keys) and the remedy in `suggestion`. `error_code`
+    and `error_data` are in the published types only, so a consumer must tolerate their absence.'
+  see_also:
+  - tools-contracts#io-06
+  - published-api-extension-points#tools-04
+  - checkpoint-rollback-state#state-23
+  - workflow-execution#wf-08
+  - packaging-conformance-governance#diag-03
+- id: err-02
+  relation: partial
+  acs:
+    concept: A safety error ends the workflow run with its code unless a failure mode handles it; ACS's
+      tool-call layers instead deny the call and let the model recover
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (lines 691-693; quote at line 693)
+    - core/src/exec/mod.rs lines 172-179 (Body::Failed)
+    - grounded_agency/adapter.py lines 627-630 (strict mode denies, non-strict mode logs)
+    quote: the run with its code, and a step that did not fail goes on to the next.
+  sa:
+    concept: 'Ending a run or a session from code: `state.execution.stop()`, `state.stopSession()` (a
+      successful stop), the model-called `sessionFail` binding, and run-status reason codes'
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §3 Controlling Execution (lines 57-70; quote
+      at line 70), §4.2 Reasons (lines 105-114)
+    - content/0.2.0/specification/threads.md §9.3 Parent Messaging (line 540)
+    - content/0.2.0/specification/agents.md §1.2 SideConfig (lines 46, 57)
+    - content/0.2.0/specification/subagents.md §6.2 (line 205)
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (line 77)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2609-2614 (ExecutionState.stop), 2996-3010 (stopSession)'
+    quote: '`state.execution.stop()` stops the current execution loop.'
+  explanation: 'Tool code can end the loop with `execution.stop()`; the published comment says it takes
+    effect after the current operation completes and ''Does not abort in-progress LLM calls.'' Neither
+    text nor types say whether the remaining tool calls of the same model response still execute, nor
+    which `reason` a run stopped this way reports; runtimes MAY add codes and clients MUST treat unknown
+    codes as opaque, so a safety stop cannot be recognised from run status in a portable way. SA''s failed-session
+    path is `sessionFail`, a tool binding on a prompt side that the model calls; code has no equivalent,
+    and the published comment on `stopSession` says it stops the session ''successfully''. Searched content/0.2.0
+    and the published types: failSession: not found.'
+  combined: 'Default: return the error result and continue, as ACS''s own tool-call layers do (strict
+    mode there means deny instead of warn, not end the run). Stop the loop when the call waits for a person
+    (F502 pending) or after a configured number of denials in one flow, and set the latch of gate-05 for
+    a hard stop. In a child thread, `state.stopSession({ result })` carries the ACS code inside the result
+    text, because code cannot end a session as failed. Consumers read the code from the tool result or
+    the guard''s record, never from `ThreadStatus.reason`.'
+  see_also:
+  - workflow-execution#wf-12
+  - packaging-conformance-governance#diag-04
+- id: lim-01
+  relation: fits
+  acs:
+    concept: 'Bounds on repetition: `retry.max`, `max_loops`, step `timeout` (R401, R404); the SDK adapter''s
+      per-risk rate limit'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2 Step Definition, `timeout` and `retry` (lines 254-255)
+    - spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (lines 639-642)
+    - spec/STANDARD-v1.1.0.md §9.5 Runtime Errors (lines 1310, 1313)
+    - grounded_agency/adapter.py lines 539-542 (rate limit by risk level)
+    quote: '| R404 | RECOVERY_EXHAUSTED | Max recovery loops exceeded |'
+  sa:
+    concept: '`maxSteps`, `maxSessionTurns`, runtime hard caps, and the matching stop reasons'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §1 Overview (line 12), §6 Stop Conditions (lines 102-109;
+      quote at line 109)
+    - content/0.2.0/specification/agents.md §1.2 SideConfig, `maxSteps` (line 44), §2.2 Optional, `maxSessionTurns`
+      (line 84)
+    - content/0.2.0/specification/threads/execution-state.md §2 Execution Properties (line 25), §4.2 Reasons
+      (lines 113-114)
+    quote: 4. safety limits (`maxSteps`, `maxSessionTurns`, runtime hard caps)
+  explanation: 'Both bound runaway behaviour, at different granularity: ACS per step and per failure mode,
+    SA per side and per session. `maxSteps` counts model request/response cycles, not tool calls, so several
+    denied calls can arrive in one step, and it has no default. Enforcement rests on Runtime §1 (the runtime
+    MUST ''enforce configured limits and stop semantics''); the stop order in §6 is introduced with a
+    lowercase ''should''. SA has no per-tool or per-risk limit and no tool execution timeout. Searched
+    content/0.2.0: timeout (hooks SHOULD have one; providers and runtime streams have request timeouts;
+    code execution has none by design), deadline, rate limit (a provider error code only), throttl, quota
+    (a draft Users example), budget, retry.'
+  combined: Set `maxSteps` on prompt sides that hold grounded tools, so that a model that keeps being
+    denied cannot loop without end. Keep any per-call or per-risk rate limit in the guard wrapper, with
+    a counter in the key-value store, since `maxSteps` does not bound tool calls.
+  see_also:
+  - workflow-execution#wf-17
+- id: exec-01
+  relation: fits
+  acs:
+    concept: The reference executor as a state machine that does no I/O, driven by a host through actions
+      and responses
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md (lines 10-14; action table at lines 83-92)
+    - core/src/exec/mod.rs lines 103-180 (enum Body)
+    - core/Cargo.toml lines 8, 14-17 (`publish = false`; the Python feature)
+    quote: The executor does no I/O. It tells your code what to do next (an
+  sa:
+    concept: 'Deterministic code that owns a turn or a tool call and holds the full `ThreadState`: a handler-backed
+      side, or one function tool with `uses`'
+    refs:
+    - content/0.2.0/specification/handlers.md §3 Execution Model (lines 44-55), §4 Delivery Semantics
+      (lines 63, 65), §5 Error Semantics (lines 71-75), §6 Capabilities (lines 79-88; quote at line 81)
+    - content/0.2.0/specification/subagents.md §3.3 (line 112)
+    - content/0.2.0/specification/tools.md §2.1 Tool Dependencies (lines 36-44)
+    - content/0.2.0/specification/threads.md §3.2 Direct Invocation (lines 260-272)
+    - '@standardagents/spec 0.45.10 index.d.ts line 221 (`result?: string`)'
+    quote: 'A handler receives the full [`ThreadState`](/0.2.0/specification/threads) and may do anything
+      tools can do:'
+  explanation: 'The strongest enforcement available is not a hook: deterministic SA code acts as the ACS
+    host. The executor decides the next action and a function tool, or a handler, performs it through
+    `ThreadState`; checkpoints, approvals, gates, edge order and failure modes are then enforced as ACS
+    defines them, and models work only inside individual steps. SA hazards: a handler turn that throws
+    is fatal to the turn and is not redelivered, and a handler that awaits a blocking child holds its
+    thread''s delivery slot and can deadlock. Tool hooks are not stated to fire for `invokeTool`, so the
+    host writes its own records. The ACS executor is an unpublished Rust crate with a Python binding;
+    it type-checks for the `wasm32-unknown-unknown` target, so it needs a JavaScript binding, not a port.'
+  combined: '`defineTool({ uses: [...] as const, execute })`, or a handler, runs the loop: ask the ACS
+    run for its next action, perform it, submit the response. `InvokeCapability` maps to `state.invokeTool`;
+    each step tool returns JSON text, which the host parses and checks before it answers `Output` (else
+    R402). `CreateCheckpoint` and `Rollback` map to the agent''s checkpoint and rollback tools, `RecheckSource`
+    to a re-read. For waiting actions (`RequestApproval`, `AwaitEvent`, `Sleep`) the host saves the run
+    snapshot in the key-value store, ends the turn, and resumes on a later turn, after the authenticated
+    endpoint recorded the decision (appr-03); it does not await a blocking child from a handler. `uses`
+    must list every target. This needs an ACS executor callable from TypeScript, which ACS does not ship.'
+  see_also:
+  - tools-contracts#cls-04
+  - tools-contracts#cls-14
+  - tools-contracts#io-07
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#hooks-02
+  - published-api-extension-points#thread-05
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-15
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#collect-02
+  - workflow-execution#wf-04
+  - workflow-execution#wf-05
+  - workflow-execution#wf-22
+  - workflow-execution#wf-25
+  - multi-agent#coord-20
+  - multi-agent#coord-26
+  - packaging-conformance-governance#pkg-06
+- id: scope-01
+  relation: partial
+  acs:
+    concept: 'Reach of the safety rules across nested runs: an invoked workflow shares the caller''s checkpoints;
+      delegation settings are attested by the host; `delegate` itself carries no checkpoint or approval
+      flag'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 786-790; quote at line 788)
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 917-922)
+    - 'schemas/capability_ontology.yaml lines 1443-1447 (delegate: `risk: medium`, `mutation: false`)'
+    quote: run it invokes shares the caller's checkpoints, so its waits invalidate
+  sa:
+    concept: 'Child threads are isolated: key-value data is not shared, hooks do not flow from parent
+      to child, a package''s internal tools are hidden. A parent can pass values down and read a child''s
+      persisted history afterwards'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md Durable Key-Value Store, Runtime Semantics items 3 and 8
+      (lines 352, 357)
+    - content/0.2.0/specification/hooks.md §1.1 (line 24), §1.3 Hook Scoping (lines 76-93)
+    - content/0.2.0/specification/agents.md §5 Tool Exposure (line 128), §6 Required Parent Hooks (line
+      160)
+    - content/0.2.0/distribution/packaging.md Visibility Rules (lines 221-230)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (line 94), §2.3 (line 238)
+    - content/0.2.0/specification/subagents.md §1 (lines 41-42, 45), §5 Lifecycle Tools (lines 157-163),
+      §6.2 (lines 197-203)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6035-6044 (after_subagent_created)'
+    quote: Values **MUST NOT** be automatically copied, inherited, or synchronized between threads when
+      subagents are spawned.
+  explanation: 'An SA parent cannot extend its checks into a child thread: the child''s hooks come from
+    the child''s own prompts and agent, the parent''s key-value markers are not readable there, and a
+    package''s internal tools and prompts are hidden from outside, so a host cannot wrap them. The parent
+    can pass values down (`setEnv` propagation, `scopedEnv`, creation arguments, the `after_subagent_created`
+    hook, which receives the child''s `ThreadState`) and can read the child''s persisted history afterwards
+    through `getChildThread()`; no text restricts that for packed children. It cannot gate the child''s
+    tool calls. ACS states the same limit for delegation (the host attests `effective`) but shares checkpoints
+    with invoked workflows. A handoff agent is not a child: it takes over the same thread and sees the
+    same markers.'
+  combined: 'Treat each SA thread as its own ACS run: a child takes its own checkpoint before it mutates.
+    Treat composing an ungrounded packed agent as an ACS `delegate` step whose effects are unknown: declare
+    every relationship of that side `hidden`, since any visible relationship gives the model the lifecycle
+    tools; spawn the child from a guarded tool bound to `delegate`, with `requires_approval` and `requires_checkpoint`
+    raised as the deployment needs (the ontology gives `delegate` neither); set `parentCommunication:
+    ''explicit''` if the child''s reference must stay out of model context; and do not offer ungrounded
+    agents as handoff tools. The code-facing call shape for spawning is not fixed by 0.2.0.'
+  see_also:
+  - tools-contracts#cls-07
+  - tools-contracts#io-04
+  - published-api-extension-points#hooks-01
+  - published-api-extension-points#thread-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-12
+  - approval-human#approval-07
+  - approval-human#approval-16
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-04
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-26
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - multi-agent#coord-05
+  - multi-agent#coord-20
+  - multi-agent#coord-22
+  - multi-agent#coord-23
+  - packaging-conformance-governance#naming-02
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#remember-02
+- id: surface-01
+  relation: partial
+  acs:
+    concept: Mutations happen in steps of mutating capabilities, which the flags and edges govern
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition, `mutation` (line 121)
+    - spec/STANDARD-v1.1.0.md §4.2 Layers (lines 129-143)
+    quote: '| `mutation` | boolean | No | Whether the capability changes persistent state (default false)
+      |'
+  sa:
+    concept: Side effects can originate in tools, hooks, handlers, effects, thread endpoints, sandboxed
+      code with bridged functions, and provider-executed tools
+    refs:
+    - content/0.2.0/specification/effects.md introduction and §1.1 Purpose (lines 3-13; quote at line
+      3)
+    - content/0.2.0/specification/hooks.md introduction (line 3)
+    - content/0.2.0/specification/handlers.md §6 Capabilities (lines 79-88)
+    - content/0.2.0/specification/threads/endpoints.md §3 Handler Signature (lines 63, 67)
+    - content/0.2.0/specification/providers.md §10.1 Overview (line 602)
+    - content/0.2.0/specification/models.md §1.2 Optional Properties, `providerTools` (line 34)
+    - content/0.2.0/infrastructure/runtime.md Code Execution Runtime, Value Marshaling (lines 280-282)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 439-448 (executionMode), 1014-1021 (ProviderResponse.providerTools),
+      4001 (model providerTools)'
+    quote: Effects are scheduled side-effect handlers that run outside normal tool execution.
+  explanation: 'A tool-call safety layer sees tool calls. In SA, state-changing code also runs in effects
+    (outside normal tool execution), in hooks (whose definition lists side effects), in handlers, in thread
+    endpoints, in `runCode` when the caller bridges host functions into the sandbox, and in provider-executed
+    tools, which the Providers page says execute server-side and which the published types call informational,
+    adding that they ''must not be re-executed locally''. None of these passes through a function tool''s
+    `execute`, and the text does not say which tool hooks, if any, fire for them. Provider tools are enabled
+    per model (`providerTools` in the model definition), not in a prompt''s `tools`. Searched content/0.2.0:
+    executionMode, provider-executed: not found in the text.'
+  combined: 'A convention for a grounded SA agent, not something SA can enforce: every external write
+    goes through a grounded tool; effects, hooks, handlers and endpoints that need to write call that
+    tool with `state.invokeTool` instead of writing directly; `runCode` is given no bridged function that
+    writes; and provider-executed tools bound to mutating capabilities are left out of the model definition''s
+    `providerTools`.'
+  see_also:
+  - tools-contracts#cls-03
+  - tools-contracts#cls-07
+  - tools-contracts#cls-08
+  - tools-contracts#cls-10
+  - tools-contracts#cls-14
+  - tools-contracts#cls-15
+  - tools-contracts#eff-01
+  - tools-contracts#io-07
+  - published-api-extension-points#thread-05
+  - published-api-extension-points#tools-06
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-16
+  - checkpoint-rollback-state#state-18
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - evidence-audit-observability#exec-01
+  - evidence-audit-observability#provider-01
+  - multi-agent#coord-13
+  - multi-agent#coord-20
+  - packaging-conformance-governance#pkg-03
+  - models-context-memory-security#perceive-02
+- id: cred-01
+  relation: fits
+  acs:
+    concept: 'No counterpart: `send` is governed by the checkpoint and approval flags; role-based capability
+      authorisation is listed as planned'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.4 Safety-Critical Capabilities, `send` (line 187)
+    - spec/SECURITY.md §9.1 Planned Enhancements (line 401)
+    quote: '| `send` | `checkpoint` | Cannot send without prior checkpoint |'
+  sa:
+    concept: Credential grants with `origins` and `allow` lists that the runtime enforces on `fetch` (Users
+      page, a draft proposal)
+    refs:
+    - content/0.2.0/specification/users.md status note (line 3)
+    - content/0.2.0/specification/users.md §6 Credential Grants (lines 184-205; quote at line 202)
+    - content/0.2.0/specification/users.md §8 Conformance (lines 393-394)
+    - content/0.2.0/getting-started/examples.md §3 Hooks (line 542)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1582 (UserHandle.fetch), 1593 (CredentialGrant)'
+    quote: 4. The runtime MUST reject a `fetch` from a caller not covered by `allow`. An absent `allow`
+      denies all callers.
+  explanation: 'The draft Users page gives the only runtime-enforced denial of an outbound request that
+    is keyed to the calling tool: a credentialed `fetch` MUST be rejected unless the destination origin
+    is covered by `origins` and the caller by `allow`, which can list tools. (The `uses` rule is also
+    keyed to the calling tool, but governs invocation, not requests.) The page is marked ''draft proposal'',
+    and within it grant support is SHOULD; the published types already export `CredentialGrant`. A grant
+    is user-scoped: the page does not say an agent package can create one or set its `allow` list, and
+    a secret a tool reads directly (as the examples page''s `close_as_duplicate` reads `GITHUB_TOKEN`)
+    is outside the grant policy. Searched ACS spec/, schemas/, docs/guides: credential, allowlist, egress:
+    nothing comparable found.'
+  combined: 'Deployment guidance, not something a package can enforce: where a runtime implements the
+    draft Users page, operators store outbound credentials only as grants whose `allow.tools` names the
+    grounded tools, and never as environment variables; the package documents the tool names to allow.
+    An unwrapped tool then cannot make an authenticated request to that origin, which closes the main
+    bypass of in-tool guards for `send`-type effects. Do not rest 0.2.0 conformance on it.'
+  see_also:
+  - published-api-extension-points#grant-01
+  - models-context-memory-security#secrets-02

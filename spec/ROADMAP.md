@@ -8,6 +8,18 @@ Standard 1.1.0.
 For the full list of changes, see the [specification changelog](CHANGELOG.md)
 and the [project changelog](../CHANGELOG.md).
 
+## Versions
+
+Four version numbers are in use. Each is declared in one file, and
+`tests/test_version_lines.py` compares this table with those files.
+
+| Version line | Current | Declared in |
+|--------------|---------|-------------|
+| Standard | 1.1.0 | The `**Version:**` line of [STANDARD-v1.1.0.md](STANDARD-v1.1.0.md) |
+| Capability ontology | 2.1.0 | `meta.version` in [capability_ontology.yaml](../schemas/capability_ontology.yaml) |
+| Plugin | 2.0.0 | `version` in [plugin.json](../.claude-plugin/plugin.json) |
+| Python package `grounded-agency` | 0.1.0 | `version` under `[project]` in [pyproject.toml](../pyproject.toml); `grounded_agency.__version__` repeats it |
+
 ## Standard
 
 | Version | Date | Status |
@@ -30,17 +42,19 @@ and [RFC-0004](RFC-0004-agent-identity.md). It adds:
 [Appendix C](STANDARD-v1.1.0.md#appendix-c-changes-from-100) of the 1.1.0 text
 lists every change from 1.0.0.
 
-Standard 1.2.0 has one proposal so far:
-[RFC-0002](RFC-0002-agent-reliability-profile.md) (Draft), which adds
-cross-session behavioural reliability for agents.
+Standard 1.2.0 has two proposals so far, both Draft:
+[RFC-0002](RFC-0002-agent-reliability-profile.md), which adds cross-session
+behavioural reliability for agents, and
+[RFC-0005](RFC-0005-tool-calling-hosts.md), which says how the Standard
+applies to a host where a model chooses tool calls and no workflow runs.
 
 ```mermaid
 ---
 title: The Standard's versions
 ---
 flowchart LR
-  accDescr: Standard 1.0.0 is supported; 1.1.0, accepted through RFC-0003 and RFC-0004, is the current candidate; 1.2.0 is planned, with RFC-0002 as its one draft proposal so far.
-  v10["1.0.0: supported"] --> v11["1.1.0: current, via RFC-0003 and RFC-0004"] --> v12["1.2.0: planned, RFC-0002 in draft"]
+  accDescr: Standard 1.0.0 is supported; 1.1.0, accepted through RFC-0003 and RFC-0004, is the current candidate; 1.2.0 is planned, with RFC-0002 and RFC-0005 as its draft proposals so far.
+  v10["1.0.0: supported"] --> v11["1.1.0: current, via RFC-0003 and RFC-0004"] --> v12["1.2.0: planned, two RFCs in draft"]
 ```
 
 ## Plugin and tools

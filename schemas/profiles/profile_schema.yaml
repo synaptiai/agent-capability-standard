@@ -1,6 +1,20 @@
 # Domain Profile Schema
 # Defines configuration for domain-specific trust weights, risk thresholds,
 # checkpoint policies, and evidence requirements.
+#
+# Status: a domain profile is informative data for hosts and workflow authors.
+# Standard 1.1.0 mentions profiles twice: `profile` as a descriptive workflow
+# field (section 5.1) and a `trust_weights` key `trust_class:<class>` that
+# overrides a trust class weight (section 8.3). It does not say how a profile
+# is applied, and no shipped component loads or selects one: the validator,
+# the executor and the plugin hooks do not use a profile, and the Python
+# package applies only a profile's trust_weights, when a caller passes them to
+# grounded_agency/trust.py. tools/validate_profiles.py checks the shape
+# described here (required fields, types, ranges, enumerations) and nothing
+# else. Until the Standard says how a profile is applied, a setting such as
+# block_autonomous, require_human, checkpoint_policy or minimum_confidence
+# takes effect only where a host implements it or a workflow author writes it
+# into the workflow. See "Status of Domain Profiles" in docs/domains/README.md.
 
 profile_schema:
   type: object

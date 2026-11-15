@@ -535,24 +535,27 @@ echo "SDK/Runtime version match: OK"
 
 **Location:** `.claude/audit.log`
 **Written by:** `hooks/posttooluse_log_tool.sh`
-**Trigger:** Every PostToolUse event matching the `Skill` matcher
+**Trigger:** Every PostToolUse and PostToolUseFailure event (the matcher is `*`, every tool)
 
-The audit log captures timestamped entries for every skill invocation during a Claude Code session. Each entry records:
-- Timestamp (ISO 8601)
-- Skill name
-- Tool context (what tool triggered the skill)
+The audit log holds one JSON line for every tool call that ran during a Claude Code session, succeeded or failed. Each entry records:
+- `ts`: timestamp (ISO 8601, UTC)
+- `event`: `PostToolUse` (the call succeeded) or `PostToolUseFailure` (it failed)
+- `tool`: tool name
+- `skill`: skill name, on a `Skill` call only
+- `input_sha256`: SHA-256 digest of the tool input; the input itself is not written
+- `prev_hmac`, `hmac`: the HMAC chain that `tools/verify_audit_log.py` checks
 
-**Example entries:**
+**Example entries** (written with `AUDIT_HMAC_KEY=example-key`; digests and HMACs shortened to eight characters):
 
 ```
-2026-01-30T10:15:23Z skill=checkpoint tool=Write scope=src/*.py
-2026-01-30T10:15:45Z skill=mutate tool=Edit target=src/auth.py
-2026-01-30T10:16:02Z skill=verify tool=Bash command=pytest
+{"ts":"2026-01-30T10:15:23Z","event":"PostToolUse","tool":"Skill","skill":"checkpoint","input_sha256":"a69e8f80...","prev_hmac":"","hmac":"6c8a194a..."}
+{"ts":"2026-01-30T10:15:45Z","event":"PostToolUse","tool":"Edit","input_sha256":"40aaa32a...","prev_hmac":"6c8a194a...","hmac":"9ca095c4..."}
+{"ts":"2026-01-30T10:16:02Z","event":"PostToolUseFailure","tool":"Bash","input_sha256":"64775f89...","prev_hmac":"9ca095c4...","hmac":"40a5e122..."}
 ```
 
 **Monitoring approach:**
 - Review audit logs after each agent session to verify safety compliance
-- Check that every `mutate` or `send` entry is preceded by a `checkpoint` entry
+- Check that every `Skill` entry for `mutate` or `send` is preceded by one for `checkpoint`
 - Alert on skill invocations that bypass the expected workflow sequence
 - The healthcare domain profile requires 2,555 days (7 years) of audit retention
 
@@ -789,7 +792,7 @@ git commit -m "revert: rollback <domain> profile to previous version"
    ```bash
    which jq
    ```
-3. Verify the PostToolUse hook is configured for the `Skill` matcher in `hooks/hooks.json`
+3. Verify the PostToolUse and PostToolUseFailure hooks are configured for every tool (matcher `*`) in `hooks/hooks.json`
 
 ### 7.3 Validator Failures
 

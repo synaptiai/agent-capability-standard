@@ -12,7 +12,9 @@ Example::
     adapter = GroundedAgentAdapter()
     adapter.create_checkpoint(["*"], "Before edits")
 
-    async with GroundedClient(adapter) as client:
+    # An edit requires approval: the can_use_tool callback decides it.
+    options = ClaudeAgentOptions(can_use_tool=ask_the_user)
+    async with GroundedClient(adapter, options=options) as client:
         await client.query("Refactor the config module")
         async for msg in client.receive_response():
             print(msg)
@@ -44,7 +46,8 @@ class GroundedClient:
         adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=True))
         adapter.create_checkpoint(["*.py"], "Before changes")
 
-        async with GroundedClient(adapter) as client:
+        options = ClaudeAgentOptions(can_use_tool=ask_the_user)
+        async with GroundedClient(adapter, options=options) as client:
             await client.query("Add type hints to utils.py")
             async for msg in client.receive_response():
                 print(msg)
@@ -66,7 +69,10 @@ class GroundedClient:
             config: Configuration for the adapter.  Ignored when
                 *adapter* is provided.
             options: Optional base ``ClaudeAgentOptions``.  Safety
-                layer is applied on top.
+                layer is applied on top.  Its ``can_use_tool`` callback
+                decides the calls that require approval; without one
+                they are denied (F502) unless the adapter's config sets
+                ``approval="off"``.
         """
         # Lazy import check — done at init so the error is clear
         try:

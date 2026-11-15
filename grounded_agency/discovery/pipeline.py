@@ -45,11 +45,25 @@ class DiscoveryPipeline:
         llm_fn: LLMFunction | None = None,
         domain: str | None = None,
         evidence_store: EvidenceStore | None = None,
+        *,
+        evidence_include_tool_input: bool = False,
     ) -> None:
+        """
+        Args:
+            registry: The capability ontology.
+            engine: Workflow engine used to validate synthesized workflows.
+            llm_fn: Optional LLM function for analysis and synthesis.
+            domain: Default domain for discovery.
+            evidence_store: Where the pipeline's evidence anchors go.
+            evidence_include_tool_input: Keep the task description in the
+                discovery anchor's metadata. Off by default: the
+                description is the user's prompt and can hold credentials.
+        """
         self.registry = registry
         self.engine = engine
         self.domain = domain
         self._evidence_store = evidence_store
+        self._evidence_include_tool_input = evidence_include_tool_input
         self._llm_fn = llm_fn
 
         # Initialize sub-components
@@ -153,16 +167,19 @@ class DiscoveryPipeline:
         """Create evidence anchors for the discovery process."""
         raw_anchors: list[EvidenceAnchor] = []
 
-        # Create discovery evidence anchor
+        # Create discovery evidence anchor. The task description is kept
+        # only when the pipeline was asked to keep inputs.
         raw_anchors.append(
             EvidenceAnchor.from_tool_output(
                 tool_name="DiscoveryPipeline",
                 tool_use_id="discovery",
                 tool_input={"task_description": task_description},
+                include_tool_input=self._evidence_include_tool_input,
             )
         )
 
-        # Record each match as evidence
+        # Record each match as evidence. What is kept here is the
+        # classifier's own result, not an input.
         for match in matches:
             raw_anchors.append(
                 EvidenceAnchor.from_tool_output(
@@ -172,6 +189,7 @@ class DiscoveryPipeline:
                         "capability_id": match.capability_id,
                         "confidence": match.confidence,
                     },
+                    include_tool_input=True,
                 )
             )
 

@@ -133,7 +133,7 @@ options = adapter.wrap_options(base_options)  # Injects hooks, permissions, sett
 | Hook | Trigger | Script | Purpose |
 |------|---------|--------|---------|
 | PreToolUse | Write\|Edit\|MultiEdit\|NotebookEdit\|Bash | `pretooluse_require_checkpoint.sh` | Reads the tool call as JSON on stdin; blocks file edits, and Bash commands matching its 21 detection patterns, without a valid `.claude/checkpoint.ok` (JSON with timestamp freshness, symlink rejection), with exit code 2 and the reason on stderr |
-| PostToolUse | Skill | `posttooluse_log_tool.sh` | Appends HMAC-signed entry to `.claude/audit.log` with `flock` serialization |
+| PostToolUse, PostToolUseFailure | every tool (`*`) | `posttooluse_log_tool.sh` | Appends one HMAC-signed entry per tool call to `.claude/audit.log` (time, event, tool name, skill name on a Skill call, SHA-256 digest of the tool input; the input itself is not written), serialized with `flock` or, where it is not installed, a lock directory |
 
 **Python Layer** (`grounded_agency/hooks/`):
 

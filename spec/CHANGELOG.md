@@ -2,6 +2,18 @@
 
 This changelog tracks changes to the **Agent Capability Standard specification** itself. For plugin and project-level changes, see the [root CHANGELOG](../CHANGELOG.md).
 
+## Unreleased
+
+### Proposed
+- **[RFC-0005](RFC-0005-tool-calling-hosts.md)** (Draft, target 1.2.0):
+  how the Standard applies to a host where a model chooses tool calls and no
+  workflow runs. It defines a safety layer and a tool binding record, says
+  how `requires` edges, checkpoints and approval apply to a sequence of
+  calls, how a refusal is reported, how an output travels on a text-only
+  channel, and one evidence anchor item, with a conformance class and
+  call-sequence fixtures. Nothing in it is normative until a Standard
+  version carries it.
+
 ## v1.1.0 (2026-10-28)
 
 ### Added — Standard v1.1.0 (Candidate Standard), RFC-0003 and RFC-0004 (#114)

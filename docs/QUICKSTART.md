@@ -308,6 +308,8 @@ flowchart LR
 
 The framework includes domain-specific templates to accelerate adoption. Choose the domain closest to your use case:
 
+A profile is informative data: no shipped component loads or selects one, and of its settings only `trust_weights` has reference code, `grounded_agency/trust.py`, which applies them when your host passes them. The key characteristics below are what each profile declares, for your host and your workflows to implement. See [Status of Domain Profiles](domains/README.md#status-of-domain-profiles).
+
 ### Manufacturing
 For production monitoring, quality control, predictive maintenance, and supply chain.
 
@@ -382,7 +384,7 @@ cat schemas/workflows/healthcare_workflows.yaml
 | Something else | Pick the closest, then customize |
 
 Each domain provides:
-- **Profile** — Pre-calibrated trust weights, risk thresholds, checkpoint policies
+- **Profile** — Pre-calibrated trust weights, risk thresholds, checkpoint policies, as informative data
 - **Workflows** — Ready-to-use workflow patterns
 - **Documentation** — Customization and integration guidance
 

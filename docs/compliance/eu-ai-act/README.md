@@ -12,6 +12,8 @@ This document suite prepares for EU AI Act conformity assessment by mapping the 
 
 **Key principle:** The Grounded Agency framework is *infrastructure*, not an AI system. Risk classification depends on the deployment context, not the framework alone. These documents demonstrate the framework's structural readiness for each risk tier.
 
+**Domain profiles are informative.** These documents cite settings of the domain profiles (`block_autonomous`, `require_human`, `require_review`, `checkpoint_policy`, `minimum_confidence`, required anchor types, retention periods). A profile is data for hosts and workflow authors. Standard 1.1.0 does not say how one is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. A profile setting is a control only where the deployer's host implements it or where it is written into a workflow. What is enforced today rests on the ontology's safety flags, through the validator, the reference executor, the Python adapter and the plugin hook. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+
 ## Document Register
 
 | Doc ID | Document | Article | Purpose | Lines |

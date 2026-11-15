@@ -88,6 +88,7 @@ class TestFullPipeline:
         entries = audit_log.read_text().strip().split("\n")
         assert len(entries) >= 1
         entry = json.loads(entries[-1])
+        assert entry["tool"] == "Skill"
         assert entry["skill"] == "checkpoint"
 
     def test_no_checkpoint_blocks_mutation(self, tmp_path: Path) -> None:
@@ -155,14 +156,28 @@ class TestHookMatcherRouting:
             "NotebookEdit should be caught as a mutation and blocked without checkpoint"
         )
 
-    def test_posttooluse_ignores_non_skill(self, tmp_path: Path) -> None:
-        """PostToolUse should only log Skill invocations."""
-        payload = {"tool_name": "Read", "tool_input": {"path": "/tmp/x"}}
-        result = run_posttooluse(payload, str(tmp_path))
-        assert result.returncode == 0
-        # No audit log should be created for non-Skill tools
+    def test_posttooluse_logs_every_tool(self, tmp_path: Path) -> None:
+        """PostToolUse logs every tool call, not only Skill invocations."""
+        for tool_name in ("Read", "Bash", "Skill", "mcp__github__get_me"):
+            payload = {"tool_name": tool_name, "tool_input": {"path": "/tmp/x"}}
+            result = run_posttooluse(payload, str(tmp_path))
+            assert result.returncode == 0
+
         audit_log = tmp_path / ".claude" / "audit.log"
-        assert not audit_log.exists()
+        entries = [json.loads(line) for line in audit_log.read_text().splitlines()]
+        assert [entry["tool"] for entry in entries] == [
+            "Read",
+            "Bash",
+            "Skill",
+            "mcp__github__get_me",
+        ]
+        assert "/tmp/x" not in audit_log.read_text()
+
+    def test_posttooluse_matcher_routes_every_tool(self) -> None:
+        """hooks.json sends every tool call, succeeded or failed, to the log hook."""
+        hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+        for event in ("PostToolUse", "PostToolUseFailure"):
+            assert [group["matcher"] for group in hooks[event]] == ["*"]
 
 
 class TestPythonShellComplementarity:

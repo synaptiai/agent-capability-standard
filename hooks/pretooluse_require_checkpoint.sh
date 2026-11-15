@@ -10,13 +10,22 @@
 #   0  allow the tool call
 #   2  block it; the reason on stderr is shown to Claude
 #
+# The reason opens with the Standard's code and name for the refusal,
+# "F501 CHECKPOINT_REQUIRED:" (STANDARD §9.6), so a reader of the text alone
+# can tell which rule refused the call.
+#
 # The marker file (.claude/checkpoint.ok) must contain a JSON object with:
 #   { "checkpoint_id": "...", "created_at": <unix_timestamp>, "expires_at": <unix_timestamp> }
 #
 # This hook validates:
 #   1. The marker file exists and is a regular file (not a symlink)
-#   2. The marker contains valid JSON with a timestamp
+#   2. The marker is a JSON object with a checkpoint_id and a numeric expires_at
 #   3. The checkpoint has not expired
+# Without jq it checks only that the marker is under 30 minutes old.
+#
+# It fails closed: Claude Code treats any exit code other than 2 as a
+# non-blocking error and runs the call, so an unexpected failure of a command
+# here blocks the call instead of exiting with that command's status.
 #
 # SEC-001: Prevents stale checkpoint.ok bypass
 # SEC-006: Uses CLAUDE_PROJECT_DIR for absolute path resolution
@@ -29,9 +38,10 @@ else
 fi
 
 block() {
-  echo "Blocked: $1" >&2
+  echo "F501 CHECKPOINT_REQUIRED: $1" >&2
   exit 2
 }
+trap 'block "the checkpoint hook failed at line $LINENO, so the call is blocked."' ERR
 
 # Mutation patterns: tool names, and commands that change files, push data or
 # install software. Matched against the whole payload, so every call of the
@@ -80,8 +90,13 @@ fi
 
 # Check if jq is available for JSON parsing
 if command -v jq &> /dev/null; then
-  checkpoint_id=$(echo "$content" | jq -r '.checkpoint_id // empty' 2>/dev/null)
-  expires_at=$(echo "$content" | jq -r '.expires_at // empty' 2>/dev/null)
+  # A marker that is not a JSON object (plain text, a string, an array) makes
+  # jq fail: that is a block, like a marker without the fields.
+  if ! checkpoint_id=$(printf '%s' "$content" | jq -r 'if type == "object" then .checkpoint_id // empty else error("not an object") end' 2>/dev/null) \
+    || ! expires_at=$(printf '%s' "$content" | jq -r '.expires_at // empty' 2>/dev/null); then
+    rm -f "$marker"
+    block "checkpoint marker is not a JSON object. Create a new checkpoint."
+  fi
   if [ -z "$checkpoint_id" ] || [ -z "$expires_at" ]; then
     rm -f "$marker"
     block "checkpoint marker missing required fields. Create a new checkpoint."

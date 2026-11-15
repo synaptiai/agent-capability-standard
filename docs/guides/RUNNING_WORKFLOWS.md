@@ -82,7 +82,7 @@ flowchart TB
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs` (a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` (any other code is read as R402) |
+| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` (any other code is read as R402) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
@@ -253,7 +253,95 @@ run early, plus the outputs, the action
 records (world state `ActionRecord`s for every step that required
 approval), the deferrals (`deferred`: each deferred step, why, and the
 `action_id` of its queued action) and the trace (every decision the
-executor took).
+executor took, see [The trace](#the-trace)).
+
+## The trace
+
+The trace is the executor's own record of a run: one event for each
+decision it took, in order. `RunResult.trace` holds it after a run and
+`run.trace()` at any point during one. It is part of the run's state, so a
+snapshot carries it and a restored run continues it.
+
+This section is informative. The Standard mentions a trace twice, for a
+`warn` gate ([§5.6](../../spec/STANDARD-v1.1.0.md#56-gate-semantics)) and
+for an expression error
+([§5.8.2](../../spec/STANDARD-v1.1.0.md#582-evaluation)), and gives it no
+form. The fields and kinds below are those of the reference executor
+(`core/src/exec/`), and another executor may record a run differently.
+They are executor trace kinds, not the event types of
+[§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events): an
+`event_type` names an event a step waits for (`approval.granted`), and a
+trace kind names something the executor did (`approval_requested`).
+
+The executor delivers the trace to nobody. A host that wants to announce
+what happened, for example that an approval is pending, reads the trace,
+or the action it was handed, and relays it by its own means.
+
+### Trace event fields
+
+Every trace event is an object with these six fields:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `seq` | integer | Position of the event in the trace, from 0 |
+| `at` | integer | The run's clock when the event was recorded: the latest time the host passed, in milliseconds since the epoch |
+| `kind` | string | One of the kinds below |
+| `frame` | array of strings | The workflows of the nested runs, root first, as on an action |
+| `step` | integer or null | Index of the step in its workflow, from 0; null on `run_started` and `run_finished` |
+| `detail` | object | Members that depend on the kind; an empty object for a kind that has none |
+
+### Trace kinds
+
+The table lists every kind the reference executor records, with the
+members of its `detail`.
+
+| Kind | Recorded when | `detail` |
+|------|---------------|----------|
+| `run_started` | The run starts | `workflow` |
+| `step_started` | A step begins, before its condition is evaluated; again each time a loop runs the step | `capability` |
+| `step_skipped` | The step does not run: its condition is false, a gate skipped it, or it needed approval and `when_unattended: skip` applied | `reason` |
+| `step_deferred` | The step is deferred (§5.14) | `reason` |
+| `step_completed` | The step has its output, before its after-gates are evaluated | none |
+| `step_failed` | The step fails with a code, after its retries and before its failure modes | `code`, `message` |
+| `expression_error` | A condition, a gate's `when` or a failure mode's `when` did not evaluate (R405) | `site`, `code`, `message` |
+| `gate_fired` | A gate fires, whatever its action | `gate`, `action`, `message` |
+| `run_ended` | A gate with `action: end` ends the run, or the nested run it fired in | `message` |
+| `delay_started` | A step's `delay` begins | `until` |
+| `delay_finished` | The delay is over | none |
+| `always_ask` | A step that requires approval uses an item from an always-ask trust class (§5.17), so a person is asked | none |
+| `approval_requested` | A `RequestApproval` action is issued | `digest` |
+| `approval_decided` | A decision arrives; `valid` is true only when it lets the step go ahead | `decision_id`, `decision`, `valid` |
+| `approval_unattended` | The run is unattended and no standing mandate covers the step, so `when_unattended` applies | `when_unattended`, `reason` |
+| `approval_expired` | No decision arrived before the request expired | none |
+| `recheck` | The source named by `approval.recheck` was read again after approval | `changed` |
+| `checkpoint_created` | A checkpoint is recorded: the host answered `CreateCheckpoint`, or a `checkpoint` step completed | `checkpoint_id` |
+| `checkpoint_consumed` | A step that requires a checkpoint uses the latest valid one | `checkpoint_id` |
+| `checkpoints_invalidated` | A completed wait or delay ends the validity of earlier checkpoints | `checkpoint_ids` |
+| `rolled_back` | The host answered a `Rollback` that a gate or a failure mode asked for | none |
+| `event_dropped` | A wait receives an event that does not match; recorded once per reason for each wait | `reason` |
+| `event_received` | A wait receives its matching event; `dropped` counts the dropped events by reason | `event_type`, `dropped` |
+| `delegated` | A waiting `delegate` has delegated and now waits for the result; `principal` is present when the host attested who took the delegation (`identity@1`) | `task_id`, `principal` |
+| `invoke_started` | An `invoke` step starts a nested run | `workflow` |
+| `invoke_returned` | The nested run is over; `result` is its outcome or its failure code | `workflow`, `result`, `ended` |
+| `quorum` | A `constrain` step with a `quorum` counted the verdicts | `tally` |
+| `retry` | An attempt failed and the step will be tried again; `attempt` is the attempt that failed, from 1 | `code`, `message`, `attempt`, `backoff_ms` |
+| `failure_mode_fired` | A failure mode applies | `failure_mode`, `action` |
+| `loop` | A failure mode loops back; `to` is the index of the step it goes to and `loop` the count for this failure mode, from 1 | `failure_mode`, `to`, `loop` |
+| `recovery_exhausted` | A failure mode has no loops left | `failure_mode`, `loops` |
+| `escalated` | The run goes to a handler step; `cause` is the code that led there | `handler`, `cause` |
+| `run_finished` | The run ends with an outcome; `cause` is the code that led to an escalation, null without one, and absent when the run ends `replan_required` | `outcome`, `cause` |
+| `run_failed` | The run ends with a failure code | `code`, `message` |
+
+`gate`, `failure_mode` and `handler` are indexes, from 0, into the step's
+`gates`, the step's `failure_modes` and the workflow's `steps`.
+`event_dropped.reason` names the first check the event failed:
+`event_type`, `source_kind`, `correlate.<key>`, `accept_from`,
+`delegate_identity`, `sender_check` or `accept_trust_classes`.
+
+A runtime fixture names the kinds its run must record in `trace_kinds`
+(see [Conformance](#conformance)). `tests/test_trace_kinds_doc.py` compares
+this section with the kinds the executor's source passes to its trace, with
+the kinds the fixtures name, and with the events the fixtures' runs record.
 
 ## Driving a run yourself
 
@@ -304,7 +392,8 @@ flowchart TB
 
 `tests/conformance/runtime/*.json` are scripted runs. Each one has a
 catalog, inputs, a script of expected actions and responses, and the
-expected end and trace. They are generated by
+expected end and trace (`trace_kinds`: kinds the run's trace must contain,
+from [Trace kinds](#trace-kinds)). They are generated by
 `scripts/gen_runtime_fixtures.py`: edit them there and regenerate (CI runs
 it with `--check`). `cargo test --test runtime` runs them, replaying
 each one with a snapshot and restore before every step, and
@@ -330,3 +419,12 @@ flowchart TB
   fx --> cargo["cargo test --test runtime: snapshot and restore before every step"]
   fx --> py["tests/test_runner.py: through Python"]
 ```
+
+A host that computes an approval digest itself, to check a decision before
+it submits it or to record what a person approved, can test that
+computation against `tests/conformance/approval/digests.json`. Each vector
+there is one `RequestApproval` of the reference executor: the `shown`
+values, their canonical JSON (RFC 8785) and the `digest`, including what
+the executor shows for a step that declares no `shows`. The file and the
+trust vectors beside it (`tests/conformance/trust/`) are described under
+[Informative vectors](../../spec/CONFORMANCE.md#informative-vectors).

@@ -279,24 +279,67 @@ flowchart TB
 |------|-------------------|
 | `pretooluse_require_checkpoint.sh` | Blocks mutation without checkpoint |
 
+The hook blocks every `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` call while there is no valid checkpoint marker (`.claude/checkpoint.ok`). The reason it gives opens with the code and name of the refusal, `F501 CHECKPOINT_REQUIRED:`.
+
 ### 5.2 Post-Tool Use Hooks
 
 | Hook | Security Function |
 |------|-------------------|
-| `posttooluse_log_tool.sh` | Creates audit trail |
+| `posttooluse_log_tool.sh` | Logs every tool call to the audit trail |
+
+The hook runs after every tool call, whether the call succeeded (`PostToolUse`) or failed (`PostToolUseFailure`), and appends one line to `.claude/audit.log`: the time, the event, the tool name, the skill name on a `Skill` call, and a SHA-256 digest of the tool input. The tool input itself is not written, because a command, a file's content or a skill's arguments can hold a credential; a reader who holds an input can confirm it against the digest. A call that a pre-tool-use hook or a permission rule refused did not run and has no line. The lines form an HMAC chain that `tools/verify_audit_log.py` checks.
 
 ### 5.3 Adding Security Hooks
 
-Custom security hooks can enforce additional policies:
+Custom security hooks can enforce additional policies. Claude Code passes the tool call to a command hook as JSON on stdin. A pre-tool-use hook blocks the call by exiting with code 2, and the reason it wrote to stderr is shown to the model. Any other non-zero exit code is a non-blocking error: the tool call proceeds. A hook that prints a reason and exits with code 1 therefore blocks nothing.
 
 ```bash
-#!/bin/bash
+#!/usr/bin/env bash
 # Example: Block writes to sensitive paths
-if [[ "$TOOL_NAME" == "Write" && "$FILE_PATH" =~ ^/etc/ ]]; then
-  echo "BLOCKED: Cannot write to /etc/"
-  exit 1
+input="$(cat)"
+# A call that cannot be read (no jq, input that is not JSON) is blocked
+if ! tool_name="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)" ||
+   ! file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)"; then
+  echo "BLOCKED: cannot read the tool call" >&2
+  exit 2
 fi
+if [[ "$tool_name" == "Write" && "$file_path" == /etc/* ]]; then
+  echo "BLOCKED: Cannot write to /etc/" >&2
+  exit 2
+fi
+exit 0
 ```
+
+### 5.4 Checks Enforced by Code and Checks a Model Judges
+
+The plugin declares hooks at two places. Its own hooks (`hooks/hooks.json`) run in every session that has the plugin enabled. Six skills (`audit`, `checkpoint`, `persist`, `rollback`, `send`, `transform`) declare further hooks in the frontmatter of their `SKILL.md`; Claude Code registers those when the skill is invoked and keeps them for the rest of the session.
+
+A hook is of one of two kinds:
+
+- A **command hook** is a program. It reads the tool call and decides by rule, so the same call always gets the same answer.
+- A **prompt hook** sends the tool call and a list of conditions to a model in a single call and takes the model's verdict. Nothing checks the verdict. The model receives the hook's input, which holds the tool call and not the conversation, so a condition about anything else (whether the user approved, whether a checkpoint exists, what an allowlist holds) is judged without the fact.
+
+| Check | Declared in | Enforced by |
+|-------|-------------|-------------|
+| A valid checkpoint marker exists before a `Write`, `Edit`, `MultiEdit`, `NotebookEdit` or `Bash` call | `hooks/pretooluse_require_checkpoint.sh` | Code: blocks the call |
+| Every tool call that ran is logged, with a digest in place of its input | `hooks/posttooluse_log_tool.sh` | Code: records, cannot block |
+| `send`: a `curl`, `wget` or `http` command names as a host `localhost` (in any case), `127.0.0.1` or a private IPv4 address (`10.x.x.x`, `172.16.x.x` to `172.31.x.x`, `192.168.x.x`) | `skills/send/SKILL.md`, command hook on `Bash` | Code: blocks the call |
+| `persist`: the edited file's path has a `//`, `.` or `..` segment, or the file is under `/etc`, `/usr`, `/bin`, `/sbin`, `~/.ssh`, `~/.aws` or `~/.config`, or its name ends in `.env`, `credentials`, `secrets`, `password`, `.pem` or `.key` | `skills/persist/SKILL.md`, command hook on `Edit` | Code: blocks the call |
+| `rollback`: a `git stash pop` or `git stash apply` command when the repository has no stash | `skills/rollback/SKILL.md`, command hook on `Bash` | Code: blocks the call |
+| Each of the six skills logs under `.audit/` every call of the tools its post-tool-use hooks match (`audit`: `Read`, `Grep`; `checkpoint`: `Bash`, `Edit`; `persist`: `Edit`; `rollback` and `send`: `Bash`; `transform`: `Read`), with a digest in place of the input | `skills/<name>/SKILL.md` of the six skills, command hooks after the tool | Code: records, cannot block |
+| `send`: the destination is on the approved allowlist; the payload holds no sensitive data; the user approved the send; a checkpoint exists; rate limits are respected | `skills/send/SKILL.md`, prompt hook on `Bash` | A model judges |
+| `persist`: the content holds no credentials, personal data or malicious code; the file is within the project; the content is stable knowledge, not a duplicate and not in contradiction with stored facts | `skills/persist/SKILL.md`, prompt hook on `Edit` | A model judges |
+| `rollback`: the checkpoint exists, is intact and has not expired; the current state was captured; the scope matches; no operation in progress conflicts; no data is lost beyond the intended scope | `skills/rollback/SKILL.md`, prompt hook on `Bash` | A model judges |
+| `checkpoint`: the scope covers every file to be mutated; no sensitive file is captured; the reason is documented; the checkpoint type fits the operation | `skills/checkpoint/SKILL.md`, prompt hook on `Bash` | A model judges |
+| `transform`: the source is readable and its format understood; the transformation exposes no sensitive data; the transformation is logged | `skills/transform/SKILL.md`, prompt hook on `Read`, removed after its first successful run | A model judges |
+
+Three consequences follow:
+
+- The checkpoint requirement of §1.1 does not rest on a prompt. For a tool call it is enforced by the plugin's pre-tool-use hook, and for a workflow by the validator (V102). The prompt hooks of `send` and `rollback` ask about a checkpoint as well; that is an additional, model-judged check.
+- The command hooks match text. A private address reached through a host name, or a system directory reached through a relative path or a symbolic link, is not matched. They narrow what a skill can do; they are not a sandbox.
+- A command hook needs `jq` to read the tool call. Without it the three blocking skill hooks block the call, since they cannot read it, the checkpoint hook checks the marker's age instead of its expiry time, the audit hook writes nothing, and the skills' logging hooks write their line with `unavailable` in place of the digest.
+
+These hooks are Claude Code's mechanism. A host that loads a skill's text as instructions and does not run frontmatter hooks runs none of the skill-level checks, and a host that does not load `hooks/hooks.json` runs none of the plugin's. On such a host the rows enforced by code are not enforced unless the host implements them. The Standard does not state these checks as requirements of the capabilities.
 
 ---
 
@@ -416,3 +459,4 @@ Unless anonymity is requested.
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 - [STRIDE Threat Model](https://docs.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats)
 - [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
+- [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)

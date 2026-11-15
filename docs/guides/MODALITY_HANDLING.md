@@ -1,7 +1,7 @@
 # Modality Handling via Domain Parameters
 
-**Version:** 1.0.0
-**Date:** 2026-01-29
+**Version:** 1.1.0
+**Date:** 2026-11-15
 **Status:** Guide
 
 ---
@@ -46,9 +46,9 @@ Concrete examples:
 | `generate-image` | `generate` with `domain: image` |
 | `transcribe-speech` | `transform` with `source_format: audio.speech`, `target_format: text.transcript` |
 
-Note that `transform` uses its native `source_format`/`target_format` input parameters rather than the `domain` annotation convention, since the modality is inherent to the transformation definition itself.
+Note that `transform` uses its native `source_format`/`target_format` input parameters rather than the `domain` step field, since the modality is inherent to the transformation definition itself.
 
-**A note on the `domain` parameter:** The `domain` parameter used throughout this guide is a workflow-level annotation convention. It is not a formal property defined in the capability ontology schema -- rather, it serves as a hint to implementations about which modality-specific processing pipeline to invoke. Workflow authors use `domain` to specialize generic capabilities (e.g., `detect` with `domain: visual` vs `domain: audio`) without requiring separate ontology entries per modality.
+**A note on the `domain` parameter:** `domain` is a step field of the workflow DSL, defined in [STANDARD-v1.1.0 §5.2](../../spec/STANDARD-v1.1.0.md#52-step-definition) as a string, the "Domain parameter for the capability". It is written on the step, beside `capability`, not among the capability's inputs: the capability ontology declares no `domain` input and no list of domain values. The validator checks that the value is a string (S303 otherwise) and nothing more. The reference executor hands it to the host on the `InvokeCapability` action ([Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)), and the host chooses the processing pipeline that serves it. The values used in this guide (`image.object`, `audio.genre` and the like) are this guide's convention; the Standard defines none. Workflow authors use `domain` to specialize generic capabilities (e.g., `detect` with `domain: image.object` vs `domain: audio.event`) without requiring separate ontology entries per modality.
 
 **Cross-reference:** Domain profiles (e.g., `schemas/profiles/vision.yaml`) use profile-level domain names (e.g., `domain: vision`) that differ from the capability-level domain parameters used in this guide (e.g., `domain: image.object`). Profile domain names identify the agent specialization; capability domain parameters specify the processing pipeline.
 
@@ -64,26 +64,27 @@ Note that `transform` uses its native `source_format`/`target_format` input para
 
 ### 1.3 Handling Unsupported Modalities
 
-When a workflow specifies a `domain` parameter for a modality that the target implementation does not support, the implementation should return a clear error indicating the unsupported domain value. For example:
+A host that has no processing pipeline for a step's `domain` cannot run the step. Today it says so in the one way the host protocol offers: it answers the `InvokeCapability` action with an `Error`, whose only members are `code` and `message` ([Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)). The step then fails with R402 (`EXECUTION_FAILED`, [STANDARD-v1.1.0 §9.5](../../spec/STANDARD-v1.1.0.md#95-runtime-errors)), and its `retry` and failure modes apply as for any failed step:
 
 ```yaml
-error:
-  code: unsupported_domain
-  domain: "haptic.pressure"
-  message: "No processing pipeline available for domain 'haptic.pressure'"
+kind: Error
+code: R402
+message: "No processing pipeline available for domain 'haptic.pressure'"
 ```
+
+The Standard defines no code, field or reason for an unsupported domain, and this guide defines none either. The reference executor reads any code a host reports for a capability call, other than R401, as R402, so a host that answered with a code of its own, such as `unsupported_domain`, would still fail the step with R402. The reason is whatever the host writes in `message`, which is free text. A failure mode can match the code (`on_error: R402`) but cannot tell an unsupported domain from any other failed execution.
 
 ```mermaid
 ---
-title: A domain the implementation does not support
+title: A domain the host does not support
 ---
 flowchart TB
-  accDescr: When the implementation has no processing pipeline for the step's domain value, it returns an unsupported_domain error naming the domain, so the gap is found rather than failing silently.
+  accDescr: When the host has no processing pipeline for the step's domain value, it answers the capability call with an Error, the step fails with R402, and the message names the domain.
   step["Step with domain: haptic.pressure"] --> has{"Pipeline for this domain?"}
-  has -->|no| err["Error unsupported_domain, naming the domain"]
+  has -->|no| err["Error: the step fails with R402, the message names the domain"]
 ```
 
-This allows workflow authors to detect modality gaps at design time rather than encountering silent failures at runtime.
+The gap is found when the step runs, not when the workflow is validated: the validator does not know which domains a host serves.
 
 ### 1.4 When Modality Matters
 
@@ -178,9 +179,9 @@ matches:
     span: [120, 132]
 evidence_anchors:
   - ref: "document:report.pdf:page:3:char:42-51"
-    kind: text_span
+    kind: file
   - ref: "document:report.pdf:page:3:char:120-132"
-    kind: text_span
+    kind: file
 confidence: 0.92
 ```
 
@@ -207,7 +208,7 @@ probabilities:
   mixed: 0.03
 evidence_anchors:
   - ref: "document:feedback.txt:line:3-7"
-    kind: text_span
+    kind: file
     excerpt: "The response time was unacceptable and..."
 confidence: 0.88
 ```
@@ -269,9 +270,9 @@ locations:
   - region: { x: 450, y: 280, width: 300, height: 220 }
 evidence_anchors:
   - ref: "image:frame_20260129_143022.jpg:bbox:120,340,200,150"
-    kind: bounding_box
+    kind: file
   - ref: "image:frame_20260129_143022.jpg:bbox:450,280,300,220"
-    kind: bounding_box
+    kind: file
 confidence: 0.92
 ```
 
@@ -297,7 +298,7 @@ uncertainty:
 unit: "SSIM"
 evidence_anchors:
   - ref: "image:upload_001.jpg:full_frame"
-    kind: image_reference
+    kind: file
     excerpt: "SSIM computed against reference at 1920x1080"
 confidence: 0.95
 ```
@@ -373,9 +374,9 @@ locations:
   - segment: { start_ms: 16100, end_ms: 28500 }
 evidence_anchors:
   - ref: "audio:meeting_2026-01-29.wav:segment:2300-15800"
-    kind: time_segment
+    kind: file
   - ref: "audio:meeting_2026-01-29.wav:segment:16100-28500"
-    kind: time_segment
+    kind: file
 confidence: 0.92
 ```
 
@@ -414,7 +415,7 @@ matches:
     severity: "high"
 evidence_anchors:
   - ref: "audio:factory_line3_20260129.wav:segment:753400-755100"
-    kind: time_segment
+    kind: file
     excerpt: "1700ms segment with frequency peak at 3.2kHz consistent with bearing wear"
 confidence: 0.84
 ```
@@ -457,7 +458,7 @@ matches:
     confidence: 0.91
 evidence_anchors:
   - ref: "video:warehouse_cam2.mp4:frames:1200-1450:bbox:300,150,80,120"
-    kind: video_region
+    kind: file
     excerpt: "Person without hard hat detected in Zone B, frames 1200-1450"
 confidence: 0.91
 ```
@@ -516,11 +517,11 @@ matches:
     image_region: { ref: "image:product_001.jpg:bbox:100,200,400,300" }
     severity: "high"
 evidence_anchors:
-  - ref: "text:listing.txt:char:45-60"
-    kind: text_span
+  - ref: "document:listing.txt:char:45-60"
+    kind: file
     excerpt: "features a sleek blue exterior"
   - ref: "image:product_001.jpg:bbox:100,200,400,300"
-    kind: bounding_box
+    kind: file
     excerpt: "Dominant color in region: RGB(180, 30, 25) -- red"
 confidence: 0.89
 ```
@@ -533,7 +534,7 @@ flowchart LR
   accDescr: The product text and its images go into detect with domain multimodal.inconsistency, which returns the mismatches with a text span anchor and a bounding box anchor for each.
   text[Product listing text] --> d["detect, domain: multimodal.inconsistency"]
   img[Product images] --> d
-  d --> m["mismatch_out: matches, text_span and bounding_box anchors"]
+  d --> m["mismatch_out: matches, a text span anchor and a bounding box anchor"]
 ```
 
 **Example 2: Multi-Modal Search**
@@ -593,62 +594,61 @@ flowchart TB
 
 ## 4. Evidence Grounding for Modalities
 
-Every capability invocation in the Grounded Agency framework must produce `evidence_anchors` -- references that ground the output in verifiable sources. Different modalities require different anchor types to maintain this grounding guarantee.
+Every capability output carries `evidence_anchors` -- references that ground the output in verifiable sources. The capability ontology declares the field as an array and gives its items no schema. The canonical schemas of [STANDARD-v1.1.0 §6.1](../../spec/STANDARD-v1.1.0.md#61-required-schema-files) do define an anchor: the `Anchor` type of `schemas/event_schema.yaml` is an object with `ref` and `kind`, and optionally `excerpt` and `timestamp`. The Standard does not say that the items of `evidence_anchors` are `Anchor` objects ([§6.2](../../spec/STANDARD-v1.1.0.md#62-observation-requirements) keeps a capability's `evidence_anchors` apart from an event's `anchors`). This guide writes its anchors in the `Anchor` form, so that every `kind` it uses is one a canonical schema defines.
+
+`kind` says what sort of source an anchor points to. Where in the source the evidence lies depends on the modality, and goes in `ref`.
 
 ### 4.1 Evidence Anchor Types by Modality
 
-| Modality | Anchor Kind | Reference Format | Description |
+The reference forms below are this guide's convention for `ref`; the Standard defines none. Their names are labels for the forms, not values of `kind`.
+
+| Modality | Reference Form | `ref` Format | Description |
 |---|---|---|---|
-| **Text** | `text_span` | `document:<path>:line:<N>` or `document:<path>:char:<start>-<end>` | Character offset or line reference within a text document |
-| **Image** | `bounding_box` | `image:<path>:bbox:<x>,<y>,<w>,<h>` | Rectangular region in pixel coordinates |
-| **Image** | `image_reference` | `image:<path>:full_frame` | Reference to the entire image |
-| **Image** | `pixel_mask` | `image:<path>:mask:<mask_id>` | Binary or probability mask over image pixels |
-| **Audio** | `time_segment` | `audio:<path>:segment:<start_ms>-<end_ms>` | Time range in milliseconds within an audio file |
-| **Audio** | `frequency_band` | `audio:<path>:freq:<low_hz>-<high_hz>:time:<start_ms>-<end_ms>` | Spectrogram region defined by frequency and time |
-| **Video** | `video_region` | `video:<path>:frames:<start>-<end>:bbox:<x>,<y>,<w>,<h>` | Spatio-temporal region: frame range and bounding box |
-| **Video** | `frame_reference` | `video:<path>:frame:<N>` | Reference to a single video frame |
-| **Video** | `temporal_segment` | `video:<path>:time:<start>-<end>` | Time range within a video file |
-| **Multi-Modal** | `composite` | Contains nested anchors from multiple modalities | Combines anchors from different modalities |
+| **Text** | text span | `document:<path>:line:<N>` or `document:<path>:char:<start>-<end>` | Character offset or line reference within a text document |
+| **Image** | bounding box | `image:<path>:bbox:<x>,<y>,<w>,<h>` | Rectangular region in pixel coordinates |
+| **Image** | image reference | `image:<path>:full_frame` | Reference to the entire image |
+| **Image** | pixel mask | `image:<path>:mask:<mask_id>` | Binary or probability mask over image pixels |
+| **Audio** | time segment | `audio:<path>:segment:<start_ms>-<end_ms>` | Time range in milliseconds within an audio file |
+| **Audio** | frequency band | `audio:<path>:freq:<low_hz>-<high_hz>:time:<start_ms>-<end_ms>` | Spectrogram region defined by frequency and time |
+| **Video** | video region | `video:<path>:frames:<start>-<end>:bbox:<x>,<y>,<w>,<h>` | Spatio-temporal region: frame range and bounding box |
+| **Video** | frame reference | `video:<path>:frame:<N>` | Reference to a single video frame |
+| **Video** | temporal segment | `video:<path>:time:<start>-<end>` | Time range within a video file |
+| **Multi-Modal** | no form of its own | One anchor per contributing modality, each in its modality's form | The anchors sit side by side in `evidence_anchors` |
+
+Every format above points into a stored file, so the `kind` of these anchors is `file`. An anchor whose source is of another sort takes the kind of that source (`url`, `sensor`, `tool`, `log`, `api` or `human_note`) and the same position in `ref`.
+
+Domain profiles list anchor types of their own in `evidence_policy.required_anchor_types` (`bounding_box`, `time_segment` and `image_reference` among them). Those are labels in a profile, which is informative data ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)); none of them is an `Anchor.kind`.
 
 ### 4.2 Anchor Schema
 
-All evidence anchors follow a common schema, regardless of modality:
+The anchors in this guide follow the `Anchor` type of `schemas/event_schema.yaml`, regardless of modality:
 
 ```yaml
-evidence_anchor:
+Anchor:
   type: object
   required: [ref, kind]
   properties:
     ref:
       type: string
-      description: URI-style reference to the evidence source
     kind:
       type: string
       enum:
-        - text_span
-        - bounding_box
-        - image_reference
-        - pixel_mask
-        - time_segment
-        - frequency_band
-        - video_region
-        - frame_reference
-        - temporal_segment
-        - composite
         - file
         - url
-        - tool_output
-        - sensor_reading
-        # The `file`, `url`, `tool_output`, and `sensor_reading` kinds are generic
-        # evidence anchors not specific to any modality. They are included for
-        # completeness alongside the modality-specific kinds defined in Section 4.1.
+        - tool
+        - log
+        - sensor
+        - human_note
+        - api
+    timestamp:
+      type: string
+      nullable: true
     excerpt:
       type: string
-      description: Human-readable description of what the evidence shows
-    nested_anchors:
-      type: array
-      description: For composite anchors, contains sub-anchors from each modality
+      nullable: true
 ```
+
+`schemas/world_state_schema.yaml` defines an `Anchor` with the same members and six of the seven kinds: it has no `api`. Neither schema has a member for nested anchors, so a claim that rests on several modalities lists one anchor for each.
 
 ### 4.3 Grounding Rules by Modality
 
@@ -674,7 +674,7 @@ evidence_anchor:
 
 **Multi-modal grounding rules:**
 - Cross-modal claims MUST include anchors from each contributing modality.
-- Composite anchors MUST use `nested_anchors` to reference the individual modality evidence.
+- The `Anchor` type has no nesting: the anchors of the contributing modalities are listed side by side in `evidence_anchors`.
 - When modalities disagree, ALL modality-specific evidence MUST be included, not just the one that supports the conclusion.
 
 ### 4.4 Example: Grounded Multi-Modal Evidence
@@ -683,27 +683,22 @@ A claim that a product listing is inconsistent requires evidence from both text 
 
 ```mermaid
 ---
-title: A composite anchor holds one anchor per modality
+title: A cross-modal claim carries one anchor per modality
 ---
 flowchart TB
-  accDescr: A cross-modal claim carries a composite anchor whose nested anchors reference the text span and the image bounding box that it rests on.
-  claim["Claim: the listing is inconsistent"] --> comp["Composite anchor, kind: composite"]
-  comp -->|nested_anchors| ts["text_span: listing_001.txt, characters 45-60"]
-  comp -->|nested_anchors| bb["bounding_box: product_001.jpg, 100,200,400,300"]
+  accDescr: A cross-modal claim carries two anchors of kind file side by side, one whose ref is a text span and one whose ref is an image bounding box.
+  claim["Claim: the listing is inconsistent"] --> ts["kind: file, text span: listing_001.txt, characters 45-60"]
+  claim --> bb["kind: file, bounding box: product_001.jpg, 100,200,400,300"]
 ```
 
 ```yaml
 evidence_anchors:
-  - ref: "multimodal:listing_001:text+image"
-    kind: composite
-    excerpt: "Text describes 'blue exterior' but image shows red vehicle"
-    nested_anchors:
-      - ref: "text:listing_001.txt:char:45-60"
-        kind: text_span
-        excerpt: "features a sleek blue exterior"
-      - ref: "image:product_001.jpg:bbox:100,200,400,300"
-        kind: bounding_box
-        excerpt: "Vehicle body region with dominant RGB(180,30,25)"
+  - ref: "document:listing_001.txt:char:45-60"
+    kind: file
+    excerpt: "features a sleek blue exterior"
+  - ref: "image:product_001.jpg:bbox:100,200,400,300"
+    kind: file
+    excerpt: "Vehicle body region with dominant RGB(180,30,25)"
 ```
 
 ---
@@ -748,7 +743,7 @@ These workflow patterns will be formally defined in the workflow catalog. See th
 
 2. **Safety integration.** OASF modality skills do not carry built-in safety properties. In Grounded Agency, every modality invocation inherits evidence anchors, confidence scores, and (where applicable) checkpoint requirements. An `image.object` detection returns grounded bounding boxes and confidence just as a `text.entity` detection returns grounded character spans and confidence.
 
-3. **Evidence grounding.** OASF does not define how to anchor evidence for non-text modalities. Grounded Agency defines modality-specific evidence anchor types (see [Section 4](#4-evidence-grounding-for-modalities)) that provide verifiable references into the source data regardless of modality.
+3. **Evidence grounding.** OASF does not define how to anchor evidence for non-text modalities. This guide gives modality-specific reference forms for evidence anchors (see [Section 4](#4-evidence-grounding-for-modalities)) that provide verifiable references into the source data regardless of modality.
 
 ### 5.4 Reference
 

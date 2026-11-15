@@ -25,7 +25,7 @@ from ._types import (
     HookContext,
 )
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
-from .capabilities.mapper import ToolCapabilityMapper, ToolMapping
+from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
 from .client import GroundedClient
 from .coordination import (
@@ -106,6 +106,7 @@ __all__ = [
     "CapabilityRegistry",
     "ToolCapabilityMapper",
     "ToolMapping",
+    "UNCLASSIFIED_TOOL",
     # State management
     "CheckpointTracker",
     "Checkpoint",

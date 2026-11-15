@@ -12,6 +12,8 @@ The multi-modal domain profile is calibrated for environments where:
 
 This profile maps to [OASF Category 7 (Multi-modal)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering image-to-text, text-to-video, speech recognition, visual question answering, and cross-modal transformations.
 
+The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+
 ## Domain Profile
 
 **Profile location:** `schemas/profiles/multimodal.yaml`
@@ -48,8 +50,9 @@ require_human: high     # High-risk cross-modal decisions require human
 block_autonomous:
   - mutate              # Never autonomously modify source content
   - send                # Never autonomously distribute generated content
-  - generate            # Never autonomously generate without review
 ```
+
+The profile does not list `generate`: the ontology rates it low risk, and the profile asks instead for a checkpoint before content generation (`before_content_generation: always`).
 
 ### Checkpoint Policy
 

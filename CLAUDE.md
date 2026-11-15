@@ -76,6 +76,28 @@ python scripts/gen_runtime_fixtures.py          # after editing the fixtures the
 python scripts/gen_runtime_fixtures.py --check  # CI: fail on drift
 ```
 
+### Regenerate the Standard Agents binding's generated files
+```bash
+python scripts/gen_standard_agents_binding.py          # after changing the ontology
+python scripts/gen_standard_agents_binding.py --check  # CI: fail on drift
+```
+It also writes the approval digest vectors, `tests/conformance/approval/digests.json`,
+from the reference executor; the binding's fixture is a copy.
+
+### Regenerate the strict JSON Schema rendering of the capability contracts
+```bash
+python scripts/gen_capability_json_schemas.py          # after changing a contract in the ontology
+python scripts/gen_capability_json_schemas.py --check  # CI: fail on drift
+```
+
+### Check the Standard Agents binding (TypeScript, in `examples/standard_agents/`)
+```bash
+cd examples/standard_agents
+npm ci          # install the exact versions in package-lock.json
+npm run check   # type-check against the published @standardagents/spec types
+npm test        # vitest
+```
+
 ### Run conformance tests (optional, local only)
 ```bash
 python scripts/run_conformance.py
@@ -132,8 +154,14 @@ npm ci          # install the exact versions in package-lock.json
 npm run check   # type-check, colour contrast, design data, no hand-typed counts
 npm test        # vitest; also builds the site into a temporary directory
 npm run build   # build, Pagefind index, then scripts/check-dist.mjs
+npm run check:axe  # after a build: axe over every built page (CI runs it; slow)
 npm run dev     # local server; search works only on a built site (npm run preview)
 ```
+
+`check:axe` needs a Chromium: Playwright's own, or the binary `ACS_CHROMIUM`
+names. For a quick run on the pages a change touches:
+`node scripts/check-axe.mjs --paths /guides/standard-agents/`. It fails on any
+axe violation, for example a Markdown table whose header cell is empty.
 
 `npm run build` fails when a Markdown link or `#anchor` does not resolve, when
 rendered heading ids differ from GitHub's ids for the source, and, in
@@ -216,6 +244,8 @@ Every agent action must be:
 | `templates/SKILL_TEMPLATE_ENHANCED.md` | Template for creating new skills |
 | `_archive/` | Archived files from v1 (99-capability model) |
 | `schemas/interop/oasf_mapping.yaml` | OASF skill-code-to-capability mapping |
+| `schemas/interop/standard_agents_mapping.yaml` | Standard Agents binding conventions (capability rulings, anchor forms, identity map) |
+| `schemas/generated/capability_contracts.schema.json` | The capability contracts as strict JSON Schema 2020-12 (generated) |
 | `docs/guides/MODALITY_HANDLING.md` | Modality handling guide (vision, audio, multimodal) |
 | `docs/proposals/OASF_SAFETY_EXTENSIONS.md` | OASF safety extension proposal |
 
@@ -239,7 +269,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 
 Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by category). Each skill has:
 
-- YAML frontmatter with `name`, `description`, `allowed-tools`, `agent` type, and `layer`
+- YAML frontmatter with `name`, `description`, `allowed-tools` and `agent` type (`layer` is in 13 of the 42 skills; the ontology gives every capability's layer, see `skills/README.md`)
 - Intent and success criteria
 - Input/output contracts with `domain` parameter for specialization
 - Procedure steps with evidence grounding
@@ -259,7 +289,7 @@ The 36-capability model uses **domain parameters** instead of domain-specific va
 
 The plugin enforces safety through Claude Code hooks:
 - **PreToolUse (Write|Edit|MultiEdit|NotebookEdit|Bash)**: Requires checkpoint marker before mutations
-- **PostToolUse (Skill)**: Logs skill invocations to `.claude/audit.log`
+- **PostToolUse and PostToolUseFailure (every tool)**: Log every tool call to `.claude/audit.log`: time, event, tool, the skill name on a `Skill` call, and a SHA-256 digest of the input in place of the input; each line is HMAC-chained (`tools/verify_audit_log.py` checks the chain)
 
 ### Ontology Edge Types
 
@@ -331,9 +361,18 @@ This regenerates `skills/<name>/schemas/output_schema.yaml` from the ontology
 vendored schema copies in sync. `--check` fails on drift (CI); `--dry-run` lists
 what would change.
 
+Then regenerate the Standard Agents binding's ontology table and annotation
+schema, and the strict JSON Schema rendering, which list every capability:
+```bash
+python scripts/gen_standard_agents_binding.py
+python scripts/gen_capability_json_schemas.py
+```
+
 ## Releasing
 
 When creating a new release, update the version in `.claude-plugin/plugin.json` to match the new tag before committing. This file does not auto-sync with git tags.
+
+A version change also updates the Versions table in `spec/ROADMAP.md` (and its sentence "Plugin X implements Standard Y"); a Standard or ontology version change also updates `meta.agent_capability_standard` in `schemas/interop/oasf_mapping.yaml` and the header of `docs/integrations/oasf_coverage.md`; a Python package version change updates both `pyproject.toml` and `__version__` in `grounded_agency/__init__.py`. `tests/test_version_lines.py` fails otherwise.
 
 Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push an annotated tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` publishes the GitHub Release with that section as its notes (a `-suffix` tag is a pre-release). Where the tag cannot be pushed, run the workflow by hand on `main` with the tag as its input: it creates the annotated tag on `main`'s head, then publishes the Release. It refuses a tag that does not match `plugin.json` or has no section, or (run by hand) one that already exists; check first with:
 ```bash

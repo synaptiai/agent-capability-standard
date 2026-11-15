@@ -252,7 +252,7 @@ Hooks implementing VERIFY layer capabilities:
 | Hook | Capability | Purpose |
 |------|------------|---------|
 | `pretooluse_require_checkpoint.sh` | `checkpoint` | Enforce checkpoint before mutations |
-| `posttooluse_log_tool.sh` | `audit` | Maintain audit trail |
+| `posttooluse_log_tool.sh` | `audit` | Log every tool call to the audit trail, with a digest in place of its input |
 
 ## Documentation
 

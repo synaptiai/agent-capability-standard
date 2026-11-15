@@ -516,7 +516,7 @@ flowchart TB
 
 ### Does this work with images, audio, and video?
 
-Yes. The standard includes modality-specific domain profiles and grounding requirements:
+Yes. The repository includes modality-specific domain profiles and a guide to grounding by modality:
 
 - **Vision**: Spatial grounding with bounding boxes and confidence scores
 - **Audio**: Temporal grounding with timestamps and speaker diarization
@@ -526,7 +526,7 @@ See the [Modality Handling Guide](guides/MODALITY_HANDLING.md) for full details.
 
 ### How do modality profiles differ from regular domain profiles?
 
-Modality profiles add source-type-specific trust weights and grounding requirements. For example, the vision profile requires spatial coordinates for all detections, while the audio profile requires temporal anchors.
+Modality profiles add source-type-specific trust weights and grounding requirements. For example, the vision profile requires spatial coordinates for all detections, while the audio profile requires temporal anchors. These are declarations: a profile is informative data, and no shipped component checks an output against one (see [Status of Domain Profiles](domains/README.md#status-of-domain-profiles)).
 
 ---
 

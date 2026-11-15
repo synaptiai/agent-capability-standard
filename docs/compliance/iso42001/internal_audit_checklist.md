@@ -221,7 +221,7 @@ flowchart LR
 |---|-------|---------|----------|-------|
 | 8.3.1 | Is the risk treatment plan implemented? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Hooks active, profiles configured, approvals flowing | |
 | 8.3.2 | Are structural controls functioning? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Test: attempt Write without checkpoint (must be blocked) | Critical test |
-| 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | `block_autonomous` enforcement, confidence thresholds | |
+| 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | The deployment's own implementation of `block_autonomous` and the confidence thresholds, in its host or its workflows (no shipped component applies either) | |
 
 ```mermaid
 ---
@@ -330,7 +330,9 @@ These are Grounded Agency-specific checks beyond standard ISO 42001 requirements
 | F.9 | Run `python tools/validate_profiles.py` | All profiles valid against schema | | |
 | F.10 | Run `python tools/validate_workflows.py` | All workflows valid | | |
 | F.11 | Verify `execute` capability has `requires_approval: true` | Flag present in ontology | | |
-| F.12 | Verify medium-risk capabilities are controlled by domain profiles | `block_autonomous` lists include relevant capabilities per domain | | |
+| F.12 | Verify how the medium-risk capabilities a domain lists under `block_autonomous` are kept from running autonomously | The lists name the relevant capabilities per domain, and the deployment's host or workflows implement them | | |
+
+F.6 and F.12 check what a profile declares. A domain profile is informative data, and no shipped component enforces its `block_autonomous` list, so the control to audit is the deployment's implementation of it. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ---
 

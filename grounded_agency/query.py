@@ -63,7 +63,10 @@ async def grounded_query(
     Args:
         prompt: The user prompt to send to the agent.
         options: Optional ``ClaudeAgentOptions`` instance.  If *None*,
-            a default instance is created.
+            a default instance is created.  Its ``can_use_tool`` callback
+            decides the calls that require approval; without one they
+            are denied (F502) unless the adapter's config sets
+            ``approval="off"``.
         config: Optional ``GroundedAgentConfig``.  Ignored when
             *adapter* is provided.
         adapter: Optional pre-configured adapter.  When omitted a new
@@ -81,7 +84,11 @@ async def grounded_query(
         adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=True))
         adapter.create_checkpoint(["*.py"], "Before changes")
 
-        async for msg in grounded_query("Edit utils.py", adapter=adapter):
+        # An edit requires approval: the can_use_tool callback decides it.
+        options = ClaudeAgentOptions(can_use_tool=ask_the_user)
+        async for msg in grounded_query(
+            "Edit utils.py", options=options, adapter=adapter
+        ):
             print(type(msg).__name__, msg)
 
         print("Cost:", adapter.cost_summary.total_usd)

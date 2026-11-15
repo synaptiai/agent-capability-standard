@@ -13,16 +13,24 @@ hooks:
       hooks:
         - type: command
           command: |
-            # Record audit data access for meta-audit
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
             mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-READ] $(date -u +%Y-%m-%dT%H:%M:%SZ) | File: {{tool_input.file_path}} | Accessed for audit" >> .audit/audit-meta.log
+            echo "[AUDIT-READ] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Read | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
     - matcher: "Grep"
       hooks:
         - type: command
           command: |
-            # Record audit search operations
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
             mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-SEARCH] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Pattern: {{tool_input.pattern}} | Searched for audit" >> .audit/audit-meta.log
+            echo "[AUDIT-SEARCH] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Grep | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
 ---
 
 ## Live Context
@@ -91,8 +99,8 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 6) **Write the record (append-only)**: Persist the audit record before returning
    - Build one compact JSON line: `audit_id`, `timestamp`, the `event`, the `context`, `retention` if given, and the collected `audit_record`, `changes` and `provenance` (redact credentials and PII first)
    - Append it with Bash to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` (`mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"`, then `>>`), so the record lands in the same project `.claude/` directory the plugin's hooks use rather than under whatever the working directory is; refuse if the file is a symlink, and never rewrite, truncate or reorder existing lines
-   - Do not write to `.claude/audit.log`: the plugin's PostToolUse hook keeps it as an HMAC-chained log of skill invocations (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends this skill's own invocation only after the skill finishes, so there is no line for it yet: cite earlier lines (the invocations being audited) as evidence, not this one
-   - The plugin's PreToolUse hook blocks a Bash command that matches its mutation pattern (`rm`, `mv`, `sed`, `git`, `curl`, `chmod`, … anywhere in the command, record text included) while there is no valid checkpoint marker (`.claude/checkpoint.ok`); a plain `mkdir`/`printf >>` append whose text matches none of them is not blocked. If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
+   - Do not write to `.claude/audit.log`: the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself: cite earlier lines (the calls being audited) as evidence, not these
+   - The plugin's PreToolUse hook blocks every Bash call, this append included, while there is no valid checkpoint marker (`.claude/checkpoint.ok`): a shell command is not trusted to be read-only. If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
 
 7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line
 

@@ -30,6 +30,30 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 
 
+async def approve(tool_name: str, tool_input: dict, context: object) -> object:
+    """Stand-in for the host's ``can_use_tool`` callback: approves every call.
+
+    A real host shows the person the tool and its input and returns their
+    decision. Without such a callback, a call whose capability requires
+    approval is denied with F502 (APPROVAL_REQUIRED).
+    """
+    try:
+        from claude_agent_sdk import PermissionResultAllow
+    except ImportError:
+        from grounded_agency import FallbackPermissionAllow
+
+        return FallbackPermissionAllow(updated_input=tool_input)
+    return PermissionResultAllow(updated_input=tool_input)
+
+
+def is_allowed(result: object) -> bool:
+    """An SDK permission result (``behavior``) or the fallback (``allowed``)."""
+    return (
+        getattr(result, "behavior", None) == "allow"
+        or getattr(result, "allowed", None) is True
+    )
+
+
 async def demo_checkpoint_enforcement():
     """Show that mutations are blocked without checkpoint (in strict mode)."""
     print("\n" + "=" * 60)
@@ -60,7 +84,7 @@ async def demo_checkpoint_enforcement():
     print(f"Has valid checkpoint: {adapter.has_valid_checkpoint()}")
 
     # Simulate permission check for Write tool
-    permission_callback = adapter._make_permission_callback()
+    permission_callback = adapter._make_permission_callback(approve)
     result = await permission_callback(
         "Write",
         {"file_path": "test.txt", "content": "hello"},
@@ -68,8 +92,8 @@ async def demo_checkpoint_enforcement():
     )
 
     print(f"Permission result for Write: {result}")
-    if isinstance(result, dict) and not result.get("allowed", True):
-        print(f"  Blocked: {result.get('message', 'No message')}")
+    if not is_allowed(result):
+        print(f"  Blocked: {getattr(result, 'message', 'No message')}")
 
 
 async def demo_safe_mutation():
@@ -95,9 +119,10 @@ async def demo_safe_mutation():
     print(f"Checkpoint created: {checkpoint_id}")
     print(f"Has valid checkpoint: {adapter.has_valid_checkpoint()}")
 
-    # Now mutation should be allowed
+    # Now the checkpoint rule is satisfied. mutate also requires approval,
+    # so the host's can_use_tool callback (here: approve) decides the call.
     print("\n--- With Checkpoint ---")
-    permission_callback = adapter._make_permission_callback()
+    permission_callback = adapter._make_permission_callback(approve)
     result = await permission_callback(
         "Write",
         {"file_path": "test.txt", "content": "hello"},
@@ -105,8 +130,8 @@ async def demo_safe_mutation():
     )
 
     print(f"Permission result for Write: {result}")
-    if isinstance(result, dict) and result.get("allowed", False):
-        print("  Mutation ALLOWED with checkpoint")
+    if is_allowed(result):
+        print("  Mutation ALLOWED with checkpoint and approval")
 
 
 async def demo_evidence_collection():

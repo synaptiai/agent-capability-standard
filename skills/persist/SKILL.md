@@ -15,8 +15,8 @@ hooks:
           prompt: |
             PERSIST DATA VALIDATION CHECK
 
-            Target file: {{tool_input.file_path}}
-            Content to write: {{tool_input.new_string}}
+            The tool call follows this prompt as JSON; the target file is
+            tool_input.file_path and the content to write is tool_input.new_string.
 
             Verify before persisting:
             1. NO credentials, API keys, or secrets in content
@@ -29,22 +29,37 @@ hooks:
             - Is this a duplicate of existing content?
             - Does this contradict existing persisted facts?
 
-            Reply ALLOW if content is safe to persist.
-            Reply BLOCK with specific reason if validation fails.
+            Return ok: true if content is safe to persist.
+            Return ok: false, with the specific reason, if validation fails.
           once: false
         - type: command
           command: |
-            # Validate target file is not a sensitive system file
-            TARGET="{{tool_input.file_path}}"
-            # Block writes to system directories
-            if echo "$TARGET" | grep -qE "^(/etc/|/usr/|/bin/|/sbin/|~/.ssh/|~/.aws/|~/.config/)"; then
-              echo "BLOCK: Cannot persist to system or credential directories"
-              exit 1
-            fi
+            # Validate target file is not a sensitive system file. Claude Code
+            # passes the tool call as JSON on stdin; exit 2 blocks the call and the
+            # reason on stderr is shown to Claude. A call that cannot be read is blocked.
+            TARGET="$(jq -r '.tool_input.file_path // empty' 2>/dev/null)" || { echo "BLOCK: cannot read the tool call (jq is required)" >&2; exit 2; }
+            case "$TARGET" in
+              "~/"*) TARGET="${HOME}/${TARGET#??}" ;;
+            esac
+            # A path with '//', '.' or '..' segments is not compared as written
+            # (/tmp/../etc/passwd is /etc/passwd), so it is blocked
+            case "$TARGET" in
+              *//*|*/./*|*/.|*/../*|*/..|../*|..)
+                echo "BLOCK: Cannot persist to a path with '//', '.' or '..' segments; give the normalised path" >&2
+                exit 2
+                ;;
+            esac
+            # Block writes to system directories and to credential directories under the home directory
+            case "$TARGET" in
+              /etc/*|/usr/*|/bin/*|/sbin/*|"${HOME}"/.ssh/*|"${HOME}"/.aws/*|"${HOME}"/.config/*)
+                echo "BLOCK: Cannot persist to system or credential directories" >&2
+                exit 2
+                ;;
+            esac
             # Block writes to credential files
-            if echo "$TARGET" | grep -qiE "(\.env|credentials|secrets|password|\.pem|\.key)$"; then
-              echo "BLOCK: Cannot persist to credential files"
-              exit 1
+            if printf '%s\n' "$TARGET" | grep -qiE "(\.env|credentials|secrets|password|\.pem|\.key)$"; then
+              echo "BLOCK: Cannot persist to credential files" >&2
+              exit 2
             fi
             exit 0
   PostToolUse:
@@ -52,7 +67,13 @@ hooks:
       hooks:
         - type: command
           command: |
-            echo "[PERSIST] $(date -u +%Y-%m-%dT%H:%M:%SZ) | File: {{tool_input.file_path}} | Success" >> .audit/persist-operations.log 2>/dev/null || true
+            # Log the call without its input. Claude Code passes the tool call as
+            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
+            DIGEST=""
+            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
+              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
+            mkdir -p .audit 2>/dev/null || true
+            echo "[PERSIST] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Edit | input_sha256: ${DIGEST:-unavailable}" >> .audit/persist-operations.log 2>/dev/null || true
 ---
 
 ## Intent

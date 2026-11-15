@@ -43,7 +43,7 @@ The Grounded Agency framework provides:
 | Component | Function | Risk Relevance |
 |-----------|----------|---------------|
 | Capability ontology (36 capabilities) | Typed I/O contracts, risk metadata, edges | Defines structural safety envelope |
-| Domain profiles (7 profiles) | Trust weights, risk thresholds, checkpoint policies | Configures safety per deployment |
+| Domain profiles (7 profiles) | Trust weights, risk thresholds, checkpoint policies | Records the settings a deployment intends; informative data that no shipped component loads or selects (Section 4) |
 | Workflow catalog (12 workflows) | Composable capability sequences | Enables auditable execution |
 | Safety enforcement (hooks, validators) | Runtime checkpoint gates, audit logging | Provides compliance infrastructure |
 | SDK integration (`grounded_agency/`) | Python adapter for Claude Agent SDK | Enables programmatic safety |
@@ -59,10 +59,12 @@ The Grounded Agency framework provides:
 | Technical documentation (Art. 11) | Formal specification, derivation methodology | `spec/WHITEPAPER.md`, `docs/methodology/` |
 | Record-keeping (Art. 12) | PostToolUse audit hook, audit log | `hooks/hooks.json`, `.claude/audit.log` |
 | Transparency (Art. 13) | Typed contracts, evidence anchors, confidence scores | Output schemas in capability ontology |
-| Human oversight (Art. 14) | Domain profiles with `block_autonomous`, `require_human` | `schemas/profiles/*.yaml` |
+| Human oversight (Art. 14) | `requires_approval` on `execute`, `mutate` and `send`, which the reference executor enforces; domain profiles declare `block_autonomous` and `require_human`, which a deployer's host has to implement | `schemas/capability_ontology.yaml`, `schemas/profiles/*.yaml` |
 | Accuracy, robustness, cybersecurity (Art. 15) | 6 validators, confidence thresholds, trust weights | `tools/validate_*.py`, evidence policies |
 
 ## 4. Domain Profile Classification Matrix
+
+**Profile settings are declarations.** A domain profile is informative data for hosts and workflow authors. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. The settings quoted in this section (`block_autonomous`, `require_human`, `require_review`, `auto_approve`, `checkpoint_policy` entries, `minimum_confidence`, required anchor types) are what each profile declares; they take effect only where the deployer's host implements them or where they are written into a workflow. What is enforced today rests on the ontology's safety flags: the validator rejects a workflow in which `mutate`, `send` or `rollback` has no `checkpoint` before it, the reference executor runs a step that requires a checkpoint or approval only with one, and the plugin hook blocks Write, Edit, MultiEdit, NotebookEdit and Bash calls without a valid checkpoint marker. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ### 4.1 Classification Summary
 
@@ -82,7 +84,7 @@ The Grounded Agency framework provides:
 
 **Classification Basis:** Art. 6(2) and Annex III, Area 5(a) — "AI systems intended to be used as a safety component in the management and operation of [...] healthcare" and AI systems qualifying as medical devices under Regulation (EU) 2017/745.
 
-**Profile Characteristics:**
+**Profile Characteristics (declared in the profile):**
 - `auto_approve: none` — No autonomous clinical actions permitted
 - `require_review: low` — All actions require clinical review
 - `require_human: low` — Near-total human oversight
@@ -90,7 +92,7 @@ The Grounded Agency framework provides:
 - `minimum_confidence: 0.90` — Highest confidence threshold
 - `compliance.hipaa: required` — Existing regulatory awareness
 
-**Framework Readiness:** The healthcare profile already exceeds EU AI Act Art. 14 (human oversight) requirements. The `block_autonomous` list prevents any clinical action without human authorization. Evidence policy requires `clinician_verification` as an anchor type.
+**Framework Readiness:** The healthcare profile declares more than EU AI Act Art. 14 (human oversight) asks for: its `block_autonomous` list names `mutate`, `send`, `execute` and `delegate`, and its evidence policy lists `clinician_verification` as a required anchor type. No shipped component enforces these settings. A deployment relies on the approval and checkpoint flags the reference executor enforces and on what its host implements of the profile.
 
 **Gaps:** Post-market monitoring plan (addressed in EUAIA-PMM-001), formal declaration of conformity.
 
@@ -98,7 +100,7 @@ The Grounded Agency framework provides:
 
 **Classification Basis:** Art. 6(2) and Annex III, Area 2(b) — "AI intended to be used as a safety component in the management and operation of [...] machinery."
 
-**Profile Characteristics:**
+**Profile Characteristics (declared in the profile):**
 - `auto_approve: low` — Only low-risk actions auto-approved
 - `require_review: medium` — Medium-risk requires human review
 - `require_human: high` — High-risk requires human execution
@@ -106,7 +108,7 @@ The Grounded Agency framework provides:
 - `minimum_confidence: 0.85` — High confidence threshold
 - Checkpoint policy includes `before_actuator_command: always` — Safety-critical gating
 
-**Framework Readiness:** The manufacturing profile enforces checkpoint-before-actuation and blocks autonomous state mutation. This aligns with Art. 9 (risk management) and Art. 14 (human oversight).
+**Framework Readiness:** The manufacturing profile declares a checkpoint before every actuator command (`before_actuator_command: always`) and lists `mutate` and `send` under `block_autonomous`. No shipped component enforces either setting. The ontology's flags cover part of it: `mutate` and `send` require a checkpoint and approval. The validator rejects a workflow without a `checkpoint` step before them, the reference executor runs them only with a valid checkpoint and an approval decision, and the plugin hook blocks Write, Edit, MultiEdit, NotebookEdit and Bash calls without a checkpoint marker; the hook asks for no approval. This aligns with Art. 9 (risk management) and Art. 14 (human oversight).
 
 **Gaps:** Sector-specific safety standards (Machinery Regulation 2023/1230 harmonization), post-market monitoring plan.
 
@@ -114,7 +116,7 @@ The Grounded Agency framework provides:
 
 **Classification Basis:** Art. 50 — AI systems designed to interact directly with natural persons. Not listed in Annex III; no safety-critical function.
 
-**Profile Characteristics:**
+**Profile Characteristics (declared in the profile):**
 - `auto_approve: low` — Basic autonomy for low-risk tasks
 - `require_review: medium` — User confirmation for medium actions
 - `block_autonomous: [send, mutate]` — External actions blocked
@@ -138,7 +140,7 @@ The Grounded Agency framework provides:
 | Scientific research analysis | Minimal Risk | N/A | No direct decision impact |
 | Regulatory reporting | Limited Risk | N/A | Transparency obligations |
 
-**Framework Readiness:** The data analysis profile includes `data_lineage` as a required evidence anchor type, supporting Art. 10 (data governance) traceability requirements.
+**Framework Readiness:** The data analysis profile lists `data_lineage` as a required evidence anchor type, supporting Art. 10 (data governance) traceability requirements. Nothing shipped checks an output's anchors against a profile; a host has to.
 
 #### Vision (Context-Dependent — Potentially High Risk)
 
@@ -152,7 +154,7 @@ The Grounded Agency framework provides:
 | Content moderation | Limited Risk | N/A | Content detection with transparency |
 | Satellite imagery analysis | Minimal Risk | N/A | No rights or safety impact |
 
-**Conservative Assessment:** Any vision system capable of processing human biometric data should be assessed as *potentially high-risk* until deployment context confirms otherwise. The profile's `block_autonomous: [mutate, send]` and `before_classification_output: always` checkpoint policy provide a strong safety baseline.
+**Conservative Assessment:** Any vision system capable of processing human biometric data should be assessed as *potentially high-risk* until deployment context confirms otherwise. The profile's `block_autonomous: [mutate, send]` and `before_classification_output: always` checkpoint policy declare a safety baseline for a host to implement.
 
 #### Audio (Context-Dependent — Potentially High Risk)
 
@@ -174,7 +176,7 @@ The Grounded Agency framework provides:
 
 **Risk Inheritance Rule:** If a multimodal system combines vision (potentially biometric) with audio (potentially speaker identification), the combined system inherits the highest applicable risk tier. Example: a video analysis system with facial recognition + speaker verification is classified under Annex III Area 1.
 
-**Framework Readiness:** The multimodal profile requires `source_modality` and `target_modality` evidence anchors, enabling modality-specific risk tracking. The `minimum_confidence: 0.75` threshold is the lowest among all profiles, reflecting the inherent uncertainty in cross-modal transformations.
+**Framework Readiness:** The multimodal profile lists `source_modality` and `target_modality` as required evidence anchors, so a host that checks them can track risk per modality. The `minimum_confidence: 0.75` threshold is the lowest among all profiles, reflecting the inherent uncertainty in cross-modal transformations.
 
 ```mermaid
 ---
@@ -194,8 +196,8 @@ The framework's internal risk model maps to EU AI Act requirements:
 | Framework Risk Tier | Capabilities (Count) | EU AI Act Mapping | Art. 9 Controls |
 |--------------------|---------------------|-------------------|-----------------|
 | **Low** (29 capabilities) | retrieve, search, observe, receive, detect, classify, measure, predict, compare, discover, plan, decompose, critique, explain, state, transition, attribute, ground, simulate, generate, transform, integrate, verify, checkpoint, constrain, audit, persist, recall, inquire | Minimal or Limited Risk baseline | Evidence grounding, confidence thresholds, trust decay |
-| **Medium** (5 capabilities) | execute, rollback, delegate, synchronize, invoke | Limited to High Risk | Approval gates, domain blocking, audit logging |
-| **High** (2 capabilities) | mutate, send | High Risk (when in Annex III context) | Mandatory checkpoint, dual approval, PreToolUse hook gate, domain blocking, full provenance chain |
+| **Medium** (5 capabilities) | execute, rollback, delegate, synchronize, invoke | Limited to High Risk | Approval gate on `execute`, audit logging; domain blocking where a host implements the profile |
+| **High** (2 capabilities) | mutate, send | High Risk (when in Annex III context) | Mandatory checkpoint, dual approval, PreToolUse hook gate, full provenance chain; domain blocking where a host implements the profile |
 
 **Note:** This mapping shows structural alignment, not equivalence. A low-risk *capability* in a high-risk *deployment* still carries the deployment's regulatory obligations.
 
@@ -203,7 +205,7 @@ The framework's internal risk model maps to EU AI Act requirements:
 
 ### 6.1 Areas Directly Relevant to Framework Profiles
 
-| Annex III Area | Description | Relevant Profiles | Framework Controls |
+| Annex III Area | Description | Relevant Profiles | Profile Settings (declared) |
 |---------------|-------------|-------------------|-------------------|
 | **Area 1** — Biometrics | Biometric identification, categorisation, emotion recognition | vision, audio, multimodal | `block_autonomous`, checkpoint before identification, evidence grounding |
 | **Area 2(b)** — Machinery safety | AI as safety component of machinery products | manufacturing | `before_actuator_command: always`, `before_process_change: always` |

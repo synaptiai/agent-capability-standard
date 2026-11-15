@@ -6,7 +6,7 @@ This directory contains domain-specific workflow templates and configuration pro
 
 Domain templates provide ready-to-use starting points for specific industry verticals. Each domain includes:
 
-- **Profile** — Trust weights, risk thresholds, and checkpoint policies calibrated for the domain
+- **Profile** — Trust weights, risk thresholds, and checkpoint policies calibrated for the domain, as informative data (see [Status of Domain Profiles](#status-of-domain-profiles))
 - **Workflows** — Pre-composed workflow patterns using the 36 atomic capabilities
 - **Documentation** — Guidance on customization and integration
 
@@ -23,6 +23,8 @@ Domain templates provide ready-to-use starting points for specific industry vert
 | [Multi-modal](./multimodal/README.md) | [multimodal.yaml](../../schemas/profiles/multimodal.yaml) | 4 proposed (not yet in a catalog) | Cross-modal-consistent, alignment-verified, modality-trust-ranked |
 
 ## Choosing a Domain
+
+The key settings listed for each domain are what its profile declares. [Status of Domain Profiles](#status-of-domain-profiles) says what enforces a rule today.
 
 ### Manufacturing
 
@@ -143,7 +145,7 @@ workflows:          # Recommended workflows
 
 4. **Define checkpoint policy** based on what actions are critical
 
-5. **Create workflow files** in `schemas/workflows/`
+5. **Create workflow files** in `schemas/workflows/`. Nothing applies a profile to a workflow ([Status of Domain Profiles](#status-of-domain-profiles)), so write the checkpoints and approvals the domain needs into the workflows themselves: a `checkpoint` step before a step that changes state, and `requires_approval: true` or `requires_checkpoint: true` on a step whose ontology flags are weaker than the profile asks for
 
 6. **Document** in `docs/domains/<your-domain>/README.md`
 
@@ -175,6 +177,19 @@ detect:
 ```
 
 This proves the atomic capability set is complete — different domains compose the same building blocks with domain-specific parameterization.
+
+## Status of Domain Profiles
+
+A domain profile is informative data: what the authors of a domain consider appropriate for trusting sources, involving a person, taking checkpoints and expecting evidence. Nothing applies one. Standard 1.1.0 names `profile` as a descriptive workflow field ([§5.1](../../spec/STANDARD-v1.1.0.md#51-catalog-and-workflow-definition)) and lets a `trust_weights` key `trust_class:<class>` override a trust class's weight ([§8.3](../../spec/STANDARD-v1.1.0.md#83-trust-classes)), but says neither how a run selects a profile nor what its other settings change. No shipped component reads `schemas/profiles/*.yaml`: `grounded_agency/trust.py` applies `trust_weights` only when its caller passes them, and `tools/validate_profiles.py` checks a profile's shape only. Some settings use words outside the Standard's vocabulary: `require_human` admits `critical`, which is not a risk level of [§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition), and no `required_anchor_types` entry in the shipped profiles is an `Anchor.kind` of `schemas/event_schema.yaml`.
+
+So `block_autonomous`, `require_human`, `checkpoint_policy` and `minimum_confidence` take effect only where a host implements them or a workflow author writes them into the workflow, for example as a step's `requires_approval` ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)). Where this documentation says a profile requires or blocks something, that is what the profile declares. What is enforced rests on the ontology's safety flags:
+
+| What is enforced | By what |
+|------------------|---------|
+| No `mutate`, `send` or `rollback` step without a `checkpoint` step before it (V102); a step's flags are never weaker than the ontology's (W602) | The validator in `core/` ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) |
+| A step runs only on a valid checkpoint and a decision on what the approver was shown, where its flags require them | The reference executor ([Running workflows](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces)) |
+| A tool call needs a checkpoint (F501, strict mode) and is put to the host for approval (F502), where its capability requires them | The Python adapter ([Claude Agent SDK integration](../integrations/claude_agent_sdk.md)) |
+| A Write, Edit, MultiEdit, NotebookEdit or Bash call needs a valid checkpoint marker (F501) | The plugin hook ([Safety hooks](../../hooks/README.md)) |
 
 ## Related Documentation
 

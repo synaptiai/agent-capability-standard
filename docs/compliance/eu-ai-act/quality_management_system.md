@@ -20,6 +20,8 @@ This QMS applies to:
 - The full AI lifecycle: design, development, testing, deployment, post-market monitoring
 - All 36 capabilities in the ontology, all 7 domain profiles, and all 12 workflow patterns
 
+The domain profiles are informative data. Standard 1.1.0 does not say how a profile is applied, and no shipped component loads or selects one: the validator, the executor and the plugin hooks do not use a profile, and the Python package applies only a profile's `trust_weights`, when a caller passes them to `grounded_agency/trust.py`. Where this document cites a profile setting as an implementation, the setting is what the profile declares, and it takes effect only where the deployer's host implements it or where it is written into a workflow. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+
 ```mermaid
 ---
 title: The lifecycle this QMS covers
@@ -80,13 +82,13 @@ flowchart TB
 
 | Requirement Element | Framework Implementation | Evidence |
 |-------------------|--------------------------|----------|
-| Data acquisition | Trust-weighted source model with domain-specific weights | `schemas/profiles/*.yaml` — `trust_weights` sections |
+| Data acquisition | Trust-weighted source model; domain profiles record domain-specific weights for a host to apply | `schemas/profiles/*.yaml` — `trust_weights` sections |
 | Data collection | EvidenceStore with typed evidence anchors | `grounded_agency/state/evidence_store.py` |
-| Data analysis | Confidence scoring with domain-specific minimum thresholds | Evidence policies in domain profiles |
-| Data labelling | Required anchor types per domain profile | `evidence_policy.required_anchor_types` per profile |
+| Data analysis | Confidence score on every capability output; domain profiles record a minimum threshold (`minimum_confidence`), which no shipped component compares an output against | Evidence policies in domain profiles |
+| Data labelling | Anchor types each domain profile lists as required; no shipped component checks an output's anchors against the list | `evidence_policy.required_anchor_types` per profile |
 | Data storage | Append-only audit log; checkpoint metadata store; evidence store | `hooks/hooks.json`, `grounded_agency/state/checkpoint_tracker.py`, `grounded_agency/state/evidence_store.py` |
 | Data filtration | Trust decay model (halves every 10 days, floor 0.25) | Trust model in `grounded_agency/` |
-| Data retention | Domain-specific retention (healthcare: 2555 days); Art. 12 minimum 10 years | Domain profiles `compliance` section; EUAIA-PMM-001 Section 9 |
+| Data retention | Domain-specific retention declared in the profile (healthcare: 2555 days), which the deployer's log storage has to apply; Art. 12 minimum 10 years | Domain profiles `compliance` section; EUAIA-PMM-001 Section 9 |
 | Provenance tracking | ProvenanceRecord linking evidence to source, timestamp, and capability | EvidenceStore provenance API |
 
 **ISO 42001 Cross-Reference:** Clause 8.3 (Data for AI systems), Annex C (AI-related data management)
@@ -99,7 +101,7 @@ flowchart TB
 |-------------------|--------------------------|----------|
 | Risk identification | Structural risk classification in ontology metadata | `schemas/capability_ontology.yaml` — `risk`, `mutation`, `requires_checkpoint`, `requires_approval` per capability |
 | Risk analysis | Three-tier model: Low (29), Medium (5), High (2) | AIMS-RSK-001 (risk treatment plan), EUAIA-CLS-001 |
-| Risk evaluation | Domain profiles configure risk thresholds per deployment context | `schemas/profiles/*.yaml` — `risk_thresholds` |
+| Risk evaluation | The ontology's risk level and safety flags per capability are what the validator and the executor evaluate; domain profiles record risk thresholds per deployment context for the deployer's host to implement | `schemas/capability_ontology.yaml`; `schemas/profiles/*.yaml` — `risk_thresholds` |
 | Risk treatment | Structural controls (hooks, conflicts_with edges), operational controls (approvals, blocking), detective controls (audit, evidence) | AIMS-RSK-001 Sections 3.1-3.3 |
 | Residual risk acceptance | Formal acceptance per risk tier with monitoring | AIMS-RSK-001 Section 7 |
 | Risk monitoring | Post-market monitoring KPIs | EUAIA-PMM-001 Section 5 |
@@ -156,7 +158,7 @@ flowchart TB
 | Requirement Element | Framework Implementation | Evidence |
 |-------------------|--------------------------|----------|
 | Technical documentation | Annex IV documentation | EUAIA-TEC-001 |
-| Audit logs | Append-only skill invocation log | `hooks/hooks.json` — PostToolUse hook, `.claude/audit.log` |
+| Audit logs | Append-only tool call log | `hooks/hooks.json` — PostToolUse hook, `.claude/audit.log` |
 | Evidence records | Typed evidence anchors with provenance | `grounded_agency/state/evidence_store.py` |
 | Checkpoint records | Checkpoint creation, validation, expiry metadata | `grounded_agency/state/checkpoint_tracker.py` |
 | Configuration records | Domain profiles with version tracking | `schemas/profiles/*.yaml` with git history |

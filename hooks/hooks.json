@@ -13,7 +13,18 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Skill",
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",

@@ -1,6 +1,10 @@
 # Healthcare Domain Profile
 # Calibrated for clinical decision support, patient monitoring, and care coordination.
 # NOTE: This profile is for CLINICAL DECISION SUPPORT only, not autonomous medical decisions.
+#
+# Status: informative data for hosts and workflow authors. No shipped component
+# loads or selects this profile; see "Status of Domain Profiles" in
+# docs/domains/README.md.
 
 domain: healthcare
 version: "1.0.0"

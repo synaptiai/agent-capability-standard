@@ -1,0 +1,1679 @@
+# Models, context, memory, profiles and security
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: models-context-memory-security
+title: Models, context, memory, profiles and security
+rows:
+- id: models-01
+  relation: sa_only
+  acs:
+    concept: (no counterpart) model selection, connection, pricing, sampling and capability flags
+    refs:
+    - spec/ (every file searched; not found)
+    - grounded_agency/adapter.py GroundedAgentConfig (lines 152-185; quote at line 168), a Claude Agent
+      SDK pass-through, non-normative
+    - grounded_agency/query.py CostSummary (lines 32-42), non-normative
+    - schemas/capability_ontology.yaml nodes[id=delegate] input `model_family` (lines 1467-1469)
+    quote: 'model: Default model name (SDK ``model``).'
+  sa:
+    concept: Model definition (`defineModel`) and provider interface (`LLMProviderInterface`, `defineProvider`,
+      config slots)
+    refs:
+    - content/0.2.0/specification/models.md introduction (line 3; quote at line 3), §1 Model Definition
+      (lines 9-34), §3 Fallback Chains (lines 40-52), §5 Capabilities (lines 74-113), §6 Validation (lines
+      115-123), §8.5 Sampling Parameters (line 315)
+    - content/0.2.0/specification/providers.md §1 Provider Interface (lines 10-43), §1.3 Provider Extension
+      Factories (lines 75-216), §7 Error Handling (lines 394-439)
+    - content/0.2.0/infrastructure/providers.md 'Provider Packages' (line 24), 'Provider Configuration'
+      (lines 68-139)
+    - '@standardagents/spec 0.45.10 index.d.ts line 4048 (defineModel)'
+    quote: A model definition specifies which Large Language Model (LLM) to use for inference and how
+      to connect to it.
+  explanation: 'The ACS Standard does not describe models or LLM providers. Its only model-related concept
+    is `model_family`: a requested input of `delegate` and an attested identity field (row models-02).
+    The reference SDK passes a model name and a cost budget through to the Claude Agent SDK and keeps
+    a per-model cost summary; none of that is normative. SA specifies models and providers normatively
+    (required fields, validation MUSTs, fallback SHOULDs, typed provider errors). No ACS field maps to
+    a model definition, so SA''s two pages are adopted as written; other rows of this mapping do constrain
+    four properties of the model definitions a grounded agent writes. Searched: temperature, pricing,
+    context window, system prompt, sampling, llm provider (every file under spec/, case-insensitive).'
+  combined: '`defineModel({ name, provider, model })` and provider packages are used unchanged; the call
+    type-checks against the published types. Four rules from other rows apply to the definition: (1) no
+    `fallbacks` that leave the model family the host attests (models-02); (2) no `providerTools` on models
+    of grounded prompts unless their results are captured (perceive-02); (3) `capabilities.supportsImages`
+    declared explicitly, because it defaults to `false` and the binding''s dispatcher reads it (modality-02);
+    (4) a provider extension that wraps the provider for recording is a separate provider identity with
+    its own `name` in setup interfaces (providers-01).'
+- id: models-02
+  relation: partial
+  acs:
+    concept: 'Model family: requested with `delegate` `model_family`, attested as `effective.model_family`
+      or the attested identity''s `model_family`, and required by quorum `require_model_families`'
+    refs:
+    - schemas/agent_identity_schema.yaml agent_identity.model_family (lines 29-31; quote at line 31)
+    - schemas/capability_ontology.yaml nodes[id=delegate] input `model_family` (lines 1467-1469), output
+      `effective` (lines 1517-1532)
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 760-761), §5.15 Delegation (lines 917-923),
+      §5.16 Quorum, `require_model_families` (line 981), §5.17 Sender Identity, Delegation (lines 1063-1075)
+    quote: 'description: For an agent, the model family it ran on.'
+  sa:
+    concept: 'Model identity at run time: `ModelDefinition.name` and `model`, `fallbacks`, `ProviderResponse.metadata.model`,
+      `ResponseSummary.model`, `ProviderUsage.provider`; the message record''s `prompt` field'
+    refs:
+    - content/0.2.0/specification/models.md §1.1 Required Properties (lines 15-19), §3.1 Fallback Behavior
+      (lines 44-48; quote at line 47), §5.3 Default Capabilities (line 111), §8.5 Sampling Parameters
+      (line 315)
+    - content/0.2.0/specification/providers.md §5 Response Format (lines 362-367), §6 Streaming (lines
+      380-391), §9.3 ResponseSummary Structure (lines 536-549), §9.5 Implementation Notes (lines 563-566),
+      §11 TypeScript Reference (lines 806, 816-817)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 11-38)
+    - content/0.2.0/specification/threads/decisions.md §4 Result Types (line 148)
+    - content/0.2.0/distribution/packaging.md 'Visibility Rules' (lines 228-230)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2006-2097 (Message), 1024 (ProviderResponse.metadata),
+      1179-1183 (finish chunk), 2880 (loadPrompt)'
+    quote: 2. If the primary model fails after exhausting retries, try each fallback in order
+  explanation: 'ACS counts a model family only when the host attests it (§5.16), and `effective` is part
+    of the delegation''s output, so for a waiting delegate it is attested before the delegate''s model
+    has answered. SA knows a prompt''s model statically, but with `fallbacks` (SHOULD-level) another model
+    may answer, and the message record names the prompt, not the model. Provider code can see the answering
+    model: `ProviderResponse.metadata.model` on `generate` (optional; typed `unknown` in the published
+    types) and `ResponseSummary.model`, documented as the model that handled the request, for streamed
+    and non-streamed calls; no stream chunk carries it. `ProviderUsage.provider` names the upstream provider.
+    SA has no family field. Searched: a model member in the Message table and the published `Message`
+    interface: not found; family (content/0.2.0: one adjective in models.md §8.5; published types: not
+    found).'
+  combined: '(a) Attestation is static. A reviewer whose family counts toward `require_model_families`
+    uses a model definition with no `fallbacks`, or a chain whose members all map to one family. The host
+    maps a definition to a family string with its own table (ACS defines no vocabulary) and reads definitions
+    in its own namespace with `state.loadPrompt<PromptDefinition>(name)` and `state.loadModel<ModelDefinition>(prompt.model)`;
+    a packaged reviewer publishes its family itself, because package internals cannot be loaded from outside.
+    (b) A dynamic record is a cross-check: a provider extension records `ctx.summary.model` in `overrides.getResponseMetadata`
+    and `ctx.request.model` in `generate` and `stream` (row providers-01), which needs the optional `ctx.state`;
+    a verdict whose recorded model maps to another family is discarded. (c) Where the delegate is a blocking
+    spawn and the host answers only after the child session closes, it may attest from that record. `state.decide()`
+    is outside these overrides; `DecisionResult.model` reports its model.'
+  see_also:
+  - published-api-extension-points#thread-06
+  - workflow-execution#wf-20
+  - multi-agent#coord-07
+- id: providers-01
+  relation: fits
+  acs:
+    concept: 'Recording a model call: `audit` and `ProvenanceRecord` say what a record holds; no ACS requirement
+      to record model calls was found'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=audit] (lines 1336-1375; quote at line 1338)
+    - schemas/world_state_schema.yaml types.ProvenanceRecord (lines 151-182)
+    - spec/SECURITY.md §4.2 Runtime Security (lines 243-248)
+    quote: 'description: Record what happened and why'
+  sa:
+    concept: 'Observation of a model call by provider-extension code: method overrides (`generate`, `stream`,
+      `getResponseMetadata`) and the per-request transport (`createFetch`), each with the thread `state`
+      when the runtime supplies it'
+    refs:
+    - content/0.2.0/infrastructure/providers.md 'Provider Packages' (line 24), 'Method Overrides' (lines
+      141-180; quote at line 178), 'Per-request Transport (`createFetch`)' (lines 182-189)
+    - content/0.2.0/specification/providers.md §1.2 Provider Factory (lines 50-65), §1.3 'Method Overrides'
+      (lines 174-214), §5 Response Format (lines 347-368), §6 Streaming (lines 380-391), §9 Response Metadata
+      (lines 512-566)
+    - content/0.2.0/specification/models.md §3.1 Fallback Behavior (lines 44-48), §4.2 Pricing Priority
+      (line 72)
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (lines 21-36)
+    - content/0.2.0/infrastructure/runtime.md §7.4 Initial Payload Mapping (line 176)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 21-25)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3638-3655 (ProviderOverrideContext), 3666-3670 (CreateFetch),
+      3745 (factory context argument), 1179-1183 (finish chunk)'
+    quote: additionally receive the executing thread's `state` on
+  explanation: 'ACS says what a record contains; no MUST asks for a record per model call (SECURITY.md
+    §4.2 is a SHOULD-level list about tools). This row is supporting infrastructure for rows models-02
+    and context-01, not a conformance item. SA shows the facts of a model call (dispatched request, token
+    usage, answering model) to provider-extension code only: of the 14 thread hooks, the message hooks
+    see the assistant message built from the response, and none receives usage, finish reason or the answering
+    model. The text does not require runtimes to run overrides; they run because the published `defineProvider()`
+    wraps the base instance, and `state` arrives only through a second factory argument that the published
+    types have and the text''s `ProviderFactory` lacks. Decision calls, a runtime''s own model calls (the
+    bootstrap pass of Runtime §7.4) and provider-executed tools are outside the wrapper.'
+  combined: 'A provider extension is the `provider` of every model of a grounded agent, fallbacks included,
+    with: (1) `overrides.generate` recording `ctx.request.model`, a digest of `ctx.request.messages` and
+    token counts after `next()`; (2) `overrides.stream` returning a wrapping async iterable that records
+    the same at the `finish` chunk (no chunk carries the answering model); (3) `overrides.getResponseMetadata`
+    recording `ctx.summary.model`. Records go to `ctx.state.setValue` under a package-prefixed key, without
+    `usage.cost`, which SA restricts to authorized parties. When `ctx.state` is undefined the record cannot
+    be tied to a thread; an agent that requires it throws, which fails the step only once every model
+    of the chain has thrown. `createFetch` is the transport-level alternative. An external sink is an
+    external service the package has to declare as part of its purpose.'
+- id: prompts-01
+  relation: sa_only
+  acs:
+    concept: (no counterpart in the Standard) instructions to the model; the nearest ACS artefact is a
+      skill's procedure text
+    refs:
+    - spec/STANDARD-v1.1.0.md (searched for 'prompt'; not found)
+    - spec/SECURITY.md §2.2.1 Prompt Injection (lines 91-101), §9.2 Open Research Questions (line 408)
+    - CLAUDE.md 'Skill Structure' (lines 252-260; quote at line 259), plugin documentation, non-normative
+    quote: '- Procedure steps with evidence grounding'
+  sa:
+    concept: 'Prompt definition: system prompt content (`text` and `include` parts), `tools`, `toolChoice`,
+      `reasoning`, `hooks`; `after_system_message` hook'
+    refs:
+    - content/0.2.0/specification/prompts.md introduction (line 3; quote at line 3), §1.1 Required Properties
+      (lines 13-18), §2.2 Structured Prompts (lines 54-62), §2.4 Include Resolution (lines 86-91), §8
+      Hook Scoping (lines 272-273), §9.1 Required Field Validation (lines 283-288)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 76-85), §3.1 after_system_message
+      (lines 204-215)
+    - content/0.2.0/distribution/packaging.md 'Visibility Rules' (lines 223-230)
+    - content/0.2.0/specification/threads/client-api.md §6 Creating a Thread (lines 147-151)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4086-4099 (PromptEnvPart, PromptPart)'
+    quote: A prompt defines how each request to an LLM is crafted.
+  explanation: 'The ACS Standard never mentions prompts: it constrains which steps exist and what they
+    return, not how a model is instructed. SA''s prompt definition is adopted as written. Prompt text
+    can state the grounding rules, but text given to a model satisfies no ACS MUST; enforcement stays
+    in tool wrappers and hooks. Two SA limits shape the binding. Packed code sees only its own package
+    plus other packages'' entry agents, so a shared rules prompt cannot be included across packages; an
+    included prompt is also a full definition that needs a `toolDescription` and a defined `model`. An
+    `after_system_message` hook runs only when it is in the resolved hook set, and a child''s hook at
+    the default `after_parent` stage may replace the string again. Searched: prompt (spec/STANDARD-v1.1.0.md:
+    not found; spec/SECURITY.md: lines 91, 101 and 408, all on prompt injection).'
+  combined: 'The grounding rules ship as a string constant exported by the binding library and placed
+    in a text part, `{ type: ''text'', content: ACS_GROUNDING_RULES }`; an `include` part is usable only
+    for a prompt in the same package, and only its `prompt` field is included. Profile-dependent text
+    can be added per request by an `after_system_message` hook, whose returned string MUST replace the
+    rendered system message; the hook is listed in the `hooks` array of every prompt that declares one
+    and in the agent''s `hooks` for prompts that declare none (row hooks-01). Grounded system prompts
+    are not built from caller-settable environment values: the published types have an `env` prompt part,
+    and `POST {runtime_prefix}/threads` accepts `env`.'
+- id: prompts-02
+  relation: partial
+  acs:
+    concept: 'Capability skills: `skills/<id>/SKILL.md` with YAML frontmatter. All 42 files carry `name`,
+      `description`, `argument-hint`, `disable-model-invocation`, `user-invocable`, `allowed-tools`, `context`
+      and `agent`; 13 carry `layer`; 6 carry `hooks`'
+    refs:
+    - CLAUDE.md 'Skill Structure' (lines 252-260; quote at line 256)
+    - skills/retrieve/SKILL.md frontmatter (lines 1-10)
+    - skills/persist/SKILL.md frontmatter `hooks` (lines 10-34)
+    - skills/capability-gap-analysis/SKILL.md frontmatter `name` (line 2)
+    - skills/digital-twin-sync-loop/SKILL.md frontmatter `name` (line 2)
+    quote: '- YAML frontmatter with `name`, `description`, `allowed-tools`, `agent` type, and `layer`'
+  sa:
+    concept: Agent Skills library on `state.skills` (`list`, `get`, `readFile`, `install`, `setEnabled`,
+      `remove`); progressive disclosure
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, Skills (lines 161-170), §7.4 Agent Skills
+      (lines 447-465; quote at line 455)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1844-1847 (SkillFileInput), 1875 (install)'
+    quote: '- A skill''s identity **MUST** come from its `SKILL.md` frontmatter — never from a caller-supplied
+      name — and installs **MUST** validate the frontmatter against the standard.'
+  explanation: 'Both use a folder whose root SKILL.md opens with YAML frontmatter carrying `name` and
+    `description`; all 42 ACS skills meet the limits §7.4 states (lowercase kebab-case `name` of at most
+    64 characters, `description` of at most 1024; checked by script). Differences: (1) the other ACS keys
+    are Claude Code keys for which SA defines no behaviour; (2) two skills have a `name` that differs
+    from their directory (`gap-analysis-workflow`, `digital-twin-sync-workflow`), and on SA the frontmatter
+    name is the identity; (3) the SA library belongs to the thread owner, not to a package: installs need
+    mutation authorization and change what that owner''s other agents see, and how skills reach a model
+    is SHOULD-level; (4) checks that six ACS skills express as frontmatter `hooks` do not run on SA. Whether
+    an install accepts the extra keys depends on the Agent Skills standard, which was not consulted.'
+  combined: 'Agent code does not install ACS skills into the thread owner''s library. Capability instructions
+    travel in prompt text (row prompts-01), which ships with the package and is scoped to the agent. Installing
+    an ACS skill with `state.skills.install([{ path: ''SKILL.md'', content }])` is offered only as something
+    a user or administrator does; the published input type carries text files only. The checks of the
+    six skills with frontmatter hooks (audit, checkpoint, persist, rollback, send, transform) are re-expressed
+    in tool wrappers; the skill bodies still carry the same rules as instructions.'
+  see_also:
+  - tools-contracts#skl-01
+  - packaging-conformance-governance#pkg-05
+- id: context-01
+  relation: fits
+  acs:
+    concept: Grounded claims (§3.1) and provenance (F505 PROVENANCE_MISSING, reserved and unchecked)
+    refs:
+    - spec/STANDARD-v1.1.0.md header 'Status' (lines 4-8), §3.1 Grounded Claims (line 77; quote at line
+      77), §5.17 Sender Identity, Always ask (lines 1091-1093), §9.6 Safety Errors, F505 (line 1325)
+    quote: Every claim MUST be evidence-backed or explicitly marked as inferred. Ungrounded claims MUST
+      include an `inference_method` and `confidence` score.
+  sa:
+    concept: 'Context assembly and request-context hooks: `after_system_message`, `filter_messages`, `prefilter_llm_history`;
+      stored history versus request context; child `parentHooks`'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §4 Context Assembly (lines 61-73)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 76-85), §3.2 filter_messages (lines
+      227-231; quote at line 230), §3.3 prefilter_llm_history (lines 261-264), §3.4 Stored history and
+      the request context (lines 293-306), §6.4 LLMMessage (lines 495-503)
+    - content/0.2.0/specification/threads/execution-state.md §2.2 Live execution history (lines 45-49)
+    - content/0.2.0/specification/threads/messages.md §7 Conformance Scenarios (line 197)
+    - content/0.2.0/specification/agents.md §6 Required Parent Hooks (line 163)
+    - content/0.2.0/specification/providers.md §1.1 Methods, `inspectRequest` (line 42)
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (line 73)
+    quote: '- Synthetic or transformed messages returned here **MUST** remain confined to the request
+      context. They **MUST NOT** replace [`execution.messageHistory`](/0.2.0/specification/threads/execution-state#22-live-execution-history).'
+  explanation: 'Do the context hooks threaten evidence integrity? Stored evidence: no. Synthetic or transformed
+    messages MUST stay confined to the request and MUST NOT replace `execution.messageHistory`; this is
+    also a conformance scenario. What the model saw: yes. The hooks may drop evidence-bearing messages,
+    rewrite content and add synthetic messages that exist nowhere in storage, and SA defines no record
+    of the dispatched context (`inspectRequest` is an optional provider preview; Handlers §5 names a ''request/execution
+    log'' that no page defines). A claim can therefore cite a stored message the model never saw, or rest
+    on a synthetic message no anchor can reach. ACS does not relate an anchor to what the claimant was
+    shown either: F505 is reserved, and the reference implementation does not check §3.1. Searched: request
+    log, execution log, dispatched (hooks.md, runtime.md, execution-state.md, messages.md): not found.'
+  combined: '(a) Evidence is anchored to persisted records (message `id`, `tool_call_id`, file path),
+    never to request-context content. (b) The dispatched context is recorded in a `prefilter_llm_history`
+    hook, whose returned array MUST be the provider request history: a digest of the provider messages
+    and the tool call ids, stored per `state.execution.flowId` and `stepCount`; the provider-extension
+    record of row providers-01 is a second check where `ctx.state` is present. An output tool can then
+    refuse an anchor `tool_call:<id>` whose id is absent from the current step''s record. (c) A synthetic
+    message returned by a request-context hook counts as inferred content. Limits: provider messages carry
+    tool call ids but no persisted message id, so only tool results are identifiable; a child''s `parentHooks`
+    of the same type run after the parent''s; ACS has no rule that requires (b).'
+- id: context-02
+  relation: partial
+  acs:
+    concept: Append-only observations and events; audit trail; retention
+    refs:
+    - spec/STANDARD-v1.1.0.md §2 Terms, Observation (line 58)
+    - schemas/event_schema.yaml schema.principles (lines 7-11; quote at line 8)
+    - spec/SECURITY.md §2.1 STRIDE Analysis, Tampering and Repudiation (lines 83-84)
+    - schemas/profiles/healthcare.yaml compliance.audit_retention_days (line 106)
+    quote: Events are immutable and append-only.
+  sa:
+    concept: 'Persisted message storage and its mutation paths: `updateMessage`, `deleteMessage`, client
+      message deletion, thread deletion; message lifecycle hooks'
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure, `status` (line 20), §5 Updating
+      Messages (lines 169-178), §6 Deleting Messages (lines 180-186)
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (lines 21-36), §1.3 Hook Scoping (lines
+      80-83, 99-100), §4.2 after_create_message (lines 334-335), §4.3 before_update_message (lines 348-350)
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (line 14), §10 Deleting a Thread (lines
+      294-296; quote at line 296), §13 Deleting a Message (lines 378-381)
+    - content/0.2.0/specification/subagents.md §4.1 Persistence Is Universal (line 124)
+    - content/0.2.0/infrastructure/runtime.md §10 Termination Semantics (line 235)
+    - content/0.2.0/specification/effects.md §3 Execution Semantics (lines 85-90)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 9-25)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6161-6164 (before_update_message comment)'
+    quote: 5. The runtime **MUST** delete the messages, files, and stored values of every thread in the
+      deletion set.
+  explanation: 'SA thread storage is durable and ordered, which suits it as a working evidence store,
+    but it is not append-only. Code holding a `ThreadState` can change a message''s content or metadata
+    or delete it (tool-result messages cascade with their assistant message); a client with thread access
+    can delete a message; deleting a thread MUST delete its messages, files and stored values. Updates
+    have before and after hooks: the text says a failing `before_update_message` SHOULD prevent the update,
+    and the published types say a throw rejects `updateMessage()` except for updates an execution cannot
+    go on without. Deletion has no hook and no stream frame. Retention is runtime-defined. ACS states
+    append-only in a definition and a schema principle, not in a MUST, so this limits the naive binding
+    and is not a contradiction. Searched: delet (hooks.md): not found.'
+  combined: 'The tool wrapper that produced the evidence is the primary mirror: before it returns, it
+    appends a digest of its result string to a log outside the thread (an external service the package
+    declares as part of its purpose) or, as a weaker local copy, to a thread file; a failed append becomes
+    an error result instead of a silent gap. `after_create_message` and `after_update_message` hooks add
+    the message id as a secondary record; they are listed on every prompt that sets `hooks` and on the
+    agent, and their failure is silent. Scheduled effects are not used: delivery is not guaranteed, and
+    thread deletion discards them. An anchor resolves only if `state.getMessage(id)` returns the record,
+    a mirror entry exists and the digests match. The mirror detects alteration by other code on the thread;
+    it does not prevent it.'
+  see_also:
+  - published-api-extension-points#erase-01
+  - safety-enforcement#audit-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-15
+  - checkpoint-rollback-state#state-17
+  - checkpoint-rollback-state#state-19
+  - evidence-audit-observability#audit-01
+  - evidence-audit-observability#audit-02
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#retention-01
+  - evidence-audit-observability#store-02
+  - workflow-execution#wf-25
+  - workflow-execution#wf-27
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-07
+- id: context-03
+  relation: fits
+  acs:
+    concept: 'Explicit data flow between steps: typed bindings `${store.field}` resolved by the executor,
+      and required output fields checked (R402)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.3 Binding Syntax (lines 286-318; quote at line 288), §5.4 Typed Binding
+      Rules (lines 320-333), §5.5 Consumer Contract Checking (lines 335-361)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 119-120)
+    quote: 'Bindings reference prior step outputs and workflow inputs:'
+  sa:
+    concept: Implicit data flow through conversation history, governed per prompt by `includeChat`, `includePastTools`,
+      `recentImageThreshold` and `reasoning.include`; explicit sub-prompt input through `requiredSchema`
+      and `initUserMessageProperty`
+    refs:
+    - content/0.2.0/specification/prompts.md §1.2 Optional Properties (lines 26-27; quote at line 27),
+      §3.3 Sub-Prompt Tool Configuration (lines 161, 168), §5.2 Schema Usage (line 218), §6.3 Reasoning
+      Visibility (lines 245-248), §7 Image Context Management (lines 252-256)
+    - content/0.2.0/infrastructure/runtime.md §4 Context Assembly (lines 61-71)
+    - content/0.2.0/specification/subagents.md §5.1 Persistent Invocation Arguments (lines 173-174)
+    - content/0.2.0/getting-started/examples.md §2 An Agent with Tools (line 300), non-normative
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4416-4428 (PromptDefinition.historyLimit)'
+    quote: '| `includePastTools` | `boolean` | `false` | Include past tool results |'
+  explanation: 'ACS passes evidence from step to step explicitly and type-checks it; the reference executor
+    fails a step whose output lacks the contract''s required fields. SA passes it implicitly: a later
+    model step sees what the prompt''s flags admit into the snapshot. `includeChat` and `includePastTools`
+    both default to `false`; their meaning is one table row each, a Tip, and the non-normative examples
+    page (''The default excludes past tool results.''). The term ''eligible persisted history'', used
+    in several MUSTs, is not defined in terms of the flags. SA''s explicit channel into a sub-prompt is
+    narrow: arguments are validated against `requiredSchema` (MUST), but `initUserMessageProperty` maps
+    one property, and other arguments reach the model only through prompt variable interpolation, which
+    has no specified syntax. The published types add `historyLimit`, which narrows `execution.messageHistory`
+    itself and is not in the 0.2.0 text.'
+  combined: 'When an ACS workflow drives SA (the host''s `invoke_capability` calls a prompt tool or spawns
+    a subagent), all resolved bindings are serialised into one argument (for example `inputs`, a JSON
+    string) declared in the receiving prompt''s `requiredSchema` and named by `initUserMessageProperty`;
+    interpolation of other argument keys is not relied on. In a subagent, tools may read `state.arguments`
+    instead. Model-driven grounded prompts set `includeChat: true` and `includePastTools: true`, with
+    the caveat that the exact effect of the two flags is not defined normatively.'
+- id: context-04
+  relation: partial
+  acs:
+    concept: '`evidence_anchors` required on all 36 capability outputs; `confidence` declared and required
+      on 23; `Anchor`, `ProvenanceRecord`'
+    refs:
+    - schemas/capability_ontology.yaml meta.principles (lines 11-15; quote at line 13); output schemas,
+      for example retrieve (lines 123-139) and receive (lines 255-281)
+    - schemas/world_state_schema.yaml types.Anchor (lines 62-85), types.ProvenanceRecord (lines 151-182)
+    - spec/STANDARD-v1.1.0.md §6.2 Observation Requirements (lines 1123-1126)
+    quote: Every capability returns evidence anchors and confidence
+  sa:
+    concept: 'Message record fields usable as anchor targets and carriers: `id`, `tool_call_id`, `attachments`,
+      `metadata`; `before_create_message`; provenance fields and conventions'
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 11-38; quote at line
+      29), §1.1 Provenance Metadata Conventions (lines 42-49), §3.2 Presentation (`silent`) (lines 127-130),
+      §5 Updating Messages (lines 169-178)
+    - content/0.2.0/specification/hooks.md §2.4 Execution Provenance (lines 173-196), §4.1 before_create_message
+      (lines 316-322), §5.2 before_store_tool_result (lines 395-398), §6.1 HookMessage (lines 451-462),
+      §6.3 HookToolResult (lines 481-487)
+    - content/0.2.0/specification/threads.md §12 TypeScript Reference (lines 635-637)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5947 (HookMessage = Message), 2134-2139 (MessageUpdates),
+      6109-6112 (before_create_message comment), 211-249 (ToolResult)'
+    quote: '| `metadata` | `Record<string, unknown>` | Custom metadata (may include runtime status markers
+      such as `status_kind`) |'
+  explanation: 'SA has no evidence-anchor or confidence field. It does provide stable things an anchor
+    can point at (message `id`, `tool_call_id`, attachment `path`) and provenance of its own: the record''s
+    `prompt`, `name` and `subagent_id` fields, hook execution provenance, and the cross-thread metadata
+    conventions. A tool result is a string with optional attachments and no metadata member, although
+    hooks.md §5.2 lists adding metadata to tool results as a use; anchors travel in `result` or on the
+    message record''s `metadata`. Text and types differ: hooks.md §6.1 defines `HookMessage` without `metadata`,
+    the published types define `HookMessage = Message`; that an update merges metadata is stated only
+    in a type comment. On the ACS side the ontology principle overstates the schemas: 13 capabilities
+    declare no `confidence`. Searched: evidence, grounded, grounding (content/0.2.0 and the published
+    types): not found; confidence: decisions.md only.'
+  combined: The tool returns the ACS output (with `evidence_anchors`, and `confidence` where the capability
+    declares one) as JSON in `result`. A `before_create_message` hook, whose returned object MUST be used
+    for insertion, copies the anchors into a namespaced metadata key of the binding's choosing (here `metadata.acs`)
+    with the message id and tool call id. Derived evidence is stored with `state.setValue` under a package-prefixed
+    key or in a thread file, not as a silent message, because silent messages MUST remain eligible for
+    model context. A tool message without `metadata.acs` counts as carrying no anchors. Metadata merging
+    on update is not relied on. The ref schemes `message:<id>` and `tool_call:<id>` are binding-defined;
+    in `Anchor` terms the kinds are `tool` for tool results, `file` for attachments and `human_note` for
+    a person's message. The tag holds against the model, not against other code on the thread.
+  see_also:
+  - tools-contracts#io-09
+  - published-api-extension-points#drift-02
+  - published-api-extension-points#hooks-03
+  - checkpoint-rollback-state#state-26
+  - evidence-audit-observability#anchors-02
+- id: perceive-01
+  relation: partial
+  acs:
+    concept: 'PERCEIVE: `retrieve` (by reference), `search` (by criteria), `observe` (current state)'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=retrieve] (lines 98-139; quote at line 100), nodes[id=search]
+      (lines 140-176), nodes[id=observe] (lines 177-211)
+    - schemas/world_state_schema.yaml types.Anchor.ref (lines 68-70)
+    - docs/guides/MODALITY_HANDLING.md §2.3 PERCEIVE Layer Capabilities (lines 123-130), Guide
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 119-120)
+    quote: 'description: Get specific data by reference (ID, path, URI)'
+  sa:
+    concept: 'Function tools (`defineTool`) and `ThreadState` reads: `readFile`, `statFile`, `grepFiles`,
+      `findFiles`, `getMessage`, `getMessages`, `status()`, `children`'
+    refs:
+    - content/0.2.0/specification/tools.md introduction (line 3; quote at line 3), §1 Tool Categories
+      (lines 7-11), §2 Function Tool Definition (lines 17-33), §9 Conformance Notes (lines 150-156)
+    - content/0.2.0/specification/threads/filesystem.md §3 Reading Files (lines 44-57), §6 Search Operations
+      (lines 111-124)
+    - content/0.2.0/specification/threads/messages.md §2 Reading Messages (lines 81-90)
+    - content/0.2.0/specification/threads/execution-state.md §4 Run Status (lines 79-89)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 211-249 (ToolResult), 263 (ToolArgsNode), 421-448
+      (DefineToolOptions)'
+    quote: Tools are callable capabilities exposed to models during execution.
+  explanation: 'SA supplies the mechanism and ACS the contract. An SA function tool has a validated `args`
+    schema and returns a status, a result string, an error and attachments; it declares no output schema,
+    and the runtime validates arguments (a MUST) and persists results as messages (a MUST), nothing more.
+    ACS requires each of these three outputs to be an object with the capability''s result field plus
+    `evidence_anchors` and `confidence`, and says nothing about how data is fetched; its reference executor
+    fails a step whose output lacks a required field. `grepFiles` returns path and line, which gives the
+    `file:line` form of an `Anchor.ref` directly; its pattern syntax is shown by example only. Searched:
+    outputSchema, output_schema (content/0.2.0 and the published types): not found.'
+  combined: 'One SA function tool per perception capability, for thread-local data: `args` is the Zod
+    form of the ontology `input_schema` (`any` as `z.unknown()`, `string|object` as a `z.union`, `integer`
+    as `z.number().int()`; `z.any()` is rejected by the published tool-argument types), and `result` is
+    the JSON text of the ontology output. `retrieve` reads `state.readFile(path)` or `state.getMessage(id)`;
+    `search` uses `state.grepFiles(pattern)` or `state.findFiles(glob)`; `observe` uses `state.status()`
+    and `state.children`. Anchors are `file:<path>` with a digest (row modality-01) and `message:<id>`.
+    The wrapper validates its own output against the ontology contract, since the runtime does not. Domain
+    tools keep their own arguments and are bound to a capability by id; the ontology-shaped tool suits
+    thread-local data only.'
+- id: perceive-02
+  relation: partial
+  acs:
+    concept: 'Evidence for perception done on the agent''s behalf: `search` and `retrieve` outputs require
+      `evidence_anchors`, and an `Anchor` of kind `url` can point at a web source'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=search] output_schema (lines 159-176)
+    - schemas/world_state_schema.yaml types.Anchor (lines 62-85; quote at line 70)
+    quote: 'description: Pointer like file:line, URL, tool-output-id'
+  sa:
+    concept: 'Provider tools: `ModelDefinition.providerTools`, `getTools`, tools executed by the provider'
+    refs:
+    - content/0.2.0/specification/models.md §1.2 Optional Properties (line 34), §8.2 How It Works (line
+      216), §9.7 Model with Provider Tools (lines 461-481)
+    - content/0.2.0/specification/providers.md §10 Provider Tools (lines 598-653; quote at line 602)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 153)
+    - content/0.2.0/specification/threads.md §7.4 Agent Skills (line 453)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1014-1021 (ProviderResponse.providerTools), 1096-1139
+      (ProviderExecutedToolResult), 1172-1178 (stream chunks), 438-448 (executionMode, executionProvider)'
+    quote: Providers can embed built-in tools that leverage provider-specific capabilities. For example,
+      OpenAI provides web search, file search, code interpreter, and image generation tools that execute
+      server-side.
+  explanation: 'Provider tools perceive (web search, file search) outside the runtime''s tool loop. The
+    0.2.0 text does not say whether their calls and results are persisted as messages or whether tool
+    hooks fire for them; its one hint of a distinction is ''execute local tools sequentially'' in Tools
+    §9. The published types carry more: `ProviderResponse.providerTools`, described there as informational,
+    with `result.actions[].sources[].url`; the stream chunks `web-search-done` and `provider-tool-done`;
+    and `executionMode: ''local'' | ''provider''` on tools. None is in the 0.2.0 text. Evidence for provider-side
+    perception is therefore not guaranteed to reach hooks or storage. Searched: executionMode, provider-executed,
+    provider-tool-done, web-search-done (content/0.2.0): not found; server-side, Handled by provider:
+    providers.md §10, plus an unrelated use in threads.md §7.4.'
+  combined: 'Strict and portable: models used by grounded prompts list no `providerTools`, and search
+    is done through function tools (row perceive-01). Otherwise the sources are captured in the provider
+    extension of row providers-01: `res.providerTools[].result.actions[].sources` in `overrides.generate`,
+    and the `provider-tool-done` chunk in a wrapped stream, recorded as `url` anchors. That path rests
+    on the published types only and cannot be built with thread hooks as specified. Provider options are
+    open-ended (the example schema of Models §8.2 ends in `.passthrough()`), so a grounded model definition
+    is also reviewed for options that switch on server-side search; that is an inference, not a statement
+    of the text.'
+  see_also:
+  - tools-contracts#cls-08
+  - safety-enforcement#surface-01
+  - approval-human#approval-15
+  - evidence-audit-observability#provider-01
+- id: perceive-03
+  relation: partial
+  acs:
+    concept: '`receive` (pushed data and events), waits (§5.13), `accept_from` (§5.15) and the sender-identity
+      inputs (§5.17): a workflow filters received items by the host-reported principal and identity'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=receive] (lines 212-281)
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 695-728), §5.15 Delegation (lines 923-938;
+      quote at line 935), §5.17 Sender Identity (lines 1044-1061)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses', AwaitEvent (line 90)
+    quote: the principal of an item the authenticated party that delivered it to the
+  sa:
+    concept: 'Inbound traffic: client message send (delivered with `queueMessage` semantics), thread endpoints
+      with `auth.caller`, subagent completion messages'
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §12 Sending a Message (lines 341-345, 368-369)
+    - content/0.2.0/specification/threads/endpoints.md §4 Access and Authentication (lines 89-105; quote
+      at line 105)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 11-38), §1.1 Provenance
+      Metadata Conventions (lines 42-49), §4 Queueing Messages (lines 147-167)
+    - content/0.2.0/specification/agents.md §1.1 The Three Backings (line 19)
+    - 'content/0.2.0/specification/subagents.md §6.2 Child → Parent: Completion and Failure (lines 197-205)'
+    - content/0.2.0/specification/users.md §3 User Endpoints (line 111), §3.2 File-Based Routing (lines
+      148-150), Draft
+    - '@standardagents/spec 0.45.10 index.d.ts lines 5367-5370 (ThreadEndpointAuth), 2119-2130 (QueueMessageInput)'
+    quote: The mechanism by which a runtime authenticates requests (sessions, API keys, or otherwise)
+      is implementation-defined. This specification defines only the identity contract observable by endpoint
+      code.
+  explanation: 'SA delivers pushed messages durably and in order. ACS lets a workflow filter received
+    items by the host-reported principal (`accept_from`) and identity (`sender_check`, trust classes);
+    when the host reports none, a bound filter drops the item, or the item becomes always-ask. In SA the
+    only code that holds both a `ThreadState` and the authenticated caller is a thread endpoint handler
+    (`auth.caller`); Draft user endpoints resolve the caller but MUST NOT receive a `ThreadState`. The
+    persisted message record names no sender, a client may send `role: ''user'' | ''assistant'' | ''system''`,
+    and Agents §1.1 deliberately leaves the person''s identity out of scope. `metadata.subagent_id` is
+    a convention that consumers MUST tolerate being absent and that any code on the thread can set; the
+    record''s `subagent_id` field and `state.children` are runtime-maintained. Searched: sender, sent_by,
+    created_by (content/0.2.0 and the published types): not found.'
+  combined: 'People with thread access: an `authenticated` thread endpoint builds the identity from `auth.caller`
+    (`principal: ''sa-user:'' + caller.id`; `authenticated_by` an `x-` vendor value, because SA does not
+    say how the caller was authenticated; `trust_class: ''owner''` only when `caller.id === state.userId`),
+    stores it with `state.setValue` under a digest of the content, and queues the message; the `before_create_message`
+    hook finds it by that digest and tags the record. Passing `metadata` on the queue input is shorter
+    but exists only in the published types. Systems: a `public` endpoint verifies a signature with a secret
+    read through `state.instanceEnv` and reports `kind: ''service''`. Messages sent through the Thread
+    Client API have no identity: dropped where `sender_check` or `accept_trust_classes` is bound, otherwise
+    always-ask. A child''s report is `own_subagent_report` only when the host read it from the child''s
+    own thread through `state.getChildThread(reference)` with a `reference` from `state.children`; a message''s
+    `subagent_id` alone does not establish it (approval-human#identity-06).'
+  see_also:
+  - published-api-extension-points#hitl-01
+  - published-api-extension-points#user-01
+  - safety-enforcement#appr-01
+  - safety-enforcement#appr-03
+  - approval-human#approval-07
+  - approval-human#approval-13
+  - approval-human#approval-24
+  - approval-human#identity-01
+  - approval-human#identity-02
+  - approval-human#identity-03
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - workflow-execution#wf-09
+  - workflow-execution#wf-30
+  - multi-agent#coord-08
+  - multi-agent#coord-22
+- id: remember-01
+  relation: partial
+  acs:
+    concept: 'REMEMBER: `persist` (`data` required; `key`, `ttl` optional; output `stored`, `key`, `timestamp`)
+      and `recall` (`key`, `default`; output `data`, `found`, `stored_at`)'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=persist] (lines 1376-1410; quote at line 1378), nodes[id=recall]
+      (lines 1411-1442)
+    - spec/STANDARD-v1.1.0.md §4.2 Layers, REMEMBER (line 142), §5.10.1 Durations (lines 597-605)
+    quote: 'description: Store data durably'
+  sa:
+    concept: 'Durable thread key-value store: `state.setValue(key, value)` and `state.getValue(key)`;
+      `scheduleEffect(name, args, delay)`'
+    refs:
+    - content/0.2.0/specification/threads.md §4.1 Scheduling Effects (lines 294-298), §7 Durable Key-Value
+      Store (lines 408-445; quote at line 410)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14),
+      §14.1 items 1-9 and §14.2 (lines 344-362)
+    - content/0.2.0/specification/effects.md §3 Execution Semantics (lines 85-90)
+    quote: '`getValue` and `setValue` provide a simple durable key-value store scoped to the thread. Values
+      persist across executions, tool calls, hook invocations, and endpoint requests for the lifetime
+      of the thread.'
+  explanation: 'Close in purpose, different in contract. Matches: keyed durable storage of JSON values,
+    durable across executions, restarts and redeploys (MUST), with read-your-writes on the same thread
+    (MUST). Durability at the moment `setValue` resolves is SHOULD-level, and runtimes MAY cap key length,
+    value size and key count. Missing on the SA side: `ttl`, a stored-at timestamp for thread values,
+    and an output object (`setValue` returns nothing; `getValue` returns the value or `null`). Because
+    `setValue(key, null)` deletes the key, `null` cannot be stored. Missing on the ACS side: scope and
+    lifetime (row remember-02) and a grammar for `ttl`. A time to live can still be honoured above the
+    store. Searched: ttl, expire, expir (content/0.2.0 and the published types): only stream tickets,
+    a room challenge and credential-grant metadata.'
+  combined: '`persist`: `key = args.key ?? generated`; `await state.setValue(''<pkg>/persist/'' + key,
+    { data, stored_at, expires_at, anchors })` inside try/catch, then a read-back; return `{ stored, key,
+    timestamp, evidence_anchors }`, with `stored: false` when the write is rejected (for example by a
+    capacity cap). With `ttl`, the wrapper parses it as an ACS duration (§5.10.1; the binding''s choice),
+    sets `expires_at` and schedules a cleanup effect with that delay; effects have no delivery guarantee,
+    so the read-side check is the guarantee. `recall`: `const v = await state.getValue(''<pkg>/persist/''
+    + key)`; an absent or expired entry is `found: false` with `data` set to `default`. Only a `ttl` that
+    does not parse is rejected. The store is not required to be encrypted at rest, so secrets are not
+    persisted (row secrets-01); the key space is shared by all code on the thread.'
+  see_also:
+  - tools-contracts#cls-15
+  - tools-contracts#eff-01
+  - tools-contracts#rec-01
+  - published-api-extension-points#thread-04
+  - checkpoint-rollback-state#state-01
+  - checkpoint-rollback-state#state-02
+  - checkpoint-rollback-state#state-16
+  - approval-human#approval-08
+  - workflow-execution#wf-11
+  - multi-agent#coord-26
+- id: remember-02
+  relation: partial
+  acs:
+    concept: 'Memory scope and lifetime: REMEMBER as long-term memory across interactions; scopes are
+      named only in the recall skill''s prose'
+    refs:
+    - schemas/capability_ontology.yaml layers.REMEMBER (lines 83-88; quote at line 85)
+    - skills/recall/SKILL.md Procedure step 2 (lines 41-44)
+    quote: 'cognitive_mapping: ''Cognitive: Long-term memory'''
+  sa:
+    concept: 'Storage scopes and lifetimes: per-thread key-value store and file system, layered `env`,
+      user values (Draft), thread deletion, retention'
+    refs:
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (line 238), §7.2 Semantics
+      (lines 426-433), §7.3 Comparison With Other Storage (lines 437-443), §9 Subagent Hierarchy (lines
+      485-486)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14),
+      §14.1 items 3 and 8 (lines 352-357; quote at line 352)
+    - content/0.2.0/specification/users.md status banner (line 3), §2 UserState (lines 50-74), §2.1 Serialization
+      (lines 79-80), §5 UserHandle (lines 170-182), §7 Lifecycle Hooks (line 215), §7.1 User Rooms and
+      Attachment Admission (lines 284-286), Draft
+    - 'content/0.2.0/specification/subagents.md §4.1 Persistence Is Universal (line 124), §6.4 Child →
+      Parent: Explicit Escalation (line 219)'
+    - content/0.2.0/specification/threads/client-api.md §10 Deleting a Thread (line 296)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3168-3211 (ThreadState.getUserValue, setUserValue,
+      listUserValues), 2913-2919 (getChildThread, getParentThread), 6347-6354 (user_value_changed)'
+    quote: 3. Each thread **MUST** maintain its own isolated key space. Values **MUST NOT** be readable
+      by any other thread, including parent, child, or sibling threads.
+  explanation: 'ACS states no scope for `persist` and `recall`; only the recall skill''s prose speaks
+    of session, project and global stores. SA is precise about key spaces. Thread values are isolated
+    per thread and not copied to children; deleting a thread removes its values and files; retention of
+    idle threads is runtime-defined. Memory across one user''s threads exists at user scope, on a page
+    marked Draft (the published types also put `getUserValue` and `setUserValue` on `ThreadState`, which
+    the text does not); such access is not serialized outside user endpoints, the Draft implies client-writable
+    value routes, and per the published types its `user_value_changed` hook fires regardless of the writer.
+    Whether the isolation extends to handles is not stated: `getParentThread()` and `getChildThread()`
+    return a full `ThreadState`, Subagents §6.4 suggests delivering results through the parent''s key-value
+    store, and the quoted item says values MUST NOT be readable by any other thread. `setEnv` propagates
+    to active descendants. The Agent Skills library is a further cross-thread store (row remember-03).'
+  combined: 'Thread memory: `state.setValue` and `getValue`. Large or binary items: `state.writeFile`
+    and `readFile`, anchored as `file:<path>` with a digest. Memory across one user''s threads: `(await
+    state.user())?.setValue(key, v)`, or `user.call(endpoint, payload)` for read-modify-write (serialized
+    per user), inside try/catch because the Draft defines no capability flag to detect. It rests on a
+    Draft page and is writable by the user''s own clients, so it suits preferences and not evidence, approvals
+    or checkpoints. Parent and child: models share only what is passed explicitly (arguments, messages,
+    attachments); code on either side holds a `ThreadState` for the other thread and can reach its messages
+    and files, and its store wherever the runtime does not apply the key-value isolation rule to such
+    a handle, so thread memory is not to be assumed protected from a composing parent or a composed child
+    (row isolation-01), and no binding should depend on such a read or write (evidence-audit-observability#prov-04).
+    Organisation-wide memory is not available in SA 0.2.0 and sits in an external store behind a tool.'
+  see_also:
+  - tools-contracts#io-04
+  - tools-contracts#rec-01
+  - published-api-extension-points#thread-01
+  - safety-enforcement#scope-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-11
+  - checkpoint-rollback-state#state-13
+  - approval-human#approval-07
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-04
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - multi-agent#coord-19
+  - multi-agent#coord-22
+  - multi-agent#coord-23
+- id: synthesize-01
+  relation: partial
+  acs:
+    concept: 'SYNTHESIZE: `generate` (output `content`, `evidence_anchors`, `confidence`), `transform`,
+      `integrate`'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=generate] (lines 922-959; quote at line 924), nodes[id=transform]
+      (lines 960-1001), nodes[id=integrate] (lines 1002-1052)
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 89-92)
+    quote: 'description: Produce new content'
+  sa:
+    concept: 'A model step of a prompt-backed side; structured output through a required tool call (`toolChoice:
+      ''required''`, `stopTool`); prompt tools; `ProviderRequest.responseFormat`'
+    refs:
+    - content/0.2.0/specification/prompts.md §1.2 Optional Properties (lines 24-36), §3.3 Sub-Prompt Tool
+      Configuration (line 131), §3.4 Subagent Lifecycle Tools (line 174), §4.2 Tool Choice Behavior (lines
+      192-194; quote at line 193)
+    - content/0.2.0/specification/agents.md §1.2 SideConfig, PromptSide `stopTool` (lines 42-43)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (lines 152-155)
+    - content/0.2.0/specification/providers.md §2 Request Format, `responseFormat` (line 237), §5 Response
+      Format, `images` (line 352)
+    - content/0.2.0/specification/models.md §5.1 Capability Properties, `supportsJsonMode` (line 86)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (line 114)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4429-4444 (PromptDefinition.providerOptions)'
+    quote: '- The LLM **MUST** include at least one tool call in its response'
+  explanation: 'In SA the natural form of `generate` is an assistant message: free text with no anchors
+    or confidence. A sub-prompt used as a tool returns a single text string. SA''s portable way to obtain
+    a structured, validated model output is a tool call whose arguments the runtime validates (a MUST).
+    `toolChoice: ''required''` is weaker than it reads: the quoted MUST binds the model; the runtime''s
+    part is a SHOULD-level retry; any tool satisfies it, including the lifecycle tools injected on a side
+    with visible relationships; and whether a `stopTool` that returns an error still ends the turn is
+    not stated. A JSON response format exists on `ProviderRequest.responseFormat` and as `supportsJsonMode`,
+    but the prompt property table has no response-format field; the published types add a provider-specific
+    `providerOptions` on prompts. `transform` and `integrate` have no SA construct of their own.'
+  combined: '`generate`: a prompt with `toolChoice: ''required''` whose `tools` contain one output tool
+    with `args` mirroring the ontology output (`content`, `evidence_anchors`, `confidence`). The runtime
+    validates the arguments; the tool''s `execute` checks that each anchor ref resolves (`state.getMessage(id)`,
+    `state.statFile(path)`) and returns an error result otherwise. Acceptance does not depend on stop
+    semantics: on success the tool stores the accepted output with `state.setValue` under a key derived
+    from `state.execution.flowId`, and the consumer (the calling tool or the host''s dispatcher) reads
+    it there and fails the step when it is absent. Naming the tool as `stopTool` is a convenience; the
+    generating side declares no visible subagent relationships. A resolving anchor shows that the record
+    exists, not that the model was shown it (row context-01). `transform` and `integrate` are function
+    tools returning the ontology output as JSON text.'
+- id: modality-01
+  relation: partial
+  acs:
+    concept: Modality-specific evidence anchors (`text_span`, `bounding_box`, `time_segment`, `video_region`,
+      `composite`), defined in a Guide
+    refs:
+    - docs/guides/MODALITY_HANDLING.md header (lines 3-5), §4.1 Evidence Anchor Types by Modality (lines
+      600-611; quote at line 603), §4.2 Anchor Schema (lines 617-651), §4.3 Grounding Rules by Modality
+      (lines 655-678)
+    - schemas/profiles/vision.yaml evidence_policy.required_anchor_types (lines 59-63)
+    - schemas/world_state_schema.yaml types.Anchor (lines 62-85)
+    quote: '| **Image** | `bounding_box` | `image:<path>:bbox:<x>,<y>,<w>,<h>` | Rectangular region in
+      pixel coordinates |'
+  sa:
+    concept: 'Non-text content: `AttachmentRef` into the thread file system, provider content parts (`text`,
+      `image`, `image_url`, `file`), `recentImageThreshold`, cross-thread attachment copying, file `metadata`'
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1.2 Attachment References (lines 53-67)
+    - content/0.2.0/specification/threads/filesystem.md §1 File Record (lines 11-21), §4 Directory Operations
+      (line 75), §5 Moving and Renaming (lines 80-82)
+    - content/0.2.0/specification/providers.md §3.1 Content Types (lines 304-310)
+    - content/0.2.0/specification/prompts.md §7 Image Context Management (lines 252-256; quote at line
+      255)
+    - content/0.2.0/specification/subagents.md §7 Attachment Copying (lines 232-237)
+    - content/0.2.0/specification/threads/code-execution.md §6.1 No Host Capabilities on `globalThis`
+      (line 389)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 166-172 (ToolAttachment comment on downsampling of
+      user uploads)'
+    quote: '- Older images are replaced with text descriptions'
+  explanation: SA carries non-text content as files referenced by `AttachmentRef` (path, mimeType, size,
+    optional width and height). ACS's modality anchors, which a Guide defines, need a stable path and
+    stable coordinates. The path is stable only while no code moves, renames, unlinks or rewrites the
+    file; SA defines no immutability for attachments. Across threads attachments are copied and the destination
+    MUST receive destination-local paths, and neither `AttachmentRef` nor `FileRecord` has a content digest;
+    `FileRecord.metadata` can hold one, though whether a cross-thread copy keeps it is not stated. In
+    context, `recentImageThreshold` replaces older images with text descriptions, and a comment in the
+    published types mentions downsampling of user uploads, so a model may not have seen the stored bytes.
+    The guide's modality kinds are not canonical `Anchor.kind` values (file, url, tool, log, sensor, human_note).
+  combined: 'An anchor is a ref plus a digest in every case: `image:<path>:bbox:x,y,w,h` or `audio:<path>:segment:a-b`
+    with `sha256:<hex>` of the stored bytes, computed by the tool that processed the file (`state.readFile(path)`)
+    using a hash function bundled with the package, because 0.2.0 does not say which host globals tool
+    code may use. Verification re-reads the file and compares. For files the binding writes, the digest
+    is also stored in the file''s `metadata` through the `writeFile` options. Coordinates are produced
+    in tools on the stored bytes, never taken from model text. Audio and video are processed by function
+    tools that read the thread file system; the SA text does not say how non-image attachments are presented
+    to a model.'
+- id: modality-02
+  relation: partial
+  acs:
+    concept: Modality selection by the step's `domain` parameter; the Guide's `unsupported_domain` error
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2 Step Definition, `domain` (line 260)
+    - docs/guides/MODALITY_HANDLING.md §1.1 Design Philosophy (line 51), §1.3 Handling Unsupported Modalities
+      (lines 67-86; quote at line 86), Appendix A (lines 773-791), Guide
+    - core/src/exec/mod.rs Body::InvokeCapability.domain (lines 104-108)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (line 85)
+    quote: This allows workflow authors to detect modality gaps at design time rather than encountering
+      silent failures at runtime.
+  sa:
+    concept: Model capability flags (`supportsImages`) and request-time filtering of image parts
+    refs:
+    - content/0.2.0/specification/models.md §3.1 Fallback Behavior (lines 44-48), §5.1 Capability Properties
+      (lines 80-88), §5.3 Default Capabilities (lines 107-113)
+    - content/0.2.0/specification/providers.md §1.1 Methods, `getModelCapabilities` (line 40)
+    - content/0.2.0/infrastructure/runtime.md §4 Context Assembly (lines 61-82; quote at line 82)
+    - content/0.2.0/distribution/packaging.md 'Visibility Rules' (lines 228-230)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 3788-3846 (ModelCapabilities)'
+    quote: When supported by the model, attachments remain multimodal content. If a model does not support
+      vision, runtimes may filter image parts at request time while preserving stored message attachments.
+  explanation: 'Both declare modality support, in different places. ACS puts it on the step (`domain`,
+    a step field in §5.2 that the reference executor passes to the host with the action); SA puts it on
+    the model (`supportsImages`, default `false`). SA declares images only. Behaviour when unsupported
+    differs: the ACS Guide says an implementation should return a clear error naming the domain (a lowercase
+    ''should'', in a Guide that predates §5.2); SA lets a runtime drop image parts at request time, and
+    the text does not say at which assembly step, nor that anything records the omission. A provider may
+    also report capabilities through the optional `getModelCapabilities`; how that combines with a definition''s
+    defaults is not stated. Searched: audio (content/0.2.0): not found; video: one file name in an example;
+    supportsAudio, supportsVideo, supportsFiles (published types): not found.'
+  combined: 'In the host''s capability dispatcher, for a step whose `domain` is `image`, starts with `image.`,
+    or is another domain the binding maps to image input: load the prompt and every model of its fallback
+    chain from the host''s own namespace and fail the step with R402 and a message naming the domain unless
+    each has `capabilities.supportsImages === true`. The flag has to be declared explicitly, since an
+    omitted flag reads as `false`. A packaged child cannot be inspected from outside its package; it declares
+    the modalities it accepts. Audio and video domains are dispatched to tools; SA has no capability flag
+    to consult. R402 with a message is what the host protocol allows today (any other code is read as
+    R402).'
+- id: profile-01
+  relation: acs_only
+  acs:
+    concept: Domain profile as a unit (`trust_weights`, `risk_thresholds`, `checkpoint_policy`, `evidence_policy`,
+      `domain_sources`) and where it is supplied
+    refs:
+    - schemas/profiles/profile_schema.yaml (lines 5-13)
+    - spec/STANDARD-v1.1.0.md §5.1 Catalog and Workflow Definition (line 225; quote at line 225), §5.2.1
+      Safety Flags (lines 272-277), §8.3 Trust Classes (lines 1249-1251)
+    - tools/validate_profiles.py (structural validation only)
+    - core/src/validate/semantics.rs (line 26)
+    quote: '| `domain`, `profile`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields
+      |'
+  sa:
+    concept: 'Configuration surfaces: layered `env` (thread, agent, prompt, user account, instance), optional
+      `instanceEnv`, `variables`, `PromptToolConfig.options`, `CreateThreadRequest.env`, code bundled
+      in the package'
+    refs:
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 220-238; quote
+      at line 231)
+    - content/0.2.0/specification/agents.md §2.2 Optional, `env` (line 91)
+    - content/0.2.0/specification/prompts.md §1.2 Optional Properties, `variables` and `env` (lines 32-33),
+      §3.2 Tool Configuration with Environment Values (lines 119-125)
+    - content/0.2.0/specification/tools.md §3 Variable Declarations (lines 51-64)
+    - content/0.2.0/specification/threads/client-api.md §6 Creating a Thread (lines 147-151, 162)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 15-17), 'Entry Point Exports'
+      (line 29)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2947 (instanceEnv), 4218-4222 (PromptToolConfig.options)'
+    quote: Use it when a value establishes a trust boundary, such as a service endpoint
+  explanation: 'SA has no profile and no risk or evidence policy object. ACS itself does not say how a
+    profile is applied: the Standard mentions profiles in §5.1 (a descriptive field) and §8.3 only, the
+    validator checks structure, and no reference code reads one. Placement in SA is therefore an inference:
+    the profile belongs in package code, imported by hooks and tool wrappers. Selection through `agent.env`
+    is a default, not a pin: thread values resolve first, `POST {runtime_prefix}/threads` accepts caller-supplied
+    `env`, and `setEnv` propagates to descendants. Only `instanceEnv` reads from the instance alone, and
+    it is optional. `variables` declare names and secrecy of string values; `PromptToolConfig.options`
+    is structured and author-set, but how a tool reads it is unspecified. Searched: risk (content/0.2.0):
+    not found; threshold: 6 lines, none about risk; profile: 1 line (the user''s profile).'
+  combined: 'One validated profile is pinned in package code as a JSON or TypeScript module and imported
+    by the wrappers; that is the whole binding until ACS defines how a profile is selected and merged.
+    If a deployment must choose, the wrapper reads `await state.instanceEnv?.(''ACS_PROFILE'')` and falls
+    back to the bundled profile when the method or the value is missing, never to a caller-supplied value;
+    falling back keeps a packed agent working where the optional capability is absent, as Packaging requires.
+    The variable is declared with `scoped: true`, so a parent thread''s value is not inherited. No comparison
+    of profiles by strictness is implemented: §5.2.1 defines ''stricter of'' for four flags, not for profiles.'
+  see_also:
+  - published-api-extension-points#options-01
+  - published-api-extension-points#thread-07
+  - checkpoint-rollback-state#state-15
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - approval-human#users-01
+  - evidence-audit-observability#audit-02
+  - evidence-audit-observability#policy-01
+  - workflow-execution#wf-05
+  - multi-agent#coord-19
+  - multi-agent#coord-26
+  - packaging-conformance-governance#ver-04
+- id: profile-02
+  relation: partial
+  acs:
+    concept: '`risk_thresholds`: `auto_approve`, `require_review`, `require_human`, `block_autonomous`'
+    refs:
+    - schemas/profiles/profile_schema.yaml risk_thresholds (lines 35-55; quote at line 55)
+    - schemas/profiles/healthcare.yaml risk_thresholds (lines 46-54)
+    - spec/STANDARD-v1.1.0.md §4.1 Capability Definition, `risk` and `requires_approval` (lines 120-123),
+      §5.14 Approval (lines 804-902)
+    quote: 'description: Capability IDs that must never run autonomously'
+  sa:
+    concept: Human-in-the-loop composition (a child with a human side, `awaiting_human`); observational
+      `tool_call_started`; the non-normative 'policy gate' note
+    refs:
+    - content/0.2.0/specification/agents.md §1.1 The Three Backings (line 19), §7 Human-in-the-Loop Composition
+      (lines 171-189)
+    - content/0.2.0/specification/hooks.md §3.3 prefilter_llm_history, Note (line 273), §5.1 tool_call_started
+      (lines 381-382; quote at line 382)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (line 113)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6023-6355 (HookSignatures)'
+    quote: '- The return value **MUST** be ignored; the hook cannot modify the tool call.'
+  explanation: 'ACS grades capabilities by risk and lets a profile name levels and capabilities. Only
+    `block_autonomous` has a clear reading (capability ids; every value in the seven shipped profiles
+    is a valid id). The other three keys are not bindable mechanically: the schema speaks of ''human review''
+    and ''human execution'' without defining either or relating them to `requires_approval` and §5.14,
+    the `require_human` enum includes `critical`, a level no capability can have, and the healthcare profile
+    sets `require_human: low`, which read literally parks every call on a person. SA has no risk attribute
+    on tools, prompts or agents and no hook that can stop a tool call before it executes; it does specify
+    a waiting state for a person (a child with a human side parks as `awaiting_human`) without defining
+    who the person is. Searched: risk (content/0.2.0): not found.'
+  combined: 'Only `block_autonomous` is bound: tools bound to a listed capability are left out of every
+    prompt''s `tools`, or their wrapper returns an error result (which the runtime MUST persist without
+    crashing the loop) unless a recorded human decision exists; that decision comes from the approval
+    binding of the approval concern. Enforcement sits in the tool''s `execute`, not in a hook. `auto_approve`,
+    `require_review` and `require_human` are treated as documentation until ACS defines them, and the
+    binding says so.'
+- id: profile-03
+  relation: acs_only
+  acs:
+    concept: '`checkpoint_policy` (free-form keys mapped to always / high_risk / medium_risk / never)'
+    refs:
+    - schemas/profiles/profile_schema.yaml checkpoint_policy (lines 56-61; quote at line 58)
+    - schemas/profiles/personal_assistant.yaml checkpoint_policy (line 45)
+    - schemas/profiles/healthcare.yaml checkpoint_policy (lines 56-60)
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-88)
+    quote: 'description: When to create checkpoints'
+  sa:
+    concept: (no counterpart) SA has no checkpoint or rollback concept
+    refs:
+    - content/0.2.0/ (every file searched; not found)
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (line 74; quote at line 74)
+    quote: '- The inbound message stays persisted. Nothing is rolled back.'
+  explanation: 'SA has no checkpoint or rollback concept; the nearest wording is the handler rule that
+    a failed turn rolls nothing back (''snapshot'' in SA refers to the context snapshot and registry snapshots).
+    Independently of SA, the profile''s keys are free-form labels such as `before_send_message` or `before_any_recommendation`:
+    the schema constrains only the values, and nothing defines which capability, step or tool a key denotes.
+    Searched: checkpoint, rollback, revert, savepoint, transaction (content/0.2.0): not found; rolled
+    back: one line, handlers.md §5.'
+  combined: Cannot be bound mechanically today. The checkpoint rule that is defined (a checkpoint before
+    `mutate`, `send` and `rollback`) comes from the ontology, not from the profile, and is bound in the
+    checkpoint concern. Until ACS defines the key vocabulary, `checkpoint_policy` is treated as documentation,
+    or each key is hand-mapped to tool names in package code and that mapping is published with the binding.
+  see_also:
+  - checkpoint-rollback-state#state-22
+- id: profile-04
+  relation: partial
+  acs:
+    concept: '`evidence_policy`: `minimum_confidence`, `require_grounding`, `required_anchor_types`; `classify`
+      output `probabilities`; the canonical `Uncertainty` type'
+    refs:
+    - schemas/profiles/profile_schema.yaml evidence_policy (lines 62-80; quote at line 75)
+    - schemas/capability_ontology.yaml nodes[id=classify] output_schema (lines 342-360), nodes[id=measure]
+      output_schema (lines 381-405)
+    - schemas/world_state_schema.yaml types.Uncertainty (lines 86-116)
+    quote: 'description: Minimum confidence threshold for actions'
+  sa:
+    concept: 'Decision inference: `state.decide()` with explicit context, typed questions, probabilities
+      and optional confidence; decision providers'
+    refs:
+    - content/0.2.0/specification/threads/decisions.md §1 Thread Interface (lines 11-27), §2 Request Types
+      (lines 48-60), §3 Question Types (lines 69-96), §4.1 Answer Semantics (lines 155-167; quote at line
+      165), §5 Provider Interface (lines 190-192), §6 Conversation Semantics (lines 202-207)
+    - content/0.2.0/infrastructure/runtime.md §1.1 Decision Inference (lines 21-25)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1321-1323 (DecideOptions.provider)'
+    quote: Providers and runtimes **MUST NOT** coerce a boolean probability to a boolean
+  explanation: 'SA''s decision API returns probabilities in [0, 1] and forbids providers and runtimes
+    from thresholding them; thresholds and subsequent actions are the caller''s. ACS''s `minimum_confidence`
+    is such a caller threshold. `decide()` takes explicit context and MUST NOT implicitly read conversation
+    messages, so the evidence a decision saw is exactly what the caller passed: its result is groundable
+    by construction. Limits: the decision interface is a separate provider capability (`kind: ''decision''`)
+    that no provider package is required to offer; an answer''s `confidence` is optional, provider-reported
+    and distinct from an outcome probability; a `score` answer is a rubric index, while ACS `measure`
+    requires `value` and `uncertainty`. On the ACS side nothing reads `minimum_confidence` or `require_grounding`,
+    and the capability-output `confidence` is undefined, although the canonical schemas have a richer
+    `Uncertainty` type.'
+  combined: '`state.decide({ provider, model, context, questions })` is an optional implementation of
+    `classify` (a `choice` question) and of yes/no checks (a `boolean` question), available when the deployment
+    has a decision provider; otherwise a function tool is used. `probabilities` are reported as returned.
+    ACS `confidence` is set from the provider''s `confidence` when present and otherwise from the selected
+    option''s probability, and the output records which of the two was used. `evidence_anchors` are the
+    refs of the items placed in `context`. A `score` question serves `measure` only when the metric is
+    a rubric, with `uncertainty` derived from the distribution. Comparing with the profile''s `minimum_confidence`,
+    and rejecting empty `evidence_anchors` for `require_grounding` capabilities, are binding choices until
+    ACS gives profiles application semantics.'
+  see_also:
+  - tools-contracts#io-08
+  - published-api-extension-points#decide-01
+  - evidence-audit-observability#trust-02
+- id: profile-05
+  relation: acs_only
+  acs:
+    concept: 'Source trust: `trust_weights`, `domain_sources`, trust classes and their default weights
+      (§8)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity (lines 1044-1056), §8.1 Trust Score Calculation (lines
+      1211-1222), §8.3 Trust Classes (lines 1243-1251; quote at line 1249)
+    - schemas/authority_trust_model.yaml source_ranking.weights (lines 20-26), trust_classes.weights (lines
+      32-40)
+    - schemas/profiles/profile_schema.yaml trust_weights (lines 25-34)
+    - benchmarks/scenarios/conflicting_sources.py _recency_weight (lines 70-87)
+    quote: A domain profile overrides a class weight with a `trust_weights` key
+  sa:
+    concept: '(no trust model) source-identifying signals only: the tool name on tool results, the record''s
+      `subagent_id`, `metadata.subagent_id`, `metadata.forwarded_from`, hook `PackageSignature`'
+    refs:
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure, `name` and `subagent_id` (lines
+      16-30), §1.1 Provenance Metadata Conventions (lines 42-49; quote at line 49)
+    - content/0.2.0/specification/subagents.md §4.2 Registry (lines 128-148), §6.5 Provenance Metadata
+      (lines 223-228)
+    - content/0.2.0/specification/hooks.md §2.4 Execution Provenance (lines 173-196)
+    quote: 'These are conventions, not requirements: consumers **MUST** tolerate their absence, and runtimes
+      **MUST NOT** rely on them for routing correctness.'
+  explanation: 'SA has no source-trust model: ''trust'' appears for trust boundaries (`instanceEnv`),
+    the trusted identity authority of user roles, untrusted code and trusted definition code, never as
+    a weight on a data source. SA contributes labels: the tool name on a tool-result message, the record''s
+    `subagent_id`, the cross-thread metadata conventions, the thread owner''s identity, and package provenance
+    for child-contributed hooks. The ACS side is not mechanical either: of the 101 `trust_weights` keys
+    in the seven shipped profiles, one (`hardware_sensor`) is also a key of `source_ranking.weights`,
+    and none uses the `trust_class:<class>` form §8.3 defines (checked by script). ACS ships no reusable
+    implementation of the §8 score: the half-life rule is implemented only in a benchmark scenario. Searched:
+    trust (content/0.2.0): 15 lines, none a source weight.'
+  combined: A static map in package code from SA tool name to a profile `trust_weights` key or `domain_sources`
+    entry, written by hand per profile and published with the binding. A child's report gets trust class
+    `own_subagent_report` only when the record's `subagent_id` (or `metadata.subagent_id`) matches a `reference`
+    in `state.children`. A message with no class is dropped or always-ask under §5.17 where those inputs
+    are bound; for §8 scoring it gets its source-type weight, not a floor. The §8 score, including the
+    MUST that the decay factor is 0.5 at one half-life, is implemented by the binding in TypeScript, for
+    example inside an `integrate` tool; SA supplies only the labels.
+  see_also:
+  - evidence-audit-observability#trust-01
+- id: profile-06
+  relation: fits
+  acs:
+    concept: 'Enforced safety flags: validators, executors and safety layers MUST act on effective flags'
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 85-93), §5.2.1 Safety Flags (lines 272-284;
+      quote at line 279)
+    quote: Validators, executors and safety layers MUST act on effective flags.
+  sa:
+    concept: Tool `annotations` (implementation-specific hints)
+    refs:
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 125-146; quote at line 146), §9 Conformance
+      Notes (line 156)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, Resource Loading (lines 102-113)
+    - content/0.2.0/specification/hooks.md §6.2 HookToolCall (lines 468-475)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 412 (ToolAnnotations), 424 (DefineToolOptions.annotations)'
+    quote: '- Annotations **MUST NOT** change argument validation, execution, the tool''s results, or
+      what is sent to the model. A tool behaves identically in a runtime that ignores them.'
+  explanation: 'Not a conflict between the two texts: both requirements can hold together, so the relation
+    is partial. SA offers a declarative, non-enforcing metadata slot; ACS''s flags need an enforcing layer
+    elsewhere. Recording an ACS capability id, domain or flags in a tool''s `annotations` is allowed:
+    keys belong to whoever owns them, `defineTool()` MUST return them unchanged, and implementations MUST
+    preserve them. Expecting a runtime to enforce them would contradict SA, where annotations MUST NOT
+    change execution and a runtime MUST ignore keys it does not understand. A hook cannot look up a tool''s
+    annotations through `ThreadState`, which has no tool loader, and it receives only the call''s name
+    and arguments; a hook in the same package can import the tool definition module (an inference from
+    ordinary module imports). Searched: loadTool, getToolNames (content/0.2.0 and the published types):
+    not found.'
+  combined: '`annotations: { acs: { standard, ontology, capability, layer, domain, risk, mutation, requires_checkpoint,
+    requires_approval } }` (the object `schemas/interop/standard_agents_annotation.schema.json` defines;
+    `domain` is its one optional member) is declarative metadata only, read at build time by an ACS validator
+    that imports the package''s tool definitions, and by interfaces. Enforcement comes from code: the
+    tool''s own `execute` wrapper, which knows its capability from its closure, and hooks keyed by tool
+    name. No ACS guarantee depends on a runtime reading annotations.'
+  see_also:
+  - tools-contracts#cls-02
+  - tools-contracts#cls-03
+  - tools-contracts#dom-01
+  - published-api-extension-points#tools-02
+  - published-api-extension-points#tools-03
+  - safety-enforcement#flags-01
+  - approval-human#approval-02
+  - packaging-conformance-governance#pkg-03
+  - packaging-conformance-governance#ver-02
+- id: secrets-01
+  relation: sa_only
+  acs:
+    concept: (no normative counterpart) secrets and credential handling; non-normative rules in skill
+      prose and in the persist, checkpoint and send frontmatter hooks
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity (line 1075)
+    - spec/RFC-0004-agent-identity.md Non-goals (line 52)
+    - spec/SECURITY.md §2.1 STRIDE Analysis, Information Disclosure (line 85), §9.1 Planned Enhancements
+      (line 402)
+    - skills/persist/SKILL.md frontmatter `hooks` (lines 10-34; quote at line 22), Safety Constraints
+      (line 362)
+    - skills/audit/SKILL.md (line 314)
+    - skills/recall/SKILL.md (line 297)
+    - skills/send/SKILL.md (lines 21-22, 297)
+    - skills/perspective-validation/SKILL.md (line 149)
+    - hooks/posttooluse_log_tool.sh (lines 38-39)
+    - schemas/interop/oasf_mapping.yaml skill 804 (lines 393-397)
+    quote: 1. NO credentials, API keys, or secrets in content
+  sa:
+    concept: Variables of type `text` / `secret`, `scoped`, layered `env`, the `envType` redaction class,
+      provider secrets as config slots
+    refs:
+    - content/0.2.0/specification/tools.md §3 Variable Declarations (lines 51-64)
+    - content/0.2.0/specification/threads.md §2.3 Environment Variable Resolution (lines 220-240; quote
+      at line 236)
+    - content/0.2.0/specification/prompts.md §2.1 String Prompts (line 50)
+    - content/0.2.0/infrastructure/providers.md 'API Key Management' (lines 205-212)
+    - content/0.2.0/specification/hooks.md §1.2 Hook Definition (line 68), §5.2 before_store_tool_result
+      (lines 395-398), §8.7 Sanitizing Sensitive Data (lines 766-784)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14),
+      §14.1 item 9 (line 358)
+    - content/0.2.0/specification/threads/code-execution.md §11 Security Considerations (line 552)
+    - content/0.2.0/specification/subagents.md §3.2 Immediate Spawning (lines 103-104)
+    - content/0.2.0/specification/threads/decisions.md §5 Provider Interface (lines 196-198)
+    - content/0.2.0/specification/users.md §6 Credential Grants (lines 199-203), Draft
+    quote: '`envType(propertyName)` returns the display/redaction classification for a resolved environment
+      value. Unknown or non-thread sources default to `secret`. Values marked `secret` should be redacted
+      from tool output and logs; values marked `text` may be displayed.'
+  explanation: 'The ACS Standard and SECURITY.md state no rule on secrets; rules exist only as non-normative
+    skill text and in the persist, checkpoint and send frontmatter hooks, and the reference audit hook
+    records skill arguments verbatim. SA''s typed, layered model varies in strength. MUST-level: system
+    prompts must not contain secrets; provider credentials are declared as secret slots; hooks must not
+    expose sensitive data in logs or error messages; bridged sandbox functions must not expose secrets
+    the caller did not pass; `scopedEnv` values are not shown to the model; decision-provider destination
+    overrides must not redirect inherited credentials; and, on the Draft Users page, grant secrets are
+    write-only. Lowercase ''should'': encryption at rest, and redaction of `secret` values from tool output
+    and logs. Nothing stops a tool from returning a secret it read with `state.env()`. Searched: secret,
+    credential, redact, api key, encrypt (every file under spec/): three hits, none a rule.'
+  combined: 'SA''s model is adopted unchanged, plus one binding rule: evidence excerpts, audit records
+    and persisted memory are built only after redaction. The tool wrapper hands the inner `execute` a
+    proxied state whose `env()` remembers every value returned for a name the tool declares with `type:
+    ''secret''`, and replaces those values (above a minimum length) in `result` and `error` before returning.
+    A value is redacted when the tool declares its name with `type: ''secret''` or when `state.envType(name)`
+    returns `secret`, the redaction class threads.md §2.3 defines (tools-contracts#var-01); `envType`
+    also reports `secret` for every value from a non-thread source, so the second test only widens the
+    set. A `before_store_tool_result` hook is a second layer that may fail open (row security-02). Limits:
+    exact matches only, and nothing in SA prevents a tool from reading a variable it did not declare.'
+  see_also:
+  - tools-contracts#var-01
+  - evidence-audit-observability#privacy-01
+- id: secrets-02
+  relation: fits
+  acs:
+    concept: '`send`: transmit data to an external system (high risk; checkpoint and approval required).
+      `destination` is a free string; the send skill refers to a destination allow-list that nothing defines'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=send] (lines 1133-1170; quote at line 1135)
+    - spec/STANDARD-v1.1.0.md §4.4 Safety-Critical Capabilities (line 187)
+    - skills/send/SKILL.md frontmatter hook (line 21), Procedure (line 88), Safety Constraints (line 295),
+      non-normative
+    quote: 'description: Transmit data to external system'
+  sa:
+    concept: 'Credential grants: named, user-scoped credentials with `origins` and `allow` policies, used
+      through `fetch(grant, ...)` (Draft)'
+    refs:
+    - content/0.2.0/specification/users.md status banner (line 3), §2 UserState (line 70), §5 UserHandle
+      (line 175), §6 Credential Grants (lines 186-205; quote at line 201), §8 Conformance (lines 393-394),
+      Draft
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1582 (UserHandle.fetch), 1593-1628 (CredentialGrant)'
+    quote: 3. The runtime MUST reject a `fetch` whose destination origin is not covered by `origins`.
+  explanation: 'Two controls on one act. ACS decides whether a send may happen (a checkpoint and an approval
+    first); in the Standard and the ontology `destination` is a free string, and the send skill refers
+    to a destination allow-list that no schema or profile defines. An SA credential grant fixes where
+    a credential may go (`origins`) and which packaged tools, endpoints or agents may use it (`allow`;
+    an absent `allow` denies all callers); the secret is write-only. Where grants are supported the origin
+    and caller checks are MUSTs. Not guaranteed: that grants exist (SHOULD-level, on a Draft page), that
+    package code can detect their absence (`fetch` is a non-optional member and no capability flag is
+    defined), or that a grant admits this tool for this user. Searched: allowlist, allow-list, allowed_destinations
+    (spec/ and schemas/): not found; redirect (users.md): not found.'
+  combined: 'An optional hardening for deployments that provision a grant naming the send tool in `allow.tools`:
+    the tool calls `(await state.user())?.fetch(grant, destination, { redirect: ''error'', ... })` inside
+    try/catch and returns an error result on any rejection. Without a grant, and on user-less threads,
+    the wrapper checks the destination against the binding''s own allow-list before using a `secret` variable.
+    In both cases the checkpoint and the approval of `send` are separate and still required; the approved
+    value is the full destination, which the wrapper compares itself, since a grant restricts origins
+    only.'
+  see_also:
+  - published-api-extension-points#grant-01
+  - safety-enforcement#cred-01
+- id: secrets-03
+  relation: fits
+  acs:
+    concept: 'Delegation constraints: `fresh_context`, `read_only`, attested as `effective`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 917-922; quote at line 917)
+    - schemas/capability_ontology.yaml nodes[id=delegate] inputs (lines 1463-1477), output `effective`
+      (lines 1517-1532)
+    quote: '`delegate` accepts `fresh_context` (start the delegate without the'
+  sa:
+    concept: 'Credential flow to child threads: `scoped` variables, relationship `scopedEnv`, `setEnv`
+      propagation; thread isolation of the child'
+    refs:
+    - content/0.2.0/specification/tools.md §3 Variable Declarations (lines 60-64; quote at line 63)
+    - content/0.2.0/specification/subagents.md introduction (line 3), §1 SubagentRelationship, `scopedEnv`
+      (line 42), §3.2 Immediate Spawning (lines 103-104), §3.3 Blocking and Create-or-Continue (line 110)
+    - content/0.2.0/specification/threads.md §1.2.2 Methods (lines 94-95), §2.3 Environment Variable Resolution
+      (lines 220-225, 238)
+    - content/0.2.0/infrastructure/runtime.md §7.4 Initial Payload Mapping (lines 176-179)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 300-306 (VariableDefinition.scoped)'
+    quote: '- `scoped: true` blocks inheritance from parent thread env for that variable name.'
+  explanation: 'ACS lets a delegator ask for a fresh context and read-only behaviour and has the host
+    attest what it used; it defines read-only by behaviour and says nothing about credentials. SA specifies
+    credential flow. Thread env flows downward by default: scoped variables ''still flow downward'' from
+    the declaring thread, descendants filter out inherited values for names marked `scoped` in their own
+    agent graph, and `setEnv` propagates to active descendants. `scopedEnv` names values copied into a
+    child as runtime-only transfer data, which the runtime MUST NOT expose to the model unless `nameEnv`
+    or `descriptionEnv` designates the same name. No parent-side switch stops inheritance. For `fresh_context`
+    the SA counterpart is structural: a child runs in its own isolated thread. Credentials are neither
+    necessary nor sufficient for `read_only`: user-account and instance values stay resolvable by name,
+    and a child can reach its parent''s `ThreadState`.'
+  combined: 'Credential flow: grounded children declare their secrets with `scoped: true` and receive
+    them through the relationship''s `scopedEnv`. `effective.fresh_context: true` is attested only for
+    a newly created child instance; create-or-continue (`blocking: true` with `maxInstances: 1`) resumes
+    an instance with its history. `effective.read_only: true` is attested only on the conditions set in
+    the safety-enforcement concern: the child''s prompts offer only tools bound to non-mutating capabilities,
+    its tools declare `uses: []`, its models list no `providerTools`, it has no handoff agents, and its
+    tool, hook, effect and handler code has been reviewed to make no external write and no write outside
+    its own thread; otherwise the host reports `false`. Credential isolation supports that review and
+    does not replace it.'
+  see_also:
+  - published-api-extension-points#thread-06
+  - safety-enforcement#gate-04
+  - approval-human#approval-06
+  - workflow-execution#wf-16
+  - workflow-execution#wf-20
+  - multi-agent#coord-05
+  - multi-agent#coord-06
+  - multi-agent#coord-10
+- id: security-01
+  relation: fits
+  acs:
+    concept: 'Untrusted content and prompt injection: trust classes, always-ask marks, residual risk statement'
+    refs:
+    - spec/SECURITY.md §2.2.1 Prompt Injection (lines 91-101; quote at line 101)
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity, input table (line 1048), Always ask (lines 1077-1093),
+      §8.3 Trust Classes (lines 1243-1251)
+    quote: '**Residual Risk**: Prompt injection is primarily a runtime concern. The standard provides
+      structure but not content filtering.'
+  sa:
+    concept: Sanitization and validation duties on implementations and hooks; sandbox for untrusted code
+    refs:
+    - content/0.2.0/specification/prompts.md §2.1 String Prompts (line 50; quote at line 50), §5.2 Schema
+      Usage (line 222)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 76-85), §3.3 prefilter_llm_history
+      (line 271), §4.1 before_create_message (lines 320-322)
+    - content/0.2.0/specification/threads/code-execution.md §11 Security Considerations (lines 550-552)
+    quote: System prompts **MUST NOT** contain secrets or sensitive credentials. Implementations **MUST**
+      sanitize prompt content that incorporates untrusted input to prevent injection.
+  explanation: 'Each side covers what the other leaves open. ACS identifies who delivered an item (trust
+    class), carries an always-ask mark along references the workflow author fixed and the executor tracks,
+    gates approval on it, and states that it provides no content filtering. SA places sanitization and
+    validation duties on implementations and hooks and sandboxes untrusted code, but does not define untrusted
+    input, has no way to mark stored content as untrusted, and specifies no interpolation mechanism. In
+    a model-driven SA thread there are no executor-tracked references: the messages an action''s evidence
+    anchors name are chosen by the model, which can leave an injected message out of its anchors. A binding
+    that follows anchors is therefore weaker than ACS''s mark. Searched: taint, trust class (content/0.2.0
+    and the published types): not found; untrusted: prompt input and sandboxed code only.'
+  combined: The thread is marked, not the anchor. A `before_create_message` hook classifies each stored
+    message (tool results by a static tool-name map, child reports by the child registry, everything else
+    unclassified) and sets a thread value such as `acs/always_ask = true` whenever the class is an always-ask
+    class or is missing; wrappers of tools that require approval read that value and require a person
+    while it is set. This matches the rule that a mark is never removed during a run and does not depend
+    on what the model cites. It is conservative (one untrusted message marks the whole thread), it holds
+    against the model and not against other code on the thread, which can clear the value, and a hook
+    that is not in the active prompt's resolved set does not run (row hooks-01).
+- id: security-02
+  relation: partial
+  acs:
+    concept: 'Behaviour when a check itself fails: fail-safe by site (a stop-type gate whose `when` errors
+      fires; an `end` gate does not; a condition reads false)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.8.2 Evaluation (lines 491-495; quote at line 492)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces', Conditions and gates (lines 124-130)
+    quote: 'Its effect is fail-safe by site: a **gate** whose `when` errors'
+  sa:
+    concept: 'Hook failure semantics: non-fatal to the decorated turn; SHOULD-level prevention in the
+      `before_*` message hooks; handler errors'
+    refs:
+    - content/0.2.0/specification/hooks.md introduction (line 5; quote at line 5), §1.2 Hook Definition
+      (line 66), §3.3 prefilter_llm_history, Note (line 273), §4.1 before_create_message (line 322), §4.3
+      before_update_message (line 350), §5.2 before_store_tool_result (lines 386-398)
+    - content/0.2.0/getting-started/examples.md §3 Hooks (line 550), non-normative
+    - content/0.2.0/specification/handlers.md §5 Error Semantics (lines 71-77)
+    - content/0.2.0/infrastructure/runtime.md §5.2 Error Handling (line 92)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons, `hook_blocked` (line 113)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6109-6112 (before_create_message comment), 6161-6164
+      (before_update_message comment)'
+    quote: its failures are non-fatal to the decorated turn
+  explanation: 'Both define what happens when a check errors, with different defaults. ACS is fail-safe
+    by site: a stop-type gate whose expression errors fires, an `end` gate does not (firing would report
+    success), and a condition that errors is false. An SA hook''s failures are non-fatal to the decorated
+    turn by default. For `before_create_message` and `before_update_message` the text says a failure SHOULD
+    prevent the write; the published types say a throw prevents an `injectMessage()` insertion or an `updateMessage()`
+    update, while a runtime may still perform a write an execution cannot go on without ''with the last
+    good message''. For `before_store_tool_result`, the redaction point, the text gives no failure behaviour.
+    A runtime may let a request-context hook block a request (a Note, with the reason code `hook_blocked`).
+    A redaction or grounding hook therefore cannot be assumed to fail closed.'
+  combined: 'Fail-closed logic sits where failure is visible: in the tool''s `execute` wrapper, which
+    returns an error result that the runtime MUST persist. A handler-backed side is fail-closed for one
+    turn only: a throwing handler is fatal to the turn, and the session continues. Inside hooks, errors
+    are caught and a safe value is substituted (for a redaction error, a fixed placeholder as `result`)
+    instead of throwing. A try/catch does not cover a hook timeout or a hook that is outside the resolved
+    set, so hooks stay a second layer behind the wrapper.'
+  see_also:
+  - published-api-extension-points#hooks-02
+  - safety-enforcement#flags-02
+  - safety-enforcement#hook-01
+  - safety-enforcement#hook-02
+  - evidence-audit-observability#action-01
+  - evidence-audit-observability#audit-04
+  - evidence-audit-observability#collect-01
+  - evidence-audit-observability#collect-03
+- id: identity-01
+  relation: partial
+  acs:
+    concept: '`agent_identity` for people and services: `principal`, `kind`, `role`, `owner`, `authenticated_by`,
+      `trust_class`'
+    refs:
+    - schemas/agent_identity_schema.yaml (lines 8-55)
+    - spec/STANDARD-v1.1.0.md §5.14 Approval (lines 804-902), §5.15 Delegation, principal (lines 932-938),
+      §5.17 Sender Identity (lines 1021-1030; quote at line 1029)
+    quote: fills it in; the standard does not say how a party is authenticated or
+  sa:
+    concept: 'User identity: `UserIdentity` / `ThreadUser` (`id`, `role`, `roles`, `permissions`), `state.user()`,
+      endpoint `auth.caller`'
+    refs:
+    - content/0.2.0/specification/users.md status banner (line 3), §1 Identity (lines 9-25; quote at line
+      9), 'Application roles' (lines 29-43), Draft
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, User identity (line 159)
+    - content/0.2.0/specification/threads/endpoints.md §4 Access and Authentication (lines 98-105)
+    - content/0.2.0/specification/threads/client-api.md §6 Creating a Thread (line 159)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1892-1905 (ThreadUser)'
+    quote: 1. A runtime MUST resolve every authenticated request to a stable user id.
+  explanation: 'Field by field: `principal` maps to the user `id` (ACS compares principals by exact equality;
+    that the id is stable is a MUST only on the Draft Users page). `role` maps to `role` or one of `roles`,
+    opaque strings from the runtime''s trusted identity authority, never from clients. `kind` (agent,
+    human, service) has no SA field; a comment in the published types gives role values for the reference
+    runtime only. `authenticated_by` is not exposed: the mechanism is implementation-defined. `trust_class`
+    has no SA concept. The subject matters: `state.user()` is the thread''s owner and can resolve `null`,
+    while ACS needs the identity of a sender, an actor or an approver, and Endpoints §4 notes that caller
+    and owner frequently differ. In the published types `ThreadUser.username` and `role` are required;
+    the Draft''s `UserIdentity` makes them optional. Agent parties are row identity-02.'
+  combined: 'People: identities are built from `auth.caller` in a thread endpoint: `{ principal: ''sa-user:''
+    + caller.id, kind: <per deployment>, role: <an application role from caller.roles, else caller.role>,
+    authenticated_by: ''x-<runtime id>'' }`, with `trust_class: ''owner''` only when `caller.id === state.userId`.
+    Classing the owner as `owner` is the binding''s decision, supported by the rule that a thread''s owner
+    is set from the authenticated caller. Approver roles are checked on that caller when the decision
+    is recorded, in line with SA''s advice to authorize each protected request rather than keep an earlier
+    grant. `state.user()` identifies the owner for display and for the `owner` field of an agent''s identity,
+    nothing more.'
+  see_also:
+  - published-api-extension-points#endpoint-01
+  - published-api-extension-points#user-01
+  - safety-enforcement#appr-03
+  - approval-human#approval-13
+  - approval-human#approval-19
+  - approval-human#identity-02
+  - approval-human#identity-03
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - workflow-execution#wf-09
+  - multi-agent#coord-08
+- id: reliability-01
+  relation: fits
+  acs:
+    concept: 'Agent behavioural reliability (RFC-0002, Draft): delivery, calibration, adaptation; the
+      missing session primitive'
+    refs:
+    - spec/RFC-0002-agent-reliability-profile.md header (lines 2-3), Key decisions 3 (lines 98-165) and
+      4 (lines 167-175; quote at line 169), Backward compatibility (lines 186-191)
+    quote: The standard defines none, and neither does the reference
+  sa:
+    concept: Run status with reason codes, session end semantics, observational `tool_call_done`
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §4 Run Status (lines 79-89), §4.2 Reasons
+      (lines 107-114; quote at line 114)
+    - content/0.2.0/specification/hooks.md §5.5 tool_call_done (lines 440-442)
+    - content/0.2.0/specification/subagents.md §4.1 Persistence Is Universal (line 120)
+    - content/0.2.0/specification/threads.md §9.3 Parent Messaging (line 540)
+    quote: '| `failed` | `step_error`, `repeated_tool_error`, `session_fail`, `fatal_error`, `execution_lost`
+      |'
+  explanation: 'RFC-0002 is a Draft that specifies no fields; it says the standard lacks a session primitive
+    and the telemetry to compute its axes. SA has sessions, a persisted run status with reason codes,
+    and a hook that fires once for every completed tool call when it is in the resolved set: raw material
+    for a delivery measure. SA states how sessions end (stop, fail, error or turn cap) and that a later
+    message starts a new session with history intact; it does not define the first session''s start, a
+    session identifier, or whether a session spans several executions. The reason codes are SHOULD-level
+    and extensible, and `ThreadStatus.reason` holds only the last transition. Searched: a session is,
+    session begins, session starts (content/0.2.0): not found.'
+  combined: Nothing to bind today, since the RFC specifies no fields. If ACS later defines `delivery_score`,
+    an SA binding can count `tool_call_done` results by `status` and session ends by `ThreadStatus.reason`,
+    keyed by `state.agentId`; because the status keeps only the last reason, the binding has to record
+    each change itself.
+  see_also:
+  - workflow-execution#wf-10
+  - workflow-execution#wf-17
+  - multi-agent#coord-03
+  - multi-agent#coord-11
+  - multi-agent#coord-12
+- id: hooks-01
+  relation: partial
+  acs:
+    concept: 'Where safety checks apply: safety layers act on every step''s effective flags; the reference
+      plugin hook matches every mutating tool call of a session'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (line 279)
+    - hooks/hooks.json PreToolUse matcher (lines 3-13; quote at line 5)
+    - spec/SECURITY.md §5.1 Pre-Tool Use Hooks (lines 276-280)
+    quote: '"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash"'
+  sa:
+    concept: 'Hook scoping: a prompt''s non-empty `hooks` array replaces the agent''s; at rest only agent-level
+      hooks apply; an enabled child relationship adds its `parentHooks` before or after'
+    refs:
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 72-100)
+    - content/0.2.0/specification/prompts.md §8 Hook Scoping (lines 272-273; quote at line 272)
+    - content/0.2.0/specification/agents.md §2.2 Optional, `hooks` and `parentHooks` (lines 92-93), §6
+      Required Parent Hooks (lines 155-164)
+    - content/0.2.0/infrastructure/runtime.md §7.3.1 Required Parent-Hook Composition (lines 149-163)
+    - content/0.2.0/specification/threads/execution-state.md §2.1 Prompt Path (lines 36-39)
+    quote: '- When `hooks` is non-empty, only those hooks form the prompt base set'
+  explanation: 'ACS expects its safety layer to see every step, and the reference plugin hook is global:
+    it matches tool names for the whole session. SA thread hooks are scoped. A prompt with a non-empty
+    `hooks` array uses only those hooks as its base set; the agent''s `hooks` apply only to prompts that
+    declare none and to at-rest operations; an enabled child relationship adds its `parentHooks` before
+    or after the base set. So a grounding, redaction, mirroring or trust-tagging hook listed only on the
+    agent does not run for a prompt that sets its own hooks, one listed only on a prompt does not run
+    at rest, and a sub-prompt with its own list, or a handed-off agent from another author, runs without
+    it (the last by inference from §1.3). The text defines no way for an agent to require a hook for all
+    of its prompts.'
+  combined: 'Every hook-based part of this binding (rows context-01, context-02, context-04, security-01,
+    secrets-01, reliability-01) lists its hooks in the `hooks` array of every prompt that declares one
+    and in the agent''s `hooks`; a build-time check over the package''s definitions verifies this, since
+    the runtime does not. Guarantees that must hold regardless of the active prompt are placed in tool
+    wrappers, which run wherever the tool is called. Composing a child is reviewed for the `parentHooks`
+    it declares: composition interfaces MUST disclose the hook id, reason and stage, and those hooks run
+    with the parent''s `ThreadState`.'
+  see_also:
+  - published-api-extension-points#hooks-01
+  - safety-enforcement#flags-02
+  - safety-enforcement#trust-01
+  - evidence-audit-observability#collect-03
+  - multi-agent#coord-18
+  - packaging-conformance-governance#pkg-01
+- id: isolation-01
+  relation: partial
+  acs:
+    concept: 'Independence of a delegate from its delegator: `fresh_context`, quorum `forbidden_inputs`
+      and `require_fresh_context`; the host attests, and the Standard does not protect against a host
+      that lies'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 917-922), §5.16 Quorum, `forbidden_inputs` and `require_fresh_context`
+      (lines 977-978), §5.17 Sender Identity, Delegation (lines 1071-1075; quote at line 1074)
+    quote: it does not protect against a host that lies
+  sa:
+    concept: 'Thread isolation and its exceptions: `getParentThread()` and `getChildThread()` return a
+      full `ThreadState`; a child''s `parentHooks` run in the parent'
+    refs:
+    - 'content/0.2.0/specification/subagents.md introduction (line 3), §6.4 Child → Parent: Explicit Escalation
+      (line 219)'
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, Subagent Hierarchy (lines 94-95), §9 Subagent
+      Hierarchy, Communication, and Termination (lines 485-486)
+    - content/0.2.0/specification/agents.md §6 Required Parent Hooks (lines 155-163; quote at line 163)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 84-85, 95-96)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store' (the second section numbered 14),
+      §14.1 item 3 (line 352)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2913-2919 (getChildThread, getParentThread)'
+    quote: '- The hook receives the parent''s `ThreadState` and remains active for the lifetime of the
+      enabled relationship. It applies during every prompt on either side of the parent.'
+  explanation: 'ACS relies on the host to attest that a delegate started without the delegator''s context
+    and did not depend on forbidden inputs, and says the attestation does not protect against a host that
+    lies. In SA a child''s thread is isolated for models: its own messages, filesystem, queue and lifecycle.
+    It is not a boundary against the code it is composed with. `getParentThread()` and `getChildThread()`
+    return the full surface of the other thread (values, messages, files, env), Subagents §6.4 suggests
+    delivering results through the parent''s key-value store, and a composed child''s `parentHooks` run
+    with the parent''s `ThreadState` on every prompt, by default after the parent''s own hooks. The text
+    does not reconcile the handles with the rule that values MUST NOT be readable by any other thread.
+    Every binding in this mapping therefore holds against the model, not against co-located or composing
+    code.'
+  combined: 'The host attests `effective.fresh_context` and reviewer independence only for children whose
+    package code has been reviewed: no use of `getParentThread()` to read the delegator''s messages, values
+    or files, and no `parentHooks` that write into the parent beyond what the composition discloses. A
+    grounded parent treats a composed child''s package as part of its own trusted code base and reviews
+    the `parentHooks` a child declares before enabling the relationship. Evidence that must survive other
+    code on the thread is mirrored outside it (row context-02).'
+  see_also:
+  - tools-contracts#io-04
+  - tools-contracts#rec-01
+  - published-api-extension-points#thread-01
+  - safety-enforcement#scope-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-04
+  - checkpoint-rollback-state#state-12
+  - approval-human#approval-07
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-04
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - multi-agent#coord-05
+  - multi-agent#coord-19
+  - multi-agent#coord-22
+  - multi-agent#coord-23
+- id: ground-01
+  relation: partial
+  acs:
+    concept: '`ground`: anchor a claim to evidence (inputs `claim`, `sources`, `required_strength`; outputs
+      `grounded`, `evidence`, `gaps`, `evidence_anchors`, `confidence`)'
+    refs:
+    - schemas/capability_ontology.yaml nodes[id=ground] (lines 837-880; quote at line 839)
+    - spec/STANDARD-v1.1.0.md header 'Status' (lines 4-8), §2 Terms, Grounding (line 65), §3.1 Grounded
+      Claims (line 77)
+    quote: 'description: Anchor claims to evidence'
+  sa:
+    concept: '`state.decide()` over explicit context: a `boolean` or `choice` question evaluated without
+      reading or changing the conversation'
+    refs:
+    - content/0.2.0/specification/threads/decisions.md introduction (lines 3-4), §2 Request Types (lines
+      56-60), §3 Question Types (lines 92-96), §4.1 Answer Semantics (lines 155-167), §5 Provider Interface
+      (lines 190-192), §6 Conversation Semantics (lines 202-207; quote at line 204)
+    - content/0.2.0/infrastructure/runtime.md §1.1 Decision Inference (lines 21-25)
+    - content/0.2.0/specification/prompts.md §1.2 Optional Properties, `includeChat` (line 26)
+    quote: '- read conversation messages to assemble context;'
+  explanation: '`ground` is the ACS capability that checks a claim against sources. SA has no grounding
+    construct, but a decision is its natural carrier: `decide()` evaluates typed questions against caller-supplied
+    context, MUST NOT implicitly read conversation messages, and adds nothing to the conversation. The
+    sources a grounding check saw are therefore exactly the items the caller passed, which a model step
+    cannot guarantee (row context-01). What SA does not supply: `required_strength` has no counterpart
+    beyond the caller''s own threshold on the returned probability; `evidence` and `gaps` are lists a
+    boolean answer cannot carry; and a deployment may have no decision provider. ACS for its part does
+    not define the three strength levels, and its reference implementation does not check §3.1. Searched:
+    required_strength (every file under spec/): not found.'
+  combined: A `ground` function tool takes `claim` and `sources` (refs to persisted records), resolves
+    each ref (`state.getMessage(id)`, `state.readFile(path)`) and passes the resolved texts as `context`
+    to `state.decide()` with a `choice` question whose options are supported, contradicted and not addressed.
+    `grounded` is the caller's threshold applied to the probability of 'supported', taken per `required_strength`
+    from a table the binding publishes; `evidence_anchors` are the refs that were placed in `context`;
+    `gaps` lists the refs that did not resolve. Without a decision provider the tool falls back to a prompt
+    tool that is given the same explicit sources and no chat history (`includeChat` is `false` by default).
+  see_also:
+  - tools-contracts#io-08
+  - published-api-extension-points#decide-01
+  - evidence-audit-observability#trust-02
+- id: identity-02
+  relation: partial
+  acs:
+    concept: '`agent_identity` for agent parties: `principal`, `kind: agent`, `owner`, `model_family`,
+      `trust_class: own_subagent_report`; `effective.identity` on a delegation; `actor_identity`'
+    refs:
+    - schemas/agent_identity_schema.yaml (lines 8-55)
+    - spec/STANDARD-v1.1.0.md §5.16 Quorum, `require_distinct_identities` (line 980), §5.17 Sender Identity,
+      Delegation (lines 1063-1075; quote at line 1063), Actor (lines 1095-1101)
+    - schemas/capability_ontology.yaml nodes[id=delegate] output `effective.identity` (lines 1529-1532)
+    quote: '**Delegation.** A delegation''s host may attest who took it:'
+  sa:
+    concept: 'Agent-side identifiers: `state.agentId`, `SubagentRegistryEntry.reference`, `relationship`
+      and `name`, side backings, `state.userId`'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.1 Properties (lines 40-44)
+    - content/0.2.0/specification/subagents.md §4.2 Registry (lines 128-147; quote at line 132)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure, `subagent_id` (line 30)
+    - content/0.2.0/specification/threads/client-api.md §5 Listing Agents (lines 126-135)
+    - content/0.2.0/specification/agents.md §1.1 The Three Backings (lines 11-15)
+    quote: 'reference: string; // stable instance reference (UUID)'
+  explanation: Delegation and quorum need identities for agents, not only for people. SA has no identity
+    object for an agent party, but it has the parts. A child instance has a registry `reference` described
+    as a stable instance reference (UUID), a `relationship` name and the implementing agent's `name`;
+    the message record carries `subagent_id`; a thread has `agentId` and the owner's `userId`. The nearest
+    notion to ACS `kind` is a side's backing (human, prompt or handler), which the agent list reports
+    as `side_a_backing` and `side_b_backing`; it describes a side, not a party, and SA has no 'service'
+    kind. `model_family` has no SA field (row models-02). Nothing in SA authenticates one agent to another;
+    the registry is runtime-maintained, which is what makes a child's reference usable as a host-attested
+    principal.
+  combined: 'A delegate realised as a subagent gets `principal` = `''sa-subagent:'' + reference` (its
+    registry `reference`, namespaced as in evidence-audit-observability#prov-03), `kind: ''agent''`, `role`
+    as the delegation requested, `owner` = the thread owner''s id (`state.userId`), `model_family` per
+    row models-02 and `trust_class: ''own_subagent_report''`. The host attests this as `effective.identity`
+    and, for a waiting delegate, accepts only results it reads from that child''s own thread through `state.getChildThread(reference)`,
+    with the reference taken from `state.children`; a message''s `subagent_id` is not relied on (multi-agent#coord-08).
+    Two instances of one agent definition have different references and therefore different principals;
+    whether they count as distinct reviewers is the host''s decision, and a host that wants one party
+    per definition uses the qualified agent name as the principal instead.'
+  see_also:
+  - published-api-extension-points#user-01
+  - safety-enforcement#appr-03
+  - approval-human#approval-13
+  - approval-human#identity-02
+  - approval-human#identity-03
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - workflow-execution#wf-09
+  - multi-agent#coord-08
+  - multi-agent#coord-22
+- id: remember-03
+  relation: partial
+  acs:
+    concept: 'The persist and recall skills'' project memory: stable learnings written to durable knowledge
+      files such as CLAUDE.md'
+    refs:
+    - skills/persist/SKILL.md frontmatter `description` (line 3; quote at line 3)
+    - skills/recall/SKILL.md Procedure steps 2-3 (lines 41-48)
+    quote: 'description: Write stable learnings, decisions, and patterns to durable storage like CLAUDE.md
+      or knowledge files. Use when saving project decisions, recording patterns, or updating long-term
+      memory.'
+  sa:
+    concept: 'Agent Skills library as a durable, principal-scoped, cross-thread store: `state.skills.install`,
+      `get`, `readFile`, `list`; an administrator-shared library'
+    refs:
+    - content/0.2.0/specification/threads.md §1.2.2 Methods, Skills (lines 163-170), §7.4 Agent Skills
+      (lines 449-458; quote at line 449)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1840-1841 (SkillMetadata.updatedAt), 1844-1847 (SkillFileInput),
+      1875 (install)'
+    quote: '`state.skills` exposes the calling thread owner''s Agent Skills library plus any administrator-reviewed
+      skills explicitly shared by the runtime.'
+  explanation: 'The ACS persist skill does not describe a key-value store: it describes writing stable
+    knowledge into files an agent will read again in later sessions. The closest SA analogue is the Agent
+    Skills library, not the thread store: durable, scoped to the calling principal, visible from every
+    thread of that owner, on a non-Draft page, with an optional administrator-shared library, and with
+    name and description surfaced to agents in ambient context (SHOULD). Differences: a skill is instructions
+    with a required frontmatter, not arbitrary data; installs need mutation authorization, which a runtime
+    may refuse to agent code; shared-library changes need an administrative principal; a private skill
+    MUST NOT be visible to another principal, so there is no project scope below the shared library; and
+    what is installed reaches later models as instructions, so it is not a place for evidence.'
+  combined: Project-level learnings that ACS `persist` would write to a knowledge file are offered to
+    a person as a proposed skill (a `SKILL.md` text with `name` and `description`) rather than installed
+    by agent code; a user or administrator installs it with `state.skills.install` or through the runtime's
+    interface. `recall` with project scope reads `state.skills.get(name)` or `state.skills.readFile(name,
+    path)` and anchors the result as `skill:<name>`, a binding-defined ref scheme, with the skill's `updatedAt`
+    when the runtime supplies it. Data, evidence and approvals stay in the thread store, thread files
+    or an external store (rows remember-01 and remember-02).
+  see_also:
+  - checkpoint-rollback-state#state-27
+- id: portability-01
+  relation: fits
+  acs:
+    concept: 'Checks that fail closed and records that outlive their producer: a check ''is never silently
+      off''; `audit` with `retention`; append-only events'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.17 Sender Identity (lines 1039-1042; quote at line 1041)
+    - schemas/capability_ontology.yaml nodes[id=audit] input `retention` (lines 1357-1359)
+    - schemas/event_schema.yaml schema.principles (line 8)
+    quote: check is never silently off.
+  sa:
+    concept: 'Portability requirements for packed agents: no sidecar services that substitute for runtime
+      behaviour; optional enhancements capability-detected; declared external services'
+    refs:
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 9-25; quote at line 16)
+    - content/0.2.0/specification/threads.md §1.2.1 Properties, `_notPackableRuntimeContext` (line 50),
+      §2.3 Environment Variable Resolution (lines 231-234)
+    - content/0.2.0/specification/users.md status banner (line 3)
+    - content/0.2.0/infrastructure/providers.md 'Method Overrides' (lines 177-180)
+    quote: package's declared agents and required dependencies MUST execute correctly when
+  explanation: 'ACS''s checks are written to fail closed (a check ''is never silently off''), and its
+    records are meant to outlive the thing that produced them. SA constrains what a packed agent may depend
+    on: packed definitions MUST NOT require private runtime RPCs, undocumented events, sidecar services
+    that substitute for runtime behaviour, or `_notPackableRuntimeContext`; runtime-specific enhancements
+    may be capability-detected, but the package MUST execute correctly when they are absent; an external
+    service is acceptable when the package declares it as part of the agent''s purpose. Three parts of
+    this binding touch that rule: an external evidence log (row context-02), failing closed when an optional
+    surface is missing (`instanceEnv`, the Draft Users surface, `ctx.state` on provider overrides), and
+    records kept outside the thread. Threads §2.3 itself tells consumers of `instanceEnv` to fail closed,
+    so SA''s text holds both positions.'
+  combined: A packed grounded agent declares its external evidence log as an external service that is
+    part of the agent's purpose, and keeps a thread-local copy so that the agent still executes without
+    it; anchors then carry a weaker, stated guarantee. Optional surfaces are capability-detected with
+    a defined fallback (the bundled profile when `instanceEnv` is absent, the binding's own allow-list
+    when grants are absent). Where no safe fallback exists, the affected tool returns an error result
+    naming the missing capability instead of the agent failing as a whole, and the package documents that
+    capability as required.
+  see_also:
+  - published-api-extension-points#erase-01
+  - published-api-extension-points#thread-07
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-15
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - evidence-audit-observability#audit-02
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#retention-01
+  - evidence-audit-observability#store-02
+  - workflow-execution#wf-05
+  - workflow-execution#wf-25
+  - multi-agent#coord-19
+  - multi-agent#coord-27
+  - packaging-conformance-governance#pkg-07
+  - packaging-conformance-governance#ver-04

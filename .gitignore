@@ -31,3 +31,6 @@ grounded_agency/_core*.pyd
 site/node_modules/
 site/dist/
 site/.astro/
+
+# Standard Agents binding example
+examples/standard_agents/node_modules/

@@ -1,0 +1,407 @@
+# Standard Agent Specification to Agent Capability Standard mapping: index
+# Summary and method: docs/integrations/standard_agents.md
+meta:
+  version: 1.0.0
+  date: '2026-11-14'
+  description: Concept-by-concept mapping between the Agent Capability Standard and the Standard Agent
+    Specification, with the passages each row rests on, and the findings about each standard that the
+    mapping produced.
+  agent_capability_standard:
+    standard: 1.1.0
+    ontology: 2.1.0
+    commit: 3e4cd94
+  standard_agent_specification:
+    version: 0.2.0
+    repository: https://github.com/standardagents/spec
+    commit: faccc8be0ba5921a8af86db2fe52283773cd1583
+    types_package: '@standardagents/spec 0.45.10'
+  relations:
+    same: The two concepts mean the same thing.
+    partial: One covers part of the other.
+    fits: They address different layers and combine without conflict.
+    acs_only: The Standard Agent Specification has nothing comparable.
+    sa_only: The Agent Capability Standard has nothing comparable.
+    conflict: Using both as written would break a requirement of one.
+  row_fields:
+    id: Row identifier, unique within its concern. Across concerns a row is <concern>#<id>.
+    relation: One of the relations above.
+    acs: The Agent Capability Standard concept, where it is defined, and a verbatim quote.
+    sa: The Standard Agent Specification concept, where it is defined, and a verbatim quote.
+    explanation: Why the relation holds, and what was searched for when something is absent.
+    combined: How the two can be used together with what Standard Agents 0.2.0 requires of every runtime.
+      Absent when they cannot.
+    see_also: Rows of other concerns that hold a condition or caveat this row relies on.
+  finding_fields:
+    id: Finding identifier.
+    priority: 'blocker, important or minor. For the Standard Agent Specification: blocker means something
+      this standard requires cannot be enforced even by cooperating tool code; important means it can
+      be enforced only cooperatively or with a workaround that has a stated weakness. For this standard:
+      blocker means two careful implementers would build incompatible things or a safety rule can be bypassed;
+      important means an implementer must guess or read the reference code.'
+    summary: What the text says or leaves out, and the consequence.
+    refs: Where the evidence is.
+    quote: A verbatim passage, when the finding rests on one.
+    searched: 'For an absence: what was searched for, and where.'
+    proposed_change: The smallest change that would resolve the finding.
+    disposition: 'Standard Agent Specification findings only. proposal: one of the drafted issues asks
+      for the change (the file named in `proposal`, under tasks/standard-agents-upstream/). not_proposed:
+      no issue asks for it, with the reason. candidate: would stand as an issue of its own; not drafted.'
+    status: 'Agent Capability Standard findings only. fixed: resolved in this repository. partly_fixed:
+      what could be fixed without new normative text is; the rest is in `resolution`. proposed: the change
+      is in a Draft RFC and nothing is normative yet. open: nothing has been done.'
+    resolution: What was done, where, and what remains.
+    concerns: The concerns whose mapping produced the finding.
+    related: Findings that ask for the same change in part.
+  references: Paths under content/ and src/ are in the Standard Agent Specification repository at the
+    commit above. Other paths are in this repository at the commit above, and line numbers refer to those
+    commits. The exceptions are the files this analysis added (examples/standard_agents/, schemas/interop/standard_agents_annotation.schema.json,
+    docs/integrations/standard_agents.md), which are cited as they stand, without line numbers for the
+    binding's code.
+  review: 'Each concern was mapped from the full text of both sides, then read by two independent reviewers:
+    one checked every reference and quote and tried to refute every claim of absence; the other checked
+    that every combination compiles against the published types and relies only on what the specification
+    requires. A third pass reconciled the mapping with both reviews. Rows of different concerns that rest
+    on the same passage were then compared, and findings were merged across concerns and checked against
+    the sources again.'
+concerns:
+- concern: tools-contracts
+  title: Capabilities, tools and typed contracts
+  file: tools-contracts.yaml
+  rows: 29
+  relations:
+    partial: 12
+    fits: 7
+    acs_only: 6
+    sa_only: 4
+- concern: published-api-extension-points
+  title: The published TypeScript API as a binding surface
+  file: published-api-extension-points.yaml
+  rows: 37
+  relations:
+    partial: 24
+    fits: 11
+    acs_only: 2
+- concern: safety-enforcement
+  title: Safety flags, ontology edges and enforcement
+  file: safety-enforcement.yaml
+  rows: 29
+  relations:
+    partial: 14
+    fits: 9
+    acs_only: 6
+- concern: checkpoint-rollback-state
+  title: Checkpoints, rollback, state and memory
+  file: checkpoint-rollback-state.yaml
+  rows: 27
+  relations:
+    partial: 13
+    fits: 7
+    acs_only: 6
+    sa_only: 1
+- concern: approval-human
+  title: Approval, people and identity
+  file: approval-human.yaml
+  rows: 36
+  relations:
+    partial: 19
+    fits: 7
+    acs_only: 8
+    sa_only: 2
+- concern: evidence-audit-observability
+  title: Evidence, provenance, audit and observability
+  file: evidence-audit-observability.yaml
+  rows: 34
+  relations:
+    partial: 20
+    fits: 4
+    acs_only: 8
+    sa_only: 2
+- concern: workflow-execution
+  title: Workflows and the executor
+  file: workflow-execution.yaml
+  rows: 30
+  relations:
+    partial: 16
+    fits: 8
+    acs_only: 4
+    sa_only: 2
+- concern: multi-agent
+  title: Delegation and composition across agents
+  file: multi-agent.yaml
+  rows: 29
+  relations:
+    partial: 14
+    fits: 5
+    acs_only: 5
+    sa_only: 5
+- concern: packaging-conformance-governance
+  title: Packaging, versions, diagnostics, conformance and governance
+  file: packaging-conformance-governance.yaml
+  rows: 32
+  relations:
+    same: 1
+    partial: 20
+    fits: 7
+    acs_only: 3
+    sa_only: 1
+- concern: models-context-memory-security
+  title: Models, context, memory, profiles and security
+  file: models-context-memory-security.yaml
+  rows: 36
+  relations:
+    partial: 21
+    fits: 9
+    acs_only: 3
+    sa_only: 3
+findings:
+  standard_agent_specification:
+    file: findings_standard_agents.yaml
+    findings: 83
+    priorities:
+      important: 29
+      minor: 54
+    questions: 30
+  agent_capability_standard:
+    file: findings_agent_capability_standard.yaml
+    findings: 64
+    priorities:
+      blocker: 7
+      important: 36
+      minor: 21
+    questions: 15
+    status:
+      fixed: 5
+      partly_fixed: 14
+      proposed: 7
+      open: 38
+not_mapped:
+- standard: acs
+  ref: schemas/capability_ontology.yaml nodes[id=predict] (lines 406-448), nodes[id=discover] (lines 493-533),
+    nodes[id=decompose] (lines 579-619), nodes[id=attribute] (lines 796-836), nodes[id=simulate] (lines
+    881-921)
+  what: 'Five cognitive capabilities of the UNDERSTAND, REASON and MODEL layers: predict future states,
+    find unknown patterns, break a problem into subproblems, identify causes, and run what-if scenarios.'
+  reason: 'Covered as a class, not by name: tools-contracts#cls-05 maps the UNDERSTAND, REASON, MODEL
+    and SYNTHESIZE layers to prompt tools, and the ''Capabilities and tools'' table of docs/integrations/standard_agents.md
+    has one row for cognitive capabilities. `discover` and `simulate` are named in no row; `predict`,
+    `attribute` and `decompose` only in edge lists. All five are `risk: low` with no mutation, checkpoint
+    or approval flag, so no capability-specific rule applies.'
+- standard: acs
+  ref: grounded_agency/capabilities/registry.py class CapabilityRegistry (line 81); listed in CLAUDE.md
+    'Key Components'
+  what: The Python SDK component that loads the ontology and answers queries about capabilities, layers
+    and edges.
+  reason: 'The component is named in no row, but what it provides is mapped: the ontology as the registry
+    of capability ids (tools-contracts#cls-12, packaging-conformance-governance#type-01) and the lookup
+    of a tool''s classification (tools-contracts#cls-04, published-api-extension-points#thread-02). The
+    other five Key Components are each named in a row.'
+- standard: acs
+  ref: spec/STANDARD-v1.1.0.md §1.2 Notation (lines 43-50)
+  what: Defines the requirement keywords MUST, SHOULD and MAY.
+  reason: 'No row is needed because the difference is recorded elsewhere: as the SA gap ''The text states
+    no convention for requirement keywords'' in the safety-enforcement concern, in safety-enforcement#gate-05,
+    and in the rows that state the level (MUST, SHOULD, lowercase or none) of each SA sentence they rely
+    on.'
+- standard: acs
+  ref: spec/STANDARD-v1.1.0.md §1 Scope (lines 14-30)
+  what: Lists the nine things the Standard specifies.
+  reason: Front matter; each listed item is mapped under its own section.
+- standard: acs
+  ref: spec/STANDARD-v1.1.0.md §12.2 When to Require Typed Bindings (lines 1547-1561), §12.3 Choosing
+    Conflict Resolution Strategy (lines 1562-1571), §12.4 Selecting Conformance Level (lines 1572-1580)
+  what: 'Guidance tables for workflow authors: when a binding needs a type annotation, which trust-model
+    strategy to choose, and which conformance level to target.'
+  reason: Guidance on applying rules that are mapped where they are stated (§5.4, §8.2, §10.1); adds no
+    requirement.
+- standard: acs
+  ref: spec/STANDARD-v1.1.0.md §13 References (lines 1683-1706)
+  what: Links for the normative and informative references.
+  reason: Reference list; the references that matter to a binding (JSON Schema, I-JSON, JCS) are cited
+    by the rows that use them.
+- standard: acs
+  ref: 'spec/STANDARD-v1.1.0.md Appendix A: Layer Reference (lines 1707-1720)'
+  what: Table of the nine layers with their capability counts and members.
+  reason: Restates the §4.2 layer table, which tools-contracts#cls-01 and tools-contracts#cls-05 cite.
+- standard: acs
+  ref: spec/EDGE_TYPES.md §3 `enables` (Capability Flow) (lines 84-103)
+  what: Edge type saying that one capability's output can serve as another's input, without ordering.
+  reason: The Standard's §4.3 gives this edge no rule and no diagnostic; multi-agent#coord-28 records
+    that `enables` edges need no binding.
+- standard: acs
+  ref: spec/EDGE_TYPES.md §6 `alternative_to` (Substitutability) (lines 162-188)
+  what: Symmetric edge type saying that two capabilities can substitute for each other.
+  reason: The Standard's §4.3 gives this edge no rule and no diagnostic; checkpoint-rollback-state#state-21
+    covers the one pair that matters to storage, `persist` and `checkpoint`.
+- standard: acs
+  ref: spec/EDGE_TYPES.md §7 `specializes` (Inheritance) (lines 189-213)
+  what: Edge type saying that one capability is a more specific variant of another.
+  reason: The Standard's §4.3 gives this edge no rule and no diagnostic; the two edges that touch a binding,
+    `rollback specializes mutate` and `delegate specializes invoke`, are cited by checkpoint-rollback-state#state-06
+    and multi-agent#coord-15.
+- standard: acs
+  ref: spec/EDGE_TYPES.md 'Edge Type Summary', 'Validation Rules', 'Edge Properties', 'Usage Guidelines',
+    'Examples in the Ontology', 'Changes to the ontology's edges in 1.1.0', 'Versioning' (lines 214-370)
+  what: Summary table, per-level validator duties, edge record fields, authoring guidance and change notes
+    for the edge list.
+  reason: Validator and ontology-author detail; the four enforced edge types are mapped from the Standard's
+    §4.3 by safety-enforcement#edge-01 and safety-enforcement#edge-02.
+- standard: acs
+  ref: spec/STANDARD-v1.1.0.md §9.2 to §9.7, codes V103, V104, V108, B205, B206, S301, S302, R405, W603
+    and W609 to W615 (lines 1272-1347)
+  what: Sixteen diagnostic codes for malformed steps, binding annotations, schema references, expressions
+    and other workflow-authoring faults.
+  reason: 'Workflow-validator detail with no SA counterpart: SA has no workflow document to validate.
+    The code families are mapped by packaging-conformance-governance#diag-02; these codes are named in
+    no row, singly or within a stated range.'
+- standard: acs
+  ref: schemas/profiles/profile_schema.yaml properties `trust_model_reviewed`, `trust_model_reviewed_at`,
+    `workflows` (lines 96-111); schemas/profiles/healthcare.yaml `compliance` (lines 101-106); schemas/profiles/audio.yaml,
+    data_analysis.yaml, manufacturing.yaml, multimodal.yaml
+  what: Review bookkeeping and workflow lists of a domain profile, and four profiles that no row cites
+    by file.
+  reason: The profile is mapped as a unit by models-context-memory-security#profile-01 and block by block
+    by the rows that follow it, by checkpoint-rollback-state#state-22 and by evidence-audit-observability#policy-01;
+    these fields and files add nothing an SA binding reads.
+- standard: acs
+  ref: grounded_agency/discovery/ (DiscoveryPipeline, GapDetector, WorkflowSynthesizer; grounded_agency/discovery/__init__.py
+    lines 1-19)
+  what: SDK pipeline that detects capabilities in a task description and synthesises a workflow.
+  reason: Exported by the Python package but not among the Key Components of CLAUDE.md, and not part of
+    the Standard; no SA counterpart.
+- standard: acs
+  ref: spec/RFC-0001-agent-capability-ontology-and-workflow-dsl.md, spec/WHITEPAPER.md, spec/PRESS_KIT.md
+  what: The founding RFC, the white paper and the press kit.
+  reason: Background documents that no row cites; the Standard lists RFC-0001 and the white paper as informative
+    references (§13.2), and the rules they motivate are mapped from the Standard.
+- standard: sa
+  ref: content/0.2.0/specification/handlers.md §8 Livelock Discipline (lines 96-103)
+  what: A handler that replies to every inbound message opposite a prompt-backed side has no natural stop,
+    so its author replies conditionally, sets `maxSessionTurns`, or ends the session with `state.stopSession()`.
+  reason: Author guidance with no requirement keyword. multi-agent#coord-11 quotes the same point from
+    the examples page, and workflow-execution#wf-17 and safety-enforcement#lim-01 map `maxSessionTurns`.
+    The handler-hosted runner of workflow-execution#wf-04 faces a human-backed side, where the section's
+    case does not arise.
+- standard: sa
+  ref: content/0.2.0/specification/threads/code-execution.md §6.4 No Runtime-Imposed Deadline (lines 406-414)
+  what: The specification enforces no wall-clock timeout on `runCode`; callers SHOULD set their own with
+    `handle.terminate()`.
+  reason: Restates §2.2 and §11 of the same page, which workflow-execution#wf-11 cites for the same fact;
+    checkpoint-rollback-state#state-18 gives the binding (abort signal, and a deadline where timers exist).
+- standard: sa
+  ref: content/0.2.0/specification/handlers.md §2 Referencing a Handler (lines 30-43)
+  what: A handler is referenced only from a side's `handler` property; a reference from a prompt `tools`
+    array, a hook list or an effect schedule MUST be rejected at definition time.
+  reason: Definition-time reference rule with no ACS counterpart; the hosting rows reach a handler only
+    through its side and its inbound messages.
+- standard: sa
+  ref: content/0.2.0/specification/threads/client-api.md §9 Updating a Thread (lines 251-274)
+  what: '`PATCH {runtime_prefix}/threads/{threadId}` replaces a thread''s `tags`.'
+  reason: Client-side thread metadata; ACS has no thread or tag concept, and no row's binding keeps state
+    in tags.
+- standard: sa
+  ref: content/0.2.0/specification/threads/messages.md §2.1 Query Options (lines 92-101)
+  what: 'Options of `getMessages`: `limit`, `offset`, `order`, `includeSilent`, `maxDepth`.'
+  reason: Parameter table of a method that models-context-memory-security#perceive-01 maps; multi-agent#coord-19
+    uses `includeSilent` and `maxDepth` without citing the table.
+- standard: sa
+  ref: content/0.2.0/specification/threads/messages.md §3.4 Context snapshot assignment (lines 138-144)
+  what: A message persisted before a context snapshot is eligible for that assembly; one injected later
+    is eligible for the next.
+  reason: Points to Runtime §4 and Hooks §3.4, which models-context-memory-security#context-01 maps; the
+    neighbouring §3.3 is cited by safety-enforcement#trace-01 and evidence-audit-observability#store-02.
+- standard: sa
+  ref: content/0.2.0/specification/tools.md §6 Attachment Semantics Across Threads (lines 89-96)
+  what: Attachment paths are copied to thread-local paths when tool-driven subagent communication crosses
+    a thread boundary.
+  reason: Restates the copying rule of subagents.md §7 and threads.md §9.1, which the named rows cite.
+- standard: sa
+  ref: content/0.2.0/specification/threads/endpoints.md §6 Error Handling (lines 121-134)
+  what: Statuses the runtime returns for a thread endpoint request before any package code runs (unknown
+    thread, missing thread id, no matching route).
+  reason: HTTP routing detail with no ACS counterpart; the error body it refers to is cited by packaging-conformance-governance#diag-02.
+- standard: sa
+  ref: content/0.2.0/specification/threads/code-execution.md §2.1 Signature (lines 24-37), §3 CodeExecutionOptions
+    with §3.1 to §3.5 (lines 108-253), §4.2 CodeExecutionError (lines 288-307), §4.3 CodeExecutionLog
+    (lines 308-319), §5 Result Channels with §5.1 and §5.2 (lines 320-380), §6.2, §6.3, §6.5 and §6.6
+    (lines 393-405 and 415-422), §7 TypeScript Support (lines 431-441), §8 Module Semantics (lines 442-449),
+    §12 TypeScript Reference (lines 557-606); content/0.2.0/infrastructure/runtime.md §14.5 Configured
+    Export Resolution, §14.6 TypeScript Erasure, §14.7 Event Loop (lines 291-311)
+  what: The `runCode` signature, its options, error and log records, result channels, sandbox limits and
+    module rules.
+  reason: Sandbox API detail below the level at which ACS describes `execute`; the capability is mapped
+    by checkpoint-rollback-state#state-18 and its result by evidence-audit-observability#exec-01.
+- standard: sa
+  ref: content/0.2.0/specification/threads/filesystem.md §7 File Statistics (lines 126-134), §8 Image
+    Thumbnails (lines 135-143), §9.1 Method, §9.2 Options, §9.3 FileChunk (lines 148-171)
+  what: '`getFileStats`, `getFileThumbnail`, and the signature, options and chunk record of `readFileStream`.'
+  reason: Method detail; published-api-extension-points#thread-03 and checkpoint-rollback-state#state-03
+    name the three methods as part of the thread file system and cite the published types and §9.4.
+- standard: sa
+  ref: content/0.2.0/specification/type-registry.md §2 How Types Are Used with §2.1 to §2.3 (lines 59-141),
+    §5.1 Autocomplete (lines 287-298), §5.3 Refactoring Safety (lines 311-314), §6.2 Gradual Adoption
+    (lines 325-333), §7 TypeScript Reference (lines 334-390)
+  what: Where the registry types appear in model, prompt and agent definitions, editor benefits, and the
+    namespace declaration.
+  reason: Usage and rationale for the registries that the three named rows map; no requirement of its
+    own.
+- standard: sa
+  ref: content/0.2.0/specification/models.md §2 Provider Reference (lines 36-39), §4.1 Token Pricing (lines
+    56-65), §8.1 Overview (lines 194-201), §8.3 Runtime Validation (lines 242-258), §8.6 Backward Compatibility
+    (lines 334-339)
+  what: The `provider` property, token price fields, and validation of typed `providerOptions`.
+  reason: Model configuration with no ACS counterpart, as models-context-memory-security#models-01 records
+    for the model definition as a whole.
+- standard: sa
+  ref: content/0.2.0/specification/prompts.md §4.1 Strategy Values (lines 180-189), §6.1 Reasoning Properties
+    (lines 228-238), §6.2 Reasoning Levels (lines 239-242)
+  what: Value tables for `toolChoice` and for a prompt's `reasoning` settings.
+  reason: Value tables for properties the named rows map from §1.2, §4.2 and §6.3 of the same page.
+- standard: sa
+  ref: content/0.2.0/specification/providers.md §3 Message Format, type listing (lines 266-300), §8 Provider
+    Icons with §8.1 to §8.3 (lines 441-511); content/0.2.0/infrastructure/providers.md 'Extending a Provider'
+    (lines 26-67)
+  what: Provider message types, the optional `getIcon` method, and an example of a provider extension.
+  reason: Provider transport and display detail with no ACS counterpart; the extension factory is mapped
+    by published-api-extension-points#provext-01.
+- standard: sa
+  ref: content/0.2.0/specification/users.md §7.1 User Rooms and Attachment Admission with 'Transport and
+    frame contract' (lines 232-382), Appendix A. Notes (lines 399-410); @standardagents/spec 0.45.10 index.d.ts
+    `defineUserRoom` (line 1753)
+  what: 'An optional per-project room in the user scope: a WebSocket hub, room frames, presence callbacks
+    and attachment admission (Draft page).'
+  reason: Draft and optional (a runtime MAY support it), with no ACS counterpart. Three rows cite the
+    section for one sentence on `valuePrefix` (lines 284-286); the room itself and `defineUserRoom`, the
+    only define function no row names, are not mapped.
+- standard: sa
+  ref: content/0.2.0/getting-started/examples.md §1 Hello, World (lines 13-71), §4 Effects (lines 552-654);
+    content/0.2.0/specification/agents.md §9.1 (lines 209-220), §9.3 (lines 258-272); content/0.2.0/specification/hooks.md
+    §8.1 (lines 646-660), §8.3 to §8.5 (lines 684-742); content/0.2.0/specification/models.md §9.1 to
+    §9.6 (lines 342-460); content/0.2.0/specification/prompts.md §11 Examples (lines 409-497); content/0.2.0/specification/providers.md
+    §9.6 (lines 568-597); content/0.2.0/specification/threads/client-api.md Appendix A (lines 490-527);
+    content/0.2.0/specification/threads/code-execution.md §2.3 (lines 65-107), §10 Usage Patterns (lines
+    470-547); content/0.2.0/specification/threads/endpoints.md §7 Examples (lines 135-180); content/0.2.0/specification/threads/filesystem.md
+    §9.5, §9.6 (lines 181-216)
+  what: Example code and worked examples.
+  reason: Non-normative examples of constructs that are mapped from their defining sections; no row cites
+    these particular examples.
+- standard: sa
+  ref: '@standardagents/spec 0.45.10 index.d.ts: `VirtualModuleLoader` and `VirtualModuleRegistry` (lines
+    5402-5408), `ThreadMetadata` (line 1906), `FileStorage` (line 2249), `THREAD_STREAM_REASONING_PARAM`
+    (line 2195), `ModelProvider` (line 3511), `AgentType` (line 4706), `HookContext` (line 5909)'
+  what: Exported helper types, aliases, one constant and two deprecated names that neither a row nor the
+    0.2.0 text names.
+  reason: Each belongs to a type family that rows cover (controller context, thread identity, file records,
+    thread stream, models, agents, hooks); none adds behaviour. Every define function except `defineUserRoom`,
+    every thread hook and every `ThreadState` member is named in at least one row. The user-scope hooks
+    `user_client_attached` and `user_client_detached` are named in none; their section (users.md §7) is
+    cited by published-api-extension-points#hooks-01.
+- standard: sa
+  ref: src/data/models.md 'Recommended models', 'Scoring', 'Notes', 'Providers' (lines 5-78); src/data/home.md
+    'Why Standard Agents?', 'Anatomy of the Specification', 'Get Started' (lines 17-135 and 156-185);
+    AGENTS.md 'Stack', 'Commands' (lines 5-25), 'Diagrams, File Viewers, and Faux Threads' to 'Subagent
+    Documentation Scope' (lines 172-316), 'Callout Syntax' (lines 332-344); README.md 'Local development'
+    (lines 37-52)
+  what: Model recommendations with prices, home-page copy, and instructions for building the documentation
+    site.
+  reason: Site data and contributor tooling, not specification text; rows cite these files only for governance,
+    licence, runtime listing and contributor-guidance statements.

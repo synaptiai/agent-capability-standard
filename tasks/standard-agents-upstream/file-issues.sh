@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# File the issue texts in this folder in standardagents/spec.
+#
+#   ./file-issues.sh            list what would be filed (nothing is created)
+#   ./file-issues.sh --file     create the issues, in the order below
+#   ./file-issues.sh --file 06  create only issue 06
+#
+# Needs the GitHub CLI (gh), signed in as the account the issues should come
+# from. Each file is one issue: its first line is the title, the rest is the
+# body. An issue whose title already exists in the repository is skipped, so
+# the script can be run again after a failure.
+set -euo pipefail
+
+REPO="standardagents/spec"
+# 06 first: it is small and asks for nothing. Then 01, which matters most.
+ORDER=(06 01 07 09 02 03 04 05 08)
+
+cd "$(dirname "$0")"
+mode="list"
+only=""
+for arg in "$@"; do
+  case "$arg" in
+    --file) mode="file" ;;
+    [0-9][0-9]) only="$arg" ;;
+    *) echo "usage: $0 [--file] [NN]" >&2; exit 2 ;;
+  esac
+done
+
+for number in "${ORDER[@]}"; do
+  if [[ -n "$only" && "$only" != "$number" ]]; then continue; fi
+  file=$(ls "$number"-*.md)
+  title=$(head -n 1 "$file" | sed 's/^# //')
+  if [[ "$mode" == "list" ]]; then
+    printf '%s  %s\n' "$file" "$title"
+    continue
+  fi
+  existing=""
+  while IFS=$'\t' read -r found_title found_url; do
+    if [[ "$found_title" == "$title" ]]; then existing="$found_url"; break; fi
+  done < <(gh issue list --repo "$REPO" --state all --limit 200 \
+    --json title,url --jq '.[] | [.title, .url] | @tsv')
+  if [[ -n "$existing" ]]; then
+    printf 'exists   %s  %s\n' "$number" "$existing"
+    continue
+  fi
+  url=$(tail -n +2 "$file" | sed '1{/^$/d}' | gh issue create --repo "$REPO" --title "$title" --body-file -)
+  printf 'filed    %s  %s\n' "$number" "$url"
+done
+
+if [[ "$mode" == "list" ]]; then
+  echo
+  echo "Nothing was created. Run with --file to create these issues in $REPO."
+fi

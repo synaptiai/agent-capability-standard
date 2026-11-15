@@ -1,5 +1,9 @@
 # Data Analysis Domain Profile
 # Calibrated for data pipelines, analytics, ML model monitoring, and reporting.
+#
+# Status: informative data for hosts and workflow authors. No shipped component
+# loads or selects this profile; see "Status of Domain Profiles" in
+# docs/domains/README.md.
 
 domain: data-analysis
 version: "1.0.0"

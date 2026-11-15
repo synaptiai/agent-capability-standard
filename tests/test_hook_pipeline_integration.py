@@ -18,6 +18,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,11 @@ from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 from grounded_agency.state.evidence_store import EvidenceAnchor, EvidenceStore
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# The audit log verifier lives in tools/
+sys.path.insert(0, str(ROOT / "tools"))
+from verify_audit_log import verify_log  # noqa: E402
+
 HOOKS_DIR = ROOT / "hooks"
 PRETOOLUSE_HOOK = HOOKS_DIR / "pretooluse_require_checkpoint.sh"
 POSTTOOLUSE_HOOK = HOOKS_DIR / "posttooluse_log_tool.sh"
@@ -322,9 +328,11 @@ class TestAuditLogIntegrity:
         assert len(lines) >= 1
 
         entry = json.loads(lines[-1])
+        assert entry["tool"] == "Skill"
         assert entry["skill"] == "test-skill"
         assert "ts" in entry
         assert "hmac" in entry
+        assert "args" not in entry, "skill arguments are not written"
 
     @skip_no_bash
     @skip_no_jq
@@ -362,8 +370,8 @@ class TestAuditLogIntegrity:
     @skip_no_bash
     @skip_no_jq
     @skip_no_posttooluse
-    def test_non_skill_invocations_not_logged(self, project_dir: Path) -> None:
-        """PostToolUse hook should skip non-Skill tool invocations."""
+    def test_non_skill_invocations_logged(self, project_dir: Path) -> None:
+        """PostToolUse hook logs every tool call, not only Skill calls."""
         payload = json.dumps(
             {
                 "tool_name": "Read",
@@ -381,9 +389,61 @@ class TestAuditLogIntegrity:
         )
 
         log_file = project_dir / ".claude" / "audit.log"
-        # Log file should not exist or be empty
-        if log_file.exists():
-            assert log_file.read_text(encoding="utf-8").strip() == ""
+        lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 1
+
+        entry = json.loads(lines[0])
+        assert entry["tool"] == "Read"
+        assert "skill" not in entry
+        assert "/some/file" not in lines[0], "the tool input is not written"
+
+    @skip_no_bash
+    @skip_no_jq
+    @skip_no_posttooluse
+    @pytest.mark.skipif(not HAS_OPENSSL, reason="openssl not available")
+    def test_mixed_calls_verify(self, project_dir: Path) -> None:
+        """A log of Bash, Skill and failed calls passes the verifier."""
+        key = "test-key-for-pipeline"
+        calls = [
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "tool_input": {"command": "git status"},
+            },
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Skill",
+                "tool_input": {"skill": "checkpoint", "args": "--scope src"},
+            },
+            {
+                "hook_event_name": "PostToolUseFailure",
+                "tool_name": "Read",
+                "tool_input": {"file_path": "/missing"},
+                "error": "File does not exist",
+            },
+        ]
+        for call in calls:
+            result = subprocess.run(
+                ["bash", str(POSTTOOLUSE_HOOK)],
+                input=json.dumps(call),
+                capture_output=True,
+                text=True,
+                env=_minimal_env(
+                    {"CLAUDE_PROJECT_DIR": str(project_dir), "AUDIT_HMAC_KEY": key}
+                ),
+                timeout=10,
+            )
+            assert result.returncode == 0
+
+        log_file = project_dir / ".claude" / "audit.log"
+        assert verify_log(log_file, key) == (3, 3, [])
+
+        entries = [json.loads(line) for line in log_file.read_text().splitlines()]
+        assert [(e["event"], e["tool"]) for e in entries] == [
+            ("PostToolUse", "Bash"),
+            ("PostToolUse", "Skill"),
+            ("PostToolUseFailure", "Read"),
+        ]
 
 
 # ------------------------------------------------------------------

@@ -1,0 +1,127 @@
+{
+  "standard": "1.1.0",
+  "section": "8.1",
+  "status": "informative",
+  "description": "Trust scores: score = trust_weight(source) * confidence * recency_factor, the conflict_resolution_function.formula of schemas/authority_trust_model.yaml, with the decay factor of STANDARD v1.1.0 section 8.1 and the static weight of section 8.3. Section 8.1 lists the factors a score must support and does not state how they compose; the product is the formula of that schema, one of the schemas section 6.1 requires. min_trust floors the decay factor only: not the score and not the static weight. `model` holds the values of the schema that the vectors read. `not_covered` lists the cases the vectors leave out because the Standard does not state their result, each with what the reference implementation does; a vector for one of them would make one reading look required. grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
+  "tolerance": 1e-12,
+  "fields": {
+    "name": "The vector's name, unique in this file.",
+    "about": "What the vector covers.",
+    "source_type": "The source type of the evidence. Absent: it has none.",
+    "trust_class": "The trust class of the identity of the item's sender. Absent: the evidence has none.",
+    "profile_trust_weights": "The trust_weights of the domain profile in force. Absent: no profile.",
+    "age_hours": "The age of the observation, in hours.",
+    "confidence": "The confidence the source reports.",
+    "decay_factor": "The expected decay factor.",
+    "weight": "The expected static weight.",
+    "score": "The expected score: weight * confidence * decay_factor. A conforming value of each of the three differs from the expected one by at most `tolerance`."
+  },
+  "not_covered": [
+    "Field authority, a factor section 8.1 lists. Neither the Standard nor the schema's formula gives it arithmetic; the schema lists field_authority examples only. The reference implementation does not compute it.",
+    "A score with no stated confidence. The benchmark scenario benchmarks/scenarios/conflicting_sources.py multiplies weight by recency and has no confidence; the reference implementation's default confidence of 1.0 gives the same score. Every vector here states a confidence.",
+    "The strategies of section 8.2, which choose among conflicting sources and compute no score."
+  ],
+  "model": {
+    "source_ranking": {
+      "weights": {
+        "hardware_sensor": 0.95,
+        "system_of_record": 0.92,
+        "primary_api": 0.88,
+        "observability_pipeline": 0.8,
+        "derived_inference": 0.65,
+        "human_note": 0.55
+      }
+    },
+    "trust_classes": {
+      "weights": {
+        "owner": 0.95,
+        "decision_person": 0.9,
+        "system_of_record": 0.92,
+        "own_subagent_report": 0.7,
+        "colleague": 0.6,
+        "peer_agent": 0.55,
+        "external": 0.35
+      }
+    },
+    "decay_model": {
+      "half_life": "P10D",
+      "min_trust": 0.25
+    }
+  },
+  "vectors": [
+    {
+      "name": "new_and_certain",
+      "about": "No age and full confidence: the score is the static weight.",
+      "source_type": "primary_api",
+      "age_hours": 0,
+      "confidence": 1.0,
+      "decay_factor": 1.0,
+      "weight": 0.88,
+      "score": 0.88
+    },
+    {
+      "name": "one_half_life",
+      "about": "0.92 * 0.9 * 0.5.",
+      "source_type": "system_of_record",
+      "age_hours": 240,
+      "confidence": 0.9,
+      "decay_factor": 0.5,
+      "weight": 0.92,
+      "score": 0.414
+    },
+    {
+      "name": "floor_is_not_on_the_score",
+      "about": "The decay factor is floored at min_trust, 0.25. The score, 0.55 * 0.5 * 0.25, is below min_trust and is not raised.",
+      "source_type": "human_note",
+      "age_hours": 2400,
+      "confidence": 0.5,
+      "decay_factor": 0.25,
+      "weight": 0.55,
+      "score": 0.06875
+    },
+    {
+      "name": "floor_is_not_on_the_static_weight",
+      "about": "A profile sets the class weight to 0.2, below min_trust. The weight is not raised.",
+      "trust_class": "peer_agent",
+      "profile_trust_weights": {
+        "trust_class:peer_agent": 0.2
+      },
+      "age_hours": 0,
+      "confidence": 1.0,
+      "decay_factor": 1.0,
+      "weight": 0.2,
+      "score": 0.2
+    },
+    {
+      "name": "lower_weight_then_decay",
+      "about": "The class weight, 0.35, is lower than the source weight; half of a half-life has passed: 0.35 * 0.8 * 0.5 ** 0.5.",
+      "source_type": "system_of_record",
+      "trust_class": "external",
+      "age_hours": 120,
+      "confidence": 0.8,
+      "decay_factor": 0.7071067811865476,
+      "weight": 0.35,
+      "score": 0.1979898987322333
+    },
+    {
+      "name": "old_evidence_keeps_a_score",
+      "about": "After a hundred years the decay factor is min_trust, so the score is 0.95 * 0.25, not zero.",
+      "source_type": "hardware_sensor",
+      "age_hours": 876000,
+      "confidence": 1.0,
+      "decay_factor": 0.25,
+      "weight": 0.95,
+      "score": 0.2375
+    },
+    {
+      "name": "no_confidence",
+      "about": "A confidence of 0.0 gives a score of 0.0, whatever the weight and the age.",
+      "source_type": "derived_inference",
+      "age_hours": 24,
+      "confidence": 0.0,
+      "decay_factor": 0.9330329915368074,
+      "weight": 0.65,
+      "score": 0.0
+    }
+  ]
+}

@@ -1,0 +1,1434 @@
+# Delegation and composition across agents
+# Part of the Standard Agent Specification mapping; index.yaml explains the fields.
+concern: multi-agent
+title: Delegation and composition across agents
+rows:
+- id: coord-01
+  relation: partial
+  acs:
+    concept: '`delegate` capability (COORDINATE layer): one host-performed capability call with required
+      `task` and `agent`, returning required `accepted` and `evidence_anchors` and optional `task_id`,
+      `agent`, `effective`, `result`'
+    refs:
+    - 'schemas/capability_ontology.yaml node `delegate` (lines 1443-1538): `risk: medium`, `mutation:
+      false`, no `requires_checkpoint` or `requires_approval`'
+    - spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 904-940)
+    - 'spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 753-755): a waiting delegate''s delegation
+      MUST return a string `task_id`'
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (`InvokeCapability` row, line 85; guide
+      to the reference executor, non-normative)
+    quote: 'description: Assign task to another agent'
+  sa:
+    concept: '`SubagentRelationship` declared on an agent side, plus the runtime-injected lifecycle tool
+      `subagent_create`'
+    refs:
+    - content/0.2.0/specification/subagents.md intro (lines 3-5), §1 SubagentRelationship (lines 7-47),
+      §3.1 Creation Paths (lines 88-94), §5 Lifecycle Tools (lines 155-165)
+    - content/0.2.0/infrastructure/runtime.md §5.3 Tool Classes (lines 94-100), §7.1 Parent/Child Threading
+      and §7.2 Lifecycle Tooling (lines 115-131)
+    - content/0.2.0/specification/handlers.md §6 Capabilities (line 85)
+    - 'content/0.2.0/specification/threads.md §1.2.1 Properties (line 44, `children`), §1.2.2 Methods
+      (lines 52-176: no creation method)'
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4546-4685 (`SubagentRelationship`), lines 1925-1976
+      (`SubagentRegistryEntry`), lines 2771-3493 (`ThreadState`), lines 5911-5916 (`HookExecutionSource`
+      comment)'
+    quote: 'A subagent relationship is part of the agent''s structure: it is declared on the agent side
+      that owns it, never inside a prompt''s `tools` array.'
+  explanation: 'Both hand a task to another agent that runs separately. ACS: one capability call whose
+    target is a free string (`agent`) chosen at run time; where the delegate runs is left to the host.
+    SA: a static declaration (which agent definitions a side may instantiate, under which relationship
+    name) plus run-time creation in an isolated thread; runtimes MUST reject lifecycle invocations that
+    target undeclared or disabled relationships, without creating a child. For `subagent_create` 0.2.0
+    fixes `agent` (MUST enumerate the enabled relationship names), a non-empty `name` (MUST) and `arguments`
+    (SHOULD). Unspecified (see the Standard Agent Specification findings): what a non-blocking call returns,
+    and what code calls; `ThreadState` declares no creation method, and both the tool name `subagent_create`
+    and the relationship name (''Relationship names are tool names.'') fit the text. Searched: returns,
+    reference, result; createChild, spawnChild, createSubagent, spawn(.'
+  combined: 'To be verified per runtime (see the Standard Agent Specification findings). The host answers
+    `InvokeCapability` for `delegate` by creating an instance of the relationship ACS `agent` names (the
+    `as` name, not the agent definition), with `task` as `arguments` and a host-chosen non-empty `name`.
+    It mints `task_id` and maps it to the child reference, read in an `after_subagent_created` hook (`childState.threadId`,
+    which only the published types equate with `reference`; active hook set only) or from the registry
+    later (entries keyed by relationship name and lookup through `ThreadState` are MUSTs). `accepted:
+    true` equals `ToolResult.status === ''success''` only for a non-blocking relationship; a blocking
+    call returns after the child session closes. `evidence_anchors`: parent `threadId`, child reference,
+    `relationship`, `createdAt`. Not guaranteed: that `state.invokeTool(''subagent_create'', ...)` resolves
+    from code, arguments beyond `agent` and `name`, the result, same-invocation visibility in `state.children`,
+    a lifecycle tool as a packed tool''s `uses` target. A run-time `agent` can select only declared relationships.'
+  see_also:
+  - tools-contracts#cls-07
+  - published-api-extension-points#thread-06
+  - safety-enforcement#gate-03
+  - approval-human#approval-14
+  - approval-human#approval-16
+  - approval-human#identity-06
+  - workflow-execution#wf-20
+- id: coord-02
+  relation: partial
+  acs:
+    concept: '`delegate.task` input (an untyped object) and the `accepted` output'
+    refs:
+    - schemas/capability_ontology.yaml `delegate.input_schema.task` (lines 1454-1456) and `output_schema.accepted`
+      (lines 1509-1510)
+    - 'spec/STANDARD-v1.1.0.md §5.13 (lines 753-762): on a waiting delegate, a delegation not accepted
+      is R402'
+    - 'spec/STANDARD-v1.1.0.md §5.12 (lines 659-672): literal `invoke` inputs are checked against the
+      target (S303/S304, R402 at run time); no equivalent rule for `delegate`'
+    - 'core/src/exec/machine.rs lines 1437-1444: the `accepted` check applies only when the step has `wait`
+      and the workflow declares `wait@1`'
+    - 'schemas/workflow_catalog.yaml workflow `multi_agent_orchestration` (lines 1686-1688): a plain delegate
+      tests `accepted` in a failure mode'
+    quote: 'description: Task to delegate'
+  sa:
+    concept: Persistent invocation arguments validated against the receiving agent's side A `requiredSchema`
+    refs:
+    - content/0.2.0/specification/subagents.md §5 (line 165), §5.1 Persistent Invocation Arguments (lines
+      167-175), §5.2 Scoped Variable Bootstrap (lines 177-182)
+    - content/0.2.0/infrastructure/runtime.md §7.4 Initial Payload Mapping (line 174), §7.5 Scoped Variable
+      Bootstrap (lines 181-187)
+    - content/0.2.0/specification/threads.md §6.1 Thread Arguments (lines 352-370)
+    - 'content/0.2.0/specification/agents.md §1.2 SideConfig (lines 21-57): any side may be human-, prompt-
+      or handler-backed'
+    - '@standardagents/spec 0.45.10 index.d.ts lines 224-230 (`ToolResult.error_code`)'
+    quote: The invocation arguments a subagent accepts are dictated solely by the *receiving* agent, through
+      the `requiredSchema` of its side A prompt.
+  explanation: 'SA defines a per-child task contract; ACS does not. The receiving agent''s side A `requiredSchema`
+    governs: runtimes MUST validate creation arguments against it and persist them for the life of the
+    child thread, and MUST reject creation with a structured `subagent_arguments_required` error when
+    required arguments are missing (subagents.md §5.1). Levels differ: runtime.md §7.4 says ''should be
+    validated'' (lower case), and exposing `arguments` at all is a SHOULD. No schema source is named for
+    a child whose side A is handler-backed or human-backed. ACS `delegate.task` is `type: object` with
+    no per-target schema, and the validator has no check like the one for literal `invoke` inputs. `accepted`
+    other than `true` fails a step automatically only on a waiting delegate; on a plain delegate `accepted:
+    false` is an ordinary output.'
+  combined: 'Where the child''s side A is prompt-backed, its `requiredSchema` is the task contract. A
+    creation rejected with `subagent_arguments_required` is a refused delegation: a waiting delegate''s
+    host returns `accepted: false` and the executor raises R402; a plain delegate''s host answers `Error`
+    with code R402, or the workflow tests `accepted` in a gate or failure mode. `subagent_env_required`
+    (SHOULD-level) is a deferred creation, not a refusal: the bootstrap route stores the provided values
+    and boots the deferred child from the original creation payload. Complete the bootstrap, or fail the
+    step and ensure the request cannot complete later; never retry while it is open, since a retry delegates
+    again and could leave two children. Detect both by `ToolResult.error_code`, else `status === ''error''`:
+    the field is in the published types but, in the 0.2.0 text, only in a non-normative example (threads/runtime-streams.md).'
+- id: coord-03
+  relation: partial
+  acs:
+    concept: 'Waiting `delegate` (`wait@1` on a delegate step): delegate, then wait for that delegation''s
+      result under a mandatory `timeout`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.13 Waiting for Events (lines 719-736 and 753-775)
+    - 'spec/STANDARD-v1.1.0.md §5.13, W608 rule (lines 777-790); §9 code table (line 1338: W608 `WAIT_SPANS_CHECKPOINT`,
+      a warning)'
+    - schemas/capability_ontology.yaml `delegate.output_schema.result` (lines 1533-1536)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces' (lines 145-148 and 201) and 'Driving
+      a run yourself' (lines 258-289); guide to the reference executor, non-normative
+    quote: then waits for that delegate's result. The delegation MUST return a string
+  sa:
+    concept: '`blocking: true` on a relationship; child result via a `sessionStop` binding or `state.stopSession({
+      result })`'
+    refs:
+    - content/0.2.0/specification/subagents.md §3.3 Blocking and Create-or-Continue (lines 106-112), §6.2
+      (lines 195-205)
+    - content/0.2.0/specification/agents.md §3 SessionToolBinding (lines 97-113), §7 Human-in-the-Loop
+      Composition (line 171)
+    - 'content/0.2.0/specification/threads.md §9.3 Parent Messaging (lines 526-542), §12 TypeScript Reference
+      (lines 661-665: `stopSession` with `result?: string`)'
+    - content/0.2.0/infrastructure/runtime.md §8.3 Status Updates (line 217), §11 Concurrency (line 239)
+    - content/0.2.0/specification/handlers.md §4 Delivery Semantics (lines 62-65), §9 Worked Example (line
+      137)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (lines 105-114)
+    - content/0.2.0/getting-started/examples.md §6 Composition (lines 737-990; non-normative example)
+    quote: '`blocking: true` makes `subagent_create` await the child session''s close and return its result
+      payload.'
+  explanation: 'Same shape (start a delegate, suspend until its own result arrives), five differences.
+    (1) An ACS wait MUST declare a `timeout` (S304) and a lapse is R401; SA states no bound for a blocking
+    wait, and by inference from ''await the child session''s close'' a child parked in `awaiting_human`
+    keeps the caller waiting. (2) ACS correlates by `task_id`; an SA blocking result is the call''s return
+    value. (3) SA returns text plus copied attachments (coord-23); ACS expects an event object. (4) In
+    the reference executor a completed wait invalidates earlier checkpoints, and W608 warns of a wait
+    between a checkpoint and a step that needs one; SA has no checkpoint concept. (5) Run status `idle`
+    is not session completion: it also covers `awaiting_human`, `hook_blocked`, `aborted`, `max_total_steps`,
+    `max_side_steps` and `max_session_turns`, and reason codes are SHOULD-level. Searched (pages listed
+    in the Standard Agent Specification findings): timeout, deadline (hook timeouts and code execution
+    only).'
+  combined: 'Recommended: a waiting delegate (`wait`, `timeout`) over a non-blocking relationship on a
+    handler-backed owning side, driven as in coord-26; decide completion from an obtained result (coord-23),
+    not from `idle`. If a blocking relationship is used: (a) still declare `wait` and `timeout`, because
+    a plain delegate backed by a blocking child looks instantaneous to the executor, earlier checkpoints
+    stay valid and W608''s protection is bypassed; (b) a late answer is still R401, but the host is inside
+    the call and cannot terminate or escalate at the deadline; (c) not from a handler, which would hold
+    its thread''s one-at-a-time delivery slot for the whole child session, as would polling `status()`
+    inside one tool call or handler invocation. After the child returns, take a fresh checkpoint before
+    any `mutate` or `send`.'
+  see_also:
+  - tools-contracts#eff-01
+  - published-api-extension-points#thread-05
+  - checkpoint-rollback-state#state-08
+  - approval-human#approval-09
+  - approval-human#wait-02
+  - workflow-execution#wf-10
+  - workflow-execution#wf-17
+  - models-context-memory-security#reliability-01
+- id: coord-04
+  relation: partial
+  acs:
+    concept: Liveness of a waited-for delegate (`liveness`, R406) and replacement of a hung delegation
+      (`replaces`)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.13 (liveness row, line 713; R406, lines 726-729; replacement, lines 762-774)
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (`AwaitEvent` row, line 90; non-normative)
+    quote: names the delegation it replaces (`replaces`, its `task_id`) so the host
+  sa:
+    concept: Thread run status (`status()`), registry status text (`setStatus`, `sessionStatus`), `stopSession()`,
+      `execution.stop()` and `terminate()`
+    refs:
+    - content/0.2.0/specification/threads/execution-state.md §3 Controlling Execution (lines 57-70), §4
+      Run Status (lines 72-122)
+    - content/0.2.0/specification/subagents.md §6.3 (lines 207-209), §8 Queue and Termination (lines 239-244)
+    - content/0.2.0/specification/threads.md §1.2.2 (line 98, `stopSession`), §8 Lifecycle (lines 467-478),
+      §9.3 (line 540)
+    - content/0.2.0/specification/threads/client-api.md §3.2 item 6 (line 55), §15 Stopping Execution
+      (lines 397-407)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1925-1976 (`SubagentRegistryEntry`), line 2913 (`getChildThread`),
+      lines 3381-3392 (`status()` comment)'
+    quote: A lost execution settles to `failed` with reason `execution_lost`
+  explanation: 'SA offers the raw material for ACS liveness, not the feature. Probe mode has a normative
+    basis: runtimes MUST NOT leave a thread `running` once its executor is gone, so a child''s `status()`
+    distinguishes a lost run from a slow one. Reason codes are SHOULD-level in general, though `execution_lost`
+    is named in that MUST NOT bullet, and one such reading is one failed probe, not R406: ''a later recovery
+    run sets `running` again''. Push mode is weaker: `sessionStatus` and `setStatus()` update ''the parent''s
+    registry status text'' (a ''free-form label'' in the published types), the registry entry carries
+    only `createdAt`, and the only timestamped child-to-parent signal is a message (`created_at`). For
+    replacement, ''`terminate()` is the *only* soft-destruction path''. Whether a parent may call `stopSession()`,
+    `execution.stop()` or `terminate()` on a child''s `ThreadState` is not stated (an open question);
+    for `terminate()` it is inferred from the return type of `getChildThread()`.'
+  combined: 'Probe: the host answers ACS liveness probes with `(await state.getChildThread(ref))?.status()`.
+    `running` and `idle` (including reason `awaiting_human`) are live; consecutive `failed` readings with
+    reason `execution_lost` count against `failure_threshold`, and only then is the answer `LivenessLost`
+    (R406); `failed` with any other reason is runtime-defined and is reported as a failed delegation (R402).
+    Push: a heartbeat is a `state.notifyParent(...)` message under `parentCommunication: ''explicit''`
+    to a handler-backed owning side; `setStatus` alone cannot carry one. `replaces` (by the inference
+    above): `(await state.getChildThread(oldRef))?.terminate()`, then create a new instance. Termination
+    is permanent, though the thread stays readable. Whether a terminated instance still counts toward
+    `maxInstances` is not stated, so do not set `maxInstances: 1` on relationships whose delegations may
+    be replaced.'
+  see_also:
+  - workflow-execution#wf-10
+  - workflow-execution#wf-17
+- id: coord-05
+  relation: partial
+  acs:
+    concept: '`delegate.fresh_context` and its attestation in `effective.fresh_context`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 (lines 917-923)
+    - spec/STANDARD-v1.1.0.md §5.16, `require_fresh_context` row (line 978) and counting rule (lines 987-993)
+    - schemas/capability_ontology.yaml `delegate.input_schema.fresh_context` (lines 1463-1466), `output_schema.effective`
+      (lines 1517-1532)
+    quote: '`delegate` accepts `fresh_context` (start the delegate without the'
+  sa:
+    concept: Thread isolation of a child, versus persistence, create-or-continue, and hooks that receive
+      both thread states
+    refs:
+    - content/0.2.0/specification/subagents.md intro (line 3), §3.3 (lines 108-110), §4.1 Persistence
+      Is Universal (lines 116-124), §6.1 Parent → Child (lines 186-193)
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store', §14.1 Runtime Semantics item
+      8 (line 357; the second of two sections numbered 14)
+    - 'content/0.2.0/specification/hooks.md §1.1 (line 24), §1.3 Hook Scoping (lines 95-96), §7 TypeScript
+      Reference (lines 525-529: `after_subagent_created` receives `state` and `childState`)'
+    - content/0.2.0/specification/threads.md §2.3 (line 238, `setEnv` propagation); content/0.2.0/specification/tools.md
+      §3 (line 63)
+    - content/0.2.0/distribution/packaging.md 'PackedMeta' (lines 189-215)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 6035-6044 (`after_subagent_created` comment)'
+    quote: the thread remains addressable, and a later message starts a **new session with history intact**
+  explanation: 'A new SA child starts without the parent''s conversation by structure: it runs in its
+    own isolated thread, and nothing in 0.2.0 has the runtime copy the parent''s history into it. What
+    crosses is explicit: creation arguments, the initial message and attachments, `scopedEnv`, and environment
+    values propagated by `setEnv`. But code can carry context across: `after_subagent_created` receives
+    both thread states (the published types suggest it for copying or linking metadata), and a child''s
+    `parentHooks` run with the parent''s `ThreadState`. And instances persist: with `blocking: true` and
+    `maxInstances: 1`, `subagent_create` MUST behave as create-or-continue, resuming an instance whose
+    history holds earlier rounds, which is not fresh in the ACS sense; the call''s result is not specified
+    to say which happened. SA has no flag that requests or reports a fresh context. Searched (subagents.md,
+    threads.md, runtime.md §7 to §8): inherit, history, copied, context.'
+  combined: 'Attest structurally: `effective.fresh_context: true` only when (1) the relationship is not
+    `blocking: true` with `maxInstances: 1` (the only continue rule in 0.2.0), so a successful create
+    cannot be a continue; (2) the host created the instance for this call and has not messaged it before;
+    (3) creation arguments, initial message and attachments carry only the task; (4) neither the parent''s
+    own `after_subagent_created` hooks nor the child''s disclosed `parentHooks` (`__meta.parentHooks`)
+    copy parent history into the child. Otherwise `false`. Do not attest by comparing `state.children`
+    before and after the call: same-invocation visibility is not stated. For reviewers that must be fresh,
+    never use create-or-continue or reuse an instance through `subagent_message`.'
+  see_also:
+  - published-api-extension-points#thread-06
+  - safety-enforcement#scope-01
+  - checkpoint-rollback-state#state-12
+  - approval-human#approval-06
+  - workflow-execution#wf-16
+  - workflow-execution#wf-20
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#secrets-03
+- id: coord-06
+  relation: acs_only
+  acs:
+    concept: '`delegate.read_only` and `effective.read_only` (the delegate may read but must not change
+      anything)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 (lines 917-922)
+    - spec/STANDARD-v1.1.0.md §5.16, `require_read_only` row (line 979)
+    - 'spec/STANDARD-v1.1.0.md §5.13 (lines 760-761): a waiting delegate''s output is the delegation''s
+      output with the event as `result`'
+    - docs/guides/ORCHESTRATION_EXTENSIONS.md 'Delegation hints (`delegation@1`)' (lines 438-439)
+    quote: standard does not say how a host enforces `read_only`, only that
+  sa:
+    concept: 'Not found: no read-only mode for a child thread and no declaration of a child''s side effects'
+    refs:
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146)
+    - content/0.2.0/distribution/packaging.md 'Visibility Rules' (lines 221-230)
+    - 'content/0.2.0/specification/threads.md §1.2.2 Resource Loading (lines 100-113): `loadModel`, `loadPrompt`,
+      `loadAgent`, no tool loader'
+    - content/0.2.0/specification/prompts.md §3.3 Sub-Prompt Tool Configuration (line 127); content/0.2.0/specification/models.md
+      §1.2 (line 34, `providerTools`)
+    - '@standardagents/spec 0.45.10 index.d.ts line 2888 (`loadAgent<T = unknown>`)'
+    quote: '- Annotations **MUST NOT** change argument validation, execution, the tool''s results, or
+      what is sent to the model.'
+  explanation: 'Nothing in SA lets a parent ask for, or learn of, a child that cannot change state. Tool
+    `annotations` are the only place an author could say that a tool only reads; they are non-normative,
+    exist only on function tools, and are out of a parent''s reach: `ThreadState` has no tool loader,
+    and a packed child''s internal tools and prompts ''in a package are hidden from outside''. ACS does
+    not need SA to enforce read-only (''How a host keeps a delegate read-only is up to it''), but the
+    host''s attestation needs a truthful basis, and 0.2.0 provides none. Searched (content/0.2.0, src/data,
+    README.md): read_only, read-only, readOnly, side effect, destructive, mutat, sandbox, permission (unrelated
+    hits only: ''(readonly)'' property notes, the TypeScript `readonly` keyword, ''read-only argument
+    object'', side effects as the purpose of hooks and effects, ''non-destructively'' for the message
+    APIs, ''requires mutation authorization'' for skills, the code-execution sandbox, user `permissions`).'
+  combined: 'Default to `effective.read_only: false`. Attest `true` only for a child whose whole transitive
+    definition the host owns and has classified: both sides'' prompts, sub-prompt tools, function tools,
+    model `providerTools`, hooks, a handler, effects, thread endpoints and the child''s own subagent relationships.
+    This is the host''s judgement, not an SA guarantee, and `loadAgent` returns an untyped value, so the
+    shape inspected is the host''s assumption. Checking tool names in the child''s history afterwards
+    is not enough: `effective` belongs to the delegation''s output, which precedes the result; code in
+    hooks, handlers and effects leaves no tool-call message; grandchildren live in other threads; messages
+    can be deleted. For verdicts needing a normative basis, prefer `decide()` (coord-10). For a packed
+    third-party child attest `false`; a quorum with `require_read_only` then ignores that verdict, the
+    fail-closed outcome ACS intends.'
+  see_also:
+  - published-api-extension-points#thread-06
+  - safety-enforcement#gate-04
+  - models-context-memory-security#secrets-03
+- id: coord-07
+  relation: partial
+  acs:
+    concept: '`delegate.model_family` / `role` and their attestation (`effective.model_family`, `effective.role`)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 (lines 917-923)
+    - spec/STANDARD-v1.1.0.md §5.16, `require_model_families` row (line 981)
+    - schemas/capability_ontology.yaml `delegate.input_schema.model_family`, `role` (lines 1467-1472)
+    quote: 'Only an attested family covers one: `effective.model_family`, or the attested identity''s'
+  sa:
+    concept: The child's model is fixed by its prompts' `model` references; model `fallbacks`; no model
+      recorded on messages
+    refs:
+    - content/0.2.0/specification/prompts.md §1.1 Required Properties (line 18), §3.3 (line 127)
+    - content/0.2.0/specification/models.md §1.1 (line 19), §1.2 (lines 27-28), §3.1 Fallback Behavior
+      (lines 42-48)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 9-38)
+    - 'content/0.2.0/specification/providers.md §5 Response Format (lines 344-367: `metadata.model` optional),
+      §9.3 ResponseSummary Structure (lines 533-540), §9.5 (line 566)'
+    - content/0.2.0/specification/threads/decisions.md §4 Result Types (line 148)
+    - src/data/home.md (line 13)
+    quote: '| `fallbacks` | `string[]` | Names of fallback models to try if this model fails. |'
+  explanation: 'ACS counts a requested model family toward a quorum only when the host attests it. In
+    SA the parent cannot choose: each prompt names its model, so the family follows from which child agent
+    is instantiated. Attestation is harder (see the Standard Agent Specification findings): a model may
+    list `fallbacks` (SHOULD be tried in order), the message record has a `prompt` field but none for
+    the model, `ProviderResponse.metadata.model` is optional, and no `ThreadState` API exposes the log
+    records of providers.md §9; only `decide()` reports the resolved model. Nor is a child one model:
+    both sides may be prompt-backed with different models, sub-prompt tools have their own `model`, and
+    `includedProviders` routes through multi-provider gateways. SA has no model-family concept, and ACS
+    `role` has no functional counterpart (a side `label` and a relationship name are descriptive only).
+    Searched: model (messages.md: reasoning and model-context text only); family (models.md, providers.md:
+    one prose use, ''model-family-specific'').'
+  combined: 'Express model diversity structurally: one reviewer agent per model family (separate agent
+    definitions whose prompts reference different models), with ACS `model_family` selecting the relationship;
+    SA''s own principle is ''3. Agents should be coupled to a model.'' Attest `effective.model_family`
+    only when every model definition reachable from the side that produces the result (its prompt, its
+    sub-prompts, and all their `fallbacks`) maps to one family in a table the host maintains; otherwise
+    omit it, and `require_model_families` fails closed. The family label is the host''s mapping, since
+    the `model` string is whatever is ''sent to the provider API'' and may be an alias. Attest `effective.role`
+    only when the host''s own relationship table assigns that role to the relationship; `effective` reports
+    what the host used, not what was requested.'
+  see_also:
+  - published-api-extension-points#thread-06
+  - workflow-execution#wf-20
+  - models-context-memory-security#models-02
+- id: coord-08
+  relation: partial
+  acs:
+    concept: Principals, `accept_from`, the delegate's attested identity (`effective.identity`) and trust
+      class `own_subagent_report`
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.15 (lines 923-940)
+    - 'spec/STANDARD-v1.1.0.md §5.17 Sender Identity: identity fields (lines 1021-1030), ''Delegation''
+      paragraph (lines 1063-1075)'
+    - 'spec/RFC-0004-agent-identity.md ''Amendment: the delegate''s identity'' (lines 205-235)'
+    - schemas/authority_trust_model.yaml `trust_classes.weights` (lines 32-40)
+    - schemas/agent_identity_schema.yaml `authenticated_by` pattern (line 37)
+    quote: run, never a sender the item's content claims.
+  sa:
+    concept: Owning-side perspective routing of child traffic, the message record's `subagent_id` fields,
+      and the optional provenance metadata conventions
+    refs:
+    - content/0.2.0/specification/subagents.md §2.1 The Owning Side (line 53), §4.2 Registry (line 147),
+      §6.2 (lines 195-205), §6.5 Provenance Metadata (lines 221-228)
+    - content/0.2.0/specification/threads/messages.md §1 Message Structure (lines 30-38), §1.1 Provenance
+      Metadata Conventions (lines 40-49)
+    - content/0.2.0/specification/threads/client-api.md §1 Scope item 3 (line 11), §12 Sending a Message
+      (lines 334-370)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2006-2097 (`Message`), lines 2101-2130 (`InjectMessageInput`
+      and `QueueMessageInput`), lines 2979-2980 (`notifyParent` comment)'
+    quote: 'These are conventions, not requirements: consumers **MUST** tolerate their absence, and runtimes
+      **MUST NOT** rely on them for routing correctness.'
+  explanation: 'ACS requires the host to report the authenticated party that delivered each received item,
+    and weighs an owner''s message (0.95) above the orchestrator''s own sub-agent report (0.7). In SA
+    a non-blocking child''s result reaches the parent as a queued silent message on the owning side''s
+    perspective: for a side A relationship, `role: ''user''`, the role of a person''s messages. Distinguishing
+    signals: the text prefix, the `silent` flag, the optional `metadata.subagent_id` convention (SHOULD),
+    and the record''s top-level `subagent_id` with projected `subagent_relationship` and `subagent_name`,
+    which no sentence says when the runtime sets. In the published types code can set `metadata` and `silent`
+    but not `subagent_id`; the Client API send body (`role`, `content`, `attachments`) accepts all three
+    roles and a runtime MAY accept more fields, so imitation of a child report is not excluded (see the
+    Standard Agent Specification findings). The record has no sender, author or principal field. Searched
+    (messages.md, published `Message` type): sender, author, principal.'
+  combined: 'For results ACS filters or counts, do not rely on message text or optional metadata: use
+    the return value of a blocking `subagent_create`, or read the result from the child''s own thread
+    through `state.getChildThread(reference)`; treat the top-level `subagent_id` as an observed signal
+    0.2.0 does not guarantee. The principal is this integration''s convention (§5.15 leaves the mapping
+    to the host): the child instance''s registry `reference`, namespaced (approval-human#identity-06,
+    evidence-audit-observability#prov-03), so that a waiting delegate keeps only the result of the instance
+    that took the delegation; two aliases (`as`) of one agent definition are then two principals, so a
+    host that attests identities for `require_distinct_identities` also refuses reviewers that share a
+    `SubagentRegistryEntry.name`. Report `kind: agent`, `trust_class: own_subagent_report` and an integration-owned
+    `authenticated_by` value fitting the schema pattern, for example `x-acs.sa-child-thread`, not one
+    in another project''s namespace. This attestation (§5.17) rests on SA''s MUSTs that lifecycle invocations
+    for undeclared relationships are rejected and that parent/child lookup goes through `ThreadState`.'
+  see_also:
+  - tools-contracts#io-04
+  - published-api-extension-points#hitl-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#user-01
+  - safety-enforcement#appr-01
+  - approval-human#approval-07
+  - approval-human#approval-13
+  - approval-human#approval-24
+  - approval-human#identity-01
+  - approval-human#identity-02
+  - approval-human#identity-06
+  - evidence-audit-observability#inbound-01
+  - evidence-audit-observability#prov-03
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - models-context-memory-security#identity-01
+  - models-context-memory-security#identity-02
+  - models-context-memory-security#perceive-03
+- id: coord-09
+  relation: acs_only
+  acs:
+    concept: 'Review quorum (`quorum@1`): a blocking `constrain` step that counts typed verdicts from
+      independent reviewer delegations'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.16 Quorum (lines 942-1005)
+    - 'spec/STANDARD-v1.1.0.md §5.5 (lines 357-360): the executor runs a quorum itself'
+    - schemas/review_verdict_schema.yaml (`reviewer_id`, `value`, `pinned`, `scope`)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces', bullet 'Quorums' (lines 237-243;
+      non-normative)
+    - 'core/src/exec/quorum.rs (line 2); core/src/exec/machine.rs (lines 1641-1644: a waiting delegate''s
+      `result` is the delivered event)'
+    quote: '| `reviewers` | Required: `store_as` names of `delegate` steps that run before this one (else
+      V107), delegating to distinct agents when the agents are literal (else F504) |'
+  sa:
+    concept: 'Not found: no quorum, voting or verdict construct; the parts (several children, results,
+      registry) exist'
+    refs:
+    - content/0.2.0/specification/subagents.md (whole file)
+    - content/0.2.0/specification/handlers.md §4 Delivery Semantics (line 67)
+    - content/0.2.0/specification/agents.md §3 SessionToolBinding (line 110), §9.2 Worker / Reviewer (lines
+      221-256)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 152)
+    - content/0.2.0/specification/threads/messages.md §1 (line 17, `tool_calls`)
+    quote: Cross-thread fan-in ordering (two children queueing toward the same parent handler) is implementation-defined;
+      only per-thread persistence order is guaranteed.
+  explanation: 'SA has no construct that counts independent results, pins them to a reviewed artefact
+    or checks reviewer independence. ACS''s rules are specific: one verdict per reviewer, pinned to `pinned_to`,
+    in the vocabulary, with `min_pass`, vetoing `blocking_values`, optional `min_full`, and independence
+    conditions that count only when the host attests them. The ACS executor makes the count, not the host:
+    ''The executor evaluates it itself; there is no host call.'' For a reviewer that is a waiting delegate,
+    the executor takes `result` from the event the host delivers. SA supplies usable parts: several child
+    threads with isolated history, a closed set of declared relationships, and results returned to the
+    parent. Searched (content/0.2.0, src/data, README.md): quorum, consensus, vote, voting, verdict, attest,
+    majority, tally (no matches apart from the letters ''tally'' inside ''incrementally'').'
+  combined: 'One relationship per reviewer, each targeting a distinct agent definition, on a side deterministic
+    code controls (coord-20). Each reviewer gets a stop tool whose `args` schema is the verdict (`value`,
+    `pinned`, `scope`, notes), which runtimes MUST validate; obtain the verdict as in coord-23 (`execute`
+    calls `state.stopSession({ result: JSON.stringify(verdict) })`, or the parent''s host reads the call''s
+    arguments from the child''s history), not through a `messageProperty` binding, which carries one unvalidated
+    model-written string. The host sets `reviewer_id` to the step''s `agent` (the relationship name) and
+    wraps the verdict in the event it delivers to that reviewer''s waiting delegate, where the workflow''s
+    `verdicts` references point. The count runs in the ACS executor, outside the SA runtime (coord-27)
+    until a TypeScript build exists (ACS gap). No model may tally; join logic must not depend on arrival
+    order. Per-reviewer attestation: coord-05 to coord-08.'
+  see_also:
+  - tools-contracts#cls-11
+  - tools-contracts#io-04
+  - approval-human#approval-20
+- id: coord-10
+  relation: fits
+  acs:
+    concept: 'Quorum independence conditions: `require_fresh_context`, `require_read_only`, `require_model_families`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.16, rows `require_fresh_context`, `require_read_only`, `require_model_families`
+      (lines 978-981) and the counting rule (lines 987-1005)
+    - docs/guides/RUNNING_WORKFLOWS.md introduction (line 10; guide to the reference executor, non-normative)
+    quote: 'Every reviewer binds `fresh_context: true` (F504 otherwise)'
+  sa:
+    concept: '`ThreadState.decide()`: typed questions evaluated against caller-supplied context only'
+    refs:
+    - content/0.2.0/specification/threads/decisions.md §2 Request Types (lines 32-61), §3 Question Types
+      (lines 66-101), §4 Result Types (lines 103-151), §6 Conversation Semantics (lines 200-210)
+    - content/0.2.0/infrastructure/runtime.md §1.1 Decision Inference (lines 19-25)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 1321-1323 (`DecideOptions`), line 3401 (`ThreadState.decide`)'
+    quote: '- read conversation messages to assemble context;'
+  explanation: '`decide()` is not delegation, and SA does not present it as a review mechanism; that reading
+    is this mapping''s. It is the one SA surface with a normative basis for the properties ACS asks a
+    host to attest and that SA subagents lack: ''Invoking `decide()` **MUST NOT** implicitly:'' read conversation
+    messages, change them, ''execute tools;'' or start a conversational turn, and its result reports the
+    model that performed the evaluation, with the resolved version when the request uses an alias. A `choice`
+    question maps directly onto a quorum vocabulary. Limits: it evaluates only the context passed in and
+    runs no tools, so it suits verdicts over supplied material, not reviews that must explore a repository.
+    That it is a single model call is an inference, not a statement in the text.'
+  combined: 'An option, not the default: whether a `decide()` call satisfies §5.16''s ''delegating to
+    distinct agents'' is an open ACS question. The reference executor leaves the performance of a capability
+    call to the host (''The executor does no I/O.'', a guide statement), so a host may answer a reviewer''s
+    `delegate` call with `state.decide({ provider, model, context: <the pinned change>, questions: { verdict:
+    { type: ''choice'', instructions, options: { approve: ..., request_changes: ..., abstain: ... } }
+    } })`. On the strength of decisions.md §6 it can then attest `effective.read_only: true` and, provided
+    it passes nothing but the pinned change as `context`, `effective.fresh_context: true`. `DecisionResult.model`
+    is a provider model identifier, so `effective.model_family` is still the host''s mapping, and a decision
+    provider for each required family is a deployment matter. The host, not the reviewer, writes `pinned`
+    and `reviewer_id` into the verdict.'
+  see_also:
+  - published-api-extension-points#thread-06
+  - safety-enforcement#gate-04
+  - models-context-memory-security#secrets-03
+- id: coord-11
+  relation: sa_only
+  acs:
+    concept: 'Not found as a primitive: a two-party review loop inside one execution context (nearest:
+      a `critique`/`verify` step with a bounded recovery loop)'
+    refs:
+    - 'spec/STANDARD-v1.1.0.md §5.16 (lines 965-971): quorum reviewers must be `delegate` steps to distinct
+      agents'
+    - 'spec/STANDARD-v1.1.0.md §5.12 Recovery and Escalation (lines 638-693): `goto_step`, `max_loops`'
+    quote: '`quorum` is allowed only on `constrain` with literal'
+  sa:
+    concept: 'Dual-agent composition: two prompt-backed sides of one agent (worker and reviewer) sharing
+      one thread'
+    refs:
+    - content/0.2.0/specification/agents.md §1.3 Derivations (line 66), §9.2 Worker / Reviewer (lines
+      221-256; an example)
+    - content/0.2.0/getting-started/examples.md §7 Dual AI agents (lines 992-1239; non-normative; the
+      sentences quoted below are at lines 1233 and 1237)
+    - content/0.2.0/infrastructure/runtime.md §4 Context Assembly (lines 77-80)
+    - content/0.2.0/specification/threads.md §1 Thread Definition (line 18)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (line 113)
+    quote: Two prompt-backed sides can ping-pong indefinitely, and a handler that replies to every inbound
+      message can livelock against a prompt side just as hard
+  explanation: 'SA lets two models converse as the two sides of one agent, with `maxSessionTurns` as an
+    optional cap. The example page adds, non-normatively, that with a `sessionStop` binding on side B
+    only the reviewer can end the session, and that ''The two sides share the thread''s file system.''
+    (also inferable from a thread having ''isolated storage for messages and files''). ACS has no two-sided
+    agent; its ''reviewer'' is a quorum''s reviewer delegation. The pattern is not an ACS quorum: the
+    reviewer sees the worker''s turns as `user` messages in the same thread (though ''opposite-side tool
+    calls are not directly visible'') and shares its files, so it is neither a separate delegation nor
+    independent, and there is one reviewer. Searched (spec/STANDARD-v1.1.0.md): dual, two-sided, handoff,
+    side (other than ''side effects'' and ''outside'').'
+  combined: 'Treat a prompt-by-prompt child as a single ACS delegate with one principal: it contributes
+    at most one verdict to a quorum, and its internal review does not satisfy `require_fresh_context`.
+    `maxSessionTurns` resembles ACS `max_loops` (a bound on rework rounds) by analogy only: reaching it
+    settles the run as `idle` with reason `max_session_turns`, not as a failure, so the host must treat
+    a child that stopped on the cap without a result as failed. Where ACS independence is required, use
+    separate child threads (coord-09) rather than two sides of one thread.'
+  see_also:
+  - workflow-execution#wf-10
+  - workflow-execution#wf-17
+  - models-context-memory-security#reliability-01
+- id: coord-12
+  relation: partial
+  acs:
+    concept: '`parallel_group` and `join` on workflow steps'
+    refs:
+    - 'spec/STANDARD-v1.1.0.md §4.3 (lines 159-161), §5.2 step fields (lines 256-257), §10.3 Conformance
+      Testing (lines 1427-1431: runtime fixtures are informative)'
+    - spec/EDGE_TYPES.md 'Runs before' (lines 15-18)
+    - 'docs/GLOSSARY.md ''Parallel Group'' (lines 300-303): `all_complete`, `any_complete`'
+    - schemas/workflow_catalog.schema.json (line 334)
+    - 'core/src/exec/mod.rs (line 736: run state invariant, one pending action)'
+    quote: '| `parallel_group` | string | Group ID; steps of one group run concurrently |'
+  sa:
+    concept: 'Concurrency rules: sequential tool execution within a thread, concurrency across threads,
+      non-blocking children'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §5.1 Ordering (line 88), §11 Concurrency (line 239)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 153)
+    - content/0.2.0/specification/prompts.md §1.2 (line 28, `parallelToolCalls`)
+    - content/0.2.0/specification/handlers.md §4 (lines 62 and 67)
+    - content/0.2.0/specification/subagents.md §4.2 (line 140, `spawnGroupId`)
+    - content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (lines 105-114)
+    quote: A single thread **MUST NOT** execute multiple concurrent flows. Cross-thread concurrency is
+      allowed.
+  explanation: 'ACS uses `parallel_group` mainly as a static ordering fact (group members do not ''run
+    before'' each other). At run time it means little (see the Agent Capability Standard findings): `join`
+    is a string whose values appear only in the glossary and a schema example, conformance levels cover
+    validation only, and the reference executor holds one pending action and reads neither field, so members
+    run in list order. SA is explicit: within a thread ''Tool calls **MUST** execute sequentially in the
+    returned order.'', even where a prompt sets `parallelToolCalls`; concurrency exists only across threads.
+    ACS puts no MUST on executors, so there is no conflict, but running members concurrently inside one
+    SA thread would contradict SA''s MUST. SA has no join primitive. Searched: parallel, join (core/src/exec:
+    Rust string joins only); join, wait for all, fan-out, fan-in (SA: only the handlers.md §4 fan-in sentence
+    and unrelated example code).'
+  combined: 'Local group members run in list order inside the thread, a valid schedule for every ACS static
+    rule. The reference executor issues one action at a time, so it cannot drive a group concurrently
+    (workflow-execution#wf-18); a host that schedules a group itself, without that executor, makes each
+    member a non-blocking child and implements the join in code: `all_complete` when a result has been
+    obtained for every member (coord-23), with `failed` runs and `idle` runs that produced no result (turn
+    cap, abort, hook block) counted as member failures. Drive the join from completion messages plus a
+    deadline effect (coord-26) rather than a polling loop, and do not let it depend on arrival order.
+    Do not use `blocking: true` for group members: sequential tool execution would serialise them. `spawnGroupId`
+    is listed on the registry entry without stated semantics, so do not rely on it to identify a group.'
+  see_also:
+  - workflow-execution#wf-10
+  - workflow-execution#wf-17
+  - workflow-execution#wf-18
+  - models-context-memory-security#reliability-01
+- id: coord-13
+  relation: partial
+  acs:
+    concept: '`conflicts_with` edges (mutate/rollback, persist/rollback): the pair may not share a `parallel_group`
+      (F504)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §4.3 enforcement table (line 170)
+    - schemas/capability_ontology.yaml edges (lines 2021-2036)
+    - spec/EDGE_TYPES.md §5 `conflicts_with` (lines 138-158)
+    quote: The two capabilities never share a `parallel_group`; in sequence they are allowed
+  sa:
+    concept: Per-thread serialisation of steps, tool calls and handler turns; isolated per-thread storage
+    refs:
+    - content/0.2.0/infrastructure/runtime.md §1 Overview (lines 9-13), §5.1 (line 88), §11 (line 239),
+      'Durable Key-Value Store' §14.1 item 3 (line 352)
+    - content/0.2.0/specification/handlers.md §4 (line 62)
+    - content/0.2.0/specification/threads.md §1.3 Access Contexts (lines 178-186), §4 Effect Scheduling
+      (lines 276-280)
+    - content/0.2.0/specification/effects.md §1.1 (line 13), §3 (line 90)
+    quote: Tool calls **MUST** execute sequentially in the returned order.
+  explanation: 'Different layers. ACS rejects at validation time workflows that would run conflicting
+    capabilities concurrently; SA guarantees at run time that a thread executes one step at a time, runs
+    tool calls sequentially and never invokes a handler concurrently for the same thread, so conflicting
+    capabilities implemented as tool calls or handler code in one thread cannot overlap. The guarantee
+    is not stated for everything that touches a thread: effects ''Run **independently** of the conversation
+    flow'' and may run after the invoking conversation has completed, and thread endpoints receive a `ThreadState`
+    at rest; whether either counts as a ''flow'' under runtime.md §11 is not stated. Between a parent
+    and its children SA isolates thread storage (messages, files, key-value store) but is silent on external
+    state that sibling children might both change, where an ACS conflict could still materialise.'
+  combined: Keep F504 as a design-time check in the ACS validator. At run time, keep capabilities that
+    conflict over the same state in one thread and implement them as tool calls or handler code, where
+    SA serialises them. Do not implement `rollback`, `mutate` or `persist` as an effect or a thread endpoint
+    that could run beside a turn, and do not split a `mutate` and a `rollback` of the same external resource
+    across sibling non-blocking children.
+  see_also:
+  - tools-contracts#eff-01
+  - published-api-extension-points#consume-01
+  - published-api-extension-points#thread-01
+  - safety-enforcement#ckpt-02
+  - safety-enforcement#edge-02
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-08
+  - checkpoint-rollback-state#state-09
+  - checkpoint-rollback-state#state-16
+  - checkpoint-rollback-state#state-21
+  - approval-human#approval-10
+- id: coord-14
+  relation: acs_only
+  acs:
+    concept: '`synchronize` capability: reach state agreement across a list of agents'
+    refs:
+    - schemas/capability_ontology.yaml node `synchronize` (lines 1539-1608)
+    - 'spec/STANDARD-v1.1.0.md §5.13 (lines 719-720: a waiting synchronize needs a literal list of at
+      least two distinct agents), §5.15 (`accept_from`, lines 923-930), §5.5 (lines 357-360: the executor
+      runs a wait on `synchronize` itself)'
+    - 'core/src/exec/machine.rs (lines 1645-1650: `agreed_state` from one event''s `canonical`, `participants`
+      from the step''s `agents`)'
+    - 'grounded_agency/coordination/synchronization.py (reference SDK only: barrier with merge strategies)'
+    quote: 'description: Achieve state agreement across agents'
+  sa:
+    concept: 'Not found: no state-agreement primitive; key-value state is deliberately not shared between
+      threads'
+    refs:
+    - content/0.2.0/infrastructure/runtime.md 'Durable Key-Value Store', §14.1 Runtime Semantics items
+      3 and 8 (lines 352 and 357)
+    - content/0.2.0/specification/threads.md §2.3 (line 238, `setEnv` propagation), §7.2 Semantics (lines
+      424-433)
+    - content/0.2.0/specification/subagents.md §5 (line 161, `subagent_message`), §6.1 (line 189)
+    - content/0.2.0/specification/handlers.md §6 Capabilities (line 83)
+    quote: 8. Values **MUST NOT** be automatically copied, inherited, or synchronized between threads
+      when subagents are spawned.
+  explanation: 'No SA mechanism collects acknowledgements or yields an agreed state: `setEnv` is one-way
+    (''writes to thread storage and propagates recursively to active descendants''), and `subagent_message`
+    queues a message to one existing instance. The quoted rule concerns key-value values only and does
+    not rule out synchronisation in general. ACS `synchronize` is itself loosely specified (inputs `agents`
+    and `state`; outputs `synchronized`, `agreed_state`, `participants`); the barrier and merge strategies
+    exist only in the reference Python SDK. For a waiting `synchronize` the executor, not the host, produces
+    the output: the reference executor builds `agreed_state` from one delivered event''s `canonical` field
+    and `participants` from the step''s `agents` input. Searched (content/0.2.0): synchron, consensus,
+    agree, barrier (besides ''asynchronous'' and the quoted rule, unrelated hits only, such as a client
+    that ''resynchronizes'', sandbox ''barriers'' and a ''package/runtime agreement'').'
+  combined: 'For a waiting `synchronize`, the host''s job is to deliver one event whose `canonical` holds
+    the agreed state; any fan-out must happen before that event is delivered. For a `synchronize` that
+    does not wait, the host performs the whole capability. Either way the agreement protocol is host code:
+    send the proposed state to each participant with `(await state.getChildThread(ref))?.queueMessage({
+    role: ''user'', content })` (the typed route; the arguments of `subagent_message` beyond `agent` are
+    not specified), collect each answer by reference from the participant''s own thread (coord-22), and
+    compute the agreed state in the host. Use `setEnv` only for configuration every active descendant
+    should see. SA gives no atomicity or agreement guarantee, so the host''s output is the only evidence
+    that agreement was reached.'
+- id: coord-15
+  relation: partial
+  acs:
+    concept: '`invoke` capability: run another workflow as a nested run that shares the caller''s checkpoints;
+      cycles rejected (V105)'
+    refs:
+    - schemas/capability_ontology.yaml node `invoke` (lines 1609-1644) and edge `delegate specializes
+      invoke` (lines 2105-2108)
+    - spec/STANDARD-v1.1.0.md §5.12 (lines 659-672), §5.13 (lines 785-790), §5.11 Handler Steps (lines
+      607-626)
+    - 'docs/guides/RUNNING_WORKFLOWS.md ''What the executor enforces'', bullet ''Invocations'' (lines
+      230-236): nested at most four deep in the reference executor'
+    - 'grounded_agency/coordination/delegation.py (lines 113-119 and 209-211: `max_delegation_depth`,
+      default 10; reference SDK only)'
+    quote: run it invokes shares the caller's checkpoints, so its waits invalidate
+  sa:
+    concept: Prompt tools (nested sub-prompts in the same thread) and `state.invokeTool()` with a tool's
+      `uses` list
+    refs:
+    - content/0.2.0/specification/tools.md §1 Tool Categories (lines 5-13), §2.1 Tool Dependencies (lines
+      36-44), §4 Prompt Tool Configuration (lines 66-79)
+    - content/0.2.0/specification/prompts.md §2.4 Include Resolution (line 89), §3.3 Sub-Prompt Tool Configuration
+      (lines 127-168)
+    - content/0.2.0/specification/threads.md §3.2 Direct Invocation (lines 260-272)
+    - content/0.2.0/specification/threads/execution-state.md §2.1 Prompt Path (lines 34-41)
+    quote: '| Prompt tool | Nested prompt invocation | `definePrompt()`, named in another prompt''s `tools`
+      |'
+  explanation: 'Both are synchronous nested invocations that stay in the caller''s context, as opposed
+    to delegation to a separate one. The ontology''s ''Delegation is specialized invocation to agents''
+    parallels SA''s three tool categories (function tool, prompt tool, agent tool). The targets differ:
+    an ACS `invoke` runs a workflow with declared inputs and statically checked bindings; an SA prompt
+    tool runs a model call whose output is serialised into one text string. ACS rejects invoke cycles
+    at validation time, its reference executor limits nesting to four runs, and its reference SDK caps
+    chained delegations. For SA sub-prompts and subagent graphs no cycle or depth rule was found. Searched:
+    cycle, circular, recursi, depth (circular prompt includes are rejected; ''recursive'' describes immediate
+    spawning and `setEnv` propagation; ''depth'' is a message filter).'
+  combined: 'When an ACS workflow runs inside one SA thread, `invoke` stays internal to the ACS executor
+    and needs no SA surface. In the other direction, classify an SA prompt-tool call by what the sub-prompt
+    does (for example `generate` or `classify`) rather than as `invoke`, unless its target is itself an
+    ACS workflow. A tool''s `uses` list is the nearest SA analogue of ACS''s static invoke graph: ''When
+    a `uses` list is supplied, the runtime **MUST** reject an invocation of a target outside the list.''
+    Only packed tools must declare it, and an ACS-side checker can read it only at build time from the
+    package''s tool definitions, since `ThreadState` has no tool loader.'
+  see_also:
+  - workflow-execution#wf-19
+- id: coord-16
+  relation: fits
+  acs:
+    concept: '`inquire` capability (produce clarifying questions), with the answer arriving through `receive`'
+    refs:
+    - schemas/capability_ontology.yaml node `inquire` (lines 1645-1703) and edge `inquire enables receive`
+      (lines 1849-1852)
+    - spec/STANDARD-v1.1.0.md §5.13 (wait on `receive`, lines 695-736), §5.17 (lines 1032-1061; always-ask
+      row, line 1048)
+    quote: 'rationale: An inquiry''s answer arrives through receive'
+  sa:
+    concept: 'Human-backed side: the session parks awaiting human input; `awaiting_human` registry status
+      for children'
+    refs:
+    - content/0.2.0/specification/agents.md §1.1 The Three Backings (lines 9-19), §7 Human-in-the-Loop
+      Composition (lines 169-191)
+    - content/0.2.0/specification/subagents.md §4.3 Human-in-the-Loop Children (lines 151-153)
+    - content/0.2.0/specification/threads/execution-state.md §4.1 to §4.2 (lines 91-114)
+    - content/0.2.0/specification/handlers.md §6 Capabilities (line 84)
+    - 'content/0.2.0/specification/threads.md §1.2.1 (line 42, `userId`), §1.2.2 ''User identity'' (line
+      159, `user()`); content/0.2.0/specification/users.md (line 3: ''Status: draft proposal'')'
+    - content/0.2.0/specification/threads/client-api.md §3.1 item 6 (line 46), §12 (lines 341-345)
+    quote: The specification deliberately does **not** define who the person is or how their input arrives
+  explanation: 'ACS separates asking from waiting: `inquire` only produces structured questions with an
+    ambiguity analysis and evidence; a later `receive` wait collects the answer, optionally filtered by
+    sender. SA makes waiting a runtime fact: at a human-backed side''s turn the session parks and resumes
+    on that side''s inbound message, and such a child shows `awaiting_human` in the parent''s registry.
+    SA defines no question or answer format and leaves the person''s identity to the runtime: the thread''s
+    user is available (`userId`, `user()`; the Users page is a draft), but the message record has no field
+    for the caller or route that delivered a message, the send route accepts `role: ''user'' | ''assistant''
+    | ''system''` from any caller the thread access policy admits, and a message queued by code looks
+    the same. ACS has no parked session visible to a parent. Searched (spec/STANDARD-v1.1.0.md): park,
+    awaiting, paus (only the failure action `pause_and_checkpoint`).'
+  combined: 'Deterministic code posts the questions: from a handler-backed side A opposite a human-backed
+    side B, `state.injectMessage({ role: ''assistant'', content })`, then save the run and end the turn
+    (coord-26). The session parks; the person''s reply arrives as an inbound message that resumes the
+    run and satisfies the ACS `receive` wait. For a child, use SA''s approval-gate pattern and observe
+    `awaiting_human`. A prompt-backed side cannot be made to emit the `inquire` output verbatim, since
+    its reply is the model''s. Identity: with 0.2.0 the host can attest at most that the sender was a
+    caller admitted by the runtime''s thread access policy, and only if it captures the caller at its
+    own ingress or no definition code queues messages in that role. Otherwise it reports no `sender_identity`;
+    under `always_ask_trust_classes` an item with ''no identity or no `trust_class`'' is then always-ask,
+    the safe outcome.'
+  see_also:
+  - approval-human#inquiry-01
+- id: coord-17
+  relation: sa_only
+  acs:
+    concept: 'Not found: transfer of the same run to another agent (a run carries one actor identity)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.17 'Actor' (lines 1095-1101)
+    - 'spec/STANDARD-v1.1.0.md §5.15 Delegation (lines 904-940): a delegation is a separate task'
+    - 'core/src/exec/mod.rs (lines 516 and 608: the saved run state carries `actor_identity`; lines 684-689:
+      `restore` takes no actor)'
+    quote: '**Actor.** A run may be started with the identity of the agent that runs'
+  sa:
+    concept: 'Handoff: an exposed agent named in a prompt''s `tools` takes over the same thread'
+    refs:
+    - content/0.2.0/specification/agents.md §5 Tool Exposure (lines 126-130), §2.2 (lines 88-90), §6 Required
+      Parent Hooks (line 155)
+    - content/0.2.0/specification/threads.md §1.1 Agent Assignment (lines 20-30)
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 70-100)
+    - content/0.2.0/infrastructure/runtime.md §5.3 Tool Classes (line 99), §7.3.1 Required Parent-Hook
+      Composition (lines 149-153)
+    - content/0.2.0/distribution/packaging.md 'PackedMeta' (lines 213-215)
+    - content/0.2.0/specification/threads/execution-state.md §2.1 Prompt Path (line 39)
+    quote: 'When `exposeAsTool: true`, an agent referenced directly in a prompt''s `tools` array is a
+      **handoff**: the tool call transfers control of the *same thread* to the target agent, preserving
+      history.'
+  explanation: 'ACS delegation always yields a separate task whose result returns to the delegator; nothing
+    changes the party running a workflow mid-run. An SA handoff does exactly that, from a model''s tool
+    call or from code (''Queue a tool call to an agent to trigger handoff programmatically''). By inference,
+    not by a stated rule, the source agent''s grounding hooks then stop: thread hooks resolve from the
+    active prompt, falling back to the thread''s agent, and after a handoff the prompt path is the new
+    agent''s. The text is inconsistent on whether a handoff activates the target''s `parentHooks` (see
+    the Standard Agent Specification findings). No return path was found. Searched: handoff, hand off,
+    hand-off (ACS Standard, RFC-0002 to RFC-0004, ORCHESTRATION_EXTENSIONS.md, ontology: none; under schemas/
+    only clinical patient handoff, domain content); hand back, return path (content/0.2.0); return (agents.md
+    §5, threads.md §1.1).'
+  combined: 'End (or fail) the ACS run before a handoff, and never restore a saved run under the agent
+    that took over: the saved state carries `actor_identity` and `restore` takes no actor, so the target
+    would continue under the source''s identity. A new run starts with the target''s `actor_identity`.
+    Thread state (key-value store, files, message history) survives, so a checkpoint or evidence log stored
+    there stays readable; enforcement continues only if the target agent''s prompts or agent definition
+    list the same grounding hooks. Do not depend on `parentHooks` for a handoff until SA resolves the
+    inconsistency. Treat handoff as reachable from tools and hooks as well as from a model''s tool call.
+    It applies only to targets with a human side matching the thread''s conversational surface.'
+- id: coord-18
+  relation: sa_only
+  acs:
+    concept: 'Not found: a way for a delegate to require behaviour of its delegator (nearest: propagation
+      of the always-ask mark along data flow and into nested runs)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.17 'Always ask' (lines 1077-1093)
+    - spec/STANDARD-v1.1.0.md §5.2.1 Safety Flags (lines 270-284)
+    quote: value is marked (§5.12). A mark is never removed during a run. A
+  sa:
+    concept: '`parentHooks`: thread-scoped hooks a child agent requires on its direct parent, activated
+      on composition and failing closed'
+    refs:
+    - content/0.2.0/specification/agents.md §6 Required Parent Hooks (lines 132-167)
+    - content/0.2.0/specification/hooks.md intro (line 5), §1.3 Hook Scoping (lines 70-100), §2.4 Execution
+      Provenance (lines 171-196), §3.3 Note (line 273), §4.1 (line 322), §5 Tool Execution Hooks (lines
+      365-444)
+    - content/0.2.0/infrastructure/runtime.md §7.3.1 Required Parent-Hook Composition (lines 147-163)
+    - content/0.2.0/distribution/packaging.md 'package.json Requirements' and 'PackedMeta' (lines 178-215)
+    quote: '- Requirements apply only to direct parent relationships; they do not propagate transitively
+      through the child graph.'
+  explanation: 'SA lets an agent with `exposeAsTool: true`, and only such an agent, declare thread hooks
+    its direct parent must run: ''composing it **MUST** activate every `parentHooks` requirement automatically'',
+    ''The hook receives the parent''s `ThreadState` and remains active for the lifetime of the enabled
+    relationship.'', composition UIs MUST disclose them, and ''Missing, invalid, or unloadable required
+    hooks **MUST** fail composition closed.'' The requirement is strictly one hop, and user-scoped hooks
+    cannot be required. ACS has no corresponding construct. Its obligations travel the other way and by
+    data flow: the always-ask mark follows references through later steps and into nested runs, and safety
+    flags are resolved per step. The reverse, a parent requiring a hook on a child, was not found in SA
+    (coord-19).'
+  combined: 'A grounded child package can declare `parentHooks: [{ hook, reason, stage }]` naming a thread
+    hook from its own namespace, for example an `after_subagent_created` hook that writes the delegation''s
+    evidence anchor to the parent''s key-value store; it receives the child state, and `context.source`
+    identifies the contributing relationship. SA guarantees activation, disclosure and fail-closed loading,
+    not a veto: hook failures are non-fatal to the decorated turn, tool-call hooks observe or can only
+    replace a stored result, a failing `before_create_message` hook only SHOULD prevent that message,
+    and request-context policy gates are something runtimes ''may support''. A hook stamping provenance
+    on the child''s result messages must first recognise them, which depends on the runtime setting `subagent_id`
+    (coord-08). To reach a grandparent, an intermediate agent must redeclare the requirement. Not stated
+    (an open question): whether these hooks run when the owning side is handler-backed, and whether `after_subagent_created`
+    fires for code-initiated creation.'
+  see_also:
+  - published-api-extension-points#hooks-01
+  - safety-enforcement#flags-02
+  - safety-enforcement#trust-01
+  - evidence-audit-observability#collect-03
+  - packaging-conformance-governance#pkg-01
+  - models-context-memory-security#hooks-01
+- id: coord-19
+  relation: acs_only
+  acs:
+    concept: Capability safety flags (`mutation`, `requires_checkpoint`, `requires_approval`, `risk`)
+      as the delegator's knowledge of what an action may do
+    refs:
+    - spec/STANDARD-v1.1.0.md §3.3 Safety by Construction (lines 84-93), §5.2.1 Safety Flags (lines 270-284),
+      §5.14 deferral rule 2 (lines 856-859)
+    - schemas/capability_ontology.yaml node `delegate` (lines 1443-1447)
+    - grounded_agency/coordination/registry.py `AgentDescriptor.capabilities` (lines 48-69; reference
+      SDK only)
+    - 'docs/guides/RUNNING_WORKFLOWS.md ''Driving a run yourself'' (lines 271-278: signed snapshots)'
+    quote: '- A workflow cannot weaken a capability''s safety flags (§5.2.1)'
+  sa:
+    concept: 'Not found: no machine-readable declaration of a child agent''s effects, and no hook source
+      by which a parent observes or constrains a child''s tool calls'
+    refs:
+    - content/0.2.0/specification/hooks.md §1.3 Hook Scoping (lines 76-93), §5.1 `tool_call_started` (line
+      381)
+    - 'content/0.2.0/specification/agents.md §2.2 Optional (lines 85-90): `title`, `description`, `toolDescription`
+      are free text'
+    - content/0.2.0/specification/subagents.md §1 (line 37, `description`), §2.2 Single Owner (line 58)
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146)
+    - content/0.2.0/specification/handlers.md §1 Handler Definition (line 28)
+    - content/0.2.0/specification/threads.md §2.3 (lines 227-234, `instanceEnv`)
+    - 'content/0.2.0/getting-started/examples.md §6 Composition (lines 737-990; non-normative): a child
+      that labels GitHub issues'
+    - '@standardagents/spec 0.45.10 index.d.ts lines 4959-5114 (`AgentDefinition`: no `annotations` member),
+      line 2913 (`getChildThread`)'
+    quote: If none of these sources declares a matching hook, no hook runs.
+  explanation: 'Nothing in the specification tells an SA parent that a child mutates: agents are described
+    in free text, the registry entry carries `description` and `status`, and `annotations` are non-normative
+    and function-tool only (see the Standard Agent Specification findings). A thread''s hooks come from
+    four sources (its direct children''s `before_parent` hooks, the active prompt''s, the agent''s fallback
+    hooks, its children''s `after_parent` hooks), none of them its parent, so a parent''s hooks see none
+    of a child''s tool calls, and a parent cannot add a hook to a child. `getChildThread` returns a full
+    `ThreadState`, so parent code can inject, update and delete the child''s messages and write its files,
+    and ''handlers are trusted definition code, like tools'': child-side grounding holds against the parent''s
+    model, not its package''s code. ACS has the matching weakness (see the Agent Capability Standard findings):
+    `delegate` is `mutation: false` with no checkpoint or approval flag. Searched: childHooks, child hooks
+    (not found); inherit (environment, key-value and credential text only).'
+  combined: 'Three measures within 0.2.0. (1) A grounded child enforces its own checkpoints and approvals
+    in its own thread; the parent cannot do it for the child. Where the parent package''s code is untrusted,
+    protect the child''s records with an integrity check keyed from `instanceEnv` (optional: consumers
+    ''must feature-detect the method and fail closed if the capability is unavailable''), as the ACS reference
+    executor signs snapshots. (2) Declare the `delegate` step for any child not known to be read-only
+    with `requires_approval: true` and, where the delegator will act on the result, `requires_checkpoint:
+    true`; §5.2.1 makes a stricter declaration effective. A parent checkpoint does not cover the child''s
+    effects (ACS gap). (3) Audit afterwards: parent code can read the child''s history, tool calls included,
+    with `(await state.getChildThread(ref)).getMessages({ includeSilent: true })`; sub-prompt messages
+    need `maxDepth`, and the limits listed in coord-06 apply.'
+  see_also:
+  - tools-contracts#rec-01
+  - published-api-extension-points#thread-01
+  - published-api-extension-points#thread-07
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-04
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - evidence-audit-observability#audit-02
+  - workflow-execution#wf-05
+  - packaging-conformance-governance#ver-04
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#portability-01
+  - models-context-memory-security#profile-01
+  - models-context-memory-security#remember-02
+- id: coord-20
+  relation: acs_only
+  acs:
+    concept: 'Gating a delegation before it starts: effective `requires_approval` / `requires_checkpoint`
+      on a `delegate` step (F502, F501)'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2.1 (lines 279-284), §5.14 Approval (lines 804-844)
+    - 'schemas/workflow_catalog.yaml workflow `multi_agent_orchestration`, `delegate` step (lines 1674-1680):
+      `requires_approval: true`'
+    quote: 'declaration stricter than the ontology (e.g. `requires_approval: true` on'
+  sa:
+    concept: No pre-spawn decision point for a model-initiated `subagent_create`; `hidden` relationships
+      and handler-backed sides keep spawning in code
+    refs:
+    - content/0.2.0/specification/hooks.md §1.1 Available Hooks (line 24), §3.3 Note (line 273), §5.1
+      `tool_call_started` (lines 367-384), §5.5 `tool_call_done` (line 440)
+    - 'content/0.2.0/specification/threads/execution-state.md §4.2 Reasons (line 113: `hook_blocked`)'
+    - content/0.2.0/infrastructure/runtime.md §7.3 Optional + Immediate + Hidden Branches (lines 139-143)
+    - content/0.2.0/specification/subagents.md §1 (line 45, `hidden`), §2.5 Visibility (lines 80-84),
+      §3.1 (lines 88-94), §5 (lines 157 and 163)
+    quote: '- `hidden`: the relationship stays declared and spawnable by runtime code (`invokeTool`/`queueTool`
+      from hooks, tools, and handlers), but the tool **MUST NOT** appear in any LLM request''s tool list'
+  explanation: 'ACS can require approval or a checkpoint before a `delegate` step runs and fails the step
+    otherwise. SA has no hook that runs before a child is created and can refuse it: the only subagent
+    hook is `after_subagent_created`, and `tool_call_started` is observational (''The return value **MUST**
+    be ignored; the hook cannot modify the tool call.''). Two passages look like gates and provide none
+    for spawning (see the Standard Agent Specification findings): the hooks.md §3.3 Note on request-context
+    policy gates is optional and gates a whole model request, and nothing defines what sets the stop reason
+    `hook_blocked`. hooks.md says tool-call hooks fire ''exactly once per tool call'' with no exempt tool
+    class and is silent on calls made from code. So when a model on a prompt-backed side calls `subagent_create`,
+    0.2.0 guarantees a grounded agent no point at which to refuse. Searched (hooks.md): invokeTool, queueTool,
+    lifecycle tool, subagent_create (no hits).'
+  combined: 'Spawn only from deterministic code. (a) Preferred: a handler-backed owning side whose handler
+    runs the ACS checks (valid checkpoint, approval decision) before creating the child. (b) On a prompt-backed
+    side: declare every relationship `hidden: true`, so that no lifecycle tool is injected (injection
+    happens only for a side with non-hidden relationships), and give the prompt a function tool whose
+    `execute` runs the checks, then creates the child. Mixing hidden and visible relationships is not
+    a safe gate: the lifecycle tools are then injected, and the rejection rule covers ''undeclared or
+    disabled relationships'', not hidden ones. Split the wrapper into request and resume around a saved
+    run (coord-26), since an out-of-band approval can take hours. Unspecified: the creation call (coord-01),
+    a lifecycle tool in a packed tool''s `uses`, and which side''s relationships a code-initiated call
+    resolves against. That hidden relationships stay spawnable by code rests on a lower-case ''should''
+    list (runtime.md §7.3).'
+  see_also:
+  - tools-contracts#cls-03
+  - tools-contracts#cls-04
+  - tools-contracts#cls-07
+  - tools-contracts#cls-08
+  - tools-contracts#cls-14
+  - tools-contracts#eff-01
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#hooks-01
+  - published-api-extension-points#hooks-02
+  - published-api-extension-points#thread-06
+  - published-api-extension-points#tools-06
+  - safety-enforcement#exec-01
+  - safety-enforcement#gate-03
+  - safety-enforcement#hook-02
+  - safety-enforcement#scope-01
+  - safety-enforcement#surface-01
+  - checkpoint-rollback-state#state-07
+  - checkpoint-rollback-state#state-25
+  - approval-human#approval-15
+  - approval-human#approval-16
+  - evidence-audit-observability#collect-02
+  - workflow-execution#wf-20
+  - workflow-execution#wf-26
+  - packaging-conformance-governance#naming-02
+  - packaging-conformance-governance#pkg-03
+- id: coord-21
+  relation: sa_only
+  acs:
+    concept: 'Not found: continuing an earlier delegation, or capping concurrent delegations (a retry
+      always creates a new delegation)'
+    refs:
+    - 'spec/STANDARD-v1.1.0.md §5.13 (lines 762-774): retry and recovery loops delegate again and name
+      the delegation replaced'
+    - 'spec/STANDARD-v1.1.0.md §5.16 (line 959: the example''s per-reviewer `forbidden_inputs` option
+      names `prior_rounds`; lines 997-999: `scope`)'
+    - 'schemas/review_verdict_schema.yaml `scope: full | delta`'
+    - 'spec/STANDARD-v1.1.0.md §5.5 (lines 350-353): `x-` binding keys reach the host'
+    quote: R402. A `retry` of the step delegates again, and the new capability call
+  sa:
+    concept: Persistent child threads, `subagent_message`, create-or-continue, and `maxInstances`
+    refs:
+    - content/0.2.0/specification/subagents.md §1 (line 38, `maxInstances`), §3.3 (line 110), §4.1 Persistence
+      Is Universal (lines 116-124), §5 (lines 159-161)
+    - content/0.2.0/infrastructure/runtime.md §7.2 (line 131), §10 Termination Semantics (line 235)
+    quote: '**Every child instance is a persistent thread.**'
+  explanation: 'SA treats a child as a long-lived collaborator: session end never terminates a thread,
+    a later message ''starts a **new session with history intact**'', the parent can address an instance
+    by reference with `subagent_message`, and `maxInstances` caps simultaneous instances per relationship.
+    In ACS a delegation is a one-shot task identified by `task_id`: running the step again creates a new
+    delegation and asks the host to cancel the old one, and nothing asks the same delegate again. A persistent
+    SA child could serve a `scope: delta` review, but ACS does not presuppose a reviewer with memory:
+    `delta` is defined by coverage only, and the §5.16 example shows, as an option, a reviewer forbidden
+    from depending on prior rounds. SA''s pages differ on the cap error: SHOULD in subagents.md §1, MUST
+    in runtime.md §7.2 (see the Standard Agent Specification findings). Searched (spec/STANDARD-v1.1.0.md):
+    continu, persistent, max_instances, maxInstances (one unrelated hit, ''changes persistent state'').'
+  combined: 'Today an ACS host can only present a follow-up to an existing child as a new `delegate` call
+    and attest `effective.fresh_context: false` for it; the continuity is invisible to the ACS validator.
+    A continuation reference can already reach the host as a vendor input (coord-29): an `input_bindings`
+    key that ''starts with `x-`'' is not reported as unknown, and ''The host still receives it''. When
+    an ACS retry carries `replaces`, the host chooses between SA''s two behaviours: terminate the old
+    instance and create a new one (matches ACS semantics), or message the existing instance (cheaper,
+    but not what `replaces` means). Use the first for reviewers whose independence is counted. An SA `maxInstances`
+    refusal maps to a refused delegation (coord-02).'
+- id: coord-22
+  relation: partial
+  acs:
+    concept: 'Two ways to receive a delegate''s result: a waiting `delegate` step, or a non-waiting `delegate`
+      followed by a `receive` wait with `correlate`'
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.13 (lines 719-731 and 753-761)
+    - 'spec/STANDARD-v1.1.0.md §5.10 (line 576: event `source_kind`; 1.1 adds `agent`)'
+    quote: '`wait` is allowed only on `receive`, on `delegate`, or on `synchronize`'
+  sa:
+    concept: '`parentCommunication: ''implicit'' | ''explicit''`, with `notifyParent`, `setStatus` and
+      `stopSession` for explicit escalation'
+    refs:
+    - content/0.2.0/specification/subagents.md §6.2 to §6.4 (lines 195-219)
+    - content/0.2.0/infrastructure/runtime.md §7.1 Parent/Child Threading (lines 117-120), §7.2.1 Parent
+      Communication Modes (line 135), §8.2 Child -> Parent (lines 197-211)
+    - content/0.2.0/specification/threads.md §9.3 Parent Messaging (lines 526-542)
+    - content/0.2.0/specification/threads/messages.md §1 (line 30), §1.1 (line 49)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 2979-2980 (`notifyParent` comment)'
+    quote: runtimes **MUST NOT** auto-queue completion/failure to the parent
+  explanation: 'Both distinguish a delivered result from a fetched one. SA: `implicit` (the default) queues
+    a completion or failure message that wakes the parent; under `explicit` a child''s finish does not
+    wake the parent at all, and the child escalates deliberately. ACS: a waiting delegate receives its
+    own result as an event correlated by `task_id`; a plain delegate returns at once and a separate `receive`
+    step waits for a matching event. The correspondence is loose: SA delivers messages into a conversation
+    and wakes a turn, guaranteeing per-thread order only; ACS delivers typed events to a step with a deadline
+    and sender filters, and correlation does not depend on order. Attribution is the weak point: with
+    several outstanding children, the source of a completion or `notifyParent` message is identifiable
+    only by signals 0.2.0 does not guarantee (coord-08): the `subagent_id` field, the `metadata.subagent_id`
+    convention, or the message text.'
+  combined: 'Use the parent-side message only as a wake-up. On each wake, visit the outstanding children
+    by the references the host recorded, read `status()` and the result from each child''s own thread,
+    and build the ACS event from that, with `source_kind: agent`. Identity and correlation then rest on
+    `getChildThread(reference)`, which has a MUST behind it (runtimes MUST ''expose parent/child lookup
+    through `ThreadState`''), not on message content or optional metadata. Waiting delegate: a non-blocking
+    relationship whose completion the host matches this way, or a blocking one with the cautions of coord-03.
+    Delegate followed by `receive`: declare `parentCommunication: ''explicit''` and have the child call
+    `state.notifyParent(content)` or stop with `state.stopSession({ result, notifyParent })`; the wake-up
+    rule still applies.'
+  see_also:
+  - tools-contracts#io-04
+  - published-api-extension-points#hitl-01
+  - published-api-extension-points#thread-01
+  - safety-enforcement#appr-01
+  - safety-enforcement#scope-01
+  - approval-human#approval-07
+  - approval-human#approval-24
+  - approval-human#identity-01
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-03
+  - evidence-audit-observability#prov-04
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - models-context-memory-security#identity-02
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#perceive-03
+  - models-context-memory-security#remember-02
+- id: coord-23
+  relation: partial
+  acs:
+    concept: 'Typed capability outputs that cross the delegation boundary: `evidence_anchors` (required
+      on the `delegate` output) and `review_verdict` objects'
+    refs:
+    - 'schemas/capability_ontology.yaml `delegate.output_schema` (lines 1503-1538: `accepted` and `evidence_anchors`
+      required)'
+    - docs/guides/RUNNING_WORKFLOWS.md 'Actions and responses' (lines 118-120; non-normative)
+    - schemas/review_verdict_schema.yaml
+    quote: ontology contract requires, or the step fails (R402).
+  sa:
+    concept: Child results as text (`messageProperty`, `stopSession` `result`, `notifyParent(content)`)
+      plus attachments copied across the thread boundary
+    refs:
+    - content/0.2.0/specification/agents.md §3 SessionToolBinding (lines 97-113)
+    - content/0.2.0/specification/subagents.md §6.2 (lines 195-205), §6.4 (line 219), §7 Attachment Copying
+      (lines 230-237)
+    - content/0.2.0/infrastructure/runtime.md §8.2 Child -> Parent (lines 197-202), 'Durable Key-Value
+      Store' §14.1 item 3 (line 352)
+    - content/0.2.0/specification/threads.md §12 TypeScript Reference (lines 659-665)
+    - content/0.2.0/specification/tools.md §9 Conformance Notes (line 152); content/0.2.0/specification/threads/messages.md
+      §1 (line 17)
+    - '@standardagents/spec 0.45.10 index.d.ts lines 211-249 (`ToolResult`), lines 2659-2680 (`StopSessionOptions`)'
+    quote: '- payload attachments **MUST** be copied child filesystem -> parent filesystem'
+  explanation: 'ACS outputs are objects checked against the ontology, and the `delegate` output must carry
+    `evidence_anchors`. SA''s child-to-parent result is text: a session binding forwards one argument
+    field, `stopSession` takes `result?: string`, `notifyParent` takes a string, and a tool result''s
+    `result` is a string in the published types. Other channels, each with a caveat. Files: attachments
+    returned on completion or failure MUST be copied to the parent and referenced by parent-local paths,
+    the only MUST-level delivery guarantee. The parent''s key-value store: named by subagents.md §6.4
+    for explicit-mode children, but in tension with the rule that values MUST NOT be readable by any other
+    thread. `ToolResult.error_data`: structured, but published types only and error results only. `metadata`
+    on a message a child queues to its parent through `getParentThread()`. The child''s own history, where
+    a stop tool''s schema-validated arguments persist in `tool_calls`.'
+  combined: Let deterministic child code serialise the ACS output, not the model. Give the child a stop
+    tool with a typed `args` schema (validated per tools.md §9) whose `execute` builds the JSON and calls
+    `state.stopSession({ result })`, or writes a file that it then returns as an attachment (preferable
+    for evidence bundles, because of the copy guarantee). Alternatively the parent's host reads the stop
+    tool call's arguments from the child's history by reference. In every case the parent's host validates
+    the object against the ACS schema before submitting it to the executor, and adds its own anchor identifying
+    the child reference it came from.
+  see_also:
+  - tools-contracts#cls-11
+  - tools-contracts#io-04
+  - published-api-extension-points#thread-01
+  - safety-enforcement#scope-01
+  - approval-human#approval-07
+  - approval-human#approval-20
+  - approval-human#identity-06
+  - evidence-audit-observability#prov-04
+  - workflow-execution#wf-10
+  - workflow-execution#wf-12
+  - workflow-execution#wf-20
+  - workflow-execution#wf-28
+  - workflow-execution#wf-30
+  - models-context-memory-security#isolation-01
+  - models-context-memory-security#remember-02
+- id: coord-24
+  relation: partial
+  acs:
+    concept: Lifetime of delegations relative to the run that made them
+    refs:
+    - 'spec/STANDARD-v1.1.0.md §5.13 (lines 771-774): descriptive text in the replacement rule, no requirement
+      keyword'
+    - spec/STANDARD-v1.1.0.md §5.14 deferral rule 2 (lines 856-859)
+    quote: whose delegations name none of the earlier run's; the host ends those
+  sa:
+    concept: '`terminate()` of a thread, an undefined ''parent teardown policy'', and cascading deletion
+      through the Client API'
+    refs:
+    - content/0.2.0/specification/subagents.md §4.1 (lines 120-121), §8 (lines 239-244)
+    - content/0.2.0/specification/threads.md §8 Lifecycle (lines 467-478)
+    - content/0.2.0/infrastructure/runtime.md §10 Termination Semantics (lines 227-235)
+    - content/0.2.0/specification/threads/client-api.md §10 Deleting a Thread (lines 275-299)
+    quote: '- **Only explicit termination destroys an instance**: `state.terminate()`, operator action,
+      or a parent teardown policy.'
+  explanation: 'ACS says, descriptively and for one case (a calling workflow''s loop that runs an `invoke`
+    again), that the host ends the earlier nested run''s delegations ''with the run they belong to'';
+    it uses no MUST or SHOULD. SA deliberately specifies the opposite default: child threads outlive sessions,
+    and ''Runtimes **MUST NOT** destroy or orphan child threads on any session-finalization path.'' For
+    the abnormal case SA is specific only about Client API deletion, whose deletion set is the addressed
+    thread and every descendant, with executions in flight aborted. What `terminate()` on a parent does
+    to running children is not stated (threads.md §8 and runtime.md §10 cover only the terminated thread
+    and its own parent''s registry), and the ''parent teardown policy'' is named once and never defined
+    (see the Standard Agent Specification findings). Searched: teardown, descendant, orphan, cascade (other
+    hits: environment propagation, the deletion set, the no-orphaning rule, message deletion).'
+  combined: A host that wants the ACS behaviour ends children explicitly. When an ACS run ends or is abandoned,
+    iterate the references it recorded for that run and call `(await state.getChildThread(ref))?.terminate()`
+    for those still `running` (calling `terminate()` on a child's `ThreadState` is an inference from the
+    return type of `getChildThread()`). Recurse through each child's own `children`, since terminating
+    a child says nothing about its children. Persist the list of outstanding references with the run,
+    so that a later sweep can clean up if the parent's execution is lost. Do not rely on terminating the
+    parent thread to stop its children.
+- id: coord-25
+  relation: sa_only
+  acs:
+    concept: Not found for most flags; nearest are step `condition` (for `optional`) and trigger kinds
+      (for `immediate`)
+    refs:
+    - spec/STANDARD-v1.1.0.md §5.2 step fields (line 250, `condition`)
+    - spec/STANDARD-v1.1.0.md §5.10 Triggers (line 574)
+    - 'spec/RFC-0003-orchestration-extensions.md ''Open questions'' (lines 324-331): placement of a delegated
+      step is out of scope'
+    quote: '| `kind` | `schedule`, `event`, `manual`, `invoke` |'
+  sa:
+    concept: 'Relationship flags without an ACS counterpart: `immediate`, `optional`, `hidden`, `scopedEnv`,
+      and the agent flag `primary`'
+    refs:
+    - content/0.2.0/specification/subagents.md §1 property table (lines 33-45), §3.2 Immediate Spawning
+      (lines 96-104)
+    - content/0.2.0/infrastructure/runtime.md §7.3 Optional + Immediate + Hidden Branches (lines 137-145)
+    - content/0.2.0/specification/agents.md §2.2 (line 88, `primary`), §8 Definition-Time Errors (lines
+      193-205)
+    - content/0.2.0/specification/hooks.md §1.1 (line 24); content/0.2.0/specification/threads.md §1.2.1
+      (line 44, `children`)
+    quote: '| `immediate` | Spawn at **thread creation**, before any side takes a turn'
+  explanation: 'These flags configure composition, not a single act of delegation, and ACS has no place
+    for them. `immediate` creates a child before any turn, with no step that could be gated or audited.
+    The pages differ in level on recursion: ''Immediate spawning is recursive'' (subagents.md §3.2) against
+    ''Immediate spawning should be recursive across activated child threads.'' (runtime.md §7.3, in a
+    list introduced by ''Runtimes should evaluate relationship flags before exposing/executing them:'').
+    No rule rejecting a cycle of immediate relationships was found among the definition-time errors (agents.md
+    §8). `optional` enables a relationship from an environment flag, roughly an ACS step `condition`.
+    `hidden` removes a relationship from the model''s tool surface but keeps it available to code. `scopedEnv`
+    carries ''Environment values copied into the child thread; runtime-only transfer data.'' `primary`
+    only affects agent pickers.'
+  combined: '`hidden` is the flag a grounded binding uses (coord-20). Avoid `immediate` for children that
+    can mutate: they exist before any ACS run does, so no checkpoint or approval can precede their creation.
+    The parent learns of them through `state.children`, and through an `after_subagent_created` hook if
+    that hook fires for immediate spawns, which the text does not state. Map `optional` to an ACS step
+    `condition` so that the workflow and the relationship agree on whether delegation is possible; an
+    ACS condition cannot read SA environment values, so the host passes the flag''s resolved value in
+    as a workflow input. Keep `scopedEnv` values out of ACS evidence and audit records.'
+- id: coord-26
+  relation: fits
+  acs:
+    concept: Suspending and resuming a run between actions (`snapshot`, `restore`, `tick`), with deadlines
+      carried in the actions
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md introduction (lines 10-14), 'Actions and responses' (lines 81-92),
+      'Driving a run yourself' (lines 258-289); guide to the reference executor, non-normative
+    - 'spec/STANDARD-v1.1.0.md §5.13 (lines 777-781: a wait can last hours and the run may resume elsewhere)'
+    - 'core/src/exec/mod.rs (lines 670-689: `snapshot` and `restore`)'
+    quote: driving it. Use it to run actions asynchronously, across processes, or
+  sa:
+    concept: Durable per-thread key-value store, one handler turn per inbound message, and delayed effects
+    refs:
+    - content/0.2.0/specification/threads.md §4.1 Scheduling Effects (lines 284-300), §7 Durable Key-Value
+      Store (lines 408-433)
+    - content/0.2.0/infrastructure/runtime.md §2 Invocation Triggers (lines 27-38), §11 Concurrency (line
+      239), 'Durable Key-Value Store' §14.1 items 1 and 2 (lines 350-351)
+    - content/0.2.0/specification/handlers.md §3 Execution Model (lines 44-55), §4 Delivery Semantics
+      (lines 57-67), §9 (line 137)
+    - content/0.2.0/specification/effects.md §1.1 (line 13), §3 Execution Semantics (lines 81-90)
+    quote: '- **MUST** enqueue effects asynchronously for execution.'
+  explanation: 'A synthesis: neither specification describes the pattern. The ACS reference executor is
+    built to be suspended: it does no I/O, exposes one pending action at a time and saves a run as a snapshot
+    (canonical JSON, SHA-256, optional HMAC) restorable against the same catalog. These are properties
+    of the reference implementation and its guide, not of the Standard. SA offers matching pieces with
+    normative backing: a key-value store whose values MUST survive execution boundaries, process restarts
+    and runtime redeploys; exactly-once, in-order handler delivery; and effects that runtimes MUST enqueue,
+    whose `args` they MUST preserve until execution, and that take a `delay`. Together they let hours-long
+    ACS waits pass without holding a thread''s single execution slot (needed by coord-03, -04, -12, -16,
+    -20, -22). Not stated: whether an effect counts as a ''flow'' under runtime.md §11, and so may run
+    while a turn of the same thread is in flight.'
+  combined: 'After each action that cannot be answered within the turn (`AwaitEvent`, an out-of-band `RequestApproval`,
+    `Sleep`), store the signed snapshot with `state.setValue(...)`, end the turn, and restore the run
+    on the next inbound message on the owning side: a child''s completion, a person''s reply, or a tick.
+    For the action''s deadline or a liveness interval, call `state.scheduleEffect(name, args, delayMs)`
+    with an effect that only queues a tick message, so that the run is touched only inside a turn; on
+    a tick, call the run''s `tick(now)` and handle R401 or R406. Keep the snapshot''s HMAC key outside
+    the thread''s own storage (for example in `instanceEnv`, an optional capability): any code holding
+    the thread''s `ThreadState` can write its key-value store. Precondition: an executor callable from
+    the SA process (ACS gap: a TypeScript or WebAssembly build), or a host outside the runtime (coord-27).'
+  see_also:
+  - tools-contracts#eff-01
+  - published-api-extension-points#handler-01
+  - published-api-extension-points#options-01
+  - published-api-extension-points#thread-04
+  - published-api-extension-points#thread-07
+  - safety-enforcement#exec-01
+  - checkpoint-rollback-state#state-15
+  - checkpoint-rollback-state#state-16
+  - approval-human#approval-08
+  - approval-human#approval-12
+  - approval-human#approval-21
+  - approval-human#users-01
+  - evidence-audit-observability#audit-02
+  - evidence-audit-observability#audit-03
+  - workflow-execution#wf-04
+  - workflow-execution#wf-05
+  - workflow-execution#wf-11
+  - workflow-execution#wf-22
+  - workflow-execution#wf-25
+  - packaging-conformance-governance#pkg-06
+  - models-context-memory-security#profile-01
+  - models-context-memory-security#remember-01
+- id: coord-27
+  relation: fits
+  acs:
+    concept: A host that performs `delegate` and its wait from outside the agent runtime (how a host performs
+      a capability call is left to the host)
+    refs:
+    - docs/guides/RUNNING_WORKFLOWS.md introduction (line 10), 'Actions and responses' (lines 81-92);
+      non-normative
+    - 'spec/STANDARD-v1.1.0.md §5.15 (lines 932-936: the host maps its own identities to principals)'
+    quote: The executor does no I/O. It tells your code what to do next (an
+  sa:
+    concept: 'Thread Client API: create a thread, send a message, read status and messages, stop, delete'
+    refs:
+    - content/0.2.0/specification/threads/client-api.md §1 Scope (lines 7-14), §3.1 (lines 39-46), §6
+      Creating a Thread (lines 140-163), §8 Reading a Thread (lines 218-249), §10 Deleting a Thread (lines
+      275-299), §11 Reading Messages (lines 302-332), §12 Sending a Message (lines 334-370), §15 Stopping
+      Execution (lines 397-407), §17 Conformance (lines 471-488)
+    - content/0.2.0/infrastructure/runtime.md §15 Thread Client API (lines 364-380)
+    - content/0.2.0/distribution/packaging.md 'Portability requirements' (lines 7-25)
+    quote: 2. `status` **MUST** equal the [`ThreadStatus`](/0.2.0/specification/threads/execution-state#4-run-status)
+      that `state.status()` resolves for the thread.
+  explanation: 'The Client API is a better-specified delegation surface than code-initiated `subagent_create`,
+    and works with today''s Python executor, needing no in-process binding. Creating a thread MUST return
+    a `CreateThreadResponse` holding `threadId`; the read route returns the same `ThreadStatus` as `state.status()`;
+    the stop route aborts the execution in flight and settles it `idle` with reason `aborted_by_user`;
+    deletion covers the thread and every descendant; results are read from the message route. Limits:
+    the API is optional (SHOULD); `CreateThreadRequest` has `agent_id`, `tags` and `env` but no `arguments`,
+    so SA''s validated creation arguments are unavailable and the task travels as the first message; and
+    the delegate is a top-level thread, not a child: no registry entry, no `parentHooks`, no implicit
+    completion message, an owner set ''from the authenticated caller''. Whether such an executor is a
+    ''sidecar'' under the packaging portability rules is for SA to say (an open question).'
+  combined: '`delegate`: `POST {runtime_prefix}/threads` with the delegate agent''s `agent_id`, then `POST
+    .../threads/{threadId}/messages` with `role: ''user''` and the task. Use the returned `threadId` as
+    the ACS `task_id`; report `accepted: true` when both calls succeed. `AwaitEvent`: follow `GET .../threads/{threadId}`
+    (or the stream''s `thread_status` frames) and read the result from `GET .../threads/{threadId}/messages`;
+    a liveness probe is the same `status` read (coord-04). On the ACS deadline: `POST .../stop`, then
+    report R401. `replaces`: stop, or delete the thread. `effective.fresh_context: true` holds by construction
+    for a new thread that received only the task. The runtime does not tell the caller which model produced
+    a message, so model family and principal are attested as in coord-07 and coord-08.'
+  see_also:
+  - tools-contracts#io-07
+  - published-api-extension-points#erase-01
+  - safety-enforcement#trust-01
+  - checkpoint-rollback-state#state-15
+  - evidence-audit-observability#audit-03
+  - evidence-audit-observability#retention-01
+  - evidence-audit-observability#store-02
+  - workflow-execution#wf-24
+  - workflow-execution#wf-25
+  - packaging-conformance-governance#pkg-07
+  - models-context-memory-security#context-02
+  - models-context-memory-security#portability-01
+- id: coord-28
+  relation: partial
+  acs:
+    concept: 'Remaining members of the coordination nodes: `delegate.constraints`, output `agent`, the
+      edges `decompose enables delegate` and `delegate enables synchronize`, and the reference SDK''s
+      `max_delegation_depth`'
+    refs:
+    - schemas/capability_ontology.yaml `delegate.input_schema.constraints` (lines 1460-1462), `delegate.output_schema.agent`
+      (lines 1514-1516), edges (lines 1790-1795)
+    - 'spec/STANDARD-v1.1.0.md §4.3 (line 153: `enables` is informational)'
+    - grounded_agency/coordination/delegation.py (lines 113-119 and 209-211; reference SDK only)
+    - docs/guides/RUNNING_WORKFLOWS.md 'What the executor enforces', bullet 'Invocations' (lines 230-231)
+    quote: 'description: Delegation constraints'
+  sa:
+    concept: Creation `arguments` and relationship configuration as the only carriers; registry `name`
+      and `relationship`; no depth limit for the subagent graph
+    refs:
+    - content/0.2.0/specification/subagents.md §1 property table (lines 33-45), §4.2 Registry (lines 131-147),
+      §5.1 Persistent Invocation Arguments (lines 167-175)
+    - content/0.2.0/specification/agents.md §1.3 Derivations (line 66), §8 Definition-Time Errors (lines
+      193-205)
+    quote: '`relationship` is the composition identity (which declared relationship spawned this instance);
+      `name` is the implementing agent.'
+  explanation: '`delegate.constraints` is an untyped object in the ontology, and the Standard gives it
+    no semantics. SA has no slot for per-delegation constraints: a parent can pass creation `arguments`,
+    validated against the child''s schema, and the relationship configuration fixes `maxInstances`, `blocking`
+    and `scopedEnv` in advance; neither constrains the child''s behaviour. The ACS output `agent` (''Assigned
+    agent'') corresponds to the registry''s `name`, the ACS input `agent` to `relationship` (coord-01).
+    The two `enables` edges are informational and need no binding. Depth: the reference executor nests
+    `invoke` at most four deep and the reference SDK caps chained delegations (`max_delegation_depth`,
+    default 10); the Standard states no limit for delegation chains, and SA none for subagent graphs (coord-15).
+    Searched: constraints (spec/STANDARD-v1.1.0.md: `constrain`, `plan` and `explain` inputs and trust-model
+    text only).'
+  combined: Pass ACS `constraints` to the child as one key of the creation `arguments`, and only if the
+    child's side A `requiredSchema` declares it, since creation arguments are validated against that schema;
+    honouring them is the child's job. Report the output `agent` as the registry entry's `name`. A host
+    that wants a depth limit across child threads has to carry a counter in the creation arguments itself
+    and refuse to delegate beyond it.
+- id: coord-29
+  relation: fits
+  acs:
+    concept: 'Vendor extension points: `x-` input-binding keys that reach the host, reserved `x-` field
+      names, and `x-` values for `authenticated_by`'
+    refs:
+    - 'spec/STANDARD-v1.1.0.md §5.5 (lines 350-353), §11.3 Compatibility Guarantees (line 1458), Appendix
+      B: Reserved Identifiers (line 1730), §5.17 (line 1026)'
+    - schemas/agent_identity_schema.yaml `authenticated_by` pattern (line 37)
+    quote: Field names starting with `x-` are reserved for vendor extensions.
+  sa:
+    concept: SA-specific delegation parameters with no ACS input (the required instance `name`, an existing
+      instance reference), and SA's own extension point, tool `annotations`
+    refs:
+    - content/0.2.0/specification/subagents.md §3.3 (line 110), §5 Lifecycle Tools (lines 159-161)
+    - content/0.2.0/specification/tools.md §8 Annotations (lines 123-146)
+    quote: It **MUST** require a non-empty `name` argument for the spawned instance
+  explanation: 'ACS already has a way to carry runtime-specific parameters to a host without changing
+    the ontology: a binding key that ''starts with `x-`'' is not reported as unknown, and ''The host still
+    receives it''. SA-specific values that have no ACS input, such as the display `name` SA requires for
+    a new instance or the reference of an instance to continue, can travel that way today. Such keys are
+    outside the capability''s contract: the validator does not type them, and another host will ignore
+    them. On the SA side the corresponding extension point is tool `annotations`, whose ''meaning belongs
+    to whoever owns the key''; it exists on function tools only, not on agents (SA gap).'
+  combined: 'Reserve integration-owned key names for `delegate` steps (illustrative names: `x-sa-name`
+    for the instance name, `x-sa-continue` for an instance reference) and read them in the host when it
+    answers `InvokeCapability`. When the host continues an existing instance because of such a key, it
+    attests `effective.fresh_context: false`. List the keys in the published interop mapping so that two
+    hosts agree on them.'

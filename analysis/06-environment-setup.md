@@ -439,7 +439,7 @@ The `settings.json` at the project root configures Claude Code plugin behavior:
     },
     "posttooluse_log_tool": {
       "enabled": true,
-      "description": "Log skill invocations for audit trail (VERIFY layer)",
+      "description": "Log every tool call for audit trail (VERIFY layer)",
       "configurable": true
     }
   },
@@ -466,7 +466,7 @@ The hooks registered with Claude Code are defined in `hooks/hooks.json`:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",
@@ -477,7 +477,18 @@ The hooks registered with Claude Code are defined in `hooks/hooks.json`:
     ],
     "PostToolUse": [
       {
-        "matcher": "Skill",
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/posttooluse_log_tool.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -491,7 +502,7 @@ The hooks registered with Claude Code are defined in `hooks/hooks.json`:
 ```
 
 - **PreToolUse hook**: Fires before `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` tool invocations, reading the tool call as JSON on stdin. Every such call needs a valid `.claude/checkpoint.ok` marker (JSON with `checkpoint_id` and an unexpired `expires_at`); without one the hook blocks the call (exit code 2, reason on stderr).
-- **PostToolUse hook**: Fires after `Skill` tool invocations. Extracts the skill name and arguments via `jq`, then appends a timestamped entry to `.claude/audit.log`.
+- **PostToolUse and PostToolUseFailure hooks**: Fire after every tool call, succeeded or failed. The script reads the tool name (and the skill name on a `Skill` call) via `jq`, then appends a timestamped entry to `.claude/audit.log` with a SHA-256 digest of the tool input. The input itself is not written.
 
 ---
 
@@ -656,9 +667,9 @@ agent-capability-standard/
 |       +-- evidence_store.py        #     EvidenceStore (anchor collection)
 |
 |-- hooks/                           # Claude Code shell hooks
-|   |-- hooks.json                   #   Hook registration (PreToolUse, PostToolUse)
+|   |-- hooks.json                   #   Hook registration (PreToolUse, PostToolUse, PostToolUseFailure)
 |   |-- pretooluse_require_checkpoint.sh  # Blocks file edits and Bash without checkpoint
-|   |-- posttooluse_log_tool.sh      #   Logs Skill invocations to audit.log
+|   |-- posttooluse_log_tool.sh      #   Logs every tool call to audit.log
 |   +-- README.md                    #   Hook documentation
 |
 |-- schemas/                         # Ontology, workflow, and data schemas

@@ -96,3 +96,110 @@ built pages with the references the user named: how often a visual appears,
 what kinds, how much space. Show the user a few exemplar pages before
 building the rest. Passing checks say the page works, not that it meets the
 brief.
+
+## "Figure out if and how" two standards fit means doing the mapping
+
+**What happened.** Asked whether and how the Standard Agent Specification and
+this standard could work together, I read about half of their specification
+through summaries, answered with a one-screen verdict and offered to draft the
+mapping. The user's reply: do it thoroughly, write the integration document,
+show a grounded agent built on their standard, and prepare upstream issues.
+
+**Rule.** For a public interoperability question, the answer is the work:
+read both specifications from source (clone the repository, read the
+published types), map them concern by concern with citations, build the
+smallest thing that proves the combination works, and write it up. Give the
+short verdict as the summary of that work, not in place of it. Say up front
+what cannot be done from the session (for example filing issues in a
+repository it cannot write to) and prepare it for the user instead.
+
+## Keep the documents under review out of the corpus they are checked against
+
+**What happened.** A script checked that every quotation in the integration
+document occurs in the source repositories. The corpus globbed `docs/**`, so
+it included the document itself and every quotation passed. Excluding the
+document exposed five quotations with a changed capital letter or added
+emphasis.
+
+**Rule.** When a check compares a text with its sources, build the source
+set first and assert the text under review is not in it. Then prove the check
+can fail, with a deliberately wrong input, before trusting a clean run.
+
+## Do not fan out more agents than the usage budget can finish
+
+**What happened.** The mapping ran as ten mappers, twenty reviewers and ten
+reconcilers. The mappers used most of the budget; the limit arrived while the
+reviewers ran, so seven concerns were never reviewed and none was reconciled.
+
+**Rule.** Size a multi-stage workflow so the later stages are certain to run:
+fewer, narrower first-stage agents, or run verification on the first
+concern end to end before starting the rest. Unreviewed output is working
+material, not a deliverable; do not publish it.
+
+## Run every check the pull request's CI runs, not only the ones the guide lists
+
+**What happened.** The first CI run on the Standard Agents pull request failed
+in the site job: `npm run check:axe`, which runs after the build, found a
+table header cell with no text on the new guide page. The local runs had
+covered `npm run check`, `npm test` and `npm run build`, the three commands
+CLAUDE.md lists, and not the accessibility step in `.github/workflows/site.yml`.
+
+**Rule.** Before the first push of a branch, read the workflow files and run
+each step that can run locally. For the site: after `npm run build`, run
+`ACS_CHROMIUM=<chromium> node scripts/check-axe.mjs --paths <changed pages>`.
+A Markdown table needs text in every header cell.
+
+## `check:axe` is two checks: axe and the figure-gap sweep
+
+**What happened.** After the axe fix, the full `npm run check:axe` failed on
+`check-runs.mjs`: lengthening the SDK guide and the domains index had left
+stretches of over two viewport heights with no figure on enforced pages. The
+targeted run that followed the earlier lesson had called `check-axe.mjs`
+alone, which does not run the sweep.
+
+**Rule.** For a page an edit lengthens, run both scripts on it after the
+build: `check-axe.mjs --paths …` and `check-runs.mjs --paths …`. Fix a long
+stretch with a figure that shows the mechanism, or by moving or tightening
+text; exempt a run only when it is one of the categories in `runs.ts`.
+
+## Probe a safety guarantee with hostile input before documenting it
+
+**What happened.** The pull request documented that every mutating Bash
+command needs a checkpoint and approval, and that the plugin hook blocks a
+call without a valid marker. The final review broke both in minutes:
+`env rm -rf x` and `ls | sh` were classified read-only (the classifier read
+only the first word), and a marker of `ok` made the hook exit 5, which Claude
+Code treats as non-blocking. The unit tests checked only cooperative inputs.
+
+**Rule.** Before writing that a check blocks something, try the inputs an
+adversary would: wrappers (`env`, `xargs`, `sh -c`), every shell operator and
+redirection, quoting, case, path tricks (`//`, `..`), malformed state files,
+and a failing command inside the check. A hook must fail closed: any exit
+code other than the blocking one lets the call run.
+
+## Use the kernel's lock; do not build one from mkdir and timeouts
+
+**What happened.** A `mkdir` lock with a five-second give-up broke the audit
+log's chain on slow CI runners (a waiter appended beside a slow holder and
+removed its lock). Each patch to it (an age rule, a PID file, a turn to
+break stale locks) was broken again by reviewers: `kill -0` misreads holders
+in another uid or PID namespace, a FIFO planted as the PID file hangs the
+hook, check-then-act races remove fresh locks, and iteration counts are not
+time. flock(2) through `flock` or `perl` removed the whole class: the kernel
+releases the lock when its holder exits.
+
+**Rule.** For mutual exclusion in a shell script, use flock(2) (with a
+portable way to call it) before inventing a lock. Bound every wait by wall
+clock, and make the timeout path degrade to something detectable, not to
+silence. Test a lock under CPU load and with a slow holder, not only idle.
+
+## Test a hook with the stdin its host really gives it
+
+**What happened.** Replacing `$(cat)` with `$(</dev/stdin)` passed every test,
+which feed the hook through a pipe. Claude Code gives hooks a socket on
+Linux, and a socket cannot be opened by path, so the hook would have failed
+on every tool call. A reviewer found it by running the real binary.
+
+**Rule.** When a hook's input handling changes, test it with the host's
+actual stdin (a `socket.socketpair()` end for Claude Code on Linux) or run it
+under the host itself, not only through `subprocess.run(input=...)`.

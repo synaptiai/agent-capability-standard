@@ -795,12 +795,8 @@ sequenceDiagram
         PyMutation-->>CC: {} (passive)
     and Hook 4: Shell Audit Logger
         CC->>PostShell: stdin: JSON with tool_name, tool_input
-        alt tool_name == "Skill"
-            PostShell->>PostShell: Extract skill name + args via jq
-            PostShell->>PostShell: Append to .claude/audit.log<br/>[timestamp] Skill: <name> (args: ...)
-        else Not a Skill invocation
-            Note over PostShell: exit 0 (skip)
-        end
+        PostShell->>PostShell: Read tool name via jq (and skill name on a Skill call)
+        PostShell->>PostShell: Append to .claude/audit.log<br/>time, event, tool, SHA-256 digest of tool_input
         PostShell-->>CC: exit 0
     end
 ```
@@ -810,7 +806,7 @@ sequenceDiagram
 | Hook Point | Type | File | Matcher | Purpose |
 |------------|------|------|---------|---------|
 | PreToolUse | Shell | `pretooluse_require_checkpoint.sh` | `Write\|Edit` | Block mutations without `.claude/checkpoint.ok` |
-| PostToolUse | Shell | `posttooluse_log_tool.sh` | `Skill` | Append skill invocations to `.claude/audit.log` |
+| PostToolUse, PostToolUseFailure | Shell | `posttooluse_log_tool.sh` | `*` | Append one entry per tool call to `.claude/audit.log` |
 | PostToolUse | Python | `evidence_collector.py` | All tools | Capture evidence anchors to `EvidenceStore` |
 | PostToolUse | Python | `skill_tracker.py` | `Skill` | Update `CheckpointTracker` on checkpoint/rollback skills |
 | PreToolUse | Python | `adapter._make_pretooluse_safety_hook()` | All tools | Rate limit every call; reserve the active checkpoint for a checkpoint-gated call (`tool_use_id`); deny via `hookSpecificOutput` |
@@ -1173,8 +1169,8 @@ Steps in the same `parallel_group` never count as running before one another for
 | H-01 | Hook configuration file | JSON configuration mapping hook points to shell scripts | `hooks/hooks.json` |
 | H-02 | PreToolUse checkpoint gate | Shell hook blocking Write/Edit without `.claude/checkpoint.ok` marker | `hooks/pretooluse_require_checkpoint.sh` |
 | H-03 | PreToolUse mutation detection | Regex matching for Edit, Bash, Git, rm, mv, sed, perl patterns | `hooks/pretooluse_require_checkpoint.sh` |
-| H-04 | PostToolUse audit logger | Shell hook appending Skill invocations to `.claude/audit.log` | `hooks/posttooluse_log_tool.sh` |
-| H-05 | Audit log format | `[ISO-8601-timestamp] Skill: <name> (args: <args>)` format | `hooks/posttooluse_log_tool.sh` |
+| H-04 | PostToolUse audit logger | Shell hook appending one entry per tool call, succeeded or failed, to `.claude/audit.log` | `hooks/posttooluse_log_tool.sh` |
+| H-05 | Audit log format | One JSON line per call: `ts`, `event`, `tool`, `skill` (on a Skill call), `input_sha256`, `prev_hmac`, `hmac`; the tool input is not written | `hooks/posttooluse_log_tool.sh` |
 | H-06 | JSON stdin parsing | Reads hook input via stdin and parses with `jq` | `hooks/posttooluse_log_tool.sh` |
 | H-07 | Graceful jq fallback | Silently exits if `jq` is not available | `hooks/posttooluse_log_tool.sh` |
 | H-08 | Configurable log directory | Uses `CLAUDE_PROJECT_DIR` environment variable or `pwd` for log directory | `hooks/posttooluse_log_tool.sh` |
@@ -1323,8 +1319,8 @@ This matrix tracks the implementation status of every major feature across all s
 | Feature | Status | Component | Notes |
 |---------|--------|-----------|-------|
 | PreToolUse checkpoint gate (shell) | Implemented | `pretooluse_require_checkpoint.sh` | Matches Write/Edit |
-| PostToolUse audit logger (shell) | Implemented | `posttooluse_log_tool.sh` | Matches Skill, logs to .claude/audit.log |
-| Hook configuration file | Implemented | `hooks.json` | PreToolUse + PostToolUse arrays |
+| PostToolUse audit logger (shell) | Implemented | `posttooluse_log_tool.sh` | Matches every tool, logs to .claude/audit.log |
+| Hook configuration file | Implemented | `hooks.json` | PreToolUse, PostToolUse and PostToolUseFailure arrays |
 | JSON stdin parsing with jq | Implemented | `posttooluse_log_tool.sh` | Graceful fallback if jq missing |
 | PostToolUse evidence collector (Python) | Implemented | `evidence_collector.py` | Injected via wrap_options |
 | PostToolUse skill tracker (Python) | Implemented | `skill_tracker.py` | Injected via wrap_options |

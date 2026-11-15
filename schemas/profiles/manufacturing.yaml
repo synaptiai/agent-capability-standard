@@ -1,5 +1,9 @@
 # Manufacturing Domain Profile
 # Calibrated for industrial automation, production monitoring, and quality control.
+#
+# Status: informative data for hosts and workflow authors. No shipped component
+# loads or selects this profile; see "Status of Domain Profiles" in
+# docs/domains/README.md.
 
 domain: manufacturing
 version: "1.0.0"

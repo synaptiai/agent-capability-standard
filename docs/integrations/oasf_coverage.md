@@ -2,7 +2,7 @@
 
 **Mapping Version:** 1.1.0
 **OASF Target Version:** 0.8.0
-**Grounded Agency Version:** 2.0.0 (36 atomic capabilities)
+**Agent Capability Standard:** Standard 1.1.0, ontology 2.1.0 (36 atomic capabilities)
 
 ## Overview
 
