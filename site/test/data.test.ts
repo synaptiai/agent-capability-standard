@@ -279,12 +279,13 @@ describe('skills', () => {
   });
 
   it('shows the frontmatter name and joins composed skills to workflows', () => {
-    // skills/capability-gap-analysis/SKILL.md frontmatter "name: gap-analysis-workflow";
-    // skills/debug-workflow/SKILL.md line 14 says it runs debug_code_change.
+    // skills/capability-gap-analysis/SKILL.md frontmatter "name: capability-gap-analysis"
+    // (the directory name, ACS-59); skills/debug-workflow/SKILL.md line 14
+    // says it runs debug_code_change.
     const gap = s.find((x) => x.dir === 'capability-gap-analysis')!;
-    expect(gap.name).toBe('gap-analysis-workflow');
+    expect(gap.name).toBe('capability-gap-analysis');
     expect(gap.workflow).toBe('capability_gap_analysis');
-    expect(s.find((x) => x.dir === 'digital-twin-sync-loop')!.name).toBe('digital-twin-sync-workflow');
+    expect(s.find((x) => x.dir === 'digital-twin-sync-loop')!.name).toBe('digital-twin-sync-loop');
     expect(s.find((x) => x.dir === 'debug-workflow')!.workflow).toBe('debug_code_change');
     expect(s.find((x) => x.dir === 'perspective-validation')!.workflow).toBeUndefined();
   });

@@ -7,7 +7,6 @@ user-invocable: true
 allowed-tools: Read, Grep
 context: fork
 agent: explore
-layer: MODEL
 ---
 
 ## Intent

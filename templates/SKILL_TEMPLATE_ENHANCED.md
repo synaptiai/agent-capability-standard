@@ -6,6 +6,9 @@ Use this template to create high-quality, production-ready Claude Code skills.
 
 ````markdown
 ---
+# Keys and their owners (Agent Skills, Claude Code, ACS): skills/README.md,
+# "Skill Structure". name is the directory name; no layer key (the ontology
+# gives a capability's layer); ACS data goes under metadata, keys acs-*.
 name: <capability-name>
 description: <verb phrase describing what this capability does>. Use when <trigger conditions/keywords>.
 argument-hint: "[<required-arg>] [<optional-arg>] [constraints]"

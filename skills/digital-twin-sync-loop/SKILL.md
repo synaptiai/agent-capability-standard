@@ -1,5 +1,5 @@
 ---
-name: digital-twin-sync-workflow
+name: digital-twin-sync-loop
 description: Run the digital twin sync loop to synchronize real-world signals with a digital model. Use when updating digital twins, detecting drift, managing real-time state synchronization, or maintaining model-reality alignment.
 argument-hint: "[user_input] [previous_world_state]"
 disable-model-invocation: false

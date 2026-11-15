@@ -314,7 +314,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 
 Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by category). Each skill has:
 
-- YAML frontmatter with `name`, `description`, `allowed-tools` and `agent` type (`layer` is in 13 of the 42 skills; the ontology gives every capability's layer, see `skills/README.md`)
+- YAML frontmatter with `name` (the directory name), `description`, `allowed-tools` and `agent` type; each key's owner (Agent Skills, Claude Code or ACS) is in `skills/README.md`, and no skill declares a `layer` (the ontology gives every capability's layer)
 - Intent and success criteria
 - Input/output contracts with `domain` parameter for specialization
 - Procedure steps with evidence grounding
