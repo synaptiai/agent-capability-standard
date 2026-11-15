@@ -29,6 +29,30 @@ from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.hooks.skill_tracker import create_skill_tracker
 
 
+async def approve(tool_name: str, tool_input: dict, context: object) -> object:
+    """Stand-in for the host's ``can_use_tool`` callback: approves every call.
+
+    A real host shows the person the tool and its input and returns their
+    decision. Without such a callback, a call whose capability requires
+    approval is denied with F502 (APPROVAL_REQUIRED).
+    """
+    try:
+        from claude_agent_sdk import PermissionResultAllow
+    except ImportError:
+        from grounded_agency import FallbackPermissionAllow
+
+        return FallbackPermissionAllow(updated_input=tool_input)
+    return PermissionResultAllow(updated_input=tool_input)
+
+
+def is_allowed(result: object) -> bool:
+    """An SDK permission result (``behavior``) or the fallback (``allowed``)."""
+    return (
+        getattr(result, "behavior", None) == "allow"
+        or getattr(result, "allowed", None) is True
+    )
+
+
 async def main():
     """Demonstrate autonomous skill invocation flow."""
     print("=" * 60)
@@ -46,7 +70,9 @@ async def main():
 
     # Get the skill tracker hook
     skill_hook = create_skill_tracker(adapter.checkpoint_tracker)
-    permission_callback = adapter._make_permission_callback()
+    # mutate requires approval as well as a checkpoint; approve stands in
+    # for the host's can_use_tool callback.
+    permission_callback = adapter._make_permission_callback(approve)
 
     print("\n--- Initial State ---")
     print(f"Valid checkpoint: {adapter.has_valid_checkpoint()}")
@@ -58,8 +84,7 @@ async def main():
         {"file_path": "config.yaml", "content": "debug: true"},
         None,
     )
-    blocked = isinstance(result, dict) and not result.get("allowed", True)
-    print(f"  Result: {'BLOCKED' if blocked else 'allowed'}")
+    print(f"  Result: {'allowed' if is_allowed(result) else 'BLOCKED'}")
 
     print("\n--- Simulating Skill Invocation ---")
     print("Claude invokes: Skill(skill='checkpoint', scope=['*.yaml'])")
@@ -101,8 +126,7 @@ async def main():
         {"file_path": "config.yaml", "content": "debug: true"},
         None,
     )
-    allowed = isinstance(result, dict) and result.get("allowed", True)
-    print(f"  Result: {'ALLOWED' if allowed else 'blocked'}")
+    print(f"  Result: {'ALLOWED' if is_allowed(result) else 'blocked'}")
 
     print("\n--- Available Capability Skills ---")
     skills_path = Path(__file__).parent.parent / "skills"

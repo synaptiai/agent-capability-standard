@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..capabilities.mapper import ToolCapabilityMapper
+from ..capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
 
 if TYPE_CHECKING:
@@ -22,15 +22,19 @@ logger = logging.getLogger("grounded_agency.hooks.evidence_collector")
 def create_evidence_collector(
     store: EvidenceStore,
     mapper: ToolCapabilityMapper | None = None,
+    *,
+    include_tool_input: bool = False,
 ) -> HookCallback:
     """
     Create a PostToolUse hook that collects evidence anchors.
 
     The hook captures:
     - Tool name and ID
-    - Tool input parameters
-    - Capability ID (via mapper)
+    - Capability ID (via mapper); none for a tool the mapper does not know
     - Timestamp
+    - The file path of a file tool's call
+    - Tool input parameters, and a Bash command's text, only with
+      ``include_tool_input``: inputs can hold credentials
 
     This evidence can later be used to verify that decisions
     are grounded in actual observations.
@@ -38,6 +42,8 @@ def create_evidence_collector(
     Args:
         store: EvidenceStore to add anchors to
         mapper: Optional mapper to associate anchors with capabilities
+        include_tool_input: Keep each call's input in its anchor's
+            metadata, and a Bash command's text in its command anchor
 
     Returns:
         Async hook callback function
@@ -76,14 +82,17 @@ def create_evidence_collector(
                 tool_use_id=tool_use_id or "unknown",
                 tool_input=tool_input,
                 tool_response=tool_response,
+                include_tool_input=include_tool_input,
             )
 
-            # Determine associated capability
+            # Determine associated capability. A tool with no classification
+            # is evidence of no particular capability.
             capability_id = None
             if mapper_instance:
                 try:
                     mapping = mapper_instance.map_tool(tool_name, tool_input)
-                    capability_id = mapping.capability_id
+                    if mapping is not UNCLASSIFIED_TOOL:
+                        capability_id = mapping.capability_id
                 except Exception:
                     pass
 
@@ -111,7 +120,7 @@ def create_evidence_collector(
                     exit_code = getattr(tool_response, "exit_code", 0)
 
                 cmd_anchor = EvidenceAnchor.from_command(
-                    command=command,
+                    command=command if include_tool_input else None,
                     exit_code=exit_code,
                     tool_use_id=tool_use_id,
                 )

@@ -157,7 +157,9 @@ class EvidenceAnchor:
         ref: Reference string (e.g., "tool:Read:abc123", "file:src/main.py")
         kind: Type of evidence ("tool_output", "file", "command", "mutation")
         timestamp: When the evidence was captured
-        metadata: Additional context (tool input, file hash, etc.)
+        metadata: Additional context (tool name, file hash, etc.). A tool
+            call's input is kept only when the caller asks for it; see
+            :meth:`from_tool_output`.
         priority: Retention priority (SEC-004). Higher = evicted later.
     """
 
@@ -181,28 +183,39 @@ class EvidenceAnchor:
         tool_use_id: str,
         tool_input: dict[str, Any],
         tool_response: Any = None,
+        *,
+        include_tool_input: bool = False,
     ) -> EvidenceAnchor:
         """
         Create an evidence anchor from a tool output.
+
+        The anchor's metadata holds the tool name and whether there was a
+        response. The input is left out unless ``include_tool_input`` is
+        true: a tool input can hold credentials (a token in a command or a
+        header), and an anchor is stored and exported.
 
         Args:
             tool_name: Name of the tool (e.g., "Read", "Bash")
             tool_use_id: Unique ID for this tool use
             tool_input: Input parameters to the tool
-            tool_response: Optional response data to include
+            tool_response: Optional response data; only its presence is
+                recorded
+            include_tool_input: Keep ``tool_input`` in the metadata
 
         Returns:
             EvidenceAnchor for this tool execution
         """
+        metadata: dict[str, Any] = {
+            "tool_name": tool_name,
+            "has_response": tool_response is not None,
+        }
+        if include_tool_input:
+            metadata["tool_input"] = tool_input
         return cls(
             ref=f"tool:{tool_name}:{tool_use_id}",
             kind="tool_output",
             timestamp=datetime.now(UTC).isoformat(),
-            metadata={
-                "tool_name": tool_name,
-                "tool_input": tool_input,
-                "has_response": tool_response is not None,
-            },
+            metadata=metadata,
         )
 
     @classmethod
@@ -237,7 +250,7 @@ class EvidenceAnchor:
     @classmethod
     def from_command(
         cls,
-        command: str,
+        command: str | None,
         exit_code: int,
         tool_use_id: str | None = None,
     ) -> EvidenceAnchor:
@@ -245,7 +258,9 @@ class EvidenceAnchor:
         Create an evidence anchor for a command execution.
 
         Args:
-            command: The command that was run
+            command: The command that was run, kept in the metadata. Pass
+                None to record that a command ran without keeping its
+                text, which can hold credentials.
             exit_code: Exit code from the command
             tool_use_id: Optional tool use ID
 
@@ -253,14 +268,14 @@ class EvidenceAnchor:
             EvidenceAnchor for this command execution
         """
         ref_id = tool_use_id or datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        metadata: dict[str, Any] = {"exit_code": exit_code}
+        if command is not None:
+            metadata["command"] = command
         return cls(
             ref=f"command:{ref_id}",
             kind="command",
             timestamp=datetime.now(UTC).isoformat(),
-            metadata={
-                "command": command,
-                "exit_code": exit_code,
-            },
+            metadata=metadata,
         )
 
     @classmethod
@@ -327,7 +342,7 @@ class EvidenceStore:
     Example:
         store = EvidenceStore(max_anchors=1000)
 
-        # Add evidence from tool use
+        # Add evidence from tool use (the input is not kept unless asked for)
         anchor = EvidenceAnchor.from_tool_output("Read", "abc123", {"path": "/tmp/x"})
         store.add_anchor(anchor)
 

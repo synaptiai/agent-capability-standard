@@ -1,11 +1,13 @@
 # Claude Agent SDK Integration
 
-This guide explains how to integrate the Grounded Agency capability standard with the Claude Agent SDK, enabling SDK-based agents to operate with evidence-grounded decisions, checkpoint-before-mutation safety, and audit trails.
+This guide explains how to integrate the Grounded Agency capability standard with the Claude Agent SDK, enabling SDK-based agents to operate with evidence-grounded decisions, checkpoint-before-mutation safety, approval of the calls that require it, and audit trails.
+
+The adapter is a safety layer for tool calls that a model chooses freely, outside a workflow. It classifies each call as an ontology capability and acts on that capability's effective safety flags ([STANDARD-v1.1.0 §5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)): a call whose `requires_checkpoint` is true needs a checkpoint (refused with F501 otherwise), and a call whose `requires_approval` is true is put to the host's permission flow (F502).
 
 ## Quick Start
 
 ```python
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, PermissionResultDeny
 from grounded_agency import grounded_query, GroundedAgentAdapter, GroundedAgentConfig
 
 # 1. Create adapter with configuration
@@ -22,17 +24,28 @@ adapter.create_checkpoint(
     reason="Before refactoring"
 )
 
-# 3. Use grounded_query() — drop-in replacement for query()
+# 3. Decide the calls that require approval (mutate, send, execute).
+#    show_and_ask stands for your own prompt; context.decision_reason
+#    holds the adapter's reason, which begins "F502 APPROVAL_REQUIRED:".
+async def decide(tool_name, tool_input, context):
+    if await show_and_ask(tool_name, tool_input, context.decision_reason):
+        return PermissionResultAllow(updated_input=tool_input)
+    return PermissionResultDeny(message="Not approved")
+
+# 4. Use grounded_query(), a drop-in replacement for query()
 async for msg in grounded_query(
     "Refactor the authentication module",
+    options=ClaudeAgentOptions(can_use_tool=decide),
     adapter=adapter,
 ):
     print(msg)
 
-# 4. Check cost after completion
+# 5. Check cost after completion
 print(f"Total cost: ${adapter.cost_summary.total_usd:.4f}")
 print(f"Evidence: {adapter.get_evidence()}")
 ```
+
+Without a `can_use_tool` callback no one can approve a call, so every call that requires approval is denied. See [Approval](#approval).
 
 ### Using GroundedClient
 
@@ -44,7 +57,8 @@ from grounded_agency import GroundedClient, GroundedAgentAdapter, GroundedAgentC
 adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=True))
 adapter.create_checkpoint(["*"], "Before changes")
 
-async with GroundedClient(adapter) as client:
+options = ClaudeAgentOptions(can_use_tool=decide)  # see Quick Start
+async with GroundedClient(adapter, options=options) as client:
     await client.query("Refactor the authentication module")
     async for msg in client.receive_response():
         print(msg)
@@ -66,12 +80,14 @@ adapter.create_checkpoint(["src/*.py"], "Before refactoring")
 base_options = ClaudeAgentOptions(
     allowed_tools=["Read", "Write", "Edit", "Bash"],
     permission_mode="acceptEdits",
+    can_use_tool=decide,  # see Quick Start
 )
 options = adapter.wrap_options(base_options)
 
-# Tools in allowed_tools are approved without the adapter's permission
-# callback; the adapter's PreToolUse hook still applies the rate limit and
-# the checkpoint rule to every tool call.
+# The adapter's PreToolUse hook applies the rate limit, the checkpoint rule
+# and the approval rule to every tool call, including the tools listed in
+# allowed_tools. wrap_options() keeps your can_use_tool callback: the
+# adapter's own callback calls it after its checkpoint check.
 
 async with ClaudeSDKClient(options) as client:
     await client.query("Refactor the authentication module")
@@ -89,14 +105,14 @@ async with ClaudeSDKClient(options) as client:
 │  │CapabilityReg- │  │ToolCapability- │  │ Permission         │  │
 │  │istry          │  │Mapper          │  │ Callback           │  │
 │  │               │  │                │  │                    │  │
-│  │ Loads ontol-  │  │ Maps SDK tools │  │ Enforces           │  │
-│  │ ogy YAML      │  │ to capabilities│  │ checkpoints        │  │
+│  │ Loads ontol-  │  │ Maps SDK tools │  │ Checkpoint check,  │  │
+│  │ ogy YAML      │  │ to capabilities│  │ then host decides  │  │
 │  └───────────────┘  └────────────────┘  └────────────────────┘  │
 │                                                                  │
 │  ┌───────────────┐  ┌────────────────┐  ┌────────────────────┐  │
 │  │Checkpoint-    │  │EvidenceStore   │  │ ToolUse Hooks      │  │
 │  │Tracker        │  │                │  │                    │  │
-│  │               │  │ Evidence       │  │ Pre: reserve/block │  │
+│  │               │  │ Evidence       │  │ Pre: block or ask  │  │
 │  │ Checkpoint    │  │ anchors        │  │ Post: consume,audit│  │
 │  │ lifecycle,    │  │ storage        │  │ PostToolUseFailure:│  │
 │  │ reservations  │  │                │  │   release          │  │
@@ -129,46 +145,68 @@ async with ClaudeSDKClient(options) as client:
 
 ## Tool-to-Capability Mapping
 
-The adapter automatically maps SDK tools to Grounded Agency capabilities:
+The adapter's `ToolCapabilityMapper` maps each tool call to an ontology capability. The mapping's flags (`risk`, `mutation`, `requires_checkpoint`, `requires_approval`) are the capability's flags in `schemas/capability_ontology.yaml`; the mapper holds only the tool-to-capability table:
 
-| SDK Tool | Capability | Risk | Requires Checkpoint |
-|----------|-----------|------|---------------------|
-| Read | retrieve | low | No |
-| Glob | search | low | No |
-| Grep | search | low | No |
-| LS | observe | low | No |
-| WebFetch | retrieve | low | No |
-| WebSearch | search | low | No |
-| **Write** | **mutate** | **high** | **Yes** |
-| **Edit** | **mutate** | **high** | **Yes** |
-| **MultiEdit** | **mutate** | **high** | **Yes** |
-| Task | delegate | medium | No |
-| Skill | invoke | medium | No |
+| SDK Tool | Capability | Risk | Requires Checkpoint | Requires Approval |
+|----------|-----------|------|---------------------|-------------------|
+| Read | retrieve | low | No | No |
+| Glob | search | low | No | No |
+| Grep | search | low | No | No |
+| LS | observe | low | No | No |
+| WebFetch | retrieve | low | No | No |
+| WebSearch | search | low | No | No |
+| **Write** | **mutate** | **high** | **Yes** | **Yes** |
+| **Edit** | **mutate** | **high** | **Yes** | **Yes** |
+| **MultiEdit** | **mutate** | **high** | **Yes** | **Yes** |
+| **NotebookEdit** | **mutate** | **high** | **Yes** | **Yes** |
+| Task, Agent | delegate | medium | No | No |
+| Skill | invoke | medium | No | No |
+| AskUser, AskUserQuestion | inquire | low | No | No |
+| TodoRead, TaskList, TaskGet | recall | low | No | No |
+| TodoWrite, TaskCreate, TaskUpdate | persist | low | No | No |
+| ToolSearch | search | low | No | No |
+| BashOutput, TaskOutput, ListMcpResourcesTool | observe | low | No | No |
+| ReadMcpResourceTool | retrieve | low | No | No |
+| ExitPlanMode | inquire | low | No | No |
+| **any other tool** | **mutate (assumed)** | **high** | **Yes** | **Yes** |
+
+Claude Code tools that run a command or stop a process (`Monitor`, `KillShell`, `TaskStop`) are not in the table on purpose: they keep the strictest mapping below.
+
+### Unclassified Tools
+
+A tool that is neither in this table nor registered (see [MCP Tool Mapping](#mcp-tool-mapping)) has no classification. The mapper returns `UNCLASSIFIED_TOOL` for it, the strictest case: a high-risk mutation that requires a checkpoint and approval. The adapter uses the same constant when classification raises. Nothing tells the mapper that an unknown tool only reads, so it does not assume so.
+
+In strict mode this means that a built-in or MCP tool the table does not list is denied until a checkpoint exists, and is then put to the permission flow. To give such a tool its real classification, register it:
+
+```python
+adapter.mapper.register_mcp_tool("mcp__wiki__get_page", capability_id="retrieve")
+```
 
 ### Bash Command Classification
 
-Bash commands are analyzed to determine their capability:
+Bash commands are analyzed to determine their capability. A command counts as read-only only when it is on the mapper's allow-list; every other command is declared a high-risk mutation that needs a checkpoint, whatever its capability:
 
-| Pattern | Capability | Risk | Checkpoint |
-|---------|-----------|------|------------|
-| `ls`, `cat`, `head`, `pwd` | observe | low | No |
-| `git status`, `git log` | observe | low | No |
-| `rm`, `mv`, `chmod` | mutate | high | Yes |
-| `sed -i`, `git push` | mutate | high | Yes |
-| `curl -X POST`, `ssh` | send | high | Yes |
+| Pattern | Capability | Risk | Checkpoint | Approval |
+|---------|-----------|------|------------|----------|
+| `ls`, `cat`, `head`, `pwd` | observe | low | No | No |
+| `git status`, `git log` | observe | low | No | No |
+| `rm`, `mv`, `chmod` | mutate | high | Yes | Yes |
+| `sed -i`, `git push` | mutate | high | Yes | Yes |
+| `curl -X POST`, `ssh` | send | high | Yes | Yes |
+| `python -c`, `node -e` | execute | high | Yes | Yes |
+| any other command | mutate | high | Yes | Yes |
 
 ### MCP Tool Mapping
 
-MCP tools are dynamically registered via `create_grounded_mcp_server()`:
+MCP tools are dynamically registered via `create_grounded_mcp_server()`, which reads each tool's `metadata` and calls `ToolCapabilityMapper.register_mcp_tool()`:
 
 ```python
 from claude_agent_sdk import tool
 from grounded_agency import GroundedAgentAdapter, create_grounded_mcp_server
 
-@tool
-def deploy_service(service_name: str) -> str:
-    """Deploy a service to production."""
-    return f"Deployed {service_name}"
+@tool("deploy_service", "Deploy a service to production.", {"service_name": str})
+async def deploy_service(args):
+    return {"content": [{"type": "text", "text": f"Deployed {args['service_name']}"}]}
 
 deploy_service.metadata = {
     "capability_id": "execute",
@@ -182,8 +220,29 @@ server = create_grounded_mcp_server(
     tools=[deploy_service],
     adapter=adapter,
 )
-# deploy_service now requires checkpoint before use
+# mcp__deploy-tools__deploy_service now requires a checkpoint (declared:
+# risk high) and approval (ontology: execute)
 ```
+
+`metadata` may hold `capability_id` (default `execute`), `risk`, `mutation`, `requires_checkpoint`, `requires_approval` and `domain`. A registration follows the rules the Standard states for a workflow step:
+
+- **The capability must exist.** A `capability_id` the ontology does not define raises `ValueError` with `V101 UNKNOWN_CAPABILITY`, and nothing is registered. So does a `risk` that is not `low`, `medium` or `high`, or a flag that is not a boolean.
+- **Flags are effective flags** ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)): the stricter of the declaration and the ontology. Booleans are OR-ed and `risk` is the higher level. A flag the declaration omits is the ontology's; as before, a declared `risk` of `high` also makes `mutation` and `requires_checkpoint` true unless they are declared.
+- **A weaker declaration has no effect.** `capability_id="mutate"` with `risk="low"` is still high-risk and still needs a checkpoint. Each such flag is logged and kept in `adapter.mapper.warnings` as a W602 (`SAFETY_FLAG_DOWNGRADE`) diagnostic whose `location` holds `tool`, `capability` and `field`. The one exception is the Standard's: `mutation: false` on a capability the ontology marks `mutation_overridable` (`audit`).
+
+```python
+mapping = adapter.mapper.register_mcp_tool(
+    "mcp__db__insert", capability_id="mutate", risk="low"
+)
+assert mapping.risk == "high" and mapping.requires_checkpoint
+for w in adapter.mapper.warnings:
+    print(w.code_str, w.name, w.location, w.message)
+# W602 SAFETY_FLAG_DOWNGRADE {'tool': 'mcp__db__insert', 'capability': 'mutate',
+# 'field': 'risk'} ontology declares risk=high but the tool declares risk=low;
+# the ontology value applies
+```
+
+A tool with no `metadata` is registered as `execute`, which requires approval.
 
 ## Checkpoint Lifecycle
 
@@ -207,6 +266,12 @@ Checkpoints are the core safety mechanism. They must exist before mutations:
   │  this call      │──another in-─────▶│  BLOCKED        │
   │  (tool_use_id)  │  flight call      │                 │
   └────────┬────────┘                   └─────────────────┘
+           │
+           ▼
+  ┌─────────────────┐
+  │  Approval       │  not approved, or
+  │  (if required)  │──no one to ask────▶ BLOCKED, reservation released
+  └────────┬────────┘
            │
            ▼
   ┌─────────────────┐
@@ -269,10 +334,15 @@ assert not adapter.has_valid_checkpoint()
 
 The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and SubagentStop hooks:
 
-- **PreToolUse**: First applies the per-risk rate limit to every call, denying a call over the limit in strict and non-strict mode alike. Then, for tools whose capability requires a checkpoint (Write, Edit, Bash with destructive commands), reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). It runs for every tool call, including pre-approved ones that never reach `can_use_tool`. When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call with `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "..."}}`; non-strict mode logs a warning. For a pre-approved tool this hook is the only check that runs, so it does not let errors through: a tool the mapper cannot classify is treated as a high-risk mutation (rate-limited, needs a checkpoint), an error in the rate check denies the call in both modes, and any other error denies it in strict mode and is logged in non-strict mode.
+- **PreToolUse**: Runs for every tool call, including pre-approved ones that never reach `can_use_tool`, and applies three rules in this order:
+  1. *Rate limit.* A call over its risk level's limit is denied, in strict and non-strict mode alike.
+  2. *Checkpoint (F501).* For a call whose mapping requires a checkpoint (Write, Edit, Bash with destructive commands, an unclassified tool), the hook reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call with `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "F501 CHECKPOINT_REQUIRED: ..."}}`; non-strict mode logs a warning.
+  3. *Approval (F502).* With `approval="ask"` (the default), a call whose mapping requires approval and that the first two rules did not deny is answered with `"permissionDecision": "ask"` and a reason that begins `F502 APPROVAL_REQUIRED:`. See [Approval](#approval). A call whose mapping requires no approval, such as Read or a read-only Bash command, is not asked about. `strict_mode` does not switch this rule off.
+
+  For a pre-approved tool this hook is the only check that runs, so it does not let errors through: a tool the mapper does not know or cannot classify is treated as a high-risk mutation that requires approval (rate-limited, needs a checkpoint, asked about), an error in the rate check denies the call in both modes, and any other error denies it in strict mode and is logged in non-strict mode.
 - **PostToolUse**: Collects evidence anchors. After a successful mutation it consumes the checkpoint the call reserved; if the tool reported an error, or the checkpoint-gated tool does not mutate, it releases the reservation instead and the checkpoint stays valid.
 - **PostToolUseFailure**: Releases the reservation of a call that failed or was interrupted, so the checkpoint can cover a retry.
-- **Stop / SubagentStop**: Release a reservation still held by a call of the session (and agent) that just finished. That happens when another PreToolUse hook (yours, or one from a settings file) denies a call after the adapter reserved for it: the call never runs, so nothing else ends the reservation. Other sessions sharing the adapter, and background subagents still running, keep theirs.
+- **Stop / SubagentStop**: Release a reservation still held by a call of the session (and agent) that just finished. That happens when a call the adapter reserved for never runs and never reaches the adapter's permission callback: another PreToolUse hook (yours, or one from a settings file) denied it, or Claude Code denied the adapter's `"ask"` itself (in `dontAsk` mode, or through a permission prompt tool). Nothing else ends such a reservation. Other sessions sharing the adapter, and background subagents still running, keep theirs.
 
 A reservation that is never consumed or released lapses after `checkpoint_reservation_seconds` (default 600).
 
@@ -281,8 +351,10 @@ A reservation that is never consumed or released lapses after `checkpoint_reserv
 title: What happens to a checkpoint reservation
 ---
 flowchart TB
-  accDescr: PreToolUse applies the rate limit and reserves the checkpoint for the call; after a successful mutation PostToolUse consumes it, and after an error, no change, or a failed or interrupted call the reservation is released and the checkpoint stays valid.
-  pre["PreToolUse: rate limit, reserve the checkpoint for the tool_use_id"] --> run[Tool call]
+  accDescr: PreToolUse applies the rate limit and reserves the checkpoint for the call; a call that requires approval is then put to the host, and a refusal releases the reservation; after a successful mutation PostToolUse consumes the checkpoint, and after an error, no change, or a failed or interrupted call the reservation is released and the checkpoint stays valid.
+  pre["PreToolUse: rate limit, reserve the checkpoint for the tool_use_id"] --> host["If approval is required: ask, and the host's can_use_tool decides"]
+  host -->|"approved, or not required"| run[Tool call]
+  host -->|refused| refused["Denied; reservation released"]
   run -->|mutated| consume["PostToolUse: consume the checkpoint"]
   run -->|"error, no change, failure"| release["PostToolUse or PostToolUseFailure: release; the checkpoint stays valid"]
 ```
@@ -291,13 +363,71 @@ This provides defense-in-depth alongside the `can_use_tool` permission callback:
 
 ```python
 # Both enforcement layers are active:
-# 1. PreToolUse hook applies the rate limit and reserves the checkpoint
-#    before the tool runs
+# 1. PreToolUse hook applies the rate limit, reserves the checkpoint before
+#    the tool runs, and answers "ask" for a call that requires approval
 # 2. can_use_tool callback repeats the reservation for the same tool_use_id
-#    (idempotent)
+#    (idempotent), then calls the host's can_use_tool callback
 # 3. PostToolUse hook collects evidence and consumes (or releases) the reservation
 # 4. PostToolUseFailure hook releases the reservation of a failed or interrupted call
 ```
+
+### Refusal Reasons
+
+A hook's reason and a permission result's message are text, and they are the only channel to the model and to the host. So that a client can tell which rule refused a call without parsing prose, a reason for a rule the Standard has a code for opens with the diagnostic's code and name ([STANDARD-v1.1.0 §9.6](../../spec/STANDARD-v1.1.0.md#96-safety-errors)):
+
+| Rule | Decision | Reason begins |
+|------|----------|---------------|
+| No valid checkpoint, or it is reserved by another call | `deny` | `F501 CHECKPOINT_REQUIRED:` |
+| The call requires approval | `ask` | `F502 APPROVAL_REQUIRED:` |
+| The call requires approval and there is no `can_use_tool` callback | deny (permission callback) | `F502 APPROVAL_REQUIRED:` |
+| Rate limit; a failure of the hook itself | `deny` | no code: the Standard defines none for these |
+
+## Approval
+
+The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, and a registration can add it to any tool. [§5.14](../../spec/STANDARD-v1.1.0.md#514-approval) defines approval for a workflow step. For a tool call the adapter does not decide: it hands the call to the host's permission flow, once per call, after the checkpoint rule is satisfied.
+
+### What the Hook Returns
+
+```python
+{"hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason":
+        "F502 APPROVAL_REQUIRED: Write (capability 'mutate') requires approval. "
+        "It runs only if this call is approved.",
+}}
+```
+
+This rests on the hook contract of the Claude Agent SDK, checked against version 0.2.182 (`claude_agent_sdk.types.PreToolUseHookSpecificOutput`) and the Claude Code documentation:
+
+- `permissionDecision` is one of `"allow"`, `"deny"`, `"ask"` and `"defer"`. When several hooks answer, `deny` takes priority over `defer`, then `ask`, then `allow` ([Agent SDK hooks](https://code.claude.com/docs/en/agent-sdk/hooks)).
+- `"ask"` prompts for confirmation: a PreToolUse hook's output "can deny the tool call, force a prompt, or skip the prompt" ([Permissions](https://code.claude.com/docs/en/permissions)). In an SDK session the prompt is the `can_use_tool` callback, and `ToolPermissionContext.decision_reason` holds the hook's reason.
+- With no one to answer, the call is denied: "In a `-p` run with no host, these requests are denied either way", and the model reads the reason in the tool result ([Headless mode](https://code.claude.com/docs/en/headless), [Hooks reference](https://code.claude.com/docs/en/hooks)). In `dontAsk` mode Claude Code denies every call that would prompt, without calling the callback.
+- The documentation does not say whether `bypassPermissions` mode puts a hook's `"ask"` to the callback or approves the call, so this guide makes no claim that the approval rule holds in that mode.
+
+The tests in `tests/test_tool_call_approval.py` call the hook and the permission callback directly and check the SDK's type for `"ask"`. They do not start Claude Code, so what Claude Code does with an `"ask"` rests on the documentation cited above.
+
+### Who Decides
+
+| The options passed to `wrap_options()` have | A call that requires approval |
+|---------------------------------------------|-------------------------------|
+| a `can_use_tool` callback | The adapter's callback repeats the checkpoint check, then calls yours with the tool name, the input and the context, and returns your result. A result that is not an allow releases the call's checkpoint reservation. |
+| a `permission_prompt_tool_name` | The adapter installs no callback, because the SDK refuses the two together. Claude Code puts the hook's `"ask"` to your permission prompt tool. |
+| neither | Denied by the adapter's callback with `F502 APPROVAL_REQUIRED: ... no one can give it`. §5.14 treats an approval no one could decide as a refusal. |
+
+Your callback is also called for the calls Claude Code asks about on its own account, whether or not their capability requires approval. `wrap_options()` used to replace a `can_use_tool` callback on the base options; it now chains to it.
+
+To run without the approval rule, for example where an allow-list and a sandbox already bound what the agent can do:
+
+```python
+adapter = GroundedAgentAdapter(GroundedAgentConfig(approval="off"))
+```
+
+With `approval="off"` the hook answers nothing for a call that satisfies the checkpoint rule, and with no host callback the adapter's callback allows it: the behaviour before the approval rule existed.
+
+### What the Adapter Does Not Do
+
+The adapter obtains one decision per call from the host. It does not implement the rest of §5.14, which is written for workflow steps: it computes no digest of what was shown, counts no approvers, applies no expiry, and writes no action record. Whether the person saw the input that then ran depends on your callback; a callback that rewrites `updated_input` is responsible for what it rewrites to, since the adapter classified the input the model sent. A workflow that needs §5.14 in full runs on the [reference executor](../guides/RUNNING_WORKFLOWS.md).
 
 ## Structured Output
 
@@ -369,6 +499,18 @@ file:src/main.py               # File reference
 command:20240115143022         # Bash command execution
 mutation:config.yaml           # State mutation
 ```
+
+### What an Anchor Keeps
+
+A tool-output anchor's metadata holds the tool name and whether there was a response. A command anchor holds the exit code. A file anchor holds the path. An anchor for an unclassified tool is associated with no capability.
+
+The tool's input, and a Bash command's text, are not kept: an input can hold a credential (a token in a command or a header), and anchors are stored and exported (`EvidenceStore.to_list()`). To keep them, opt in:
+
+```python
+adapter = GroundedAgentAdapter(GroundedAgentConfig(evidence_include_tool_input=True))
+```
+
+The same switch exists where anchors are built directly: `EvidenceAnchor.from_tool_output(..., include_tool_input=True)`, `create_evidence_collector(store, mapper, include_tool_input=True)` and `DiscoveryPipeline(..., evidence_include_tool_input=True)`, which then keeps the task description. `EvidenceAnchor.from_command(None, exit_code)` records a command without its text. The adapter does not redact: with the switch on, inputs are stored as given, except that in a metadata object over 1 KB the largest values are replaced with `[truncated]`.
 
 ## Multi-Agent Coordination
 
@@ -456,7 +598,18 @@ class GroundedAgentConfig:
     # How long a tool call holds the checkpoint it reserved if it never
     # reports back (None: the tracker default, 600 seconds)
     checkpoint_reservation_seconds: float | None = None
+
+    # "ask": a call whose mapping requires approval is put to the host's
+    # permission flow (F502), and denied where there is none.
+    # "off": the adapter asks for no approval.
+    approval: Literal["ask", "off"] = "ask"
+
+    # Keep tool inputs, and Bash command text, in evidence anchors.
+    # Off by default: inputs can hold credentials.
+    evidence_include_tool_input: bool = False
 ```
+
+Any other value of `approval` raises `ValueError`.
 
 ## Using with Capability Skills
 
@@ -494,9 +647,9 @@ User: "Now update config with new settings"
           ↓
 Claude: Invokes Write tool
           ↓
-PreToolUse hook checks → Checkpoint exists → PASS
+PreToolUse hook checks → Checkpoint exists, reserved → ASK (F502)
           ↓
-Permission callback checks → Checkpoint valid → ALLOWED
+Permission callback checks → Checkpoint valid → your can_use_tool decides → ALLOWED
           ↓
 Evidence collector captures output
 ```
@@ -521,6 +674,7 @@ pytest tests/test_sdk_integration.py -v
 pytest tests/test_grounded_query.py -v
 pytest tests/test_structured_output.py -v
 pytest tests/test_pretooluse_hooks.py -v
+pytest tests/test_tool_call_approval.py -v
 pytest tests/test_mcp_integration.py -v
 
 # Run examples
@@ -536,9 +690,9 @@ python tools/validate_workflows.py
 
 ## Troubleshooting
 
-### "Capability requires checkpoint" Error
+### F501 CHECKPOINT_REQUIRED
 
-The adapter is blocking a mutation because no valid checkpoint exists.
+The adapter is blocking a call because its mapping requires a checkpoint and no valid one exists, or another in-flight call holds it. The reason names the tool and its capability: `F501 CHECKPOINT_REQUIRED: Write (capability 'mutate') requires checkpoint. ...`.
 
 ```python
 # Solution 1: Create checkpoint before mutation
@@ -547,6 +701,24 @@ adapter.create_checkpoint(["*"], "Before changes")
 # Solution 2: Use non-strict mode (not recommended)
 adapter = GroundedAgentAdapter(GroundedAgentConfig(strict_mode=False))
 ```
+
+If the reason says the tool `has no capability mapping`, the tool is unclassified and was given the strictest flags. Register it with its real capability (see [Unclassified Tools](#unclassified-tools)).
+
+### F502 APPROVAL_REQUIRED
+
+The call's mapping requires approval. If every such call is denied with `no one can give it`, the options passed to `wrap_options()`, `grounded_query()` or `GroundedClient` have no `can_use_tool` callback.
+
+```python
+# Solution 1: Pass a callback that decides (see Quick Start)
+options = ClaudeAgentOptions(can_use_tool=decide)
+
+# Solution 2: Switch the approval rule off
+adapter = GroundedAgentAdapter(GroundedAgentConfig(approval="off"))
+```
+
+### A Registered Tool Is Stricter Than Declared
+
+A declaration weaker than the ontology has no effect. `adapter.mapper.warnings` lists each one as W602.
 
 ### Checkpoint Expired
 
@@ -641,7 +813,51 @@ def create_grounded_mcp_server(
     tools: list,
     adapter: GroundedAgentAdapter,
 ) -> Any:
-    """Create MCP server with capability-aware tool mappings."""
+    """Create MCP server with capability-aware tool mappings.
+
+    Raises ValueError (V101 UNKNOWN_CAPABILITY) for a tool whose metadata
+    names a capability the ontology does not define; no server is created.
+    """
+```
+
+### ToolCapabilityMapper
+
+```python
+@dataclass(frozen=True)
+class ToolMapping:
+    capability_id: str
+    risk: str                  # "low", "medium" or "high"
+    mutation: bool
+    requires_checkpoint: bool
+    requires_approval: bool
+    domain: str | None = None
+
+UNCLASSIFIED_TOOL: ToolMapping  # mutate, high, every flag true
+
+class ToolCapabilityMapper:
+    # A CapabilityRegistry, a raw ontology dict, or None for the packaged ontology
+    def __init__(self, ontology: CapabilityRegistry | dict | None = None) -> None: ...
+
+    # Stores and returns the effective mapping. ValueError for an unknown
+    # capability (V101), a risk that is not a level, or a flag that is not a bool.
+    def register_mcp_tool(
+        self,
+        tool_name: str,
+        capability_id: str = "execute",
+        risk: str | None = None,
+        mutation: bool | None = None,
+        requires_checkpoint: bool | None = None,
+        requires_approval: bool | None = None,
+        domain: str | None = None,
+    ) -> ToolMapping: ...
+
+    # W602 diagnostics for declarations that had no effect
+    warnings: list[ValidationError]
+
+    # UNCLASSIFIED_TOOL for a tool that is neither built in nor registered
+    def map_tool(self, tool_name: str, tool_input: dict) -> ToolMapping: ...
+    def requires_checkpoint(self, tool_name: str, tool_input: dict) -> bool: ...
+    def requires_approval(self, tool_name: str, tool_input: dict) -> bool: ...
 ```
 
 ### CheckpointTracker

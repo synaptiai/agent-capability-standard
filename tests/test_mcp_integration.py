@@ -72,10 +72,12 @@ class TestDynamicToolRegistration:
 
     def test_register_overrides_default(self, mapper: ToolCapabilityMapper):
         """Test that registered tools override default mapping."""
-        # Without registration, unknown tool gets default
+        # Without registration, an unknown tool gets the strictest flags
         default = mapper.map_tool("mcp__server__tool", {})
-        assert default.capability_id == "observe"
-        assert default.risk == "medium"
+        assert default.capability_id == "mutate"
+        assert default.risk == "high"
+        assert default.requires_checkpoint is True
+        assert default.requires_approval is True
 
         # After registration, gets specific mapping
         mapper.register_mcp_tool(

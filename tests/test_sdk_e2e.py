@@ -47,12 +47,18 @@ def _pre_reason(result: dict[str, Any]) -> str:
 
 @pytest.fixture
 def adapter(tmp_path: Path) -> GroundedAgentAdapter:
-    """Create a GroundedAgentAdapter with test configuration."""
+    """Create a GroundedAgentAdapter with test configuration.
+
+    ``approval="off"``: these tests are about the checkpoint rule and the
+    rate limit. The approval rule is tested in
+    tests/test_tool_call_approval.py.
+    """
     return GroundedAgentAdapter(
         GroundedAgentConfig(
             checkpoint_dir=str(tmp_path / ".checkpoints"),
             strict_mode=True,
             rate_limit=RateLimitConfig(high_rpm=60, medium_rpm=120, low_rpm=300),
+            approval="off",
         )
     )
 
@@ -258,6 +264,7 @@ class TestPermissionCallback:
                     low_rpm=8,
                     burst_multiplier=1.0,
                 ),
+                approval="off",
             )
         )
         pre = test_adapter._make_pretooluse_safety_hook()

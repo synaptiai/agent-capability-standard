@@ -3,7 +3,7 @@ Capability-Aware MCP Server Factory
 
 Creates MCP servers where tools are automatically mapped to Grounded
 Agency capabilities, enabling safety enforcement (checkpoint requirements,
-risk levels, rate limits) for MCP-provided tools.
+approval, risk levels, rate limits) for MCP-provided tools.
 
 Example::
 
@@ -40,18 +40,27 @@ def create_grounded_mcp_server(
 
     Wraps ``claude_agent_sdk.create_sdk_mcp_server()`` and auto-registers
     each tool in the adapter's :class:`ToolCapabilityMapper` so that
-    safety enforcement (checkpoints, rate limits) applies to MCP tools.
+    safety enforcement (checkpoints, approval, rate limits) applies to MCP
+    tools.
 
     Each tool may optionally carry ``metadata`` with:
 
     - ``capability_id`` (str): The ontology capability this tool exercises
       (defaults to ``"execute"``).
     - ``risk`` (str): Risk level — ``"low"``, ``"medium"``, or ``"high"``
-      (defaults to ``"medium"``).
+      (defaults to the capability's).
     - ``mutation`` (bool): Whether the tool mutates state
-      (defaults to ``True`` for high-risk).
+      (defaults to the capability's, or ``True`` for a declared high risk).
     - ``requires_checkpoint`` (bool): Whether a checkpoint is needed
-      (defaults to ``True`` for high-risk).
+      (defaults to the capability's, or ``True`` for a declared high risk).
+    - ``requires_approval`` (bool): Whether a call needs approval
+      (defaults to the capability's).
+    - ``domain`` (str): The capability's domain parameter.
+
+    The registered flags are the stricter of the metadata's and the
+    ontology's (STANDARD v1.1 section 5.2.1); a weaker one has no effect
+    and is reported as W602 in ``adapter.mapper.warnings``. A tool with no
+    metadata is an ``execute`` tool, which requires approval.
 
     Args:
         name: MCP server name.
@@ -64,6 +73,9 @@ def create_grounded_mcp_server(
 
     Raises:
         ImportError: If ``claude_agent_sdk`` is not installed.
+        ValueError: If a tool's metadata names a capability the ontology
+            does not define (V101 UNKNOWN_CAPABILITY), or holds a risk or
+            flag of the wrong type. No server is created.
 
     Example::
 
@@ -94,29 +106,25 @@ def create_grounded_mcp_server(
             "Install with: pip install claude-agent-sdk"
         ) from exc
 
-    server = create_sdk_mcp_server(name=name, version=version, tools=tools)
-
-    # Register each tool's capability mapping in the adapter
+    # Register each tool's capability mapping in the adapter, before the
+    # server exists: a declaration the mapper refuses raises here.
     for t in tools:
         tool_name_for_mapping = f"mcp__{name}__{_get_tool_name(t)}"
         metadata = getattr(t, "metadata", None) or {}
 
-        adapter.mapper.register_mcp_tool(
+        mapping = adapter.mapper.register_mcp_tool(
             tool_name=tool_name_for_mapping,
             capability_id=metadata.get("capability_id", "execute"),
-            risk=metadata.get("risk", "medium"),
+            risk=metadata.get("risk"),
             mutation=metadata.get("mutation"),
             requires_checkpoint=metadata.get("requires_checkpoint"),
+            requires_approval=metadata.get("requires_approval"),
+            domain=metadata.get("domain"),
         )
 
-        logger.info(
-            "Registered MCP tool %s → capability=%s risk=%s",
-            tool_name_for_mapping,
-            metadata.get("capability_id", "execute"),
-            metadata.get("risk", "medium"),
-        )
+        logger.info("Registered MCP tool %s → %s", tool_name_for_mapping, mapping)
 
-    return server
+    return create_sdk_mcp_server(name=name, version=version, tools=tools)
 
 
 def _get_tool_name(tool: Any) -> str:

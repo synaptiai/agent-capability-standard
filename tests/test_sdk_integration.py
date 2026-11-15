@@ -66,12 +66,18 @@ def evidence_store() -> EvidenceStore:
 
 @pytest.fixture
 def adapter(ontology_path: str, tmp_path: Path) -> GroundedAgentAdapter:
-    """Create a fresh GroundedAgentAdapter with isolated checkpoint directory."""
+    """Create a fresh GroundedAgentAdapter with isolated checkpoint directory.
+
+    ``approval="off"``: these tests are about the checkpoint rule, so a call
+    that satisfies it is allowed outright. The approval rule is tested in
+    tests/test_tool_call_approval.py.
+    """
     return GroundedAgentAdapter(
         GroundedAgentConfig(
             ontology_path=ontology_path,
             strict_mode=True,
             checkpoint_dir=str(tmp_path / ".checkpoints"),
+            approval="off",
         )
     )
 
@@ -302,10 +308,14 @@ class TestToolCapabilityMapper:
         assert mapping.requires_checkpoint is True
 
     def test_map_unknown_tool(self, mapper: ToolCapabilityMapper):
-        """Test mapping unknown tool."""
+        """A tool the mapper does not know gets the strictest flags, not a
+        read's."""
         mapping = mapper.map_tool("UnknownTool", {})
-        assert mapping.capability_id == "observe"
-        assert mapping.risk == "medium"
+        assert mapping.capability_id == "mutate"
+        assert mapping.risk == "high"
+        assert mapping.mutation is True
+        assert mapping.requires_checkpoint is True
+        assert mapping.requires_approval is True
 
     def test_is_high_risk(self, mapper: ToolCapabilityMapper):
         """Test is_high_risk helper."""
@@ -697,6 +707,7 @@ class TestCheckpointReservation:
                 ontology_path=ontology_path,
                 strict_mode=False,
                 checkpoint_dir=str(tmp_path / ".checkpoints"),
+                approval="off",
             )
         )
         lenient.create_checkpoint(["*"], "Test")
