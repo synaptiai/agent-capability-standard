@@ -88,7 +88,6 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
   // The 1.2.0 Candidate's sections that are headings awaiting their text
   // (tasks/standard-1.2/designs/FOUNDATION.md D2). Each entry goes when its
   // section is written: test/runs.test.ts fails while one has text.
-  { page: CURRENT_STANDARD, anchor: '518-tool-calling-hosts', category: 'a', unwritten: true, run: 'Tool-Calling Hosts, §5.18 (awaiting its text)' },
   { page: CURRENT_STANDARD, anchor: '519-host-protocol', category: 'a', unwritten: true, run: 'Host Protocol, §5.19 (awaiting its text)' },
   { page: CURRENT_STANDARD, anchor: '520-grounding', category: 'a', unwritten: true, run: 'Grounding, §5.20 (awaiting its text)' },
   { page: CURRENT_STANDARD, anchor: '521-domain-profiles', category: 'a', unwritten: true, run: 'Domain Profiles, §5.21 (awaiting its text)' },

@@ -272,9 +272,8 @@ flowchart TB
   pre -->|yes| block["Blocked: F501"]
   pre -->|no| ask["Marker used up; ask: F502"]
   ask --> run[Tool runs]
-  run --> post["posttooluse_log_tool: audit trail"]
-  run --> take["posttooluse_take_checkpoint"]
-  stop["Turn ends"] --> end1["stop_end_checkpoints"]
+  run --> post["PostToolUse: posttooluse_log_tool logs the call; posttooluse_take_checkpoint writes the marker after git stash create"]
+  post --> stop["Stop, when the turn ends: stop_end_checkpoints removes the marker"]
 ```
 
 ### 5.1 Pre-Tool Use Hooks

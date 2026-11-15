@@ -7,8 +7,9 @@
 #
 # Every entry is taken from a reviewed row or from the integration document.
 # What they do not settle is left out. The entries are conventions of this
-# binding. They are not rules of Standard 1.1.0, which does not define a tool
-# binding.
+# binding. The tool binding record a tool's annotation carries is Standard
+# 1.2.0 §5.18.1; which Standard Agents construct is which capability is not a
+# rule of the Standard.
 #
 # Ruling types:
 #   is           a use of the construct is recorded as a use of the capability
@@ -22,8 +23,8 @@
 #                counterpart of the construct
 
 meta:
-  version: "1.0.0"
-  date: "2026-11-14"
+  version: "1.1.0"
+  date: "2026-11-15"
   description: "Conventions of the Standard Agents binding: which ontology capability each Standard Agents construct is, the anchor reference forms, the timestamp rule and the identity field map, each with the mapping rows it rests on"
   standard_agent_specification:
     version: "0.2.0"
@@ -32,12 +33,15 @@ meta:
     types_package:
       name: "@standardagents/spec"
       version: "0.45.10"
-  # The versions these conventions were checked against, like the analysis
-  # index's. A release does not bump them: a new version is checked against
-  # the rows first, then recorded here and in the index.
+  # The versions these conventions were checked against: the Standard and
+  # ontology the binding implements. The rows were made against 1.1.0 / 2.1.0
+  # (the analysis index says so) and are not redone at each version; a new
+  # version is checked against the rulings first, then recorded here. For
+  # 1.2.0 / 2.2.0: no flag, edge or required field changed, and §5.14 and
+  # §5.17 keep their numbers.
   agent_capability_standard:
-    standard: "1.1.0"
-    ontology: "2.1.0"
+    standard: "1.2.0"
+    ontology: "2.2.0"
   annotation:
     key: "acs"
     schema: "schemas/interop/standard_agents_annotation.schema.json"
@@ -56,7 +60,7 @@ capability_rulings:
     capabilities: [delegate]
     notes: >
       Classified by its reserved name. The runtime injects the tool, so it has
-      no definition to annotate and no `execute` to wrap. In ontology 2.1.0
+      no definition to annotate and no `execute` to wrap. In ontology 2.2.0
       `delegate` requires neither a checkpoint nor approval, so nothing is
       enforced by default. `effective.fresh_context` is attested true only
       for a child instance that the call created and that received nothing
@@ -145,7 +149,7 @@ capability_rulings:
       `uncertainty` and converts the score to that unit;
       tools-contracts#io-08 records as open whether ACS permits the
       derivation. `decide()` is inference by a
-      model. It is never an approval decision under Standard 1.1.0 §5.14, and
+      model. It is never an approval decision under Standard 1.2.0 §5.14, and
       its result never waives the approval of `execute`, `mutate` or `send`.
     rows:
       - tools-contracts#io-08
@@ -233,7 +237,7 @@ capability_rulings:
       A request to a thread endpoint is inbound traffic. The item it delivers
       is what `receive` returns, with the sender identity built from
       `auth.caller` as the `identity` section below describes. An endpoint
-      also carries an approval decision under Standard 1.1.0 §5.14 and
+      also carries an approval decision under Standard 1.2.0 §5.14 and
       delivers an event to a waiting run. Apart from the binding's own
       records, an endpoint makes no writes of its own.
     rows:
@@ -345,7 +349,7 @@ timestamps:
 # Identity
 #
 # How a Standard Agents party becomes an `agent_identity`
-# (schemas/agent_identity_schema.yaml, Standard 1.1.0 §5.17). A field is
+# (schemas/agent_identity_schema.yaml, Standard 1.2.0 §5.17). A field is
 # given as a `literal`, or as `from` a named source, with an optional
 # `prefix` for a principal.
 # ---------------------------------------------------------------------------
