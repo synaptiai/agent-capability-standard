@@ -40,6 +40,7 @@ python tools/validate_benchmark_deps.py
 python tools/sync_skill_schemas.py --check
 python scripts/gen_runtime_fixtures.py --check
 python scripts/gen_standard_agents_binding.py --check
+python scripts/gen_capability_json_schemas.py --check
 pytest tests/ -v --tb=short
 ```
 

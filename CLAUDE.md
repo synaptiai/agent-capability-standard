@@ -81,6 +81,14 @@ python scripts/gen_runtime_fixtures.py --check  # CI: fail on drift
 python scripts/gen_standard_agents_binding.py          # after changing the ontology
 python scripts/gen_standard_agents_binding.py --check  # CI: fail on drift
 ```
+It also writes the approval digest vectors, `tests/conformance/approval/digests.json`,
+from the reference executor; the binding's fixture is a copy.
+
+### Regenerate the strict JSON Schema rendering of the capability contracts
+```bash
+python scripts/gen_capability_json_schemas.py          # after changing a contract in the ontology
+python scripts/gen_capability_json_schemas.py --check  # CI: fail on drift
+```
 
 ### Check the Standard Agents binding (TypeScript, in `examples/standard_agents/`)
 ```bash
@@ -236,6 +244,8 @@ Every agent action must be:
 | `templates/SKILL_TEMPLATE_ENHANCED.md` | Template for creating new skills |
 | `_archive/` | Archived files from v1 (99-capability model) |
 | `schemas/interop/oasf_mapping.yaml` | OASF skill-code-to-capability mapping |
+| `schemas/interop/standard_agents_mapping.yaml` | Standard Agents binding conventions (capability rulings, anchor forms, identity map) |
+| `schemas/generated/capability_contracts.schema.json` | The capability contracts as strict JSON Schema 2020-12 (generated) |
 | `docs/guides/MODALITY_HANDLING.md` | Modality handling guide (vision, audio, multimodal) |
 | `docs/proposals/OASF_SAFETY_EXTENSIONS.md` | OASF safety extension proposal |
 
@@ -352,14 +362,17 @@ vendored schema copies in sync. `--check` fails on drift (CI); `--dry-run` lists
 what would change.
 
 Then regenerate the Standard Agents binding's ontology table and annotation
-schema, which list every capability:
+schema, and the strict JSON Schema rendering, which list every capability:
 ```bash
 python scripts/gen_standard_agents_binding.py
+python scripts/gen_capability_json_schemas.py
 ```
 
 ## Releasing
 
 When creating a new release, update the version in `.claude-plugin/plugin.json` to match the new tag before committing. This file does not auto-sync with git tags.
+
+A version change also updates the Versions table in `spec/ROADMAP.md` (and its sentence "Plugin X implements Standard Y"); a Standard or ontology version change also updates `meta.agent_capability_standard` in `schemas/interop/oasf_mapping.yaml` and the header of `docs/integrations/oasf_coverage.md`; a Python package version change updates both `pyproject.toml` and `__version__` in `grounded_agency/__init__.py`. `tests/test_version_lines.py` fails otherwise.
 
 Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push an annotated tag `vX.Y.Z` on `main`. `.github/workflows/release.yml` publishes the GitHub Release with that section as its notes (a `-suffix` tag is a pre-release). Where the tag cannot be pushed, run the workflow by hand on `main` with the tag as its input: it creates the annotated tag on `main`'s head, then publishes the Release. It refuses a tag that does not match `plugin.json` or has no section, or (run by hand) one that already exists; check first with:
 ```bash

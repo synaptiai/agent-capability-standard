@@ -826,100 +826,77 @@ child returns text and files but no structured data.
 ## Changes proposed to the Agent Capability Standard
 
 The mapping tested ACS against a host it was not designed around, and found
-gaps of its own.
-
-1. **Say how the rules apply to a stream of tool calls.** The Standard defines
-   its rules over the steps of a workflow. For a model-driven host it has one
-   sentence, "Validators, executors and safety layers MUST act on effective
-   flags", and does not define a safety layer.
-   This binding had to decide what a `requires` edge means over a thread's
-   history, how long a checkpoint stays valid, and what an approval for a tool
-   call shows. The Claude Agent SDK integration made its own choices. A
-   normative profile for tool-calling hosts, with language-neutral fixtures,
-   would make bindings agree. It should include the rule that one checkpoint
-   authorises one step, which today is stated in the
-   [guide](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces) and the
-   executor but not in the Standard, and settle a difference between the two
-   reference implementations: the executor uses a checkpoint up before the
-   step runs, the Python adapter after it succeeds.
-2. **Define a tool binding.** The word "tool" does not occur in the Standard.
-   How a concrete tool is classified exists only in the Python SDK and in this
-   binding's annotation schema. A binding record (capability, domain, declared
-   flags, ontology version) and its rules belong in the Standard: what an
-   unclassified tool is treated as, how a tool that performs several
-   capabilities is classified, and how a tool whose capability depends on its
-   arguments is.
-3. **Make every binding compute effective flags the same way.** The Python
-   `ToolCapabilityMapper.register_mcp_tool` accepts a declared risk below the
-   ontology's (`mutate` with `risk: "low"` needs no checkpoint) and an unknown
-   capability id. This binding refuses both when a tool is defined; §5.2.1
-   gives a step's weaker declaration no effect and reports it as W602, an
-   unknown capability is V101, and the Standard states neither rule for a
-   tool. The mapper also classifies a tool name it does not know as
-   `observe`, with no checkpoint requirement, so an unregistered tool passes
-   the adapter's checkpoint rule even in strict mode; the adapter's own
-   high-risk fallback applies only when classification raises an error.
-   `ToolMapping` carries no `requires_approval`, and neither the adapter nor
-   the plugin hook asks for the approval the ontology requires of `execute`,
-   `mutate` and `send`.
-4. **Publish the contracts as strict JSON Schema.** The ontology's schemas use
-   `type: any` and unions written `string|object`, which Draft 2020-12 tools
-   reject. A generated strict rendering would let a Zod-based host derive or
-   check tool schemas mechanically. `evidence_anchors` also needs an item
-   schema: the ontology says only `array`, the Python SDK's anchor kinds
-   (`tool_output`, `file`, `command`, `mutation`, `coordination`) differ from
-   the world state schema's (`file`, `url`, `tool`, `log`, `sensor`,
-   `human_note`), and the event schema has a seventh kind, `api`, that the
-   world state schema lacks.
-5. **Ship the core for JavaScript.** A WebAssembly build of the validator and
-   executor with a typed wrapper, taking parsed documents instead of file
-   paths, would let ACS workflows run inside a Standard Agents thread, on a
-   runtime whose definition code can load WebAssembly. What a tool-calling
-   binding needs is smaller and has no such dependency: the ontology table,
-   effective flags, canonical JSON and the digest, as a plain TypeScript
-   package generated from the ontology. This is the roadmap's
-   [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
-   item, with one data point: the crate already compiles for
-   `wasm32-unknown-unknown` unchanged. The host protocol (actions, responses,
-   the snapshot envelope) should become a published schema at the same time;
-   today it is described in a guide and defined in Rust types.
-6. **Say what crosses a delegation.** An invoked workflow "shares the caller's
-   checkpoints"; nothing equivalent is said of a delegate. On Standard Agents
-   a child's effects are outside its parent's checkpoints and rollback, and the
-   Standard should say so in §5.15. The step's flags are the other half: the
-   ontology gives `delegate` `risk: medium` and `mutation: false`, with no
-   checkpoint or approval flag, whatever the target agent may do, so a change
-   handed to a delegate needs no approval in the delegating workflow unless
-   its author raises the step's flags by hand. A manifest of the capabilities
-   an agent may exercise would let a validator derive a `delegate` step's
-   flags from its target.
-7. **Say what applying a domain profile changes, or mark profiles
-   informative.** The Standard mentions profiles twice, as a descriptive
-   workflow field (§5.1) and as a `trust_weights` override (§8.3), and neither
-   the validator, the executor, the Python SDK nor the hooks reads one.
-   `risk_thresholds.require_human` admits `critical`, a level §4.1 does not
-   define, and the keys of `checkpoint_policy` are free-form. A binding
-   therefore cannot state that it applies a profile. A normative section would
-   say how a run selects one, that a profile only tightens effective flags, as
-   a step's declaration does in §5.2.1, and what each field changes. Until
-   then the repository's documents present a profile as informative data
-   ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)).
-8. **Give secrets a rule.** Neither the Standard nor SECURITY.md states a rule
-   on secrets or redaction; the rules exist only as model instructions in
-   skill text. §6.2 requires an event's `raw` to be "Original unmodified
-   data", so a host that redacts before storing departs from the text, and one
-   that does not can write credentials into evidence and audit records: the
-   Python SDK stores a tool's input in anchor metadata, and the plugin's audit
-   hook logs skill arguments as given. The Standard should forbid secret
-   values in anchors, excerpts, diagnostics, audit records and persisted
-   memory, and say whether `raw` may hold a redacted payload as documented
-   loss under §3.2.
-
-These eight are the changes that matter most to a binding. The mapping
-produced 64 findings about ACS in all, seven of them rated as blocking for
-someone implementing the standard on a host it was not designed around; they
-are listed, with evidence, in
+gaps of its own: 64 findings, listed with their evidence and their status in
 [`findings_agent_capability_standard.yaml`](../research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml).
+What could be fixed without changing the Standard's text has been fixed in
+this repository. The rules a binding needs are proposed in
+[RFC-0005](../../spec/RFC-0005-tool-calling-hosts.md), a Draft for Standard
+1.2.0. The rest waits for the maintainers' decision, as
+[GOVERNANCE](../../spec/GOVERNANCE.md) requires for normative changes.
+
+### Fixed in this repository
+
+- **The Python SDK fails closed and follows the ontology.**
+  `ToolCapabilityMapper` used to classify a tool it did not know as `observe`
+  with no checkpoint, and `register_mcp_tool` accepted an unknown capability
+  and a declared risk below the ontology's. An unknown tool now gets the
+  strictest classification, an unknown capability is refused (V101), and a
+  weaker declaration has no effect and is reported (W602). The adapter asks
+  the host's permission flow for the approval the ontology requires of
+  `execute`, `mutate` and `send`, and its refusals open with the diagnostic
+  code. Evidence anchors no longer store a tool's input unless asked to.
+- **The plugin's hooks.** The audit hook logs every tool call, with a digest
+  of the input in place of the input. The skills' command hooks block with
+  the exit code Claude Code blocks on; they used one that blocked nothing.
+- **Data a binding can load.**
+  [`standard_agents_mapping.yaml`](../../schemas/interop/standard_agents_mapping.yaml)
+  holds this binding's conventions, and
+  [`capability_contracts.schema.json`](../../schemas/generated/capability_contracts.schema.json)
+  renders the 72 capability contracts as strict JSON Schema 2020-12.
+- **Vectors other implementations can test against**: the reference
+  executor's approval digests and the trust score arithmetic of §8, listed in
+  [CONFORMANCE.md](../../spec/CONFORMANCE.md).
+- **Documents that say what is enforced.** Domain profiles are presented as
+  informative data, which they are: no shipped component applies one. The
+  executor's trace kinds are listed and tested.
+
+### Proposed in RFC-0005
+
+1. **How the rules apply to a stream of tool calls.** The Standard defines
+   its rules over the steps of a workflow and does not define a safety layer.
+   The RFC says what a `requires` edge means over a sequence of calls, how
+   long a checkpoint stays valid and when it is used up, what an approval for
+   a call shows and binds, and how a refusal is reported. The reference
+   implementations disagreed on several of these.
+2. **A tool binding record.** The word "tool" does not occur in the
+   Standard. The RFC proposes one record (capability, domain, declared flags,
+   ontology version) and the rules for an unclassified tool, a tool that
+   performs several capabilities and a tool whose capability depends on its
+   arguments.
+3. **One evidence anchor item.** `evidence_anchors` has no item schema, and
+   the schemas and the Python SDK use three different vocabularies of anchor
+   kinds.
+
+### Still open
+
+- **A JavaScript build of the core.** A published TypeScript package of what
+  a tool-calling binding needs (the ontology table, effective flags,
+  canonical JSON, the digest) would replace the private copy this binding
+  keeps. A WebAssembly interface to the validator and executor would let ACS
+  workflows run inside a Standard Agents thread; the crate already compiles
+  for `wasm32-unknown-unknown` unchanged. This is the roadmap's
+  [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
+  item.
+- **What crosses a delegation.** A delegate's effects are outside its
+  delegator's checkpoints, and the ontology gives `delegate` no checkpoint or
+  approval flag whatever the target may do. The Standard should say so, and
+  an agent manifest would let a validator derive a `delegate` step's flags
+  from its target. Until then a workflow author raises the step's flags
+  ([How a delegate step maps to a host](#how-a-delegate-step-maps-to-a-host)).
+- **What applying a domain profile changes**, and **a rule that keeps
+  secrets out of evidence, audit records and stored data**, both normative.
+- **The host protocol as a published schema**, with a conformance class for
+  executors; today it is described in a guide and defined in Rust types.
 
 Standard Agents also does several things ACS could learn from: numbered,
 testable runtime rules for storage; `uses`, a declared and enforced list of

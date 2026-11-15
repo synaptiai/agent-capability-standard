@@ -32,7 +32,16 @@ findings:
     and hooks/hooks.json in full; grounded_agency/adapter.py lines 525-706 and 737-844; core/src/exec/machine.rs
     lines 644-677; docs/guides/RUNNING_WORKFLOWS.md lines 145-148; spec/SECURITY.md §2.2.7 (lines 165-172);
     spec/CONFORMANCE.md lines 71-82. Ran the greps listed under searched.
-  document_item: 1
+  status: proposed
+  resolution: 'RFC-0005 (Draft, target Standard 1.2.0) proposes the missing rules. Decision 1 defines
+    tool-calling host, tool binding and safety layer. Decision 3 fixes the scope in which history counts,
+    applies `requires` to a call sequence (F501, F503 for `rollback`, otherwise V102), keeps `soft_requires`
+    a warning and leaves `precedes` and `conflicts_with` unenforced, with reasons. Rule 4.6 makes a layer
+    fail closed. Decision 9 proposes a conformance class whose statement names the calls a layer covers,
+    a call-sequence fixture format and six sequences. Remaining: Nothing is normative until the maintainers
+    accept the Draft and a Standard version carries the text (§2, a section or profile, §10). The fixtures
+    under tests/conformance/calls/ and a runner per reference binding do not exist yet. Open questions
+    1 (scope lifetime, reporting a `precedes` violation) and 8 (placement) are undecided.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -70,7 +79,17 @@ findings:
     only), core/src/exec/machine.rs lines 644-677, 865-884 and 1375-1396, grounded_agency/state/checkpoint_tracker.py
     lines 40-64, 343-392 and 529-598, grounded_agency/adapter.py lines 660-704, the hook script, tests/conformance/runtime/checkpoint_per_mutation.json
     and skills/rollback/SKILL.md line 273.'
-  document_item: 1
+  status: proposed
+  resolution: 'RFC-0005 decision 4 (Draft) proposes: one checkpoint authorises one call that requires
+    one, with the same rule for steps (4.1); it is used up before the effect, as in the executor and the
+    TypeScript binding, with the case for the Python adapter''s after-success rule stated (4.2); validity
+    ends at an execution boundary and a maximum age the layer states, and a permission prompt answered
+    within the call is not a boundary (4.3); `rollback` needs a checkpoint to exist and uses none (4.4,
+    F503); a missing one is F501 (4.5). Remaining: Draft only. Open question 2: whether one checkpoint
+    per call is normative for every host, before the effect or after success, whether a layer may take
+    a checkpoint itself, and whether the Standard caps the maximum age. The executor, the TypeScript binding,
+    the Python adapter (after success, no boundary) and the plugin hook (marker never used up) keep their
+    behaviours; the RFC aligns no implementation.'
   concerns:
   - safety-enforcement
   - checkpoint-rollback-state
@@ -107,7 +126,25 @@ findings:
     lines 10-31; core/src/exec/machine.rs lines 688-780. Ran the executor on a `mutate` step with no `approval`
     field: it showed and hashed the step''s inputs wrapped in an array. The reference binding, examples/standard_agents/src/acs/grounded.ts,
     hashes `[{ action, capability, args }]`, a different object.'
-  document_item: 1
+  status: partly_fixed
+  resolution: 'The SDK adapter applies requires_approval to tool calls. With GroundedAgentConfig.approval="ask"
+    (default) its PreToolUse hook answers permissionDecision "ask", reason beginning "F502 APPROVAL_REQUIRED:",
+    once the checkpoint rule holds; the host''s can_use_tool callback, which wrap_options now chains instead
+    of replacing, decides. Without a callback the adapter''s callback denies with F502. Read-only classifications,
+    such as a read-only Bash command, are not asked about; approval="off" restores the earlier behaviour.
+    docs/integrations/claude_agent_sdk.md states what is and is not implemented. Remaining: The Standard
+    defines no approval object or digest for a call without a step (RFC). The adapter obtains one decision
+    per call and computes no §5.14 digest, approver count, expiry or action record. The plugin hook and
+    the send skill''s prompt hook are outside this package. RFC-0005 decision 5 (Draft) defines approval
+    for a call with no step: the shown and hashed value is `[{action, capability, args}]` with the §5.14
+    digest, checked before the checkpoint; one decision per call; an expiry the layer states; at least
+    `min_approvers` distinct approvers; any rejection rejects. A host permission prompt that shows the
+    tool and the inputs and decides that call alone satisfies the rule `in_session` with one approver,
+    bound to the call in place of the digest. Otherwise, and with no one to ask, F502. Remaining: Draft
+    only. Open question 3: `[{action, capability, args}]` or `[args]`; one decision per call or per digest
+    until expiry; which check comes first (the executor and the TypeScript binding check approval first,
+    the working-tree Python adapter the checkpoint). Standing mandates, `skip` and `defer_to_queue` are
+    not defined for a call.'
   concerns:
   - published-api-extension-points
   - safety-enforcement
@@ -145,6 +182,11 @@ findings:
     no checkpoint and no approval, validated with no diagnostic, and the first action of its run was `InvokeCapability`
     for `delegate`. Read schemas/capability_ontology.yaml lines 1443-1500, spec/STANDARD-v1.1.0.md lines
     268-284 and 850-861, and schemas/workflow_catalog.yaml lines 1674-1690.'
+  status: partly_fixed
+  resolution: 'docs/integrations/standard_agents.md, ''How a delegate step maps to a host'', gives the
+    workaround a workflow author has today: raise a `delegate` step''s flags when the target agent can
+    mutate. Remaining: deriving a delegate step''s flags from what its target may do needs an agent manifest
+    (ACS-29) and normative text, which needs an RFC.'
   concerns:
   - multi-agent
   related:
@@ -184,6 +226,17 @@ findings:
     set the thresholds low, medium, high and healthcare.yaml sets none, low, low; every `block_autonomous`
     and `require_grounding` entry is an ontology capability id. Read schemas/profiles/profile_schema.yaml
     lines 1-111 and tools/validate_profiles.py lines 120-258 (type and enum checks only).'
+  status: partly_fixed
+  resolution: 'docs/domains/README.md gained ''Status of Domain Profiles'': a profile is informative data,
+    no shipped component loads or selects one, and grounded_agency/trust.py applies a profile''s trust_weights
+    only when a caller passes them. A table names what the validator, the reference executor, the Python
+    adapter and the plugin hook enforce. Domain pages and profile header comments point there. The EU
+    AI Act, ISO 42001 and NIST AI RMF documents now present block_autonomous, thresholds, minimum_confidence,
+    anchor types and retention as declarations, and name what enforces each control. Remaining: The normative
+    part: a Standard section saying how a run selects a profile, a tighten-only merge rule, what each
+    field changes, key grammars tied to capability ids and Anchor.kind, and diagnostics. That needs an
+    RFC. README.md (root) and analysis/10-regulatory-compliance.md, outside this package''s scope, still
+    present block_autonomous as enforced.'
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
@@ -222,7 +275,16 @@ findings:
     a catalog that binds `${r_out.evidence_anchors[0]}` in strict mode: B204. Read examples/standard_agents/src/example/settings.ts,
     where the reference binding returns `{ ref, kind: ''file'', metadata: { sha256 } }`. The word ''anchor''
     occurs in spec/STANDARD-v1.1.0.md at lines 58, 65, 1126 and 1138 only.'
-  document_item: 4
+  status: proposed
+  resolution: 'RFC-0005 decision 8 (Draft) lists the three `kind` vocabularies as they stand in schemas/event_schema.yaml,
+    schemas/world_state_schema.yaml and the Python SDK (a free string; the five values its code writes),
+    and proposes one `EvidenceAnchor` from the event schema''s `Anchor`, the event schema''s seven kinds
+    for both schemas and the SDK, an `x-` prefix for a host''s own kinds, an opaque `ref`, an optional
+    `sha256:` digest, and `items` on the capability outputs only once every repository catalog validates
+    with it in strict mode. Remaining: Draft only: no schema, ontology or SDK file changes, since the
+    ontology and the canonical schemas change only by an accepted RFC. Open question 5: whether an item
+    may be a bare string, whether an empty list satisfies §3.1, how the SDK''s five kinds map to the seven.
+    What `required_anchor_types` means stays with ACS-05.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -263,7 +325,14 @@ findings:
     of `ToolMapping` are capability_id, risk, mutation and requires_checkpoint. Read grounded_agency/capabilities/mapper.py
     in full (`_ontology` is assigned at line 301 and not read again) and grounded_agency/adapter.py lines
     192-200 and 579-641.'
-  document_item: 3
+  status: fixed
+  resolution: 'grounded_agency/capabilities/mapper.py: register_mcp_tool resolves capability_id against
+    the ontology and raises ValueError naming V101 UNKNOWN_CAPABILITY for an unknown id. Flags are the
+    stricter of ontology and declaration (booleans OR-ed, risk the higher level); a weaker declaration
+    has no effect and is logged and kept in mapper.warnings as W602. ToolMapping is frozen and gains requires_approval
+    and domain; static mappings take every flag from the ontology. An unknown tool maps to UNCLASSIFIED_TOOL
+    (mutate, high, checkpoint and approval), the one constant the adapter also uses. Remaining: Nothing
+    for the SDK. The binding profile that states this default belongs to the tool-call RFC.'
   concerns:
   - tools-contracts
   - safety-enforcement
@@ -295,6 +364,23 @@ findings:
     569-641, hooks/pretooluse_require_checkpoint.sh lines 31-34, grounded_agency/errors.py lines 1-90
     and the published types at dist/index.d.ts lines 211-236. The reference binding, examples/standard_agents/src/acs/grounded.ts,
     returns the §9.8 object with `location: { tool, capability }`.'
+  status: partly_fixed
+  resolution: 'Hook part: the reason that hooks/pretooluse_require_checkpoint.sh writes to stderr when
+    it blocks a call (exit 2) now opens with `F501 CHECKPOINT_REQUIRED:`. Tests in tests/test_hooks_unit.py
+    and tests/test_pretooluse_hooks.py assert this prefix. hooks/README.md and SECURITY.md §5.1 state
+    it. Remaining: Not done in this package: a §9.8 convention for reporting tool-call denials (needs
+    an RFC), and the Python adapter''s deny reason. The SDK adapter''s refusal reasons open with the diagnostic
+    code and name: "F501 CHECKPOINT_REQUIRED:" for a missing or reserved checkpoint (PreToolUse hook and
+    permission callback) and "F502 APPROVAL_REQUIRED:" for an approval request or for a refusal when no
+    one can approve. Each reason names the tool and its capability. The mapper''s W602 reports carry location
+    {tool, capability, field}. Rate-limit and internal-failure reasons carry no code, since the Standard
+    defines none. Remaining: §9.8 still states no convention for a tool-call denial (RFC). The adapter
+    returns text, not a §9.8 object. The plugin shell hook is another package. RFC-0005 decision 6 (Draft)
+    proposes that a tool-call refusal is the §9.8 diagnostic whose `location` holds `tool` and `capability`
+    and no `workflow` or `step`, and that on a text-only channel the text opens with the code and name,
+    as in `F501 CHECKPOINT_REQUIRED: ...`. §9.8 is unchanged and no code is added. Remaining: Draft only,
+    so the convention is not normative. The adapter''s deny reason and the hook''s message are changed
+    by other work packages, not by this file.'
   concerns:
   - safety-enforcement
   related:
@@ -327,6 +413,9 @@ findings:
     field: ''capability''}, {workflow, step: 2, capability, field: ''requires_aproval''} and {workflow,
     step: 2, capability, field: ''gates[0].when'', column: 1}. Read core/src/validate/mod.rs lines 495-515
     and core/src/diag.rs lines 110-132.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - packaging-conformance-governance
   related:
@@ -359,6 +448,14 @@ findings:
     step''s inputs in a one-element array, and expires_at None. Read core/src/exec/machine.rs lines 716-762
     and the script of tests/conformance/runtime/checkpoint_per_mutation.json, whose first RequestApproval
     expectation holds `kind`, `step`, `mode` and `shown`.'
+  status: partly_fixed
+  resolution: 'scripts/gen_runtime_fixtures.py: both approval requests of the runtime fixture checkpoint_per_mutation
+    (two `mutate` steps with no `approval` field) now expect approver `{kind: human}`, mode `in_session`,
+    the step''s resolved inputs in an array and `expires_at: null`. The regenerated fixture passes `--check`,
+    `cargo test --test runtime` and tests/test_runner.py. Fixture matching is by subset, so tests/test_approval_vectors.py
+    also checks that the approver has no other member. Executor behaviour is unchanged. Remaining: STANDARD
+    §5.14 still does not state what is asked for a step whose effective `requires_approval` is true and
+    that declares no `approval` field. That is normative text and needs an RFC; the fixture is informative.'
   concerns:
   - approval-human
   related:
@@ -395,6 +492,18 @@ findings:
     (ten vectors of `shown` and `digest`) and its generator, scripts/gen_standard_agents_binding.py lines
     174-300, which runs the reference executor; .github/workflows/ci.yml lines 92-93 check that the file
     is current.
+  status: partly_fixed
+  resolution: 'tests/conformance/approval/digests.json holds 16 approval requests of the reference executor,
+    written by scripts/gen_standard_agents_binding.py (CI runs it with `--check`): shown values, RFC 8785
+    canonical JSON and lowercase hexadecimal SHA-256, covering member order, nesting, number forms, non-ASCII
+    text, an empty list, a step without `shows`, a step without `approval` and a re-ask after a recheck.
+    tests/test_approval_vectors.py replays each on the executor and recomputes text and digest independently.
+    The binding''s fixture is a byte copy. spec/CONFORMANCE.md lists the vectors as informative and names
+    what the Standard does not state. Remaining: STANDARD §5.14 does not state the digest input (the array
+    of resolved `shows` values, the default when `shows` is absent, the object appended on a re-ask) or
+    the lowercase hexadecimal form, and §10.3 does not cite the vectors; both are normative text and need
+    an RFC. §5.14 bounds shown integers at ±2^53 while RFC 7493 §2.2 gives ±(2^53 - 1) as the exact range;
+    the `numbers` vector holds 2^53.'
   concerns:
   - approval-human
   related:
@@ -428,6 +537,9 @@ findings:
     lines 373-412, core/src/exec/machine.rs lines 742-780 and 983-1030, core/src/exec/mod.rs lines 202-229
     and Standard Agent Specification endpoints.md lines 98-105. The record also proposes that `approval.approver`
     may bind `sender_check` and `accept_trust_classes`.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - approval-human
 - id: ACS-13
@@ -460,6 +572,9 @@ findings:
   verified: Ran the greps listed under searched; read spec/STANDARD-v1.1.0.md lines 844-902, the `defer`
     and `queue` passages of spec/RFC-0003-orchestration-extensions.md (lines 236-311) and of both guides,
     grounded_agency/_core.pyi lines 40-68, and core/src/exec/machine.rs lines 783-862 and 967-981.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - approval-human
 - id: ACS-14
@@ -492,6 +607,9 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md lines 562-595, docs/guides/ORCHESTRATION_EXTENSIONS.md lines
     57-122 and the function list of core/src/cron.rs; read grounded_agency/workflows/runner.py lines 235-269,
     where `start` passes its `attendance` argument, default `attended`, to the core.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - workflow-execution
 - id: ACS-15
@@ -527,6 +645,9 @@ findings:
     W615) with `join` set to `all_complete`, `any_complete` and `no-such-join-value`; run with `any_complete`,
     the executor issued `InvokeCapability` for steps 0, 1 and 2 in order, one at a time, and completed.
     Read spec/STANDARD-v1.1.0.md lines 153-172, 250-260, 398-406, 778-802.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - workflow-execution
   - multi-agent
@@ -562,6 +683,9 @@ findings:
     `conflicts_with` edges of schemas/capability_ontology.yaml (rollback and persist, mutate and rollback,
     each in both directions). Probe parallel.py shows the executor issuing the members of a group one
     at a time.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - safety-enforcement
 - id: ACS-17
@@ -593,6 +717,9 @@ findings:
     [claude, gpt]`): as scripted the run completed; with the first letter of each attested `model_family`
     capitalised it failed F504, "no counted verdict from model family claude, gpt". Read core/src/exec/quorum.rs
     lines 88-125 and 240-250.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - models-context-memory-security
 - id: ACS-18
@@ -626,7 +753,9 @@ findings:
   verified: 'Read spec/STANDARD-v1.1.0.md lines 84-93, 678-683, 786-790 and 904-940. Listed by script
     every ontology edge that touches `delegate`: decompose enables delegate, delegate enables synchronize,
     delegate specializes invoke; none from `checkpoint`.'
-  document_item: 6
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - multi-agent
   related:
@@ -661,6 +790,9 @@ findings:
   verified: 'Read the cited lines. Ran a `send` step with `retry: {max: 1}` on the reference executor,
     the host answering R401 and then an output: the host received two `InvokeCapability` actions with
     identical `inputs` (`attempt` 1 and 2) and one approval request, and the run completed.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - checkpoint-rollback-state
   related:
@@ -697,6 +829,9 @@ findings:
     `recorded: false` on the reference executor: the run completed. Read skills/audit/SKILL.md line 95
     and SA hooks.md line 5 (a hook''s failures are non-fatal) and lines 430-442 (`tool_call_done` fires
     for failed calls too).'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - evidence-audit-observability
   related:
@@ -734,6 +869,9 @@ findings:
   verified: 'Read the cited lines. Listed every capability output property whose name contains ''infer''
     or ''method'' by script: none. Ran the reference executor with empty `evidence_anchors` on every step:
     no diagnostic. Read schemas/profiles/profile_schema.yaml lines 76-80 (`require_grounding`).'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - evidence-audit-observability
 - id: ACS-22
@@ -763,6 +901,9 @@ findings:
     for a delegation; without the attestation the claim counts as inferred, not failed.'
   verified: 'Read the cited lines of the Standard and of the two SA pages. Listed every line of spec/STANDARD-v1.1.0.md
     that contains ''anchor'' (58, 65, 1126, 1138): none relates an anchor to what a step read.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - models-context-memory-security
 - id: ACS-23
@@ -800,6 +941,20 @@ findings:
     and 1128-1140, spec/SECURITY.md lines 78-90 and 398-404, schemas/event_schema.yaml lines 28-36 and
     146-149, and skills/perspective-validation/SKILL.md line 149, skills/audit/SKILL.md lines 92 and 314,
     skills/persist/SKILL.md lines 362-363.'
+  status: partly_fixed
+  resolution: 'Plugin part: the audit hook no longer writes skill arguments or any tool input. A SHA-256
+    digest of the input as compact JSON with sorted keys (jq -cS) stands in for it, or `unavailable` when
+    the digest cannot be computed. The skills'' own log hooks under .audit/ likewise write a digest in
+    place of commands, file paths and search patterns. Tests check that a secret in the input, the response
+    or the error text never reaches either log. Remaining: The normative rule on secrets in evidence,
+    audit records and stored data needs an RFC. The SDK''s EvidenceAnchor.from_tool_output still stores
+    tool_input in anchor metadata. Both are outside this package. EvidenceAnchor.from_tool_output keeps
+    tool_input in metadata only with include_tool_input=True. The evidence collector also leaves out a
+    Bash command''s text unless asked (from_command accepts None). GroundedAgentConfig.evidence_include_tool_input,
+    default False, reaches the collector and DiscoveryPipeline, whose anchor no longer keeps the task
+    description by default. With the switch on, inputs are stored unredacted. Remaining: A normative rule
+    on secrets in evidence, excerpts, audit records and persisted memory (Standard, SECURITY.md) needs
+    an RFC. The plugin audit hook is another package.'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -838,6 +993,9 @@ findings:
     In schemas/interop/oasf_mapping.yaml 27 distinct `domain_hint` values are dotted. Read core/src/validate/mod.rs
     lines 390-399, core/src/exec/machine.rs lines 1296-1310 and grounded_agency/workflows/tracer.py lines
     210-222.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - tools-contracts
 - id: ACS-25
@@ -873,6 +1031,16 @@ findings:
     lines 16-22, docs/integrations/oasf_coverage.md lines 3-5, spec/STANDARD-v1.1.0.md lines 1435-1516,
     site/src/data/versions.ts lines 10-24 and site/src/lib/api.ts lines 44-54 (the data API envelope carries
     standard, ontology and plugin).
+  status: partly_fixed
+  resolution: '`spec/ROADMAP.md` has a Versions table: Standard 1.1.0, ontology 2.1.0, plugin 2.0.0, Python
+    package 0.1.0, each with its declaring file. `tests/test_version_lines.py` compares the table with
+    those files. Review made the check of the introduction''s ''Plugin X implements Standard Y'' sentence
+    fail when the sentence is missing, and added a check that `grounded_agency.__version__` equals the
+    version in `pyproject.toml`. `schemas/interop/oasf_mapping.yaml` names `agent_capability_standard.standard`
+    and `.ontology` in place of `grounded_agency_version`; `docs/integrations/oasf_coverage.md` states
+    the same two versions and is compared with the mapping file. Remaining: No text says how the ontology
+    is versioned relative to the Standard, or what a classification made elsewhere cites. That is a rule
+    for STANDARD section 11 and needs an RFC; this package was limited to a table in ROADMAP.md.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-26
@@ -909,6 +1077,9 @@ findings:
     `restored` occurs in core/src only in comments about snapshots. The base `Host.rollback` in grounded_agency/workflows/runner.py
     (lines 93-96) raises `NotImplementedError("no rollback")`, and grounded_agency/adapter.py (lines 306,
     403) leaves file capture to the Claude Agent SDK.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - checkpoint-rollback-state
   related:
@@ -945,6 +1116,9 @@ findings:
     with tools/validate_workflows.py --strict: no diagnostic for the value. Ran it on the reference executor:
     the host received the string unchanged. The first validator run wrote the tool''s default output file,
     the git-ignored tools/validator_suggestions.json; later runs used --suggestions-out.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - checkpoint-rollback-state
   - models-context-memory-security
@@ -981,7 +1155,17 @@ findings:
     ''any''}` and `{type: ''string|object''}` throw ''Unsupported type'', and `{}` yields ZodAny. Read
     core/src/types.rs lines 158-184 and core/src/schema.rs lines 244-258. skills/*/schemas/ holds 36 generated
     output schemas and no input schema.'
-  document_item: 4
+  status: partly_fixed
+  resolution: 'scripts/gen_capability_json_schemas.py renders the ontology''s 72 input and output schemas
+    as one JSON Schema Draft 2020-12 document, schemas/generated/capability_contracts.schema.json (`$defs`:
+    `<capability>.input`, `<capability>.output`); CI runs it with `--check`. A union `a|b` becomes a type
+    list (6 slots); `any` becomes a schema with no `type` and `"x-acs-type": "any"` (26 slots). tests/test_capability_json_schemas.py
+    checks the metaschema, agreement with the ontology and identical reference-validator reports on every
+    workflow fixture and shipped catalog. docs/GLOSSARY.md describes the rendering. The ontology is unchanged.
+    Remaining: STANDARD v1.1.0 §4.1 still calls the contracts ''JSON Schema'' and does not define `any`
+    or `a|b`; defining them (and adopting or renaming `x-acs-type`) is normative and needs an RFC. The
+    36 generated skills/*/schemas/output_schema.yaml files keep the ontology''s spelling, and `evidence_anchors`
+    has no item schema.'
   concerns:
   - tools-contracts
   - models-context-memory-security
@@ -1015,6 +1199,9 @@ findings:
     definitions.'
   verified: Read schemas/capability_ontology.yaml lines 1443-1500, grounded_agency/coordination/registry.py
     lines 1-75 and grounded_agency/coordination/delegation.py lines 193-250; listed schemas/ and schemas/interop/.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - multi-agent
 - id: ACS-30
@@ -1046,6 +1233,9 @@ findings:
     record and accepted an arbitrary object as `event`; a run with an approved `send` produced one `ActionRecord`.
     Trace events had the keys `seq`, `at`, `kind`, `frame`, `step`, `detail`. §10.3 (lines 1427-1431)
     calls the runtime fixtures, which include the trace, informative.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - evidence-audit-observability
   related:
@@ -1085,6 +1275,9 @@ findings:
     and 637-644, and machine.rs lines 184-211, 240-250 and 2113-2170. Replayed the 175 runtime fixtures
     with a snapshot and restore before every scripted step (probe measure.py): the restored run returned
     the identical pending action, id included, at 968 of 968 points.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - workflow-execution
   related:
@@ -1120,6 +1313,9 @@ findings:
   verified: 'Read core/src/exec/mod.rs lines 82-89, 100-238 and 638-660 and core/src/exec/machine.rs lines
     1923-1968. Listed the operations of `Run` in core/src/exec/mod.rs and grounded_agency/_core.pyi: start,
     restore, next, submit, tick, finished, trace, action_records, snapshot.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - workflow-execution
   related:
@@ -1155,6 +1351,10 @@ findings:
     final snapshot state 1,269 to 40,895 bytes, median 3,343; the trace is 43% of all bytes (median 39%
     per fixture). Read core/src/exec/mod.rs lines 414-420 and 494-517. Grepped core/src/exec for uses
     of `st.trace`: `len()` for `seq` and `push` only (machine.rs lines 169, 176).'
+  status: open
+  resolution: 'Not changed in this round. Needs implementation work, not new normative text: documenting
+    the snapshot size model, and letting a host move the trace out of the run state, in the reference
+    core.'
   concerns:
   - workflow-execution
 - id: ACS-34
@@ -1187,6 +1387,9 @@ findings:
     2113-2170. Probe boundary.py restored a snapshot at the first deadline-bearing action of each kind
     and ticked at the deadline and one millisecond later: `InvokeCapability`, `AwaitEvent` and `RequestApproval`
     were unchanged at the deadline and changed after it; `Sleep` changed at `until`.'
+  status: open
+  resolution: 'Not changed in this round. Needs implementation work, not new normative text: a `Run.wake_at()`
+    call in the reference core and an event-driven host recipe in the guide.'
   concerns:
   - workflow-execution
   related:
@@ -1222,6 +1425,9 @@ findings:
     the snapshot state holds that identity; `Run.restore` rejected an `actor_identity` argument with TypeError;
     the restored run completed and both of its action records carry `agent-a`. Read core/src/exec/mod.rs
     lines 494-517 and 684-700.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - multi-agent
 - id: ACS-36
@@ -1258,6 +1464,14 @@ findings:
     and send, with `exit 1` at skills/persist/SKILL.md lines 42 and 47, skills/rollback/SKILL.md line
     46 and skills/send/SKILL.md line 38. Read hooks/pretooluse_require_checkpoint.sh lines 1-34 (its `block`
     function exits 2) and spec/SECURITY.md lines 270-299.'
+  status: partly_fixed
+  resolution: 'The command hooks of the persist, rollback and send skills read the tool call from stdin
+    with jq and block with exit 2, the reason on stderr; a call they cannot read is blocked. The {{tool_input...}}
+    text, which Claude Code never substitutes, was removed from all six skills'' hooks. The SECURITY.md
+    §5.3 example now exits 2 with the reason on stderr. A new §5.4 table lists which checks code enforces
+    and which a model judges. tests/test_skill_hooks.py runs each frontmatter command under sh and bash.
+    Remaining: The proposal to state each of the six checks as a host-neutral requirement of its capability
+    changes the Standard. It needs an RFC and was not done.'
   concerns:
   - safety-enforcement
   - models-context-memory-security
@@ -1296,7 +1510,9 @@ findings:
     in full, schemas/world_state_schema.yaml lines 360-415 (the `decision` enum holds `expired`, which
     no host response carries), spec/CONFORMANCE.md lines 1-82, spec/RFC-0002-agent-reliability-profile.md
     line 207 and Standard Agent Specification runtime.md §16 (lines 382-395).
-  document_item: 5
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - published-api-extension-points
   - approval-human
@@ -1341,7 +1557,17 @@ findings:
     Specification tools.md lines 142-146. Validated the instance {capability: mutate, layer: PERCEIVE,
     risk: low, mutation, requires_checkpoint and requires_approval false} against the annotation schema
     with the jsonschema package: accepted.'
-  document_item: 2
+  status: proposed
+  resolution: 'RFC-0005 decision 2 (Draft) proposes one host-neutral binding record under schemas/interop/:
+    `tool`, `capability`, optional `domain`, declared `flags`, `additional_capabilities`, `invokes`, `ontology`.
+    An unknown capability is V101; effective flags are the stricter of declaration and ontology, a weaker
+    declaration is W602 (except `mutation: false` on a `mutation_overridable` capability); an unbound
+    tool is the strictest case; the enforcing code is authoritative and copies such as `layer` are ignored.
+    The Python `metadata` and the `acs` annotation become carriers; neither is an instance today. Remaining:
+    Draft only: the schema file (proposed name `tool_binding.schema.json`) is not written and the annotation
+    schema is unchanged. Open question 4: strictest case, `observe` at medium risk or refusal for an unbound
+    tool, and whether a definition-time report needs a code. The SDK still gives an MCP tool without metadata
+    `execute`.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -1381,7 +1607,16 @@ findings:
     the ontology with PyYAML and compared the flags of `mutate`, `send` and `persist`. The cited Standard
     Agents example, `close_as_duplicate`, posts a comment and closes an issue in one call (the record
     describes it as labelling and commenting).'
-  document_item: 2
+  status: proposed
+  resolution: 'RFC-0005 rules 2.4 and 2.5 (Draft) propose: a tool that performs several capabilities names
+    them in `additional_capabilities` and takes the strictest flags across them, flag by flag, with the
+    `requires` edges of each; a per-call classifier narrows only for input it recognises, and the declared
+    worst case applies otherwise or when it fails. The classification of remote writes, writes to the
+    host''s own store, messages to a delegate and control-only tools is put to the maintainers as open
+    question 6 (ACS-Q07). Remaining: Draft only. The RFC gives no control-only marker and no decision
+    table for `mutate` versus `send`, `persist` versus `mutate` or `delegate` versus `send`; choosing
+    needs normative text (open question 6). Whether a classifier may return flags weaker than its tool''s
+    declared worst case is open question 7 (ACS-Q08).'
   concerns:
   - tools-contracts
   related:
@@ -1413,6 +1648,9 @@ findings:
     and let the Python store accept a persistent backend.
   verified: Read the cited lines of the Python SDK, the runner and the reference binding, and SA runtime.md
     lines 344-362.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - evidence-audit-observability
 - id: ACS-41
@@ -1447,6 +1685,13 @@ findings:
     A script over schemas/capability_ontology.yaml found `evidence_anchors` required by all 36 output
     schemas. Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 149, 485-487, 505-507
     and 579 describe the binding''s encoding.'
+  status: proposed
+  resolution: 'RFC-0005 decision 7 (Draft) proposes: where a tool''s result is a string, a capability
+    output is the I-JSON text of the output object with nothing around it; the consumer parses it and
+    checks the fields the output contract requires (R402 otherwise, as in the executor); validated structure
+    such as a submit tool''s arguments is preferred where the host has it; the producer checks the §5.14
+    I-JSON limits first. Remaining: Draft only. The workflow guide and the integration document are not
+    changed by this file.'
   concerns:
   - tools-contracts
   - workflow-execution
@@ -1480,7 +1725,10 @@ findings:
     core/src/lib.rs lines 15-22, core/src/validate/mod.rs lines 95-102 (file paths), core/src/ontology.rs
     lines 105-112 (`Ontology::from_value`), core/src/exec/mod.rs lines 575-600 (`Run::start` takes a parsed
     catalog), examples/standard_agents/package.json (`"private": true`) and spec/ROADMAP.md line 86.'
-  document_item: 5
+  status: open
+  resolution: 'Not changed in this round. Needs implementation work, not new normative text: a published
+    TypeScript package of the ontology table, effective flags, canonical JSON and the digest (the reference
+    binding holds a private copy), and a JSON-in, JSON-out WebAssembly interface to the core.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -1524,6 +1772,14 @@ findings:
     and grounded_agency/capabilities/mapper.py lines 239-244 (`Task` is `delegate`). In standardagents/spec
     read content/0.2.0/specification/threads/client-api.md lines 65-73 (seconds, microseconds and milliseconds).
     Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 10-13 pin the versions.'
+  status: fixed
+  resolution: '`schemas/interop/standard_agents_mapping.yaml` pins SA 0.2.0, its commit, `@standardagents/spec`
+    0.45.10, Standard 1.1.0, ontology 2.1.0 and the `acs` annotation key with its schema. It records twelve
+    capability rulings, three anchor `ref` forms, the timestamp units and the identity field map, each
+    with the mapping rows it rests on. Review changed `subagent_message` from `is` to `carrier`, because
+    tools-contracts#cls-07 leaves its classification by reserved name open, and tightened four notes.
+    `tests/test_standard_agents_interop.py` checks capability ids, cited rows and pinned versions, and
+    now pins the `subagent_message` and `notify_parent` rulings.'
   concerns:
   - approval-human
   - evidence-audit-observability
@@ -1559,6 +1815,9 @@ findings:
   verified: Ran the greps listed under searched and read each matching line. In core/src/exec/machine.rs
     the value is read at line 761 for the request and at lines 1013 and 2150 for the record, each with
     the default `in_session`, and nowhere else.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - approval-human
 - id: ACS-45
@@ -1589,6 +1848,9 @@ findings:
     declared outputs). Anything else a workflow wants transmitted is a `send` or `inquire` step.'
   verified: Read schemas/capability_ontology.yaml lines 1133-1142, spec/STANDARD-v1.1.0.md lines 84-88,
     182-190 and 815-825, and the action table of docs/guides/RUNNING_WORKFLOWS.md (lines 83-92).
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - workflow-execution
 - id: ACS-46
@@ -1620,6 +1882,9 @@ findings:
     the same list under `agents` gave W604; a `delegate` step whose `agent` is `${pool[0]: string}` validated
     with no diagnostic. Read schemas/workflow_catalog.yaml lines 1674-1690 and spec/STANDARD-v1.1.0.md
     lines 222-230.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - workflow-execution
 - id: ACS-47
@@ -1650,6 +1915,9 @@ findings:
   verified: 'Probe delegate.py: a `delegate` step that binds `x-continues` validated with no diagnostic
     and the key reached the host in the action''s `inputs`; the same key without `x-` gave W604. Read
     spec/STANDARD-v1.1.0.md lines 753-775, 978 and 987-996 and core/src/exec/quorum.rs lines 88-140.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - multi-agent
 - id: ACS-48
@@ -1679,6 +1947,9 @@ findings:
     document. Say what `stored: false` does to the step.'
   verified: 'Read the cited lines. Ran a `persist` step on the reference executor with the host returning
     `stored: false`: the step completed and the run went on.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - checkpoint-rollback-state
   related:
@@ -1713,6 +1984,9 @@ findings:
     1328-1331 ('workflow ... is not in the catalog', R402), core/src/exec/program.rs lines 150-165 and
     core/src/exec/mod.rs lines 575-600 (a run is built from one catalog value), and spec/ROADMAP.md lines
     74-81.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - packaging-conformance-governance
 - id: ACS-50
@@ -1738,6 +2012,9 @@ findings:
   verified: Read schemas/capability_ontology.yaml lines 1645-1704 (`inquire`), the `receive` node's output
     schema and the edge at lines 1849-1852; skills/inquire/SKILL.md lines 98 and 186; Standard Agent Specification
     decisions.md lines 66-96.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - approval-human
 - id: ACS-51
@@ -1771,6 +2048,9 @@ findings:
     Found a top-level `confidence` in the output contracts of ten of the thirteen skills (not execute,
     mutate or invoke). Read spec/STANDARD-v1.1.0.md §8.1 (line 1218), which calls the factor ''Self-reported
     confidence from source''.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -1802,6 +2082,9 @@ findings:
     it with origin-scoped credentials.'
   verified: 'Read the cited lines. Ran a `send` to an arbitrary URL on the reference executor with no
     `constrain` step: the host received the destination unchanged.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - models-context-memory-security
   related:
@@ -1835,6 +2118,9 @@ findings:
     Give `audit.retention` the duration form `max_age` uses.
   verified: 'Read the cited lines. Ran an `audit` step with `retention: "whenever"` through strict validation
     and the reference executor: accepted, and passed to the host unchanged.'
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - checkpoint-rollback-state
 - id: ACS-54
@@ -1863,6 +2149,9 @@ findings:
   verified: Read schemas/capability_ontology.yaml lines 1448-1459 and spec/STANDARD-v1.1.0.md lines 659-672.
     Probe delegate.py validated a `delegate` step whose literal `task` is an arbitrary nested mapping
     with no diagnostic.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - multi-agent
 - id: ACS-55
@@ -1896,6 +2185,15 @@ findings:
     and 535-550, and in standardagents/spec content/0.2.0/specification/hooks.md lines 169-180 and 428-444,
     content/0.2.0/specification/agents.md lines 132-166 and content/0.2.0/infrastructure/runtime.md lines
     84-92.
+  status: partly_fixed
+  resolution: 'The plugin''s audit hook now runs after every tool call: hooks/hooks.json registers it
+    for PostToolUse and PostToolUseFailure with matcher `*`. It appends one HMAC-chained line per call
+    to .claude/audit.log with ts, event, tool, the skill name on a Skill call, and input_sha256. Concurrent
+    runs are serialised with flock, or with a lock directory where flock is missing. Tests show that the
+    chain breaks without either lock. tools/verify_audit_log.py verifies the new format and earlier entries.
+    Remaining: Three parts change the Standard and need an RFC: a required hook that a host must refuse
+    to run without, a record of which configuration activated a hook, and a stated concurrency assumption
+    for the safety layer.'
   concerns:
   - safety-enforcement
 - id: ACS-56
@@ -1930,6 +2228,18 @@ findings:
     * trust_decay`, a different score) and tests/test_validators.py lines 704-711 (the test replaces the
     formula string in the schema). Listed tests/conformance: contrib, expressions, runtime. benchmarks/tests/test_scenarios.py
     tests only the benchmark''s private `_recency_weight`.'
+  status: partly_fixed
+  resolution: 'New module grounded_agency/trust.py, standard library only: decay_factor (0.5 ** (age /
+    half_life), floored at min_trust), static_weight (the lower of class and source weight, with profile
+    `trust_class:<class>` and source keys), trust_score (the product in schemas/authority_trust_model.yaml)
+    and TrustModel. Vectors tests/conformance/trust/decay.json (13), weight.json (14) and score.json (7),
+    absolute tolerance 1e-12; each file lists under `not_covered` the cases section 8 leaves open, and
+    no vector covers them. tests/test_trust.py runs the vectors and checks agreement with the benchmark
+    scenario''s decay. Remaining: STANDARD §10.3 does not name the trust vectors (normative text, RFC).
+    Field authority (§8.1) and the §8.2 strategies have no stated arithmetic and are not implemented.
+    A min_trust above 0.5 (which conflicts with 0.5 at one half-life), a negative age, unknown weights
+    and the composition of the factors are left open by the Standard''s text; the files list them. benchmarks/scenarios/conflicting_sources.py
+    still uses its private `_recency_weight`.'
   concerns:
   - models-context-memory-security
 - id: ACS-57
@@ -1959,6 +2269,14 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md §5.1 (lines 201-230), §5.12 (lines 659-672) and §9.2 (lines 1272-1284);
     skills/mutate/SKILL.md lines 1-9; Standard Agent Specification tools.md lines 36-44. The integration
     document names `uses` in the unnumbered paragraph that follows item 6, not in a numbered item.
+  status: proposed
+  resolution: 'RFC-0005 rule 2.6 (Draft) proposes an `invokes` field on the binding record, naming the
+    bindings a tool calls. The tool takes the strictest flags over its own and, transitively, those of
+    the bindings listed; a host SHOULD refuse an invocation outside the list; the list bounds named invocation
+    only, not storage or network calls, so the computed flags are a lower bound. Remaining: Draft only;
+    no schema or implementation carries `invokes`. The RFC does not say whether a layer that also sees
+    the invoked calls checks them on their own, which would make a composite and its inner `mutate` call
+    each need a checkpoint.'
   concerns:
   - tools-contracts
   related:
@@ -1986,6 +2304,9 @@ findings:
     which is delivered at most once.
   verified: Grepped the Standard. Read spec/ROADMAP.md lines 72-104, SA threads.md lines 322-348 and SA
     client-api.md lines 445-462.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - evidence-audit-observability
 - id: ACS-59
@@ -2016,6 +2337,15 @@ findings:
     on 13, `hooks` on 6, no `version` key; two names differ from their directory. Read skills/README.md
     lines 119-124 and 146-160, docs/WORKFLOW_ROADMAP.md lines 76-79, site/test/data.test.ts lines 283-288
     and CLAUDE.md line 256.'
+  status: partly_fixed
+  resolution: 'skills/README.md ''Skill Structure'' now shows the eight frontmatter keys all 42 skills
+    carry and the five sections all have. A table says `layer` is in 13 skills (12 capability skills and
+    discover-capabilities) and `hooks` in 6. It says the ontology, not the frontmatter, gives a capability''s
+    layer, that no skill declares a version, and which two composed skills declare a name other than their
+    directory. docs/GLOSSARY.md no longer says skills are organized by layer. Counts were checked by parsing
+    every frontmatter. Remaining: CLAUDE.md ''Skill Structure'' still lists `layer` as part of every skill
+    (outside this package''s scope). No document yet says which keys belong to Agent Skills, Claude Code
+    or ACS. The two composed skills keep their differing names, as instructed.'
   concerns:
   - published-api-extension-points
   - packaging-conformance-governance
@@ -2050,6 +2380,13 @@ findings:
     kind passed to trace() or trace_step() under core/src/exec (34) and compared it with the union of
     `trace_kinds` over the 175 files of tests/conformance/runtime (34, identical). Counted the runtime
     fixtures that name an approval kind: 11, of which 8 name `approval_requested`.'
+  status: fixed
+  resolution: docs/guides/RUNNING_WORKFLOWS.md has a new informative section, 'The trace'. It lists the
+    six fields of a trace event and the 34 kinds the reference executor records, with each kind's detail
+    members. It says these are executor trace kinds, not §5.13 event types, and that relaying them is
+    left to the host. tests/test_trace_kinds_doc.py compares the list with the kinds core/src/exec passes
+    to trace(), with the runtime fixtures' trace_kinds, and with the events and detail members the fixtures'
+    runs record.
   concerns:
   - approval-human
   related:
@@ -2086,6 +2423,13 @@ findings:
     Ran a two-step catalog on the reference executor in which a `delegate` without `wait` returned `accepted:
     false`: the run completed and the next step ran. Read SA subagents.md lines 38, 106-110 and 122, and
     docs/integrations/standard_agents.md line 163.'
+  status: fixed
+  resolution: 'docs/integrations/standard_agents.md, under ''Composing grounded agents'', has a new subsection,
+    ''How a delegate step maps to a host''. A waiting delegate is a result the host waits for. A plain
+    delegate is a non-blocking child. A cap refusal is accepted false or an Error response. A plain delegate''s
+    refusal fails nothing unless the workflow tests accepted. The subsection also covers create-or-continue
+    and retries under maxInstances. For ACS-04 it gives the workaround: raise requires_approval or requires_checkpoint
+    on the step, with a YAML example that the validator accepts.'
   concerns:
   - multi-agent
 - id: ACS-62
@@ -2120,6 +2464,15 @@ findings:
     lines 260 and 1306-1315, core/src/exec/mod.rs lines 209-213 (`Error` has `code` and `message`) and
     core/src/exec/machine.rs lines 2020-2026 (R401 is kept, R406 is kept on a wait, any other code becomes
     R402).
+  status: partly_fixed
+  resolution: 'docs/guides/MODALITY_HANDLING.md (now 1.1.0) cites STANDARD §5.2 for the step field domain:
+    the validator checks only that it is a string (S303), and the executor passes it on InvokeCapability.
+    §1.3 says a host without a pipeline answers Error, the step fails with R402, and the Standard defines
+    no code or field for an unsupported domain. Every anchor now uses an Anchor.kind of schemas/event_schema.yaml
+    (file), and the modality forms are ref conventions. composite and nested_anchors are removed. The
+    RUNNING_WORKFLOWS InvokeCapability row now names domain. Remaining: A machine-readable place for the
+    reason unsupported_domain (a reason field on Error or a fixed message prefix) needs normative text
+    in §9.5 or the host protocol.'
   concerns:
   - models-context-memory-security
   related:
@@ -2154,6 +2507,10 @@ findings:
     9-12 and 31-36, and in standardagents/spec content/0.2.0/specification/handlers.md lines 3-5, content/0.2.0/specification/tools.md
     line 3 and content/0.2.0/specification/threads/execution-state.md line 25. Re-read docs/integrations/standard_agents.md
     at commit 4bc1dd2: its headings include no glossary or term table.'
+  status: fixed
+  resolution: docs/GLOSSARY.md says its definitions give this standard's senses. It adds the entry 'Terms
+    Shared with the Standard Agent Specification', which names the words with different senses and links
+    the table 'Words the two standards use differently' in docs/integrations/standard_agents.md.
   concerns:
   - workflow-execution
   - packaging-conformance-governance
@@ -2176,6 +2533,9 @@ findings:
     both files in it.
   verified: Read spec/STANDARD-v1.1.0.md lines 1176-1182 and schemas/entity_taxonomy.yaml lines 10-16.
     Found by the coverage check, which looked for sections of the Standard that no mapping row cites.
+  status: open
+  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
+    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
   concerns:
   - evidence-audit-observability
 questions:

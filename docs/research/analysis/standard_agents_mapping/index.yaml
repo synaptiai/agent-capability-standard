@@ -46,8 +46,10 @@ meta:
     disposition: 'Standard Agent Specification findings only. proposal: one of the drafted issues asks
       for the change (the file named in `proposal`, under tasks/standard-agents-upstream/). not_proposed:
       no issue asks for it, with the reason. candidate: would stand as an issue of its own; not drafted.'
-    document_item: 'Agent Capability Standard findings only: the numbered item in the integration document''s
-      list of proposed changes that states the finding.'
+    status: 'Agent Capability Standard findings only. fixed: resolved in this repository. partly_fixed:
+      what could be fixed without new normative text is; the rest is in `resolution`. proposed: the change
+      is in a Draft RFC and nothing is normative yet. open: nothing has been done.'
+    resolution: What was done, where, and what remains.
     concerns: The concerns whose mapping produced the finding.
     related: Findings that ask for the same change in part.
   references: Paths under content/ and src/ are in the Standard Agent Specification repository at the
@@ -167,6 +169,11 @@ findings:
       important: 36
       minor: 21
     questions: 15
+    status:
+      fixed: 5
+      partly_fixed: 14
+      proposed: 7
+      open: 38
 not_mapped:
 - standard: acs
   ref: schemas/capability_ontology.yaml nodes[id=predict] (lines 406-448), nodes[id=discover] (lines 493-533),
