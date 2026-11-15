@@ -126,8 +126,15 @@ jobs:
       - name: Clippy (Python extension)
         run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets --features python -- -D warnings
 
+      - name: Clippy (WebAssembly interface)
+        run: cargo +"$RUST_TOOLCHAIN" clippy --locked --all-targets --features wasm -- -D warnings
+
       - name: Tests
         run: cargo +"$RUST_TOOLCHAIN" test --locked
+
+      # The WebAssembly interface's exports and dispatcher, driven natively.
+      - name: Tests (WebAssembly interface)
+        run: cargo +"$RUST_TOOLCHAIN" test --locked --features wasm --test wasm
 
       - name: Builds on the minimum supported Rust version
         run: |
@@ -313,18 +320,42 @@ jobs:
           cache: npm
           cache-dependency-path: packages/acs-core/package-lock.json
 
+      # The ./wasm entry is the core built for wasm32-unknown-unknown
+      # (core/src/wasm.rs). RUSTUP_TOOLCHAIN (set for every job above) makes
+      # build-wasm.mjs's cargo use the toolchain installed here with the
+      # target.
+      - name: Install Rust with the wasm32 target
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target wasm32-unknown-unknown
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+
+      - name: Cache Rust build
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: ${{ runner.os }}-cargo-wasm-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('core/Cargo.lock') }}
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
+
+      - name: Build the WebAssembly module
+        run: npm run build:wasm
+
+      - name: Build
+        run: npm run build
 
       - name: Type-check
         run: npm run check
 
-      # The tests read the conformance vectors in tests/conformance/ in place.
+      # The tests read the conformance vectors in tests/conformance/ in
+      # place, and replay the validator, runtime and expression fixtures and
+      # the profile vectors through the WebAssembly core; package.test.ts
+      # checks `npm pack --dry-run`.
       - name: Tests
         run: npm test
-
-      - name: Build
-        run: npm run build
 
   standard-agents-binding:
     name: Standard Agents binding (type-check, tests)
@@ -344,12 +375,13 @@ jobs:
             packages/acs-core/package-lock.json
             examples/standard_agents/package-lock.json
 
-      # The binding imports the package's built dist/ (file: dependency).
+      # The binding imports the package's built dist/ (file: dependency);
+      # it uses the plain-TypeScript entry only, so no WebAssembly build.
       - name: Build the TypeScript package
         working-directory: packages/acs-core
         run: |
           npm ci --ignore-scripts
-          npm run build
+          npm run build:ts
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
