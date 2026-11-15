@@ -957,6 +957,62 @@ class TestWrapOptionsApproval:
         assert _configure_can_use_tool(wrapped) is wrapped  # no ValueError
 
     @pytest.mark.asyncio
+    async def test_prompt_tool_denial_leaves_no_reservation(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        """With a permission prompt tool the adapter never hears of a
+        denial, so an asked call reserves nothing: after the prompt tool
+        denies call 1, call 2 is asked about, not refused with F501. A call
+        that then runs takes and uses up the checkpoint."""
+        base = ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
+        wrapped = asking_adapter.wrap_options(base)
+        asking_adapter.create_checkpoint(["*"], "Test")
+        call = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "a.txt", "content": "x"},
+            "session_id": "s1",
+        }
+
+        # Call 1 is asked about; the prompt tool denies it, so no Post* event.
+        first = await _pre(wrapped)(call, "w1", None)
+        assert _decision(first) == "ask"
+        assert _reason(first).startswith(F502)
+
+        # Call 2 is asked about too, and this time approved and run.
+        second = await _pre(wrapped)(call, "w2", None)
+        assert _decision(second) == "ask"
+        for entry in wrapped.hooks["PostToolUse"]:
+            for hook in entry.hooks:
+                await hook({**call, "tool_response": {}}, "w2", None)
+        assert not asking_adapter.has_valid_checkpoint()
+
+        # Call 3 needs a new checkpoint.
+        third = await _pre(wrapped)(call, "w3", None)
+        assert _decision(third) == "deny"
+        assert _reason(third).startswith(F501)
+
+    @pytest.mark.asyncio
+    async def test_prompt_tool_failed_call_keeps_the_checkpoint(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        """A call the prompt tool approved that then fails uses up nothing."""
+        wrapped = asking_adapter.wrap_options(
+            ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
+        )
+        asking_adapter.create_checkpoint(["*"], "Test")
+        call = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "a.txt", "content": "x"},
+            "session_id": "s1",
+        }
+        assert _decision(await _pre(wrapped)(call, "w1", None)) == "ask"
+        for entry in wrapped.hooks["PostToolUseFailure"]:
+            for hook in entry.hooks:
+                await hook({**call, "error": "disk full"}, "w1", None)
+        assert asking_adapter.has_valid_checkpoint()
+        assert not asking_adapter._unreserved_asks
+
+    @pytest.mark.asyncio
     async def test_asked_approved_run_and_consumed(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:

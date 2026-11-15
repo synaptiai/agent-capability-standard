@@ -424,14 +424,14 @@ rows:
     a client may send any of three roles, so an echoed digest shows that the child saw the request, not
     who approved (inference from those facts). What can carry it is a thread endpoint, whose `auth.caller`
     MUST be the authenticated identity (appr-03). On the ACS side the §5.14 protocol is enforced only
-    by the workflow executor; the plugin hook and SDK adapter enforce none, and the `send` skill adds
+    by the workflow executor; the plugin hook enforces none, the SDK adapter (since ACS-03 was fixed) obtains one host decision per call without the rest of §5.14, and the `send` skill adds
     a model-judged prompt. Searched: approver, digest, expire, mandate, consent, confirmation, sign-off:
     no decision record found.'
   combined: Use a recorded decision, not a blocking wait. The guard computes the ACS digest of the shown
-    values (by default the list holding the call's inputs, as the reference executor does) and looks up
+    values (`[{action, capability, args}]`, so that a decision covers one tool and capability and not every tool that takes the same arguments; RFC-0005 5.2) and looks up
     a decision with `state.getValue`. With none valid it writes a pending request (digest, shown values,
     expiry, `min_approvers`), returns an error result carrying F502, and may call `state.execution.stop()`.
-    An authenticated thread endpoint records the decision (appr-03). On the retried call the guard requires
+    An authenticated thread endpoint records the decision for the request's current round (appr-03). On the retried call the guard requires
     a digest match, enough distinct approvers, not expired and not used, goes on to the checkpoint check,
     and marks the record used only when that check has passed as well, so that a call refused F501 leaves
     the approval unused (published-api-extension-points#tools-04). A human-sided child stays useful for
@@ -538,9 +538,9 @@ rows:
     how the caller was authenticated, which callers the runtime''s thread access policy admits, and any
     notion of approval, digest, expiry or single use; those stay in the binding''s code.'
   combined: 'A thread endpoint with `authenticated` access (for example a file `approve.post.ts`) reads
-    `{ digest, decision }`, rejects a digest that differs from the pending request the guard wrote, de-duplicates
+    `{ digest, round, decision }`, refuses a round that has closed (409), rejects a digest that differs from the pending request the guard wrote, de-duplicates
     approvers by `auth.caller.id`, may check `auth.caller.roles` against the ACS approver role, and writes
-    the decision under a key of its own (the request''s digest plus `auth.caller.id`) with `state.setValue`,
+    the decision under a key of its own (the request''s digest, its round and `auth.caller.id`) with `state.setValue`,
     a rejection as an idempotent flag, so that two approvers deciding at once cannot overwrite each other:
     the store has no conditional write and the text does not serialise endpoint requests (approval-human#approval-04).
     The guard reads it on the retried tool call (appr-01). The endpoint runs with `state.execution` null:

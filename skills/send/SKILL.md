@@ -36,7 +36,10 @@ hooks:
             # reason on stderr is shown to Claude. A call that cannot be read is blocked.
             CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "BLOCK: cannot read the tool call (jq is required)" >&2; exit 2; }
             ADDR='(localhost|127\.0\.0\.1|10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)'
-            if printf '%s\n' "$CMD" | grep -qE "(curl|wget|http)" && printf '%s\n' "$CMD" | grep -qE "(^|[^0-9A-Za-z.-])${ADDR}([^0-9A-Za-z.-]|\$)"; then
+            # The address must stand where a host does: after a URL scheme, a user@,
+            # a space or a quote, and before a port, a path, a query or the end.
+            # Host names are case-insensitive, so the match is too.
+            if printf '%s\n' "$CMD" | grep -qiE "(curl|wget|http)" && printf '%s\n' "$CMD" | grep -qiE "(^|[[:space:]\"']|://|@)${ADDR}([:/?#[:space:]\"']|\$)"; then
               echo "BLOCK: Internal network access requires explicit approval" >&2
               exit 2
             fi

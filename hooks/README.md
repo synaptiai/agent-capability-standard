@@ -108,8 +108,9 @@ Each hook entry specifies:
 The `pretooluse_require_checkpoint.sh` hook enforces the `checkpoint` capability requirement:
 - Expects a marker file at `.claude/checkpoint.ok` before allowing mutation operations: every `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` call (it fails closed: a shell command is not trusted to be read-only). The marker is written outside these tools, by `CheckpointTracker` or by a person
 - Blocks with exit code 2 and the reason on stderr, which opens with `F501 CHECKPOINT_REQUIRED:` (the code and name the Standard gives a mutation without a checkpoint)
-- Validates marker contains JSON with checkpoint ID, creation time, and expiry (SEC-001)
-- Rejects stale markers that have expired (default: 30 minutes)
+- Validates that the marker is a JSON object with a `checkpoint_id` and a numeric `expires_at` (SEC-001); `created_at` is written for the reader and not checked. Without `jq` it checks only that the marker is under 30 minutes old
+- Rejects markers that have expired, and removes them
+- Fails closed: a marker that is not a JSON object, or any command in the hook that fails, blocks the call with exit code 2 (any other exit code would let it run)
 - Rejects symlinks to prevent bypass attacks (SEC-006)
 - Uses `CLAUDE_PROJECT_DIR` for absolute path resolution (SEC-006)
 - Maps to the spec's `requires_checkpoint: true` field on capabilities
@@ -120,16 +121,16 @@ The `pretooluse_require_checkpoint.sh` hook enforces the `checkpoint` capability
 title: How the checkpoint hook decides
 ---
 flowchart TB
-  accDescr: CheckpointTracker or a person writes the marker file outside the gated tools; on every Write, Edit, MultiEdit, NotebookEdit or Bash call the hook allows the call only when the marker is present, is not a symlink, holds valid JSON with an id, creation time and expiry, and has not expired, and otherwise blocks with exit code 2.
+  accDescr: CheckpointTracker or a person writes the marker file outside the gated tools; on every Write, Edit, MultiEdit, NotebookEdit or Bash call the hook allows the call only when the marker is present, is not a symlink, is a JSON object with an id and an expiry, and has not expired, and otherwise blocks with exit code 2.
   w[CheckpointTracker or a person] -->|writes| m[".claude/checkpoint.ok"]
   call["Write, Edit, MultiEdit, NotebookEdit or Bash call"] --> h[pretooluse_require_checkpoint.sh]
   m -.->|read by| h
-  h --> q{"Marker present, not a symlink, valid JSON, not expired?"}
+  h --> q{"Marker present, not a symlink, a JSON object with an id and an expiry, not expired?"}
   q -->|yes| ok[Call allowed]
   q -->|no| no[Blocked with exit code 2]
 ```
 
-The marker file must contain valid JSON:
+The marker file must contain a JSON object (`created_at` is optional):
 ```json
 {"checkpoint_id": "chk_...", "created_at": 1706000000, "expires_at": 1706001800}
 ```

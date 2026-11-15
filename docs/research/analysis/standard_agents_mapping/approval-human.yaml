@@ -189,7 +189,7 @@ rows:
   combined: 'Check `role` in the decision endpoint against `auth.caller.roles`. On a `public` endpoint
     admit a caller only on a role match, on membership in an approver list from the tool''s own policy,
     or when `auth.threadAccess` is true; never on a non-null caller alone. For `min_approvers`, write
-    each approval under its own key (request id plus `auth.caller.id`) and a rejection as an idempotent
+    each approval under its own key (digest, round and `auth.caller.id`) and a rejection as an idempotent
     flag, with an index key whose lost update can only under-count: the store has no compare-and-set and
     cannot list keys, and the text does not say that endpoint requests on one thread are serialized. The
     tool, which runs inside the thread''s single flow, counts distinct ids for the same digest. `label`

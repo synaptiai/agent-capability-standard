@@ -16,7 +16,7 @@ import { approvalState, decideApproval, readApproval, type ApprovalPolicy } from
 import { digest } from '../src/acs/canonical.js';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
-import { CAPABILITIES, effectiveFlags } from '../src/acs/ontology.js';
+import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags } from '../src/acs/ontology.js';
 import { readCheckpoints, readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH } from '../src/example/settings.js';
 import annotationSchema from '../../../schemas/interop/standard_agents_annotation.schema.json' with { type: 'json' };
@@ -58,8 +58,8 @@ async function post(t: MemoryThread, caller: ReturnType<typeof user> | null, bod
 describe('classification', () => {
   it('annotates each tool with its capability and effective flags', () => {
     expect(acsAnnotation(writeConfig)).toEqual({
-      standard: '1.1.0',
-      ontology: '2.1.0',
+      standard: STANDARD_VERSION,
+      ontology: ONTOLOGY_VERSION,
       capability: 'mutate',
       layer: 'EXECUTE',
       domain: 'config',
@@ -417,6 +417,42 @@ describe('approval bound to what was shown', () => {
     clock += 59_000;
     await decideApproval(t.state, user('alice'), late, 'approved', clock);
     clock += 60_001;
+    expect(await tool.execute(t.state, { version: '2' })).toMatchObject({ error_code: 'F502' });
+  });
+
+  it('takes no approval after the deadline, so later approvers cannot extend the window', async () => {
+    let clock = 0;
+    const tool = groundedTool({
+      name: 'release',
+      capability: 'execute',
+      description: 'Run the release.',
+      approval: { expires_ms: 1000 },
+      args: z.object({ version: z.string() }),
+      now: () => clock,
+      execute: async () => ({ result: 'released', evidence_anchors: [] }),
+    });
+    const t = thread();
+    const d = digestOf(await tool.execute(t.state, { version: '1' }));
+    clock = 999;
+    await decideApproval(t.state, user('alice'), d, 'approved', clock);
+    // Alice's approval still counts at 1500, but the request takes no new approval.
+    clock = 1500;
+    await expect(decideApproval(t.state, user('bob'), d, 'approved', clock)).rejects.toThrow(/no approval/);
+    clock = 2000;
+    expect(await tool.execute(t.state, { version: '1' })).toMatchObject({ error_code: 'F502' });
+
+    // An approval stored after the deadline (by a writer that skipped the
+    // check) counts for nothing.
+    const record = { digest: 'd', shown: [], min_approvers: 1, requested_at: 0, expires_ms: 1000 };
+    const carol = { decision_id: 'x', decision: 'approved' as const, approver: 'carol', at: 1500 };
+    expect(approvalState({ ...record, decisions: [carol] }, 1600)).toBe('expired');
+
+    // A rejection is still taken after the deadline while an approval counts.
+    const d2 = digestOf(await tool.execute(t.state, { version: '2' }));
+    clock += 999;
+    await decideApproval(t.state, user('alice'), d2, 'approved', clock);
+    clock += 500;
+    await decideApproval(t.state, user('bob'), d2, 'rejected', clock);
     expect(await tool.execute(t.state, { version: '2' })).toMatchObject({ error_code: 'F502' });
   });
 });

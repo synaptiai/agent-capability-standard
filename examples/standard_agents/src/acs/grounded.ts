@@ -110,7 +110,10 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   capability: C;
   /** The capability's domain parameter, e.g. `config` or `email`. */
   domain?: string;
-  /** Flags stricter than the capability's; a weaker one is ignored (W602). */
+  /**
+   * Flags stricter than the capability's. A weaker one is W602, which fails
+   * the definition here, as warnings do in strict validation.
+   */
   flags?: DeclaredFlags;
   /** Who may approve and for how long, when the tool needs approval. */
   approval?: ApprovalPolicy;
@@ -217,7 +220,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   const { name, capability, domain } = options;
   const { flags, warnings } = effectiveFlags(capability, options.flags);
   if (warnings.length > 0) {
-    throw new Error(`groundedTool '${name}': ${warnings.join('; ')}`);
+    throw new Error(`groundedTool '${name}': ${warnings.join('; ')}; a tool definition may not declare weaker flags`);
   }
   const policy = options.approval ?? {};
   const problems = policyProblems(policy);

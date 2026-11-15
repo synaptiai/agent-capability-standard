@@ -489,7 +489,7 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md lines 817-837, core/src/exec/machine.rs lines 716-736, core/src/exec/canonical.rs
     in full (its `digests` test pins SHA-256 of the empty string and an equality of two key orders, no
     shown-values array), core/tests/runtime.rs lines 25-40 and core/Cargo.toml lines 10-17. Read examples/standard_agents/test/fixtures/approval-digests.json
-    (ten vectors of `shown` and `digest`) and its generator, scripts/gen_standard_agents_binding.py lines
+    (ten vectors of `shown` and `digest` when this was verified, 16 now) and its generator, scripts/gen_standard_agents_binding.py lines
     174-300, which runs the reference executor; .github/workflows/ci.yml lines 92-93 check that the file
     is current.
   status: partly_fixed
@@ -946,15 +946,13 @@ findings:
     digest of the input as compact JSON with sorted keys (jq -cS) stands in for it, or `unavailable` when
     the digest cannot be computed. The skills'' own log hooks under .audit/ likewise write a digest in
     place of commands, file paths and search patterns. Tests check that a secret in the input, the response
-    or the error text never reaches either log. Remaining: The normative rule on secrets in evidence,
-    audit records and stored data needs an RFC. The SDK''s EvidenceAnchor.from_tool_output still stores
-    tool_input in anchor metadata. Both are outside this package. EvidenceAnchor.from_tool_output keeps
+    or the error text never reaches either log. SDK part: EvidenceAnchor.from_tool_output keeps
     tool_input in metadata only with include_tool_input=True. The evidence collector also leaves out a
     Bash command''s text unless asked (from_command accepts None). GroundedAgentConfig.evidence_include_tool_input,
     default False, reaches the collector and DiscoveryPipeline, whose anchor no longer keeps the task
     description by default. With the switch on, inputs are stored unredacted. Remaining: A normative rule
     on secrets in evidence, excerpts, audit records and persisted memory (Standard, SECURITY.md) needs
-    an RFC. The plugin audit hook is another package.'
+    an RFC.'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -2343,8 +2341,8 @@ findings:
     discover-capabilities) and `hooks` in 6. It says the ontology, not the frontmatter, gives a capability''s
     layer, that no skill declares a version, and which two composed skills declare a name other than their
     directory. docs/GLOSSARY.md no longer says skills are organized by layer. Counts were checked by parsing
-    every frontmatter. Remaining: CLAUDE.md ''Skill Structure'' still lists `layer` as part of every skill
-    (outside this package''s scope). No document yet says which keys belong to Agent Skills, Claude Code
+    every frontmatter. CLAUDE.md ''Skill Structure'' now says `layer` is in 13 of the 42 skills. Remaining:
+    No document yet says which keys belong to Agent Skills, Claude Code
     or ACS. The two composed skills keep their differing names, as instructed.'
   concerns:
   - published-api-extension-points

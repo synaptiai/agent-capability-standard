@@ -103,7 +103,11 @@ def verify_log(log_path: Path, hmac_key: str) -> tuple[int, int, list[str]]:
     if not log_path.exists():
         return 0, 0, ["Audit log not found"]
 
-    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    # One entry per "\n": the hook writes no other line break between
+    # entries, and str.splitlines() would also split at U+0085, U+2028 and
+    # U+2029, which jq -c writes raw inside a JSON string.
+    text = log_path.read_text(encoding="utf-8").strip()
+    lines = text.split("\n") if text else []
     if not lines:
         return 0, 0, ["Audit log is empty"]
 

@@ -148,3 +148,31 @@ CLAUDE.md lists, and not the accessibility step in `.github/workflows/site.yml`.
 each step that can run locally. For the site: after `npm run build`, run
 `ACS_CHROMIUM=<chromium> node scripts/check-axe.mjs --paths <changed pages>`.
 A Markdown table needs text in every header cell.
+
+## `check:axe` is two checks: axe and the figure-gap sweep
+
+**What happened.** After the axe fix, the full `npm run check:axe` failed on
+`check-runs.mjs`: lengthening the SDK guide and the domains index had left
+stretches of over two viewport heights with no figure on enforced pages. The
+targeted run that followed the earlier lesson had called `check-axe.mjs`
+alone, which does not run the sweep.
+
+**Rule.** For a page an edit lengthens, run both scripts on it after the
+build: `check-axe.mjs --paths …` and `check-runs.mjs --paths …`. Fix a long
+stretch with a figure that shows the mechanism, or by moving or tightening
+text; exempt a run only when it is one of the categories in `runs.ts`.
+
+## Probe a safety guarantee with hostile input before documenting it
+
+**What happened.** The pull request documented that every mutating Bash
+command needs a checkpoint and approval, and that the plugin hook blocks a
+call without a valid marker. The final review broke both in minutes:
+`env rm -rf x` and `ls | sh` were classified read-only (the classifier read
+only the first word), and a marker of `ok` made the hook exit 5, which Claude
+Code treats as non-blocking. The unit tests checked only cooperative inputs.
+
+**Rule.** Before writing that a check blocks something, try the inputs an
+adversary would: wrappers (`env`, `xargs`, `sh -c`), every shell operator and
+redirection, quoting, case, path tricks (`//`, `..`), malformed state files,
+and a failing command inside the check. A hook must fail closed: any exit
+code other than the blocking one lets the call run.

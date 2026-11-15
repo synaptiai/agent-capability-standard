@@ -534,7 +534,7 @@ flowchart TB
 | `mode` | Not distinguished: the Standard names `in_session` and `out_of_band` without defining them. The decision always arrives through the endpoint, not the conversation |
 | `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON |
 | `recheck` | Implicit: the digest is recomputed from the arguments at the moment the tool runs |
-| `expires` | `approval.expires_ms`. As in the reference executor, no decision is accepted later than `expires_ms` after the request. Each approval then counts for `expires_ms` after it was given: the executor uses a decision when it arrives, a tool when the model calls again, so a request can be used up to twice `expires_ms` after it was made |
+| `expires` | `approval.expires_ms`. As in the reference executor, no approval is accepted later than `expires_ms` after the request, and one stored later counts for nothing. Each approval then counts for `expires_ms` after it was given: the executor uses a decision when it arrives, a tool when the model calls again, so a request can be used up to twice `expires_ms` after it was made, however many approvers decide. A rejection is accepted until the request is used or expires, since it can only stop the call |
 | `approver.kind: standing_mandate`, `when_unattended` | Not implemented: an unapproved call is refused, which is `when_unattended: fail` |
 
 ### Evidence and audit trail

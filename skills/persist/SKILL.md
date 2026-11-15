@@ -41,6 +41,14 @@ hooks:
             case "$TARGET" in
               "~/"*) TARGET="${HOME}/${TARGET#??}" ;;
             esac
+            # A path with '//', '.' or '..' segments is not compared as written
+            # (/tmp/../etc/passwd is /etc/passwd), so it is blocked
+            case "$TARGET" in
+              *//*|*/./*|*/.|*/../*|*/..|../*|..)
+                echo "BLOCK: Cannot persist to a path with '//', '.' or '..' segments; give the normalised path" >&2
+                exit 2
+                ;;
+            esac
             # Block writes to system directories and to credential directories under the home directory
             case "$TARGET" in
               /etc/*|/usr/*|/bin/*|/sbin/*|"${HOME}"/.ssh/*|"${HOME}"/.aws/*|"${HOME}"/.config/*)

@@ -184,14 +184,16 @@ adapter.mapper.register_mcp_tool("mcp__wiki__get_page", capability_id="retrieve"
 
 ### Bash Command Classification
 
-Bash commands are analyzed to determine their capability. A command counts as read-only only when it is on the mapper's allow-list; every other command is declared a high-risk mutation that needs a checkpoint, whatever its capability:
+Bash commands are analyzed to determine their capability. A command counts as read-only only when it is on the mapper's allow-list; every other command is declared a high-risk mutation that needs a checkpoint, whatever its capability.
+
+The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`; it is read-only only when every one of them is, so `ls | sh` and `ls & rm x` are mutations while `cat f | grep "a|b"` is not. A line is a mutation when it redirects output to anything but `/dev/null`, opens a subshell or a here-document, has an unbalanced quote, or uses command substitution, `${...}`, `eval` or `source`. An allow-listed command given an option that writes is a mutation too: `find -delete` or `-exec`, `sort -o`, `uniq IN OUT`, `git diff --output`, `git branch NAME`, `git remote set-url`. `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
 
 | Pattern | Capability | Risk | Checkpoint | Approval |
 |---------|-----------|------|------------|----------|
 | `ls`, `cat`, `head`, `pwd` | observe | low | No | No |
 | `git status`, `git log` | observe | low | No | No |
 | `rm`, `mv`, `chmod` | mutate | high | Yes | Yes |
-| `sed -i`, `git push` | mutate | high | Yes | Yes |
+| `sed`, `awk`, `env`, `git push` | mutate | high | Yes | Yes |
 | `curl -X POST`, `ssh` | send | high | Yes | Yes |
 | `python -c`, `node -e` | execute | high | Yes | Yes |
 | any other command | mutate | high | Yes | Yes |
@@ -332,17 +334,32 @@ assert not adapter.has_valid_checkpoint()
 
 ## PreToolUse Hook Enforcement
 
-The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and SubagentStop hooks:
+The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and SubagentStop hooks. PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`, and applies three rules in order:
 
-- **PreToolUse**: Runs for every tool call, including pre-approved ones that never reach `can_use_tool`, and applies three rules in this order:
+```mermaid
+---
+title: What PreToolUse decides for a call
+---
+flowchart TB
+  accDescr: A call over its risk level's rate limit is denied. A call that needs a checkpoint reserves a valid checkpoint no other call holds for its tool_use_id; without one, strict mode denies it with F501 and non-strict mode logs a warning. A call that needs approval is then answered ask with F502. Any other call gets no answer from the hook and goes on.
+  call[Tool call] --> rate{"Within its rate limit?"}
+  rate -->|no| d1[deny]
+  rate -->|yes| cp{"Needs a checkpoint, and none is free?"}
+  cp -->|"yes, in strict mode"| d2["deny: F501"]
+  cp -->|"otherwise, reserving it"| ap{"Needs approval?"}
+  ap -->|yes| ask["ask: F502"]
+  ap -->|no| none["No answer: the call goes on"]
+```
+
+- **PreToolUse**:
   1. *Rate limit.* A call over its risk level's limit is denied, in strict and non-strict mode alike.
-  2. *Checkpoint (F501).* For a call whose mapping requires a checkpoint (Write, Edit, Bash with destructive commands, an unclassified tool), the hook reserves the active checkpoint for the call, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call with `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "F501 CHECKPOINT_REQUIRED: ..."}}`; non-strict mode logs a warning.
-  3. *Approval (F502).* With `approval="ask"` (the default), a call whose mapping requires approval and that the first two rules did not deny is answered with `"permissionDecision": "ask"` and a reason that begins `F502 APPROVAL_REQUIRED:`. See [Approval](#approval). A call whose mapping requires no approval, such as Read or a read-only Bash command, is not asked about. `strict_mode` does not switch this rule off.
+  2. *Checkpoint (F501).* A call whose mapping requires a checkpoint (Write, Edit, Bash with destructive commands, an unclassified tool) reserves the active checkpoint, keyed by its `tool_use_id` (`CheckpointTracker.validate_and_reserve`). When there is no valid checkpoint, or another in-flight call holds the reservation, strict mode denies the call and non-strict mode logs a warning.
+  3. *Approval (F502).* With `approval="ask"` (the default), a call whose mapping requires approval and that the first two rules did not deny is answered `"ask"`; see [Approval](#approval). A call whose mapping requires no approval, such as Read or a read-only Bash command, is not asked about. `strict_mode` does not switch this rule off.
 
-  For a pre-approved tool this hook is the only check that runs, so it does not let errors through: a tool the mapper does not know or cannot classify is treated as a high-risk mutation that requires approval (rate-limited, needs a checkpoint, asked about), an error in the rate check denies the call in both modes, and any other error denies it in strict mode and is logged in non-strict mode.
+  For a pre-approved tool this hook is the only check that runs, so it does not let errors through: a tool the mapper does not know or cannot classify is treated as a high-risk mutation that requires approval, an error in the rate check denies the call in both modes, and any other error denies it in strict mode and is logged in non-strict mode.
 - **PostToolUse**: Collects evidence anchors. After a successful mutation it consumes the checkpoint the call reserved; if the tool reported an error, or the checkpoint-gated tool does not mutate, it releases the reservation instead and the checkpoint stays valid.
 - **PostToolUseFailure**: Releases the reservation of a call that failed or was interrupted, so the checkpoint can cover a retry.
-- **Stop / SubagentStop**: Release a reservation still held by a call of the session (and agent) that just finished. That happens when a call the adapter reserved for never runs and never reaches the adapter's permission callback: another PreToolUse hook (yours, or one from a settings file) denied it, or Claude Code denied the adapter's `"ask"` itself (in `dontAsk` mode, or through a permission prompt tool). Nothing else ends such a reservation. Other sessions sharing the adapter, and background subagents still running, keep theirs.
+- **Stop / SubagentStop**: Release a reservation still held by a call of the session (and agent) that just finished: a call the adapter reserved for that never ran and never reached the adapter's permission callback, because another PreToolUse hook (yours, or one from a settings file) denied it or Claude Code denied the adapter's `"ask"` itself (in `dontAsk` mode). Nothing else ends such a reservation. Other sessions sharing the adapter, and background subagents still running, keep theirs.
 
 A reservation that is never consumed or released lapses after `checkpoint_reservation_seconds` (default 600).
 
@@ -386,6 +403,35 @@ A hook's reason and a permission result's message are text, and they are the onl
 
 The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, and a registration can add it to any tool. [§5.14](../../spec/STANDARD-v1.1.0.md#514-approval) defines approval for a workflow step. For a tool call the adapter does not decide: it hands the call to the host's permission flow, once per call, after the checkpoint rule is satisfied.
 
+The adapter obtains one decision per call from the host. It does not implement the rest of §5.14, which is written for workflow steps: it computes no digest of what was shown, counts no approvers, applies no expiry, and writes no action record. Whether the person saw the input that then ran depends on your callback; a callback that rewrites `updated_input` is responsible for what it rewrites to, since the adapter classified the input the model sent. A workflow that needs §5.14 in full runs on the [reference executor](../guides/RUNNING_WORKFLOWS.md).
+
+### Who Decides
+
+```mermaid
+---
+title: Who decides a call that requires approval
+---
+flowchart TB
+  accDescr: PreToolUse answers ask with a reason that begins F502 APPROVAL_REQUIRED. If the options passed to wrap_options() have a can_use_tool callback, the adapter's callback repeats the checkpoint check and calls yours with the tool name, the input and the context; an allow runs the call, and anything else denies it and releases its checkpoint reservation. If they have a permission_prompt_tool_name, Claude Code puts the ask to that tool. With neither, the adapter's callback denies the call with F502, since no one can give the approval.
+  ask["PreToolUse: ask, F502"] --> q1{"A can_use_tool callback?"}
+  q1 -->|yes| cb["The adapter checks the checkpoint again, then calls yours; not an allow: denied, reservation released"]
+  q1 -->|no| q2{"A permission prompt tool?"}
+  q2 -->|yes| ppt["Claude Code asks that tool"]
+  q2 -->|no| none["Denied: F502, no one can give it"]
+```
+
+The adapter installs no callback beside a permission prompt tool, because the SDK refuses the two together. It then never hears that the tool refused a call, so it does not reserve the checkpoint for a call it asks about: the hook checks that a checkpoint is free, and the PostToolUse hook takes it and uses it up once the call has run. Two such calls approved and run at the same time could share one checkpoint. With neither, the call is denied because §5.14 treats an approval no one could decide as a refusal.
+
+Your callback is also called for the calls Claude Code asks about on its own account, whether or not their capability requires approval. `wrap_options()` used to replace a `can_use_tool` callback on the base options; it now chains to it.
+
+To run without the approval rule, for example where an allow-list and a sandbox already bound what the agent can do:
+
+```python
+adapter = GroundedAgentAdapter(GroundedAgentConfig(approval="off"))
+```
+
+With `approval="off"` the hook answers nothing for a call that satisfies the checkpoint rule, and with no host callback the adapter's callback allows it: the behaviour before the approval rule existed.
+
 ### What the Hook Returns
 
 ```python
@@ -398,36 +444,14 @@ The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, a
 }}
 ```
 
-This rests on the hook contract of the Claude Agent SDK, checked against version 0.2.182 (`claude_agent_sdk.types.PreToolUseHookSpecificOutput`) and the Claude Code documentation:
+This rests on the SDK's hook contract (version 0.2.182, `PreToolUseHookSpecificOutput`) and the Claude Code documentation:
 
 - `permissionDecision` is one of `"allow"`, `"deny"`, `"ask"` and `"defer"`. When several hooks answer, `deny` takes priority over `defer`, then `ask`, then `allow` ([Agent SDK hooks](https://code.claude.com/docs/en/agent-sdk/hooks)).
-- `"ask"` prompts for confirmation: a PreToolUse hook's output "can deny the tool call, force a prompt, or skip the prompt" ([Permissions](https://code.claude.com/docs/en/permissions)). In an SDK session the prompt is the `can_use_tool` callback, and `ToolPermissionContext.decision_reason` holds the hook's reason.
+- `"ask"` forces a prompt ([Permissions](https://code.claude.com/docs/en/permissions)). In an SDK session the prompt is the `can_use_tool` callback, and `ToolPermissionContext.decision_reason` holds the hook's reason.
 - With no one to answer, the call is denied: "In a `-p` run with no host, these requests are denied either way", and the model reads the reason in the tool result ([Headless mode](https://code.claude.com/docs/en/headless), [Hooks reference](https://code.claude.com/docs/en/hooks)). In `dontAsk` mode Claude Code denies every call that would prompt, without calling the callback.
 - The documentation does not say whether `bypassPermissions` mode puts a hook's `"ask"` to the callback or approves the call, so this guide makes no claim that the approval rule holds in that mode.
 
-The tests in `tests/test_tool_call_approval.py` call the hook and the permission callback directly and check the SDK's type for `"ask"`. They do not start Claude Code, so what Claude Code does with an `"ask"` rests on the documentation cited above.
-
-### Who Decides
-
-| The options passed to `wrap_options()` have | A call that requires approval |
-|---------------------------------------------|-------------------------------|
-| a `can_use_tool` callback | The adapter's callback repeats the checkpoint check, then calls yours with the tool name, the input and the context, and returns your result. A result that is not an allow releases the call's checkpoint reservation. |
-| a `permission_prompt_tool_name` | The adapter installs no callback, because the SDK refuses the two together. Claude Code puts the hook's `"ask"` to your permission prompt tool. |
-| neither | Denied by the adapter's callback with `F502 APPROVAL_REQUIRED: ... no one can give it`. §5.14 treats an approval no one could decide as a refusal. |
-
-Your callback is also called for the calls Claude Code asks about on its own account, whether or not their capability requires approval. `wrap_options()` used to replace a `can_use_tool` callback on the base options; it now chains to it.
-
-To run without the approval rule, for example where an allow-list and a sandbox already bound what the agent can do:
-
-```python
-adapter = GroundedAgentAdapter(GroundedAgentConfig(approval="off"))
-```
-
-With `approval="off"` the hook answers nothing for a call that satisfies the checkpoint rule, and with no host callback the adapter's callback allows it: the behaviour before the approval rule existed.
-
-### What the Adapter Does Not Do
-
-The adapter obtains one decision per call from the host. It does not implement the rest of §5.14, which is written for workflow steps: it computes no digest of what was shown, counts no approvers, applies no expiry, and writes no action record. Whether the person saw the input that then ran depends on your callback; a callback that rewrites `updated_input` is responsible for what it rewrites to, since the adapter classified the input the model sent. A workflow that needs §5.14 in full runs on the [reference executor](../guides/RUNNING_WORKFLOWS.md).
+The tests in `tests/test_tool_call_approval.py` call the hook and the callback directly; what Claude Code does with an `"ask"` rests on the documentation cited above.
 
 ## Structured Output
 
@@ -514,7 +538,18 @@ The same switch exists where anchors are built directly: `EvidenceAnchor.from_to
 
 ## Multi-Agent Coordination
 
-Bridge the orchestration runtime to SDK subagents:
+Bridge the orchestration runtime to SDK subagents. The example registers two agents and exports them:
+
+```mermaid
+---
+title: The two agents in the example
+---
+flowchart TB
+  accDescr: The analyst agent has search, retrieve and classify and the writer agent has generate and mutate; the orchestration runtime holds both, and wrap_options exports them as SDK agent definitions.
+  analyst["analyst: search, retrieve, classify"] --> rt[OrchestrationRuntime]
+  writer["writer: generate, mutate"] --> rt
+  rt -->|"adapter.orchestrator, wrap_options()"| agents["options.agents: SDK AgentDefinition dicts"]
+```
 
 ```python
 from grounded_agency import (
@@ -555,17 +590,6 @@ runtime.register_agent(
 adapter.orchestrator = runtime
 options = adapter.wrap_options(base_options)
 # options.agents now contains SDK-compatible AgentDefinition dicts
-```
-
-```mermaid
----
-title: The two agents in the example
----
-flowchart TB
-  accDescr: The analyst agent has search, retrieve and classify and the writer agent has generate and mutate; the orchestration runtime holds both, and wrap_options exports them as SDK agent definitions.
-  analyst["analyst: search, retrieve, classify"] --> rt[OrchestrationRuntime]
-  writer["writer: generate, mutate"] --> rt
-  rt -->|"adapter.orchestrator, wrap_options()"| agents["options.agents: SDK AgentDefinition dicts"]
 ```
 
 ## Configuration Options

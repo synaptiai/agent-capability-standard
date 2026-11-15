@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import inspect
 import logging
+import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -352,6 +353,11 @@ class GroundedAgentAdapter:
         )
         self.evidence_store = EvidenceStore()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
+        # Calls the PreToolUse hook asked about without reserving the
+        # checkpoint (a permission prompt tool decides them), by tool_use_id,
+        # with their (session_id, agent_id). See _make_pretooluse_safety_hook.
+        self._unreserved_asks: dict[str, tuple[Any, Any]] = {}
+        self._unreserved_lock = threading.Lock()
 
         # Lazy-initialized by _get_or_create_workflow_engine
         self._workflow_engine: Any = None
@@ -438,7 +444,9 @@ class GroundedAgentAdapter:
 
         # PreToolUse hook: rate limit, checkpoint and approval enforcement
         pre_hooks = list(existing_hooks.get("PreToolUse", []))
-        safety_pre_hook = self._make_pretooluse_safety_hook()
+        safety_pre_hook = self._make_pretooluse_safety_hook(
+            reserve_asked=not getattr(base, "permission_prompt_tool_name", None)
+        )
         safety_pre_hook._grounded_adapter = self  # see _already_wrapped
         pre_hooks.append(self._wrap_hook(safety_pre_hook))
 
@@ -608,9 +616,12 @@ class GroundedAgentAdapter:
             context: HookContext | None,
         ) -> dict[str, Any]:
             try:
-                holder = tracker.release_reservation_in_scope(
-                    (input_data.get("session_id"), input_data.get("agent_id"))
-                )
+                scope = (input_data.get("session_id"), input_data.get("agent_id"))
+                with self._unreserved_lock:
+                    for held, held_scope in list(self._unreserved_asks.items()):
+                        if held_scope == scope:
+                            del self._unreserved_asks[held]
+                holder = tracker.release_reservation_in_scope(scope)
                 if holder is not None:
                     logger.info(
                         "Turn ended: released the reservation left by %s", holder
@@ -621,7 +632,7 @@ class GroundedAgentAdapter:
 
         return release_at_turn_end
 
-    def _make_pretooluse_safety_hook(self) -> Any:
+    def _make_pretooluse_safety_hook(self, reserve_asked: bool = True) -> Any:
         """
         Create the PreToolUse hook that enforces the rate limit,
         checkpoint-before-mutation and approval.
@@ -651,6 +662,12 @@ class GroundedAgentAdapter:
           denies it where there is none. ``strict_mode`` does not switch
           this rule off. A mapping that requires no approval, such as a
           read-only Bash command, is not asked about.
+        - With ``reserve_asked=False`` (the options name a permission prompt
+          tool, so the adapter installs no ``can_use_tool``), a call the hook
+          asks about is not reserved for: if the prompt tool denies it,
+          nothing tells the adapter, and the reservation would refuse the
+          next mutation. The hook checks that a checkpoint is free, and the
+          PostToolUse hook takes and consumes it once the call has run.
         - A tool the mapper does not know, or fails to classify, is treated
           as a high-risk mutation that requires approval, so every check
           above applies to it. Any other error (for example in the
@@ -680,6 +697,8 @@ class GroundedAgentAdapter:
         limiter = self.rate_limiter
         # Anything but an explicit "off" asks.
         asks = self.config.approval != "off"
+        unreserved_asks = self._unreserved_asks
+        unreserved_lock = self._unreserved_lock
 
         def decide(decision: str, message: str) -> dict[str, Any]:
             return {
@@ -733,18 +752,27 @@ class GroundedAgentAdapter:
 
                 if mapping.requires_checkpoint:
                     holder = tool_use_id or input_data.get("tool_use_id")
-                    reserved, checkpoint_id = tracker.validate_and_reserve(
-                        holder,
-                        scope=(
-                            input_data.get("session_id"),
-                            input_data.get("agent_id"),
-                        ),
+                    scope = (input_data.get("session_id"), input_data.get("agent_id"))
+                    unreserved = (
+                        not reserve_asked
+                        and asks
+                        and mapping.requires_approval
+                        and holder is not None
                     )
+                    if unreserved:
+                        reserved, checkpoint_id = tracker.can_reserve(holder)
+                    else:
+                        reserved, checkpoint_id = tracker.validate_and_reserve(
+                            holder, scope=scope
+                        )
                     if not reserved:
                         message = _checkpoint_denial(mapping, tool_name, checkpoint_id)
                         if strict:
                             return deny(message)
                         logger.warning("PreToolUse warning (non-strict): %s", message)
+                    elif unreserved:
+                        with unreserved_lock:
+                            unreserved_asks[str(holder)] = scope
 
             except Exception:
                 # The detail stays in the log: the deny reason goes back to
@@ -773,7 +801,10 @@ class GroundedAgentAdapter:
         mutation completes, its checkpoint is consumed, requiring a new
         checkpoint for subsequent mutations. Only the checkpoint reserved
         under the call's ``tool_use_id`` is touched, so a call that held no
-        reservation cannot consume another call's checkpoint.
+        reservation cannot consume another call's checkpoint. The exception
+        is a call the PreToolUse hook asked about without reserving (a
+        permission prompt tool decided it): having run, it takes the active
+        checkpoint now and consumes it, unless another call holds it.
 
         Returns:
             Async hook callback function
@@ -788,6 +819,8 @@ class GroundedAgentAdapter:
         ) -> dict[str, Any]:
             """PostToolUse hook: consume the call's reserved checkpoint, or
             release it if the tool reported an error."""
+            with self._unreserved_lock:
+                unreserved_scope = self._unreserved_asks.pop(tool_use_id or "", None)
             try:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
@@ -815,6 +848,10 @@ class GroundedAgentAdapter:
                     logger.info("%s changed nothing, checkpoint preserved", tool_name)
                     return {}
 
+                if unreserved_scope is not None:
+                    # Asked about without a reservation; it ran, so take
+                    # the checkpoint now.
+                    tracker.validate_and_reserve(tool_use_id, scope=unreserved_scope)
                 consumed_id = tracker.consume_checkpoint(tool_use_id)
                 if consumed_id is not None:
                     logger.info(
@@ -847,6 +884,8 @@ class GroundedAgentAdapter:
             """PostToolUseFailure hook: release the call's reservation."""
             try:
                 holder = tool_use_id or input_data.get("tool_use_id")
+                with self._unreserved_lock:
+                    self._unreserved_asks.pop(holder or "", None)
                 if holder and tracker.release_reservation(holder):
                     logger.info(
                         "%s failed, checkpoint reservation released",

@@ -176,6 +176,54 @@ class TestPreToolUseExitCodes:
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
         assert "expired" in result.stderr.lower()
 
+    @pytest.mark.parametrize(
+        "content", ["ok", '"just a string"', "[1, 2]", "5", "null"]
+    )
+    def test_exit_2_marker_not_a_json_object(
+        self, tmp_path: Path, content: str
+    ) -> None:
+        """A marker that is not a JSON object blocks: jq's own exit code
+        would be a non-blocking error, and the call would run."""
+        if shutil.which("jq") is None:
+            pytest.skip("jq not installed; the fallback checks the marker's age only")
+        marker = tmp_path / ".claude" / "checkpoint.ok"
+        marker.parent.mkdir()
+        marker.write_text(content)
+
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_hook(PRETOOLUSE_HOOK, "Write something", env)
+        assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        assert "not a json object" in result.stderr.lower()
+        assert not marker.exists()
+
+    def test_a_failing_command_blocks(self, tmp_path: Path) -> None:
+        """Any unexpected failure inside the hook blocks the call (exit 2),
+        rather than exiting with the failing command's status."""
+        if shutil.which("jq") is None:
+            pytest.skip("jq not installed")
+        import time
+
+        marker = tmp_path / ".claude" / "checkpoint.ok"
+        marker.parent.mkdir()
+        marker.write_text(
+            json.dumps({"checkpoint_id": "chk", "expires_at": int(time.time()) + 600})
+        )
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        fake_date = bin_dir / "date"
+        fake_date.write_text("#!/bin/sh\nexit 1\n")
+        fake_date.chmod(0o755)
+
+        env = {
+            "CLAUDE_PROJECT_DIR": str(tmp_path),
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        }
+        result = run_hook(PRETOOLUSE_HOOK, "Write something", env)
+        assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        assert "hook failed" in result.stderr
+
     def test_empty_payload_passes(self) -> None:
         """Empty payload (no arg) should pass — not a mutation."""
         result = run_hook(PRETOOLUSE_HOOK, "")

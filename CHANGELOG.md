@@ -18,6 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Edit, a mutating Bash command, `execute`/`mutate`/`send` tools) is put to
   the host's permission flow; set `approval="off"` for the earlier behaviour.
   `ToolMapping` is frozen and has a required `requires_approval` field.
+  `ToolCapabilityMapper(ontology_dict)` now takes every flag from the dict it
+  is given: pass the full ontology, a `CapabilityRegistry`, or nothing for the
+  packaged ontology; with an empty or partial dict `map_tool` raises V101. An
+  MCP tool registered without a `risk` takes its capability's risk (was
+  `"medium"`), so a `retrieve` or `search` tool counts against the low-risk
+  rate limit.
+- Python SDK, Bash: `sed`, `awk` and `env` are no longer read-only, since they
+  can write a file or run another command; a call to one needs a checkpoint
+  and approval like any other mutation.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool call
   with a digest of the input in place of the input; `tools/verify_audit_log.py`
   verifies old and new lines in one chain.
@@ -136,6 +145,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Passing options that `wrap_options()` already returned to it again (as
   `GroundedClient` does with the options it is given) returns them
   unchanged instead of adding a second set of hooks.
+- Python SDK: the Bash classifier read only the first word of each part of a
+  line split at `&&`, `||` and `; ` followed by a letter, so `env rm -rf x`,
+  `ls | sh`, `ls & rm x`, `ls ;/bin/rm x`, `echo x >~/.bashrc` and
+  `find . -delete` counted as read-only and needed neither a checkpoint nor
+  approval. The line is now read with the shell's quoting rules and split at
+  every control operator; it is read-only only when every command in it is
+  allow-listed, by its exact name, with no option that writes, and it has no
+  output redirection except to `/dev/null`, no subshell and no here-document.
+  A quoted operator is now data: `grep -E "a|b" f` is read-only.
+- Python SDK: with a `permission_prompt_tool_name`, a call the prompt tool
+  denied kept the checkpoint reserved, so the next mutation was refused with
+  F501 for up to ten minutes. The adapter no longer reserves for a call it
+  asks about in that mode; the call takes the checkpoint once it has run.
+- Plugin checkpoint hook: a marker that was not a JSON object made `jq` exit
+  5, which Claude Code treats as a non-blocking error, so every Write, Edit
+  and Bash call ran. Any failure in the hook now blocks the call (exit 2).
+- Skill hooks: the persist hook's protected paths could be reached through
+  `//`, `/./` or `..` segments, which it now refuses; the send hook matched
+  `localhost` case-sensitively and blocked URLs that only contained an
+  internal-looking number, such as a version in a path. It now matches host
+  names in any case, and an address only where a host stands.
+- `tools/verify_audit_log.py` split lines on U+0085, U+2028 and U+2029 as well
+  as newlines, so a log with such a character in a logged name failed
+  verification. It splits on newlines only.
+- Standard Agents binding: an approval accepted after the deadline extended
+  the request, so with enough approvers it never expired. No approval is now
+  accepted more than `expires_ms` after the request, and one stored later
+  counts for nothing; a rejection is still accepted until the request is used
+  or expires.
 
 ## [v2.0.0] — 2026-10-29
 

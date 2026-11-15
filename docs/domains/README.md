@@ -10,25 +10,6 @@ Domain templates provide ready-to-use starting points for specific industry vert
 - **Workflows** — Pre-composed workflow patterns using the 36 atomic capabilities
 - **Documentation** — Guidance on customization and integration
 
-## Status of Domain Profiles
-
-A domain profile is informative data for hosts and workflow authors. It records what the authors of a domain consider appropriate: how far to trust each source, which risk levels and capabilities call for a person, when to take a checkpoint and what evidence to expect. It changes nothing about how a workflow is validated or run, or about what a tool call is allowed to do.
-
-- **The Standard does not say how a profile is applied.** Standard 1.1.0 mentions profiles twice: `profile` is a recognised descriptive workflow field ([§5.1](../../spec/STANDARD-v1.1.0.md#51-catalog-and-workflow-definition)), and a `trust_weights` key of the form `trust_class:<class>` overrides the weight of a trust class ([§8.3](../../spec/STANDARD-v1.1.0.md#83-trust-classes)). It does not say how a run selects a profile, or what any other setting changes.
-- **No shipped component loads or selects a profile.** The validator and the executor (`core/`), the Python package (`grounded_agency/`) and the plugin hooks (`hooks/`) do not load `schemas/profiles/*.yaml`. One setting has reference code: the trust arithmetic of `grounded_agency/trust.py` applies a profile's `trust_weights` to a static weight when its caller passes them (a `trust_class:<class>` key as the class weight of §8.3, any other key as a source weight), and reads no file. Nothing applies any other setting. `tools/validate_profiles.py` checks the shape of a profile: required fields, types, value ranges and enumerations. It does not check that the entries of `block_autonomous` and `require_grounding` are capability ids, or that a listed workflow exists.
-- **The settings are not tied to the Standard's vocabulary.** `require_human` admits `critical`, which is not one of the risk levels of [§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition) (`low`, `medium`, `high`). The keys of `checkpoint_policy` are free-form labels. None of the `required_anchor_types` in the shipped profiles is an `Anchor.kind` of `schemas/event_schema.yaml`, and none of their `trust_weights` keys has the `trust_class:<class>` form of §8.3.
-
-A setting such as `block_autonomous`, `require_human`, `checkpoint_policy` or `minimum_confidence` therefore takes effect only where a host implements it, or where a workflow author writes it into the workflow, for example by raising a step's `requires_approval` ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)). Where this documentation says that a profile requires, blocks or never allows something, that is what the profile declares, not something a shipped component enforces.
-
-What is enforced today rests on the ontology's safety flags and on workflows, not on profiles:
-
-| What is enforced | By what |
-|------------------|---------|
-| A workflow in which `mutate`, `send` or `rollback` has no `checkpoint` step running before it does not validate (V102). A step's safety flags are the stricter of its own declaration and the ontology's; a weaker declaration has no effect and is reported (W602) | The validator in `core/`, run by `tools/validate_workflows.py` ([§4.3](../../spec/STANDARD-v1.1.0.md#43-edge-types-and-dependency-semantics), [§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) |
-| A step whose effective `requires_checkpoint` is true runs only on a valid checkpoint, and a step whose effective `requires_approval` is true runs only on a decision bound to what the approver was shown. In the ontology `mutate` and `send` carry both flags and `execute` carries `requires_approval` | The reference executor in `core/` ([Running workflows](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces), [§5.14](../../spec/STANDARD-v1.1.0.md#514-approval)) |
-| A tool call is classified by a capability. In strict mode a call whose capability requires a checkpoint is denied when no valid checkpoint exists (F501). A call whose capability requires approval is put to the host's permission flow (F502), unless the adapter is configured with `approval="off"`. Calls are rate-limited by risk level | The Python adapter, `grounded_agency/adapter.py` ([Claude Agent SDK integration](../integrations/claude_agent_sdk.md)) |
-| A Write, Edit, MultiEdit, NotebookEdit or Bash call is blocked unless a valid, unexpired checkpoint marker exists (F501). The hook asks for no approval | The Claude Code plugin hook, `hooks/pretooluse_require_checkpoint.sh` ([Safety hooks](../../hooks/README.md)) |
-
 ## Available Domains
 
 | Domain | Profile | Workflows | Key Characteristics |
@@ -196,6 +177,19 @@ detect:
 ```
 
 This proves the atomic capability set is complete — different domains compose the same building blocks with domain-specific parameterization.
+
+## Status of Domain Profiles
+
+A domain profile is informative data: what the authors of a domain consider appropriate for trusting sources, involving a person, taking checkpoints and expecting evidence. Nothing applies one. Standard 1.1.0 names `profile` as a descriptive workflow field ([§5.1](../../spec/STANDARD-v1.1.0.md#51-catalog-and-workflow-definition)) and lets a `trust_weights` key `trust_class:<class>` override a trust class's weight ([§8.3](../../spec/STANDARD-v1.1.0.md#83-trust-classes)), but says neither how a run selects a profile nor what its other settings change. No shipped component reads `schemas/profiles/*.yaml`: `grounded_agency/trust.py` applies `trust_weights` only when its caller passes them, and `tools/validate_profiles.py` checks a profile's shape only. Some settings use words outside the Standard's vocabulary: `require_human` admits `critical`, which is not a risk level of [§4.1](../../spec/STANDARD-v1.1.0.md#41-capability-definition), and no `required_anchor_types` entry in the shipped profiles is an `Anchor.kind` of `schemas/event_schema.yaml`.
+
+So `block_autonomous`, `require_human`, `checkpoint_policy` and `minimum_confidence` take effect only where a host implements them or a workflow author writes them into the workflow, for example as a step's `requires_approval` ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)). Where this documentation says a profile requires or blocks something, that is what the profile declares. What is enforced rests on the ontology's safety flags:
+
+| What is enforced | By what |
+|------------------|---------|
+| No `mutate`, `send` or `rollback` step without a `checkpoint` step before it (V102); a step's flags are never weaker than the ontology's (W602) | The validator in `core/` ([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)) |
+| A step runs only on a valid checkpoint and a decision on what the approver was shown, where its flags require them | The reference executor ([Running workflows](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces)) |
+| A tool call needs a checkpoint (F501, strict mode) and is put to the host for approval (F502), where its capability requires them | The Python adapter ([Claude Agent SDK integration](../integrations/claude_agent_sdk.md)) |
+| A Write, Edit, MultiEdit, NotebookEdit or Bash call needs a valid checkpoint marker (F501) | The plugin hook ([Safety hooks](../../hooks/README.md)) |
 
 ## Related Documentation
 

@@ -32,6 +32,9 @@ meta:
     types_package:
       name: "@standardagents/spec"
       version: "0.45.10"
+  # The versions these conventions were checked against, like the analysis
+  # index's. A release does not bump them: a new version is checked against
+  # the rows first, then recorded here and in the index.
   agent_capability_standard:
     standard: "1.1.0"
     ontology: "2.1.0"

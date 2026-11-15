@@ -70,7 +70,7 @@ export function effectiveFlags(
   if (declared.risk !== undefined) {
     if (RISK_ORDER[declared.risk] > RISK_ORDER[risk]) risk = declared.risk;
     else if (RISK_ORDER[declared.risk] < RISK_ORDER[risk]) {
-      warnings.push(`W602: risk '${declared.risk}' is weaker than the ontology's '${node.risk}' and is ignored`);
+      warnings.push(`W602: risk '${declared.risk}' is weaker than the ontology's '${node.risk}' and has no effect`);
     }
   }
 
@@ -78,7 +78,7 @@ export function effectiveFlags(
   if (declared.mutation === true) mutation = true;
   else if (declared.mutation === false && node.mutation) {
     if (node.mutation_overridable) mutation = false;
-    else warnings.push(`W602: mutation false is weaker than the ontology's value and is ignored`);
+    else warnings.push(`W602: mutation false is weaker than the ontology's value and has no effect`);
   }
 
   return {

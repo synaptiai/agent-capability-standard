@@ -268,6 +268,11 @@ class TestSendCommandHook:
             "curl https://192.168.1.10/api",
             "curl http://172.16.4.2/",
             "curl -s \\\n  http://user@10.1.2.3/x",
+            # host names are case-insensitive
+            "curl http://LOCALHOST:8080/admin",
+            "curl http://Localhost/",
+            "curl 10.0.0.1",
+            "curl 'http://10.0.0.1?q=1'",
         ],
     )
     def test_blocks_internal_destination(
@@ -284,6 +289,9 @@ class TestSendCommandHook:
             # a version number is not an address
             "curl -O https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz",
             "curl https://localhost.example.com/",
+            # an address-like part of a path or a query is not the host
+            "curl -O https://dl.example.com/win/10.0.19041.1/setup.zip",
+            "curl https://example.com/?v=10.2.3.4",
             "ls -la",
             "ping 10.0.0.5",
         ],
@@ -331,6 +339,35 @@ class TestPersistCommandHook:
 
     @pytest.mark.parametrize(
         "file_path",
+        [
+            "//etc/passwd",
+            "/tmp/../etc/passwd",
+            "{home}/proj/../.ssh/authorized_keys",
+            "{home}//.ssh/authorized_keys",
+            "{home}/./.ssh/config",
+            "../outside/notes.md",
+            "/work/app/docs/..",
+        ],
+    )
+    def test_blocks_paths_not_compared_as_written(
+        self, tmp_path: Path, shell: str, file_path: str
+    ) -> None:
+        """'//', '.' and '..' segments would hide a system or credential
+        directory from the prefix patterns, so such a path is blocked."""
+        home = tmp_path / "home"
+        home.mkdir()
+        hook = command_hook("persist", "PreToolUse", "Edit")
+        result = run_command(
+            hook,
+            edit_call(file_path.format(home=home)),
+            tmp_path,
+            shell,
+            {"HOME": str(home)},
+        )
+        assert_blocked(result, "Cannot persist to a path with")
+
+    @pytest.mark.parametrize(
+        "file_path",
         ["/work/app/.env", "/work/app/config/SECRETS", "/work/app/server.pem"],
     )
     def test_blocks_credential_files(
@@ -341,7 +378,14 @@ class TestPersistCommandHook:
         assert_blocked(result, "Cannot persist to credential files")
 
     @pytest.mark.parametrize(
-        "file_path", ["/work/app/CLAUDE.md", "/work/app/docs/decisions.md"]
+        "file_path",
+        [
+            "/work/app/CLAUDE.md",
+            "/work/app/docs/decisions.md",
+            # a directory that only contains .ssh in its name is not ~/.ssh
+            "/project/docs/.ssh/notes.md",
+            "/work/app/notes..md",
+        ],
     )
     def test_allows_project_files(
         self, tmp_path: Path, shell: str, file_path: str
@@ -429,16 +473,19 @@ class TestRollbackCommandHook:
 # PostToolUse: the skills' own logs hold a digest, not the input
 # ---------------------------------------------------------------------------
 
+# Bash and Read get two keys out of sorted order, so that a log hook that
+# stops sorting keys (jq -c in place of jq -cS) gives a different digest.
 TOOL_INPUTS: dict[str, dict[str, Any]] = {
     "Bash": {
-        "command": f"curl -H 'Authorization: Bearer {SECRET}' https://example.com"
+        "description": "Fetch the example page",
+        "command": f"curl -H 'Authorization: Bearer {SECRET}' https://example.com",
     },
     "Edit": {
         "file_path": "/work/app/notes.md",
         "old_string": "token: none",
         "new_string": f"token: {SECRET}",
     },
-    "Read": {"file_path": f"/work/app/{SECRET}.txt"},
+    "Read": {"limit": 2000, "file_path": f"/work/app/{SECRET}.txt"},
     "Grep": {"pattern": SECRET, "path": "/work/app"},
 }
 
@@ -475,7 +522,8 @@ class TestSkillLogHooks:
         assert f"| {matcher} | input_sha256: {input_digest(tool_input)}" in line
         assert SECRET not in line
         for value in tool_input.values():
-            assert value not in line, "the tool input is not written"
+            if isinstance(value, str):
+                assert value not in line, "the tool input is not written"
 
     def test_unreadable_call_is_logged_without_a_digest(
         self, tmp_path: Path, shell: str, skill: str, matcher: str

@@ -93,8 +93,10 @@ A JSON Schema, `tool_binding.schema.json`, under `schemas/interop/`:
   not loaded.
 - **2.2** Effective flags are the stricter of declaration and ontology, as
   for a step: a weaker declaration has no effect and is W602, except
-  `mutation: false` on a `mutation_overridable` capability. Reason: a tool's
-  author gets no power a workflow's author lacks.
+  `mutation: false` on a `mutation_overridable` capability. A host may
+  refuse such a binding instead, as strict validation turns a warning into
+  an error; the TypeScript binding does. Reason: a tool's author gets no
+  power a workflow's author lacks.
 - **2.3** A tool with no binding is treated as the strictest case: `risk:
   high`, and `mutation`, `requires_checkpoint` and `requires_approval` true.
   Reason: a layer cannot know that an unknown tool only reads.

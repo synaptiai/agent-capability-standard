@@ -9,6 +9,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -19,6 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from verify_audit_log import compute_hmac, verify_entry, verify_log  # noqa: E402
 
 HMAC_KEY = "test-key-for-verification"
+POSTTOOLUSE_HOOK = (
+    Path(__file__).resolve().parents[1] / "hooks" / "posttooluse_log_tool.sh"
+)
 
 
 def sign(content_dict: dict, hmac_key: str = HMAC_KEY) -> dict:
@@ -201,6 +207,42 @@ class TestVerifyEntry:
 
 class TestVerifyLog:
     """Tests for full log verification."""
+
+    @pytest.mark.skipif(
+        shutil.which("bash") is None or shutil.which("jq") is None,
+        reason="the hook needs bash and jq",
+    )
+    def test_line_separators_inside_a_name_verify(self, tmp_path: Path) -> None:
+        """U+0085, U+2028 and U+2029 inside a logged name are not line breaks.
+
+        jq -c writes them raw, and the hook chains on lines split at "\\n"
+        only; str.splitlines() would split the entry in two.
+        """
+        env = {
+            **os.environ,
+            "CLAUDE_PROJECT_DIR": str(tmp_path),
+            "AUDIT_HMAC_KEY": HMAC_KEY,
+        }
+        calls = [
+            {"tool_name": "Read", "tool_input": {"file_path": "/work/a.md"}},
+            {"tool_name": "Skill", "tool_input": {"skill": "x\u2028y\u0085z\u2029"}},
+            {"tool_name": "Read", "tool_input": {"file_path": "/work/b.md"}},
+        ]
+        for call in calls:
+            subprocess.run(
+                ["bash", str(POSTTOOLUSE_HOOK)],
+                input=json.dumps({"hook_event_name": "PostToolUse", **call}),
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=30,
+                check=True,
+            )
+        log_file = tmp_path / ".claude" / "audit.log"
+        raw = log_file.read_text(encoding="utf-8")
+        assert raw.count("\n") == 3
+        assert "\u2028" in raw, "the name is written raw, as the test intends"
+        assert verify_log(log_file, HMAC_KEY) == (3, 3, [])
 
     def test_valid_chain_passes(self, tmp_path: Path) -> None:
         log_path = tmp_path / "audit.log"

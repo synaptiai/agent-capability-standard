@@ -120,7 +120,7 @@ export interface ApprovalRecord {
   role?: string;
   requested_at: number;
   /**
-   * How long a decision stays valid, in milliseconds: no decision is
+   * How long a decision stays valid, in milliseconds: no approval is
    * accepted later than this after `requested_at`, and an approval counts
    * for this long after it was given. See `approvalState`.
    */

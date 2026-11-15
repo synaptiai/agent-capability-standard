@@ -126,7 +126,8 @@ Three things the binding cannot do for a deployment:
 ## Generated files
 
 `src/acs/ontology.gen.ts` and `test/fixtures/approval-digests.json` come from
-this repository's ontology and reference executor. After changing either:
+this repository's ontology and reference executor. After changing either,
+from the repository root:
 
 ```bash
 python scripts/gen_standard_agents_binding.py

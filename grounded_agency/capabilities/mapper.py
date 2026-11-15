@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shlex
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -101,14 +102,19 @@ _ALWAYS_DANGEROUS_PATTERNS = re.compile(
     re.VERBOSE,
 )
 
-# Compound command operators: &&, ||, ; followed by a command.
-# Used to split compound commands for per-sub-command classification.
-# Known limitation: quoted or escaped compound operators
-# (e.g., echo "a && b", echo 'a || b', heredocs) will cause
-# incorrect splitting. This is fail-safe: unrecognized fragments
-# default to high-risk via the secure default-deny path.
-_COMPOUND_OPERATOR_RE = re.compile(r"\s*(?:&&|\|\||;\s*(?=[a-zA-Z]))\s*")
+# The shell is read with shlex (POSIX rules, operators as their own tokens), so
+# quoted text stays one word: `grep "a|b" f` is one command. These control
+# operators separate simple commands; a list or pipeline is read-only only when
+# every command in it is.
+_SEPARATORS: frozenset[str] = frozenset({"&&", "||", ";", "|", "&", "|&"})
+# Output redirections. One is harmless only to /dev/null, or as `>&N`, which
+# duplicates a descriptor; anything else writes a file.
+_OUTPUT_REDIRECTS: frozenset[str] = frozenset({">", ">>", ">|", "&>", "&>>", ">&"})
+_OPERATOR_CHARS = frozenset("();<>|&")
 
+# Commands that only read, unless given an option that writes (_writes).
+# Not here, because they run another command or can write a file whatever
+# their options: env, xargs, sed, awk, tee and the interpreters.
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "ls",
@@ -127,7 +133,6 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "uname",
         "date",
         "cal",
-        "env",
         "printenv",
         "echo",
         "printf",
@@ -136,8 +141,6 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "locate",
         "find",
         "grep",
-        "awk",
-        "sed",
         "cut",
         "sort",
         "uniq",
@@ -164,6 +167,123 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "kubectl logs",
     }
 )
+
+# find actions that delete, run a command or write a file.
+_FIND_WRITES: frozenset[str] = frozenset(
+    {
+        "-delete",
+        "-exec",
+        "-execdir",
+        "-ok",
+        "-okdir",
+        "-fprint",
+        "-fprint0",
+        "-fprintf",
+        "-fls",
+    }
+)
+# The only arguments with which `git branch` lists and changes nothing.
+_GIT_BRANCH_LISTING: frozenset[str] = frozenset(
+    {
+        "-a",
+        "--all",
+        "-r",
+        "--remotes",
+        "-v",
+        "-vv",
+        "--verbose",
+        "-l",
+        "--list",
+        "--show-current",
+        "--color",
+        "--no-color",
+    }
+)
+
+
+def _simple_commands(command: str) -> list[list[str]] | None:
+    """
+    The simple commands of a shell command line, each as its words.
+
+    Returns None when the line holds something this reading cannot show to be
+    harmless: an unbalanced quote, a subshell or group, a here-document, or an
+    output redirection to anything but /dev/null. Redirections are dropped
+    from the words. Comments are not recognised, so `ls # ; rm x` reads as two
+    commands: a reading that errs splits a command into more commands to
+    check, never fewer.
+    """
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    commands: list[list[str]] = [[]]
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in _SEPARATORS:
+            commands.append([])
+        elif token == "<":
+            i += 1  # reads a file: skip its name
+        elif token in _OUTPUT_REDIRECTS:
+            target = tokens[i + 1] if i + 1 < len(tokens) else ""
+            if target != "/dev/null" and not (token == ">&" and target.isdigit()):
+                return None
+            i += 1
+        elif token and set(token) <= _OPERATOR_CHARS:
+            return None  # (, ), <<, <>, ;; and the like
+        else:
+            commands[-1].append(token)
+        i += 1
+    return [words for words in commands if words]
+
+
+def _writes(words: list[str]) -> bool:
+    """Whether an allow-listed command is given an option that writes,
+    deletes or runs something. Errs towards True."""
+    name, args = words[0], words[1:]
+    short = [a for a in args if a.startswith("-") and not a.startswith("--")]
+    if name == "find":
+        return any(a in _FIND_WRITES for a in args)
+    if name == "sort":
+        return any(a.startswith("--output") for a in args) or any(
+            "o" in a[1:] for a in short
+        )
+    if name == "uniq":
+        # `uniq INPUT OUTPUT` writes OUTPUT.
+        return len([a for a in args if not a.startswith("-")]) > 1
+    if name == "date":
+        return any(a.startswith("--set") for a in args) or any(
+            "s" in a[1:] for a in short
+        )
+    if name == "hostname":
+        return any(not a.startswith("-") for a in args)
+    if name == "file":
+        return any(a in ("-C", "--compile") for a in args)
+    if name in ("less", "more"):
+        return any(a.startswith("+") for a in args)  # runs a pager command
+    if name == "git":
+        if any(a.startswith("--output") for a in args):
+            return True
+        sub, rest = args[0], args[1:]
+        if sub == "branch":
+            return not all(a in _GIT_BRANCH_LISTING for a in rest)
+        if sub == "remote":
+            return not (
+                rest in ([], ["-v"], ["--verbose"]) or rest[0] in ("show", "get-url")
+            )
+    return False
+
+
+def _is_read_only(words: list[str]) -> bool:
+    """Whether a simple command is on the read-only allow-list (by its exact
+    name, or its name and subcommand) with no option that writes."""
+    listed = (
+        words[0] in _READ_ONLY_COMMANDS or " ".join(words[:2]) in _READ_ONLY_COMMANDS
+    )
+    return listed and not _writes(words)
 
 
 @dataclass(frozen=True, slots=True)
@@ -617,14 +737,17 @@ class ToolCapabilityMapper:
         """
         Classify a Bash command based on its content.
 
-        Uses a two-pass approach for compound commands (&&, ||, ;):
-        1. Always-dangerous patterns are checked first (instant high-risk).
-        2. If compound operators are present, split and classify each
-           sub-command independently. Result is the max risk across all.
-        3. Single commands go through the standard check sequence.
+        1. Always-dangerous patterns (command substitution, backticks,
+           variable expansion, eval, exec, source, control characters) and
+           process substitution make the command a mutation at once.
+        2. The line is split into simple commands (`_simple_commands`); one
+           it cannot read is a mutation.
+        3. Each simple command is classified; the first that is not low risk
+           decides. Only a line whose every command is allow-listed as
+           read-only is an observation.
 
-        Security principle: Fail-safe defaults. Unknown commands are treated
-        as high-risk until explicitly allowlisted as read-only.
+        Security principle: fail-safe defaults. A command is high-risk until
+        it is shown to be on the read-only allow-list.
 
         Args:
             tool_input: Bash tool input with 'command' key
@@ -633,75 +756,51 @@ class ToolCapabilityMapper:
             ToolMapping based on command analysis
         """
         command = tool_input.get("command", "")
+        mutation = self._builtin("Bash", "mutate", checkpoint_gated=True)
 
         # Empty or non-string command is suspicious - fail-safe
         if not isinstance(command, str) or not command.strip():
-            return self._builtin("Bash", "mutate", checkpoint_gated=True)
+            return mutation
 
-        # FIRST: Check for always-dangerous patterns (command substitution,
-        # backticks, variable expansion, eval, exec, source, etc.)
-        # These bypass all other checks and are always high-risk.
-        if _ALWAYS_DANGEROUS_PATTERNS.search(command):
-            return self._builtin("Bash", "mutate", checkpoint_gated=True)
+        # SEC-002: These bypass all other checks and are always high-risk.
+        if _ALWAYS_DANGEROUS_PATTERNS.search(
+            command
+        ) or _PROCESS_SUBSTITUTION_PATTERNS.search(command):
+            return mutation
 
-        # SECOND: Check for compound operators (&&, ||, ;cmd)
-        # If present, split and classify each sub-command individually.
-        if _COMPOUND_OPERATOR_RE.search(command):
-            parts = _COMPOUND_OPERATOR_RE.split(command)
-            parts = [p.strip() for p in parts if p.strip()]
+        commands = _simple_commands(command)
+        if not commands:
+            return mutation
+        for words in commands:
+            result = self._classify_single_command(words)
+            if result.risk != "low":
+                return result
+        return self._builtin("Bash", "observe")
 
-            for part in parts:
-                result = self._classify_single_command(part)
-                if result.risk != "low":
-                    return result
-
-            return self._builtin("Bash", "observe")
-
-        # THIRD: Single command path
-        return self._classify_single_command(command)
-
-    def _classify_single_command(self, command: str) -> ToolMapping:
+    def _classify_single_command(self, words: list[str]) -> ToolMapping:
         """
-        Classify a single (non-compound) Bash command.
+        Classify one simple command, given as its words.
 
-        Checks in order: interpreter → process substitution → network →
-        destructive → read-only allowlist → secure default-deny.
-
-        Args:
-            command: A single shell command (no compound operators)
-
-        Returns:
-            ToolMapping based on command analysis
+        Checks in order: interpreter → network → destructive → read-only
+        allowlist → secure default-deny.
         """
+        text = " ".join(words)
         # SEC-002: Check for interpreter invocations (python -c, node -e, etc.)
-        if _INTERPRETER_PATTERNS.search(command):
+        if _INTERPRETER_PATTERNS.search(text):
             return self._builtin("Bash", "execute", checkpoint_gated=True)
 
-        # SEC-002: Check for process substitution and here-strings
-        if _PROCESS_SUBSTITUTION_PATTERNS.search(command):
-            return self._builtin("Bash", "mutate", checkpoint_gated=True)
-
         # Check for network send operations
-        if _NETWORK_SEND_PATTERNS.search(command):
+        if _NETWORK_SEND_PATTERNS.search(text):
             return self._builtin("Bash", "send", checkpoint_gated=True)
 
         # Check for destructive operations
-        if _DESTRUCTIVE_PATTERNS.search(command):
+        if _DESTRUCTIVE_PATTERNS.search(text):
             return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
-        # Check if it's a known read-only command (allowlist approach)
-        first_word = command.strip().split()[0] if command.strip() else ""
-        if first_word.lower() in _READ_ONLY_COMMANDS:
+        if _is_read_only(words):
             return self._builtin("Bash", "observe")
 
-        # Check for two-word read-only commands
-        first_two = " ".join(command.strip().split()[:2]).lower()
-        if first_two in _READ_ONLY_COMMANDS:
-            return self._builtin("Bash", "observe")
-
-        # SECURE DEFAULT: Unknown commands are high-risk
-        # This is fail-safe - we require checkpoint for anything not
-        # explicitly allowlisted as read-only
+        # SECURE DEFAULT: a command not shown to be read-only is high-risk.
         return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
     def is_high_risk(self, tool_name: str, tool_input: dict[str, Any]) -> bool:

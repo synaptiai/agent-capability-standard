@@ -23,9 +23,9 @@ export interface ApprovalPolicy {
   role?: string;
   /**
    * How long a decision stays valid, in milliseconds (more than zero). No
-   * decision is accepted later than this after the request, as in the
+   * approval is accepted later than this after the request, as in the
    * reference executor, and an approval counts for this long after it was
-   * given.
+   * given. A rejection is accepted until the request is used or expires.
    */
   expires_ms?: number;
 }
@@ -63,13 +63,23 @@ export class ApprovalError extends Error {
 }
 
 /**
+ * The time after which a request accepts no approval: `expires_ms` after it
+ * was made. The reference executor likewise fixes the deadline when the
+ * request is made (`core/src/exec/machine.rs`). Undefined without `expires_ms`.
+ */
+export function approvalDeadline(record: Pick<ApprovalRecord, 'requested_at' | 'expires_ms'>): number | undefined {
+  return record.expires_ms === undefined ? undefined : record.requested_at + record.expires_ms;
+}
+
+/**
  * Where an approval request stands at time `now`.
  *
- * With `expires_ms`, an approval counts only while `now` is within
- * `expires_ms` of when it was given, and once `expires_ms` has passed since
- * the request, a request without enough such approvals is expired and
- * accepts no further decision. The reference executor likewise fixes the
- * deadline when the request is made (`core/src/exec/machine.rs`).
+ * With `expires_ms`, an approval counts only if it was given by the
+ * deadline (`approvalDeadline`) and only while `now` is within `expires_ms`
+ * of when it was given. So a request can be used at most twice `expires_ms`
+ * after it was made, however many approvers decide: an approval stored after
+ * the deadline extends nothing. Once the deadline has passed, a request
+ * without enough approvals that count is expired.
  */
 export function approvalState(record: ApprovalRecord, now: number): ApprovalState {
   if (record.used_at !== undefined) return 'used';
@@ -78,9 +88,12 @@ export function approvalState(record: ApprovalRecord, now: number): ApprovalStat
   if (!Number.isInteger(record.min_approvers) || record.min_approvers < 1) return 'pending';
   const expires = record.expires_ms;
   if (expires !== undefined && !(expires > 0)) return 'expired';
-  const counted = record.decisions.filter((d) => expires === undefined || now <= d.at + expires);
+  const deadline = approvalDeadline(record);
+  const counted = record.decisions.filter(
+    (d) => d.decision === 'approved' && (expires === undefined || (d.at <= deadline! && now <= d.at + expires)),
+  );
   if (new Set(counted.map((d) => d.approver)).size >= record.min_approvers) return 'approved';
-  return expires !== undefined && now > record.requested_at + expires ? 'expired' : 'pending';
+  return deadline !== undefined && now > deadline ? 'expired' : 'pending';
 }
 
 async function pending(store: Store): Promise<string[]> {
@@ -227,6 +240,13 @@ export async function decideApproval(
   const state = approvalState(record, now);
   if (state === 'rejected' || state === 'expired' || state === 'used') {
     throw new ApprovalError('closed', `the request is ${state} and accepts no decision`);
+  }
+  // An approval that arrives after the deadline is refused even while an
+  // earlier one still counts, so later approvals cannot extend the request.
+  // A rejection is still taken: it only stops the call.
+  const deadline = approvalDeadline(record);
+  if (decision === 'approved' && deadline !== undefined && now > deadline) {
+    throw new ApprovalError('closed', 'the request accepts no approval: more than expires_ms has passed since it was made');
   }
   if (record.decisions.some((d) => d.approver === approver.id)) {
     throw new ApprovalError('already_decided', `${approver.id} has already decided this request`);
