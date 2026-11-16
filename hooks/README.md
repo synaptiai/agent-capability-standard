@@ -249,6 +249,11 @@ written and starts a new chain), an input digest that could not be computed
 (the line is written with `unavailable`). It exits 0 for a call it logged and
 for input that is not a tool call.
 
+As a store ([STANDARD v1.2 §6.6](../spec/STANDARD-v1.2.0.md#66-evidence-records-and-stores)),
+the log is `durable`: a file in the project, which outlives the session,
+with no retention of its own: lines are kept until someone removes them
+(§6.3).
+
 Each entry is an action record with these fields, in this order:
 
 | Field | Value |
@@ -319,6 +324,15 @@ it a model-judged addition. The rollback skill's command hook reads the
 same markers as the hook here: a `git stash pop` or `git stash apply` that
 does not name a commit a marker recorded (the marker, `used/` or `ended/`)
 restores no checkpoint and is blocked with `F503 ROLLBACK_FAILED:`.
+
+The `persist` skill's command hook and the `audit` skill's `Bash` hook share
+one secret scan, `secret_scan.sh` in this directory: each copies it verbatim
+between its `# BEGIN secret-scan` and `# END secret-scan` lines (a skill
+copied out of the plugin keeps working), and `tests/test_skill_hooks.py`
+keeps every copy equal to the file. The file is not a hook: `hooks.json`
+does not run it. The scan blocks content written to memory, and a record
+appended to `.claude/audit/records.jsonl`, that holds a credential-shaped
+value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7).
 
 ## Relationship to Spec
 

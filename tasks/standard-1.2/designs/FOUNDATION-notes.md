@@ -710,3 +710,54 @@ Workstreams should run `npm run check:axe` (or at least
   `/spec/1.2.0/` is now 1800px (§5.14.1, after `deferral-replay`, unchanged
   by the merge): a stream that lengthens §5.14 or §5.14.1 needs a figure
   there.
+
+## 2026-11-16 — S4 (evidence, grounding and secrets), for the streams after it
+
+- **Grounding in the executor (S6).** `Machine::grounding_check`
+  (`core/src/exec/machine.rs`) collects the policies that require the step's
+  capability as `wf.grounding.iter().chain(&self.st.grounding)`: the frame
+  workflow's own (`Workflow.grounding`, under `grounding@1`), then the run's
+  host policies (`StartOptions.grounding`, which apply in every frame). S6
+  appends the applied profiles' policies to that chain (built with the
+  public `grounding::Policy::new`, ids checked with `check_ids`), and puts
+  its minimum-confidence check right after the call in `output()`, before
+  the after-gates (C24). The check runs after the `require_record` R402
+  check, and a waiting delegate's acceptance returns before it. The
+  `grounding` trace event's `policies` counts the policies that applied.
+- **§11.5 (S6).** `semantics::FEATURES` gains two 1.2 entries: "extension
+  'grounding@1' and its field 'grounding'" (first use at
+  `workflow_extensions.requires[i]`) and "F505 in a failure mode's
+  'on_error'". S6's §11.5 list of 1.2 features should name them (S4.md
+  2.20's text).
+- **Profiles (S6).** `GroundingPolicy.from_profile` reads
+  `evidence_policy.require_grounding`/`required_anchor_types`, and also a
+  `{require, kinds}` entry; a `required_anchor_types` value that is not a
+  §6.5 kind is a `ValueError`, so a shipped profile is read only once S6
+  migrates its values (and the site's `domain-usage.ts` comparison).
+  `docs/domains/README.md` "Status of Domain Profiles" gained S4's row; the
+  section is S6's to rewrite.
+- **Skills (S5).** S4 rewrote the `persist` skill's PreToolUse command hook
+  (it reads the call once with `jq -c .`, refuses with `F504
+  CONSTRAINT_VIOLATED:`/`R407 SAFETY_CHECK_FAILED:`, and copies
+  `hooks/secret_scan.sh` between its BEGIN and END lines, which
+  `tests/test_skill_hooks.py` keeps equal), and added `record` anchors of
+  the action to the examples of `checkpoint` (`checkpoint:<id>`),
+  `rollback` (`rollback:<checkpoint id>`), `send` (`sent:<idempotency_key>`,
+  the example `sent:run-4f2a:7` in S5's `<run_id>:<n>` form) and `persist`
+  (`memory:<key>`). S5's rewrites of those bodies keep them (§3.1). The
+  skills' `confidence` glosses are pinned by `tests/test_evidence_schemas.py`
+  (probability and §4.1.1 in the table row; none of the old glosses).
+- **Secrets (S5).** `Redactor.holds_credential` (Python) and
+  `holdsCredential` (`@synaptiai/acs-core`) are the narrow rule a refusal
+  uses (registered values, key and token formats, credential-shaped
+  assignments), the same as the plugin's scan; `redact`/`redactJson` stay
+  the broad rule for what is written. The SDK adapter and the binding now
+  refuse `persist` and `audit` data holding a credential (F504) and redact
+  their records, so both statements dropped those `not_applied` lines; the
+  `send` line (S5) and the adapter's output-contract line remain.
+- **Fixture of S2b.** `pass_audit_require_record` bound `retention: P1Y`,
+  outside the §5.10.1 grammar and now W614; it binds `P365D`.
+- **Runner.** `WorkflowRunner` gains `evidence_store=` and `redactor=`;
+  `run()`/`start()` take `grounding=`. It redacts the message of every
+  `Error` it submits (`_redact_error`), and reads what a submit added with
+  `run.trace(since=run.trace_seq)` (`_core.Run.trace_seq` is new).

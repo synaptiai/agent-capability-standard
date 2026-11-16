@@ -595,7 +595,7 @@ flowchart TB
 
 ## 4. Evidence Grounding for Modalities
 
-Every capability output carries `evidence_anchors` -- references that ground the output in verifiable sources. The capability ontology declares the field as an array and gives its items no schema. The canonical schemas of [STANDARD-v1.1.0 §6.1](../../spec/STANDARD-v1.1.0.md#61-required-schema-files) do define an anchor: the `Anchor` type of `schemas/event_schema.yaml` is an object with `ref` and `kind`, and optionally `excerpt` and `timestamp`. The Standard does not say that the items of `evidence_anchors` are `Anchor` objects ([§6.2](../../spec/STANDARD-v1.1.0.md#62-observation-requirements) keeps a capability's `evidence_anchors` apart from an event's `anchors`). This guide writes its anchors in the `Anchor` form, so that every `kind` it uses is one a canonical schema defines.
+Every capability output carries `evidence_anchors` -- references that ground the output in verifiable sources. Since Standard 1.2.0 their items are **evidence anchors** ([STANDARD-v1.2.0 §6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)): the `Anchor` type of `schemas/event_schema.yaml`, which `schemas/world_state_schema.yaml` repeats and every output contract names, an object with `ref` and `kind`, and optionally `timestamp`, `excerpt` and `digest`. This guide writes its anchors in that form.
 
 `kind` says what sort of source an anchor points to. Where in the source the evidence lies depends on the modality, and goes in `ref`.
 
@@ -616,13 +616,13 @@ The reference forms below are this guide's convention for `ref`; the Standard de
 | **Video** | temporal segment | `video:<path>:time:<start>-<end>` | Time range within a video file |
 | **Multi-Modal** | no form of its own | One anchor per contributing modality, each in its modality's form | The anchors sit side by side in `evidence_anchors` |
 
-Every format above points into a stored file, so the `kind` of these anchors is `file`. An anchor whose source is of another sort takes the kind of that source (`url`, `sensor`, `tool`, `log`, `api` or `human_note`) and the same position in `ref`.
+Every format above points into a stored file, so the `kind` of these anchors is `file`. An anchor whose source is of another sort takes the kind of that source (`url`, `sensor`, `tool`, `log`, `api`, `human_note`, or `record` for a record the agent system itself holds) and the same position in `ref`. The `ref` forms are this guide's schemes, which §6.5 leaves to the producer to document. For media content, an anchor's `digest` (`sha256:` and the hexadecimal SHA-256 of the bytes `ref` names) lets a consumer tell whether the image, recording or video changed since it was read.
 
-Domain profiles list anchor types of their own in `evidence_policy.required_anchor_types` (`bounding_box`, `time_segment` and `image_reference` among them). Those are labels in a profile, which is informative data ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)); none of them is an `Anchor.kind`.
+Domain profiles list anchor types of their own in `evidence_policy.required_anchor_types` (`bounding_box`, `time_segment` and `image_reference` among them). A grounding policy's `kinds`, which a profile's `required_anchor_types` become when it is applied ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)), are kinds of §6.5's vocabulary; those labels are not, and name reference forms of this guide instead. A host that needs a modality's anchors told apart by kind uses a vendor kind (`x-bounding_box`).
 
 ### 4.2 Anchor Schema
 
-The anchors in this guide follow the `Anchor` type of `schemas/event_schema.yaml`, regardless of modality:
+The anchors in this guide follow the `Anchor` type of `schemas/event_schema.yaml` 1.2.0, regardless of modality (descriptions left out):
 
 ```yaml
 Anchor:
@@ -633,23 +633,19 @@ Anchor:
       type: string
     kind:
       type: string
-      enum:
-        - file
-        - url
-        - tool
-        - log
-        - sensor
-        - human_note
-        - api
+      pattern: '^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$'
     timestamp:
       type: string
       nullable: true
     excerpt:
       type: string
       nullable: true
+    digest:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
 ```
 
-`schemas/world_state_schema.yaml` defines an `Anchor` with the same members and six of the seven kinds: it has no `api`. Neither schema has a member for nested anchors, so a claim that rests on several modalities lists one anchor for each.
+`schemas/world_state_schema.yaml` repeats the same type. Neither schema has a member for nested anchors, so a claim that rests on several modalities lists one anchor for each.
 
 ### 4.3 Grounding Rules by Modality
 

@@ -284,16 +284,20 @@ findings:
     a catalog that binds `${r_out.evidence_anchors[0]}` in strict mode: B204. Read examples/standard_agents/src/example/settings.ts,
     where the reference binding returns `{ ref, kind: ''file'', metadata: { sha256 } }`. The word ''anchor''
     occurs in spec/STANDARD-v1.1.0.md at lines 58, 65, 1126 and 1138 only.'
-  status: proposed
-  resolution: 'RFC-0005 decision 8 (Draft) lists the three `kind` vocabularies as they stand in schemas/event_schema.yaml,
-    schemas/world_state_schema.yaml and the Python SDK (a free string; the five values its code writes),
-    and proposes one `EvidenceAnchor` from the event schema''s `Anchor`, the event schema''s seven kinds
-    for both schemas and the SDK, an `x-` prefix for a host''s own kinds, an opaque `ref`, an optional
-    `sha256:` digest, and `items` on the capability outputs only once every repository catalog validates
-    with it in strict mode. Remaining: Draft only: no schema, ontology or SDK file changes, since the
-    ontology and the canonical schemas change only by an accepted RFC. Open question 5: whether an item
-    may be a bare string, whether an empty list satisfies §3.1, how the SDK''s five kinds map to the seven.
-    What `required_anchor_types` means stays with ACS-05.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.5 (Evidence Anchors), accepted from RFC-0008, which takes over RFC-0005 decision 8
+    and answers its open question 5: one evidence anchor, `event_schema.yaml#/types/Anchor` 1.2.0, which
+    `world_state_schema.yaml` repeats (`tools/validate_canonical_schemas.py` and
+    `tests/test_evidence_schemas.py` check they are equal), with `ref`, `kind` and optional `timestamp`,
+    `excerpt` and a `sha256:` `digest`; one kind vocabulary (the seven, `record`, and vendor kinds
+    `x-...`); `ref` opaque except the reserved `acs:` scheme; every one of the 36 outputs''
+    `evidence_anchors` has `items: anyOf [Anchor, string, object]` (ontology 2.2.0), the bare string and
+    the non-anchor object being deprecated legacy forms, accepted until 2.0 and never counted. An empty
+    list grounds nothing (§3.1); `required_anchor_types` lists kinds and is a grounding policy''s
+    `kinds` (§5.20). Every repository catalog still validates in strict mode. The Python SDK writes
+    canonical kinds (the legacy names are deprecated aliases whose queries keep their 1.1 results;
+    `tests/test_evidence_anchor.py`), the binding''s `fileAnchor` carries `digest`, and
+    `schemas/interop/evidence.schema.json` restates the anchor.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -916,9 +920,17 @@ findings:
   verified: 'Read the cited lines. Listed every capability output property whose name contains ''infer''
     or ''method'' by script: none. Ran the reference executor with empty `evidence_anchors` on every step:
     no diagnostic. Read schemas/profiles/profile_schema.yaml lines 76-80 (`require_grounding`).'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §3.1, §4.1.1 and §5.20, accepted from RFC-0008: `inference_method` is an optional
+    string on all 36 output contracts with a vocabulary a producer SHOULD use; the extension
+    `grounding@1` (a workflow `grounding` policy) and host policies given at start (covering nested
+    runs) make the reference executor check host outputs, failing with F505, now fireable in `on_error`;
+    outputs the executor builds itself, a waiting delegate included, are exempt; an output reporting an
+    action is grounded by a `record` anchor. Implemented by `core/src/grounding.rs` (`check`) and
+    `core/src/exec/machine.rs`, `validate/grounding.rs` (V106 in a 1.2 target, W604 otherwise, S303,
+    S304, V101), `grounded_agency/grounding.py`, the SDK adapter''s `GroundedAgentConfig.grounding` and
+    the binding''s `grounding` option; pinned by `tests/conformance/grounding/check.json` (normative,
+    run in Rust, Python and TypeScript), the `grounding_*` runtime fixtures and the workflow fixtures.'
   concerns:
   - evidence-audit-observability
 - id: ACS-22
@@ -948,9 +960,18 @@ findings:
     for a delegation; without the attestation the claim counts as inferred, not failed.'
   verified: 'Read the cited lines of the Standard and of the two SA pages. Listed every line of spec/STANDARD-v1.1.0.md
     that contains ''anchor'' (58, 65, 1126, 1138): none relates an anchor to what a step read.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §3.1 (Available evidence) and §5.20, accepted from RFC-0008: an anchor grounds a
+    claim only if its producer had the evidence, and a host MUST NOT return one it knows its producer
+    did not have. Under a grounding policy the executor requires an `acs:` citation to be of kind
+    `record` and covered by a reference the step''s `input_bindings` make (same root, the bound path a
+    prefix, an index within a bound slice counting); a host attests other evidence with `evidence_seen`
+    on its `Output` response (absent attests nothing, an empty list attests nothing was seen), and
+    `attested: true` makes an unattested anchor not count, so the output then stands only if marked
+    inferred. A call''s argument names are what its `acs:` anchors may cite; the binding''s `seen`
+    option lists only what the call received. Pinned by the coverage and attestation vectors of
+    `tests/conformance/grounding/check.json` and the `grounding_acs_*`,
+    `grounding_evidence_seen_mismatch` and `grounding_attested_*` runtime fixtures.'
   concerns:
   - models-context-memory-security
 - id: ACS-23
@@ -988,18 +1009,18 @@ findings:
     and 1128-1140, spec/SECURITY.md lines 78-90 and 398-404, schemas/event_schema.yaml lines 28-36 and
     146-149, and skills/perspective-validation/SKILL.md line 149, skills/audit/SKILL.md lines 92 and 314,
     skills/persist/SKILL.md lines 362-363.'
-  status: partly_fixed
-  resolution: 'Plugin part: the audit hook no longer writes skill arguments or any tool input. A SHA-256
-    digest of the input as compact JSON with sorted keys (jq -cS) stands in for it, or `unavailable` when
-    the digest cannot be computed. The skills'' own log hooks under .audit/ likewise write a digest in
-    place of commands, file paths and search patterns. Tests check that a secret in the input, the response
-    or the error text never reaches either log. SDK part: EvidenceAnchor.from_tool_output keeps
-    tool_input in metadata only with include_tool_input=True. The evidence collector also leaves out a
-    Bash command''s text unless asked (from_command accepts None). GroundedAgentConfig.evidence_include_tool_input,
-    default False, reaches the collector and DiscoveryPipeline, whose anchor no longer keeps the task
-    description by default. With the switch on, inputs are stored unredacted. Remaining: A normative rule
-    on secrets in evidence, excerpts, audit records and persisted memory (Standard, SECURITY.md) needs
-    an RFC.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.7 (Secrets in Records), §3.2, §6.2 and §5.19.1, accepted from RFC-0008, and
+    SECURITY.md §1.5: a secret never enters evidence, records, notifications, canonical events,
+    diagnostics, a host''s Error, a trace or persisted memory; redaction to `[REDACTED]` is a transform
+    with documented loss; a canonical event''s `raw` may be the redacted original with `redactions`;
+    persisting a secret is refused (F504 on a layer, reason `secret_in_data` for a step). Enforced by
+    code: the Python `Redactor` in every evidence store, the coordination audit log, the runner''s Error
+    messages and the adapter''s records; the evidence collector keeps no digest of a response holding a
+    secret; the binding redacts every trace entry and notification; the SDK adapter and the binding
+    refuse persist and audit data holding a credential (F504, §5.18.10), as the plugin''s persist and
+    audit skill hooks do with one shared scan (`hooks/secret_scan.sh`). Tested by
+    `tests/test_redaction.py`, `tests/test_skill_hooks.py` and the binding''s `test/evidence.test.ts`.'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -1747,9 +1768,17 @@ findings:
     and let the Python store accept a persistent backend.
   verified: Read the cited lines of the Python SDK, the runner and the reference binding, and SA runtime.md
     lines 344-362.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.6 (Evidence Records and Stores), accepted from RFC-0008: an evidence record (an
+    anchor with `run_id`, `frame`, `step`, `capability`, `tool`, `call_id`) and the duties of an
+    implementation that offers a store (append only, ids never reused, get, filter by capability, kind
+    and run, JSON Lines export, stated durability and bound, removals counted); evidence records are not
+    audit records. `schemas/interop/evidence.schema.json` defines EvidenceRecord, StoreInfo and
+    EvidenceRecorded. Python: `EvidenceStoreProtocol`, the in-memory `EvidenceStore` (frozen kept
+    copies, monotonic ids) and a durable `JsonlEvidenceStore` that repairs a torn last line;
+    `GroundedAgentConfig.evidence_store` takes any backend; the runner records the evidence of outputs
+    the core kept. The binding exports its thread trace as records (`exportEvidence`, a `session`
+    store). Tested by `tests/test_evidence_store.py` and `tests/test_runner_evidence.py`.'
   concerns:
   - evidence-audit-observability
 - id: ACS-41
@@ -2159,9 +2188,16 @@ findings:
     Found a top-level `confidence` in the output contracts of ten of the thirteen skills (not execute,
     mutate or invoke). Read spec/STANDARD-v1.1.0.md §8.1 (line 1218), which calls the factor ''Self-reported
     confidence from source''.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.1.1 (Common Output Fields), accepted from RFC-0008: `confidence` is the
+    producer''s self-reported probability that the output''s claim is correct, with no threshold in the
+    Standard (gates, conditions and profiles set them); `meta.principles` (ontology 2.2.0) now say every
+    output carries evidence anchors or is marked inferred, and that a capability whose contract requires
+    a confidence returns one; the 13 outputs without one declare it optional; one reconciled
+    `Uncertainty`, optional on every output, with `measure.uncertainty` keeping `lower` and `upper` and
+    gaining its members. Every capability skill glosses `confidence` as that probability, and the OASF
+    proposal quotes the reworded principle. Pinned by `tests/test_evidence_schemas.py` (the 23/13 split,
+    the principle, the glosses).'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -2229,9 +2265,15 @@ findings:
     Give `audit.retention` the duration form `max_age` uses.
   verified: 'Read the cited lines. Ran an `audit` step with `retention: "whenever"` through strict validation
     and the reference executor: accepted, and passed to the host unchanged.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.3 and §6.6, accepted from RFC-0008: retention applies to the store the records are
+    written to, and a `memory` or `session` store cannot keep a record longer than its process or
+    session; a host that must keep records longer exports each when it writes it. `audit.retention` is a
+    §5.10.1 duration, and a literal outside the grammar is W614 (`core/src/validate/extensions.rs`
+    `audit_retention`, fixture `pass_audit_retention_warn`); the `audit` output gains `store` (`name`,
+    `durability`, `retention`), which a host whose store does not outlive the session never reports
+    `durable`, so a workflow can stop on it. The `audit` skill reports its store; the plugin''s audit
+    log is documented as a `durable` store with no retention of its own.'
   concerns:
   - checkpoint-rollback-state
 - id: ACS-54
@@ -2424,9 +2466,16 @@ findings:
     which is delivered at most once.
   verified: Grepped the Standard. Read spec/ROADMAP.md lines 72-104, SA threads.md lines 322-348 and SA
     client-api.md lines 445-462.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §6.6 (Notification), accepted from RFC-0008: a host MAY send an
+    `acs.evidence_recorded` payload when it stores evidence records, a canonical event or audit records
+    (`record_ids`, `event_id` or `action_ids`), with the anchors'' `ref`, `kind` and `digest` and the
+    correlation; it is not a record, may be delivered at most once, and carries no excerpt or secret
+    (`schemas/interop/evidence.schema.json` `EvidenceRecorded`). The Python stores notify `subscribe`d
+    listeners once per append, outside their lock; the binding emits it through `state.emit` after a
+    grounded call completes with anchors, at most once and never failing the call. Tested by
+    `tests/test_evidence_store.py`, `tests/test_evidence_schemas.py` and the binding''s
+    `test/evidence.test.ts`.'
   concerns:
   - evidence-audit-observability
 - id: ACS-59

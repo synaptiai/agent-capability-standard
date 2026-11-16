@@ -86,7 +86,7 @@ flowchart TB
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below) |
+| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown`, in `mode`: `in_session`, whoever attends the run, in its session; `out_of_band`, a separate channel whose approvers need not attend the run (keep the run's snapshot while you wait). `queued_action_id` names the queued action a resumed run is asking about, on every such request ([Resuming a deferred run](#resuming-a-deferred-run)) | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable`; with `identity@1`, optionally `approver_identities` (each an `agent_identity`, one per principal; `approvers` then empty or their principals) |
@@ -166,6 +166,16 @@ the digest and the expiry, never other stores or inputs of the run.
 
 ## What the executor enforces
 
+- **Grounding.** Under a grounding policy (a workflow's `grounding`, with
+  `grounding@1`, or one the host gives when the run starts), each host
+  `Output` of a required capability is checked after the fields its
+  contract requires and before the after-gates: an `acs:` citation must be
+  of kind `record` and covered by a reference the step binds, an anchor
+  must be in `evidence_seen` when the host gives it, and an output with no
+  anchor that counts must be marked inferred; otherwise the step fails with
+  F505, which is not retried
+  ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). The trace gets a
+  `grounding` event for each output that passes.
 - **Conditions and gates.** A false condition skips the step, unless
   `skip_if_false: false`, which makes it R403. Gate actions: `stop` → R403,
   `skip` → skip the step, `rollback` → roll back, then R403, `warn` → a trace
@@ -372,6 +382,27 @@ archive before `run`, `drive`, `advance` or `cancel` returns, and raises
 `RunArchiveError` (with the live run, so you can archive again) when the
 archive fails.
 
+### Evidence and grounding
+
+`WorkflowRunner(engine, evidence_store=store)` records the evidence anchors
+(STANDARD v1.2 §6.5) of each host `Output` the core kept, with the run's
+`run_id` and the step's `frame`, `step` and `capability`: the runner reads
+what the submit added (`run.trace(since=run.trace_seq)`), and records the
+anchors only when the step's next event is `step_completed`. An output
+refused (R402, F505), to be retried, or a waiting delegation's acceptance
+records nothing; items that are not evidence anchors (bare strings, the
+deprecated form) are skipped and logged. A store that raises never stops
+the run: the failure is logged and counted. `EvidenceStore` keeps records in
+memory (durability `memory`, bounded); `JsonlEvidenceStore(path)` appends
+them to a file (`durable`), so evidence outlives the process (§6.6).
+
+`run(..., grounding=GroundingPolicy(require={"retrieve"}, kinds={"file"}))`
+(one policy or a list) applies grounding policies to the run and its nested
+runs; each is checked against the ontology when it is made, so a misspelt
+capability is a `ValueError` naming V101. `WorkflowRunner(...,
+redactor=Redactor([...]))` registers the host's secrets: the runner redacts
+the message of every `Error` it submits (§6.7).
+
 ## Hosting runs
 
 This part is the host's side of
@@ -547,7 +578,9 @@ seen ids for deduplication across restarts) and `trigger_attendance` (an
 
 The trace is the executor's own record of a run: one event for each
 decision it took, in order. `RunResult.trace` holds it after a run and
-`run.trace()` at any point during one. It is part of the run's state, so a
+`run.trace()` at any point during one; `run.trace(since=n)` gives the
+events whose `seq` is at least `n`, and `run.trace_seq` is the `seq` the
+next event gets. It is part of the run's state, so a
 snapshot carries it and a restored run continues it.
 
 This section is informative, and the trace is not an audit record

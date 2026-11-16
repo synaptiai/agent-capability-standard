@@ -48,12 +48,14 @@ flowchart LR
 
 ### 1.3 Claims Must Be Grounded
 
-All outputs SHOULD include:
-- `evidence_anchors`: Links to original sources
-- `provenance`: How the claim was derived
-- `confidence`: Level of certainty
-
-Ungrounded claims MUST be explicitly marked with `inference_method`.
+Every output carries evidence anchors to evidence its producer had, or is
+marked inferred with `inference_method` and `confidence` (STANDARD v1.2
+§3.1). An anchor is `{ref, kind}`, with an optional `digest` of what was
+read (§6.5); an output that reports an action cites the record of that
+action. A grounding policy makes an executor or a safety layer check it:
+an output that is neither grounded nor marked inferred, cites evidence its
+producer did not have, or cites a workflow value outside what its step
+binds, fails with F505 (§5.20).
 
 ### 1.4 Identity Merges Are Constrained
 
@@ -74,6 +76,36 @@ flowchart TB
   m --> lin[Recorded in lineage]
 ```
 
+### 1.5 Secrets Stay Out of Records
+
+A secret (a password, an API key or token, a session cookie, a private key,
+a credential in a URL or a header, or anything the host classifies as
+secret) never enters an evidence anchor or record, a notification, a
+canonical event, an audit record or a safety layer's record of a call, a
+diagnostic or an `Error` a host returns, an executor's trace, or the data
+`persist` stores (STANDARD v1.2 §6.7). Where one would be written it is
+redacted: replaced by `[REDACTED]`, a transform with documented loss. A
+`persist` of a secret is refused, not redacted, since memory is read back
+as fact. Workflows carry no secrets: a host adds credentials where they are
+used.
+
+The reference implementations enforce this by code:
+
+- The Python SDK's `Redactor` (registered values and default patterns) is
+  applied by every evidence store, by the coordination audit log, by the
+  runner to the `Error` messages it submits, and by the adapter to its
+  records and refusals; the evidence collector keeps no `digest` of a tool
+  response that holds a recognised secret.
+- The TypeScript binding redacts every trace entry it writes and every
+  `acs.evidence_recorded` notification, whether or not the tool registers
+  secrets.
+- The adapter and the binding refuse a `persist` or `audit` call whose data
+  holds a credential-shaped value (F504, §5.18.10).
+- The plugin's `persist` and `audit` skills block, in command hooks that
+  share one scan (`hooks/secret_scan.sh`), content and audit records that
+  hold one; the plugin's audit log keeps a digest of each tool input, never
+  the input.
+
 ---
 
 ## 2. Threat Model
@@ -85,7 +117,7 @@ flowchart TB
 | **Spoofing** | Attacker impersonates a trusted source | Trust model with source verification, provenance tracking |
 | **Tampering** | Attacker modifies data in transit or at rest | Schema validation, checkpoint/rollback, immutable observations |
 | **Repudiation** | Actor denies actions | Audit trails, provenance, evidence anchors |
-| **Information Disclosure** | Sensitive data exposed | Constrain capability for access control |
+| **Information Disclosure** | Sensitive data exposed | Constrain capability for access control; secrets kept out of evidence, records, diagnostics and memory (STANDARD §6.7) |
 | **Denial of Service** | System overwhelmed or blocked | Timeouts, retry limits, recovery loops |
 | **Elevation of Privilege** | Unauthorized capability execution | Prerequisites, approval requirements, policy constraints |
 
@@ -250,6 +282,9 @@ Implementations SHOULD:
 - Log every tool call and every refusal, with the layer and configuration that decided it (STANDARD 1.2.0 §5.18.8)
 - Run a safety layer that fails closed (STANDARD 1.2.0 §5.18.8)
 - Validate outputs against schemas
+- Redact secrets before writing evidence or records (STANDARD 1.2.0 §6.7)
+- Know the durability of the evidence and audit stores, and export what
+  must outlive the session when it is written (STANDARD 1.2.0 §6.3, §6.6)
 
 ### 4.3 Configuration Security
 
@@ -474,6 +509,7 @@ Unless anonymity is requested.
 - [ ] Audit logging is enabled
 - [ ] Checkpoint storage is reliable
 - [ ] Trust model weights are reviewed
+- [ ] Secrets are registered with the redactor; the evidence store's durability is known
 
 ### 8.3 For Operators
 

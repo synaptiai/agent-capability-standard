@@ -479,7 +479,7 @@ except CapabilityOutputError as e:
 
 ## Conformance (class SL)
 
-The adapter meets the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)) except the §5.18.10 checks its conformance statement lists as not applied, and claims the class once those are applied. Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it lists the checks of §5.18.10 it does not apply yet: the secret checks of `persist` and `audit`; the redaction of the records and evidence it writes and of a `transform` output it records (§6.7); the destination policy of `send`; and the output contract of a tool's result, since Claude Code's tools and MCP tools return results in their own forms, which the adapter passes on unchecked. It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False` and `approval="off"` are outside the class.
+The adapter meets the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)) except the §5.18.10 checks its conformance statement lists as not applied, and claims the class once those are applied. Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it lists the checks of §5.18.10 it does not apply yet: the destination policy of `send`, and the output contract of a tool's result, since Claude Code's tools and MCP tools return results in their own forms, which the adapter passes on unchecked. It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False` and `approval="off"` are outside the class.
 
 ## Structured Output
 
@@ -528,29 +528,79 @@ print(f"Turns: {adapter.cost_summary.turn_count}")
 
 ## Evidence Anchors
 
-Evidence anchors track provenance for grounded decisions:
+Evidence anchors track provenance for grounded decisions. Each is an
+evidence anchor of STANDARD v1.2 §6.5: a `ref`, a `kind` (`file`, `url`,
+`tool`, `log`, `sensor`, `human_note`, `api`, `record`, or a vendor kind
+`x-...`) and optional `timestamp`, `excerpt` and `digest`
+(`sha256:` and 64 hex digits of what was read).
 
 ```python
 # Access collected evidence
 recent = adapter.get_evidence(10)
-# ['tool:Read:abc123', 'tool:Grep:def456', 'file:src/main.py']
+# ['tool:Read:abc123', 'command:abc123', 'file:src/main.py']
 
-# Get evidence by type
+# Get evidence by ref
 mutations = adapter.evidence_store.get_mutations()
 tool_outputs = adapter.evidence_store.get_tool_outputs()
 
-# Get evidence for a capability
-retrieve_evidence = adapter.evidence_store.get_for_capability("retrieve")
+# The anchors a capability's output cites, as §6.5 objects
+anchors = adapter.evidence_store.evidence_anchors_for("retrieve")
+# [{'ref': 'tool:Read:abc123', 'kind': 'tool', 'timestamp': '...', 'digest': 'sha256:...'}, ...]
+
+# Records with their context (§6.6), and the JSON Lines export
+records = adapter.evidence_store.records(capability="retrieve")
+lines = list(adapter.evidence_store.export())
 ```
 
 ### Evidence Format
 
-```
-tool:Read:tool_use_id_123      # Tool output evidence
-file:src/main.py               # File reference
-command:20240115143022         # Bash command execution
-mutation:config.yaml           # State mutation
-```
+| Ref | Kind | What it records |
+|-----|------|-----------------|
+| `tool:Read:tool_use_id_123` | `tool` | A tool call's result, with the response's `digest` |
+| `command:tool_use_id_123` | `tool` | A Bash command's execution (its exit code) |
+| `file:src/main.py` | `file` | A file a call read or wrote |
+| `mutation:config.yaml` | `record` | A state mutation the agent made |
+| `checkpoint:<id>` | `record` | A checkpoint `create_checkpoint` took |
+| `delegation:<task>`, `sync:`, `orchestration:`, `invoke:`, `inquire:` | `record` | Coordination actions |
+
+An output that reports an action is grounded by the record of that action
+(§3.1): `EvidenceAnchor.from_checkpoint(id)` and `from_mutation(target, op)`
+make those anchors, and `create_checkpoint` records one for capability
+`checkpoint`. The SDK's kinds before Standard 1.2 (`tool_output`,
+`command`, `mutation`, `coordination`) are deprecated: given to
+`EvidenceAnchor`, they are mapped (`tool`, `tool`, `record`, `record`) with a
+`DeprecationWarning`, and a query by one (`get_by_kind("command")`) returns
+what it returned before, by ref prefix, with the warning.
+`get_for_capability_output()` still returns bare refs, the deprecated form,
+and warns; use `evidence_anchors_for()`.
+
+### Evidence Stores
+
+Every store implements `EvidenceStoreProtocol` (§6.6): `append` and
+`append_many` (with `capability`, `run_id`, `frame`, `step`, `tool`,
+`call_id`), `get(record_id)`, `records(capability=, kind=, run_id=)` in
+append order, `export()` (one `EvidenceRecord` per JSON Lines line),
+`info()` (durability, whether it is bounded, the count, the records it
+removed), `subscribe(listener)` and `record_capture_failure()`.
+
+- `EvidenceStore` keeps records in memory (durability `memory`, bounded by
+  `max_anchors`, priority eviction). It keeps a frozen copy of each anchor:
+  what a getter returns cannot be changed (`FrozenInstanceError`, a
+  read-only metadata mapping), and changing your anchor after adding it
+  changes nothing the store holds. Record ids (`ev-<n>`) are never reused,
+  not even after `clear()`; evicted and cleared records count in
+  `info().removed`.
+- `JsonlEvidenceStore(path)` appends each record to a file (durability
+  `durable`, unbounded, created with mode 0600; one writer per file). On
+  open it truncates a last line that has no newline, an append that never
+  completed, and reports the bytes as `x-torn_tail_bytes`; the next ids
+  continue the file's.
+
+Give the adapter a store with `GroundedAgentConfig(evidence_store=...)`. A
+listener `subscribe`d to a store receives one `acs.evidence_recorded`
+payload per append (§6.6: record ids, each anchor's `ref`, `kind` and
+`digest`, never an excerpt), called after the append, outside the store's
+lock; a listener that raises is logged and does not reach the others.
 
 ### What an Anchor Keeps
 
@@ -562,7 +612,39 @@ The tool's input, and a Bash command's text, are not kept: an input can hold a c
 adapter = GroundedAgentAdapter(GroundedAgentConfig(evidence_include_tool_input=True))
 ```
 
-The same switch exists where anchors are built directly: `EvidenceAnchor.from_tool_output(..., include_tool_input=True)`, `create_evidence_collector(store, mapper, include_tool_input=True)` and `DiscoveryPipeline(..., evidence_include_tool_input=True)`, which then keeps the task description. `EvidenceAnchor.from_command(None, exit_code)` records a command without its text. The adapter does not redact: with the switch on, inputs are stored as given, except that in a metadata object over 1 KB the largest values are replaced with `[truncated]`.
+The same switch exists where anchors are built directly: `EvidenceAnchor.from_tool_output(..., include_tool_input=True)`, `create_evidence_collector(store, mapper, include_tool_input=True)` and `DiscoveryPipeline(..., evidence_include_tool_input=True)`, which then keeps the task description. `EvidenceAnchor.from_command(None, exit_code)` records a command without its text. With the switch on, inputs are kept redacted, and in a metadata object over 1 KB the largest values are replaced with `[truncated]`.
+
+### Secrets
+
+No secret enters an anchor or a record (STANDARD v1.2 §6.7). Every store
+passes each anchor through its `Redactor` (registered values, then default
+patterns for authorization headers, bearer tokens, URL passwords,
+credential assignments, private keys and common key formats) before it
+keeps it: a secret becomes `[REDACTED]`. The collector keeps a response's
+`digest` only when the redactor finds no secret in the response, since the
+digest of a response that is a secret could be inverted by guessing; the
+anchor's metadata then says `digest_omitted: secret`. Register the host's
+own secrets with `GroundedAgentConfig(secret_values=(...))`: they reach the
+store's and the coordination audit log's redactor, and never
+`recorded_by`. The adapter also redacts its call records and refusals, and
+refuses a `persist` or `audit` call whose data holds a credential-shaped
+value (F504, §5.18.10): memory is read back as fact, so it is refused, not
+redacted.
+
+### Grounding Policies
+
+`GroundedAgentConfig(grounding=GroundingPolicy(require={"retrieve"}))` (one
+policy or a tuple) applies §5.20 to the output of each covered call whose
+capability a policy requires: an output that is neither grounded nor marked
+inferred fails with F505. A policy that names a capability the ontology
+does not define is a `ValueError` naming V101. The call's argument names
+are what its `acs:` anchors may cite, and the adapter gives no
+`evidence_seen`: a hook sees the tool call, not the model's request. The
+adapter checks the outputs of the MCP tools `create_grounded_mcp_server`
+serves (their `structuredContent`, else the capability output their text
+carries, §5.18.9); Claude Code's own tools return no capability output.
+`check_grounding_output(output, policy, bound_refs=..., evidence_seen=...)`
+is the check of one output.
 
 Evidence capture is best-effort by default
 ([STANDARD v1.2 §6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)): an

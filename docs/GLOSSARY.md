@@ -163,7 +163,7 @@ Traceability record for claims and transformations. Provenance answers:
 - Who or what made this claim?
 
 ### Grounding
-Anchoring claims to evidence. A grounded claim has explicit references to the observations or sources that support it. Ungrounded claims are explicitly marked as inferred.
+Anchoring claims to evidence its producer had. A grounded output has evidence anchors to the observations or sources that support it; an output that has none is explicitly marked as inferred (STANDARD v1.2 §3.1).
 
 **Why it matters:** Without grounding, agents confidently state hallucinations. When asked "why did you conclude X?", there's no answer. Debugging requires manual verification of every claim.
 
@@ -174,7 +174,7 @@ Anchoring claims to evidence. A grounded claim has explicit references to the ob
 - Hours of debugging to find where bad data entered
 
 ### Evidence Anchor
-A reference to the original source of information. Evidence anchors enable verification by pointing to:
+A reference to one piece of evidence: `{ref, kind}`, with an optional `timestamp`, `excerpt` and `digest` (STANDARD v1.2 §6.5). The `kind` is one of `file`, `url`, `tool`, `log`, `sensor`, `human_note`, `api`, `record` or a vendor kind `x-...`; the `ref` scheme `acs:` names a workflow value. Evidence anchors enable verification by pointing to:
 - Source documents
 - API responses
 - Log entries
@@ -195,6 +195,27 @@ flowchart LR
   claim -->|evidence anchor| logs[Log entry]
   claim -->|evidence anchor| sensor[Sensor reading]
 ```
+
+### Evidence Record
+An evidence anchor kept with the context it was recorded in: a `record_id`, the time, and the run, step, capability, tool and call it came from (STANDARD v1.2 §6.6).
+
+### Evidence Store
+Where an implementation keeps evidence records. A store appends and never changes a kept record or reuses an id, answers queries in append order, exports JSON Lines, and states its **durability**: `memory` (lost with its process), `session` (deleted with its session or thread) or `durable` (STANDARD v1.2 §6.6). Evidence that must outlive a session is exported to a durable store when it is written.
+
+### Grounding Policy
+The capabilities whose outputs an executor or a safety layer checks (`require`), optionally the anchor kinds that count (`kinds`) and whether only anchors the host attests count (`attested`). A workflow states one with the extension `grounding@1`; a host applies a list to a run or to calls. An output that fails is F505 (STANDARD v1.2 §5.20).
+
+### Inferred Output
+An output not grounded in evidence that says how it was reached: an `inference_method` (`model_knowledge`, `deduction`, `statistical`, ...) and a `confidence` (STANDARD v1.2 §3.1, §4.1.1).
+
+### Confidence
+The producer's probability, from 0 to 1, that an output's claim is correct (STANDARD v1.2 §4.1.1). Self-reported unless the host documents a calibration; not a trust score. Thresholds belong to gates, conditions and domain profiles.
+
+### Secret
+A value that grants access or proves identity (a password, an API key or token, a session cookie, a private key, a credential in a URL or a header), or that the host classifies as secret. It never enters evidence, records, notifications, diagnostics, traces or stored memory (STANDARD v1.2 §6.7).
+
+### Redaction
+Replacing a secret, or the part of a string that is one, with `[REDACTED]` before a value is written into evidence or a record: a transform with documented loss (STANDARD v1.2 §3.2, §6.7). Memory is not redacted: data that holds a secret is refused.
 
 ---
 

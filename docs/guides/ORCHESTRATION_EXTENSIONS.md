@@ -18,8 +18,9 @@ and, for sender identity, [RFC-0004](../../spec/RFC-0004-agent-identity.md).
 | `delegation@1` | Delegation hints and sender filtering | Yes |
 | `quorum@1` | Independent review quorums | Yes |
 | `identity@1` | Sender identity, trust classes, "always ask" | Yes |
+| `grounding@1` | A grounding policy: the executor checks host outputs (Standard v1.2) | Yes |
 
-The reference validator checks all seven. A workflow that declares any other
+The reference validator checks all eight. A workflow that declares any other
 extension (or another major version) is refused (V106).
 
 ## Declaring the extensions you use
@@ -785,10 +786,112 @@ flowchart TB
 Placing a delegated step on a particular host or device is not part of
 the standard; RFC-0003 records it as an open question.
 
+## Grounding (`grounding@1`)
+
+Standard v1.2 says what a grounded output is
+([STANDARD-v1.2.0 §3.1](../../spec/STANDARD-v1.2.0.md#31-grounded-claims)):
+its `evidence_anchors` hold an evidence anchor (`{ref, kind}`, §6.5) to
+evidence its producer had; otherwise it is **marked inferred**, with an
+`inference_method` and a `confidence`. `grounding@1` lets a workflow ask the
+executor to check that, for the capabilities it names
+([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)):
+
+```yaml
+# Standard version: 1.2.0
+triage:
+  goal: Classify a lab report.
+  risk: low
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    require: [retrieve, classify]   # the capabilities whose outputs are checked
+    kinds: [file, record]           # optional: only anchors of these kinds count
+    attested: true                  # optional: only anchors the host attests count
+  steps:
+  - capability: retrieve
+    purpose: Read the report.
+    store_as: report
+    input_bindings: {target: reports/latest}
+  - capability: classify
+    purpose: Classify it.
+    store_as: labels
+    input_bindings: {item: "${report.data: object}"}
+    failure_modes:
+    - condition: The classification is not grounded.
+      on_error: F505
+      action: stop
+```
+
+When the host answers a checked step with an `Output`, the executor reads
+its `evidence_anchors` after the fields the contract requires (R402) and
+before the after-gates:
+
+```mermaid
+---
+title: The grounding check of one output
+---
+flowchart TB
+  accDescr: An acs citation outside the step's bindings, or an anchor the host's evidence_seen does not list, fails the step with F505. Otherwise the output passes when an anchor counts, or when it is marked inferred; else F505.
+  o[Output] --> c{"Cites an unbound value or unseen evidence?"}
+  c -->|yes| f[F505]
+  c -->|no| a{"An anchor counts?"}
+  a -->|yes| g[Grounded]
+  a -->|no| i{"Marked inferred?"}
+  i -->|yes| inf[Inferred]
+  i -->|no| f
+```
+
+- **Citing a workflow value.** An anchor whose `ref` is `acs:` and a
+  reference body (`acs:report.data`) names a workflow value. Its kind must
+  be `record`, and one of the references the step's `input_bindings` make
+  must **cover** it: the same root, the bound path a prefix of the cited
+  one, an index within a bound slice counting. A step that binds
+  `${search_out.results[0:3]}` may cite `acs:search_out.results[1].url`, not
+  `acs:search_out.results[7]`, `acs:search_out.total` or `acs:search_out`.
+- **`evidence_seen`.** The host may attest, on the `Output` response, the
+  refs of the evidence the output's producer had for this answer: what it
+  put in the model's request, the anchors inside the step's inputs, what
+  the step's tool calls returned. Never a stored history: a ref there was
+  seen by an earlier request. When it is present, every other anchor must
+  be listed. Absent, it attests nothing; an empty list attests that the
+  producer saw nothing.
+- **`attested: true`** counts only anchors whose availability is
+  established (an `acs:` citation, or one `evidence_seen` lists); an output
+  whose anchors are all unattested then stands only if it is marked
+  inferred.
+- **Legacy items.** A bare string, or an object that is not an evidence
+  anchor (no `kind`, a kind such as `tool_output`), does not count and is
+  not itself a failure: the deprecated forms of 1.1 producers.
+- **Marked inferred** means an `inference_method` of the vocabulary
+  (`model_knowledge`, `deduction`, `induction`, `abduction`, `analogy`,
+  `statistical`, `simulation`, `assumption`, or `x-...`) and a `confidence`
+  from 0 to 1.
+- **Actions** are claims too: a `checkpoint`, `audit` or `send` output is
+  grounded by an anchor to the record of what it did
+  (`{ref: "checkpoint:cp-1", kind: record}`).
+- **Not checked:** outputs the executor builds itself, a quorum's, a
+  wait's, an `invoke` step's, and a `delegate` step that waits (its
+  `Output` is the acceptance; its result is composed). With `grounding@1`
+  an `invoke` step's `evidence_anchors` are its nested run's anchors.
+- F505 is not retried; a failure mode can fire on it.
+
+A workflow's policy covers its own steps. A host can also apply policies to
+a run, a list given when the run starts
+(`WorkflowRunner.run(..., grounding=[GroundingPolicy(...)])`), which also
+cover the steps of nested runs; each policy is checked against the
+ontology, so a misspelt capability is refused (V101) rather than turning a
+check off. A domain profile's `evidence_policy` is such a policy:
+`require_grounding` is its `require` and `required_anchor_types` its
+`kinds`.
+
+In a workflow that targets 1.2, `grounding` without the declaration is
+V106. In a 1.0 or 1.1 workflow it is an unknown field (W604), as it was.
+
 ## Durations
 
 Durations appear in schedules (`every`), waits (`timeout`, liveness
-`interval`) and approvals (`expires`). Write
+`interval`) and approvals (`expires`), and in an `audit` step's
+`retention` (Standard v1.2 §6.3). Write
 `250ms`, `30s`, `5m`, `2h`, `1d`, or an ISO-8601 day-time duration such as
 `PT1H30M`, `P1DT12H` or `PT0.5S`. Years, months and weeks are not allowed,
 because their length varies. A step's `timeout` should use the same

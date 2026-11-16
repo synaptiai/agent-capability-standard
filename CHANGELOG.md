@@ -243,6 +243,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   into `cancelled` and which held back `take_records` for the rest of the
   run. A record a resumed run reuses no longer keeps the `checkpoint_id` of
   an earlier pass.
+- Python SDK, evidence (Standard 1.2.0 §6.5, §6.6):
+  - Anchor kinds are §6.5's: `tool_output` and `command` anchors are now
+    `tool`, `mutation` and coordination anchors `record`. The old names are
+    accepted with a `DeprecationWarning` (`kind` reads back the new one; a
+    former `mutation` keeps its high priority), any other free kind becomes
+    a vendor kind `x-...`, and a query by an old name (`get_by_kind("command")`)
+    returns what it returned before, by ref prefix, with the warning.
+    `get_for_capability_output()` warns: use `evidence_anchors_for()`, which
+    returns §6.5 objects. An empty `ref` or a malformed `digest` is a
+    `ValueError`.
+  - A store keeps a frozen copy of each anchor: assigning to an anchor read
+    back from a store, or calling `mark_critical()` on it, raises
+    `FrozenInstanceError`, and its metadata is read-only. Your own anchor is
+    not frozen. `add_anchor` returns the record kept.
+  - Record ids are never reused: `clear()` no longer resets the sequence,
+    and the records it drops count in `info().removed`.
+  - Every store redacts what it keeps (§6.7). With
+    `evidence_include_tool_input=True` a call's input is kept redacted, not
+    as given; the collector keeps no `digest` of a response that holds a
+    recognised secret.
+  - `CoordinationAuditLog.record` redacts `details`; the runner redacts the
+    message of every `Error` it submits; the adapter redacts its call
+    records and refusal messages.
+- Python SDK, tool calls: a `persist` call (`TodoWrite`, a tool bound to
+  `persist`) or an `audit` call whose data holds a credential-shaped value
+  is refused with F504 (Standard 1.2.0 §5.18.10, §6.7).
+- Standard Agents binding: `fileAnchor` returns `{ref, kind: 'file', digest:
+  'sha256:...'}` instead of `metadata.sha256`; every trace entry's
+  `evidence_anchors` and `error` are stored redacted (default patterns,
+  plus the tool's `secrets`), as are the notifications; a `persist` or
+  `audit` tool refuses data that holds a credential (F504).
+- Plugin: the `persist` skill refuses content that holds a credential-shaped
+  value, and the `audit` skill an append to `.claude/audit/records.jsonl`
+  that holds one (F504); both hooks' refusals now open with the Standard's
+  code and name (`F504 CONSTRAINT_VIOLATED:`, `R407 SAFETY_CHECK_FAILED:`).
+- Validator: an `audit` step's literal `retention` outside the duration
+  grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
+  1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
 
 ### Added
 - Standard 1.2.0, host protocol, runs and audit records
@@ -418,6 +456,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
   `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
   `additional_capabilities` and `invokes` with one-shot nesting tokens.
+- Standard 1.2.0, evidence, grounding and secrets
+  ([RFC-0008](spec/RFC-0008-evidence-grounding-and-secrets.md); findings
+  ACS-06, ACS-21, ACS-22, ACS-23, ACS-40, ACS-51, ACS-53, ACS-58):
+  - §3.1 defines grounded and inferred outputs, how an output reporting an
+    action is grounded (a `record` anchor), and the evidence available to a
+    producer; §4.1.1 defines `confidence`, `inference_method` and
+    `uncertainty`; §6.5 one evidence anchor (`ref`, `kind`, `timestamp`,
+    `excerpt`, `digest`; kinds with `record` and `x-...`; the `acs:` ref
+    scheme; bare strings and other objects deprecated); §6.6 evidence
+    records, stores and the `acs.evidence_recorded` notification; §6.7
+    secrets in records; §6.3 retention follows the store, and `audit`
+    reports its `store`.
+  - §5.20 Grounding: the extension `grounding@1` and host policies (a list,
+    covering nested runs) make the reference executor check host outputs:
+    `acs:` citations covered by a bound reference, the `Output` response's
+    `evidence_seen`, `attested`; F505 is raised and can fire a failure
+    mode; with `grounding@1` an `invoke` step carries its nested run's
+    anchors. In a 1.2 target `grounding` without the extension is V106.
+    Python: `_core.check_grounding`, `Run.trace(since=...)`,
+    `Run.trace_seq`, `grounded_agency.grounding` (`GroundingPolicy`,
+    `check_grounding_output`), `WorkflowRunner.run(grounding=...)`,
+    `GroundedAgentConfig.grounding`. TypeScript package: `evidence.ts`
+    (`checkGrounding`, `groundingPolicies`, `covers`, `refsIn`) and
+    `holdsCredential`; the binding's `grounding`, `seen` and `secrets`
+    options.
+  - Vectors: `tests/conformance/grounding/check.json` (normative, run in
+    Rust, Python and TypeScript); 22 `grounding_*` runtime fixtures; seven
+    workflow fixtures.
+  - Evidence stores: `EvidenceStoreProtocol`, `EvidenceRecord`, `StoreInfo`,
+    a durable `JsonlEvidenceStore` (repairs a torn last line),
+    `subscribe()`, `record_capture_failure()`; the runner's
+    `evidence_store` records the evidence of outputs the core kept, and its
+    `redactor` registers the host's secrets; `GroundedAgentConfig` gains
+    `evidence_store` and `secret_values`; `EvidenceAnchor.from_checkpoint`,
+    and `create_checkpoint` records it. Binding: `exportEvidence`,
+    `EVIDENCE_STORE_INFO`, `checkpointAnchor`.
+  - `schemas/interop/evidence.schema.json` is listed in §6.1; the catalog
+    schema accepts `grounding@1`.
+  - Plugin: `hooks/secret_scan.sh`, the one scan the `persist` and `audit`
+    skills' hooks copy; every skill's `evidence_anchors` examples are §6.5
+    anchors, and the capability skills gloss `confidence` as §4.1.1 defines
+    it.
 - Approval digest vectors of kind `tool_call` for a call's shown values.
 - Capability output vectors (informative), `tests/conformance/output/vectors.json`,
   which the Python and TypeScript codecs of §5.18.9 both pass. TypeScript

@@ -231,9 +231,12 @@ model family for a child. Two of them touch evidence:
   `prefilter_llm_history` change what one model request sees, and must leave
   the stored history untouched. Evidence stays on record, but a model can be
   shown less than the record holds.
-- **Secrets.** A tool declares which of its variables are `secret`. ACS has no
-  normative rule keeping secret values out of evidence anchors (some skills
-  say so in prose), so the author of a grounded tool has to.
+- **Secrets.** A tool declares which of its variables are `secret`. Standard
+  1.2.0 keeps secrets out of evidence, records, notifications, diagnostics
+  and stored memory
+  ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)): the binding
+  redacts every trace entry it writes with default patterns, and a grounded
+  tool's `secrets` option registers the deployment's own values.
 
 ## A grounded Standard Agent today
 
@@ -660,6 +663,47 @@ Two SA limits shape this part:
   `result`, `error`, `stack` and `attachments`. Evidence has to travel inside
   `result`, as text the model also reads.
 
+An evidence anchor is the Standard's one item of `evidence_anchors`
+([§6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)): `{ref, kind}`
+with an optional `digest` of what was read. The example tools return such
+anchors (`fileAnchor` gives `{ref: 'file:...', kind: 'file', digest:
+'sha256:...'}`), and `checkpoint_config` also cites the record of the
+checkpoint it took, `{ref: 'checkpoint:<id>', kind: 'record'}`: an output
+that reports an action is grounded by that action's record (§3.1). A bare
+string or another object is a deprecated legacy form: the default output
+check accepts it, as 1.1's did.
+
+The thread store is deleted with its thread, so as an evidence store
+([§6.6](../../spec/STANDARD-v1.2.0.md#66-evidence-records-and-stores)) it is
+`session` durability, not bounded (`EVIDENCE_STORE_INFO`). Evidence that
+must outlive the thread is exported when it is written: `exportEvidence(state)`
+gives the thread's anchors as `EvidenceRecord`s (`record_id`
+`<threadId>/<seq>/<index>`, the execution as `run_id`, the step, capability,
+tool and call id). When a call completes with evidence anchors, the binding
+emits `acs.evidence_recorded` through `state.emit`, at most once and only to
+connected clients: it is a notification, not the record, and an `emit` that
+is missing or throws never fails the call.
+
+A grounded tool takes three more options:
+
+- **`grounding`**: one policy or a list
+  ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). When a policy
+  requires the tool's capability, an output that is neither grounded nor
+  marked inferred (`inference_method` and `confidence`) is refused with F505
+  and its entry recorded `failed`. A policy naming a capability the
+  ontology does not define throws when the tool is defined (V101). Without
+  the option the output check is 1.1's: items, `inference_method` and an
+  optional `confidence` are not checked.
+- **`seen`**: what the call's producer had, as `evidence_seen`: only what
+  this call received (`refsIn(args)`) and what the tool's own code read
+  during `execute`. Never the stored trace: a ref there was seen by an
+  earlier request, not by this one.
+- **`secrets`**: values the redactor replaces besides its default patterns.
+  Redaction is always on: every trace entry's `evidence_anchors` and
+  `error`, and every notification, pass through it. A `persist` or `audit`
+  tool refuses data that holds a credential-shaped value or a registered
+  secret (F504, §5.18.10).
+
 ### Checking a prompt before it runs
 
 The ACS validator checks a workflow against the ontology before anything
@@ -719,10 +763,9 @@ checkpoint's maximum age (ten minutes), how it obtains approval (recorded
 through the endpoint) and how it keeps a check and its use atomic (the
 runtime's order, and `serially` within a realm). It lists its host gaps, the
 rows of the table above that rest on SA behaviour the text does not state, and
-the checks of §5.18.10 it does not apply yet: the secret checks of `persist`
-and `audit`, the redaction of the records and evidence it writes (an
-output's `evidence_anchors` are copied into the trace as they are) and of a
-`transform` output it records (§6.7), and the destination policy of `send`.
+the checks of §5.18.10 it does not apply yet: the destination policy of
+`send`. It applies the secret checks of `persist` and `audit` and redacts
+every trace entry it writes (§6.7).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
@@ -1034,7 +1077,8 @@ requires for normative changes.
    capability depends on its arguments and a tool that only signals the host.
 3. **One evidence anchor item.** `evidence_anchors` had no item schema, and
    the schemas and the Python SDK used three different vocabularies of anchor
-   kinds. RFC-0005 left this to the evidence rules of Standard 1.2.0.
+   kinds. Standard 1.2.0 has one evidence anchor (§6.5, RFC-0008), which
+   this binding's tools return and its trace records.
 
 ### Still open
 
@@ -1054,8 +1098,9 @@ requires for normative changes.
   an agent manifest would let a validator derive a `delegate` step's flags
   from its target. Until then a workflow author raises the step's flags
   ([How a delegate step maps to a host](#how-a-delegate-step-maps-to-a-host)).
-- **What applying a domain profile changes**, and **a rule that keeps
-  secrets out of evidence, audit records and stored data**, both normative.
+- **What applying a domain profile changes**, normative. (The rule that
+  keeps secrets out of evidence, audit records and stored data is Standard
+  1.2.0's [§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records).)
 - **The host protocol as a published schema**, with a conformance class for
   executors: Standard 1.2.0 gives it, as
   [§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol),
