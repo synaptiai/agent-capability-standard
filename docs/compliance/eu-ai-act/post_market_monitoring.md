@@ -55,7 +55,7 @@ Beyond existing telemetry, the following data points should be collected at the 
 | Error and exception rate | Capability execution failures, timeout events | Continuous | SDK error handling |
 | Human escalation rate | % of actions requiring human intervention vs. automated | Daily | Audit log (inquire events) |
 
-The trust weight drift and profile override rows presuppose a host that applies a domain profile (Standard 1.2.0 §5.21): the reference executor, the validator and the Python adapter apply a profile they are given (the executor and the adapter refuse one whose grounding or destination policy they cannot check yet), and `grounded_agency/trust.py` applies its `trust_weights` (`merge_trust_weights`, `resolve`) when the host passes them. No shipped component records a profile override ([Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles)).
+The trust weight drift and profile override rows presuppose a host that applies a domain profile (Standard 1.2.0 §5.21): the reference executor, the validator, the Python adapter and the Standard Agents binding apply a profile they are given (each refuses one whose destination policy it cannot check yet), and `grounded_agency/trust.py` applies its `trust_weights` (`merge_trust_weights`, `resolve`) when the host passes them. No shipped component records a profile override ([Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles)).
 
 ## 4. Monitoring Cadence
 

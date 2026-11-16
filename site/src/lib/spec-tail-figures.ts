@@ -98,6 +98,7 @@ export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: str
   'table-6.5': { section: '6.5 ', name: 'Evidence anchor fields', what: 'An evidence anchor' },
   'table-6.6': { section: '6.6 ', name: 'Evidence record fields', what: 'An evidence record' },
   'table-7.1': { section: '7.1 ', name: 'Parts of an entity id', what: 'An entity id' },
+  'table-8.4': { section: '8.4 ', name: 'Manual override rules', what: 'The trust model\'s overrides member' },
 };
 
 // ---------------------------------------------- §5.18 code tables

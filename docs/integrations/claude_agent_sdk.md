@@ -812,13 +812,18 @@ missing checkpoint, a profile whose `checkpoint_policy` raises
 `requires_checkpoint` (any value but `never`) raises `ProfileError` as well.
 The applied profiles are part of every record's `config_sha256`.
 
-The adapter checks no call's output and no send's destination yet, so it
-does not put a profile's grounding policy (`require_grounding`), minimum
-confidence (`minimum_confidence`) or destination policy
-(`allowed_destinations`) in force. A profile that sets one raises
-`ProfileError` naming it when the adapter is built, rather than be applied
-without the rule (§5.21.4); every shipped profile sets `require_grounding`.
-A profile that sets only thresholds and a checkpoint policy applies:
+A profile's grounding policy (`require_grounding`, with
+`required_anchor_types` as its kinds) joins `GroundedAgentConfig.grounding`,
+and its `minimum_confidence` fails an output below it with F504 (reason
+`below_minimum_confidence`, or `invalid_confidence` for a `confidence` that
+is not a number from 0 to 1), after the grounding check: both apply to the
+outputs the layer sees, those of the tools `create_grounded_mcp_server`
+serves, and a warning is logged once for any other tool they would cover
+(Claude Code's own tools return no capability output). The adapter checks
+no send's destination yet, so a profile that sets `allowed_destinations`
+raises `ProfileError` when the adapter is built, rather than be applied
+without the rule (§5.21.4); no shipped profile sets it. A profile that
+requires a person for every call:
 
 ```python
 adapter = GroundedAgentAdapter(

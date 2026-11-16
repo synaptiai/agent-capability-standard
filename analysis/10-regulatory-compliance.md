@@ -245,7 +245,7 @@ The healthcare profile requires grounding (`require_grounding`) for `detect`, `p
 - `human_note`: a clinician's sign-off (1.0.0's `clinician_verification`)
 - `file`, `sensor` and `api`: the kinds of its domain sources
 
-1.0.0's `timestamp` is not an anchor kind: every anchor carries its own time. The reference implementation does not check a profile's grounding policy yet, so the executor and the Python adapter refuse the profile rather than apply it without that rule (Standard 1.2.0 §5.21.4).
+1.0.0's `timestamp` is not an anchor kind: every anchor carries its own time. Where a profile is applied, its `require_grounding` and `required_anchor_types` are a grounding policy (Standard 1.2.0 §5.20, §5.21.3), which the reference executor, the Python adapter and the Standard Agents binding check.
 
 **Limitations:**
 

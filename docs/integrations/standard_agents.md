@@ -689,7 +689,7 @@ evidence anchors, the binding emits `acs.evidence_recorded` through
 notification, not the record, and an `emit` that is missing or throws never
 fails the call.
 
-A grounded tool takes three more options:
+A grounded tool takes four more options:
 
 - **`grounding`**: one policy or a list
   ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). When a policy
@@ -708,6 +708,18 @@ A grounded tool takes three more options:
   `error`, and every notification, pass through it. A `persist` or `audit`
   tool refuses data that holds a credential-shaped value or a registered
   secret (F504, §5.18.10).
+- **`profiles`**: the domain profiles the layer applies
+  ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)), as the core
+  computes them: `bindingProfiles(context, documents)` with a `CoreContext`
+  of `@synaptiai/acs-core/wasm`, once, passed to every tool. They raise
+  each capability's flags; a call they require a person for counts only
+  approvals the deployment attests as a person's (`kind: human`) and its
+  entries carry `person_required`; their grounding policies join
+  `grounding`; and an output below their `minimum_confidence` fails with
+  F504 (`reason_code`), after the grounding check. A profile with an error
+  throws, and so does one that sets `allowed_destinations`, a destination
+  policy this binding does not check yet. The profiles are part of every
+  record's `config_sha256`.
 
 ### Checking a prompt before it runs
 
@@ -1065,11 +1077,12 @@ requires for normative changes.
   [CONFORMANCE.md](../../spec/CONFORMANCE.md).
 - **Documents that say what is enforced.** Domain profiles take effect where
   a host or safety layer applies them, and §5.21 says what each rule changes:
-  the reference executor and the Python adapter apply their flags and person
-  requirements, and refuse a profile whose grounding or destination policy
-  they do not check yet (every shipped profile sets `require_grounding`); the
-  validator given a profile reports the flags it raises; this binding
-  applies none yet. The executor's trace kinds are listed and tested.
+  the reference executor, the Python adapter and this binding (a grounded
+  tool's `profiles`) apply their flags, person requirements, grounding
+  policies and minimum confidence, and refuse a profile whose destination
+  policy they do not check yet (no shipped profile sets one); the validator
+  given a profile reports the flags it raises. The executor's trace kinds
+  are listed and tested.
 
 ### Accepted from RFC-0005
 

@@ -194,17 +194,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `tools/validate_profiles.py` checks profiles with the core and fails on
   any diagnostic; its old helper functions are gone. A profile that sets a
   rule an implementation does not put in force is refused too, rather than
-  applied without it (§5.21.4): until the grounding check (§5.20) and the
-  destination check (§4.4.2) read them, the executor (`_core.Run.start`,
-  `WorkflowRunner`, WebAssembly `run.start`, and a restore) refuses a profile
-  with `require_grounding` or `allowed_destinations`, every shipped profile
-  included, and `GroundedAgentAdapter` refuses those and
-  `minimum_confidence` (`ProfileError`), since it checks no call output or
-  send, and, with `strict_mode=False` (which only logs a missing
-  checkpoint), a `checkpoint_policy` that raises `requires_checkpoint`. A
-  member without an exact JSON form (an integer beyond 2^53) is S303. An
-  unknown top-level profile member stays a warning (W604) and is now logged
-  at WARNING with the member meant.
+  applied without it (§5.21.4): until the destination check (§4.4.2) reads
+  it, the executor (`_core.Run.start`, `WorkflowRunner`, WebAssembly
+  `run.start`, and a restore), `GroundedAgentAdapter` (`ProfileError`) and
+  the Standard Agents binding refuse a profile with `allowed_destinations`
+  (no shipped profile sets it), and the adapter, with `strict_mode=False`
+  (which only logs a missing checkpoint), a `checkpoint_policy` that raises
+  `requires_checkpoint`. A profile's grounding policy (`require_grounding`,
+  every shipped profile's) and its `minimum_confidence` are applied: an
+  output they cover that is not grounded fails with F505, one not confident
+  enough with F504, in runs, in the adapter (on the outputs of the tools
+  `create_grounded_mcp_server` serves) and in the binding. A member without
+  an exact JSON form (an integer beyond 2^53) is S303. An unknown top-level
+  profile member stays a warning (W604) and is now logged at WARNING with
+  the member meant.
 - Python SDK: `OASFAdapter.translate` raises `UnknownCapabilityError` (V101,
   with the closest id) for an entry that names a capability the ontology
   does not define; it logged a warning and translated the entry without it,
@@ -621,8 +624,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - WebAssembly (ACS-42): the core's `wasm` feature (`core/src/wasm.rs`, a
   JSON interface over three C-ABI exports) and the TypeScript package's
   `./wasm` entry (`AcsCore`, `CoreContext`, `CoreRun`, `loadDocuments`),
-  which runs the validator and executor, profiles included, in process;
+  which runs the validator and executor, profiles included, in process,
+  with the host protocol's run operations (`run.resume`, `run.cancel`,
+  `run.wake_at`, `run.take_trace`, `run.take_records`, `run.run_record`,
+  `run.trace` since a `seq`; `CoreRun.resume`, `cancel`, `wakeAt`, ...);
   `Context::from_values` with an in-memory schema store.
+- Domain profiles in every reference layer (§5.21.3): a profile's grounding
+  policy is checked by the executor's grounding check (§5.20) and by
+  `GroundedAgentAdapter.check_call_output`, which also applies the
+  profiles' minimum confidence (`_core.check_confidence`; an exported call
+  record carries `reason_code`); the Standard Agents binding applies
+  profiles through `groundedTool({profiles})` and `bindingProfiles`
+  (raised flags, a person's approval, grounding, minimum confidence).
+  Runtime fixtures `profile_grounding_*` and the header fixtures
+  `header_1_2_sender_check_needs_identities` and
+  `header_null_sender_check_not_read`; validator fixture
+  `warn_version_feature_1_2`.
   `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
   a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
   `NPM_TOKEN` are both set (a dry run otherwise).

@@ -100,6 +100,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'table-7.1', level: 3, section: '7.1 ', at: fieldTable() },
   { key: 'merge-thresholds', level: 3, section: '7.3 ', at: 'heading' },
   { key: 'decay', level: 3, section: '8.1 ', at: after('paragraph', 2, 'Field authority is not a factor of the s') },
+  { key: 'table-8.4', level: 3, section: '8.4 ', at: fieldTable() },
   { key: 'families', level: 3, section: '9.1 ', at: 'heading' },
   { key: 'codes-9.2', level: 3, section: '9.2 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
   { key: 'codes-9.3', level: 3, section: '9.3 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },

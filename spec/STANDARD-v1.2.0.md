@@ -9,13 +9,12 @@
 [RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md) and
 [RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
 validator and executor implement §4, §5 and §9–§11 and claim class EX
-(§10.5); they check §3.1's grounding where a grounding policy applies
-(§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does
-for the call outputs it sees;
-the Python SDK adapter and the Standard Agents binding implement §5.18 and
-meet §10.4 except the §5.18.10 rows their conformance statements list as not
-applied, and claim class SL once those are applied; `grounded_agency` implements §7.1's entity ids and
-§8's arithmetic; §7.2 and §7.3 are not implemented
+(§10.5); the Python SDK adapter and the Standard Agents binding implement
+§5.18 and meet §10.4 except the §5.18.10 rows their conformance statements
+list as not applied, and claim class SL once those are applied; the
+executor and both layers check grounding (§5.20) and apply domain profiles
+(§5.21); `grounded_agency` implements §7.1's entity ids and §8's
+arithmetic; §7.2 and §7.3 are not implemented
 **Date:** 2026-11-15
 **Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported; see §11.5)
 
@@ -88,6 +87,16 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Secret** | A value that grants access or proves identity, or that the host classifies as secret (§6.7) |
 | **Diagnostic** | An error or warning reported by a validator or executor (§9) |
 | **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and the ontology (§5.2.1) |
+| **Executor** | What runs a workflow step by step, with no input or output of its own (§5.19) |
+| **Host** | What performs the actions an executor asks for and gives it the time (§5.19) |
+| **Run** | One execution of a workflow, from its start to its terminal action (§5.19) |
+| **Action** | What a run asks its host to do next, or how it ended (§5.19.1) |
+| **Audit record** | An action record or a canonical event that says what happened (§6.4) |
+
+Terms of domain profiles, contracts, entities, ordering and tool-calling hosts:
+
+| Term | Definition |
+|------|------------|
 | **Domain profile** | Rules for one domain that a host, a safety layer or a validator applies to tighten what steps and calls require (§5.21) |
 | **Schema dialect** | The JSON Schema subset, and the forms it adds, that capability contracts are written in (§4.1.2) |
 | **Entity id** | The identifier of a world-state entity, `<class>:<namespace>/<local_id>` (§7.1) |
@@ -98,11 +107,6 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Safety layer** | Code that decides, before a call's effect, whether the call may run under §5.18: a pre-call hook, a permission callback, or a wrapper around the tool's own code |
 | **Layer scope** | The sequence of calls a safety layer orders and keeps records for, such as one session or thread (§5.18.5); in §5.18, *scope* means a layer scope |
 | **Execution boundary** | A point where work stops and later resumes, after which earlier checkpoints authorise nothing: for a workflow, the end of a wait or delay (§5.13) and the resumption of a deferred run (§5.14.1), but not the restoring of a saved run (§5.19.4); on a tool-calling host, a point its safety layer names, such as a turn that ends while a person decides (§5.18.6) |
-| **Executor** | What runs a workflow step by step, with no input or output of its own (§5.19) |
-| **Host** | What performs the actions an executor asks for and gives it the time (§5.19) |
-| **Run** | One execution of a workflow, from its start to its terminal action (§5.19) |
-| **Action** | What a run asks its host to do next, or how it ended (§5.19.1) |
-| **Audit record** | An action record or a canonical event that says what happened (§6.4) |
 
 ---
 
@@ -3169,16 +3173,17 @@ A **manual override** replaces, by a person's or an agent's decision, what
 §8.1–§8.3 computed: a trust score, or which value won a conflict.
 `authority_trust_model.yaml` `overrides` governs it:
 
-- `allow_manual_override`: when false, an implementation refuses every
-  override;
-- `requires_anchors`: when true, an override MUST cite at least one evidence
-  anchor for the value it sets, and one that cites none is refused;
-- `audit_required`: when true, an override MUST be recorded as an audit
-  record (§6.4) before it takes effect: an action record whose `intent`
-  names the override, whose `actor_identity` (or `actor`) is who made it,
-  whose `details` hold what was overridden, the value it had and the value
-  set, and whose `anchors` are the anchors cited. An override whose record
-  cannot be written does not take effect.
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `allow_manual_override` | boolean | No | When false, an implementation refuses every override |
+| `requires_anchors` | boolean | No | When true, an override MUST cite at least one evidence anchor for the value it sets, and one that cites none is refused |
+| `audit_required` | boolean | No | When true, an override MUST be recorded as an audit record (§6.4) before it takes effect |
+
+The audit record of an override is an action record whose `intent` names
+the override, whose `actor_identity` (or `actor`) is who made it, whose
+`details` hold what was overridden, the value it had and the value set, and
+whose `anchors` are the anchors cited. An override whose record cannot be
+written does not take effect.
 
 ---
 

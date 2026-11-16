@@ -236,30 +236,31 @@ findings:
     and `require_grounding` entry is an ontology capability id. Read schemas/profiles/profile_schema.yaml
     lines 1-111 and tools/validate_profiles.py lines 120-258 (type and enum checks only).'
   status: partly_fixed
-  resolution: 'Partly fixed: the Standard text and every rule but two are in force; the profiles'' grounding
-    and destination policies are refused until the checks they feed are on main. Standard 1.2.0 §5.21 (Domain
-    Profiles), accepted from RFC-0010: a host applies profiles to a run at start, a safety layer to the calls
-    it covers, a validator may be given them; a workflow''s `profile` field stays descriptive. Rules only
-    tighten (trust weights replace, §8.3); every member''s effect is stated in effective flags (§5.2.1) and
-    §5.14, a person for `require_human`/`block_autonomous` without a mark (records carry `person_required`),
-    `checkpoint` steps exempt from `checkpoint_policy`, a minimum confidence (F504
-    `below_minimum_confidence`/`invalid_confidence`); key grammars are capability ids or `*`, anchor kinds and
-    trust classes; loading diagnostics S303, S304, V101, V109, W602-W604, `critical` deprecated; an
-    executor or safety layer refuses a profile whose rule it does not put in force, and a validator applies
-    only the flags (§5.21.4). Implemented once in
-    core/src/profile.rs for the validator (`--profile`, `Options.profiles`) and the executor
-    (`StartOptions.profiles`: thresholds, checkpoint policy, the person, minimum confidence, waited
-    delegations included), exposed to Python (`AppliedProfiles`, `GroundedAgentConfig(profiles=)` for flags
-    and the person, `WorkflowRunner(profiles=)`) and to TypeScript through the WebAssembly core. Normative
-    vectors tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_*; validator
-    fixtures with `profiles`; the shipped profiles migrated to 2.0.0; the compliance documents say where a
-    setting is enforced. Remaining: the executor refuses a profile with `require_grounding` or
-    `allowed_destinations` (`Policy::unenforced`, core/tests/profiles.rs) until S4''s grounding check (§5.20)
-    and S5''s destination check (§4.4.2) read `Policy::grounding` and `Policy::destinations`, with the
-    fixtures profile_grounding_required and profile_destinations_refuse; the Python adapter, which checks no
-    call output or send, refuses those rules and `minimum_confidence`, and with `strict_mode=False` a raised
-    checkpoint (tests/test_profiles.py). Every shipped
-    profile sets `require_grounding`, so only the validator applies one as it is until then.'
+  resolution: 'Partly fixed: the Standard text and every rule but one are in force; a profile''s destination
+    policy is refused until S5''s destination check reads it. Standard 1.2.0 §5.21 (Domain Profiles), accepted
+    from RFC-0010: a host applies profiles to a run at start, a safety layer to the calls it covers, a
+    validator may be given them; a workflow''s `profile` field stays descriptive. Rules only tighten (trust
+    weights replace, §8.3); every member''s effect is stated in effective flags (§5.2.1) and §5.14, a person
+    for `require_human`/`block_autonomous` without a mark (records carry `person_required`), `checkpoint`
+    steps exempt from `checkpoint_policy`, a grounding policy (`require_grounding` with
+    `required_anchor_types` as kinds, §5.20), a minimum confidence (F504
+    `below_minimum_confidence`/`invalid_confidence`) checked after grounding; key grammars are capability
+    ids or `*`, anchor kinds and trust classes; loading diagnostics S303, S304, V101, V109, W602-W604,
+    `critical` deprecated; an executor or safety layer refuses a profile whose rule it does not put in
+    force, and a validator applies only the flags (§5.21.4). Implemented once in core/src/profile.rs for
+    the validator (`--profile`, `Options.profiles`) and the executor (`StartOptions.profiles`: thresholds,
+    checkpoint policy, the person, grounding through S4''s check in every frame, minimum confidence, waited
+    delegations included), exposed to Python (`AppliedProfiles`, `WorkflowRunner(profiles=)`,
+    `GroundedAgentConfig(profiles=)` for flags, the person, grounding and minimum confidence on the outputs
+    the adapter sees, `_core.check_confidence`), to TypeScript through the WebAssembly core, and in the
+    Standard Agents binding (`groundedTool({profiles})`, `bindingProfiles`). Normative vectors
+    tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_* (profile_grounding_*
+    among them); validator fixtures with `profiles`; the shipped profiles migrated to 2.0.0, each applied as
+    it is by the executor, the adapter and the binding; the compliance documents say where a setting is
+    enforced. Remaining (S5): the executor, the adapter and the binding refuse a profile with
+    `allowed_destinations` (`Policy::unenforced`, `refuse_unapplied`, `unappliedRule`) until the destination
+    check (§4.4.2) reads `Policy::destinations` and its counterparts, with the fixture
+    profile_destinations_refuse; no shipped profile sets it.'
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
@@ -1126,8 +1127,11 @@ findings:
     major or an unsupported Standard is V109). §11.7 lists the artifacts of 1.2.0 with their versions, checked
     by tests/test_version_lines.py (test_standard_artifact_table). §11.5 adds 1.2, makes W616 read one table
     of features (core `semantics::FEATURES`) and makes the catalog header an explicit start member; each 1.2
-    feature''s row of that table, and the S303 for `agents` before 1.2, land with the workstream that adds the
-    feature (S2a, S2b, S3, S4, S5). The consumers implement the citation rule through one core function
+    feature''s row of that table lands with the workstream that adds the feature (S2a''s approver fields,
+    S2b''s `require_record` and S4''s `grounding@1` and F505 are in it, fixture warn_version_feature_1_2; S3''s
+    and S5''s, and the S303 for `agents` before 1.2, come with them), and the header fixtures
+    header_1_2_sender_check_needs_identities and header_null_sender_check_not_read pin the header in the
+    executor. The consumers implement the citation rule through one core function
     (`_core.check_cited_versions`): the profile loader and the OASF adapter (`grounded_agency.versions`,
     CitedVersionError); an id a cited document names that the ontology lacks is V101 where it is used (the
     profile loader; the OASF adapter''s translate, UnknownCapabilityError, tests/test_oasf_adapter.py); the

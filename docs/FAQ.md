@@ -526,7 +526,7 @@ See the [Modality Handling Guide](guides/MODALITY_HANDLING.md) for full details.
 
 ### How do modality profiles differ from regular domain profiles?
 
-Modality profiles add source-type-specific trust weights and grounding requirements. For example, the vision and audio profiles require grounding for `detect`, `classify`, `predict`, `generate` and `transform`, with `file` among the anchor kinds: an image region or a time range is a `file` anchor whose `ref` holds the coordinates or the times (see the [Modality Handling Guide](guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality)). A profile takes effect where a host or safety layer applies it (Standard 1.2.0 §5.21); the reference implementation does not check grounding policies yet, so it refuses a profile that sets one rather than apply it without that rule (see [Status of Domain Profiles](domains/README.md#status-of-domain-profiles)).
+Modality profiles add source-type-specific trust weights and grounding requirements. For example, the vision and audio profiles require grounding for `detect`, `classify`, `predict`, `generate` and `transform`, with `file` among the anchor kinds: an image region or a time range is a `file` anchor whose `ref` holds the coordinates or the times (see the [Modality Handling Guide](guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality)). A profile takes effect where a host or safety layer applies it (Standard 1.2.0 §5.21): there, an output of a listed capability that is not grounded with an anchor of a listed kind, or marked inferred, fails (F505; see [Status of Domain Profiles](domains/README.md#status-of-domain-profiles)).
 
 ---
 

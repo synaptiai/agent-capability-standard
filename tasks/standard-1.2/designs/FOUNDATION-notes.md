@@ -821,3 +821,30 @@ Workstreams should run `npm run check:axe` (or at least
   schema_root)` for every configuration (`GroundedAgentConfig.schema_root`,
   default the ontology's grandparent, as `WorkflowEngine`): a contract
   `$ref` that names nothing refuses the configuration.
+
+## 2026-11-16 — S6 integrated with the chain (round3/a), for S3 and S5
+
+- **Profiles' grounding is wired.** `Program.grounding` (the applied
+  profiles' policies) joins `grounding_check`'s chain after the workflow's
+  and the host's; `Policy::unenforced` names only a destination policy.
+  **S5** deletes that last line (and `unenforced` with it) when its send
+  check reads `self.program.policy.destinations()`, and the adapter's
+  `refuse_unapplied(("destinations",), ...)` call and the binding's
+  `unappliedRule` (`examples/standard_agents/src/acs/profiles.ts`) when
+  their send checks read the profiles' destinations (S6 progress, item 5).
+- **The binding applies profiles per tool**: `groundedTool({profiles})`,
+  `bindingProfiles(core, documents)`; trace entries carry
+  `person_required` and `reason_code`, which `actionRecord` exports. S5's
+  `configureLayer` may take the same `BindingProfiles` for the layer.
+- **WebAssembly run operations.** `core/src/wasm.rs` has `run.resume`,
+  `run.cancel`, `run.wake_at`, `run.run_id`, `run.trace` (`since`),
+  `run.trace_seq`, `run.take_trace`, `run.take_records`,
+  `run.taken_sha256`, `run.run_record`; `packages/acs-core/test/wasm-runtime.test.ts`
+  plays every script entry. **S3**: start options `catalogs` and `agents`
+  go through `start_options` there, and the harness's `SUPPORTED` filter
+  goes when they do.
+- **W616.** `FEATURES` holds S2a's, S2b's and S4's 1.2 rows; **S3** and
+  **S5** append theirs (§11.5's table already names them).
+- **Fixtures.** `NORMATIVE_MEMBERS` lists `person_required` (§5.21.3) on
+  records. `absent` is in §10.5 and CONFORMANCE's entry table.
+

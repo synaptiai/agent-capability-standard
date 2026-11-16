@@ -189,23 +189,20 @@ A domain profile takes effect where it is **applied** (Standard 1.2.0
 [§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): by the reference
 executor (`Run.start(profiles=…)`, `WorkflowRunner(profiles=…)`), the
 validator (`tools/validate_workflows.py --profile`), the Python adapter
-(`GroundedAgentConfig(profiles=…)`) and TypeScript hosts through the
-WebAssembly core; never by a workflow's `profile` field or the plugin hooks.
-Applied, a profile only tightens: its thresholds and `checkpoint_policy`
-raise the flags of steps and calls (under `require_human` and
-`block_autonomous` a person approves each one, which no standing mandate
-covers), and the executor fails an output below `minimum_confidence` (F504).
-Its `trust_weights` replace weights where a host computes trust scores
-(`grounded_agency.trust`). A profile with an error is refused; a misspelled
-top-level member is a logged warning (W604).
+(`GroundedAgentConfig(profiles=…)`), the Standard Agents binding and
+TypeScript hosts through the WebAssembly core; never by a workflow's
+`profile` field or the plugin hooks. Applied, a profile only tightens: its
+thresholds and `checkpoint_policy` raise the flags of steps and calls (under
+`require_human` and `block_autonomous` a person approves each one, which no
+standing mandate covers), and an output fails that its grounding policy
+(`require_grounding`, §5.20) finds ungrounded (F505) or that is below
+`minimum_confidence` (F504). Its `trust_weights` replace weights where a
+host computes trust scores (`grounded_agency.trust`). A profile with an
+error is refused; a misspelled top-level member is a logged warning (W604).
 
-The reference implementation does not check a grounding policy
-(`require_grounding`, §5.20) or a destination policy
-(`allowed_destinations`, §4.4.2) yet, so the executor and the adapter refuse
-a profile that sets one (the adapter, which checks no output, also
-`minimum_confidence`) rather than apply it without the rule. Every shipped
-profile (`schemas/profiles/`, examples, version 2.0.0) sets
-`require_grounding`, so only the validator applies one as it is.
+No reference component checks a destination policy (`allowed_destinations`,
+§4.4.2) yet, so each refuses a profile that sets one; no shipped profile
+(`schemas/profiles/`, examples, version 2.0.0) does.
 
 Without a profile, what is enforced rests on the ontology's safety flags:
 

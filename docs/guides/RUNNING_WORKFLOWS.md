@@ -586,12 +586,10 @@ steps of nested runs, and are saved with the run's snapshot. An unknown
 top-level member is W604 and ignored (§5.21.2): `AppliedProfiles` logs it
 at WARNING with the member meant (`did you mean 'checkpoint_policy'?`) and
 keeps it in `warnings`. A workflow's `profile` field applies nothing. The
-executor does not check a profile's grounding policy
-(`evidence_policy.require_grounding`, §5.20) or destination policy
+executor does not check a profile's destination policy
 (`allowed_destinations`, §4.4.2) yet: a run under a profile that sets one
-does not start (`RunStartError`), rather than run without the rule; every
-shipped profile sets `require_grounding`. What changes in a run under a
-profile:
+does not start (`RunStartError`), rather than run without the rule; no
+shipped profile sets one. What changes in a run under a profile:
 
 - **Approvals.** A step whose effective risk `require_review` covers, or
   that is above `auto_approve`, needs approval, as a step whose
@@ -607,10 +605,16 @@ profile:
 - **Checkpoints.** A step `checkpoint_policy` covers needs a checkpoint
   before it, as one whose `requires_checkpoint` is true does; a
   `checkpoint` step is exempt.
+- **Grounding.** `evidence_policy.require_grounding` is a grounding policy
+  (§5.20) whose kinds are `required_anchor_types`: it is checked as one the
+  host gives at start (`grounding=`), in every frame, and an output of a
+  capability it lists that is neither grounded nor marked inferred fails
+  the step with F505.
 - **Confidence.** With `minimum_confidence`, an output whose `confidence`
   is below it fails the step with F504, reason `below_minimum_confidence`,
   and one whose `confidence` is not a number from 0 to 1 with F504, reason
   `invalid_confidence`; a failure mode's `on_error: [F504]` matches both.
+  The grounding check comes first.
 
 `tools/validate_workflows.py --profile <path>` validates a catalog as a run
 under the profile would be checked (F501, W606, W608). `AppliedProfiles`
