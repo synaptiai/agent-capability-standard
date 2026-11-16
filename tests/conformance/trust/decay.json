@@ -1,8 +1,8 @@
 {
-  "standard": "1.1.0",
+  "standard": "1.2.0",
   "section": "8.1",
-  "status": "informative",
-  "description": "Decay factors of STANDARD v1.1.0 section 8.1. The section requires the factor to be 0.5 at an age of one half-life and recommends (SHOULD) 0.5 ** (age / half_life); the vectors at other ages follow that formula, which schemas/authority_trust_model.yaml states as recency_factor. decay_model.min_trust, when the model sets it, is a floor on this factor. Each expected value is the value of that formula, written to the precision of a binary64 number. `not_covered` lists the cases the vectors leave out because the Standard does not state their result, each with what the reference implementation does; a vector for one of them would make one reading look required. grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
+  "status": "normative",
+  "description": "Decay factors of STANDARD v1.2.0 section 8.1: max(0.5 ** (age / half_life), min_trust), or 0.5 ** (age / half_life) when the model sets no min_trust, the recency_factor of schemas/authority_trust_model.yaml. The factor is exactly 0.5 at one half-life before the floor; min_trust floors the factor only, and a floor above 0.5 holds it from the age at which the curve reaches it; an age below zero counts as zero. The half-life is a duration of whole days, P<n>D with n at least 1: another form, or a min_trust outside 0 to 1, makes the model invalid, and an implementation refuses it (expect_error). Normative (section 10.3): an implementation that computes trust scores gives each vector's decay_factor within `tolerance`, and refuses each vector with expect_error. grounded_agency/trust.py is the reference implementation; tests/test_trust.py runs it against this file.",
   "tolerance": 1e-12,
   "fields": {
     "name": "The vector's name, unique in this file.",
@@ -10,13 +10,9 @@
     "half_life": "decay_model.half_life: an ISO 8601 duration of whole days, as schemas/authority_trust_model.yaml writes it.",
     "min_trust": "decay_model.min_trust. Absent: the model sets no floor.",
     "age_hours": "The age of the observation, in hours.",
-    "decay_factor": "The expected decay factor. A conforming value differs from it by at most `tolerance`."
+    "decay_factor": "The expected decay factor, absent when expect_error is true. A conforming value differs from it by at most `tolerance`.",
+    "expect_error": "true: the model or the age is invalid and an implementation refuses it; the vector then has no decay_factor."
   },
-  "not_covered": [
-    "A min_trust above 0.5. Section 8.1 requires a factor of 0.5 at one half-life and makes min_trust a floor on the factor; with a floor above 0.5 both cannot hold. The reference implementation returns max(0.5 ** (age / half_life), min_trust), the recency_factor of schemas/authority_trust_model.yaml and the benchmark scenario benchmarks/scenarios/conflicting_sources.py, which is min_trust at one half-life.",
-    "An age below zero, for an observation dated in the future. Section 8.1 does not say what it decays to, and the formula gives a factor above 1. The reference implementation refuses it.",
-    "A half-life in another form than P<n>D. Section 8.1 says the half-life is configurable and gives no format; tools/validate_canonical_schemas.py accepts P<n>D with n at least 1 only, and so does the reference implementation."
-  ],
   "vectors": [
     {
       "name": "no_age",
@@ -118,6 +114,52 @@
       "half_life": "P30D",
       "age_hours": 720,
       "decay_factor": 0.5
+    },
+    {
+      "name": "min_trust_above_half",
+      "about": "A floor above 0.5 applies: at one half-life the factor is min_trust, 0.6; before the floor, the curve is 0.5 there.",
+      "half_life": "P10D",
+      "min_trust": 0.6,
+      "age_hours": 240,
+      "decay_factor": 0.6
+    },
+    {
+      "name": "min_trust_above_half_young",
+      "about": "Above the floor, the curve applies: 0.5 ** 0.1, above 0.6.",
+      "half_life": "P10D",
+      "min_trust": 0.6,
+      "age_hours": 24,
+      "decay_factor": 0.9330329915368074
+    },
+    {
+      "name": "negative_age_counts_as_zero",
+      "about": "Evidence dated a day after the time the score is computed: its age counts as zero, so it is never fresher than a present observation.",
+      "half_life": "P10D",
+      "min_trust": 0.25,
+      "age_hours": -24,
+      "decay_factor": 1.0
+    },
+    {
+      "name": "half_life_not_days",
+      "about": "A half-life of another form than P<n>D is invalid.",
+      "half_life": "PT12H",
+      "age_hours": 24,
+      "expect_error": true
+    },
+    {
+      "name": "half_life_zero",
+      "about": "A half-life of zero days is invalid.",
+      "half_life": "P0D",
+      "age_hours": 24,
+      "expect_error": true
+    },
+    {
+      "name": "min_trust_out_of_range",
+      "about": "A min_trust outside 0 to 1 is invalid.",
+      "half_life": "P10D",
+      "min_trust": 1.5,
+      "age_hours": 24,
+      "expect_error": true
     }
   ]
 }

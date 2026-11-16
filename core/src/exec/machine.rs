@@ -352,6 +352,10 @@ impl<'a> Machine<'a> {
         if self.always_ask_at(i) {
             record["always_ask"] = json!(true);
         }
+        // An applied profile required a person for the step (§5.21.3).
+        if step.person {
+            record["person_required"] = json!(true);
+        }
         if let Some(c) = &f.cur.checkpoint_id {
             record["checkpoint_id"] = json!(c);
         }
@@ -1065,11 +1069,20 @@ impl<'a> Machine<'a> {
             self.frame().cur.always_ask = true;
             self.trace_step("always_ask", json!({}));
         }
+        // A step an applied profile requires a person for (§5.21.3) is
+        // asked as an always-ask step is, but marks nothing: only the
+        // request and the decision change.
+        if self.step_ref().person && !self.frame_ref().cur.person {
+            self.frame().cur.person = true;
+            let profiles = self.step_ref().raised_by.clone();
+            self.trace_step("person_required", json!({"profiles": profiles}));
+        }
+        let required = marked || self.step_ref().person;
         // So is a queued step that an attended resumption re-enters
         // (§5.14.1); every request for a re-entered queued step names it
         // while the step continues it (a re-ask and a retry included).
         let queued = self.queued_record();
-        let person = marked || (queued.is_some() && self.st.attendance == Attendance::Attended);
+        let person = required || (queued.is_some() && self.st.attendance == Attendance::Attended);
         let queued_action_id =
             queued.and_then(|r| self.st.rec(r)["action_id"].as_str().map(str::to_string));
         // A standing mandate needs no one present: it is asked even in an
@@ -1083,6 +1096,8 @@ impl<'a> Machine<'a> {
         if self.st.attendance == Attendance::Unattended && !mandate {
             let why = if marked {
                 "the run is unattended and the step uses an item from an always-ask trust class"
+            } else if required {
+                "the run is unattended and an applied profile requires a person for this step"
             } else {
                 "the run is unattended"
             };
@@ -1121,7 +1136,7 @@ impl<'a> Machine<'a> {
         if person && let Value::Object(a) = &mut approver {
             a.insert("kind".into(), json!("human"));
             a.remove("mandate_ref");
-            if marked {
+            if required {
                 a.insert("always_ask".into(), json!(true));
             }
         }
@@ -2002,6 +2017,12 @@ impl<'a> Machine<'a> {
                     "a delegation the step waits on needs a task_id to match its result",
                 );
             }
+            // The accepted delegation's output becomes the step's output
+            // once the result arrives (with `result` added): its
+            // confidence is checked now (§5.21.3).
+            if let Some(flow) = self.confidence_failure(&value) {
+                return flow;
+            }
             let mut traced = json!({"task_id": value.get("task_id")});
             if wf.extension("identity@1")
                 && let Some(p) = super::delegate_principal(&value)
@@ -2032,6 +2053,11 @@ impl<'a> Machine<'a> {
         if let Err(message) = self.grounding_check(&value, seen) {
             return self.step_error("F505", message);
         }
+        // An applied profile's minimum confidence (§5.21.3), after the
+        // required fields and the grounding check, before the after-gates.
+        if let Some(flow) = self.confidence_failure(&value) {
+            return flow;
+        }
         if step.capability == "checkpoint" {
             let id = value
                 .get("checkpoint_id")
@@ -2045,11 +2071,21 @@ impl<'a> Machine<'a> {
         self.set_stage(Stage::After)
     }
 
+    /// The step's failure when `value`, an output the host returned for
+    /// it, fails the applied profiles' minimum confidence (§5.21.3): F504
+    /// with `below_minimum_confidence` or `invalid_confidence`.
+    fn confidence_failure(&mut self, value: &Value) -> Option<Flow> {
+        let min = self.program.policy.minimum_confidence()?;
+        let fault = crate::profile::check_confidence(value, min)?;
+        Some(self.step_error_with("F504", fault.message(min), Reason::of(fault.reason())))
+    }
+
     /// §5.20's check of a host's output for the current step: under every
     /// policy that requires its capability (the frame workflow's own, then
-    /// the host's, which apply in every frame), each on its own. With none,
-    /// nothing is checked or traced, as in 1.1. On success the trace gets
-    /// one `grounding` event, from the last policy checked.
+    /// the host's, then the applied profiles' (§5.21.3); the last two apply
+    /// in every frame), each on its own. With none, nothing is checked or
+    /// traced, as in 1.1. On success the trace gets one `grounding` event,
+    /// from the last policy checked.
     fn grounding_check(&mut self, output: &Value, seen: Option<&[String]>) -> Result<(), String> {
         let step = self.step_ref();
         let wf = &self.program.workflows[&self.frame_ref().workflow];
@@ -2057,6 +2093,7 @@ impl<'a> Machine<'a> {
             .grounding
             .iter()
             .chain(&self.st.grounding)
+            .chain(&self.program.grounding)
             .filter(|p| p.requires(&step.capability))
             .collect();
         let Some(last) = policies.len().checked_sub(1) else {

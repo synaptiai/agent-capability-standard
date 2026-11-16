@@ -782,7 +782,70 @@ class GroundedAgentConfig:
     # Keep tool inputs, and Bash command text, in evidence anchors.
     # Off by default: inputs can hold credentials.
     evidence_include_tool_input: bool = False
+
+    # Domain profiles applied to every call the adapter covers (STANDARD
+    # 1.2.0 §5.21): loaded profiles or paths of profile files.
+    profiles: Sequence[Mapping | str | PathLike] = ()
+
+    # The directory the ontology's $ref paths are relative to (§4.1.2).
+    # None: the directory above the ontology's (the repository root).
+    schema_root: str | None = None
 ```
+
+**Domain profiles.** `GroundedAgentConfig(profiles=[...])` applies domain
+profiles to every tool call the adapter covers (STANDARD 1.2.0 §5.21): they
+raise the flags of the call's capability (`checkpoint_policy` a checkpoint,
+`require_review` and `auto_approve` an approval), and `require_human` and
+`block_autonomous` require a person's approval, which the adapter asks
+through the host's permission prompt; such a call's records carry
+`person_required: true`, an unbound tool's too when a profile requires a
+person for `mutate` (§5.18.2 treats it as `mutate`). A composite tool (a
+binding with `invokes`) takes the flags a profile raises for each binding it
+invokes, and its person requirement, transitively: its approval and
+checkpoint cover the nested calls, which the adapter does not see (§5.18.4).
+The ask's reason, which
+your `can_use_tool` callback reads as `context.decision_reason`, then says
+`requires approval by a person`: only a person's decision counts for that
+call (§5.21.3), so a callback that approves some calls automatically (an
+allowlist, say) puts such a call to a person instead. The core computes the
+raised flags (`AppliedProfiles`, `adapter.profiles`), as it does for the
+executor. A profile with an error raises `ProfileError` when the adapter is
+built, and profiles need `approval="ask"` (with approvals off, the approvals
+they require would be skipped). With `strict_mode=False`, which only logs a
+missing checkpoint, a profile whose `checkpoint_policy` raises
+`requires_checkpoint` (any value but `never`) raises `ProfileError` as well.
+The applied profiles are part of every record's `config_sha256`.
+
+A profile's grounding policy (`require_grounding`, with
+`required_anchor_types` as its kinds) joins `GroundedAgentConfig.grounding`,
+and its `minimum_confidence` fails an output below it with F504 (reason
+`below_minimum_confidence`, or `invalid_confidence` for a `confidence` that
+is not a number from 0 to 1), after the grounding check: both apply to the
+outputs the layer sees, those of the tools `create_grounded_mcp_server`
+serves, and a warning is logged once for any other tool they would cover
+(Claude Code's own tools return no capability output), whose calls the
+conformance statement names among its host gaps (§5.21.4). The adapter checks
+no send's destination yet, so a profile that sets `allowed_destinations`
+raises `ProfileError` when the adapter is built, rather than be applied
+without the rule (§5.21.4); no shipped profile sets it. A profile that
+requires a person for every call:
+
+```python
+adapter = GroundedAgentAdapter(
+    GroundedAgentConfig(
+        profiles=[{
+            "domain": "clinic",
+            "version": "1.0.0",
+            "risk_thresholds": {"require_human": "low"},
+        }]
+    )
+)
+adapter.mapper.map_tool("Read", {"file_path": "notes.md"}).person_required  # True
+```
+
+The ontology is loaded by the core as well when the adapter is built: a
+capability contract whose `$ref` names nothing under `schema_root`, is
+cyclic or nests too deep raises `ValueError` (§4.1.2).
 
 Any other value of `approval` raises `ValueError`, as does an `expiry_minutes` above 30 or not above 0, and a `checkpoint_reservation_seconds` of 0. `GroundedAgentAdapter(config, clock=...)` takes a clock (a function returning an aware `datetime`) that the checkpoint tracker and the records read, so a test can move time.
 

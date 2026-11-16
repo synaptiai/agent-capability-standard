@@ -433,7 +433,7 @@ export const PROFILE_SECTION_KEYS: ReadonlySet<string> = new Set([
 export interface SchemaEntry {
   source: string;
   name: string;
-  group: 'required' | 'supporting' | 'ontology' | 'interop' | 'transforms' | 'profiles' | 'other';
+  group: 'required' | 'supporting' | 'ontology' | 'interop' | 'transforms' | 'other';
   description: string;
   /** The Purpose column of the Standard's §6.1 table, for a required schema. */
   purpose?: string;
@@ -529,11 +529,9 @@ export function schemaListing(specText: string): SchemaEntry[] {
           ? 'interop'
           : name.startsWith('transforms/')
             ? 'transforms'
-            : name.startsWith('profiles/')
-              ? 'profiles'
-              : /^(capability_ontology|workflow_catalog)\./.test(name)
-                ? 'ontology'
-                : 'other';
+            : /^(capability_ontology|workflow_catalog)\./.test(name)
+              ? 'ontology'
+              : 'other';
     const entry: SchemaEntry = { source, name, group, description: schemaDescription(source, readRepoFile(source)) };
     const purpose = purposes[name];
     if (purpose !== undefined) entry.purpose = purpose;
@@ -547,7 +545,6 @@ export function schemaGroups(standardVersion: string): { key: SchemaEntry['group
   { key: 'required', label: 'Required by the Standard', intro: `Section 6.1 of Standard ${standardVersion} requires every implementation to provide these schemas.` },
   { key: 'supporting', label: 'Supporting schemas', intro: `Section 6.1 names these schemas as used by specific sections. They are not required of every implementation.` },
   { key: 'ontology', label: 'Ontology and workflow catalog', intro: 'The capability ontology, the reference workflow catalog, and the JSON Schemas that check them.' },
-  { key: 'profiles', label: 'Domain profile format', intro: 'The schema every domain profile follows.' },
   { key: 'interop', label: 'Interoperability', intro: 'Mappings to other agent frameworks.' },
   { key: 'other', label: 'Other schemas', intro: 'Schema files the Standard does not name.' },
   { key: 'transforms', label: 'Transforms', intro: 'The coercion registry and the mappings the transform capability uses.' },

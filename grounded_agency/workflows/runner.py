@@ -26,14 +26,16 @@ Example::
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
-from collections.abc import Callable, Mapping, MutableSet
+from collections.abc import Callable, Mapping, MutableSet, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from .. import _core
 from ..grounding import Policies, as_policies
+from ..profiles import AppliedProfiles
 from ..state.checkpoint_tracker import CheckpointTracker
 from ..state.evidence_store import EvidenceAnchor, EvidenceStoreProtocol
 from ..state.redaction import DEFAULT_REDACTOR, Redactor
@@ -335,6 +337,7 @@ class WorkflowRunner:
         max_actions: int = 100_000,
         poll_interval_ms: int = 1_000,
         max_polls: int = 100_000,
+        profiles: Sequence[Mapping[str, Any] | str | os.PathLike[str]] = (),
         archive: Callable[[RunResult], None] | None = None,
         run_ids: MutableSet[str] | None = None,
         event_seen: Callable[[str, int], MutableSet[str]] | None = None,
@@ -344,6 +347,16 @@ class WorkflowRunner:
         """
         Args:
             engine: Holds the catalog to run.
+            profiles: Domain profiles the host applies to every run it
+                starts (STANDARD v1.2 §5.21), each a loaded profile or a
+                path: they raise the steps' flags, require a person for the
+                steps ``require_human`` and ``block_autonomous`` cover, apply
+                their grounding policies (``require_grounding``, F505) and
+                fail an output below ``minimum_confidence`` with F504. They
+                are checked here (:class:`~grounded_agency.profiles.ProfileError`)
+                and saved with each run; one that sets ``allowed_destinations``
+                refuses the start (:class:`RunStartError`) until the
+                executor checks destinations.
             max_actions: Most actions to answer in one :meth:`drive` before
                 giving up on a run (:class:`RunIncomplete`). Polls that got
                 no answer do not count.
@@ -395,6 +408,9 @@ class WorkflowRunner:
                 ``Error`` it submits (§6.7). The default patterns when None.
         """
         self._engine = engine
+        self._profiles = AppliedProfiles(
+            profiles, validator=engine.core_validator() if profiles else None
+        )
         self._max_actions = max_actions
         self._poll_ms = poll_interval_ms
         self._max_polls = max_polls
@@ -503,6 +519,7 @@ class WorkflowRunner:
                 run_id=rid,
                 now_ms=now,
                 actor_identity=None if actor_identity is None else dict(actor_identity),
+                profiles=self._profiles.documents or None,
                 records=records,
                 grounding=[p.to_dict() for p in as_policies(grounding)] or None,
             )

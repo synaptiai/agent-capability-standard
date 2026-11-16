@@ -1,0 +1,18 @@
+# Standard version: 1.1.0
+# Validated with tests/fixtures/profiles/checkpoint_execute.profile.yaml: the
+# profile makes the execute step need a checkpoint, and none precedes it (F501).
+run_command:
+  goal: Run a command once the policy allows it.
+  risk: medium
+  steps:
+  - capability: constrain
+    purpose: Check the command against the policy.
+    store_as: policy
+    input_bindings:
+      target: command
+      constraints: [policy]
+  - capability: execute
+    purpose: Run the command.
+    store_as: run
+    input_bindings:
+      code: make deploy

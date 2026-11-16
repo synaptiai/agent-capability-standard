@@ -7,7 +7,6 @@ user-invocable: true
 allowed-tools: Read, Grep, Bash, Edit, Write
 context: fork
 agent: general-purpose
-layer: COORDINATE
 ---
 
 ## Intent

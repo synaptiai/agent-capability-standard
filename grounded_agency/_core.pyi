@@ -24,6 +24,7 @@ def validate_catalog(
     catalog_path: str | PathLike[str],
     ontology_path: str | PathLike[str],
     schema_root: str | PathLike[str],
+    profiles: list[Any] | None = None,
 ) -> dict[str, Any]: ...
 def canonical_json(value: Any) -> str:
     """The canonical JSON (RFC 8785) of an I-JSON value; ``ValueError``
@@ -69,6 +70,13 @@ def check_grounding(
     are 0 for a refused output). ``ValueError`` for a malformed policy or a
     bound reference that is not a reference body."""
 
+def check_confidence(output: Any, minimum: float) -> dict[str, Any] | None:
+    """A domain profile's minimum confidence applied to one output (STANDARD
+    v1.2 §5.21.3): None when the output passes (it is not an object, has no
+    ``confidence``, or one at or above ``minimum``), else ``{code: "F504",
+    reason: "below_minimum_confidence" | "invalid_confidence", message}``.
+    ``ValueError`` when ``minimum`` is not a number from 0 to 1."""
+
 @final
 class Validator:
     """Raises ``FileNotFoundError`` (or another ``OSError``) when the
@@ -77,8 +85,28 @@ class Validator:
     def __new__(
         cls, ontology_path: str | PathLike[str], schema_root: str | PathLike[str]
     ) -> Validator: ...
-    def validate_file(self, path: str | PathLike[str]) -> dict[str, Any]: ...
-    def validate(self, catalog: Any, header: str | None = None) -> dict[str, Any]: ...
+    def validate_file(
+        self, path: str | PathLike[str], profiles: list[Any] | None = None
+    ) -> dict[str, Any]: ...
+    def validate(
+        self, catalog: Any, header: str | None = None, profiles: list[Any] | None = None
+    ) -> dict[str, Any]:
+        """``profiles``: domain profiles to apply (Standard v1.2 §5.21); their
+        diagnostics come first."""
+    def check_profiles(self, profiles: list[Any]) -> dict[str, Any]:
+        """The diagnostics of loading ``profiles`` (Standard v1.2 §5.21.2)."""
+    def profile_flags(
+        self,
+        profiles: list[Any],
+        capability: str,
+        declared: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """``{"risk", "mutation", "requires_checkpoint", "requires_approval",
+        "person", "warnings"}`` (§5.21.3); ``ValueError((message,
+        diagnostics))`` when the profiles have an error."""
+    def profile_policy(self, profiles: list[Any]) -> dict[str, Any]:
+        """``{"minimum_confidence", "grounding", "destinations",
+        "trust_weights"}`` (§5.21.3); ``ValueError`` as ``profile_flags``."""
     def contracts(self) -> dict[str, dict[str, Any]]:
         """Every capability's ``{"input": ..., "output": ...}`` contracts with
         each ``$ref`` resolved, in ontology order."""
@@ -112,7 +140,12 @@ class Run:
         grounding policies ``{require, kinds?, attested?}`` the host applies
         to the run and its nested runs (§5.20): a malformed policy, or one
         that requires a capability the ontology does not define (V101), is
-        a ``ValueError``. ``profiles``, ``destinations``, ``catalogs`` and
+        a ``ValueError``. ``profiles``: the domain profiles applied to every
+        step of the run and its nested runs, checked at start and saved with
+        the run (§5.21); one with an error, or one that sets a destination
+        policy (``allowed_destinations``), which no check of this executor
+        reads yet, refuses the start (``ValueError``), as a restore of a
+        state holding one is refused. ``destinations``, ``catalogs`` and
         ``agents`` are refused (``ValueError``) until the 1.2 workstreams
         implement them."""
 

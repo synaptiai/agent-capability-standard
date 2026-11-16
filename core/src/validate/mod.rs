@@ -107,8 +107,27 @@ impl Context {
                 err,
             }
         })?;
-        let ontology = Ontology::from_value(&doc)?;
-        let schemas = SchemaStore::new(schema_root);
+        Context::new(&doc, SchemaStore::new(schema_root))
+    }
+
+    /// A context from values in memory: the parsed ontology and the schema
+    /// documents a contract or a workflow may reference, each keyed by its
+    /// path relative to the schema root (`schemas/event_schema.yaml`).
+    pub fn from_values(
+        ontology: &Value,
+        documents: impl IntoIterator<Item = (String, Value)>,
+    ) -> Result<Context, LoadError> {
+        Context::new(ontology, SchemaStore::in_memory(documents))
+    }
+
+    /// A context from a parsed ontology and a schema store. Every
+    /// capability's contracts are resolved, a same-file `$ref`
+    /// (`#<pointer>`) against `doc`; one that still holds a `$ref` (it
+    /// names nothing, is cyclic, or nests deeper than the limit) is outside
+    /// the schema dialect, and the ontology is refused (STANDARD v1.2
+    /// §4.1.2).
+    pub fn new(doc: &Value, schemas: SchemaStore) -> Result<Context, LoadError> {
+        let ontology = Ontology::from_value(doc)?;
         let mut coercions = Vec::new();
         if let Some(reg) = schemas.document(COERCION_REGISTRY) {
             for c in reg
@@ -149,7 +168,7 @@ impl Context {
                 if !v.is_object() {
                     return Ok(empty());
                 }
-                schemas.resolve_node(v, &mut budget).map_err(|e| {
+                schemas.resolve_node_in(v, doc, &mut budget).map_err(|e| {
                     LoadError::Invalid(format!(
                         "the {which} schema of capability '{}' cannot be used: {e}",
                         cap.id
@@ -160,6 +179,15 @@ impl Context {
                 input: resolve(&cap.input_schema, "input")?,
                 output: resolve(&cap.output_schema, "output")?,
             };
+            for (which, schema) in [("input", &c.input), ("output", &c.output)] {
+                if let Some((r, pointer)) = residual_ref(schema, &mut Vec::new()) {
+                    return Err(LoadError::Invalid(format!(
+                        "the {which} schema of capability '{}' holds the $ref '{r}' at '{pointer}', which names nothing, is cyclic or nests deeper than {} (STANDARD v1.2 §4.1.2)",
+                        cap.id,
+                        schema::MAX_REF_DEPTH
+                    )));
+                }
+            }
             contracts.insert(cap.id.clone(), c);
         }
         Ok(Context {
@@ -200,6 +228,45 @@ impl Context {
                     types::compatible(&c.from, actual) && types::compatible(expected, &c.to)
                 })
             })
+    }
+}
+
+/// The first `$ref` left in a resolved contract, with its JSON Pointer
+/// (RFC 6901) within the contract: resolution keeps a `$ref` only when it
+/// cannot be followed.
+fn residual_ref(node: &Value, path: &mut Vec<String>) -> Option<(String, String)> {
+    let pointer = |path: &[String]| {
+        path.iter()
+            .map(|p| format!("/{}", p.replace('~', "~0").replace('/', "~1")))
+            .collect::<String>()
+    };
+    match node {
+        Value::Object(m) => {
+            if let Some(Value::String(r)) = m.get("$ref") {
+                return Some((r.clone(), pointer(path)));
+            }
+            for (k, v) in m {
+                path.push(k.clone());
+                let found = residual_ref(v, path);
+                path.pop();
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+        Value::Array(a) => {
+            for (i, v) in a.iter().enumerate() {
+                path.push(i.to_string());
+                let found = residual_ref(v, path);
+                path.pop();
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 
@@ -248,6 +315,26 @@ pub fn validate_catalog_file(ctx: &Context, path: &Path) -> Result<Report, LoadE
     ))
 }
 
+/// [`validate_catalog_file`] with domain profiles applied (§5.21).
+pub fn validate_catalog_file_with(
+    ctx: &Context,
+    path: &Path,
+    profiles: &[Value],
+) -> Result<Report, LoadError> {
+    let load = |err| LoadError::File {
+        what: "workflow catalog",
+        err,
+    };
+    let text = yaml::read_guarded(path, yaml::ONTOLOGY_MAX_BYTES).map_err(load)?;
+    let catalog = yaml::load_str(&text).map_err(load)?;
+    let options = Options {
+        header: header_version(&text),
+        profiles: profiles.to_vec(),
+        ..Options::default()
+    };
+    validate_with(ctx, &catalog, &options)
+}
+
 /// What validation takes besides the catalog (STANDARD v1.2 §5.1.1, §5.15.1,
 /// §5.21, §11.5). The default is one catalog with no header and nothing
 /// else given.
@@ -256,8 +343,9 @@ pub struct Options {
     /// The version the catalog's `# Standard version:` header declares
     /// (§11.5), or none for a catalog without one.
     pub header: Option<String>,
-    /// Domain profiles to apply (§5.21), as given. Workstream S6 loads and
-    /// applies them; until then a non-empty list is refused.
+    /// Domain profiles to apply (§5.21), as given: they are checked
+    /// (§5.21.2), and each workflow is validated with the effective flags
+    /// they raise (§5.21.3). Their diagnostics come first in the report.
     pub profiles: Vec<Value>,
     /// Agent manifests (§5.15.1), as given. Workstream S3 reads them; until
     /// then a non-empty list is refused.
@@ -274,9 +362,6 @@ impl Options {
     /// profile, manifest or catalog it was given were absent. Each
     /// workstream removes its line when it implements the member.
     pub(crate) fn unimplemented(&self) -> Option<&'static str> {
-        if !self.profiles.is_empty() {
-            return Some("profiles (§5.21)");
-        }
         if !self.agents.is_empty() {
             return Some("agent manifests (§5.15.1)");
         }
@@ -294,17 +379,27 @@ pub fn validate_with(
     catalog: &Value,
     options: &Options,
 ) -> Result<Report, LoadError> {
+    validate_options(ctx, catalog, options).map(|(report, _)| report)
+}
+
+/// [`validate_with`], also returning the loaded profiles (§5.21), which the
+/// executor runs with.
+pub(crate) fn validate_options(
+    ctx: &Context,
+    catalog: &Value,
+    options: &Options,
+) -> Result<(Report, Policy), LoadError> {
     if let Some(what) = options.unimplemented() {
         return Err(LoadError::Invalid(format!(
             "this validator does not implement {what} yet"
         )));
     }
-    Ok(validate_catalog_policy(
-        ctx,
-        catalog,
-        options.header.as_deref(),
-        &Policy::default(),
-    ))
+    let mut report = Report::default();
+    let policy = Policy::load(&options.profiles, &ctx.ontology, &mut report);
+    let rest = validate_catalog_policy(ctx, catalog, options.header.as_deref(), &policy);
+    report.diagnostics.extend(rest.diagnostics);
+    report.suggestions.extend(rest.suggestions);
+    Ok((report, policy))
 }
 
 /// Validate a parsed catalog: a mapping of workflow name to workflow.
@@ -660,7 +755,8 @@ impl WorkflowCheck<'_> {
             semantics::flag_downgrades(&loc, step, node, self.report);
             // The step's effective flags (§5.2.1), raised by the applied
             // profiles (§5.21.3).
-            let flags = semantics::effective(node, step, None, self.policy).flags;
+            let effective = semantics::effective(node, step, None, self.policy);
+            let (flags, person) = (effective.flags, effective.person);
             semantics::unknown_inputs(&loc, step, node, self.report);
             semantics::missing_inputs(&loc, step, node, self.report);
             // A handler step runs only on escalation, after the step that
@@ -815,7 +911,11 @@ impl WorkflowCheck<'_> {
             // item: it is asked of a person, and no one is present.
             let mandate_only = matches!(step.get("approval"), Some(Value::Object(a))
                 if !a.contains_key("when_unattended") && plan_for_unattended);
-            if requires_approval && unattended && mandate_only && !always_ask.is_empty() {
+            // Nor for a step an applied profile requires a person for
+            // (§5.21.3).
+            if requires_approval && unattended && mandate_only && person {
+                approval::unattended_person(&loc, self.report);
+            } else if requires_approval && unattended && mandate_only && !always_ask.is_empty() {
                 let mut roots = Vec::new();
                 for key in ["input_bindings", "condition", "gates", "approval", "wait"] {
                     if let Some(v) = step.get(key) {
@@ -2023,11 +2123,18 @@ pub(crate) mod tests {
             ["W605"]
         );
         assert!(codes(&validate_with(&ctx(), &catalog, &with(Some("1.2"))).unwrap()).is_empty());
-        for options in [
-            Options {
+        // Profiles are applied: a profile's diagnostics come first.
+        let profiled = validate_with(
+            &ctx(),
+            &catalog,
+            &Options {
                 profiles: vec![json!({"domain": "d"})],
                 ..Options::default()
             },
+        )
+        .unwrap();
+        assert_eq!(codes(&profiled)[0], "S304");
+        for options in [
             Options {
                 agents: vec![json!({"agent": "a"})],
                 ..Options::default()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -127,17 +126,17 @@ class TestSafetyMetadata:
         assert len(result.capability_nodes) > 0
         assert result.capability_nodes[0].id == "classify"
 
-    def test_warning_logged_for_missing_capability(
-        self, adapter: OASFAdapter, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A warning is logged when a mapped capability is not found in the registry."""
+    def test_missing_capability_is_v101_not_dropped(self, adapter: OASFAdapter) -> None:
+        """A mapped capability the registry lacks is V101 (Standard v1.2
+        §11.6), not dropped with a warning: the entry's risk and checkpoint
+        need cannot be computed without it."""
+        from grounded_agency.adapters import UnknownCapabilityError
+
         with patch.object(adapter._registry, "get_capability", return_value=None):
-            with caplog.at_level(
-                logging.WARNING, logger="grounded_agency.adapters.oasf"
-            ):
-                result = adapter.translate("109")  # classify -> patched to None
-        assert "not found in registry" in caplog.text
-        assert result.capability_nodes == []
+            with pytest.raises(UnknownCapabilityError) as caught:
+                adapter.translate("109")  # classify -> patched to None
+        assert caught.value.code == "V101"
+        assert (caught.value.skill_code, caught.value.capability) == ("109", "classify")
 
 
 class TestReverseLookup:
@@ -333,3 +332,101 @@ class TestCoverageReport:
         report = adapter.coverage_report()
         assert report["oasf_version"] == "0.8.0"
         assert report["mapping_version"] == "1.1.0"
+
+
+class TestCitedVersions:
+    """Standard v1.2 §11.6: the adapter refuses a mapping that cites another
+    ontology major or an unsupported Standard (V109) or a malformed version
+    (S303), and loads one that cites a later minor or nothing."""
+
+    def _copy(self, tmp_path: Path, cited: dict[str, str] | None) -> OASFAdapter:
+        import yaml
+
+        from grounded_agency.capabilities.registry import CapabilityRegistry
+
+        doc = yaml.safe_load(MAPPING_PATH.read_text(encoding="utf-8"))
+        if cited is None:
+            doc["meta"].pop("agent_capability_standard")
+        else:
+            doc["meta"]["agent_capability_standard"] = cited
+        path = tmp_path / "oasf_mapping.yaml"
+        path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        return OASFAdapter(path, registry=CapabilityRegistry(ONTOLOGY_PATH))
+
+    def test_the_shipped_mapping_cites_the_current_versions(
+        self, adapter: OASFAdapter
+    ) -> None:
+        assert adapter.cited_versions == {"standard": "1.2.0", "ontology": "2.2.0"}
+
+    @pytest.mark.parametrize(
+        ("cited", "code"),
+        [
+            ({"standard": "1.2.0", "ontology": "3.0.0"}, "V109"),
+            ({"standard": "2.0", "ontology": "2.2.0"}, "V109"),
+            ({"standard": "1.2.0", "ontology": "two"}, "S303"),
+        ],
+    )
+    def test_refused(self, tmp_path: Path, cited: dict[str, str], code: str) -> None:
+        from grounded_agency.versions import CitedVersionError
+
+        adapter = self._copy(tmp_path, cited)
+        with pytest.raises(CitedVersionError) as caught:
+            adapter.category_count  # noqa: B018 - loads the mapping
+        assert caught.value.code == code
+        assert caught.value.diagnostics[0]["location"]["document"].endswith(
+            "oasf_mapping.yaml"
+        )
+
+    @pytest.mark.parametrize(
+        "cited", [{"standard": "1.2.0", "ontology": "2.9"}, {"standard": "1.0"}, None]
+    )
+    def test_accepted(self, tmp_path: Path, cited: dict[str, str] | None) -> None:
+        assert self._copy(tmp_path, cited).category_count == 15
+
+    def test_every_shipped_entry_names_capabilities_of_the_ontology(
+        self, adapter: OASFAdapter
+    ) -> None:
+        """No shipped entry is V101: each translates."""
+        for mapping in adapter.list_all_mappings():
+            adapter.translate(mapping.skill_code)
+
+    def test_an_id_of_a_later_minor_is_v101_where_it_is_used(
+        self, tmp_path: Path
+    ) -> None:
+        """A mapping written against a later ontology minor may name a
+        capability this ontology lacks: the entry that uses it is V101 (with
+        the closest id), never translated without it, so its risk and
+        checkpoint need cannot fail open; the other entries translate."""
+        import yaml
+
+        from grounded_agency.adapters import UnknownCapabilityError
+        from grounded_agency.capabilities.registry import CapabilityRegistry
+
+        doc = yaml.safe_load(MAPPING_PATH.read_text(encoding="utf-8"))
+        doc["meta"]["agent_capability_standard"] = {
+            "standard": "1.2.0",
+            "ontology": "2.3.0",
+        }
+        first = next(iter(doc["categories"]))
+        doc["categories"][first]["capabilities"] = ["retrieve", "teleport", "mutat"]
+        path = tmp_path / "oasf_mapping.yaml"
+        path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        adapter = OASFAdapter(path, registry=CapabilityRegistry(ONTOLOGY_PATH))
+        with pytest.raises(UnknownCapabilityError) as caught:
+            adapter.translate(str(first))
+        assert caught.value.code == "V101"
+        assert (caught.value.skill_code, caught.value.capability) == (
+            str(first),
+            "teleport",
+        )
+        assert caught.value.suggestion is None
+        assert "V101" in str(caught.value) and "§11.6" in str(caught.value)
+        doc["categories"][first]["capabilities"] = ["retrieve", "mutat"]
+        path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        adapter = OASFAdapter(path, registry=CapabilityRegistry(ONTOLOGY_PATH))
+        with pytest.raises(UnknownCapabilityError) as caught:
+            adapter.translate(str(first))
+        assert caught.value.suggestion == "mutate"
+        # An entry that names only known ids still translates.
+        result = adapter.translate("109")
+        assert [n.id for n in result.capability_nodes] == ["classify"]

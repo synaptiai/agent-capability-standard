@@ -177,6 +177,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (secrets and redaction, §6.7; the destination policy, §4.4.2; for the
   adapter, the output contract of a tool's result): they meet class SL
   except those checks, and claim it once they apply them.
+- **Breaking (plugin):** two composed skills take their directory names
+  (Agent Skills requires `name` to equal the directory): the slash commands
+  `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
+  `/capability-gap-analysis` and `/digital-twin-sync-loop`. The plugin
+  release that carries this is a MAJOR version (3.0.0). No workflow,
+  ontology or schema changes. The `layer` frontmatter key is removed from
+  the 13 skills that had it (the ontology gives a capability's layer).
+- Domain profiles (Standard 1.2.0 §5.21) are now applied where they are
+  given, and refused when malformed: a `checkpoint_policy` key must be a
+  capability id or `"*"` (a label such as `before_send` is V101), the
+  members of `risk_thresholds` and `evidence_policy` are closed (another is
+  S303), and `required_anchor_types` lists anchor kinds. A third-party
+  profile written for 1.1, which nothing applied, is refused where it is
+  applied now: migrate it as the shipped profiles were (each to 2.0.0).
+  `tools/validate_profiles.py` checks profiles with the core and fails on
+  any diagnostic; its old helper functions are gone. A profile that sets a
+  rule an implementation does not put in force is refused too, rather than
+  applied without it (§5.21.4): until the destination check (§4.4.2) reads
+  it, the executor (`_core.Run.start`, `WorkflowRunner`, WebAssembly
+  `run.start`, and a restore), `GroundedAgentAdapter` (`ProfileError`) and
+  the Standard Agents binding refuse a profile with `allowed_destinations`
+  (no shipped profile sets it), and the adapter, with `strict_mode=False`
+  (which only logs a missing checkpoint), a `checkpoint_policy` that raises
+  `requires_checkpoint`. A profile's grounding policy (`require_grounding`,
+  every shipped profile's) and its `minimum_confidence` are applied: an
+  output they cover that is not grounded fails with F505, one not confident
+  enough with F504, in runs, in the adapter (on the outputs of the tools
+  `create_grounded_mcp_server` serves) and in the binding. A member without
+  an exact JSON form (an integer beyond 2^53) is S303. An unknown top-level
+  profile member stays a warning (W604) and is now reported with the member
+  meant: logged at WARNING by the Python layers, and passed by the
+  binding's `bindingProfiles` to its `onWarning` (`console.warn` by
+  default).
+- Python SDK: `OASFAdapter.translate` raises `UnknownCapabilityError` (V101,
+  with the closest id) for an entry that names a capability the ontology
+  does not define; it logged a warning and translated the entry without it,
+  so its `max_risk` and `requires_checkpoint` could be too low. Catch it
+  where a mapping written against a later ontology may be loaded.
+- Python SDK: `grounded_agency.trust.decay_factor` counts an age below zero
+  as zero (it raised `ValueError`), and `TrustModel` reads its field
+  authorities from `field_authority.fields`, refusing a malformed entry or
+  an unknown tie-breaker. `_core.Run.start(profiles=...)` and
+  `Validator.validate(profiles=...)` apply profiles (they were refused);
+  `GroundedAgentConfig(profiles=...)` needs `approval="ask"`.
+- An ontology whose capability contract keeps a `$ref` that names nothing,
+  is cyclic or nests deeper than 12 is refused when it is loaded (it was
+  kept silently): by the validator CLI, the executor and WebAssembly, and in
+  Python by `_core.Validator`, `WorkflowEngine` and `GroundedAgentAdapter`,
+  which now loads its ontology through the core as well. An adapter whose
+  ontology is not at `<root>/schemas/` names the directory its `$ref`s are
+  relative to with `GroundedAgentConfig(schema_root=...)`. A same-file
+  `$ref` (`#<pointer>`) names a node of the ontology itself (§4.1.2).
+- TypeScript package: `npm test` replays the fixtures through the
+  WebAssembly core, so run `npm run build:wasm` (which needs the
+  `wasm32-unknown-unknown` target) and `npm run build` first; the binding
+  needs only `npm run build:ts`.
 - Standard Agents binding: a trace entry's `approval.approvers` (and
   `GroundedCall.approvers`) are now the approvers' principals,
   `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
@@ -535,7 +591,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   package: `iJsonProblem`. Python SDK: `CheckpointTracker.valid_checkpoint_id()`,
   `has_commit()` and `max_age_minutes`.
 
+- Domain profiles (Standard 1.2.0 §5.21, RFC-0010): the core loads and
+  checks them (`profile::Policy`), the validator and the executor apply
+  them (raised flags, a person for `require_human` and `block_autonomous`
+  with `person_required` on records and in the trace, F504
+  `below_minimum_confidence` and `invalid_confidence`, W606 for a
+  mandate-only step), and they are saved with a run. Python:
+  `AppliedProfiles`, `ProfileError`, `load_profile`,
+  `GroundedAgentConfig(profiles=...)`, `WorkflowRunner(profiles=...)`,
+  `_core.Validator.check_profiles`, `profile_flags`, `profile_policy`;
+  `tools/validate_workflows.py --profile`. Normative profile vectors
+  (`tests/conformance/profiles/`), 17 runtime fixtures and validator
+  fixtures with profiles (`EXPECTATIONS.json` gains `profiles`). A runtime
+  fixture's script entry may list `absent` members, which the pending
+  action must not hold. The adapter's records digest (`config_sha256`)
+  covers the applied profiles; `GroundedAgentConfig(schema_root=...)`. When
+  a profile requires a person for a call, the adapter's ask reason says
+  `requires approval by a person`, and an unbound tool's record carries
+  `person_required` when a profile requires one for `mutate`
+  (`ToolCapabilityMapper.person_required`).
+- Trust (§8): `grounded_agency.trust.resolve` with the six strategies of
+  §8.2 and tie-breaking (a single candidate is chosen whatever the
+  strategy), `Candidate`, `Resolution`, `merge_trust_weights`;
+  the trust vectors are normative, with `resolve.json`. The
+  conflicting-sources benchmark resolves with `resolve` (same results).
+- Entity ids (§7.1): `grounded_agency.entities.parse_entity_id`,
+  `tests/conformance/entities/ids.json`; `entity_taxonomy.yaml`'s pattern
+  is checked against its examples, and names every white space and control
+  character a segment cannot hold (U+00A0, U+2028 and U+0085 among them),
+  so it means the same in every regular expression dialect.
+- Cited versions (§11.6): `grounded_agency.versions.check_cited` and
+  `CitedVersionError`; the OASF adapter refuses a mapping that cites
+  another ontology major or an unsupported Standard.
+- WebAssembly (ACS-42): the core's `wasm` feature (`core/src/wasm.rs`, a
+  JSON interface over three C-ABI exports) and the TypeScript package's
+  `./wasm` entry (`AcsCore`, `CoreContext`, `CoreRun`, `loadDocuments`),
+  which runs the validator and executor, profiles included, in process,
+  with the host protocol's run operations (`run.resume`, `run.cancel`,
+  `run.wake_at`, `run.take_trace`, `run.take_records`, `run.run_record`,
+  `run.trace` since a `seq`; `CoreRun.resume`, `cancel`, `wakeAt`, ...);
+  `Context::from_values` with an in-memory schema store.
+  `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
+  a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
+  `NPM_TOKEN` are both set (a dry run otherwise).
+- Domain profiles in every reference layer (§5.21.3): a profile's grounding
+  policy is checked by the executor's grounding check (§5.20) and by
+  `GroundedAgentAdapter.check_call_output`, which also applies the
+  profiles' minimum confidence (`_core.check_confidence`) to the outputs of
+  the tools `create_grounded_mcp_server` serves, with or without
+  `config.grounding`; an exported call record carries `reason_code` and
+  `person_required` (a failed call's record too). A composite tool takes
+  the flags a profile raises for each binding it `invokes`, and its person
+  requirement, transitively (§5.18.4), in the adapter
+  (`ToolCapabilityMapper.map_tool`) as in the binding, so no profile rule
+  is bypassed through a composite. The Standard Agents binding applies
+  profiles through `groundedTool({profiles})` and `bindingProfiles` (raised
+  flags at the call's effective risk with its `invokes`, and for what the
+  tools it invokes perform; a person's approval, also for a composite whose
+  approval covers a call needing one; grounding; minimum confidence;
+  loading warnings such as W604 reported to `onWarning`), and a TypeScript
+  host's `CoreContext.start` reports those warnings likewise (the
+  WebAssembly interface's `run.start` answers them as `warnings`).
+  Runtime fixtures `profile_grounding_*` and the header fixtures
+  `header_1_2_sender_check_needs_identities` and
+  `header_null_sender_check_not_read`; validator fixture
+  `warn_version_feature_1_2`.
+- `skills/README.md` lists each frontmatter key's owner (Agent Skills,
+  Claude Code, ACS), checked by `tests/test_skill_frontmatter.py`.
+- Standard 1.2.0 text of §4.1.2 (schema dialect), §5.21, §7.1, §8.1–§8.3,
+  §11.5–§11.7 and Appendix D.7; RFC-0010.
+
 ### Changed
+- The shipped domain profiles are version 2.0.0, cite Standard 1.2.0 and
+  ontology 2.2.0, key `checkpoint_policy` by capability id or `"*"`, and
+  list anchor kinds as `required_anchor_types`. The documentation and the
+  compliance documents say a profile setting is enforced where a profile
+  is applied, and which rules the reference implementation refuses until
+  it checks them; the site's domain figures follow §5.21.3. A profile's
+  `checkpoint_policy` `never` for `rollback` is W602, as for `mutate` and
+  `send` (a `checkpoint` `requires` edge needs a checkpoint before it).
 - Direct dependencies are at their latest releases. Python: the dev ranges are
   pytest 8.4.2–9, pytest-asyncio 1.x, mypy 1.19.1–2 and ruff 0.17 (CI runs
   ruff 0.17.4).
@@ -586,6 +720,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   not claim class SL.
 
 ### Fixed
+- A reference index beyond the platform's `usize` (`${a[18446744073709551615]}`)
+  was a parse error on a 32-bit target and a missing index on a 64-bit one;
+  it is a missing index everywhere.
 - Python SDK: `register_mcp_tool` accepted an unknown capability and a
   declared risk below the ontology's (`mutate` with `risk="low"` needed no
   checkpoint). It now refuses the first (V101) and ignores and reports the
@@ -602,9 +739,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   on stderr. The audit hook logged only Skill calls, with their arguments; it
   logs every call with a digest of the input. Refusals open with the
   diagnostic code (`F501 CHECKPOINT_REQUIRED:`).
-- Documentation no longer says that a domain profile setting is enforced: no
-  shipped component applies a profile, and the compliance documents say which
-  component enforces what.
+- Documentation no longer says that a domain profile setting is enforced
+  where no shipped component applied a profile; the compliance documents say
+  which component enforces what (Standard 1.2.0 applies profiles, see
+  Changed).
 - A Bash call whose input is not a dictionary, or whose `command` is not
   text, made the tool mapper raise, and the PreToolUse hook then let the
   call through. It is now treated as an unknown, checkpoint-gated mutation.

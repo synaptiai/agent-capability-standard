@@ -7,11 +7,18 @@ enabling systems built on OASF to leverage Grounded Agency's safety guarantees.
 
 from __future__ import annotations
 
-from .oasf import OASFAdapter, OASFMapping, OASFSkillResult, UnknownSkillError
+from .oasf import (
+    OASFAdapter,
+    OASFMapping,
+    OASFSkillResult,
+    UnknownCapabilityError,
+    UnknownSkillError,
+)
 
 __all__ = [
     "OASFAdapter",
     "OASFMapping",
     "OASFSkillResult",
+    "UnknownCapabilityError",
     "UnknownSkillError",
 ]

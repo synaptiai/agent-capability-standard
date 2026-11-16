@@ -157,7 +157,7 @@ The Grounded Agency framework's structural properties align with anticipated sta
 | Data governance | EvidenceStore with provenance | Strong — typed evidence anchors |
 | Documentation | Formal specification (whitepaper), ontology, methodology docs | Strong — exceeds typical documentation |
 | Logging | Audit hook, append-only log | Strong — automatic, non-bypassable |
-| Human oversight | Approval gates on `execute`, `mutate` and `send`, enforced by the reference executor; domain profiles declare `block_autonomous`, which a deployer's host has to implement ([Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles)) | Strong for the approval and checkpoint flags; a profile setting is a declaration until a host implements it |
+| Human oversight | Approval gates on `execute`, `mutate` and `send`, enforced by the reference executor; domain profiles set `block_autonomous`, enforced where the profile is applied ([Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles)) | Strong for the approval and checkpoint flags; for a profile setting, where the deployment applies the profile |
 | Accuracy and robustness | Confidence thresholds, trust decay, 6 validators | Moderate — validators check structure, not ML performance |
 
 ## 6. Notified Body Selection Criteria

@@ -789,3 +789,97 @@ Workstreams should run `npm run check:axe` (or at least
   pins the refusal rule for Python, TypeScript and `hooks/secret_scan.sh`;
   a stream that changes the scan re-syncs the skills' copies.
 
+## 2026-11-16 — S6 review round 1 (affects S2b, S4, S5)
+
+- **A profile rule no check reads is refused, not ignored.**
+  `profile::Policy::unenforced()` names a profile's grounding policy
+  (`require_grounding`) or destination policy (`allowed_destinations`), and
+  `Run::prepare` (`core/src/exec/mod.rs`, so start, restore, Python and
+  WebAssembly) refuses it with `StartError::Unsupported`, as
+  `StartOptions::unimplemented()` refuses the host's own. **S4**, when its
+  grounding check reads `self.program.policy.grounding()`, deletes the
+  grounding line; **S5**, when its send check reads
+  `self.program.policy.destinations()`, deletes the destination line (S6
+  Pending items 1 and 5). The Python adapter refuses the same rules and
+  `minimum_confidence` (`self.profiles.refuse_unapplied(...)` in
+  `GroundedAgentAdapter.__post_init__`): S4's adapter output check and
+  S5's send check delete their names there. §5.21.4 states the rule: an
+  implementation refuses a profile that sets a rule it does not put in
+  force.
+- **Fixture format: `absent`.** A runtime fixture's script entry may list
+  `absent`: member paths (`approver.mandate_ref`) the pending action must
+  not hold. It is in `tests/conformance/runtime/schema/fixture.schema.json`
+  and checked by `tests/runtime_replay.py` `play`, `core/tests/runtime.rs`
+  `play` and `packages/acs-core/test/wasm-runtime.test.ts` `play`. **S2b**
+  keeps it when it edits those files and lists it among the script entry
+  members in §10.5.
+- **Same-file `$ref` in contracts.** `SchemaStore::resolve_node_in(node,
+  doc, budget)` resolves `#<pointer>` in `doc`; `Context::new` resolves
+  contracts with it against the ontology, so §4.1.2's same-file form loads.
+- **The adapter loads its ontology through the core.**
+  `GroundedAgentAdapter` builds `_core.Validator(ontology_path,
+  schema_root)` for every configuration (`GroundedAgentConfig.schema_root`,
+  default the ontology's grandparent, as `WorkflowEngine`): a contract
+  `$ref` that names nothing refuses the configuration.
+
+## 2026-11-16 — S6 integrated with the chain (round3/a), for S3 and S5
+
+- **Profiles' grounding is wired.** `Program.grounding` (the applied
+  profiles' policies) joins `grounding_check`'s chain after the workflow's
+  and the host's; `Policy::unenforced` names only a destination policy.
+  **S5** deletes that last line (and `unenforced` with it) when its send
+  check reads `self.program.policy.destinations()`, and the adapter's
+  `refuse_unapplied(("destinations",), ...)` call and the binding's
+  `unappliedRule` (`examples/standard_agents/src/acs/profiles.ts`) when
+  their send checks read the profiles' destinations (S6 progress, item 5).
+- **The binding applies profiles per tool**: `groundedTool({profiles})`,
+  `bindingProfiles(core, documents)`; trace entries carry
+  `person_required` and `reason_code`, which `actionRecord` exports. S5's
+  `configureLayer` may take the same `BindingProfiles` for the layer.
+- **WebAssembly run operations.** `core/src/wasm.rs` has `run.resume`,
+  `run.cancel`, `run.wake_at`, `run.run_id`, `run.trace` (`since`),
+  `run.trace_seq`, `run.take_trace`, `run.take_records`,
+  `run.taken_sha256`, `run.run_record`; `packages/acs-core/test/wasm-runtime.test.ts`
+  plays every script entry. **S3**: start options `catalogs` and `agents`
+  go through `start_options` there, and the harness's `SUPPORTED` filter
+  goes when they do.
+- **W616.** `FEATURES` holds S2a's, S2b's and S4's 1.2 rows; **S3** and
+  **S5** append theirs (§11.5's table already names them).
+- **Fixtures.** `NORMATIVE_MEMBERS` lists `person_required` (§5.21.3) on
+  records. `absent` is in §10.5 and CONFORMANCE's entry table.
+
+
+## 2026-11-16 — S6 integration review round 1 (for S5)
+
+- **Binding: the person requirement through composites.** `groundedTool`
+  computes profile flags at the call's effective risk (with `invokes`), keeps
+  a `PERSON` set beside `EFFECTIVE` (a composite listing a person-required
+  tool is person-required), and a `NestingToken` carries the composite's
+  `person`: a person-required nested call is covered only by a composite
+  whose approval was a person's (§5.21.3, §5.18.4). **S5**: if
+  `configureLayer` takes the profiles for the layer, keep both.
+- **Binding: `ProfileCore.checkProfiles`.** `bindingProfiles(core,
+  documents, {onWarning})` reports and keeps the loading warnings
+  (`BindingProfiles.warnings`).
+- **Adapter.** `GroundedAgentAdapter._checks_call_outputs` is the one gate
+  for checking a call's output (config grounding, the profiles' grounding,
+  a minimum confidence), used by `mcp.py`'s served tools;
+  `call_action_record` exports `person_required` as the top-level
+  `ActionRecord` member.
+
+## 2026-11-16 — S6 integration review round 2 (for S3 and S5)
+
+- **Composites under profiles.** The Python adapter's
+  `ToolCapabilityMapper._apply_profiles` ORs in the raised flags and person
+  requirement of each binding a composite `invokes`, transitively (its cache
+  clears when `records_revision` moves). The binding keeps `PERFORMS`
+  (capability, effective risk) pairs beside `EFFECTIVE` and `PERSON`, and a
+  composite's profiles raise its flags for what its nested calls perform at
+  their own R. **S5**: if `configureLayer` takes the profiles for the layer,
+  keep both.
+- **§5.21.4** says how a safety layer puts output rules in force (§5.20's
+  hosts outside a workflow, on the capability outputs it receives; the rest
+  named in its statement and reported per tool).
+- **WebAssembly `run.start`** answers `{run, warnings}`; `CoreContext.start`
+  reports them to `StartArgs.onWarning`. **S3**: keep `warnings` when
+  `start_options` gains `catalogs` and `agents`.

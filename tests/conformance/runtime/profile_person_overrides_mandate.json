@@ -1,0 +1,154 @@
+{
+  "description": "block_autonomous requires a person for the mutate step: it is asked of a human with always_ask and no mandate_ref (the request has none), though its approver is a standing mandate; its record carries person_required, and the decision no mandate_ref.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "m1"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "absent": [
+        "approver.mandate_ref"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "executed",
+        "person_required": true,
+        "approval": {
+          "mandate_ref": null,
+          "approvers": [
+            "dana"
+          ]
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "person_required",
+    "approval_requested",
+    "approval_decided"
+  ],
+  "profiles": [
+    {
+      "domain": "person-mutate",
+      "version": "1.0.0",
+      "risk_thresholds": {
+        "block_autonomous": [
+          "mutate"
+        ]
+      }
+    }
+  ]
+}

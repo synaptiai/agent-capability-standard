@@ -12,7 +12,7 @@ The audio domain profile is calibrated for environments where:
 
 This profile maps to [OASF Category 3 (Audio)](https://schema.oasf.outshift.com/skill_categories) (see also `schemas/interop/oasf_mapping.yaml` for the local mapping), covering audio classification, speech recognition, speaker identification, and audio synthesis.
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for which components apply it, its grounding policy (`require_grounding`) and minimum confidence included.
 
 ## Domain Profile
 
@@ -59,6 +59,19 @@ Audio workflows require checkpoints before any action that:
 - Produces a final transcription
 - Generates or synthesizes audio
 - Identifies speakers
+
+The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_audio_modification -> mutate; before_transcription_output and
+  # before_synthesis -> persist; before_speaker_identification -> none
+  # (classifying changes no state); before_batch_processing (high_risk) -> "*".
+  mutate: always
+  persist: always
+  "*": high_risk
+```
 
 ## Capability Usage
 
@@ -250,11 +263,10 @@ trust_weights:
   reference_audio: 0.95       # Reference tracks
   expert_annotation: 0.92     # Musicologist annotations
 evidence_policy:
-  required_anchor_types:
-    - audio_reference
-    - time_segment
-    - frequency_analysis       # Spectral evidence
-    - confidence_score
+  required_anchor_types:       # Anchor kinds (Standard 1.2.0 §6.5)
+    - file                     # The source audio
+    - x-spectral_analysis      # A vendor kind: spectral evidence
+  require_grounding: [detect, classify]
 ```
 
 ## Safety Considerations

@@ -11,7 +11,6 @@ user-invocable: true
 allowed-tools: Read, Grep, Bash
 context: fork
 agent: general-purpose
-layer: REASON
 ---
 
 ## Intent

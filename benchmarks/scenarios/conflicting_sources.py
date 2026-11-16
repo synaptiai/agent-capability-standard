@@ -17,11 +17,11 @@ Metrics:
 """
 
 import random
-import re
 from pathlib import Path
 from typing import Any
 
 from grounded_agency.state.evidence_store import EvidenceAnchor, EvidenceStore
+from grounded_agency.trust import Candidate, TrustModel, resolve
 from grounded_agency.utils.safe_yaml import safe_yaml_load
 
 from .base import BenchmarkScenario
@@ -34,57 +34,17 @@ _TRUST_MODEL_PATH = (
 )
 
 
-def _load_trust_model() -> tuple[dict[str, float], int, float]:
-    """Load trust weights and decay settings from authority_trust_model.yaml."""
+def _load_trust_model() -> TrustModel:
+    """The canonical trust model, read once (STANDARD v1.2 §8)."""
     if not _TRUST_MODEL_PATH.exists():
         raise FileNotFoundError(
             f"Trust model not found: {_TRUST_MODEL_PATH}. "
             "Benchmark integrity requires this file."
         )
-
-    model = safe_yaml_load(_TRUST_MODEL_PATH)
-    weights = model.get("source_ranking", {}).get("weights", {})
-    decay = model.get("decay_model", {})
-    half_life_str = decay.get("half_life", "P10D")
-    match = re.fullmatch(r"P(\d+)D", half_life_str)
-    if not match:
-        raise ValueError(
-            f"Unsupported half_life format '{half_life_str}'. Expected 'P<n>D'."
-        )
-    half_life_days = int(match.group(1))
-    if half_life_days < 1:
-        raise ValueError(
-            f"half_life must be at least one day, got '{half_life_str}'. "
-            "A zero half-life divides by zero in the decay curve."
-        )
-    half_life_hours = half_life_days * 24
-    min_trust = float(decay.get("min_trust", 0.0))
-    if not 0.0 <= min_trust <= 1.0:
-        raise ValueError(f"min_trust must be in [0.0, 1.0], got {min_trust}")
-    return weights, half_life_hours, min_trust
+    return TrustModel.from_mapping(safe_yaml_load(_TRUST_MODEL_PATH))
 
 
-_TRUST_WEIGHTS, _TRUST_HALF_LIFE_HOURS, _TRUST_MIN = _load_trust_model()
-
-
-def _recency_weight(
-    hours_ago: float,
-    half_life: float = _TRUST_HALF_LIFE_HOURS,
-    min_trust: float = _TRUST_MIN,
-) -> float:
-    """Weight an observation by age using floored half-life decay.
-
-    Returns exactly 0.5 at ``hours_ago == half_life``.  The earlier form
-    ``exp(-hours_ago / half_life)`` treated ``half_life`` as an exponential
-    time constant, decaying 1/ln(2) ~ 1.44x too fast (issue #105).
-
-    Decay stops at ``decay_model.min_trust``, so an observation never becomes
-    worthless purely through age -- it only ever loses its recency advantage
-    over fresher ones.  With the shipped values the floor is reached at exactly
-    two half-lives (``0.5**2 == 0.25``).  This clamp was declared in the schema
-    but unimplemented until issue #106.
-    """
-    return max(0.5 ** (hours_ago / half_life), min_trust)
+_TRUST_MODEL = _load_trust_model()
 
 
 class ConflictingSourcesScenario(BenchmarkScenario):
@@ -193,29 +153,40 @@ class ConflictingSourcesScenario(BenchmarkScenario):
         """
         Grounded Agency: Trust-weighted resolution with EvidenceStore.
 
-        Uses source trust weights and temporal recency to
-        select the most reliable value. Evidence anchors are
-        tracked through the real EvidenceStore.
+        Resolves each conflict with grounded_agency.trust.resolve
+        (STANDARD v1.2 §8.2, strategy highest_score): source trust weights
+        and half-life decay. Evidence anchors are tracked through the real
+        EvidenceStore.
         """
         evidence_store = EvidenceStore(max_anchors=self.num_cases * 2)
         correct = 0
         results = []
 
+        escalated = 0
         for case in self.test_cases:
-            # Calculate scores for each source
             s1 = case["source1"]
             s2 = case["source2"]
-
-            score1 = _TRUST_WEIGHTS[s1["type"]] * _recency_weight(s1["hours_ago"])
-            score2 = _TRUST_WEIGHTS[s2["type"]] * _recency_weight(s2["hours_ago"])
-
-            # Select higher-scoring source
-            if score1 >= score2:
-                selected = s1["value"]
+            # §8.2's default strategy, highest_score: the trust score of
+            # §8.1 (weight x decay; no confidence is reported, so 1), ties
+            # broken by the model's tie-breakers and escalated if they stay.
+            resolution = resolve(
+                _TRUST_MODEL,
+                [
+                    Candidate(age_days=s1["hours_ago"] / 24, source_type=s1["type"]),
+                    Candidate(age_days=s2["hours_ago"] / 24, source_type=s2["type"]),
+                ],
+                strategy="highest_score",
+            )
+            score1, score2 = resolution.scores
+            if resolution.outcome != "chosen":
+                # An exact tie that no tie-breaker settles: no value is
+                # selected, which counts as incorrect.
+                escalated += 1
+                selected = None
                 winning_source = "source1"
             else:
-                selected = s2["value"]
-                winning_source = "source2"
+                winning_source = ("source1", "source2")[resolution.winner or 0]
+                selected = case[winning_source]["value"]
 
             is_correct = selected == case["ground_truth"]
             if is_correct:
@@ -240,6 +211,7 @@ class ConflictingSourcesScenario(BenchmarkScenario):
                     "evidence_anchors": [anchor.to_dict()],
                     "score_source1": score1,
                     "score_source2": score2,
+                    "outcome": resolution.outcome,
                 }
             )
 
@@ -255,6 +227,7 @@ class ConflictingSourcesScenario(BenchmarkScenario):
             "total_count": len(self.test_cases),
             "has_evidence": True,
             "evidence_completeness": 1.0,  # All decisions have evidence
+            "escalated": escalated,
             "results": results,
         }
 

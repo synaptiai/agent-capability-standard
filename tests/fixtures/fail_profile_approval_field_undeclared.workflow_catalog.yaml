@@ -1,0 +1,19 @@
+# Standard version: 1.1.0
+# Validated with tests/fixtures/profiles/review_low.profile.yaml. The profile
+# makes the retrieve step need approval, but whether a step may carry an
+# approval field does not depend on profiles (Standard v1.2 §5.21.1): without
+# requires_approval: true the field is S303.
+read_source:
+  goal: Read a source.
+  risk: low
+  workflow_extensions:
+    requires: [approval@1]
+  steps:
+  - capability: retrieve
+    purpose: Read the source.
+    store_as: data
+    input_bindings:
+      target: source
+    approval:
+      approver:
+        kind: human

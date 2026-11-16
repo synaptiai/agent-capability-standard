@@ -1,0 +1,6 @@
+# A domain profile for the validator fixtures (Standard v1.2 §5.21):
+# every execute step needs a checkpoint before it.
+domain: checkpoint-execute
+version: "1.0.0"
+checkpoint_policy:
+  execute: always

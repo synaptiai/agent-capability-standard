@@ -1,0 +1,85 @@
+{
+  "description": "require_review: low covers every risk level: a low-risk retrieve is asked for approval (a human, the default approver) before it runs.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0,
+        "approver": {
+          "kind": "human"
+        }
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "executed",
+        "approval": {
+          "decision": "approved"
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "approval_requested",
+    "approval_decided"
+  ],
+  "profiles": [
+    {
+      "domain": "review-low",
+      "version": "1.0.0",
+      "risk_thresholds": {
+        "require_review": "low"
+      }
+    }
+  ]
+}

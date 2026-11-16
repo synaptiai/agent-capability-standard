@@ -1,7 +1,7 @@
 {
   "name": "@synaptiai/acs-core",
   "version": "0.1.0",
-  "description": "Agent Capability Standard core for TypeScript: the capability ontology, effective safety flags, canonical JSON and approval digests, and secret redaction",
+  "description": "Agent Capability Standard core for TypeScript: the capability ontology, effective safety flags, canonical JSON and approval digests, secret redaction, and the reference validator and executor, domain profiles included, through WebAssembly",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -18,7 +18,13 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./wasm": {
+      "types": "./dist/wasm.d.ts",
+      "default": "./dist/wasm.js"
+    },
+    "./acs_core.wasm": "./dist/acs_core.wasm",
+    "./documents.json": "./dist/documents.json"
   },
   "files": [
     "dist",
@@ -27,13 +33,15 @@
     "NOTICE"
   ],
   "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
     "build:ts": "tsc -p tsconfig.build.json",
-    "build": "npm run build:ts",
+    "build": "npm run build:ts && node scripts/bundle-documents.mjs",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "prepack": "npm run build"
+    "prepack": "npm run build:wasm && npm run build"
   },
   "devDependencies": {
+    "ajv": "8.20.0",
     "typescript": "6.0.3",
     "vitest": "5.1.0"
   }

@@ -236,16 +236,35 @@ findings:
     and `require_grounding` entry is an ontology capability id. Read schemas/profiles/profile_schema.yaml
     lines 1-111 and tools/validate_profiles.py lines 120-258 (type and enum checks only).'
   status: partly_fixed
-  resolution: 'docs/domains/README.md gained ''Status of Domain Profiles'': a profile is informative data,
-    no shipped component loads or selects one, and grounded_agency/trust.py applies a profile''s trust_weights
-    only when a caller passes them. A table names what the validator, the reference executor, the Python
-    adapter and the plugin hook enforce. Domain pages and profile header comments point there. The EU
-    AI Act, ISO 42001 and NIST AI RMF documents now present block_autonomous, thresholds, minimum_confidence,
-    anchor types and retention as declarations, and name what enforces each control. Remaining: The normative
-    part: a Standard section saying how a run selects a profile, a tighten-only merge rule, what each
-    field changes, key grammars tied to capability ids and Anchor.kind, and diagnostics. That needs an
-    RFC. README.md (root) and analysis/10-regulatory-compliance.md, outside this package''s scope, still
-    present block_autonomous as enforced.'
+  resolution: 'Partly fixed: the Standard text and every rule but one are in force; a profile''s destination
+    policy is refused until S5''s destination check reads it. Standard 1.2.0 §5.21 (Domain Profiles), accepted
+    from RFC-0010: a host applies profiles to a run at start, a safety layer to the calls it covers, a
+    validator may be given them; a workflow''s `profile` field stays descriptive. Rules only tighten (trust
+    weights replace, §8.3); every member''s effect is stated in effective flags (§5.2.1) and §5.14, a person
+    for `require_human`/`block_autonomous` without a mark (records carry `person_required`; a composite
+    whose approval covers such a call is asked of a person, §5.18.4), `checkpoint`
+    steps exempt from `checkpoint_policy`, a grounding policy (`require_grounding` with
+    `required_anchor_types` as kinds, §5.20), a minimum confidence (F504
+    `below_minimum_confidence`/`invalid_confidence`) checked after grounding; key grammars are capability
+    ids or `*`, anchor kinds and trust classes; loading diagnostics S303, S304, V101, V109, W602-W604,
+    `critical` deprecated; an executor or safety layer refuses a profile whose rule it does not put in
+    force, and a validator applies only the flags (§5.21.4). Implemented once in core/src/profile.rs for
+    the validator (`--profile`, `Options.profiles`) and the executor (`StartOptions.profiles`: thresholds,
+    checkpoint policy, the person, grounding through S4''s check in every frame, minimum confidence, waited
+    delegations included), exposed to Python (`AppliedProfiles`, `WorkflowRunner(profiles=)`,
+    `GroundedAgentConfig(profiles=)` for flags, the person, a composite taking the raised flags and person of
+    the bindings it invokes, grounding and minimum confidence on the outputs of the tools it serves and a
+    report for the rest, `_core.check_confidence`), to TypeScript through the WebAssembly
+    core, and in the Standard Agents binding (`groundedTool({profiles})` at the call''s effective risk with
+    its `invokes`, a composite listing a binding a profile requires a person for asked of a person,
+    `bindingProfiles` reporting loading warnings). Normative vectors
+    tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_* (profile_grounding_*
+    among them); validator fixtures with `profiles`; the shipped profiles migrated to 2.0.0, each applied as
+    it is by the executor, the adapter and the binding; the compliance documents say where a setting is
+    enforced. Remaining (S5): the executor, the adapter and the binding refuse a profile with
+    `allowed_destinations` (`Policy::unenforced`, `refuse_unapplied`, `unappliedRule`) until the destination
+    check (§4.4.2) reads `Policy::destinations` and its counterparts, with the fixture
+    profile_destinations_refuse; no shipped profile sets it.'
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
@@ -1105,16 +1124,23 @@ findings:
     lines 16-22, docs/integrations/oasf_coverage.md lines 3-5, spec/STANDARD-v1.1.0.md lines 1435-1516,
     site/src/data/versions.ts lines 10-24 and site/src/lib/api.ts lines 44-54 (the data API envelope carries
     standard, ontology and plugin).
-  status: partly_fixed
-  resolution: '`spec/ROADMAP.md` has a Versions table: Standard 1.1.0, ontology 2.1.0, plugin 2.0.0, Python
-    package 0.1.0, each with its declaring file. `tests/test_version_lines.py` compares the table with
-    those files. Review made the check of the introduction''s ''Plugin X implements Standard Y'' sentence
-    fail when the sentence is missing, and added a check that `grounded_agency.__version__` equals the
-    version in `pyproject.toml`. `schemas/interop/oasf_mapping.yaml` names `agent_capability_standard.standard`
-    and `.ontology` in place of `grounded_agency_version`; `docs/integrations/oasf_coverage.md` states
-    the same two versions and is compared with the mapping file. Remaining: No text says how the ontology
-    is versioned relative to the Standard, or what a classification made elsewhere cites. That is a rule
-    for STANDARD section 11 and needs an RFC; this package was limited to a table in ROADMAP.md.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §11.6 (Ontology Versions): the ontology''s own SemVer with a change table that
+    classifies constraint changes and records 2.1.0''s `transform.output` widening; pairing with Standard
+    versions; a citation rule for documents outside workflows (`standard` and `ontology`; another ontology
+    major or an unsupported Standard is V109). §11.7 lists the artifacts of 1.2.0 with their versions, checked
+    by tests/test_version_lines.py (test_standard_artifact_table). §11.5 adds 1.2, makes W616 read one table
+    of features (core `semantics::FEATURES`) and makes the catalog header an explicit start member; each 1.2
+    feature''s row of that table lands with the workstream that adds the feature (S2a''s approver fields,
+    S2b''s `require_record` and S4''s `grounding@1` and F505 are in it, fixture warn_version_feature_1_2; S3''s
+    and S5''s, and the S303 for `agents` before 1.2, come with them), and the header fixtures
+    header_1_2_sender_check_needs_identities and header_null_sender_check_not_read pin the header in the
+    executor. The consumers implement the citation rule through one core function
+    (`_core.check_cited_versions`): the profile loader and the OASF adapter (`grounded_agency.versions`,
+    CitedVersionError); an id a cited document names that the ontology lacks is V101 where it is used (the
+    profile loader; the OASF adapter''s translate, UnknownCapabilityError, tests/test_oasf_adapter.py); the
+    ROADMAP Versions table has five lines and site/src/data/versions.ts reads the TypeScript package''s
+    version.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-26
@@ -1229,17 +1255,17 @@ findings:
     ''any''}` and `{type: ''string|object''}` throw ''Unsupported type'', and `{}` yields ZodAny. Read
     core/src/types.rs lines 158-184 and core/src/schema.rs lines 244-258. skills/*/schemas/ holds 36 generated
     output schemas and no input schema.'
-  status: partly_fixed
-  resolution: 'scripts/gen_capability_json_schemas.py renders the ontology''s 72 input and output schemas
-    as one JSON Schema Draft 2020-12 document, schemas/generated/capability_contracts.schema.json (`$defs`:
-    `<capability>.input`, `<capability>.output`); CI runs it with `--check`. A union `a|b` becomes a type
-    list (6 slots); `any` becomes a schema with no `type` and `"x-acs-type": "any"` (26 slots). tests/test_capability_json_schemas.py
-    checks the metaschema, agreement with the ontology and identical reference-validator reports on every
-    workflow fixture and shipped catalog. docs/GLOSSARY.md describes the rendering. The ontology is unchanged.
-    Remaining: STANDARD v1.1.0 §4.1 still calls the contracts ''JSON Schema'' and does not define `any`
-    or `a|b`; defining them (and adopting or renaming `x-acs-type`) is normative and needs an RFC. The
-    36 generated skills/*/schemas/output_schema.yaml files keep the ontology''s spelling, and `evidence_anchors`
-    has no item schema.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.1.2 (Schema Dialect) defines the contracts'' keywords: Draft 2020-12 ones
+    from a fixed list, `type: any`, `type: "a|b"`, `$ref` to a repository path or the same file with sibling
+    keywords merged over the target (a missing target, a cycle or a chain deeper than 12 refuses the ontology
+    at load: core Context::new, and so the validator, the executor, WebAssembly and the Python adapter;
+    core/tests/contracts.rs, tests/test_capability_json_schemas.py), `nullable`, and `x-` annotations with
+    `x-acs-` reserved (Appendix B). The Draft 2020-12 rendering''s rules are normative;
+    schemas/generated/capability_contracts.schema.json is generated from the core''s resolved contracts, and
+    the §5.4 divergence on `nullable` is stated and pinned (tests/test_capability_json_schemas.py).
+    schemas/capability_ontology.schema.json''s dialect metaschema checks the ontology in CI; the TypeScript
+    package compiles the rendering under strict ajv.'
   concerns:
   - tools-contracts
   - models-context-memory-security
@@ -1865,10 +1891,16 @@ findings:
     core/src/lib.rs lines 15-22, core/src/validate/mod.rs lines 95-102 (file paths), core/src/ontology.rs
     lines 105-112 (`Ontology::from_value`), core/src/exec/mod.rs lines 575-600 (`Run::start` takes a parsed
     catalog), examples/standard_agents/package.json (`"private": true`) and spec/ROADMAP.md line 86.'
-  status: open
-  resolution: 'Not changed in this round. Needs implementation work, not new normative text: a published
-    TypeScript package of the ontology table, effective flags, canonical JSON and the digest (the reference
-    binding holds a private copy), and a JSON-in, JSON-out WebAssembly interface to the core.'
+  status: fixed
+  resolution: 'packages/acs-core (`@synaptiai/acs-core` 0.1.0): the plain-TypeScript entry holds the ontology
+    table, effective flags, RFC 8785 canonical JSON and the approval digest; the `./wasm` entry runs the
+    reference validator and executor, domain profiles included, in process through core/src/wasm.rs (feature
+    `wasm`: three C-ABI exports over JSON, no new dependency; `Context::from_values` with an in-memory schema
+    store). The package''s tests replay the validator fixtures, every runtime fixture (straight and restored
+    before each entry), the expression fixtures and the profile vectors through the module; CI builds it.
+    .github/workflows/publish-npm.yml publishes from a tag `acs-core-vX.Y.Z` on main when NPM_PUBLISH_ENABLED
+    and NPM_TOKEN are both set (a dry run otherwise; tests/test_ci_workflows.py). The Standard Agents binding
+    depends on the package.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -2396,18 +2428,15 @@ findings:
     * trust_decay`, a different score) and tests/test_validators.py lines 704-711 (the test replaces the
     formula string in the schema). Listed tests/conformance: contrib, expressions, runtime. benchmarks/tests/test_scenarios.py
     tests only the benchmark''s private `_recency_weight`.'
-  status: partly_fixed
-  resolution: 'New module grounded_agency/trust.py, standard library only: decay_factor (0.5 ** (age /
-    half_life), floored at min_trust), static_weight (the lower of class and source weight, with profile
-    `trust_class:<class>` and source keys), trust_score (the product in schemas/authority_trust_model.yaml)
-    and TrustModel. Vectors tests/conformance/trust/decay.json (13), weight.json (14) and score.json (7),
-    absolute tolerance 1e-12; each file lists under `not_covered` the cases section 8 leaves open, and
-    no vector covers them. tests/test_trust.py runs the vectors and checks agreement with the benchmark
-    scenario''s decay. Remaining: STANDARD §10.3 does not name the trust vectors (normative text, RFC).
-    Field authority (§8.1) and the §8.2 strategies have no stated arithmetic and are not implemented.
-    A min_trust above 0.5 (which conflicts with 0.5 at one half-life), a negative age, unknown weights
-    and the composition of the factors are left open by the Standard''s text; the files list them. benchmarks/scenarios/conflicting_sources.py
-    still uses its private `_recency_weight`.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §8.1-§8.3: score = weight × confidence × decay in binary64; confidence 1 when none
+    is reported; an age below zero counts as zero; a `min_trust` above 0.5 applies; evidence without a
+    static weight has no score; field authority ranks sources in §8.2 through the trust model''s new
+    `field_authority.fields`. §8.2 defines six strategies (default `highest_score`), tie-breaking by
+    `tie_breakers`, and chooses a single candidate whatever the strategy. grounded_agency/trust.py gains `resolve`, `Candidate`, `Resolution` and
+    `merge_trust_weights`; the trust vectors are normative with resolve.json added
+    (tests/test_trust.py); the conflicting-sources benchmark resolves with `resolve`, with unchanged
+    results.'
   concerns:
   - models-context-memory-security
 - id: ACS-57
@@ -2515,15 +2544,13 @@ findings:
     on 13, `hooks` on 6, no `version` key; two names differ from their directory. Read skills/README.md
     lines 119-124 and 146-160, docs/WORKFLOW_ROADMAP.md lines 76-79, site/test/data.test.ts lines 283-288
     and CLAUDE.md line 256.'
-  status: partly_fixed
-  resolution: 'skills/README.md ''Skill Structure'' now shows the eight frontmatter keys all 42 skills
-    carry and the five sections all have. A table says `layer` is in 13 skills (12 capability skills and
-    discover-capabilities) and `hooks` in 6. It says the ontology, not the frontmatter, gives a capability''s
-    layer, that no skill declares a version, and which two composed skills declare a name other than their
-    directory. docs/GLOSSARY.md no longer says skills are organized by layer. Counts were checked by parsing
-    every frontmatter. CLAUDE.md ''Skill Structure'' now says `layer` is in 13 of the 42 skills. Remaining:
-    No document yet says which keys belong to Agent Skills, Claude Code
-    or ACS. The two composed skills keep their differing names, as instructed.'
+  status: fixed
+  resolution: 'Every skill''s frontmatter `name` equals its directory (capability-gap-analysis and
+    digital-twin-sync-loop renamed; their slash commands change, a plugin MAJOR recorded in the
+    CHANGELOG), the `layer` key is removed from the 13 skills that had it (the ontology gives the
+    layer), skills/README.md lists each key''s owner (Agent Skills, Claude Code, ACS under
+    `metadata.acs-*`), and tests/test_skill_frontmatter.py enforces the table. The Agent Skills
+    specification is cited in Standard 1.2.0 §13.2.'
   concerns:
   - published-api-extension-points
   - packaging-conformance-governance
@@ -2711,9 +2738,16 @@ findings:
     both files in it.
   verified: Read spec/STANDARD-v1.1.0.md lines 1176-1182 and schemas/entity_taxonomy.yaml lines 10-16.
     Found by the coverage check, which looked for sections of the Standard that no mapping row cites.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §7.1 takes the taxonomy''s form `<class>:<namespace>/<local_id>`, states its
+    grammar (namespace outermost first, `namespace_components` the recommended order) and gives examples of
+    both files, 1.1''s printed example rewritten. schemas/entity_taxonomy.yaml 1.1.0 adds
+    `id_convention.pattern`, which names each white space and control character a segment cannot hold so that
+    it means the same in every regular expression dialect, and that example; grounded_agency/entities.py
+    parses ids; tests/conformance/entities/ids.json (normative) pins the grammar, U+00A0, U+2028, U+3000,
+    U+FEFF and U+0085 included (tests/test_entities.py), and tools/validate_canonical_schemas.py checks every
+    taxonomy example against the pattern and the class list; the skills'' examples write ids in the form, and
+    tests/test_entities.py parses every quoted `entity_id` in the repository''s examples.'
   concerns:
   - evidence-audit-observability
 questions:

@@ -7,12 +7,14 @@
 # convention (e.g., domain: audio.speech, domain: audio.event).
 # See docs/guides/MODALITY_HANDLING.md for the domain parameter convention.
 #
-# Status: informative data for hosts and workflow authors. No shipped component
-# loads or selects this profile; see "Status of Domain Profiles" in
+# Status: applied where a host, a safety layer or a validator applies it
+# (Standard v1.2 §5.21); see "Status of Domain Profiles" in
 # docs/domains/README.md.
 
 domain: audio
-version: "1.0.0"
+version: "2.0.0"
+standard: "1.2.0"
+ontology: "2.2.0"
 description: |
   Profile for audio processing and acoustic analysis environments.
   Emphasizes temporal evidence grounding, signal quality assessment,
@@ -54,18 +56,24 @@ risk_thresholds:
     - send                    # Never autonomously distribute audio content
 
 checkpoint_policy:
-  before_audio_modification: always     # Always checkpoint before modifying audio
-  before_transcription_output: always   # Always checkpoint before final transcription
-  before_synthesis: always              # Always checkpoint before generating audio
-  before_speaker_identification: always # Always checkpoint before identifying speakers
-  before_batch_processing: high_risk    # Checkpoint before large batch operations
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_audio_modification -> mutate; before_transcription_output and
+  # before_synthesis -> persist; before_speaker_identification -> none
+  # (classifying changes no state); before_batch_processing (high_risk) -> "*".
+  mutate: always
+  persist: always
+  "*": high_risk
 
 evidence_policy:
   required_anchor_types:
-    - audio_reference          # Source audio URI or hash
-    - time_segment             # Temporal segment (start/end timestamps)
-    - confidence_score         # Model confidence for detections
-    - signal_quality           # SNR or quality metric for source audio
+    # §6.5 kinds: audio_reference -> file, plus the kinds of domain_sources.
+    # time_segment, confidence_score and signal_quality are not kinds.
+    - file
+    - log
+    - sensor
+    - human_note
+    - api
+    - record
   minimum_confidence: 0.80     # Moderate confidence for audio tasks
   require_grounding:
     - detect                   # Sound event detections must reference time segments

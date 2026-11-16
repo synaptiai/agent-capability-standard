@@ -222,10 +222,12 @@ Replacing a secret, or the part of a string that is one, with `[REDACTED]` befor
 ## Trust and Identity
 
 ### Trust Score
-Authority-weighted, confidence-weighted, recency-decayed score for a source or claim. Trust scores consider:
-- Source ranking weights (authoritative sources score higher)
-- Time decay (older information scores lower)
-- Field-specific authority preferences
+The weight of a piece of evidence: `score = weight × confidence × decay`, in that order ([Standard 1.2.0 §8.1](../spec/STANDARD-v1.2.0.md#81-trust-score-calculation)). The factors:
+- The static weight of the evidence's source type or sender trust class (the lower of the two with both; §8.3), which a domain profile's `trust_weights` may replace
+- The confidence the source reports (1 when it reports none)
+- A half-life decay of its age, `max(0.5 ** (age / half_life), min_trust)`; an age below zero counts as zero
+
+Evidence without a static weight has no score. Field authority is not a factor: it ranks sources when a conflict is resolved (Conflict Strategy).
 
 **Why it matters:** When sources conflict, you need a principled way to decide which to believe. Trust scores make conflict resolution transparent and consistent instead of arbitrary.
 
@@ -236,12 +238,21 @@ Authority-weighted, confidence-weighted, recency-decayed score for a source or c
 title: What a trust score combines
 ---
 flowchart TB
-  accDescr: Source ranking weights, time decay and field-specific authority preferences combine into a trust score, which decides which source to believe when sources conflict.
-  w[Source ranking weights] --> t[Trust score]
-  d[Time decay] --> t
-  f[Field-specific authority preferences] --> t
+  accDescr: A static weight, the reported confidence and a half-life decay multiply into a trust score, which decides which source to believe when sources conflict.
+  w[Static weight] --> t[Trust score]
+  c[Reported confidence] --> t
+  d[Half-life decay] --> t
   t -->|sources conflict| r[Which source to believe]
 ```
+
+### Conflict Strategy
+How a conflict between values for one field is resolved ([Standard 1.2.0 §8.2](../spec/STANDARD-v1.2.0.md#82-conflict-resolution)): `highest_score` (the default), `prefer_authoritative_sources` (the field's authorities in `field_authority.fields` first, then the highest static weight), `prefer_recent`, `prefer_high_confidence`, `merge_with_uncertainty` or `escalate_to_human`. Ties within 10⁻¹² go through the trust model's `tie_breakers`; a tie that remains is escalated. `grounded_agency.trust.resolve` is the reference.
+
+### Entity Id
+The identifier of an entity of the world state, `<class>:<namespace>/<local_id>`, such as `svc:acme/payments/prod/api` ([Standard 1.2.0 §7.1](../spec/STANDARD-v1.2.0.md#71-entity-identification)): the class is a class or alias of `schemas/entity_taxonomy.yaml` (or a vendor class `x-…`), and the namespace is one or more `/`-separated segments, outermost first.
+
+### Domain Profile
+A document of rules for one domain that tighten flags, checks, evidence, confidence and destinations and replace trust weights ([Standard 1.2.0 §5.21](../spec/STANDARD-v1.2.0.md#521-domain-profiles)). It takes effect where a host applies it to a run, a safety layer to its calls, or a validator is given it; a workflow's `profile` field applies nothing. Examples are under `schemas/profiles/`.
 
 ### Identity Resolution
 Defining entities and resolving aliases across sources. Identity resolution:
@@ -494,8 +505,11 @@ The guaranteed structure of data a capability produces. Output schemas enable:
 - Contract verification
 - Documentation
 
+### Schema Dialect
+The JSON Schema keywords capability contracts are written in ([Standard 1.2.0 §4.1.2](../spec/STANDARD-v1.2.0.md#412-schema-dialect)): Draft 2020-12 keywords from a fixed list, plus `type: any`, a union `type: "a|b"`, `$ref` with the keywords beside it merged over its target, `nullable`, and `x-` annotations (`x-acs-` reserved for the Standard). `schemas/capability_ontology.schema.json` checks the ontology against it.
+
 ### Strict Contract Rendering
-The input and output schema of every capability as JSON Schema Draft 2020-12, in [`schemas/generated/capability_contracts.schema.json`](../schemas/generated/capability_contracts.schema.json): `$defs` holds `<capability>.input` and `<capability>.output`. The ontology writes its contracts with two values of `type` that the Draft 2020-12 metaschema does not allow, `any` and a union written `string|object`, so a tool that checks a schema against that metaschema refuses the contracts as the ontology writes them. [`scripts/gen_capability_json_schemas.py`](../scripts/gen_capability_json_schemas.py) generates the rendering from the ontology, which remains the source, and its `--check` option fails when the two differ. A union becomes a type list (`["string", "object"]`). `any` becomes a schema with no `type`, which accepts every value, and carries `"x-acs-type": "any"` so that it stays apart from a slot whose type the ontology does not state. Objects stay open: a contract lists the fields it requires and does not forbid others. Draft 2020-12 says a validator should treat a keyword it does not know as an annotation, so `x-acs-type` constrains nothing. A tool that refuses unknown keywords, as Ajv does in its default strict mode, has to be told about this one. In that mode Ajv also refuses the format `date-time`, which the ontology itself uses, until a format package is added or format validation is turned off.
+The rendering of the schema dialect that §4.1.2 defines: the input and output schema of every capability as JSON Schema Draft 2020-12, in [`schemas/generated/capability_contracts.schema.json`](../schemas/generated/capability_contracts.schema.json): `$defs` holds `<capability>.input` and `<capability>.output`. The ontology writes its contracts with two values of `type` that the Draft 2020-12 metaschema does not allow, `any` and a union written `string|object`, so a tool that checks a schema against that metaschema refuses the contracts as the ontology writes them. [`scripts/gen_capability_json_schemas.py`](../scripts/gen_capability_json_schemas.py) generates the rendering from the ontology, which remains the source, and its `--check` option fails when the two differ. A union becomes a type list (`["string", "object"]`). `any` becomes a schema with no `type`, which accepts every value, and carries `"x-acs-type": "any"` so that it stays apart from a slot whose type the ontology does not state. Objects stay open: a contract lists the fields it requires and does not forbid others. Draft 2020-12 says a validator should treat a keyword it does not know as an annotation, so `x-acs-type` constrains nothing. A tool that refuses unknown keywords, as Ajv does in its default strict mode, has to be told about this one. In that mode Ajv also refuses the format `date-time`, which the ontology itself uses, until a format package is added or format validation is turned off.
 
 ### Type Coercion
 Converting data from one type to another. Coercion is used when:

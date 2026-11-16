@@ -662,30 +662,52 @@ class TestTemporalDecayModel:
     """
 
     def test_recency_weight_halves_at_half_life(self) -> None:
-        """The defining property of a half-life: f(half_life) == 0.5."""
-        from benchmarks.scenarios.conflicting_sources import (
-            _TRUST_HALF_LIFE_HOURS,
-            _recency_weight,
-        )
+        """The defining property of a half-life: f(half_life) == 0.5, with
+        the model the scenario resolves conflicts with."""
+        from benchmarks.scenarios.conflicting_sources import _TRUST_MODEL
 
-        assert _recency_weight(_TRUST_HALF_LIFE_HOURS) == pytest.approx(0.5, abs=1e-9)
+        half_life = _TRUST_MODEL.half_life_days
+        assert _TRUST_MODEL.decay_factor(half_life) == 0.5
 
     def test_recency_weight_quarters_at_two_half_lives(self) -> None:
         """Decay compounds: f(2*half_life) == 0.25."""
-        from benchmarks.scenarios.conflicting_sources import (
-            _TRUST_HALF_LIFE_HOURS,
-            _recency_weight,
-        )
+        from benchmarks.scenarios.conflicting_sources import _TRUST_MODEL
 
-        assert _recency_weight(2 * _TRUST_HALF_LIFE_HOURS) == pytest.approx(
-            0.25, abs=1e-9
-        )
+        assert _TRUST_MODEL.decay_factor(2 * _TRUST_MODEL.half_life_days) == 0.25
 
     def test_recency_weight_is_one_at_zero_age(self) -> None:
         """A just-observed value suffers no decay."""
-        from benchmarks.scenarios.conflicting_sources import _recency_weight
+        from benchmarks.scenarios.conflicting_sources import _TRUST_MODEL
 
-        assert _recency_weight(0.0) == pytest.approx(1.0, abs=1e-12)
+        assert _TRUST_MODEL.decay_factor(0.0) == 1.0
+
+    def test_ga_choice_is_resolve(self) -> None:
+        """The scenario decides with grounded_agency.trust.resolve (STANDARD
+        v1.2 §8.2). At seed 42 every case is chosen, and the chosen source
+        is the one with the strictly higher weight x decay computed inline,
+        the rule the scenario used before: the switch changed nothing."""
+        from benchmarks.scenarios.conflicting_sources import (
+            _TRUST_MODEL,
+            ConflictingSourcesScenario,
+        )
+
+        scenario = ConflictingSourcesScenario(seed=42)
+        scenario.setup()
+        result = scenario.run_ga()
+        assert result["escalated"] == 0
+        for case, row in zip(scenario.test_cases, result["results"], strict=True):
+            assert row["outcome"] == "chosen"
+            scores = [
+                _TRUST_MODEL.source_weights[case[k]["type"]]
+                * max(
+                    0.5 ** (case[k]["hours_ago"] / (24 * _TRUST_MODEL.half_life_days)),
+                    _TRUST_MODEL.min_trust or 0.0,
+                )
+                for k in ("source1", "source2")
+            ]
+            assert scores[0] != scores[1]
+            winner = "source1" if scores[0] > scores[1] else "source2"
+            assert row["selected"] == case[winner]["value"]
 
     def test_schema_and_fixture_half_life_agree(self) -> None:
         """The mock-API fixture must not drift from the canonical schema."""
@@ -762,36 +784,25 @@ class TestTrustFloor:
     """
 
     def test_recency_weight_never_falls_below_min_trust(self) -> None:
-        from benchmarks.scenarios.conflicting_sources import (
-            _TRUST_HALF_LIFE_HOURS,
-            _TRUST_MIN,
-            _recency_weight,
-        )
+        from benchmarks.scenarios.conflicting_sources import _TRUST_MODEL
 
+        half_life = _TRUST_MODEL.half_life_days
         for multiple in (3, 10, 100, 10_000):
-            assert _recency_weight(multiple * _TRUST_HALF_LIFE_HOURS) == pytest.approx(
-                _TRUST_MIN
+            assert _TRUST_MODEL.decay_factor(multiple * half_life) == (
+                _TRUST_MODEL.min_trust
             ), f"floor breached at {multiple} half-lives"
 
     def test_floor_is_reached_at_two_half_lives(self) -> None:
         """0.5**2 == 0.25 == min_trust, so decay stops at exactly 2 half-lives."""
-        from benchmarks.scenarios.conflicting_sources import (
-            _TRUST_HALF_LIFE_HOURS,
-            _TRUST_MIN,
-            _recency_weight,
-        )
+        from benchmarks.scenarios.conflicting_sources import _TRUST_MODEL
 
-        assert _recency_weight(2 * _TRUST_HALF_LIFE_HOURS) == pytest.approx(
-            _TRUST_MIN, abs=1e-9
-        )
+        assert _TRUST_MODEL.min_trust == 0.25
+        assert _TRUST_MODEL.decay_factor(2 * _TRUST_MODEL.half_life_days) == 0.25
 
     def test_decay_is_unclamped_above_the_floor(self) -> None:
-        from benchmarks.scenarios.conflicting_sources import (
-            _TRUST_HALF_LIFE_HOURS,
-            _recency_weight,
-        )
+        from benchmarks.scenarios.conflicting_sources import _TRUST_MODEL
 
-        assert _recency_weight(_TRUST_HALF_LIFE_HOURS) == pytest.approx(0.5, abs=1e-9)
+        assert _TRUST_MODEL.decay_factor(_TRUST_MODEL.half_life_days) == 0.5
 
     def test_schema_and_fixture_floor_agree(self) -> None:
         import json

@@ -2,12 +2,14 @@
 # Calibrated for clinical decision support, patient monitoring, and care coordination.
 # NOTE: This profile is for CLINICAL DECISION SUPPORT only, not autonomous medical decisions.
 #
-# Status: informative data for hosts and workflow authors. No shipped component
-# loads or selects this profile; see "Status of Domain Profiles" in
+# Status: applied where a host, a safety layer or a validator applies it
+# (Standard v1.2 §5.21); see "Status of Domain Profiles" in
 # docs/domains/README.md.
 
 domain: healthcare
-version: "1.0.0"
+version: "2.0.0"
+standard: "1.2.0"
+ontology: "2.2.0"
 description: |
   Profile for healthcare and clinical support environments.
   Emphasizes patient safety, regulatory compliance (HIPAA, FDA, HL7),
@@ -58,19 +60,26 @@ risk_thresholds:
     - delegate            # Never delegate clinical tasks autonomously
 
 checkpoint_policy:
-  before_any_recommendation: always   # Always checkpoint suggestions
-  before_alert_generation: always     # Always checkpoint alerts
-  before_documentation: always        # Always checkpoint doc changes
-  before_order_suggestion: always     # Always checkpoint order suggestions
-  before_handoff: always              # Always checkpoint care transitions
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_documentation -> mutate; before_any_recommendation,
+  # before_alert_generation and before_order_suggestion -> persist;
+  # before_handoff -> send and delegate.
+  mutate: always
+  persist: always
+  send: always
+  delegate: always
 
 evidence_policy:
   required_anchor_types:
-    - clinical_data_point
-    - guideline_reference
-    - audit_trail
-    - clinician_verification
-    - timestamp
+    # §6.5 kinds: clinical_data_point and audit_trail -> record;
+    # guideline_reference -> url; clinician_verification -> human_note; plus
+    # the kinds of domain_sources. timestamp is not a kind.
+    - file
+    - url
+    - sensor
+    - human_note
+    - api
+    - record
   minimum_confidence: 0.90  # Very high confidence for healthcare
   require_grounding:
     - detect                # All detections need clinical evidence

@@ -255,33 +255,69 @@ class TestValidateProfiles:
         assert "Validating:" in result.stdout
 
     def test_boolean_weights_are_refused(self) -> None:
-        """YAML ``true`` is an int in Python, but not a weight."""
-        import importlib.util
+        """YAML ``true`` is an int in Python, but not a weight: the core
+        reports S303 at each (Standard v1.2 §5.21.2)."""
+        from grounded_agency import _core
 
-        sys.path.insert(0, str(ROOT / "tools"))  # for its `yaml_util` import
-        spec = importlib.util.spec_from_file_location(
-            "validate_profiles", ROOT / "tools" / "validate_profiles.py"
+        validator = _core.Validator(
+            str(ROOT / "schemas" / "capability_ontology.yaml"), str(ROOT)
         )
-        assert spec is not None and spec.loader is not None
-        vp = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(vp)
+        report = validator.check_profiles(
+            [
+                {
+                    "domain": "p",
+                    "version": "1.0.0",
+                    "trust_weights": {"a": True, "b": 0.5},
+                    "evidence_policy": {"minimum_confidence": False},
+                    "domain_sources": [{"name": "s", "default_trust": True}],
+                }
+            ]
+        )
+        found = {(d["code"], d["location"]["field"]) for d in report["diagnostics"]}
+        assert found == {
+            ("S303", "trust_weights.a"),
+            ("S303", "evidence_policy.minimum_confidence"),
+            ("S303", "domain_sources[0].default_trust"),
+        }
+        # A NaN weight cannot reach the core as data.
+        with pytest.raises(ValueError, match="non-finite"):
+            validator.check_profiles(
+                [
+                    {
+                        "domain": "p",
+                        "version": "1.0.0",
+                        "trust_weights": {"a": float("nan")},
+                    }
+                ]
+            )
 
-        errors: list[str] = []
-        vp.validate_trust_weights({"trust_weights": {"a": True, "b": 0.5}}, errors, "p")
-        vp.validate_evidence_policy(
-            {"evidence_policy": {"minimum_confidence": False}}, errors, "p"
+    def test_a_misspelled_rule_fails(self, tmp_path: Path) -> None:
+        """A checkpoint_policy key that is no capability id is V101, an
+        error: no misspelled rule is ignored."""
+        profiles = tmp_path / "profiles"
+        shutil.copytree(ROOT / "schemas" / "profiles", profiles)
+        path = profiles / "vision.yaml"
+        text = path.read_text()
+        assert "  mutate: always\n" in text
+        path.write_text(text.replace("  mutate: always\n", "  mutat: always\n", 1))
+        result = run_validator(
+            "validate_profiles.py", ["--profiles-dir", str(profiles)]
         )
-        vp.validate_domain_sources(
-            {"domain_sources": [{"name": "s", "default_trust": True}]}, errors, "p"
-        )
-        assert any("trust_weights.a" in e for e in errors), errors
-        assert any("minimum_confidence" in e for e in errors), errors
-        assert any("default_trust" in e for e in errors), errors
-        assert not any("trust_weights.b" in e for e in errors), errors
+        assert result.returncode != 0
+        assert "V101" in result.stdout and "mutate" in result.stdout
 
-        nan: list[str] = []
-        vp.validate_trust_weights({"trust_weights": {"a": float("nan")}}, nan, "p")
-        assert any("trust_weights.a" in e for e in nan), nan
+    def test_a_shipped_profile_cites_the_current_versions(self, tmp_path: Path) -> None:
+        profiles = tmp_path / "profiles"
+        shutil.copytree(ROOT / "schemas" / "profiles", profiles)
+        path = profiles / "audio.yaml"
+        path.write_text(
+            path.read_text().replace('standard: "1.2.0"', 'standard: "1.1.0"')
+        )
+        result = run_validator(
+            "validate_profiles.py", ["--profiles-dir", str(profiles)]
+        )
+        assert result.returncode != 0
+        assert "'standard' must be '1.2.0'" in result.stdout
 
     def test_no_trust_calibration_warnings(self) -> None:
         """SEC-009: All profiles have trust_model_reviewed: true — no warnings."""
@@ -723,6 +759,50 @@ class TestValidateCanonicalSchemas:
             "authority_trust_model.yaml",
             "    - hardware_sensor\n    - system_of_record",
             "    - unverified\n    - system_of_record",
+        )
+
+    def test_catches_a_taxonomy_example_outside_the_pattern(
+        self, tmp_path: Path
+    ) -> None:
+        """Standard v1.2 §7.1: every example is an id of the grammar."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "entity_taxonomy.yaml",
+            "  - svc:acme/payments/prod/api",
+            "  - svc:acme",
+        )
+
+    def test_catches_a_taxonomy_example_of_an_unknown_class(
+        self, tmp_path: Path
+    ) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "entity_taxonomy.yaml",
+            "  - svc:acme/payments/prod/api",
+            "  - robot:acme/payments/prod/api",
+        )
+
+    def test_catches_a_missing_section_7_1_example(self, tmp_path: Path) -> None:
+        self._assert_drift_is_caught(
+            tmp_path,
+            "entity_taxonomy.yaml",
+            "  - person:org.company/user/12345\n",
+            "",
+        )
+
+    def test_catches_an_unknown_tie_breaker(self, tmp_path: Path) -> None:
+        """Standard v1.2 §8.2 defines four tie-breakers."""
+        self._assert_drift_is_caught(
+            tmp_path,
+            "authority_trust_model.yaml",
+            "  - prefer_high_confidence\n  - escalate_to_human",
+            "  - prefer_loudest\n  - escalate_to_human",
+        )
+
+    def test_catches_missing_field_authority_fields(self, tmp_path: Path) -> None:
+        """§8.2 reads field_authority.fields; examples are illustrative."""
+        self._assert_drift_is_caught(
+            tmp_path, "authority_trust_model.yaml", "  fields:\n", "  feilds:\n"
         )
 
     def test_catches_phantom_source_in_the_examples(self, tmp_path: Path) -> None:

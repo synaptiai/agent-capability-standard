@@ -621,6 +621,88 @@
       "S303"
     ]
   },
+  "fail_profile_checkpoint_missing": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "safety",
+    "profiles": [
+      "tests/fixtures/profiles/checkpoint_execute.profile.yaml"
+    ],
+    "expected_error_codes": [
+      "F501"
+    ],
+    "note": "A profile raises requires_checkpoint (Standard v1.2 \u00a75.21.3)"
+  },
+  "pass_profile_checkpoint": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "safety",
+    "profiles": [
+      "tests/fixtures/profiles/checkpoint_execute.profile.yaml"
+    ],
+    "expected_warning_codes": []
+  },
+  "pass_profile_star_always": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "safety",
+    "profiles": [
+      "tests/fixtures/profiles/star_always.profile.yaml"
+    ],
+    "expected_warning_codes": [],
+    "note": "A checkpoint step is never given requires_checkpoint by a profile"
+  },
+  "warn_profile_person_unattended": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "safety",
+    "profiles": [
+      "tests/fixtures/profiles/person_mutate.profile.yaml"
+    ],
+    "expected_warning_codes": [
+      "W606"
+    ],
+    "note": "No standing mandate covers a step a profile requires a person for"
+  },
+  "fail_profile_approval_field_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "safety",
+    "profiles": [
+      "tests/fixtures/profiles/review_low.profile.yaml"
+    ],
+    "expected_error_codes": [
+      "S303"
+    ],
+    "note": "Whether a step may carry approval does not depend on profiles"
+  },
+  "fail_profile_invalid": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "safety",
+    "profiles": [
+      "tests/fixtures/profiles/invalid.profile.yaml"
+    ],
+    "expected_error_codes": [
+      "S303",
+      "V101"
+    ],
+    "note": "A label-keyed or misspelled profile rule is refused"
+  },
+  "pass_spec_version_1_2": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "versioning",
+    "expected_warning_codes": []
+  },
+  "fail_spec_version_1_3": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "versioning",
+    "expected_error_codes": [
+      "V109"
+    ]
+  },
   "pass_approver_identity": {
     "should_pass": true,
     "level": "L1",
@@ -735,5 +817,14 @@
     "expected_warning_codes": [
       "W614"
     ]
+  },
+  "warn_version_feature_1_2": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "versioning",
+    "expected_warning_codes": [
+      "W616"
+    ],
+    "note": "A 1.2 feature (the audit input require_record) in a workflow that targets 1.1 (Standard v1.2 \u00a711.5)"
   }
 }

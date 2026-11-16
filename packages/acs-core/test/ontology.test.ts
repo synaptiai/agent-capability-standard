@@ -49,3 +49,35 @@ describe('effective flags (STANDARD v1.2.0 §5.2.1)', () => {
     expect(effectiveFlags('audit', { mutation: false }).flags.mutation).toBe(false);
   });
 });
+
+describe('the generated table agrees with the ontology', () => {
+  it('as the core parses it: flags, layers, required outputs and requires edges', async () => {
+    const { loadCore } = await import('./core.js');
+    const { REQUIRES } = await import('../src/ontology.js');
+    const core = await loadCore();
+    const texts = import.meta.glob<string>('../../../schemas/capability_ontology.yaml', {
+      eager: true,
+      import: 'default',
+      query: '?raw',
+    });
+    const onto = core.parseYaml(Object.values(texts)[0] as string, 8 * 1024 * 1024) as {
+      nodes: { id: string; layer: string; risk?: string; mutation?: boolean; requires_checkpoint?: boolean; requires_approval?: boolean; mutation_overridable?: boolean; output_schema?: { required?: string[] } }[];
+      edges: { from: string; to: string; type: string }[];
+    };
+    expect(Object.keys(CAPABILITIES)).toEqual(onto.nodes.map((n) => n.id));
+    for (const n of onto.nodes) {
+      const row = CAPABILITIES[n.id as keyof typeof CAPABILITIES];
+      expect(row.layer, n.id).toBe(n.layer);
+      expect(row.risk, n.id).toBe(n.risk ?? 'low');
+      expect(row.mutation, n.id).toBe(n.mutation ?? false);
+      expect(row.requires_checkpoint, n.id).toBe(n.requires_checkpoint ?? false);
+      expect(row.requires_approval, n.id).toBe(n.requires_approval ?? false);
+      expect(row.mutation_overridable, n.id).toBe(n.mutation_overridable ?? false);
+      expect([...row.output_required], n.id).toEqual(n.output_schema?.required ?? []);
+    }
+    const requires = onto.edges.filter((e) => e.type === 'requires').map((e) => [e.from, e.to]);
+    const sorted = (pairs: readonly (readonly string[])[]) => pairs.map((p) => p.join(' -> ')).sort();
+    expect(sorted(REQUIRES)).toEqual(sorted(requires));
+    for (const [from, to] of requires) expect(prerequisites(to as keyof typeof CAPABILITIES), `${from} -> ${to}`).toContain(from);
+  });
+});

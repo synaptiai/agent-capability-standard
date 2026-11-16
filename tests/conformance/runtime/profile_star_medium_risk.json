@@ -1,0 +1,100 @@
+{
+  "description": "checkpoint_policy {\"*\": medium_risk} covers the invoke step (medium) but not the low-risk retrieve of its nested run.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child"
+          }
+        }
+      ]
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "x"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "checkpoint_consumed",
+    "invoke_started",
+    "invoke_returned"
+  ],
+  "profiles": [
+    {
+      "domain": "star-medium",
+      "version": "1.0.0",
+      "checkpoint_policy": {
+        "*": "medium_risk"
+      }
+    }
+  ]
+}

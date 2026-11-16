@@ -18,6 +18,7 @@ OASF Reference: https://schema.oasf.outshift.com
 
 from __future__ import annotations
 
+import difflib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,7 @@ from typing import Any, Literal
 
 from ..capabilities.registry import CapabilityNode, CapabilityRegistry
 from ..utils.safe_yaml import safe_yaml_load
+from ..versions import check_cited
 
 logger = logging.getLogger("grounded_agency.adapters.oasf")
 
@@ -37,6 +39,37 @@ class UnknownSkillError(KeyError):
         super().__init__(
             f"Unknown OASF skill code: '{skill_code}'. "
             f"Check schemas/interop/oasf_mapping.yaml for valid codes."
+        )
+
+
+class UnknownCapabilityError(ValueError):
+    """Raised when a mapping entry names a capability the ontology lacks.
+
+    Standard v1.2 §11.6: a cited document may name a capability the
+    consumer's ontology does not define (one written against a later
+    ontology MINOR may); the consumer reports V101 at each place it uses
+    the id, rather than drop it and translate the rest, which would compute
+    the entry's risk and checkpoint need without it.
+
+    Attributes:
+        code: ``"V101"``.
+        skill_code: The OASF code whose entry names the id.
+        capability: The id the ontology does not define.
+        suggestion: The closest id the ontology defines, if any is close.
+    """
+
+    code = "V101"
+
+    def __init__(
+        self, skill_code: str, capability: str, suggestion: str | None
+    ) -> None:
+        self.skill_code = skill_code
+        self.capability = capability
+        self.suggestion = suggestion
+        hint = f"; did you mean '{suggestion}'?" if suggestion else ""
+        super().__init__(
+            f"V101 OASF code '{skill_code}' maps to capability '{capability}', "
+            f"which this ontology does not define{hint} (STANDARD v1.2 §11.6)"
         )
 
 
@@ -111,7 +144,22 @@ class OASFAdapter:
         if not self._mapping_path.exists():
             raise FileNotFoundError(f"OASF mapping not found: {self._mapping_path}")
 
-        self._raw = safe_yaml_load(self._mapping_path)
+        raw = safe_yaml_load(self._mapping_path)
+        # Standard v1.2 §11.6: a mapping cites the Standard and ontology it
+        # was written against under meta.agent_capability_standard; refuse
+        # another ontology major or an unsupported Standard (V109). The
+        # members are optional in this format.
+        meta = raw.get("meta") if isinstance(raw, dict) else None
+        cited = (
+            meta.get("agent_capability_standard") if isinstance(meta, dict) else None
+        )
+        if isinstance(cited, dict):
+            check_cited(
+                cited,
+                ontology_version=self._registry.version,
+                document=str(self._mapping_path),
+            )
+        self._raw = raw
 
         self._build_index()
 
@@ -167,6 +215,9 @@ class OASFAdapter:
 
         Raises:
             UnknownSkillError: If skill_code has no mapping
+            UnknownCapabilityError: If the entry names a capability the
+                ontology does not define (V101, Standard v1.2 §11.6): its
+                risk and checkpoint need cannot be computed without it.
         """
         self._ensure_loaded()
         assert self._index is not None
@@ -181,16 +232,17 @@ class OASFAdapter:
 
         for cap_id in mapping.capabilities:
             node = self._registry.get_capability(cap_id)
-            if node is not None:
-                nodes.append(node)
-                if node.requires_checkpoint:
-                    requires_checkpoint = True
-                if self._RISK_ORDER.get(node.risk, 0) > self._RISK_ORDER.get(
-                    max_risk, 0
-                ):
-                    max_risk = node.risk
-            else:
-                logger.warning("Capability '%s' not found in registry", cap_id)
+            if node is None:
+                known = [c.id for c in self._registry.all_capabilities()]
+                close = difflib.get_close_matches(cap_id, known, n=1)
+                raise UnknownCapabilityError(
+                    mapping.skill_code, cap_id, close[0] if close else None
+                )
+            nodes.append(node)
+            if node.requires_checkpoint:
+                requires_checkpoint = True
+            if self._RISK_ORDER.get(node.risk, 0) > self._RISK_ORDER.get(max_risk, 0):
+                max_risk = node.risk
 
         logger.debug(
             "Translated OASF %s (%s) -> %s [risk=%s, checkpoint=%s]",
@@ -292,6 +344,17 @@ class OASFAdapter:
         assert self._raw is not None
         meta: dict[str, Any] = self._raw.get("meta", {})
         return str(meta.get("oasf_version", "unknown"))
+
+    @property
+    def cited_versions(self) -> dict[str, str]:
+        """``meta.agent_capability_standard``: the Standard and ontology
+        versions the mapping cites (§11.6), as given."""
+        self._ensure_loaded()
+        assert self._raw is not None
+        cited = (self._raw.get("meta") or {}).get("agent_capability_standard") or {}
+        return {
+            str(k): str(v) for k, v in cited.items() if k in ("standard", "ontology")
+        }
 
     @property
     def mapping_version(self) -> str:

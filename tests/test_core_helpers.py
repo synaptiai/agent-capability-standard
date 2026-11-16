@@ -160,7 +160,6 @@ def test_start_validates_with_the_header(validator: _core.Validator) -> None:
 @pytest.mark.parametrize(
     "option",
     [
-        {"profiles": [{"domain": "d"}]},
         {"destinations": [["ops"]]},
         {"catalogs": [{"x": {}}]},
         {"agents": [{"agent": "a"}]},
@@ -209,6 +208,16 @@ def test_record_mode_actions_is_implemented(validator: _core.Validator) -> None:
     "option",
     [
         {"records": "everything"},
+        {"profiles": [{"domain": "d"}]},
+        {
+            "profiles": [
+                {
+                    "domain": "d",
+                    "version": "1.0.0",
+                    "checkpoint_policy": {"mutat": "always"},
+                }
+            ]
+        },
         {"grounding": [{"require": ["retreive"]}]},
         {"grounding": [{"require": []}]},
         {"grounding": [{"require": ["retrieve"], "kinds": ["paper"]}]},

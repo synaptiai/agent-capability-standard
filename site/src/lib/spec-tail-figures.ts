@@ -16,7 +16,7 @@ import { loadOntology } from '../data/ontology';
 import { loadIdentityPolicy, loadTrustModel, RUNTIME_FIXTURE_DIR, type IdentityPolicy } from '../data/spec-sources';
 import { parseCatalog, type Workflow } from '../data/workflows';
 import { readRepoFile, trackedIn, trackedUnder } from './repo';
-import { blockText, codeLines, sectionBlocks, sectionFence, sectionParagraphs, sectionTable, tableCodes, tableRows } from './md-sections';
+import { blockText, codeLines, sectionBlocks, sectionFence, sectionTable, tableCodes, tableRows } from './md-sections';
 import { schemaListing } from './views';
 import { andList, plural } from './words';
 
@@ -83,36 +83,47 @@ export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
 
 /**
  * Field tables the page draws as a `Port` column (F-S2 for §4.1, F-S24 for
- * §6.3): one row per field, required filled and optional outlined, with its
- * type glyph and type string, grouped by dotted prefix. The figure wraps
- * the source table and keeps it, folded, under the drawing, so the page
- * does not show the same fields twice. `what` starts the caption.
+ * §6.3, and §5.18.1's, §5.21.2's and §7.1's): one row per field, required
+ * filled and optional outlined, with its type glyph and type string, grouped
+ * by dotted prefix. The figure wraps the source table and keeps it, folded,
+ * under the drawing, so the page does not show the same fields twice.
+ * `what` starts the caption.
  */
 export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: string; what: string }>> = {
   'table-4.1': { section: '4.1 ', name: 'Capability fields', what: 'A capability' },
   'table-5.1': { section: '5.1 ', name: 'Fields every workflow defines', what: 'The part every workflow defines' },
   'table-5.18.1': { section: '5.18.1 ', name: 'Tool binding fields', what: 'A tool binding' },
+  'table-5.21.2': { section: '5.21.2 ', name: 'Domain profile members', what: 'A domain profile' },
   'table-6.3': { section: '6.3 ', name: 'World-state fields', what: 'A world state snapshot' },
   'table-6.5': { section: '6.5 ', name: 'Evidence anchor fields', what: 'An evidence anchor' },
   'table-6.6': { section: '6.6 ', name: 'Evidence record fields', what: 'An evidence record' },
+  'table-7.1': { section: '7.1 ', name: 'Parts of an entity id', what: 'An entity id' },
+  'table-8.4': { section: '8.4 ', name: 'Manual override rules', what: 'The trust model\'s overrides member' },
 };
 
 // ---------------------------------------------- §5.18 code tables
 
 /**
- * Tables of §5.18 (tool-calling hosts) whose Code column the page draws as
- * diagnostic tiles, as it does §5.8.3's and §9's: each figure wraps the
- * section's first table, and each code links to its entry on the
- * diagnostics page. A code the diagnostics loader does not know fails the
- * build (rehype-spec-slots).
+ * Tables whose Code column the page draws as diagnostic tiles, as it does
+ * §5.8.3's and §9's: §5.18's (tool-calling hosts), and those of the
+ * dialect, domain profiles and versions. Each figure wraps the section's
+ * table at `index` (0-based, default the first), and each code links to its
+ * entry on the diagnostics page. A code the diagnostics loader does not
+ * know fails the build (rehype-spec-slots).
  */
-export const CODE_TABLE_FIGURES: Readonly<Record<string, { level: number; section: string; name: string }>> = {
+export const CODE_TABLE_FIGURES: Readonly<Record<string, { level: number; section: string; name: string; index?: number }>> = {
+  'dialect-forms': { level: 4, section: '4.1.2 ', name: 'The forms the schema dialect adds' },
   'offered-tools': { level: 4, section: '5.18.2 ', name: 'What a host checks of the tools it offers' },
   'composite-codes': { level: 4, section: '5.18.4 ', name: 'Codes of a composite tool' },
   'edge-codes': { level: 4, section: '5.18.5 ', name: 'How each edge type applies to calls' },
   'checkpoint-refusals': { level: 4, section: '5.18.6 ', name: 'Calls refused for want of a checkpoint' },
   'call-refusals': { level: 4, section: '5.18.8 ', name: 'The codes a call is refused with' },
   'capability-checks': { level: 4, section: '5.18.10 ', name: 'Capability checks and their codes' },
+  'profile-codes': { level: 4, section: '5.21.2 ', name: 'What loading a profile reports', index: 1 },
+  'profile-raises': { level: 4, section: '5.21.3 ', name: 'What each threshold and rule raises' },
+  'profile-rules': { level: 4, section: '5.21.3 ', name: 'The other rules a profile puts in force', index: 1 },
+  'version-codes': { level: 3, section: '11.5 ', name: 'The codes of a version declaration', index: 1 },
+  'citing-codes': { level: 3, section: '11.6 ', name: 'What a consumer of a cited document reports', index: 1 },
 };
 
 const CODE = /\b[A-Z]\d{3}\b/g;
@@ -121,9 +132,9 @@ const CODE = /\b[A-Z]\d{3}\b/g;
 export function codeTableCodes(key: string, text: string, where: string): Diagnostic[] {
   const f = CODE_TABLE_FIGURES[key];
   if (!f) throw new Error(`${where}: no code table figure ${key}`);
-  const rows = tableRows(sectionTable(text, f.section, 0, where));
+  const rows = tableRows(sectionTable(text, f.section, f.index ?? 0, where));
   const col = rows[0]!.indexOf('Code');
-  if (col === -1) throw new Error(`${where}: §${f.section.trim()}'s first table has no Code column`);
+  if (col === -1) throw new Error(`${where}: §${f.section.trim()}'s table ${(f.index ?? 0) + 1} has no Code column`);
   const byCode = new Map(loadDiagnostics().map((d) => [d.code, d]));
   const seen: Diagnostic[] = [];
   for (const r of rows.slice(1)) {
@@ -138,7 +149,8 @@ export function codeTableCodes(key: string, text: string, where: string): Diagno
 }
 
 export function codeTableCaption(key: string, text: string, where: string): string {
-  const rows = tableRows(sectionTable(text, CODE_TABLE_FIGURES[key]!.section, 0, where)).length - 1;
+  const f = CODE_TABLE_FIGURES[key]!;
+  const rows = tableRows(sectionTable(text, f.section, f.index ?? 0, where)).length - 1;
   const ds = codeTableCodes(key, text, where);
   const errors = ds.filter((d) => d.severity === 'error').length;
   const sev = errors === ds.length ? (ds.length === 1 ? 'an error' : 'all errors') : errors === 0 ? (ds.length === 1 ? 'a warning' : 'all warnings') : `${plural(errors, 'error', 'errors')} and ${plural(ds.length - errors, 'warning', 'warnings')}`;
@@ -278,9 +290,11 @@ export interface DecayColumn {
  * half-life formula and min_trust as a floor on the decay factor.
  */
 export function decayColumns(text: string, where: string): { columns: DecayColumn[]; minTrust: number; halfLife: string } {
-  const prose = sectionParagraphs(text, '8.1 ', where).join(' ').replace(/\s+/g, ' ');
+  // The section's whole text: 1.1 states the formula in prose, 1.2 in its
+  // factor table (`max(0.5 ** (age / half_life), min_trust)`).
+  const prose = sectionBlocks(text, '8.1 ', where).map((n) => blockText(n)).join(' ').replace(/\s+/g, ' ');
   if (!prose.includes('0.5 ** (age / half_life)')) throw new Error(`${where}: §8.1 no longer states 0.5 ** (age / half_life)`);
-  if (!/min_trust, when present, is a floor on the decay factor/.test(prose)) throw new Error(`${where}: §8.1 no longer makes min_trust a floor on the decay factor`);
+  if (!/min_trust(, when present,)? is a floor on the decay factor/.test(prose)) throw new Error(`${where}: §8.1 no longer makes min_trust a floor on the decay factor`);
   const m = loadTrustModel();
   const columns = Array.from({ length: 9 }, (_, i) => {
     const k = i / 2;

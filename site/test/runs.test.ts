@@ -94,11 +94,9 @@ describe('exempt runs and scope', () => {
       'appendix-c-changes-from-100:c',
       'appendix-d-changes-from-110:c',
       // Not in the spec's table: added at integration, read from
-      // STANDARD-v1.2.0.md (§9.8 and §11.7 are reference tables), and the
-      // Candidate's sections still awaiting their text.
+      // STANDARD-v1.2.0.md (§9.8 and §11.7 are reference tables).
       '98-diagnostic-format:c',
       '117-artifacts-of-this-version:c',
-      '521-domain-profiles:a',
     ]);
     expect(rows('/start/overview/')).toEqual([
       'why-this-matters:a',

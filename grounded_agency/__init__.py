@@ -70,6 +70,7 @@ from .discovery import (
     TaskRequirement,
     WorkflowSynthesizer,
 )
+from .entities import EntityId, parse_entity_id
 from .errors import (
     ErrorCode,
     Severity,
@@ -80,6 +81,7 @@ from .errors import (
 from .grounding import GroundingPolicy, GroundingResult
 from .grounding import check_output as check_grounding_output
 from .mcp import create_grounded_mcp_server
+from .profiles import AppliedProfiles, ProfileError, load_profile
 from .query import CostSummary, grounded_query
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
 from .state.evidence_store import (
@@ -92,6 +94,9 @@ from .state.evidence_store import (
 from .state.jsonl_evidence_store import JsonlEvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
 from .state.redaction import Redactor
+from .trust import Candidate, Resolution, merge_trust_weights
+from .trust import resolve as resolve_conflict
+from .versions import CitedVersionError
 from .workflows.engine import (
     BindingError,
     StepStatus,
@@ -203,6 +208,17 @@ __all__ = [
     "ValidationError",
     "format_error",
     "format_errors_response",
+    # Domain profiles, trust, entity ids and cited versions (Standard 1.2)
+    "AppliedProfiles",
+    "ProfileError",
+    "load_profile",
+    "EntityId",
+    "parse_entity_id",
+    "Candidate",
+    "Resolution",
+    "resolve_conflict",
+    "merge_trust_weights",
+    "CitedVersionError",
     # Logging
     "logger",
 ]

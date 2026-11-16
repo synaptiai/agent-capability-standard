@@ -73,6 +73,7 @@ import {
   type Json,
 } from '@synaptiai/acs-core';
 import { notifyEvidence } from './evidence.js';
+import { confidenceFailure, unappliedRule, type BindingProfiles } from './profiles.js';
 import {
   CAPABILITIES,
   ONTOLOGY_VERSION,
@@ -212,6 +213,25 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    */
   grounding?: GroundingPolicy | readonly GroundingPolicy[];
   /**
+   * Domain profiles (STANDARD 1.2.0 §5.21) this layer applies to the tool's
+   * calls, as the core computed them (`bindingProfiles`): they raise the
+   * flags of each of the tool's capabilities at the call's effective risk
+   * (with `invokes`), and of each capability the tools it invokes perform,
+   * transitively, at theirs (its approval covers their nested calls); a
+   * call they require a person for counts only
+   * approvals the deployment attests as a person's
+   * (`approver_identity.kind: human`), and its trace entries carry
+   * `person_required`. A composite that invokes such a tool needs a
+   * person's approval too, as its approval covers the nested call; a nested
+   * call needing a person that a composite without one makes is checked as
+   * a call of its own. Their grounding policies join `grounding`; and an
+   * output below their minimum confidence, or whose `confidence` is not a
+   * number from 0 to 1, fails with F504 (the call has run). A profile that
+   * sets `allowed_destinations`, which this binding does not check yet,
+   * throws here.
+   */
+  profiles?: BindingProfiles;
+  /**
    * What the call's producer had (`evidence_seen`, §5.20): only what this
    * call received (`refsIn(args)`) and what the tool's own code read during
    * `execute` (the file it read and cites). Never a stored trace or history:
@@ -271,6 +291,29 @@ const STATED_NAMES = new WeakMap<object, string>();
 const EFFECTIVE = new WeakMap<object, SafetyFlags>();
 
 /**
+ * The tools defined here whose calls an applied domain profile requires a
+ * person for (§5.21.3), directly or through a tool they invoke: a
+ * composite's approval covers its nested calls (§5.18.4), so it must be a
+ * person's whenever one of them needs a person's.
+ */
+const PERSON = new WeakSet<object>();
+
+/** A capability a call performs, at the call's effective risk R (§5.21.3). */
+interface Performed {
+  capability: CapabilityId;
+  risk: SafetyFlags['risk'];
+}
+
+/**
+ * What each tool defined here performs: its capabilities at its effective
+ * risk, and what the tools it invokes perform, transitively. Profiles given
+ * to a composite govern the nested calls its approval covers (§5.21.3,
+ * §5.18.4), so they raise its flags for each of these as they would raise
+ * the nested call's own.
+ */
+const PERFORMS = new WeakMap<object, readonly Performed[]>();
+
+/**
  * What each name a tool defined here states for itself is bound to: its
  * capability, or `control`; `null` once two definitions of the name
  * disagree. A refusal that knows a tool only by name (a composite's call to
@@ -317,12 +360,33 @@ function invokedFlags(name: string, tool: object & { annotations?: Record<string
 }
 
 /**
+ * What a tool another tool invokes performs (§5.18.4): what a grounded or
+ * control tool noted for itself, else the capabilities of its `acs`
+ * annotation read as a binding record, at its effective risk, else, for a
+ * tool with no annotation or one that does not load, `mutate` at high risk,
+ * as which an unbound tool is treated (§5.18.2).
+ */
+function invokedPerforms(
+  name: string,
+  tool: object & { annotations?: Record<string, unknown> },
+): readonly Performed[] {
+  const computed = PERFORMS.get(tool);
+  if (computed) return computed;
+  const record = annotationRecord(name, tool.annotations?.[ANNOTATION_KEY]);
+  const loaded = record ? checkBindings([record]).effective[name] : undefined;
+  if (!loaded) return [{ capability: 'mutate', risk: 'high' }];
+  return (loaded.capabilities as CapabilityId[]).map((capability) => ({ capability, risk: loaded.risk }));
+}
+
+/**
  * One invocation of a listed tool by a running composite: a one-shot token
  * the invoked tool takes to be covered (§5.18.4).
  */
 interface NestingToken {
   composite: string;
   seq: number;
+  /** The composite's approval counted only a person's decisions (§5.21.3). */
+  person: boolean;
   flow: string;
   tool: string;
   digest: string;
@@ -352,6 +416,7 @@ function nestingState(
   composite: {
     name: string;
     seq: number;
+    person: boolean;
     flow: string | null;
     invokes: readonly string[];
     recorded_by: RecordedBy;
@@ -382,6 +447,7 @@ function nestingState(
     const token: NestingToken = {
       composite: composite.name,
       seq: composite.seq,
+      person: composite.person,
       flow: composite.flow,
       tool,
       digest: await digestOf(args as Json),
@@ -445,7 +511,42 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   const invokes = options.invokes ?? {};
   const invokeNames = Object.keys(invokes);
   let flags = own.flags;
-  for (const [invoked, tool] of Object.entries(invokes)) flags = joinFlags(flags, invokedFlags(invoked, tool));
+  // Whether an applied profile requires a person for the call (§5.21.3).
+  // A composite needs one when a tool it invokes does: its approval covers
+  // that tool's nested calls (§5.18.4).
+  let person = false;
+  // What the nested calls the composite's approval covers perform.
+  const nested: Performed[] = [];
+  for (const [invoked, tool] of Object.entries(invokes)) {
+    flags = joinFlags(flags, invokedFlags(invoked, tool));
+    person ||= PERSON.has(tool);
+    nested.push(...invokedPerforms(invoked, tool));
+  }
+  const risk = flags.risk;
+  // Domain profiles (§5.21.3): the flags they raise for each capability at
+  // the call's effective risk R before profiles, which includes its other
+  // capabilities and the tools it invokes (§5.18.3, §5.18.4); and, since a
+  // composite's effective flags include those of each tool it lists, those
+  // they raise for what its nested calls perform, at their own R (so
+  // `block_autonomous` given to a composite alone reaches them).
+  const profiles = options.profiles;
+  if (profiles !== undefined) {
+    const problem = unappliedRule(profiles.policy);
+    if (problem !== null) throw new Error(`groundedTool '${name}': ${problem}`);
+    const raise = (c: CapabilityId, declared: DeclaredFlags): void => {
+      const raised = profiles.flags(c, declared);
+      flags = joinFlags(flags, {
+        risk: raised.risk,
+        mutation: raised.mutation,
+        requires_checkpoint: raised.requires_checkpoint,
+        requires_approval: raised.requires_approval,
+      });
+      person ||= raised.person;
+    };
+    for (const c of capabilities) raise(c, { ...options.flags, risk });
+    for (const performed of nested) raise(performed.capability, { risk: performed.risk });
+  }
+  const minimumConfidence = profiles?.policy.minimum_confidence ?? null;
   const policy = options.approval ?? {};
   const problems = policyProblems(policy);
   if (problems.length > 0) {
@@ -460,9 +561,15 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   const now = options.now ?? (() => Date.now());
   const prerequisites = prerequisitesOf(capabilities);
   // Grounding policies, checked once (§5.20): an unknown id throws here.
-  const policies = (options.grounding === undefined ? [] : groundingPolicies(options.grounding)).filter((p) =>
-    p.require.includes(capability),
-  );
+  // The applied profiles' grounding policies join the tool's own (§5.21.3).
+  const fromProfiles: GroundingPolicy[] = (profiles?.policy.grounding ?? []).map((g) => ({
+    require: g.require as CapabilityId[],
+    ...(g.kinds !== null ? { kinds: g.kinds } : {}),
+  }));
+  const policies = [
+    ...(options.grounding === undefined ? [] : groundingPolicies(options.grounding)),
+    ...(fromProfiles.length > 0 ? groundingPolicies(fromProfiles) : []),
+  ].filter((p) => p.require.includes(capability));
   const secretsOf = async (state: ThreadState): Promise<readonly string[]> => {
     const given = options.secrets;
     return typeof given === 'function' ? await given(state) : (given ?? []);
@@ -494,7 +601,13 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
 
   // What decides this tool's calls (§5.18.8): its binding record and the
   // checkpoint maximum age, which the annotation does not state.
-  const configuration = { annotation, settings: { checkpoint_max_age_ms: maxAge } };
+  const configuration = {
+    annotation,
+    settings: {
+      checkpoint_max_age_ms: maxAge,
+      ...(profiles !== undefined ? { profiles: profiles.documents } : {}),
+    },
+  };
   let layer: Promise<RecordedBy> | undefined;
   const recordedBy = (): Promise<RecordedBy> =>
     (layer ??= digestOf(configuration as unknown as Json).then((config_sha256) => ({
@@ -513,7 +626,14 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     const flow = flowOf(state);
     const step = stepOf(state);
     const position = { ...(flow !== null ? { flow_id: flow } : {}), ...(step !== null ? { step } : {}) };
-    const identity = { action: name, capability, ...(domain !== undefined ? { domain } : {}), ...position };
+    const identity = {
+      action: name,
+      capability,
+      ...(domain !== undefined ? { domain } : {}),
+      ...position,
+      // An applied profile requires a person for the call (§5.21.3).
+      ...(person ? { person_required: true as const } : {}),
+    };
     // What is known of the call so far, for the record if a write fails.
     const used: Pick<TraceEntry, 'args_digest' | 'approval' | 'checkpoint_id' | 'covered_by'> = {};
     let layerRecord: RecordedBy | undefined;
@@ -569,9 +689,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // A nested call the running composite's own code made, with these
       // exact arguments in this execution, is covered by the composite's
       // approval and checkpoint (§5.18.4): only those two checks are skipped.
+      // A call a profile requires a person for is covered only by a
+      // composite whose approval a person gave (§5.21.3); otherwise it is
+      // checked as a call of its own.
       const token = used.args_digest === undefined ? undefined : takeToken(state.threadId, flow, name, used.args_digest);
-      if (token) used.covered_by = token.seq;
-      const covered = token !== undefined;
+      const covered = token !== undefined && (token.person || !person);
+      if (covered) used.covered_by = token.seq;
 
       // 1. Approval, bound to the digest of exactly what is about to run.
       let request: ApprovalRecord | undefined;
@@ -606,14 +729,22 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         const shown: Json[] = [{ action: name, capability, args: argsJson }];
         approvedAt = now();
         request = await requestApproval(state, shown, policy, approvedAt);
-        const standing = approvalState(request, approvedAt);
+        let standing = approvalState(request, approvedAt);
+        // A person must decide (§5.21.3): only approvals the deployment
+        // attests as a person's count.
+        if (standing === 'approved' && person) {
+          const people = countedDecisions(request, approvedAt).filter((d) => d.approver_identity?.kind === 'human');
+          if (new Set(people.map((d) => d.approver)).size < request.min_approvers) standing = 'pending';
+        }
         if (standing !== 'approved') {
           return await refuse(
             refusal(
               'F502',
               name,
               capability,
-              `This call needs approval and the request is ${standing}.`,
+              person
+                ? `This call needs a person's approval (an applied domain profile requires one, STANDARD 1.2.0 §5.21.3: only approvals the deployment attests as a person's count), and the request is ${standing}.`
+                : `This call needs approval and the request is ${standing}.`,
               'Tell the person what you intend to do and wait for them to decide; then call the tool again with the same arguments.',
               { digest: request.digest, round: approvalRound(request), shown, state: standing },
             ),
@@ -682,7 +813,10 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         // the request approved, as principals, with their identities when
         // every one of those decisions recorded one. One decision per
         // approver, so identities never disagree for one principal.
-        const counted = countedDecisions(request, approvedAt);
+        // Under a person requirement, a person's approvals only (§5.21.3).
+        const counted = countedDecisions(request, approvedAt).filter(
+          (d) => !person || d.approver_identity?.kind === 'human',
+        );
         approvers = [...new Set(counted.map((d) => principalOf(d.approver)))];
         const identities = new Map<string, AgentIdentity>();
         for (const d of counted) {
@@ -786,7 +920,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     try {
       const composite = nestingState(
         state,
-        { name, seq: call.seq, flow, invokes: invokeNames, recorded_by, now },
+        { name, seq: call.seq, person, flow, invokes: invokeNames, recorded_by, now },
         (entry) => serially(state.threadId, () => appendTrace(state, entry, secrets)),
       );
       output = await options.execute(composite, args, call);
@@ -865,6 +999,32 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       }
     }
 
+    // The applied profiles' minimum confidence (§5.21.3), after grounding.
+    const low = minimumConfidence === null ? null : confidenceFailure(output, minimumConfidence);
+    if (low !== null) {
+      const result = refusal(
+        'F504',
+        name,
+        capability,
+        `The output of ${name} fails a domain profile: ${low.message}.`,
+        'Return an output whose confidence, a number from 0 to 1, meets the minimum of the applied profiles.',
+      );
+      try {
+        await serially(state.threadId, () =>
+          completeTrace(
+            state,
+            started,
+            { at: now(), status: 'failed', code: 'F504', reason_code: low.reason, error: result.error ?? 'F504' },
+            secrets,
+          ),
+        );
+      } catch (recordFailure) {
+        const why = recordFailure instanceof Error ? recordFailure.message : String(recordFailure);
+        return refusal('R407', name, capability, `The call's outcome could not be recorded: ${why}.`, 'It ran.');
+      }
+      return result;
+    }
+
     const anchors = output['evidence_anchors'];
     let completed: TraceEntry | undefined;
     try {
@@ -922,6 +1082,8 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   });
   STATED_NAMES.set(definition, name);
   EFFECTIVE.set(definition, flags);
+  PERFORMS.set(definition, [...capabilities.map((capability) => ({ capability, risk })), ...nested]);
+  if (person) PERSON.add(definition);
   noteBound(name, capability);
   return definition;
 }
@@ -996,6 +1158,7 @@ export function controlTool<Args extends ToolArgs>(options: ControlToolOptions<A
   });
   STATED_NAMES.set(definition, name);
   EFFECTIVE.set(definition, { risk: 'low', mutation: false, requires_checkpoint: false, requires_approval: false });
+  PERFORMS.set(definition, []);
   noteBound(name, 'control');
   return definition;
 }

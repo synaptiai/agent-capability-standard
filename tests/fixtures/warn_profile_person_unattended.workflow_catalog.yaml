@@ -1,0 +1,36 @@
+# Standard version: 1.1.0
+# Validated with tests/fixtures/profiles/person_mutate.profile.yaml: the
+# profile requires a person for the mutate step, which no standing mandate
+# covers, and an unattended schedule reaches it with no when_unattended (W606).
+# Without the profile the mandate is a plan for the unattended run.
+nightly_fix:
+  goal: Apply the nightly configuration fix.
+  risk: high
+  workflow_extensions:
+    requires: [triggers@1, approval@1]
+  triggers:
+  - kind: schedule
+    schedule:
+      every: P1D
+  steps:
+  - capability: checkpoint
+    purpose: Save a restore point.
+    store_as: cp
+    input_bindings:
+      scope: config
+  - capability: constrain
+    purpose: Check the change against the policy.
+    store_as: policy
+    input_bindings:
+      target: config
+      constraints: [policy]
+  - capability: mutate
+    purpose: Apply the fix.
+    store_as: fixed
+    input_bindings:
+      target: config
+      operation: {set: 1}
+    approval:
+      approver:
+        kind: standing_mandate
+        mandate_ref: mandates/nightly

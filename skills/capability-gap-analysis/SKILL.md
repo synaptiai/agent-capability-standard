@@ -1,5 +1,5 @@
 ---
-name: gap-analysis-workflow
+name: capability-gap-analysis
 description: Identify capability gaps and propose new skills with prioritization. Use when analyzing missing capabilities, planning skill development, performing ontology expansion, or assessing coverage.
 argument-hint: "[user_input]"
 disable-model-invocation: false

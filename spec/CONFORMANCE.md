@@ -149,6 +149,8 @@ Running the suite:
 | Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `packages/acs-core/` |
 | Trigger vectors | `cargo test --test triggers` (in `core/`), `pytest tests/test_triggers.py` |
 | Trust vectors | `pytest tests/test_trust.py` |
+| Profile vectors | `cargo test --test profiles` (in `core/`), `pytest tests/test_profiles.py`, `npm test` in `packages/acs-core/` (through WebAssembly) |
+| Entity id vectors | `pytest tests/test_entities.py` |
 | Grounding vectors | `cargo test --test grounding` (in `core/`), `pytest tests/test_grounding.py`, `npm test` in `packages/acs-core/` |
 | Secret redaction vectors (informative) | `pytest tests/test_redaction.py`, `npm test` in `packages/acs-core/` |
 
@@ -171,7 +173,7 @@ the other start members, all passed to start with `run_id` `"run-1"`. Its
 
 | Entry | What the harness does |
 |-------|-----------------------|
-| `{"expect": A, "respond": R, "at": T}` | The pending action must match `A`; then `R`, when given, is submitted at `T` (`"{{digest}}"` and `"{{digest_upper}}"` stand for the action's digest) |
+| `{"expect": A, "respond": R, "at": T}` | The pending action must match `A` and hold none of the members `absent` lists (paths joined by `.`); then `R`, when given, is submitted at `T` (`"{{digest}}"` and `"{{digest_upper}}"` stand for the action's digest) |
 | `{"tick": T, "changed": C}` | The time `T` is given; when `changed` is there, the tick must change the run exactly when `C` |
 | `{"wake_at": W}` | The run's wake-up time must be `W` (null: none) |
 | `{"cancel": {"reason": S, "at": T}}` | The run is cancelled |
@@ -283,20 +285,29 @@ entry per case.
   Python in exponent form) are left out of `encode`.
   `tests/test_capability_output.py` and the TypeScript package's
   `test/output.test.ts` read the file in place.
-- Trust: `tests/conformance/trust/decay.json` (the decay factor of §8.1:
-  0.5 at one half-life, which §8.1 requires, `0.5 ** (age / half_life)` at
-  other ages, which it recommends, and not below `decay_model.min_trust`),
-  `tests/conformance/trust/weight.json` (the static weight of §8.3: the lower
-  of the class weight and the source weight, with a domain profile's
-  `trust_weights` overrides) and `tests/conformance/trust/score.json` (the
-  product that `conflict_resolution_function.formula` in
-  `schemas/authority_trust_model.yaml` names). Each file states the absolute
-  tolerance its expected values are given to. §8.3 states the profile
-  override of a class weight only; the vectors in which a profile key
-  replaces or adds a source weight rest on a comment in the schema and say
-  so. Each file lists under `not_covered` the cases whose result the
-  Standard does not state, such as a `min_trust` above 0.5, where §8.1
-  requires 0.5 at one half-life and also floors the factor at `min_trust`;
-  no vector covers them, and each entry says what the reference
-  implementation does. `tests/test_trust.py` runs the reference
-  implementation, `grounded_agency/trust.py`, against the vectors.
+
+## Normative vectors of Standard 1.2.0 (§10.3)
+
+- Trust: `tests/conformance/trust/decay.json` (the decay factor of §8.1,
+  `max(0.5 ** (age / half_life), min_trust)`, a floor above 0.5 included,
+  an age below zero counting as zero), `weight.json` (the static weight of
+  §8.3: the lower of the class weight and the source weight, with a domain
+  profile's `trust_weights`, either direction, the lowest across profiles),
+  `score.json` (`weight × confidence × decay`, confidence 1 when none is
+  reported) and `resolve.json` (the strategies of §8.2, ties and
+  tie-breakers, and the refusal of a conflict with an unweighable
+  candidate). Each file states the absolute tolerance of its values; a
+  vector with `expect_error` expects a refusal. `tests/test_trust.py` runs
+  the reference implementation, `grounded_agency/trust.py`, against them.
+- Domain profiles: `tests/conformance/profiles/load.json` (the diagnostics
+  of §5.21.2, each with its code, `location.profile` and `location.field`)
+  and `effective.json` (the effective flags and the rules of §5.21.3). The
+  core runs them (`core/tests/profiles.rs`), and so do the Python package
+  (`tests/test_profiles.py`, through `_core`) and the TypeScript package
+  (through WebAssembly, whose interface refuses a request that is not
+  I-JSON, so `not_i_json` is refused before the loader sees it): one
+  loader.
+- Entity ids: `tests/conformance/entities/ids.json` (the grammar of §7.1:
+  valid ids parsed into class, namespace and local id; invalid ones
+  refused), run by `tests/test_entities.py` against
+  `grounded_agency/entities.py`.
