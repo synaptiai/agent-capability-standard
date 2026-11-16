@@ -1324,7 +1324,6 @@
     "level": "L2",
     "category": "versioning",
     "expected_warning_codes": [
-      "W616",
       "W616"
     ],
     "expected_locations": [

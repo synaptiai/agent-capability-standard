@@ -21,7 +21,7 @@ Branch `round3/a`, worktree `/home/user/acs-a`.
 - [x] 4. CLAUDE.md and AGENTS.md against what the streams changed
 - [x] 5. Findings: every ACS finding fully implemented is `fixed` with an
   accurate resolution
-- [ ] Full F6 set green (including check-axe over the whole site), commit
+- [x] Full F6 set green (including check-axe over the whole site), commit
 
 ## 1. Class SL: the adapter's output-contract row
 
@@ -149,3 +149,32 @@ are 64 fixed, and `tests/test_standard_agents_mapping.py` now checks them.
 ACS-49's last sentence (migrating the duplicated example to a qualified
 invoke once the reference catalog has a manifest) is an optional follow-up,
 not part of the finding's proposed change.
+
+## Checks (F6, on the final tree)
+
+All green:
+
+- Python: every `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py
+  --strict`, every domain catalog and example `--strict`; every generator
+  with `--check` (`sync_skill_schemas`, `gen_runtime_fixtures` 350,
+  `gen_call_fixtures` 33 + 26, `gen_trigger_vectors`,
+  `gen_standard_agents_binding`, `gen_capability_json_schemas`); ruff check
+  and format (CI's list); mypy; `pytest tests/` (4271 passed, 7 skipped);
+  `pytest benchmarks/tests/` (69) and `benchmarks/runner.py --report`;
+  `scripts/run_conformance.py`.
+- Rust (`core/`, 1.99.1): fmt; clippy plain, `python`, `wasm`; `cargo test
+  --locked` (`edge_checks_scale_linearly` failed once while axe ran, passed
+  alone, as the task notes warn); `--features wasm --test wasm`; MSRV
+  `cargo +1.88.0 check --locked --all-targets --features python`; the CEL
+  differential (`go run .`, 155 cases and 92 expressions, 0 failures). No
+  Rust changed here.
+- TypeScript: `packages/acs-core` check, test (1784), build; the binding
+  check and test (182, 1 skipped).
+- Site: `npm run check`, `npm test` (1169; a run beside axe timed out two
+  render tests at 5s, and passed alone), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` (0 enforced runs over 1800px), and
+  `scripts/check-axe.mjs` over all 182 pages (728 runs, no violations).
+
+A note on the harnesses: `expected_warning_codes` lists distinct codes (the
+WebAssembly harness compares sets), so `warn_version_feature_1_2_grounding`
+lists W616 once and pins its two findings with `expected_locations`.
