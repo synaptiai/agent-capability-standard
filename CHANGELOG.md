@@ -206,8 +206,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   enough with F504, in runs, in the adapter (on the outputs of the tools
   `create_grounded_mcp_server` serves) and in the binding. A member without
   an exact JSON form (an integer beyond 2^53) is S303. An unknown top-level
-  profile member stays a warning (W604) and is now logged at WARNING with
-  the member meant.
+  profile member stays a warning (W604) and is now reported with the member
+  meant: logged at WARNING by the Python layers, and passed by the
+  binding's `bindingProfiles` to its `onWarning` (`console.warn` by
+  default).
 - Python SDK: `OASFAdapter.translate` raises `UnknownCapabilityError` (V101,
   with the closest id) for an entry that names a capability the ontology
   does not define; it logged a warning and translated the entry without it,
@@ -629,20 +631,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `run.wake_at`, `run.take_trace`, `run.take_records`, `run.run_record`,
   `run.trace` since a `seq`; `CoreRun.resume`, `cancel`, `wakeAt`, ...);
   `Context::from_values` with an in-memory schema store.
+  `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
+  a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
+  `NPM_TOKEN` are both set (a dry run otherwise).
 - Domain profiles in every reference layer (§5.21.3): a profile's grounding
   policy is checked by the executor's grounding check (§5.20) and by
   `GroundedAgentAdapter.check_call_output`, which also applies the
-  profiles' minimum confidence (`_core.check_confidence`; an exported call
-  record carries `reason_code`); the Standard Agents binding applies
-  profiles through `groundedTool({profiles})` and `bindingProfiles`
-  (raised flags, a person's approval, grounding, minimum confidence).
+  profiles' minimum confidence (`_core.check_confidence`) to the outputs of
+  the tools `create_grounded_mcp_server` serves, with or without
+  `config.grounding`; an exported call record carries `reason_code` and
+  `person_required`. The Standard Agents binding applies profiles through
+  `groundedTool({profiles})` and `bindingProfiles` (raised flags at the
+  call's effective risk with its `invokes`, a person's approval, also for a
+  composite whose approval covers a call needing one, grounding, minimum
+  confidence; loading warnings such as W604 reported to `onWarning`).
   Runtime fixtures `profile_grounding_*` and the header fixtures
   `header_1_2_sender_check_needs_identities` and
   `header_null_sender_check_not_read`; validator fixture
   `warn_version_feature_1_2`.
-  `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
-  a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
-  `NPM_TOKEN` are both set (a dry run otherwise).
 - `skills/README.md` lists each frontmatter key's owner (Agent Skills,
   Claude Code, ACS), checked by `tests/test_skill_frontmatter.py`.
 - Standard 1.2.0 text of §4.1.2 (schema dialect), §5.21, §7.1, §8.1–§8.3,

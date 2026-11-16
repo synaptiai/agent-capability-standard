@@ -252,6 +252,12 @@ async def test_an_unbound_tool_records_person_required_under_a_mutate_rule(
         None,
         True,
     )
+    # Exported, it is the ActionRecord member (world_state_schema.yaml), not
+    # a detail.
+    exported = adapter.export_action_records("scope")[-1]
+    assert exported["action_id"] == f"scope/{record['seq']}"
+    assert exported["person_required"] is True
+    assert "person_required" not in exported.get("details", {})
     # Without a rule that covers mutate, the unbound tool's record has none.
     plain = GroundedAgentAdapter(
         GroundedAgentConfig(

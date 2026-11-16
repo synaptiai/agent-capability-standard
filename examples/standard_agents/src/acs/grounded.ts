@@ -215,10 +215,14 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   /**
    * Domain profiles (STANDARD 1.2.0 §5.21) this layer applies to the tool's
    * calls, as the core computed them (`bindingProfiles`): they raise the
-   * flags of each of the tool's capabilities; a call they require a person
-   * for counts only approvals the deployment attests as a person's
+   * flags of each of the tool's capabilities at the call's effective risk
+   * (with `invokes`); a call they require a person for counts only
+   * approvals the deployment attests as a person's
    * (`approver_identity.kind: human`), and its trace entries carry
-   * `person_required`; their grounding policies join `grounding`; and an
+   * `person_required`. A composite that invokes such a tool needs a
+   * person's approval too, as its approval covers the nested call; a nested
+   * call needing a person that a composite without one makes is checked as
+   * a call of its own. Their grounding policies join `grounding`; and an
    * output below their minimum confidence, or whose `confidence` is not a
    * number from 0 to 1, fails with F504 (the call has run). A profile that
    * sets `allowed_destinations`, which this binding does not check yet,
@@ -285,6 +289,14 @@ const STATED_NAMES = new WeakMap<object, string>();
 const EFFECTIVE = new WeakMap<object, SafetyFlags>();
 
 /**
+ * The tools defined here whose calls an applied domain profile requires a
+ * person for (§5.21.3), directly or through a tool they invoke: a
+ * composite's approval covers its nested calls (§5.18.4), so it must be a
+ * person's whenever one of them needs a person's.
+ */
+const PERSON = new WeakSet<object>();
+
+/**
  * What each name a tool defined here states for itself is bound to: its
  * capability, or `control`; `null` once two definitions of the name
  * disagree. A refusal that knows a tool only by name (a composite's call to
@@ -337,6 +349,8 @@ function invokedFlags(name: string, tool: object & { annotations?: Record<string
 interface NestingToken {
   composite: string;
   seq: number;
+  /** The composite's approval counted only a person's decisions (§5.21.3). */
+  person: boolean;
   flow: string;
   tool: string;
   digest: string;
@@ -366,6 +380,7 @@ function nestingState(
   composite: {
     name: string;
     seq: number;
+    person: boolean;
     flow: string | null;
     invokes: readonly string[];
     recorded_by: RecordedBy;
@@ -396,6 +411,7 @@ function nestingState(
     const token: NestingToken = {
       composite: composite.name,
       seq: composite.seq,
+      person: composite.person,
       flow: composite.flow,
       tool,
       digest: await digestOf(args as Json),
@@ -459,16 +475,24 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   const invokes = options.invokes ?? {};
   const invokeNames = Object.keys(invokes);
   let flags = own.flags;
-  for (const [invoked, tool] of Object.entries(invokes)) flags = joinFlags(flags, invokedFlags(invoked, tool));
-  // Domain profiles (§5.21.3): each capability's flags as they raise them,
-  // and whether they require a person for the call.
-  const profiles = options.profiles;
+  // Whether an applied profile requires a person for the call (§5.21.3).
+  // A composite needs one when a tool it invokes does: its approval covers
+  // that tool's nested calls (§5.18.4).
   let person = false;
+  for (const [invoked, tool] of Object.entries(invokes)) {
+    flags = joinFlags(flags, invokedFlags(invoked, tool));
+    person ||= PERSON.has(tool);
+  }
+  // Domain profiles (§5.21.3): each capability's flags as they raise them
+  // at the call's effective risk R before profiles, which includes its
+  // other capabilities and the tools it invokes (§5.18.3, §5.18.4).
+  const profiles = options.profiles;
   if (profiles !== undefined) {
     const problem = unappliedRule(profiles.policy);
     if (problem !== null) throw new Error(`groundedTool '${name}': ${problem}`);
+    const declared: DeclaredFlags = { ...options.flags, risk: flags.risk };
     for (const c of capabilities) {
-      const raised = profiles.flags(c, options.flags);
+      const raised = profiles.flags(c, declared);
       flags = joinFlags(flags, {
         risk: raised.risk,
         mutation: raised.mutation,
@@ -621,9 +645,12 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // A nested call the running composite's own code made, with these
       // exact arguments in this execution, is covered by the composite's
       // approval and checkpoint (§5.18.4): only those two checks are skipped.
+      // A call a profile requires a person for is covered only by a
+      // composite whose approval a person gave (§5.21.3); otherwise it is
+      // checked as a call of its own.
       const token = used.args_digest === undefined ? undefined : takeToken(state.threadId, flow, name, used.args_digest);
-      if (token) used.covered_by = token.seq;
-      const covered = token !== undefined;
+      const covered = token !== undefined && (token.person || !person);
+      if (covered) used.covered_by = token.seq;
 
       // 1. Approval, bound to the digest of exactly what is about to run.
       let request: ApprovalRecord | undefined;
@@ -849,7 +876,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     try {
       const composite = nestingState(
         state,
-        { name, seq: call.seq, flow, invokes: invokeNames, recorded_by, now },
+        { name, seq: call.seq, person, flow, invokes: invokeNames, recorded_by, now },
         (entry) => serially(state.threadId, () => appendTrace(state, entry, secrets)),
       );
       output = await options.execute(composite, args, call);
@@ -1011,6 +1038,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   });
   STATED_NAMES.set(definition, name);
   EFFECTIVE.set(definition, flags);
+  if (person) PERSON.add(definition);
   noteBound(name, capability);
   return definition;
 }

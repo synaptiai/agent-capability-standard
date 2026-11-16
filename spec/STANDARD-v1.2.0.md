@@ -1833,7 +1833,8 @@ those of each binding listed (§5.18.1).
   further checkpoint or approval to it, and records it with the call that
   covered it. Every other check still applies to it, its prerequisites
   (§5.18.5) included. A layer that cannot attribute it checks it as a call
-  of its own.
+  of its own. A composite that lists a binding a profile requires a person
+  for is asked of a person (§5.21.3).
 - A layer attributes a call to a composite only on evidence that the
   composite's own code made it, such as an invocation the layer itself
   passed to the composite. That a call comes from the same thread, session
@@ -2629,7 +2630,11 @@ recovery (§5.12), each of which a profile governs by its own capability and
 risk. The step's action records carry `person_required: true`
 (`ActionRecord`, `world_state_schema.yaml`); they carry `always_ask: true`
 only if the step also uses an always-ask item. A safety layer accepts for
-such a call only a decision a person made for it.
+such a call only a decision a person made for it. Since a composite's
+approval covers its nested calls (§5.18.4), a composite that lists a binding
+a profile requires a person for, directly or through another composite, is
+itself asked of a person, and a composite's approval no person gave covers
+no nested call that needs one.
 
 Each applied profile also puts in force:
 
@@ -3472,6 +3477,7 @@ of §5.20 for one output at a time: an executor that accepts `grounding@1`,
 and a safety layer that applies grounding policies, MUST give the status and
 code each vector expects. The runtime fixtures whose names start with
 `grounding_` script the check inside runs.
+
 Trust vectors (`tests/conformance/trust/`), profile vectors
 (`tests/conformance/profiles/`) and entity id vectors
 (`tests/conformance/entities/ids.json`) are normative for §8, §5.21 and §7.1.

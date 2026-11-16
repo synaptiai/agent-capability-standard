@@ -469,11 +469,13 @@ def call_action_record(entry: dict[str, Any], scope: str) -> dict[str, Any] | No
     ``run_id`` and prefixes its ``action_id``, ``<scope>/<seq>``. A refusal is
     ``rejected`` with its diagnostic's ``code``; a call the host's permission
     flow approved in its session has ``approval`` with ``mode: in_session``
-    and the digest of what was shown (section 5.18.7). ``recorded_by`` is the
-    layer's, as the call record holds it. Every other member of the call
-    record (``decision``, ``permission_mode``, ``diagnostic``, ...) is kept
-    under ``details``. Returns None for a boundary entry, which records no
-    action.
+    and the digest of what was shown (section 5.18.7). A call an applied
+    domain profile required a person for has ``person_required`` (section
+    5.21.3), and a failure's reason is ``reason_code`` (section 5.19.7).
+    ``recorded_by`` is the layer's, as the call record holds it. Every other
+    member of the call record (``decision``, ``permission_mode``,
+    ``diagnostic``, ...) is kept under ``details``. Returns None for a
+    boundary entry, which records no action.
     """
     status = _CALL_STATUS.get(entry.get("decision", ""))
     if status is None:
@@ -503,6 +505,11 @@ def call_action_record(entry: dict[str, Any], scope: str) -> dict[str, Any] | No
         # holds it.
         record["reason_code"] = entry["reason"]
         mapped.add("reason")
+    if entry.get("person_required") is True:
+        # An applied domain profile required a person for the call
+        # (section 5.21.3): an ActionRecord member, as a step's record holds it.
+        record["person_required"] = True
+        mapped.add("person_required")
     if entry.get("approvers") == ["in_session"] and entry.get("digest"):
         record["approval"] = {
             "digest": entry["digest"],
@@ -741,6 +748,13 @@ class GroundedAgentAdapter:
     # Grounding of call outputs (STANDARD v1.2 section 5.20)
     # ------------------------------------------------------------------
 
+    @property
+    def _checks_call_outputs(self) -> bool:
+        """Whether :meth:`check_call_output` applies any rule: a grounding
+        policy (the configuration's or an applied profile's, section 5.21.3)
+        or the profiles' minimum confidence."""
+        return bool(self._grounding) or self.profiles.minimum_confidence is not None
+
     def check_call_output(
         self,
         tool: str,
@@ -759,9 +773,9 @@ class GroundedAgentAdapter:
         Grounding is checked first, as the executor checks it. ``output``
         that is not an object fails a grounding policy as an output with no
         anchors; it has no confidence for a minimum to check."""
-        minimum = self.profiles.minimum_confidence
-        if not self._grounding and minimum is None:
+        if not self._checks_call_outputs:
             return None
+        minimum = self.profiles.minimum_confidence
         mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
         capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
         if not capability:
@@ -1092,9 +1106,7 @@ class GroundedAgentAdapter:
         minimum confidence for it (a tool that ``create_grounded_mcp_server``
         does not serve, Claude Code's own tools included): section 5.20, and
         the minimum of section 5.21.3, are not applied to it."""
-        if mapping is UNCLASSIFIED_TOOL:
-            return
-        if not self._grounding and self.profiles.minimum_confidence is None:
+        if mapping is UNCLASSIFIED_TOOL or not self._checks_call_outputs:
             return
         required = sorted(
             {c for c in mapping.capabilities for p in self._grounding if p.requires(c)}

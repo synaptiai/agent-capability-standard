@@ -848,3 +848,21 @@ Workstreams should run `npm run check:axe` (or at least
 - **Fixtures.** `NORMATIVE_MEMBERS` lists `person_required` (§5.21.3) on
   records. `absent` is in §10.5 and CONFORMANCE's entry table.
 
+
+## 2026-11-16 — S6 integration review round 1 (for S5)
+
+- **Binding: the person requirement through composites.** `groundedTool`
+  computes profile flags at the call's effective risk (with `invokes`), keeps
+  a `PERSON` set beside `EFFECTIVE` (a composite listing a person-required
+  tool is person-required), and a `NestingToken` carries the composite's
+  `person`: a person-required nested call is covered only by a composite
+  whose approval was a person's (§5.21.3, §5.18.4). **S5**: if
+  `configureLayer` takes the profiles for the layer, keep both.
+- **Binding: `ProfileCore.checkProfiles`.** `bindingProfiles(core,
+  documents, {onWarning})` reports and keeps the loading warnings
+  (`BindingProfiles.warnings`).
+- **Adapter.** `GroundedAgentAdapter._checks_call_outputs` is the one gate
+  for checking a call's output (config grounding, the profiles' grounding,
+  a minimum confidence), used by `mcp.py`'s served tools;
+  `call_action_record` exports `person_required` as the top-level
+  `ActionRecord` member.

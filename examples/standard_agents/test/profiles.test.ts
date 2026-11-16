@@ -7,19 +7,24 @@ import type { ToolResult } from '@standardagents/spec';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Json } from '@synaptiai/acs-core';
-import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
+import type { CoreContext, Diagnostic, ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { decideApproval } from '../src/acs/approval.js';
 import { groundedTool } from '../src/acs/grounded.js';
-import { effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
+import { effectiveFlags, type CapabilityId, type DeclaredFlags, type Risk } from '../src/acs/ontology.js';
 import { bindingProfiles, confidenceFailure, type ProfileCore } from '../src/acs/profiles.js';
 import { actionRecord, readTrace } from '../src/acs/records.js';
-import { memoryThread, user } from './memory_thread.js';
+import { memoryThread, user, type MemoryThread } from './memory_thread.js';
 
 const NO_RULES: ProfilePolicy = { minimum_confidence: null, grounding: [], destinations: [], trust_weights: {} };
 
-/** A core for one profile: `require_human: low` when `person`, and `policy`. */
-function core(policy: Partial<ProfilePolicy>, person = false): ProfileCore {
+// The core's context is what a host passes to `bindingProfiles`.
+const coreContextIsAProfileCore = (context: CoreContext): ProfileCore => context;
+void coreContextIsAProfileCore;
+
+/** A core for one profile: `require_human: low` when `person`, and `policy`; `warnings` its loading warnings. */
+function core(policy: Partial<ProfilePolicy>, person = false, warnings: Diagnostic[] = []): ProfileCore {
   return {
+    checkProfiles: () => ({ diagnostics: warnings, suggestions: [] }),
     profileFlags(_profiles: Json[], capability: CapabilityId): ProfileFlags {
       const { flags } = effectiveFlags(capability);
       return person ? { ...flags, requires_approval: true, person: true } : { ...flags, person: false };
@@ -29,6 +34,28 @@ function core(policy: Partial<ProfilePolicy>, person = false): ProfileCore {
     },
   };
 }
+
+const RANK: Record<Risk, number> = { low: 0, medium: 1, high: 2 };
+
+/**
+ * A core computing `risk_thresholds.require_human` and `block_autonomous`
+ * as the core does (§5.21.3): at the effective risk with the declared
+ * flags, a person when a profile's threshold covers it or lists the
+ * capability.
+ */
+const THRESHOLDS: ProfileCore = {
+  checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+  profileFlags(profiles: Json[], capability: CapabilityId, declared?: DeclaredFlags): ProfileFlags {
+    const { flags } = effectiveFlags(capability, declared);
+    const person = profiles.some((p) => {
+      const t = (p as { risk_thresholds?: { require_human?: Risk; block_autonomous?: string[] } }).risk_thresholds ?? {};
+      const human = t.require_human;
+      return (human !== undefined && RANK[flags.risk] >= RANK[human]) || (t.block_autonomous ?? []).includes(capability);
+    });
+    return { ...flags, requires_approval: flags.requires_approval || person, person };
+  },
+  profilePolicy: () => NO_RULES,
+};
 
 function classify(profiles: ReturnType<typeof bindingProfiles>, output: Record<string, unknown>) {
   return groundedTool({
@@ -53,7 +80,12 @@ describe('bindingProfiles', () => {
     expect(() => bindingProfiles(core({ destinations: [['mailto:*']] }), [{ domain: 'd' }])).toThrow(
       /allowed_destinations/,
     );
-    const handmade = { documents: [], policy: { ...NO_RULES, destinations: [[]] }, flags: core({}).profileFlags };
+    const handmade = {
+      documents: [],
+      policy: { ...NO_RULES, destinations: [[]] },
+      warnings: [],
+      flags: core({}).profileFlags,
+    };
     expect(() =>
       groundedTool({
         name: 'n',
@@ -64,6 +96,35 @@ describe('bindingProfiles', () => {
         execute: async () => ({ data: 1, confidence: 1, evidence_anchors: [] }) as never,
       }),
     ).toThrow(/allowed_destinations/);
+  });
+
+  it("reports each loading warning and keeps it (§5.21.2's W604: the member is ignored)", () => {
+    const w604: Diagnostic = {
+      code: 'W604',
+      name: 'UNKNOWN_FIELD',
+      severity: 'warning',
+      message: "unknown profile member 'risk_threshold' is ignored",
+      location: { profile: 'd', field: 'risk_threshold' },
+      suggestion: "did you mean 'risk_thresholds'?",
+    };
+    const documents = [{ domain: 'd', version: '1.0.0', risk_threshold: { require_human: 'low' } }];
+    const seen: Diagnostic[] = [];
+    const profiles = bindingProfiles(core({}, false, [w604]), documents, { onWarning: (d) => seen.push(d) });
+    expect(seen).toEqual([w604]);
+    expect(profiles.warnings).toEqual([w604]);
+    // Without a callback each warning goes to console.warn.
+    const logged: unknown[] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => void logged.push(args.join(' '));
+    try {
+      bindingProfiles(core({}, false, [w604]), documents);
+    } finally {
+      console.warn = original;
+    }
+    expect(logged).toEqual([
+      "bindingProfiles: W604 warning: unknown profile member 'risk_threshold' is ignored (did you mean 'risk_thresholds'?)",
+    ]);
+    expect(bindingProfiles(core({}), [{ domain: 'd' }], { onWarning: () => expect.fail('no warning') }).warnings).toEqual([]);
   });
 
   it('applies the minimum confidence as the core does', () => {
@@ -125,5 +186,164 @@ describe('a grounded tool under domain profiles (§5.21.3)', () => {
       return (await readTrace(t.state)).at(-1)!.recorded_by?.config_sha256;
     };
     expect(await run([{ domain: 'a' }])).not.toBe(await run([{ domain: 'b' }]));
+  });
+});
+
+describe('a composite under domain profiles (§5.18.4, §5.21.3)', () => {
+  const args = z.object({}).passthrough();
+  const save = groundedTool({
+    name: 'save',
+    capability: 'checkpoint',
+    description: 'save',
+    args,
+    execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+  });
+
+  /**
+   * `write` (mutate) and `batch` (invoke, `invokes: {write}`) under
+   * `documents`, registered in a thread. `composite-only`: the profiles are
+   * given to `batch` alone. `unprofiled-listed`: `batch` lists a definition
+   * of `write` the profiles were not given to, while the thread runs the
+   * one they were.
+   */
+  function setup(documents: Json[], mode?: 'composite-only' | 'unprofiled-listed') {
+    const profiles = bindingProfiles(THRESHOLDS, documents);
+    const writeTool = (p?: typeof profiles) =>
+      groundedTool({
+        name: 'write',
+        capability: 'mutate',
+        description: 'write',
+        args,
+        ...(p !== undefined ? { profiles: p } : {}),
+        execute: async () => ({ success: true, evidence_anchors: [] }),
+      });
+    const write = writeTool(mode === 'composite-only' ? undefined : profiles);
+    const nested: ToolResult[] = [];
+    const batch = groundedTool({
+      name: 'batch',
+      capability: 'invoke',
+      invokes: { write: mode === 'unprofiled-listed' ? writeTool() : write } as never,
+      description: 'batch',
+      args,
+      profiles,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('write', {}));
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const t = memoryThread();
+    for (const [n, tool] of Object.entries({ save, write, batch })) t.tools.set(n, tool);
+    return { t, nested };
+  }
+
+  const run = (t: MemoryThread, n: string) => t.tools.get(n)!.execute(t.state, {});
+
+  /** Ask for `batch`, approve it as `who`, and call it again. */
+  async function batchApprovedBy(t: MemoryThread, who: 'agent' | 'person'): Promise<ToolResult> {
+    expect((await run(t, 'save')).status).toBe('success');
+    const asked = await run(t, 'batch');
+    expect(asked.error_code).toBe('F502');
+    const digest = asked.error_data?.['digest'] as string;
+    if (who === 'agent') {
+      await decideApproval(t.state, user('bot'), digest, 'approved', Date.now(), undefined, { kind: 'agent' });
+    } else {
+      await decideApproval(t.state, user('alice'), digest, 'approved', Date.now());
+    }
+    return run(t, 'batch');
+  }
+
+  it('takes R with the tools it invokes: require_human: high asks a person for an invoke of a mutate', async () => {
+    const documents = [{ domain: 'd', version: '1.0.0', risk_thresholds: { require_human: 'high' } }];
+    // An invoke alone is medium; with the mutate it lists, R is high. Only
+    // the composite is given the profiles, so only its own R decides.
+    const { t, nested } = setup(documents, 'composite-only');
+    const refused = await batchApprovedBy(t, 'agent');
+    expect(refused.error_code).toBe('F502');
+    expect(refused.error).toMatch(/person's approval/);
+    expect(nested).toEqual([]);
+    expect((await readTrace(t.state)).filter((e) => e.action === 'write')).toEqual([]);
+
+    const { t: t2, nested: nested2 } = setup(documents);
+    expect((await batchApprovedBy(t2, 'person')).status).toBe('success');
+    expect(nested2.map((r) => r.status)).toEqual(['success']);
+    const trace = await readTrace(t2.state);
+    const composite = trace.find((e) => e.action === 'batch' && e.status === 'executed')!;
+    expect(composite).toMatchObject({ person_required: true, approval: { approvers: ['sa-user:alice'] } });
+    expect(trace.find((e) => e.action === 'write')).toMatchObject({
+      status: 'executed',
+      person_required: true,
+      covered_by: composite.seq,
+    });
+  });
+
+  it('asks a person for a composite that invokes a tool a profile requires one for (block_autonomous)', async () => {
+    const documents = [{ domain: 'd', version: '1.0.0', risk_thresholds: { block_autonomous: ['mutate'] } }];
+    const { t, nested } = setup(documents);
+    // C is invoke, which is not listed; the nested mutate is, and the
+    // composite's approval would cover it.
+    const refused = await batchApprovedBy(t, 'agent');
+    expect(refused.error_code).toBe('F502');
+    expect(nested).toEqual([]);
+
+    const { t: t2, nested: nested2 } = setup(documents);
+    expect((await batchApprovedBy(t2, 'person')).status).toBe('success');
+    expect(nested2.map((r) => r.status)).toEqual(['success']);
+    const trace = await readTrace(t2.state);
+    expect(trace.find((e) => e.action === 'batch' && e.status === 'executed')).toMatchObject({ person_required: true });
+    expect(trace.find((e) => e.action === 'write')).toMatchObject({ status: 'executed', person_required: true });
+  });
+
+  it('passes the requirement on through a composite of composites', async () => {
+    const profiles = bindingProfiles(THRESHOLDS, [
+      { domain: 'd', version: '1.0.0', risk_thresholds: { block_autonomous: ['mutate'] } },
+    ]);
+    const write = groundedTool({
+      name: 'write',
+      capability: 'mutate',
+      description: 'write',
+      args,
+      profiles,
+      execute: async () => ({ success: true, evidence_anchors: [] }),
+    });
+    const inner = groundedTool({
+      name: 'inner',
+      capability: 'invoke',
+      invokes: { write } as never,
+      description: 'inner',
+      args,
+      execute: async () => ({ result: true, evidence_anchors: [] }) as never,
+    });
+    const outer = groundedTool({
+      name: 'outer',
+      capability: 'invoke',
+      invokes: { inner } as never,
+      description: 'outer',
+      args,
+      execute: async () => ({ result: true, evidence_anchors: [] }) as never,
+    });
+    const t = memoryThread();
+    for (const [n, tool] of Object.entries({ save, outer })) t.tools.set(n, tool);
+    expect((await run(t, 'save')).status).toBe('success');
+    const asked = await run(t, 'outer');
+    const digest = asked.error_data?.['digest'] as string;
+    await decideApproval(t.state, user('bot'), digest, 'approved', Date.now(), undefined, { kind: 'agent' });
+    const refused = await run(t, 'outer');
+    expect(refused.error_code).toBe('F502');
+    expect(refused.error).toMatch(/person's approval/);
+  });
+
+  it("checks a nested call that needs a person as a call of its own when the composite's approval was not a person's", async () => {
+    const { t, nested } = setup(
+      [{ domain: 'd', version: '1.0.0', risk_thresholds: { block_autonomous: ['mutate'] } }],
+      'unprofiled-listed',
+    );
+    // The composite lists a `write` that needs no person, so it is approved
+    // by an agent and runs; the `write` the thread runs needs a person, so
+    // the composite's approval does not cover it.
+    expect((await batchApprovedBy(t, 'agent')).status).toBe('success');
+    expect(nested.map((r) => r.error_code)).toEqual(['F502']);
+    const entry = (await readTrace(t.state)).find((e) => e.action === 'write')!;
+    expect(entry).toMatchObject({ status: 'refused', code: 'F502', person_required: true });
+    expect(entry.covered_by).toBeUndefined();
   });
 });

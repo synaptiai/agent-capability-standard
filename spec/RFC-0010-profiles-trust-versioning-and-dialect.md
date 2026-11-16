@@ -84,7 +84,9 @@ required for the step itself: the request and the decision are those of an
 always-ask item, so no standing mandate covers the step and an unattended
 run does not ask, but the requirement is not a mark and does not pass to
 the data, the steps that read it or nested runs; its records carry
-`person_required`. `evidence_policy` becomes a grounding policy and a
+`person_required`. A composite tool whose approval covers a nested call a
+profile requires a person for (§5.18.4) is itself asked of a person.
+`evidence_policy` becomes a grounding policy and a
 minimum confidence (F504, `below_minimum_confidence`, and
 `invalid_confidence` for a `confidence` that is not a number from 0 to 1);
 `allowed_destinations` a destination policy; `trust_weights` the overrides
@@ -97,8 +99,10 @@ member that is not I-JSON), S304, V101 (any unknown capability id,
 top-level members only); no misspelled rule is ignored. `critical` is
 deprecated and read as `none`. The shipped profiles are migrated to 2.0.0.
 The executor, the validator (`--profile`), the Python adapter and runner
-implement it, and TypeScript reaches the same implementation through the
-WebAssembly core; `tests/conformance/profiles/load.json` and
+implement it; TypeScript reaches the same implementation through the
+WebAssembly core, and so does the Standard Agents binding
+(`groundedTool({profiles})`, with what `bindingProfiles` computes through
+it); `tests/conformance/profiles/load.json` and
 `tests/conformance/profiles/effective.json` are normative.
 
 An executor or safety layer that does not put one of these rules in force
@@ -108,14 +112,15 @@ validator applies only the flags (§5.21.1), so it refuses no profile for
 the other rules: it reports what a run under the profile would need. The
 reference executor checks a profile's grounding policy with the grounding
 check of §5.20 (RFC-0008), as a host's policy, in every frame and before
-the minimum confidence; the Python adapter applies it, and the minimum
-confidence, to the call outputs it sees (§5.20's hosts outside a
-workflow). A profile's destination policy is checked once the destination
-check of §4.4.2 lands with its own workstream (S5); until then the executor
-refuses to start or restore a run under a profile that sets
-`allowed_destinations`, and the Python adapter refuses it too, and, with
-`strict_mode=False` (which only logs a missing checkpoint), a
-`checkpoint_policy` that raises a flag. No shipped profile sets
+the minimum confidence; the Python adapter and the Standard Agents binding
+apply it, and the minimum confidence, to the call outputs they see (§5.20's
+hosts outside a workflow). A profile's destination policy is checked once
+the destination check of §4.4.2 lands with its own workstream (S5); until
+then the executor refuses to start or restore a run under a profile that
+sets `allowed_destinations`, the Python adapter and the Standard Agents
+binding refuse it too, and the Python adapter, with `strict_mode=False`
+(which only logs a missing checkpoint), refuses a `checkpoint_policy` that
+raises a flag. No shipped profile sets
 `allowed_destinations`, so every one applies as it is.
 
 ### 2) The schema dialect is defined, with a normative rendering

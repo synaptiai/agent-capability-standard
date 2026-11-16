@@ -11,7 +11,7 @@
  * refused rather than applied without it (§5.21.4).
  */
 import type { Json } from '@synaptiai/acs-core';
-import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
+import type { Diagnostic, ProfileFlags, ProfilePolicy, Report } from '@synaptiai/acs-core/wasm';
 import type { CapabilityId, DeclaredFlags } from './ontology.js';
 
 /** The applied profiles, as `groundedTool`'s `profiles` option takes them. */
@@ -22,12 +22,29 @@ export interface BindingProfiles {
   flags(capability: CapabilityId, declared?: DeclaredFlags): ProfileFlags;
   /** The rules besides flags (`CoreContext.profilePolicy`). */
   readonly policy: ProfilePolicy;
+  /**
+   * The warnings of loading the profiles (§5.21.2: W602, W603, W604), as
+   * `bindingProfiles` reported them: a member they name is ignored.
+   */
+  readonly warnings: readonly Diagnostic[];
 }
 
 /** What `bindingProfiles` needs of a core context (`CoreContext` from `@synaptiai/acs-core/wasm`). */
 export interface ProfileCore {
+  checkProfiles(profiles: Json[]): Report;
   profileFlags(profiles: Json[], capability: CapabilityId, declared?: DeclaredFlags): ProfileFlags;
   profilePolicy(profiles: Json[]): ProfilePolicy;
+}
+
+/** How `bindingProfiles` reports a warning of loading the profiles. */
+export interface BindingProfilesOptions {
+  /** Called once for each warning; defaults to `console.warn`. */
+  onWarning?: (warning: Diagnostic) => void;
+}
+
+/** A warning as one line: its code, message and suggestion. */
+function warningText(d: Diagnostic): string {
+  return `bindingProfiles: ${d.code} ${d.severity}: ${d.message}${d.suggestion !== undefined ? ` (${d.suggestion})` : ''}`;
 }
 
 /** The problem with applying `policy` in this binding, if any: a rule it does not put in force. */
@@ -41,17 +58,27 @@ export function unappliedRule(policy: ProfilePolicy): string | null {
  * Check `documents` with the core and keep what a grounded tool applies.
  * Throws the core's error (`CoreError`, kind `bad_request`, with the
  * diagnostics of §5.21.2) for a profile with an error, and an `Error` for a
- * profile that sets a rule this binding does not apply.
+ * profile that sets a rule this binding does not apply. Reports each
+ * warning (a misspelled top-level member is W604, and ignored) to
+ * `onWarning`, and keeps them as `warnings` (§5.21.4).
  */
-export function bindingProfiles(core: ProfileCore, documents: readonly Json[]): BindingProfiles {
+export function bindingProfiles(
+  core: ProfileCore,
+  documents: readonly Json[],
+  options: BindingProfilesOptions = {},
+): BindingProfiles {
   const list = Object.freeze([...documents]);
   const policy = core.profilePolicy([...list]);
   const problem = unappliedRule(policy);
   if (problem !== null) throw new Error(problem);
+  const warnings = Object.freeze(core.checkProfiles([...list]).diagnostics.filter((d) => d.severity === 'warning'));
+  const report = options.onWarning ?? ((d: Diagnostic) => console.warn(warningText(d)));
+  for (const w of warnings) report(w);
   const flags = new Map<string, ProfileFlags>();
   return Object.freeze({
     documents: list,
     policy,
+    warnings,
     flags(capability: CapabilityId, declared?: DeclaredFlags): ProfileFlags {
       const key = JSON.stringify([capability, declared ?? null]);
       let found = flags.get(key);

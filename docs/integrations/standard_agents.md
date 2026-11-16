@@ -712,14 +712,19 @@ A grounded tool takes four more options:
   ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)), as the core
   computes them: `bindingProfiles(context, documents)` with a `CoreContext`
   of `@synaptiai/acs-core/wasm`, once, passed to every tool. They raise
-  each capability's flags; a call they require a person for counts only
-  approvals the deployment attests as a person's (`kind: human`) and its
-  entries carry `person_required`; their grounding policies join
-  `grounding`; and an output below their `minimum_confidence` fails with
-  F504 (`reason_code`), after the grounding check. A profile with an error
-  throws, and so does one that sets `allowed_destinations`, a destination
-  policy this binding does not check yet. The profiles are part of every
-  record's `config_sha256`.
+  each capability's flags at the call's effective risk, with the tools it
+  `invokes`; a call they require a person for counts only approvals the
+  deployment attests as a person's (`kind: human`) and its entries carry
+  `person_required`. A composite that invokes such a tool needs a person's
+  approval too, since its approval covers the nested call (§5.18.4); a
+  nested call that needs a person is not covered by an approval no person
+  gave. Their grounding policies join `grounding`; and an output below
+  their `minimum_confidence` fails with F504 (`reason_code`), after the
+  grounding check. A profile with an error throws, and so does one that
+  sets `allowed_destinations`, a destination policy this binding does not
+  check yet; each warning (a misspelled member is W604, and ignored) goes
+  to `onWarning`, `console.warn` by default, and stays in `warnings`. The
+  profiles are part of every record's `config_sha256`.
 
 ### Checking a prompt before it runs
 

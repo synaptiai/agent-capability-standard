@@ -672,7 +672,7 @@ members of its `detail`.
 | `step_skipped` | The step does not run: its condition is false, a gate skipped it, or it needed approval and `when_unattended: skip` applied | `reason` |
 | `step_deferred` | The step is deferred (§5.14) | `reason` |
 | `step_completed` | The step has its output, before its after-gates are evaluated | none |
-| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the host's reason token (§5.19.7), `reason_ignored` a `reason` the host gave that is not one | `code`, `message`, `reason`, `reason_ignored` |
+| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the failure's reason token (§5.19.7), the host's or one the executor raises itself (`below_minimum_confidence`, say), `reason_ignored` a `reason` the host gave that is not one | `code`, `message`, `reason`, `reason_ignored` |
 | `expression_error` | A condition, a gate's `when` or a failure mode's `when` did not evaluate (R405) | `site`, `code`, `message` |
 | `gate_fired` | A gate fires, whatever its action | `gate`, `action`, `message` |
 | `run_ended` | A gate with `action: end` ends the run, or the nested run it fired in | `message` |

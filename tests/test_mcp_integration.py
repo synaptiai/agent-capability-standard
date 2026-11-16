@@ -9,6 +9,7 @@ Since claude_agent_sdk may not be installed, these tests focus on:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -272,8 +273,13 @@ class TestGroundedServerGuard:
 
     @staticmethod
     def _served(
-        adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+        adapter: GroundedAgentAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+        output: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        """The served tools: ``done`` (control-only) and ``find``
+        (search), which returns ``output`` as its structured content when
+        given, else the text ``found``."""
         import claude_agent_sdk
         from claude_agent_sdk import tool
 
@@ -285,6 +291,11 @@ class TestGroundedServerGuard:
 
         @tool("find", "Searches.", {"q": str})
         async def find(args: dict[str, object]) -> dict[str, object]:
+            if output is not None:
+                return {
+                    "content": [{"type": "text", "text": json.dumps(output)}],
+                    "structuredContent": output,
+                }
             return {"content": [{"type": "text", "text": "found"}]}
 
         done.metadata = {"control": True}  # type: ignore[attr-defined]
@@ -387,6 +398,51 @@ class TestGroundedServerGuard:
         assert exported["code"] == "F505"
         assert exported["call_id"] == "c1"
         assert not [r for r in adapter.call_records if r["decision"] == "refused"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("evidence_policy", "code", "reason"),
+        [
+            ({"require_grounding": ["search"]}, "F505", None),
+            ({"minimum_confidence": 0.9}, "F504", "below_minimum_confidence"),
+        ],
+    )
+    async def test_an_applied_profile_alone_checks_a_served_tool_output(
+        self,
+        ontology_path: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        evidence_policy: dict[str, object],
+        code: str,
+        reason: str | None,
+    ) -> None:
+        """A profile's grounding policy and minimum confidence (section
+        5.21.3) apply to the output of a tool the adapter serves with no
+        ``config.grounding``: F505 for an ungrounded output, F504 for one
+        below the minimum, each the failure of the call that ran."""
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+                profiles=[
+                    {
+                        "domain": "d",
+                        "version": "1.0.0",
+                        "evidence_policy": evidence_policy,
+                    }
+                ],
+            )
+        )
+        low = {"results": [], "confidence": 0.1, "evidence_anchors": []}
+        served = self._served(adapter, monkeypatch, output=low)
+        assert await self._pre(adapter, "mcp__srv__find", {"q": "x"}) == {}
+        result = await served["find"].handler({"q": "x"})  # type: ignore[attr-defined]
+        assert result["is_error"] is True
+        assert result["content"][0]["text"].startswith(f"{code} ")
+        records = [r for r in adapter.call_records if r.get("call") == "c1"]
+        assert [r["decision"] for r in records] == ["allowed", "failed"]
+        assert records[1]["diagnostic"]["code"] == code
+        assert records[1].get("reason") == reason
 
 
 # =============================================================================

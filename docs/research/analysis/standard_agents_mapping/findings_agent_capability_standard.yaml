@@ -241,7 +241,8 @@ findings:
     from RFC-0010: a host applies profiles to a run at start, a safety layer to the calls it covers, a
     validator may be given them; a workflow''s `profile` field stays descriptive. Rules only tighten (trust
     weights replace, §8.3); every member''s effect is stated in effective flags (§5.2.1) and §5.14, a person
-    for `require_human`/`block_autonomous` without a mark (records carry `person_required`), `checkpoint`
+    for `require_human`/`block_autonomous` without a mark (records carry `person_required`; a composite
+    whose approval covers such a call is asked of a person, §5.18.4), `checkpoint`
     steps exempt from `checkpoint_policy`, a grounding policy (`require_grounding` with
     `required_anchor_types` as kinds, §5.20), a minimum confidence (F504
     `below_minimum_confidence`/`invalid_confidence`) checked after grounding; key grammars are capability
@@ -252,8 +253,10 @@ findings:
     checkpoint policy, the person, grounding through S4''s check in every frame, minimum confidence, waited
     delegations included), exposed to Python (`AppliedProfiles`, `WorkflowRunner(profiles=)`,
     `GroundedAgentConfig(profiles=)` for flags, the person, grounding and minimum confidence on the outputs
-    the adapter sees, `_core.check_confidence`), to TypeScript through the WebAssembly core, and in the
-    Standard Agents binding (`groundedTool({profiles})`, `bindingProfiles`). Normative vectors
+    of the tools it serves, `_core.check_confidence`), to TypeScript through the WebAssembly
+    core, and in the Standard Agents binding (`groundedTool({profiles})` at the call''s effective risk with
+    its `invokes`, a composite whose approval covers a call needing a person asked of a person,
+    `bindingProfiles` reporting loading warnings). Normative vectors
     tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_* (profile_grounding_*
     among them); validator fixtures with `profiles`; the shipped profiles migrated to 2.0.0, each applied as
     it is by the executor, the adapter and the binding; the compliance documents say where a setting is
