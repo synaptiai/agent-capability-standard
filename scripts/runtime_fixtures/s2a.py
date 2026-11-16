@@ -12,11 +12,13 @@ from runtime_fixtures.helpers import (
     CP,
     POLICY,
     approve,
+    err,
     inv,
     mutate,
     out,
     resume,
     st,
+    tick,
     wf,
 )
 
@@ -896,7 +898,7 @@ def _resumption(add):
     )
     add(
         "resume_deferred_handler_loop",
-        "A recovery loop back to a re-entered queued step during a resumption runs that step again and then goes on with the resumption: the second request names the same queued action, the record is updated in place again, the step that escalated in the first run is not run again, and the deferred handler still runs last, with the escalation's cause (§5.14.1).",
+        "A recovery loop back to a re-entered queued step whose call failed runs that step again and then goes on with the resumption: the step carried its queued action out, so the second request names no queued action and its pass has a record of its own beside the failed one; the step that escalated in the first run is not run again, and the deferred handler still runs last, with the escalation's cause (§5.14.1).",
         escalating(handler_first=True, loop_on_mutate=True),
         CHECKPOINTED
         + [
@@ -910,7 +912,8 @@ def _resumption(add):
             },
             {"expect": inv("mutate", step=3), "respond": down},
             {
-                "expect": queued_request(3, "run-1/w/3/0", approver=HUMAN),
+                "expect": {"kind": "RequestApproval", "step": 3, "approver": HUMAN},
+                "absent": ["queued_action_id"],
                 "respond": approve("d2"),
             },
             {
@@ -925,7 +928,10 @@ def _resumption(add):
             "outcome": "escalated",
             "cause": "R402",
             "deferred": [],
-            "action_records": [{"action_id": "run-1/w/3/0", "status": "executed"}],
+            "action_records": [
+                {"action_id": "run-1/w/3/0", "status": "failed", "code": "R402"},
+                {"action_id": "run-1/w/3/1", "status": "executed"},
+            ],
         },
         ["run_resumed", "loop", "invoke_started"],
         attendance="unattended",
@@ -1209,9 +1215,73 @@ def _resumption(add):
         attendance="unattended",
     )
 
-    # A queued step keeps its queued action until it goes on: a recovery
-    # loop that runs it again and a re-ask after a recheck continue it, and
-    # the loop runs only that step again.
+    # A queued step keeps its queued action until it goes on or carries it
+    # out (calls its capability, whatever the result): a recovery loop that
+    # runs it again before then and a re-ask after a recheck continue it;
+    # once it has called its capability, a loop runs it as a new action. A
+    # loop runs only that step again.
+    paging_task = st(
+        "delegate",
+        "d",
+        after_deferral="run",
+        input_bindings={"task": {"page": "oncall"}, "agent": "pager"},
+    )
+    refused_again = mutate(
+        approval=DEFER,
+        failure_modes=[
+            {
+                "condition": "the change was refused",
+                "on_error": "F502",
+                "action": "request_more_context",
+                "recovery": {"goto_step": "m", "max_loops": 1},
+            }
+        ],
+    )
+
+    def paged_first(queued):
+        """The first run delegates and defers the mutate, then resumes."""
+        return CHECKPOINTED + [
+            {
+                "expect": inv("delegate", step=3),
+                "respond": out(task_id="t1", accepted=True),
+            },
+            deferred_end({"step": 2, "action_id": queued}),
+            resume(at=3600000),
+        ]
+
+    add(
+        "resume_loop_keeps_queue",
+        "A recovery loop back to a re-entered queued step that has not called its capability (its request was rejected, F502) runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (§5.14.1).",
+        {"w": wf([CP, POLICY, refused_again, paging_task], requires=["approval@1"])},
+        paged_first("run-1/w/2/0")
+        + [
+            {
+                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "respond": rejected("d1"),
+            },
+            {
+                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "respond": approve("d2"),
+            },
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
+            {"expect": inv("mutate", step=2), "respond": out(success=True)},
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "deferred": [],
+            "outputs": {"d": {"task_id": "t1"}},
+            "action_records": [
+                {
+                    "action_id": "run-1/w/2/0",
+                    "status": "executed",
+                    "approval": {"decision_id": "d2"},
+                }
+            ],
+        },
+        ["run_resumed", "loop"],
+        attendance="unattended",
+    )
     retried = mutate(
         approval=DEFER,
         failure_modes=[
@@ -1223,48 +1293,254 @@ def _resumption(add):
             }
         ],
     )
-    paging_task = st(
-        "delegate",
-        "d",
-        after_deferral="run",
-        input_bindings={"task": {"page": "oncall"}, "agent": "pager"},
-    )
-    add(
-        "resume_retry_keeps_queue",
-        "A recovery loop back to a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (§5.14.1).",
-        {"w": wf([CP, POLICY, retried, paging_task], requires=["approval@1"])},
-        CHECKPOINTED
-        + [
+
+    def failed_call(queued):
+        """Resumed: the queued mutate's call fails, a loop runs it again."""
+        return paged_first(queued) + [
             {
-                "expect": inv("delegate", step=3),
-                "respond": out(task_id="t1", accepted=True),
-            },
-            deferred_end({"step": 2, "action_id": "run-1/w/2/0"}),
-            resume(at=3600000),
-            {
-                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "expect": queued_request(2, queued, approver=HUMAN),
                 "respond": approve("d1"),
             },
             {"expect": {"kind": "CreateCheckpoint", "step": 2}, "respond": cp_answer},
-            {"expect": inv("mutate", step=2), "respond": down},
             {
-                "expect": queued_request(2, "run-1/w/2/0", approver=HUMAN),
+                "expect": inv("mutate", step=2, idempotency_key="run-1:7"),
+                "respond": err("R402", "applied half the change, then failed"),
+            },
+            {
+                "expect": {"kind": "RequestApproval", "step": 2, "approver": HUMAN},
+                "absent": ["queued_action_id"],
                 "respond": approve("d2"),
             },
             {
                 "expect": {"kind": "CreateCheckpoint", "step": 2},
                 "respond": {"kind": "Checkpoint", "checkpoint_id": "cp3"},
             },
-            {"expect": inv("mutate", step=2), "respond": out(success=True)},
-        ],
+            {
+                "expect": inv("mutate", step=2, idempotency_key="run-1:10"),
+                "respond": out(success=True),
+            },
+        ]
+
+    first_pass = {
+        "action_id": "run-1/w/2/0",
+        "status": "failed",
+        "code": "R402",
+        "idempotency_key": "run-1:7",
+        "checkpoint_id": "cp2",
+        "approval": {"decision_id": "d1"},
+    }
+    second_pass = {
+        "status": "executed",
+        "capability": "mutate",
+        "idempotency_key": "run-1:10",
+        "checkpoint_id": "cp3",
+        "approval": {"decision_id": "d2"},
+    }
+    add(
+        "resume_failed_call_then_loop",
+        "A re-entered queued step whose call fails has carried its queued action out, whatever the result: a recovery loop that runs it again asks for a new action, whose request names no queued action, and writes a record of its own. The queued record keeps the failed pass, with its decision, checkpoint and idempotency key; the new one the next pass's. The step that declares after_deferral: run, which ran in the first run, does not delegate again (§5.14.1, §6.4).",
+        {"w": wf([CP, POLICY, retried, paging_task], requires=["approval@1"])},
+        failed_call("run-1/w/2/0"),
         {
             "kind": "Completed",
             "outcome": "completed",
             "deferred": [],
             "outputs": {"d": {"task_id": "t1"}},
-            "action_records": [{"action_id": "run-1/w/2/0", "status": "executed"}],
+            "action_records": [first_pass, dict(second_pass, action_id="run-1/w/2/1")],
         },
         ["run_resumed", "loop"],
+        attendance="unattended",
+    )
+    add(
+        "resume_failed_call_then_loop_actions",
+        "In record mode actions, a re-entered queued step whose call fails and that a recovery loop runs again has one record for each pass: the queued record, failed with the first decision and key, and a new one for the loop's pass (§5.14.1, §6.4).",
+        {"w": wf([CP, POLICY, retried, paging_task], requires=["approval@1"])},
+        failed_call("run-1/w/2/2"),
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "deferred": [],
+            "action_records": [
+                {"capability": "checkpoint", "status": "executed"},
+                {"capability": "constrain", "status": "executed"},
+                dict(first_pass, action_id="run-1/w/2/2"),
+                {"capability": "delegate", "status": "executed"},
+                dict(second_pass, action_id="run-1/w/2/4"),
+            ],
+        },
+        ["run_resumed", "loop"],
+        attendance="unattended",
+        records="actions",
+    )
+    # Every way a step performs its capability carries its queued action
+    # out: starting its nested run, waiting for its event, evaluating its
+    # quorum. Each, failing and looped back to, asks for a new action.
+    looped = {
+        "condition": "it failed",
+        "on_error": ["R401", "R402", "F504"],
+        "action": "request_more_context",
+        "recovery": {"goto_step": "x", "max_loops": 1},
+    }
+    nested_fails = st(
+        "invoke",
+        "x",
+        approval=DEFER,
+        requires_approval=True,
+        workflow_id="child",
+        input_bindings={"workflow": "child"},
+        failure_modes=[looped],
+    )
+    child = wf([st("retrieve", "r", input_bindings={"target": "config"})])
+    add(
+        "resume_failed_invoke_then_loop",
+        "A re-entered queued invoke step carries its queued action out when its nested run starts: a nested run that fails, looped back to, asks for a new action with a record of its own beside the failed one (§5.14.1).",
+        {
+            "w": wf([nested_fails], requires=["approval@1"]),
+            "child": child,
+        },
+        [
+            deferred_end({"step": 0, "action_id": "run-1/w/0/0"}),
+            resume(at=3600000),
+            {"expect": queued_request(0, "run-1/w/0/0"), "respond": approve("d1")},
+            {"expect": inv("retrieve", frame=["w", "child"]), "respond": down},
+            {
+                "expect": {"kind": "RequestApproval", "step": 0},
+                "absent": ["queued_action_id"],
+                "respond": approve("d2"),
+            },
+            {
+                "expect": inv("retrieve", frame=["w", "child"]),
+                "respond": out(data=[1], confidence=1),
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "deferred": [],
+            "action_records": [
+                {"action_id": "run-1/w/0/0", "status": "failed", "code": "R402"},
+                {"action_id": "run-1/w/0/1", "status": "executed"},
+            ],
+        },
+        ["run_resumed", "loop"],
+        attendance="unattended",
+    )
+    waits = st(
+        "receive",
+        "x",
+        approval=DEFER,
+        requires_approval=True,
+        timeout="1h",
+        wait={"event_type": "job.done"},
+        failure_modes=[looped],
+    )
+    add(
+        "resume_failed_wait_then_loop",
+        "A re-entered queued step that waits for its event carries its queued action out when the wait starts: a wait that times out, looped back to, asks for a new action with a record of its own beside the failed one (§5.14.1).",
+        {"w": wf([waits], requires=["approval@1", "wait@1"])},
+        [
+            deferred_end({"step": 0, "action_id": "run-1/w/0/0"}),
+            resume(at=3600000),
+            {"expect": queued_request(0, "run-1/w/0/0"), "respond": approve("d1")},
+            {"expect": {"kind": "AwaitEvent", "step": 0, "deadline": 7200000}},
+            tick(7200001),
+            {
+                "expect": {"kind": "RequestApproval", "step": 0},
+                "absent": ["queued_action_id"],
+                "respond": approve("d2"),
+            },
+            {
+                "expect": {"kind": "AwaitEvent", "step": 0},
+                "respond": {"kind": "Event", "event": {"event_type": "job.done"}},
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "deferred": [],
+            "action_records": [
+                {"action_id": "run-1/w/0/0", "status": "failed", "code": "R401"},
+                {"action_id": "run-1/w/0/1", "status": "executed"},
+            ],
+        },
+        ["run_resumed", "loop"],
+        attendance="unattended",
+    )
+    quorum_gate = st(
+        "constrain",
+        "x",
+        approval=DEFER,
+        requires_approval=True,
+        input_bindings={
+            "target": "${verdicts.data}",
+            "constraints": ["two approvals"],
+            "action_on_violation": "block",
+        },
+        quorum={
+            "verdicts": "${verdicts.data}",
+            "reviewers": ["ra", "rb"],
+            "vocabulary": ["approve", "request_changes"],
+            "pass_values": ["approve"],
+            "blocking_values": ["request_changes"],
+            "min_pass": 2,
+            "pinned_to": "${change}",
+        },
+        failure_modes=[looped],
+    )
+    reviewers = [
+        st(
+            "delegate",
+            name,
+            input_bindings={"task": {"diff": "${change}"}, "agent": agent},
+        )
+        for name, agent in (("ra", "a"), ("rb", "b"))
+    ]
+    verdicts = st("receive", "verdicts", input_bindings={"accept_from": ["a", "b"]})
+    add(
+        "resume_failed_quorum_then_loop",
+        "A re-entered queued quorum step carries its queued action out when the executor evaluates its quorum: a quorum that is not met (F504), looped back to, asks for a new action with a record of its own beside the failed one (§5.14.1, §5.16).",
+        {
+            "w": wf(
+                [*reviewers, verdicts, quorum_gate],
+                inputs={"change": {"type": "string", "required": True}},
+                requires=["approval@1", "delegation@1", "quorum@1"],
+            )
+        },
+        [
+            {"expect": inv("delegate", step=0), "respond": out(accepted=True)},
+            {"expect": inv("delegate", step=1), "respond": out(accepted=True)},
+            {
+                "expect": inv("receive", step=2),
+                "respond": out(
+                    data=[
+                        {"reviewer_id": "a", "value": "approve", "pinned": "c1"},
+                        {
+                            "reviewer_id": "b",
+                            "value": "request_changes",
+                            "pinned": "c1",
+                        },
+                    ]
+                ),
+            },
+            deferred_end({"step": 3, "action_id": "run-1/w/3/0"}),
+            resume(at=3600000),
+            {"expect": queued_request(3, "run-1/w/3/0"), "respond": approve("d1")},
+            {
+                "expect": {"kind": "RequestApproval", "step": 3},
+                "absent": ["queued_action_id"],
+                "respond": approve("d2"),
+            },
+        ],
+        {
+            "kind": "Failed",
+            "code": "R404",
+            "action_records": [
+                {"action_id": "run-1/w/3/0", "status": "failed", "code": "F504"},
+                {"action_id": "run-1/w/3/1", "status": "failed", "code": "F504"},
+            ],
+        },
+        ["run_resumed", "quorum", "loop", "recovery_exhausted"],
+        inputs={"change": "c1"},
         attendance="unattended",
     )
     rechecked = guarded(
@@ -1761,7 +2037,7 @@ def _resumption_records_and_loops(add, unavailable, down, cp_answer):
     paging = ["w", "oncall"]
     add(
         "resume_loop_keeps_handler_run",
-        "A recovery loop during a resumption whose range holds the deferred handler does not run the handler: the handler keeps its place last, its kept nested run and that run's queued action, so the nested run continues without running its first step again, and its request names the queued action (§5.14.1).",
+        "A recovery loop during a resumption whose range holds the deferred handler does not run the handler: the handler keeps its place last, its kept nested run and that run's queued action, so the nested run continues without running its first step again, and its request names the queued action. The step that looped had called its capability, so its loop pass is a new action (§5.14.1).",
         {
             "w": wf([CP, POLICY, page, m, o], requires=["approval@1", "recovery@1"]),
             "oncall": oncall,
@@ -1790,7 +2066,8 @@ def _resumption_records_and_loops(add, unavailable, down, cp_answer):
             {"expect": inv("mutate", step=3), "respond": down},
             {"expect": inv("constrain", step=1), "respond": out(compliant=True)},
             {
-                "expect": queued_request(3, "run-1/w/3/0", approver=HUMAN),
+                "expect": {"kind": "RequestApproval", "step": 3, "approver": HUMAN},
+                "absent": ["queued_action_id"],
                 "respond": approve("d2"),
             },
             {
@@ -1816,8 +2093,9 @@ def _resumption_records_and_loops(add, unavailable, down, cp_answer):
             "cause": "R402",
             "deferred": [],
             "action_records": [
-                {"action_id": "run-1/w/3/0", "status": "executed"},
+                {"action_id": "run-1/w/3/0", "status": "failed", "code": "R402"},
                 {"action_id": "run-1/w/oncall/3/1", "status": "executed"},
+                {"action_id": "run-1/w/3/2", "status": "executed"},
             ],
         },
         ["run_resumed", "loop", "invoke_resumed"],

@@ -647,7 +647,7 @@ findings:
     and refusal; a recovery loop runs again only the steps from its target to the step that looped, a
     deferred handler among them keeping its nested run, and the resumption goes on; the queued actions of a
     run that did not end `deferred` are abandoned. `Run.resume` (core/src/exec/mod.rs, machine.rs),
-    `_core.Run.resume`, `WorkflowRunner.resume`; twenty-seven `resume_*` runtime fixtures,
+    `_core.Run.resume`, `WorkflowRunner.resume`; thirty-two `resume_*` runtime fixtures,
     core/tests/runtime.rs and tests/test_runner.py. RFC-0006 Part A, decision A5.'
   concerns:
   - approval-human

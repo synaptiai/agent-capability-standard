@@ -779,10 +779,11 @@ fn failed_rollback_fails_the_approved_record() {
 }
 
 #[test]
-fn reused_queued_record_names_only_its_pass_checkpoint() {
-    // A resumed queued step's record is updated in place; a pass refused
-    // before it ran used no checkpoint, so the record names none, though
-    // an earlier pass used one (§6.4, §5.14.1).
+fn refused_loop_pass_names_no_checkpoint() {
+    // A resumed queued step whose call failed carried its queued action
+    // out: that record keeps its pass's checkpoint, and the loop's pass is
+    // a new action. Refused before it ran, it used no checkpoint, so its
+    // record names none, though the earlier pass used one (§6.4, §5.14.1).
     let catalog = wf(json!([
         checkpoint(),
         policy(),
@@ -815,7 +816,10 @@ fn reused_queued_record_names_only_its_pass_checkpoint() {
     decide(&mut run, "d2", "rejected", 10);
     let end = end(&run);
     assert_eq!(end["code"], "F502");
-    let record = &end["action_records"][0];
+    let first = &end["action_records"][0];
+    assert_eq!(first["status"], "failed");
+    assert_eq!(first["checkpoint_id"], "cp2");
+    let record = &end["action_records"][1];
     assert_eq!(record["status"], "rejected");
     assert!(
         record.get("checkpoint_id").is_none(),
@@ -918,6 +922,71 @@ fn snapshot_v1_tampered_terminal_refused() {
             "{name}: a terminal action that differs from the state was restored"
         );
     }
+}
+
+/// A version-1 state saved in the middle of a run (§5.19.4): the records
+/// this executor goes on writing carry the members §6.4 requires, which a
+/// 1.1 executor did not write, and the checkpoint the pass consumed before
+/// the save; a pass that began after an earlier pass consumed one names
+/// none; a record 1.1 settled keeps its members.
+#[test]
+fn snapshot_v1_running_records_get_their_members() {
+    let cases = recorded_v1();
+    let restore = |name: &str| {
+        let case = cases.iter().find(|c| c["name"] == name).unwrap();
+        Run::restore(&ctx(), &case["catalog"], &snapshot_of(case), None).unwrap()
+    };
+    let members = |r: &Value, step: u64, capability: &str| {
+        assert_eq!(r["run_id"], "run-1", "{r}");
+        assert_eq!(r["frame"], json!(["w"]), "{r}");
+        assert_eq!(r["step"], step, "{r}");
+        assert_eq!(r["capability"], capability, "{r}");
+    };
+
+    // The call of an approved step was pending: its record ends executed,
+    // with the checkpoint 1.1 consumed for it and the key of the call.
+    let mut run = restore("approved_call_pending");
+    answer(&mut run, output(json!({"success": true})), 0);
+    let records = end(&run)["action_records"].clone();
+    let [r] = records.as_array().unwrap().as_slice() else {
+        panic!("{records}")
+    };
+    assert_eq!(r["status"], "executed");
+    members(r, 2, "mutate");
+    assert_eq!(r["checkpoint_id"], "cp1");
+    assert_eq!(r["idempotency_key"], "run-1:4");
+
+    // A recovery loop's second pass was asked for approval after the first
+    // consumed cp1: rejected now, its record names no checkpoint. The first
+    // pass's record, settled by 1.1, is as 1.1 wrote it.
+    let mut run = restore("loop_second_pass_asked");
+    let action = end(&run);
+    let decision = serde_json::from_value(json!({"kind": "Decision", "decision_id": "d2",
+        "decision": "rejected", "approvers": ["alice"], "digest": action["digest"]}))
+    .unwrap();
+    run.submit(action["id"].as_u64().unwrap(), decision, 0)
+        .unwrap();
+    let records = end(&run)["action_records"].clone();
+    let [first, second] = records.as_array().unwrap().as_slice() else {
+        panic!("{records}")
+    };
+    assert_eq!(first["status"], "failed");
+    assert!(first.get("run_id").is_none(), "{first}");
+    assert_eq!(second["status"], "rejected");
+    members(second, 2, "mutate");
+    assert!(second.get("checkpoint_id").is_none(), "{second}");
+
+    // A deferral's planned record in a run still going: the run ends
+    // deferred, and the record carries the members.
+    let mut run = restore("deferral_running");
+    answer(&mut run, output(json!({"data": [1], "confidence": 1})), 0);
+    let end = end(&run);
+    assert_eq!(end["outcome"], "deferred");
+    let [r] = end["action_records"].as_array().unwrap().as_slice() else {
+        panic!("{end}")
+    };
+    assert_eq!(r["status"], "planned");
+    members(r, 2, "mutate");
 }
 
 #[test]

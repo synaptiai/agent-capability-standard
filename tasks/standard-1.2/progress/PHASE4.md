@@ -878,3 +878,178 @@ new one-step fixtures), trace 42% mean and 47% of all bytes; after taking,
   /rfcs/0006/, /guides/running-workflows/, /guides/standard-agents/,
   /guides/claude-agent-sdk/, /community/release-notes/,
   /workflows/roadmap/): no violations, no sideways scroll.
+
+## Round 2 — core-rust, ci-build
+
+Four issues, all in core-rust; all real, none rejected. No ci-build issue
+was reported. Each was reproduced with the reviewer's scripts before the
+fix (pointed at this tree), and each code change has a test that fails
+without it.
+
+1. **A re-entered queued step whose call failed, looped back to, rewrote
+   the record of the call (medium).** Real, reproduced
+   (`s_queued_loop.py`): attended throughout, two records
+   (`run-1/w/2/0 failed R402 run-1:4`, `run-1/w/2/1 executed run-1:8`);
+   deferred, then resumed, the mutate was called twice (keys `run-1:6`,
+   `run-1:10`) under two decisions and one record remained
+   (`run-1/w/2/0 executed run-1:10 d8`), in record mode `actions` too. That
+   breaks §6.4 (one record for each pass; the pass's key on its record) and
+   loses a call that may have taken effect (R402 is "failed", not "did
+   nothing"). Root cause: `Frame.queued` closed only in `after()`, when the
+   step succeeded. Fix (`machine.rs`): `carry_out_queued` closes it at each
+   point where the step performs its capability: its `InvokeCapability`
+   (after the pass's key is on the record), the `AwaitEvent` of its `wait`,
+   the start of an `invoke`'s nested run, the executor's quorum evaluation.
+   `after()`'s close went (every step that completes passes one of these).
+   A failure then marks the record `failed` (issue 2), and a loop's pass
+   asks for a new action, with a record of its own and no
+   `queued_action_id`. A loop before the call (a rejected request, a
+   checkpoint that could not be taken) still continues the queued action,
+   as item 6 says. Standard: §5.14.1 item 5 ("before it goes on or carries
+   the action out"), item 6 defines carrying the action out (performing its
+   capability, whatever the result: the record is then that pass's, and a
+   loop asks for a new action), §6.4 (the passes of a re-entered queued
+   step before it carries its action out share its record), Appendix D; RFC-0006 A5 (with the
+   reason) and A7; CHANGELOG's resumption entry (it also said "a retry
+   included", and a retry does not ask); the running-workflows guide.
+   Fixtures: `resume_retry_keeps_queue`, which pinned the old behaviour,
+   is replaced by `resume_loop_keeps_queue` (the request is rejected, F502,
+   and the loop's request names the same queued action; one record, `d2`)
+   and `resume_failed_call_then_loop` (approvals) and `..._actions` (record
+   mode `actions`): the queued record `failed` R402 with `d1`, `cp2` and
+   `run-1:7`, a new record `executed` with `d2`, `cp3` and `run-1:10`, the
+   second request with no `queued_action_id` (`absent`). The other three
+   ways are pinned by `resume_failed_invoke_then_loop`,
+   `resume_failed_wait_then_loop` (R401 at the deadline) and
+   `resume_failed_quorum_then_loop` (F504, then R404 when the loop is
+   exhausted). `resume_deferred_handler_loop` and
+   `resume_loop_keeps_handler_run` looped after a failed call: they now
+   expect a request with no queued action and a record of the loop's pass.
+   Tests: `tests/test_runner.py`
+   `test_a_queued_step_names_its_action_until_it_goes_on` plays
+   `resume_loop_keeps_queue` and `resume_recheck_reask`; new
+   `test_a_queued_step_whose_call_failed_carried_its_action_out` (both
+   modes: two keys, the queued record failed with `d1` and the first key,
+   the new one with `d2` and the second); the "does not repeat what ran
+   ahead" test plays `resume_failed_call_then_loop`; the handler-run test
+   expects three records. `core/tests/host_protocol.rs`
+   `reused_queued_record_names_only_its_pass_checkpoint` encoded the old
+   rule (a refused loop pass after a failed call reused the queued record)
+   and is now `refused_loop_pass_names_no_checkpoint`: the failed pass's
+   record keeps `cp2`, and the refused pass's own record names none.
+   Mutation checks: with HEAD's `machine.rs` every new or changed fixture
+   fails except `resume_loop_keeps_queue` (unchanged behaviour, by design);
+   removing each `carry_out_queued` call fails its fixture (wait, quorum,
+   `InvokeCapability` through `resume_deferred_handler_loop`, invoke). The
+   reviewer's script now gives `run-1/w/2/0 failed R402 run-1:6 d4` and
+   `run-1/w/2/1 executed run-1:10 d8` (actions mode: `run-1/w/2/2` failed,
+   `run-1/w/2/4` executed); Python and WebAssembly agree (both play every
+   fixture). The random-run harness (`fuzz.py`, a snapshot and restore
+   before every operation, seeds 0–9999): the seeds the reviewer named
+   (5269, 5781, 7818, 8128, 8455) pass. The notes left are on HEAD before
+   this change too and are the designed case: a re-entered queued step
+   whose checkpoint could not be taken (F501, before its call) is looped
+   back, and its record, never carried out and with no key, is updated in
+   place.
+2. **A cancel during the failure mode of an approved step that failed
+   recorded it `cancelled` R408 (low).** Real, reproduced
+   (`s_cancel_fm.py`: approved, actions mode, the record was `approved`
+   with code R402 before the cancel and `cancelled` R408 after; with an
+   `outcome_unknown` reason, `reason_code` stayed beside R408). Fix:
+   `step_error_with` calls `record_failed` in both record modes once the
+   step's error is set, so an approved record is `failed`, with its code
+   and reason, from the moment the step fails; the actions-mode branch
+   that only added the code went. `recover()` and `end_frame()` keep their
+   calls, for a state an earlier executor saved while a failure mode ran
+   (a 1.1 state holds such a record `approved`). `cancel()` removes
+   `reason_code` from a record it overwrites. Standard §5.19.5's cancel
+   bullet says both; CHANGELOG Upgrading (the existing entry on failed
+   records: from the moment the step fails, so a host that reads the
+   records while a failure mode's checkpoint or rollback is pending sees
+   `failed`); the guide. Fixtures `cancel_failure_rollback_approved`
+   (approvals mode, R402 `outcome_unknown`, Rollback pending: `failed`
+   R402 with the reason) and `cancel_failure_checkpoint_approved` (record
+   mode `actions`: `failed` R402 with the reason, then the cancelled
+   checkpoint); both fail with HEAD's `machine.rs`. A 1.1 workflow's runs
+   end with the same records as before (1.1 has no cancel): playing every
+   1.1 fixture straight on origin/main's executor and on this tree gives
+   the same actions and record statuses, except the two F503 fixtures the
+   round-1 change already listed.
+3. **A run restored from a version-1 state finished its step with a 1.1
+   record (low).** Real, reproduced (`xversion.py`: a version-1 state
+   saved before `approval_decided_at_expiry`'s call ends with
+   `{action_id, idempotency_key, status: executed, ...}` and no `run_id`,
+   `frame`, `step`, `capability` or `checkpoint_id`). Fix (`mod.rs`,
+   `fill_v1_records`, called for a version-1 state after `check_state`):
+   for a run still in progress, each running frame's pass gets the
+   checkpoint it consumed before the save (the last `checkpoint_consumed`
+   of its frame and step after the pass's `step_started`; the trace of a
+   version-1 state is whole), and the records of the running frames' steps
+   and of the deferrals get `run_id`, `frame`, `step`, `capability` and
+   that checkpoint, where missing. A finished run is left as 1.1 ended it
+   (its stored terminal action must equal the derived one), and so is a
+   record 1.1 settled. §5.19.4 item 3 says so, and that a call made before
+   the save has no key; CHANGELOG Upgrading (the version-1 sentence). With
+   the fix, of the 1,134 restore points of a version-1 run still in
+   progress, no record this executor writes lacks a member HEAD's straight
+   replay has; the differences left are on records 1.1 settled before the
+   save (269, by design) and three records whose call 1.1 made, which keep
+   no `idempotency_key` (none was sent). Test:
+   `core/tests/data/snapshots_v1.json` gains three cases recorded with
+   origin/main's executor in the middle of a run (`approved_call_pending`,
+   `loop_second_pass_asked`, `deferral_running`), and
+   `host_protocol.rs` `snapshot_v1_running_records_get_their_members`
+   checks the executed record (members, `cp1`, the key), a refused second
+   pass (members, no checkpoint: cp1 was the first pass's) beside the
+   untouched 1.1 record, and the planned record of a deferral. Mutation
+   checks: without the call it fails; without the reset at `step_started`
+   the refused pass names `cp1`, and it fails.
+4. **Dead `StartError::Unsupported` (low).** Real: nothing constructed it
+   but a test closure in `core/tests/profiles.rs`, which used it to wrap a
+   restore error. It was added on this branch (origin/main's `StartError`
+   has four variants), so removing it changes no released API. Removed the
+   variant, its `Display` arm and `python.rs`'s arm; the test's two
+   closures return `Result<Run, String>`; `Run.start`'s docstring no
+   longer says "or not implemented yet"; FOUNDATION-notes' bullet says it
+   was removed.
+
+The fixture count is 368 (361 − 1 + 8): the running-workflows guide's
+snapshot paragraph was re-measured the same way (1.2 to 34.8 kB, median
+2.76 kB, now "2.8 kB"; trace 42% mean, 47% of all bytes; after taking, 1.0
+to 11.8 kB, median 1.4 kB), CHANGELOG's S2a count is 46, and RFC-0006 and
+the findings file count thirty-two `resume_*` fixtures.
+
+The site's figure-gap sweep (CI's headless shell 1248) then failed a run
+of /spec/1.2.0/ at 1807px (the §5.14.1 run, 1795px before): item 6's new
+sentence is tightened (what the record holds once the action is carried out
+is §6.4's) and item 7 keeps its text, which item 6's "whatever the result"
+already covers; the run is 1795px again.
+
+### Checks after round 2 (core-rust, ci-build)
+
+- Rust (`core/`, 1.99.1; extension rebuilt): fmt; clippy plain, `python`
+  and `wasm`; `cargo test --locked` (the timing test included);
+  `--features wasm --test wasm` (13); MSRV `cargo +1.88.0 check --locked
+  --all-targets --features python`. No expression changed, so the CEL
+  differential was not rerun.
+- Python: every `tools/validate_*.py`, `validate_workflows.py --strict`,
+  every domain catalog and example `--strict`; the generators' `--check`
+  (`sync_skill_schemas` 107, `gen_runtime_fixtures` 368,
+  `gen_call_fixtures` 35 and 30, `gen_trigger_vectors`,
+  `gen_standard_agents_binding`, `gen_capability_json_schemas`); ruff
+  check and format (CI's list); mypy; `pytest tests/` (4518 passed, 18
+  skipped); `benchmarks/tests/` (69); `scripts/run_conformance.py`. The
+  reviewer's scripts (`s_queued_loop.py`, `s_cancel_fm.py`,
+  `xversion.py`) and the random-run harness (seeds 0–9999) as above;
+  every 1.1 fixture played straight on origin/main's executor and on this
+  tree (same actions and record statuses but the two F503 fixtures round 1
+  listed).
+- TypeScript: `packages/acs-core` `build:wasm`, build, check, test (1864,
+  every runtime fixture through WebAssembly); the binding check and test
+  (191, 2 skipped).
+- Site: `npm run check`, `npm test` (1173), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` with CI's headless shell (0 enforced runs over
+  1800px; /spec/1.2.0/'s longest 1795px) and `scripts/check-axe.mjs` over
+  the pages this round changed (/spec/1.2.0/, /spec/, /spec/changelog/,
+  /rfcs/0006/, /guides/running-workflows/, /community/release-notes/): no
+  violations, no sideways scroll.

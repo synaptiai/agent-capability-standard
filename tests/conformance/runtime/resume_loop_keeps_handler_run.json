@@ -1,5 +1,5 @@
 {
-  "description": "A recovery loop during a resumption whose range holds the deferred handler does not run the handler: the handler keeps its place last, its kept nested run and that run's queued action, so the nested run continues without running its first step again, and its request names the queued action (\u00a75.14.1).",
+  "description": "A recovery loop during a resumption whose range holds the deferred handler does not run the handler: the handler keeps its place last, its kept nested run and that run's queued action, so the nested run continues without running its first step again, and its request names the queued action. The step that looped had called its capability, so its loop pass is a new action (\u00a75.14.1).",
   "catalog": {
     "w": {
       "goal": "g",
@@ -340,11 +340,13 @@
       "expect": {
         "kind": "RequestApproval",
         "step": 3,
-        "queued_action_id": "run-1/w/3/0",
         "approver": {
           "kind": "human"
         }
       },
+      "absent": [
+        "queued_action_id"
+      ],
       "respond": {
         "kind": "Decision",
         "decision_id": "d2",
@@ -442,10 +444,15 @@
     "action_records": [
       {
         "action_id": "run-1/w/3/0",
-        "status": "executed"
+        "status": "failed",
+        "code": "R402"
       },
       {
         "action_id": "run-1/w/oncall/3/1",
+        "status": "executed"
+      },
+      {
+        "action_id": "run-1/w/3/2",
         "status": "executed"
       }
     ]

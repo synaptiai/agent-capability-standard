@@ -1015,8 +1015,8 @@ merged into `round3/a`. For phase 4 and any later stream:
   unimplemented`, `Policy::unenforced` and the call in `Run::prepare` are
   gone; `Run::start` goes through `start_set`, and every restore through
   `restore_set`, which fills a missing `idempotency_key`. `StartError::
-  Unsupported` is kept for the API (the Python binding maps it) but nothing
-  in the core constructs it now.
+  Unsupported`, which nothing constructed any more, was removed in phase 4
+  (round 2), with its Python mapping.
 - **W616 for `persist`/`recall` `scope`** is the last `FEATURES` row (after
   S3's `agents` and `continues`, as §11.5's table orders them), located at
   its step (`Use::step`); validator fixture `pass_memory_scope_v11_warn`.

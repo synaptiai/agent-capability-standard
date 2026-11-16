@@ -490,8 +490,6 @@ pub enum StartError {
     Program(String),
     /// The actor identity is not an `agent_identity`.
     Identity(String),
-    /// A start option this executor does not implement yet.
-    Unsupported(String),
     /// The catalog header's version is not a version (§11.5).
     Header(String),
     /// A grounding policy is malformed or requires a capability the
@@ -516,7 +514,6 @@ impl fmt::Display for StartError {
             StartError::Identity(m) => write!(f, "actor_identity: {m}"),
             StartError::Grounding(m) => f.write_str(m),
             StartError::Policy(m) => write!(f, "destination policy: {m}"),
-            StartError::Unsupported(m) => write!(f, "this executor does not implement {m} yet"),
             StartError::Header(h) => write!(
                 f,
                 "header: '{h}' is not a version (MAJOR.MINOR[.PATCH]); pass the version the catalog's header declares, or none"
@@ -1597,6 +1594,9 @@ impl Run {
             return Err(RestoreError::Catalog);
         }
         check_state(&program, &state).map_err(RestoreError::Malformed)?;
+        if v1 {
+            fill_v1_records(&program, &mut state);
+        }
         if let Some(e) = grounding_error(ctx, &state.grounding) {
             return Err(RestoreError::Malformed(e));
         }
@@ -2104,6 +2104,82 @@ fn fill_idempotency_key(state: &mut State) {
         && let Some(record) = state.records.get_mut(r - state.records_base)
     {
         record["idempotency_key"] = json!(filled);
+    }
+}
+
+/// A version-1 state saved mid-run (§5.19.4): the records this executor
+/// goes on to write, those of each running frame's step and of each
+/// deferral, get the members a 1.1 executor did not write and §6.4
+/// requires (`run_id`, `frame`, `step`, `capability`), and each running
+/// frame's pass gets the checkpoint it consumed before the save, from the
+/// trace, which a version-1 state holds whole: its record names it, as the
+/// record of a pass run here does. Every other record, settled by 1.1, and
+/// a finished run are left as 1.1 wrote them.
+fn fill_v1_records(program: &Program, state: &mut State) {
+    if state.finished.is_some() {
+        return;
+    }
+    let names: Vec<String> = state.frames.iter().map(|f| f.workflow.clone()).collect();
+    // Each record to fill: its index, frame, step and, for a running
+    // frame's, the checkpoint its pass consumed.
+    let mut refs: Vec<(usize, Vec<String>, usize, Option<String>)> = Vec::new();
+    for i in 0..state.frames.len() {
+        let frame = &names[..=i];
+        let step = state.frames[i].step;
+        // After the pass's `step_started`, so not an earlier pass's.
+        let mut consumed: Option<String> = None;
+        for e in &state.trace {
+            let in_frame = e.get("frame").and_then(Value::as_array).is_some_and(|f| {
+                f.iter()
+                    .map(Value::as_str)
+                    .eq(frame.iter().map(|n| Some(n.as_str())))
+            });
+            if !in_frame || e.get("step").and_then(Value::as_u64) != Some(step as u64) {
+                continue;
+            }
+            match e.get("kind").and_then(Value::as_str) {
+                Some("step_started") => consumed = None,
+                Some("checkpoint_consumed") => {
+                    consumed = e["detail"]["checkpoint_id"].as_str().map(str::to_string);
+                }
+                _ => {}
+            }
+        }
+        let cur = &mut state.frames[i].cur;
+        if cur.checkpoint_id.is_none() {
+            cur.checkpoint_id = consumed;
+        }
+        if let Some(r) = cur.record {
+            refs.push((r, frame.to_vec(), step, cur.checkpoint_id.clone()));
+        }
+    }
+    for d in &state.deferrals {
+        if let (Some(r), Some(&step)) = (d.record, d.path.last()) {
+            refs.push((r, d.frame.clone(), step, None));
+        }
+    }
+    let run_id = state.run_id.clone();
+    for (r, frame, step, checkpoint) in refs {
+        if r < state.records_base || r >= state.records_written() {
+            continue;
+        }
+        let capability = frame
+            .last()
+            .and_then(|w| program.workflows.get(w))
+            .and_then(|wf| wf.steps.get(step))
+            .map(|s| s.capability.clone());
+        let Some(record) = state.rec_mut(r).as_object_mut() else {
+            continue;
+        };
+        record.entry("run_id").or_insert_with(|| json!(run_id));
+        record.entry("frame").or_insert_with(|| json!(frame));
+        record.entry("step").or_insert_with(|| json!(step));
+        if let Some(c) = capability {
+            record.entry("capability").or_insert_with(|| json!(c));
+        }
+        if let Some(c) = checkpoint {
+            record.entry("checkpoint_id").or_insert_with(|| json!(c));
+        }
     }
 }
 

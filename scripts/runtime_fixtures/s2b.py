@@ -1089,6 +1089,71 @@ def _failed_records(add):
         },
     )
 
+    # A cancel while the failure mode of an approved step that failed is
+    # still running: the action failed, and the cancel does not change that.
+    fails_unknown = [
+        *CHECKPOINTED,
+        {"expect": {"kind": "RequestApproval", "step": 2}, "respond": approve("d1")},
+        {
+            "expect": inv("mutate", step=2),
+            "respond": err("R402", reason="outcome_unknown"),
+        },
+    ]
+    failed_unknown = {
+        "capability": "mutate",
+        "status": "failed",
+        "code": "R402",
+        "reason_code": "outcome_unknown",
+        "approval": {"decision_id": "d1"},
+    }
+    add(
+        "cancel_failure_rollback_approved",
+        "An approved step that fails is failed, with its code and reason, from the "
+        "moment it fails: a cancel while its failure mode's Rollback is pending "
+        "leaves the record failed, not cancelled (§5.19.5, §6.4).",
+        rollback,
+        [
+            *fails_unknown,
+            {"expect": {"kind": "Rollback", "step": 2}},
+            cancel("stop"),
+        ],
+        {"kind": "Failed", "code": "R408", "action_records": [failed_unknown]},
+    )
+    add(
+        "cancel_failure_checkpoint_approved",
+        "Record mode actions: a cancel while the failure mode's checkpoint of an "
+        "approved step that failed is pending leaves the step's record failed, with "
+        "its code and reason, and gives the checkpoint its own cancelled record "
+        "(§5.19.5, §6.4).",
+        _failing_mutate(
+            {
+                "action": "pause_and_checkpoint",
+                "recovery": {"goto_step": "m", "max_loops": 1},
+            }
+        ),
+        [
+            *fails_unknown,
+            {"expect": {"kind": "CreateCheckpoint", "step": 2}},
+            cancel("stop"),
+        ],
+        {
+            "kind": "Failed",
+            "code": "R408",
+            "action_records": [
+                {"capability": "checkpoint", "status": "executed"},
+                {"capability": "constrain", "status": "executed"},
+                failed_unknown,
+                {
+                    "capability": "checkpoint",
+                    "status": "cancelled",
+                    "code": "R408",
+                    "step": 2,
+                },
+            ],
+        },
+        records="actions",
+    )
+
 
 def _invoke_attendance(add):
     """A run an invoke step starts has its invoker's attendance, whatever its

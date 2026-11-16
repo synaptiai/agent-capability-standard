@@ -1,5 +1,5 @@
 {
-  "description": "A recovery loop back to a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (\u00a75.14.1).",
+  "description": "In record mode actions, a re-entered queued step whose call fails and that a recovery loop runs again has one record for each pass: the queued record, failed with the first decision and key, and a new one for the loop's pass (\u00a75.14.1, \u00a76.4).",
   "catalog": {
     "w": {
       "goal": "g",
@@ -127,7 +127,7 @@
         "deferred": [
           {
             "step": 2,
-            "action_id": "run-1/w/2/0"
+            "action_id": "run-1/w/2/2"
           }
         ]
       }
@@ -142,7 +142,7 @@
       "expect": {
         "kind": "RequestApproval",
         "step": 2,
-        "queued_action_id": "run-1/w/2/0",
+        "queued_action_id": "run-1/w/2/2",
         "approver": {
           "kind": "human"
         }
@@ -171,23 +171,26 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "mutate",
-        "step": 2
+        "step": 2,
+        "idempotency_key": "run-1:7"
       },
       "respond": {
         "kind": "Error",
         "code": "R402",
-        "message": "down"
+        "message": "applied half the change, then failed"
       }
     },
     {
       "expect": {
         "kind": "RequestApproval",
         "step": 2,
-        "queued_action_id": "run-1/w/2/0",
         "approver": {
           "kind": "human"
         }
       },
+      "absent": [
+        "queued_action_id"
+      ],
       "respond": {
         "kind": "Decision",
         "decision_id": "d2",
@@ -212,7 +215,8 @@
       "expect": {
         "kind": "InvokeCapability",
         "capability": "mutate",
-        "step": 2
+        "step": 2,
+        "idempotency_key": "run-1:10"
       },
       "respond": {
         "kind": "Output",
@@ -227,20 +231,44 @@
     "kind": "Completed",
     "outcome": "completed",
     "deferred": [],
-    "outputs": {
-      "d": {
-        "task_id": "t1"
-      }
-    },
     "action_records": [
       {
-        "action_id": "run-1/w/2/0",
+        "capability": "checkpoint",
         "status": "executed"
+      },
+      {
+        "capability": "constrain",
+        "status": "executed"
+      },
+      {
+        "action_id": "run-1/w/2/2",
+        "status": "failed",
+        "code": "R402",
+        "idempotency_key": "run-1:7",
+        "checkpoint_id": "cp2",
+        "approval": {
+          "decision_id": "d1"
+        }
+      },
+      {
+        "capability": "delegate",
+        "status": "executed"
+      },
+      {
+        "status": "executed",
+        "capability": "mutate",
+        "idempotency_key": "run-1:10",
+        "checkpoint_id": "cp3",
+        "approval": {
+          "decision_id": "d2"
+        },
+        "action_id": "run-1/w/2/4"
       }
     ]
   },
   "trace_kinds": [
     "run_resumed",
     "loop"
-  ]
+  ],
+  "records": "actions"
 }

@@ -1841,24 +1841,27 @@ When a run resumes:
    names its queued action (`queued_action_id`: the `action_id` of the
    record its deferral left), in either attendance, while the step continues
    it (item 6): after a recheck too, and when a recovery loop runs it again
-   before it goes on (items 6, 7). (A retry does not ask again, §5.13.) In
-   an attended resumption each such request is put to a person, a `human`
-   approver keeping `role`, `min_approvers`, `sender_check` and
-   `accept_trust_classes` and dropping `mandate_ref`. In an unattended
-   resumption the step is asked as in any unattended run, and its
-   `when_unattended` applies again.
+   before it goes on or carries the action out (items 6, 7). (A retry does
+   not ask again, §5.13.) In an attended resumption each such request is put
+   to a person, a `human` approver keeping `role`, `min_approvers`,
+   `sender_check` and `accept_trust_classes` and dropping `mandate_ref`. In
+   an unattended resumption the step is asked as in any unattended run, and
+   its `when_unattended` applies again.
 6. **The record.** A re-entered step continues its queued action until it
    goes on to another step, carries the action out, is deferred again, or
    its run leaves it; a recovery loop that runs it again before then keeps
-   it (item 7). Meanwhile each decision and refusal of the step updates in
-   place the record its deferral left, keeping its `action_id`, with the
-   time and actor of then (carrying the action out sets only its status);
-   no other record is written for it, and the trace keeps every decision. A
-   step deferred again leaves the record `planned`. A queued action whose
-   step goes on, or is left, before reaching its approval (its condition is
-   false, a gate skips or stops it, or it fails first) is superseded
-   (`rejected`, "superseded"); any record the resumption supersedes takes
-   the time and actor of then.
+   it (item 7). It **carries the action out** when it performs its
+   capability, whatever the result (its `InvokeCapability`, the `AwaitEvent`
+   of its `wait`, its nested run, its quorum, §5.16): the record is then
+   that pass's (§6.4), and a loop that runs the step again asks for a new
+   action, with a record of its own. Until then each decision and refusal of
+   the step updates in place the record its deferral left, keeping its
+   `action_id`, with the time and actor of then; no other record is written
+   for it, and the trace keeps every decision. A step deferred again leaves
+   the record `planned`. A queued action whose step goes on, or is left,
+   before reaching its approval (its condition is false, a gate skips or
+   stops it, or it fails first) is superseded (`rejected`, "superseded");
+   any record the resumption supersedes takes the time and actor of then.
 7. **Ending early.** A recovery loop during the resumption runs again the
    steps from its target to the step that looped, as in normal flow (a
    handler among them does not run); the resumption then goes on with the
@@ -2979,7 +2982,12 @@ later. Such a host:
    §4.4.2 names a pass, every attempt of a step, and keeps a retry from
    repeating an effect.) A pending `InvokeCapability` restored from a state
    that predates idempotency keys is given the key `<run_id>:<id>`, its own
-   id, which the later attempts of its pass reuse (§4.4.2).
+   id, which the later attempts of its pass reuse (§4.4.2). The records the
+   executor goes on writing for such a state carry what §6.4 requires: the
+   record of a step in progress, or of a deferral, gains `run_id`, `frame`,
+   `step` and `capability`, and the checkpoint its pass used before the
+   save; a record the earlier executor had settled keeps the members it was
+   written with, and a call made before the save has no key.
 4. **Interrupted turns.** When the host's own execution stops between
    performing an action and submitting the response (its process ends, a
    client stops it), the run is unchanged: on its next turn the host
@@ -3027,8 +3035,11 @@ A host MAY **cancel** a run that has not ended, or one that ended
 - withdraws the pending action: a response to it is refused. A host
   performing it SHOULD stop;
 - sets each of the run's action records that is `approved` or `planned` to
-  `cancelled`, with code R408 and the reason: an approved action may or may
-  not have been carried out, and a queued one will not be;
+  `cancelled`, with code R408, the reason and no `reason_code`: an approved
+  action may or may not have been carried out, and a queued one will not
+  be. A step that failed has made its approved record `failed` already,
+  with its code (§6.4), so a cancel while its failure modes run leaves it
+  so;
 - in record mode `actions` (§6.4), writes a `cancelled` record, with code
   R408 and the reason, for each step, in any of the run's nested runs, that
   has started its current pass and has no record of it. A step has
@@ -3528,7 +3539,9 @@ the executor's own.
 that requires approval (§5.14). Started in record mode `actions`, it also
 writes one for each pass of each step that runs, whatever its flags (a
 retry is the same pass; a recovery loop that runs the step again starts
-another): `executed` when the step has its output, `failed` when it fails
+another, except that the passes of a re-entered queued step before it
+carries its action out share the record its deferral left, §5.14.1
+item 6): `executed` when the step has its output, `failed` when it fails
 after it started, or when the checkpoint it needs cannot be taken (F501),
 and `cancelled` when the run is cancelled after the step started (§5.19.5);
 and one for each checkpoint a failure mode takes (`pause_and_checkpoint`,
@@ -5034,8 +5047,10 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   invalidated checkpoint a re-entered mutation binds; nested deferred runs
   continue; a queued step is asked afresh (of a person when attended), the
   request names `queued_action_id`, and its `planned` record is updated in
-  place, with the time and actor of each decision or supersession. The
-  queued actions of a run that did not end `deferred` are never carried out
+  place, with the time and actor of each decision or supersession, until the
+  step carries the action out by performing its capability, whatever the
+  result. The queued actions of a run that did not end `deferred` are never
+  carried out
 - With `identity@1`, approver identities on a decision
   (`approver_identities`), approvers counted by principal and checked against
   the requested kind and role, and, in a workflow that targets 1.2 or later, the

@@ -510,7 +510,8 @@ Cancelling ends the run at once with `Failed` R408
 ([§5.19.5](../../spec/STANDARD-v1.2.0.md#5195-cancelling-a-run)). No retry,
 failure mode, recovery loop, handler or rollback runs: the executor does not
 roll back, and a host that wants the effects undone restores
-`checkpoint_id` itself. Approved and queued records become `cancelled`; in
+`checkpoint_id` itself. Approved and queued records become `cancelled` (a
+step that failed has already made its approved record `failed`); in
 record mode `actions`, so does a new record of every step, in every nested
 run, that had started (a step waiting out a retry's backoff, a waiting
 `delegate` whose delegation was sent), but not one still waiting for its
@@ -586,8 +587,8 @@ wake-up time or the next poll.
 A snapshot holds a fixed part (about 0.5 kB), each stored step's output and
 the inputs it ran with, the action records (about 0.3 kB each, 0.6 kB with an
 approval), the trace (about 0.15 kB an event, three to six a step) and the
-pending action. Measured at the end of each of the 361 runtime fixtures, a
-snapshot is 1.2 kB to 35 kB (median 2.7 kB), of which the trace is about
+pending action. Measured at the end of each of the 368 runtime fixtures, a
+snapshot is 1.2 kB to 35 kB (median 2.8 kB), of which the trace is about
 42% (47% of all their bytes together); the terminal action no longer stores
 copies of the records and outputs (in 1.1 that copy was a median 13%, up to
 26%, of a finished run's state). With the trace and settled records taken
@@ -923,8 +924,12 @@ record of that action is updated in place, under the same `action_id`, so
 the queue entry you hold closes on it. A request asked again after a
 recheck, or when a recovery loop runs the step again before it goes on,
 names the same action, and its decision lands on the same record (a retry
-of the step does not ask again); once the action is carried out, a loop
-back to the step asks for a new one. A record the resumption decides or supersedes
+of the step does not ask again). The action is carried out once the step
+calls its capability (or waits for its event, starts its nested run, or
+has its quorum evaluated), whether or not that succeeds: a loop back to
+the step after that asks for a new action, with a record of its own, and
+the queued record keeps the pass that ran, with its decision and
+idempotency key. A record the resumption decides or supersedes
 takes the time and the actor of then. A recovery loop during the resumption
 runs again only the steps from its target to the step that looped, and the
 resumption then goes on: a step that ran ahead, such as an

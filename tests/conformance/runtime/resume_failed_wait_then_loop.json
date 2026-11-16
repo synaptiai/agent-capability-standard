@@ -1,0 +1,150 @@
+{
+  "description": "A re-entered queued step that waits for its event carries its queued action out when the wait starts: a wait that times out, looped back to, asks for a new action with a record of its own beside the failed one (\u00a75.14.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "x",
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          },
+          "requires_approval": true,
+          "timeout": "1h",
+          "wait": {
+            "event_type": "job.done"
+          },
+          "failure_modes": [
+            {
+              "condition": "it failed",
+              "on_error": [
+                "R401",
+                "R402",
+                "F504"
+              ],
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "x",
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1",
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+          {
+            "step": 0,
+            "action_id": "run-1/w/0/0"
+          }
+        ]
+      }
+    },
+    {
+      "resume": {
+        "attendance": "attended",
+        "at": 3600000
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0,
+        "queued_action_id": "run-1/w/0/0"
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "deadline": 7200000
+      }
+    },
+    {
+      "tick": 7200001
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0
+      },
+      "absent": [
+        "queued_action_id"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "job.done"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "deferred": [],
+    "action_records": [
+      {
+        "action_id": "run-1/w/0/0",
+        "status": "failed",
+        "code": "R401"
+      },
+      {
+        "action_id": "run-1/w/0/1",
+        "status": "executed"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "run_resumed",
+    "loop"
+  ]
+}

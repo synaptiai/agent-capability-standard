@@ -292,7 +292,258 @@
     "sha256": "6fcb49a8bafff62282c1b98dfe8dfb0cbf53864418d87d3280a1b06912cf43b1",
     "state": "{\"actor_identity\":null,\"attendance\":\"unattended\",\"catalog_digest\":\"0c0f3c1b4b800cc1bab90ca93ffba684e87d8a7440ad5012d0ba279bf9144d0d\",\"checkpoints\":[{\"id\":\"cp1\",\"valid\":true}],\"deferrals\":[{\"frame\":[\"w\"],\"path\":[2],\"reason\":\"the run is unattended\",\"record\":0,\"store_as\":\"m\"},{\"frame\":[\"w\"],\"path\":[4],\"reason\":\"it reads 'm', which was deferred\",\"record\":null,\"store_as\":\"v\"},{\"frame\":[\"w\"],\"path\":[5],\"reason\":\"it reads 'v', which was deferred\",\"record\":null,\"store_as\":\"e\"}],\"finished\":{\"action_records\":[{\"action_id\":\"run-1/w/2/0\",\"actor\":\"agent\",\"intent\":\"mutate step\",\"reason\":\"the run is unattended (when_unattended: defer_to_queue)\",\"status\":\"planned\",\"timestamp\":\"1970-01-01T00:00:00.000Z\"}],\"cause\":null,\"deferred\":[{\"action_id\":\"run-1/w/2/0\",\"frame\":[\"w\"],\"reason\":\"the run is unattended\",\"step\":2,\"store_as\":\"m\"},{\"action_id\":null,\"frame\":[\"w\"],\"reason\":\"it reads 'm', which was deferred\",\"step\":4,\"store_as\":\"v\"},{\"action_id\":null,\"frame\":[\"w\"],\"reason\":\"it reads 'v', which was deferred\",\"step\":5,\"store_as\":\"e\"}],\"frame\":[\"w\"],\"id\":4,\"kind\":\"Completed\",\"outcome\":\"deferred\",\"outputs\":{\"cp\":{\"checkpoint_id\":\"cp1\",\"evidence_anchors\":[]},\"other\":{\"confidence\":1,\"evidence_anchors\":[],\"observation\":{}},\"policy\":{\"compliant\":true,\"evidence_anchors\":[]}}},\"frames\":[{\"ahead\":[3],\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":0,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":null,\"inputs\":null,\"output\":null,\"previous\":null,\"rebaseline\":null,\"record\":null,\"replaces\":null},\"deferred\":[2,4,5],\"ended\":null,\"escalation\":null,\"inputs\":{},\"loops\":{},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{\"cp\":{\"scope\":\"repo\"},\"other\":{\"target\":\"elsewhere\"},\"policy\":{\"constraints\":[\"policy\"],\"target\":\"config\"}},\"recovery\":null,\"replaces\":[],\"stage\":{\"stage\":\"Begin\"},\"step\":6,\"stores\":{\"cp\":{\"checkpoint_id\":\"cp1\",\"evidence_anchors\":[]},\"other\":{\"confidence\":1,\"evidence_anchors\":[],\"observation\":{}},\"policy\":{\"compliant\":true,\"evidence_anchors\":[]}},\"workflow\":\"w\"}],\"next_id\":5,\"now\":0,\"pending\":null,\"records\":[{\"action_id\":\"run-1/w/2/0\",\"actor\":\"agent\",\"intent\":\"mutate step\",\"reason\":\"the run is unattended (when_unattended: defer_to_queue)\",\"status\":\"planned\",\"timestamp\":\"1970-01-01T00:00:00.000Z\"}],\"root\":\"w\",\"run_id\":\"run-1\",\"trace\":[{\"at\":0,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":0,\"detail\":{\"capability\":\"checkpoint\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0},{\"at\":0,\"detail\":{\"checkpoint_id\":\"cp1\"},\"frame\":[\"w\"],\"kind\":\"checkpoint_created\",\"seq\":2,\"step\":0},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":3,\"step\":0},{\"at\":0,\"detail\":{\"capability\":\"constrain\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":4,\"step\":1},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":5,\"step\":1},{\"at\":0,\"detail\":{\"capability\":\"mutate\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":6,\"step\":2},{\"at\":0,\"detail\":{\"reason\":\"the run is unattended\",\"when_unattended\":\"defer_to_queue\"},\"frame\":[\"w\"],\"kind\":\"approval_unattended\",\"seq\":7,\"step\":2},{\"at\":0,\"detail\":{\"reason\":\"the run is unattended\"},\"frame\":[\"w\"],\"kind\":\"step_deferred\",\"seq\":8,\"step\":2},{\"at\":0,\"detail\":{\"capability\":\"observe\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":9,\"step\":3},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":10,\"step\":3},{\"at\":0,\"detail\":{\"capability\":\"verify\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":11,\"step\":4},{\"at\":0,\"detail\":{\"reason\":\"it reads 'm', which was deferred\"},\"frame\":[\"w\"],\"kind\":\"step_deferred\",\"seq\":12,\"step\":4},{\"at\":0,\"detail\":{\"capability\":\"explain\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":13,\"step\":5},{\"at\":0,\"detail\":{\"reason\":\"it reads 'v', which was deferred\"},\"frame\":[\"w\"],\"kind\":\"step_deferred\",\"seq\":14,\"step\":5},{\"at\":0,\"detail\":{\"cause\":null,\"outcome\":\"deferred\"},\"frame\":[\"w\"],\"kind\":\"run_finished\",\"seq\":15,\"step\":null}],\"used_decisions\":[],\"version\":1}"
    }
+  },
+  {
+   "catalog": {
+    "w": {
+     "goal": "g",
+     "risk": "high",
+     "spec_version": "1.1",
+     "steps": [
+      {
+       "capability": "checkpoint",
+       "input_bindings": {
+        "scope": "repo"
+       },
+       "purpose": "cp",
+       "store_as": "cp"
+      },
+      {
+       "capability": "constrain",
+       "input_bindings": {
+        "constraints": [
+         "policy"
+        ],
+        "target": "config"
+       },
+       "purpose": "policy",
+       "store_as": "policy"
+      },
+      {
+       "approval": {
+        "approver": {
+         "kind": "human"
+        }
+       },
+       "capability": "mutate",
+       "input_bindings": {
+        "operation": {
+         "set": 1
+        },
+        "target": "config"
+       },
+       "purpose": "change it",
+       "store_as": "m"
+      }
+     ],
+     "workflow_extensions": {
+      "requires": [
+       "approval@1"
+      ]
+     }
+    }
+   },
+   "header": null,
+   "name": "approved_call_pending",
+   "next": {
+    "attempt": 1,
+    "capability": "mutate",
+    "deadline": null,
+    "domain": null,
+    "frame": [
+     "w"
+    ],
+    "id": 4,
+    "inputs": {
+     "operation": {
+      "set": 1
+     },
+     "target": "config"
+    },
+    "kind": "InvokeCapability",
+    "step": 2,
+    "store_as": "m"
+   },
+   "snapshot": {
+    "hmac": null,
+    "sha256": "3c1b141657f13548d52191c8bfd01c15b8a7a6571c98b35e30a22c9ab7c3e628",
+    "state": "{\"actor_identity\":null,\"attendance\":\"attended\",\"catalog_digest\":\"2884e0e7c5d5a6b7dcaf87c505b4119e4f3090aa780c756ef729f5b1b2b8bffc\",\"checkpoints\":[{\"id\":\"cp1\",\"valid\":false}],\"deferrals\":[],\"finished\":null,\"frames\":[{\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":1,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":null,\"inputs\":{\"operation\":{\"set\":1},\"target\":\"config\"},\"output\":null,\"previous\":null,\"rebaseline\":null,\"record\":0,\"replaces\":null},\"deferred\":[],\"ended\":null,\"escalation\":null,\"inputs\":{},\"loops\":{},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{\"cp\":{\"scope\":\"repo\"},\"policy\":{\"constraints\":[\"policy\"],\"target\":\"config\"}},\"recovery\":null,\"replaces\":[],\"stage\":{\"stage\":\"Execute\"},\"step\":2,\"stores\":{\"cp\":{\"checkpoint_id\":\"cp1\",\"evidence_anchors\":[]},\"policy\":{\"compliant\":true,\"evidence_anchors\":[]}},\"workflow\":\"w\"}],\"next_id\":5,\"now\":0,\"pending\":{\"action\":{\"attempt\":1,\"capability\":\"mutate\",\"deadline\":null,\"domain\":null,\"frame\":[\"w\"],\"id\":4,\"inputs\":{\"operation\":{\"set\":1},\"target\":\"config\"},\"kind\":\"InvokeCapability\",\"step\":2,\"store_as\":\"m\"},\"deadline\":null,\"purpose\":{\"purpose\":\"Capability\"}},\"records\":[{\"action_id\":\"run-1/w/2/0\",\"actor\":\"agent\",\"approval\":{\"approvers\":[\"alice\"],\"decided_at\":\"1970-01-01T00:00:00.000Z\",\"decision\":\"approved\",\"digest\":\"b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5\",\"expires_at\":null,\"mandate_ref\":null,\"mode\":\"in_session\"},\"intent\":\"change it\",\"status\":\"approved\",\"timestamp\":\"1970-01-01T00:00:00.000Z\"}],\"root\":\"w\",\"run_id\":\"run-1\",\"trace\":[{\"at\":0,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":0,\"detail\":{\"capability\":\"checkpoint\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0},{\"at\":0,\"detail\":{\"checkpoint_id\":\"cp1\"},\"frame\":[\"w\"],\"kind\":\"checkpoint_created\",\"seq\":2,\"step\":0},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":3,\"step\":0},{\"at\":0,\"detail\":{\"capability\":\"constrain\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":4,\"step\":1},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":5,\"step\":1},{\"at\":0,\"detail\":{\"capability\":\"mutate\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":6,\"step\":2},{\"at\":0,\"detail\":{\"digest\":\"b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5\"},\"frame\":[\"w\"],\"kind\":\"approval_requested\",\"seq\":7,\"step\":2},{\"at\":0,\"detail\":{\"decision\":\"approved\",\"decision_id\":\"d1\",\"valid\":true},\"frame\":[\"w\"],\"kind\":\"approval_decided\",\"seq\":8,\"step\":2},{\"at\":0,\"detail\":{\"checkpoint_id\":\"cp1\"},\"frame\":[\"w\"],\"kind\":\"checkpoint_consumed\",\"seq\":9,\"step\":2}],\"used_decisions\":[\"d1\"],\"version\":1}"
+   }
+  },
+  {
+   "catalog": {
+    "w": {
+     "goal": "g",
+     "risk": "high",
+     "spec_version": "1.1",
+     "steps": [
+      {
+       "capability": "checkpoint",
+       "input_bindings": {
+        "scope": "repo"
+       },
+       "purpose": "cp",
+       "store_as": "cp"
+      },
+      {
+       "capability": "constrain",
+       "input_bindings": {
+        "constraints": [
+         "policy"
+        ],
+        "target": "config"
+       },
+       "purpose": "policy",
+       "store_as": "policy"
+      },
+      {
+       "approval": {
+        "approver": {
+         "kind": "human"
+        }
+       },
+       "capability": "mutate",
+       "failure_modes": [
+        {
+         "action": "request_more_context",
+         "condition": "it failed",
+         "on_error": "R402",
+         "recovery": {
+          "goto_step": "m",
+          "max_loops": 1
+         }
+        }
+       ],
+       "input_bindings": {
+        "operation": {
+         "set": 1
+        },
+        "target": "config"
+       },
+       "purpose": "change it",
+       "store_as": "m"
+      }
+     ],
+     "workflow_extensions": {
+      "requires": [
+       "approval@1"
+      ]
+     }
+    }
+   },
+   "header": null,
+   "name": "loop_second_pass_asked",
+   "next": {
+    "approver": {
+     "kind": "human"
+    },
+    "digest": "b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5",
+    "expires_at": null,
+    "frame": [
+     "w"
+    ],
+    "id": 5,
+    "kind": "RequestApproval",
+    "mode": "in_session",
+    "shown": [
+     {
+      "operation": {
+       "set": 1
+      },
+      "target": "config"
+     }
+    ],
+    "step": 2
+   },
+   "snapshot": {
+    "hmac": null,
+    "sha256": "96a8e96d8e24ee16dc04111b94d5999ac82b5e3dfde1ddc6eb4665ee469a6910",
+    "state": "{\"actor_identity\":null,\"attendance\":\"attended\",\"catalog_digest\":\"d18f1582cf6cef46824f3032103b060db3126cbd39cb33e96c1ae3225b3f6403\",\"checkpoints\":[{\"id\":\"cp1\",\"valid\":false}],\"deferrals\":[],\"finished\":null,\"frames\":[{\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":0,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":null,\"inputs\":{\"operation\":{\"set\":1},\"target\":\"config\"},\"output\":null,\"previous\":null,\"rebaseline\":null,\"record\":null,\"replaces\":null},\"deferred\":[],\"ended\":null,\"escalation\":null,\"inputs\":{},\"loops\":{\"2:0\":1},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{\"cp\":{\"scope\":\"repo\"},\"policy\":{\"constraints\":[\"policy\"],\"target\":\"config\"}},\"recovery\":{},\"replaces\":[],\"stage\":{\"stage\":\"Approval\"},\"step\":2,\"stores\":{\"cp\":{\"checkpoint_id\":\"cp1\",\"evidence_anchors\":[]},\"policy\":{\"compliant\":true,\"evidence_anchors\":[]}},\"workflow\":\"w\"}],\"next_id\":6,\"now\":0,\"pending\":{\"action\":{\"approver\":{\"kind\":\"human\"},\"digest\":\"b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5\",\"expires_at\":null,\"frame\":[\"w\"],\"id\":5,\"kind\":\"RequestApproval\",\"mode\":\"in_session\",\"shown\":[{\"operation\":{\"set\":1},\"target\":\"config\"}],\"step\":2},\"deadline\":null,\"purpose\":{\"digest\":\"b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5\",\"expires_at\":null,\"min\":1,\"purpose\":\"Approval\"}},\"records\":[{\"action_id\":\"run-1/w/2/0\",\"actor\":\"agent\",\"approval\":{\"approvers\":[\"alice\"],\"decided_at\":\"1970-01-01T00:00:00.000Z\",\"decision\":\"approved\",\"digest\":\"b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5\",\"expires_at\":null,\"mandate_ref\":null,\"mode\":\"in_session\"},\"intent\":\"change it\",\"status\":\"failed\",\"timestamp\":\"1970-01-01T00:00:00.000Z\"}],\"root\":\"w\",\"run_id\":\"run-1\",\"trace\":[{\"at\":0,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":0,\"detail\":{\"capability\":\"checkpoint\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0},{\"at\":0,\"detail\":{\"checkpoint_id\":\"cp1\"},\"frame\":[\"w\"],\"kind\":\"checkpoint_created\",\"seq\":2,\"step\":0},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":3,\"step\":0},{\"at\":0,\"detail\":{\"capability\":\"constrain\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":4,\"step\":1},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":5,\"step\":1},{\"at\":0,\"detail\":{\"capability\":\"mutate\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":6,\"step\":2},{\"at\":0,\"detail\":{\"digest\":\"b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5\"},\"frame\":[\"w\"],\"kind\":\"approval_requested\",\"seq\":7,\"step\":2},{\"at\":0,\"detail\":{\"decision\":\"approved\",\"decision_id\":\"d1\",\"valid\":true},\"frame\":[\"w\"],\"kind\":\"approval_decided\",\"seq\":8,\"step\":2},{\"at\":0,\"detail\":{\"checkpoint_id\":\"cp1\"},\"frame\":[\"w\"],\"kind\":\"checkpoint_consumed\",\"seq\":9,\"step\":2},{\"at\":0,\"detail\":{\"code\":\"R402\",\"message\":\"down\"},\"frame\":[\"w\"],\"kind\":\"step_failed\",\"seq\":10,\"step\":2},{\"at\":0,\"detail\":{\"action\":\"request_more_context\",\"failure_mode\":0},\"frame\":[\"w\"],\"kind\":\"failure_mode_fired\",\"seq\":11,\"step\":2},{\"at\":0,\"detail\":{\"failure_mode\":0,\"loop\":1,\"to\":2},\"frame\":[\"w\"],\"kind\":\"loop\",\"seq\":12,\"step\":2},{\"at\":0,\"detail\":{\"capability\":\"mutate\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":13,\"step\":2},{\"at\":0,\"detail\":{\"digest\":\"b593b179cf0bd4234fa0cb45578f2607944d18f2090b1b047095ea4a52d8a8d5\"},\"frame\":[\"w\"],\"kind\":\"approval_requested\",\"seq\":14,\"step\":2}],\"used_decisions\":[\"d1\"],\"version\":1}"
+   }
+  },
+  {
+   "catalog": {
+    "w": {
+     "goal": "g",
+     "risk": "high",
+     "spec_version": "1.1",
+     "steps": [
+      {
+       "capability": "checkpoint",
+       "input_bindings": {
+        "scope": "repo"
+       },
+       "purpose": "cp",
+       "store_as": "cp"
+      },
+      {
+       "capability": "constrain",
+       "input_bindings": {
+        "constraints": [
+         "policy"
+        ],
+        "target": "config"
+       },
+       "purpose": "policy",
+       "store_as": "policy"
+      },
+      {
+       "approval": {
+        "approver": {
+         "kind": "human"
+        },
+        "when_unattended": "defer_to_queue"
+       },
+       "capability": "mutate",
+       "input_bindings": {
+        "operation": {
+         "set": 1
+        },
+        "target": "config"
+       },
+       "purpose": "change it",
+       "store_as": "m"
+      },
+      {
+       "capability": "retrieve",
+       "input_bindings": {
+        "target": "config"
+       },
+       "purpose": "read",
+       "store_as": "r"
+      }
+     ],
+     "workflow_extensions": {
+      "requires": [
+       "approval@1"
+      ]
+     }
+    }
+   },
+   "header": null,
+   "name": "deferral_running",
+   "next": {
+    "attempt": 1,
+    "capability": "retrieve",
+    "deadline": null,
+    "domain": null,
+    "frame": [
+     "w"
+    ],
+    "id": 3,
+    "inputs": {
+     "target": "config"
+    },
+    "kind": "InvokeCapability",
+    "step": 3,
+    "store_as": "r"
+   },
+   "snapshot": {
+    "hmac": null,
+    "sha256": "83b4caa92eae9275cda72495225ba561e1dccafb52e15523c239dd03a7ce0ef0",
+    "state": "{\"actor_identity\":null,\"attendance\":\"unattended\",\"catalog_digest\":\"761f2b6ef3c70f9852d35ba3f384d8ad6175be650bf4a9835c63f65a92b603a5\",\"checkpoints\":[{\"id\":\"cp1\",\"valid\":true}],\"deferrals\":[{\"frame\":[\"w\"],\"path\":[2],\"reason\":\"the run is unattended\",\"record\":0,\"store_as\":\"m\"}],\"finished\":null,\"frames\":[{\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":1,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":null,\"inputs\":{\"target\":\"config\"},\"output\":null,\"previous\":null,\"rebaseline\":null,\"record\":null,\"replaces\":null},\"deferred\":[2],\"ended\":null,\"escalation\":null,\"inputs\":{},\"loops\":{},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{\"cp\":{\"scope\":\"repo\"},\"policy\":{\"constraints\":[\"policy\"],\"target\":\"config\"}},\"recovery\":null,\"replaces\":[],\"stage\":{\"stage\":\"Execute\"},\"step\":3,\"stores\":{\"cp\":{\"checkpoint_id\":\"cp1\",\"evidence_anchors\":[]},\"policy\":{\"compliant\":true,\"evidence_anchors\":[]}},\"workflow\":\"w\"}],\"next_id\":4,\"now\":0,\"pending\":{\"action\":{\"attempt\":1,\"capability\":\"retrieve\",\"deadline\":null,\"domain\":null,\"frame\":[\"w\"],\"id\":3,\"inputs\":{\"target\":\"config\"},\"kind\":\"InvokeCapability\",\"step\":3,\"store_as\":\"r\"},\"deadline\":null,\"purpose\":{\"purpose\":\"Capability\"}},\"records\":[{\"action_id\":\"run-1/w/2/0\",\"actor\":\"agent\",\"intent\":\"change it\",\"reason\":\"the run is unattended (when_unattended: defer_to_queue)\",\"status\":\"planned\",\"timestamp\":\"1970-01-01T00:00:00.000Z\"}],\"root\":\"w\",\"run_id\":\"run-1\",\"trace\":[{\"at\":0,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":0,\"detail\":{\"capability\":\"checkpoint\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0},{\"at\":0,\"detail\":{\"checkpoint_id\":\"cp1\"},\"frame\":[\"w\"],\"kind\":\"checkpoint_created\",\"seq\":2,\"step\":0},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":3,\"step\":0},{\"at\":0,\"detail\":{\"capability\":\"constrain\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":4,\"step\":1},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":5,\"step\":1},{\"at\":0,\"detail\":{\"capability\":\"mutate\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":6,\"step\":2},{\"at\":0,\"detail\":{\"reason\":\"the run is unattended\",\"when_unattended\":\"defer_to_queue\"},\"frame\":[\"w\"],\"kind\":\"approval_unattended\",\"seq\":7,\"step\":2},{\"at\":0,\"detail\":{\"reason\":\"the run is unattended\"},\"frame\":[\"w\"],\"kind\":\"step_deferred\",\"seq\":8,\"step\":2},{\"at\":0,\"detail\":{\"capability\":\"retrieve\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":9,\"step\":3}],\"used_decisions\":[],\"version\":1}"
+   }
   }
  ],
- "description": "Snapshots of version 1, recorded with the executor before Standard 1.2's snapshot version 2 (S2b), with the action next() returned then. Version-1 states must still restore (core/tests/host_protocol.rs)."
+ "description": "Snapshots of version 1, recorded with the executor before Standard 1.2's snapshot version 2 (S2b), with the action next() returned then; approved_call_pending, loop_second_pass_asked and deferral_running were recorded with the released 1.1 executor in the middle of a run. Version-1 states must still restore, and the records the executor goes on writing for them get the members a 1.1 executor did not write (core/tests/host_protocol.rs)."
 }

@@ -387,8 +387,11 @@ here and marked so.
   stored with copies of the records and outputs, every action carries
   `run_id`, and the state may hold the record mode and the chain heads of
   what a host took; version-1 snapshots still restore (a finished run's
-  stored terminal action must equal the one derived). Actions and records
-  gain members (`run_id`; on records `run_id`, `frame`, `step`,
+  stored terminal action must equal the one derived; in a run still in
+  progress, the records of its current steps and of its deferrals gain
+  `run_id`, `frame`, `step`, `capability` and the checkpoint their pass
+  used, and the records 1.1 settled keep their members). Actions and
+  records gain members (`run_id`; on records `run_id`, `frame`, `step`,
   `capability`, `checkpoint_id`, `code`, `approval.decision_id`); code that
   compares whole actions or records must allow them. `_core.Run.next()`
   returns a fresh dict each time, `Run.tick` returns whether it changed the
@@ -400,13 +403,16 @@ here and marked so.
   one; a call without it raises `TypeError`. In Rust, `StartOptions` gains
   `header`, `records`, `profiles`, `grounding` and `destinations`, which
   every construction names. `WorkflowRunner` states the header itself.
-- Reference executor: an approved step that fails now has a `failed`
-  record, with the step's code, also when its failure mode's rollback or
-  checkpoint then fails (F503, F501) or finds no checkpoint to roll back
-  to; 1.1 left that record `approved`, which a cancellation would then turn
-  into `cancelled` and which held back `take_records` for the rest of the
-  run. A record a resumed run reuses no longer keeps the `checkpoint_id` of
-  an earlier pass.
+- Reference executor: an approved step that fails now has a `failed` record,
+  with the step's code, from the moment it fails, before its failure modes
+  run, and also when its failure mode's rollback or checkpoint then fails
+  (F503, F501) or finds no checkpoint to roll back to; 1.1 left that record
+  `approved` until its failure modes ended, or for good in those cases,
+  which a cancellation would then turn into `cancelled` and which held back
+  `take_records` for the rest of the run. A host that reads the records
+  while a failure mode's checkpoint or rollback is pending sees `failed`
+  where it saw `approved`. A record a resumed run reuses no longer keeps the
+  `checkpoint_id` of an earlier pass.
 - Validator: an `audit` step's literal `retention` outside the duration
   grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
   1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
@@ -690,10 +696,14 @@ here and marked so.
     they read and a checkpoint step a queued mutation binds; a nested run
     that ended deferred continues; a queued step is asked afresh (of a
     person when attended), every request of the step names
-    `queued_action_id` (a re-ask after a recheck and a retry included) until
-    its action is carried out, and its `planned` record is updated in place
-    with each decision and refusal; a queued record the resumption decides
-    or supersedes takes the time and actor of then. A recovery loop during
+    `queued_action_id` (a re-ask after a recheck and a recovery loop before
+    the step performs its capability included) until its action is carried
+    out, that is until the step calls its capability, waits for its event,
+    starts its nested run or has its quorum evaluated, whatever the result,
+    and its `planned` record is updated in place with each decision and
+    refusal until then; a loop after a failed call asks for a new action,
+    with a record of its own. A queued record the resumption decides or
+    supersedes takes the time and actor of then. A recovery loop during
     a resumption runs again only the steps from its target to the step that
     looped, a deferred handler among them keeping its nested run, and the
     resumption then goes on, so nothing that ran ahead runs twice. Trace
@@ -710,7 +720,7 @@ here and marked so.
     `WorkflowRunner.restore` take `actor_identity` and refuse another
     principal; a resumption may name a new actor, which the trace and later
     records show.
-  - 41 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
+  - 46 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
     `resume` entry and the `{{digest_upper}}` placeholder) and four
     validator fixtures (`*approver_identity*`). Each `step` digest vector
     gives what its step shows from (`bindings`, `recheck_read`), so an

@@ -221,7 +221,12 @@ checkpoints are taken anew, and a re-entered step is asked afresh (of a
 person when attended), naming its queued `action_id` on every request until
 it goes on or its action is carried out, a re-ask after a recheck and a
 recovery loop that runs it again included (a retry does not ask again); the record its deferral left is updated in place with each
-decision and refusal, and no other record is written for the step. A
+decision and refusal, and no other record is written for the step. The
+action is carried out once the step performs its capability (calls it,
+waits for its event, starts its nested run, or has its quorum evaluated),
+whatever the result: that call may have taken effect, so the record keeps
+that pass, with its decision and idempotency key, and a recovery loop
+after it asks for a new action, with a record of its own. A
 recovery loop during the resumption runs again the steps from its target to
 the step that looped, a handler among them excepted, and the resumption then
 goes on: the queued steps after it keep their queued actions, a deferred
@@ -256,7 +261,9 @@ and checks (including mismatched authentication and trust class, and the 1.1
 treatment of the approver fields), and resumption (attended, rejected,
 unattended, a mandate step in either attendance, nested, deferred handler, a
 new actor, steps that ran ahead read and unread, a bound checkpoint, a
-recovery loop and a re-ask after a recheck that continue the queued action, a loop that
+recovery loop and a re-ask after a recheck that continue the queued action,
+a loop after a call, a wait, a nested run or a quorum that failed, which
+asks for a new action, a loop that
 goes on with the resumption and one that supersedes what it runs again, a
 loop back to a queued step with a deferred handler, a gate `end`, a failure, a replan, the queued
 action of a nested run that failed, an escalation that overtakes a deferred
@@ -463,7 +470,7 @@ already does.
 - Runtime fixtures: `approval_defaults_partial`,
   `approval_out_of_band_unattended`, `approval_digest_any_case`,
   `approval_shows_unresolved`, ten new `approver_*` fixtures (the eleventh,
-  `approver_unavailable_attended`, is 1.1's) and twenty-seven
+  `approver_unavailable_attended`, is 1.1's) and thirty-two
   `resume_*` fixtures; the `resume` script entry and the `{{digest_upper}}`
   placeholder in every replayer.
 - Validator fixtures for the approver fields (pass, V106, S303 in 1.2
