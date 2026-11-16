@@ -277,13 +277,15 @@ fn a_profile_grounding_policy_is_checked_at_start_and_after_a_restore() {
         value: json!({"labels": ["a"], "confidence": 1, "evidence_anchors": anchors}),
         evidence_seen: None,
     };
-    let fresh = || Run::start(&ctx, &cat, "w", Map::new(), options(vec![profile.clone()]));
+    let fresh = || {
+        Run::start(&ctx, &cat, "w", Map::new(), options(vec![profile.clone()]))
+            .map_err(|e| e.to_string())
+    };
     let restored = || {
         let plain = Run::start(&ctx, &cat, "w", Map::new(), options(Vec::new())).unwrap();
-        Run::restore(&ctx, &cat, &holding(&plain, &profile), None)
-            .map_err(|e| StartError::Unsupported(e.to_string()))
+        Run::restore(&ctx, &cat, &holding(&plain, &profile), None).map_err(|e| e.to_string())
     };
-    for start in [&fresh as &dyn Fn() -> Result<Run, StartError>, &restored] {
+    for start in [&fresh as &dyn Fn() -> Result<Run, String>, &restored] {
         let mut run = start().unwrap();
         let id = run.next().id;
         run.submit(id, output(json!([])), 0).unwrap();

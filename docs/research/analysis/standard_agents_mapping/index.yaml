@@ -52,6 +52,14 @@ meta:
     resolution: What was done, where, and what remains.
     concerns: The concerns whose mapping produced the finding.
     related: Findings that ask for the same change in part.
+  question_fields:
+    id: Question identifier.
+    question: What the text leaves open, asked so that an answer settles it.
+    refs: Where the evidence is.
+    depends: What an implementation decides differently depending on the answer.
+    finding: The finding the question belongs to, when it belongs to one.
+    answer: 'Agent Capability Standard questions only: how the Standard answers the question, with the
+      section and the RFC decision. Absent while the question is open.'
   references: Paths under content/ and src/ are in the Standard Agent Specification repository at the
     commit above. Other paths are in this repository at the commit above, and line numbers refer to those
     commits. The exceptions are the files this analysis added (examples/standard_agents/, schemas/interop/standard_agents_annotation.schema.json,

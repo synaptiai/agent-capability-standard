@@ -530,6 +530,11 @@ def _write_marker(
     }
     if commit is not None:
         marker["commit"] = commit
+        # As posttooluse_take_checkpoint.sh does: the commit is entered
+        # before the marker names it.
+        commits = marker_dir / "checkpoints" / "commits"
+        commits.mkdir(parents=True, exist_ok=True)
+        (commits / commit).touch()
     (marker_dir / "checkpoint.ok").write_text(json.dumps(marker))
 
 
@@ -689,6 +694,37 @@ class TestShellHookSection518:
         result = _gated_hook(_bash(command), tmp_path)
         assert result.returncode == 2, command
         assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+    @pytest.mark.parametrize(
+        "command", ["git status " + "a" * 100_000, "git status " + "a " * 2100]
+    )
+    def test_a_line_over_4096_bytes_needs_the_marker(
+        self, tmp_path: Path, command: str
+    ):
+        """The word splitter reads one character at a time, each read
+        costing time that grows with the line: a ~100 KB line under a UTF-8
+        locale held the hook past Claude Code's 60-second limit, after which
+        the call runs unchecked. A line over 4096 bytes is not read: it is
+        mutate, decided at once."""
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path), "LC_ALL": "C.UTF-8"}
+        started = time.monotonic()
+        result = subprocess.run(
+            ["bash", str(SHELL_HOOK)],
+            input=json.dumps(_bash(command)),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert time.monotonic() - started < 10
+        assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+
+    def test_a_line_of_4096_bytes_is_still_read(self, tmp_path: Path):
+        command = "git status " + "a " * 2040
+        assert len(command) <= 4096
+        result = _gated_hook(_bash(command), tmp_path)
+        assert result.returncode == 0
 
     def test_rollback_restores_only_a_recorded_checkpoint(self, tmp_path: Path):
         """`git stash pop|apply <commit>` is a rollback only for the full id

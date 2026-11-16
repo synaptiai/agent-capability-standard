@@ -1,7 +1,7 @@
 // Figure slots in the current Standard (visual spec 3.9, "Placement by
 // block"): for each entry of SPEC_SLOTS, an empty marker element is put
-// under its heading, after or before its block, or on both sides of a block
-// the figure wraps. SpecPage cuts the rendered HTML at the markers and draws
+// under its heading, after or before its block (after one item of a list,
+// split there), or on both sides of a block the figure wraps. SpecPage cuts the rendered HTML at the markers and draws
 // the figures there. A slot whose section or block is missing, or whose
 // block no longer starts with the text the map records, fails the build.
 //
@@ -14,7 +14,7 @@ import type { Element, ElementContent, Root, RootContent } from 'hast';
 import type { VFile } from 'vfile';
 import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { diagnosticHref } from '../lib/generated';
-import { SPEC_SLOTS, type SlotBlock, type SpecSlot } from '../lib/spec-slots';
+import { SPEC_SLOTS, type SlotBlock, type SlotItem, type SpecSlot } from '../lib/spec-slots';
 import { CODE_TABLE_FIGURES } from '../lib/spec-tail-figures';
 import { glyphElement } from '../pixel/hast';
 import { failWith, sourceOf } from './source';
@@ -73,6 +73,23 @@ function section(kids: RootContent[], slot: SpecSlot): { head: number; els: { el
   return { head, els };
 }
 
+/**
+ * Cuts a list directly after `item`, which must start with its recorded words
+ * and not be the last item: the items after it move to a new list, returned,
+ * which an ordered list's `start` keeps numbering on. A problem otherwise.
+ */
+function splitList(list: Element, item: SlotItem, where: string): Element | string {
+  const items = list.children.filter((c): c is Element => isEl(c, 'li'));
+  const hit = items[item.index];
+  if (!hit || item.index === items.length - 1) return `${where} has ${items.length} item(s), none after item ${item.index + 1}`;
+  const text = squash(hastText(hit));
+  if (!text.startsWith(item.startsWith)) return `item ${item.index + 1} of ${where} starts "${text.slice(0, 40)}", not "${item.startsWith}"`;
+  const rest = list.children.splice(list.children.indexOf(hit) + 1);
+  const properties = { ...list.properties };
+  if (list.tagName === 'ol') properties.start = Number(list.properties.start ?? 1) + item.index + 1;
+  return { ...list, properties, children: rest };
+}
+
 /** Puts every slot's markers in the tree. Returns the problems found. */
 export function placeSlots(tree: Root, slots: readonly SpecSlot[] = SPEC_SLOTS): string[] {
   const problems: string[] = [];
@@ -99,7 +116,12 @@ export function placeSlots(tree: Root, slots: readonly SpecSlot[] = SPEC_SLOTS):
       problems.push(`slot ${slot.key}: ${block} ${index + 1} of §${slot.section.trim()} starts "${text.slice(0, 40)}", not "${startsWith}"`);
       continue;
     }
-    if (place === 'before') inserts.push({ i: hit.i, nodes: [marker(slot.key, 'here')] });
+    if (slot.at.item) {
+      const where = `list ${index + 1} of §${slot.section.trim()}`;
+      const rest = place === 'after' && block === 'list' ? splitList(hit.el, slot.at.item, where) : 'an item is placed after, in a list';
+      if (typeof rest === 'string') problems.push(`slot ${slot.key}: ${rest}`);
+      else inserts.push({ i: hit.i + 1, nodes: [marker(slot.key, 'here'), rest] });
+    } else if (place === 'before') inserts.push({ i: hit.i, nodes: [marker(slot.key, 'here')] });
     else if (place === 'after') inserts.push({ i: hit.i + 1, nodes: [marker(slot.key, 'here')] });
     else {
       inserts.push({ i: hit.i, nodes: [marker(slot.key, 'start')] });

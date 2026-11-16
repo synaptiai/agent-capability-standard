@@ -51,11 +51,12 @@ hooks:
             # A restore in this skill restores a checkpoint taken in the project
             # (STANDARD 1.2.0 §5.18.6, F503): each `git stash pop` or `git stash
             # apply` must name, as its one argument, the full id of a commit a
-            # checkpoint marker recorded (.claude/checkpoint.ok, or one filed under
-            # .claude/checkpoints/used/ or ended/), as the plugin's pre-tool-use
-            # hook reads it; valid or not, used or not. Claude Code passes the tool
-            # call as JSON on stdin; exit 2 blocks the call and the reason on stderr
-            # is shown to Claude. A call that cannot be read is blocked (R407).
+            # checkpoint recorded (.claude/checkpoint.ok's, or one entered in
+            # .claude/checkpoints/commits/, one lookup), as the plugin's
+            # pre-tool-use hook reads it; valid or not, used or not. Claude Code
+            # passes the tool call as JSON on stdin; exit 2 blocks the call and the
+            # reason on stderr is shown to Claude. A call that cannot be read is
+            # blocked (R407).
             CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then DIR="$CLAUDE_PROJECT_DIR/.claude"
             elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DIR="$CLAUDE_PLUGIN_ROOT/.claude"
@@ -65,9 +66,8 @@ hooks:
               ARG="$(printf '%s\n' "$RESTORE" | sed -E 's/^git[[:space:]]+stash[[:space:]]+(pop|apply)//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
               FOUND=""
               if printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
-                for F in "$DIR/checkpoint.ok" "$DIR"/checkpoints/used/* "$DIR"/checkpoints/ended/*; do
-                  if [ -f "$F" ] && [ ! -L "$F" ] && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$F" 2>/dev/null)" = "$ARG" ]; then FOUND=1; break; fi
-                done
+                if [ -f "$DIR/checkpoints/commits/$ARG" ] && [ ! -L "$DIR/checkpoints/commits/$ARG" ]; then FOUND=1
+                elif [ -f "$DIR/checkpoint.ok" ] && [ ! -L "$DIR/checkpoint.ok" ] && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$DIR/checkpoint.ok" 2>/dev/null)" = "$ARG" ]; then FOUND=1; fi
               fi
               if [ -z "$FOUND" ]; then
                 printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded.\n" "$RESTORE" >&2
@@ -77,25 +77,13 @@ hooks:
             $(printf '%s\n' "$CMD" | grep -oE 'git[[:space:]]+stash[[:space:]]+(pop|apply)([[:space:]][^;&|<>()]*)?' || true)
             EOF
             exit 0
-  PostToolUse:
-    - matcher: "Bash"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[ROLLBACK] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Bash | input_sha256: ${DIGEST:-unavailable}" >> .audit/rollback-operations.log 2>/dev/null || true
 ---
 
 ## Intent
 
 Execute **rollback** to return what a checkpoint captured to the state it had when the checkpoint was taken, whoever changed it since (STANDARD v1.2 §4.4.1). This is the recovery mechanism in the CAVR (Checkpoint-Act-Verify-Rollback) pattern, used when mutations fail or produce undesired outcomes.
 
-A rollback changes the world back, not the account of it: the record of what happened (the audit logs, `.claude/` and `.audit/`, the host's checkpoint and approval state, the trace, the transcript) is never rolled back. It reaches only what its checkpoint captured: a transmission a `send` made since is reported as `not_covered` (`transmitted`), as is a delegate's change outside the checkpoint (`delegated`).
+A rollback changes the world back, not the account of it: the record of what happened (`.claude/`, which holds the plugin's audit log, `.audit/`, where earlier releases' skills logged, the host's checkpoint and approval state, the trace, the transcript) is never rolled back. It reaches only what its checkpoint captured: a transmission a `send` made since is reported as `not_covered` (`transmitted`), as is a delegate's change outside the checkpoint (`delegated`).
 
 **Success criteria:**
 - Everything the rollback concerns is back in its checkpointed state, and `restored` says so
@@ -120,14 +108,14 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - An expired or used checkpoint can still be restored while its content is kept: validity limits what a checkpoint authorises, not what it restores (STANDARD 1.2.0 §4.4.1, §5.2.2)
    - If its content is gone, report `restored: false` with `{item: "*", reason: discarded}`
 
-2) **Read what changed** (read-only): `git diff --name-status <sha> -- <paths>` (tracked changes, for `changes_reverted`) and `git ls-files --others --exclude-standard -- <paths>`; files **created since** are the untracked ones not in the checkpoint's `excluded` and not under `.claude/` or `.audit/` (the audit logs, never rolled back)
+2) **Read what changed** (read-only): `git diff --name-status <sha> -- <paths>` (tracked changes, for `changes_reverted`) and `git ls-files --others --exclude-standard -- <paths>`; files **created since** are the untracked ones not in the checkpoint's `excluded` and not under `.claude/` or `.audit/` (the record of what happened, never rolled back)
 
 3) **Restore by mechanism**. The git form is one line, a gated `mutate` (a fresh checkpoint and an approval: it overwrites the current state):
    - `restore_kind: stash`: `git restore --source=<sha> --worktree -- <paths> && git restore --source=<sha>^2 --staged -- <paths>`; `restore_kind: head`: `git restore --source=<sha> --staged --worktree -- <paths>`
    - Then, only when files were created since, `&& rm -f -- <created paths>`; never `git clean` with an empty path list
    - `git stash apply <sha>` aborts once a file it touches changed since the checkpoint; a bare `git stash pop` or `apply` is refused (F503)
    - `file_copy`: copy each file back from the manifest, and remove the files created in scope since
-   - Never touch `.claude/`, `.audit/` (the audit logs) or the host's state
+   - Never touch `.claude/`, `.audit/` (the record of what happened) or the host's state
 
 4) **Verify** (read-only): `git diff --quiet <sha> -- <paths>` and the untracked list again, for `verification`
 
@@ -300,7 +288,7 @@ Apply the following verification patterns:
 - CRITICAL: Never report `restored: true` for a rollback that did not complete
 - Clean up the files created in scope since the checkpoint
 - An expired or used checkpoint can be restored (STANDARD 1.2.0 §5.2.2); the safety layer refuses a restore only when no checkpoint was ever taken (F503)
-- Never roll back the record of what happened: `.claude/`, `.audit/` (the audit logs), the host's checkpoint and approval state
+- Never roll back the record of what happened: `.claude/` (the plugin's audit log), `.audit/` (earlier releases' logs), the host's checkpoint and approval state
 - A transmission is not undone: report it `transmitted`, and compensate in a step of its own
 - If verification fails, STOP and alert - do not proceed
 

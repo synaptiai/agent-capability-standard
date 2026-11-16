@@ -227,6 +227,18 @@ binding(
     errors=[diag("S303", "done")],
 )
 binding(
+    "domain_not_a_domain_id",
+    "A domain that is not a domain id (section 5.2.4) is S303, and the record is not loaded: a step's would be W620, but tool bindings are new in 1.2.",
+    [rec("look", "detect", domain="Image Object!")],
+    errors=[diag("S303", "look")],
+)
+binding(
+    "domain_id_loads",
+    "A domain id of several segments, such as image.object, is a valid domain: the record loads.",
+    [rec("look", "detect", domain="image.object")],
+    effective={"look": LOW},
+)
+binding(
     "missing_ontology",
     "A record with no ontology is S304, and is not loaded.",
     [{"tool": "x", "capability": "observe"}],
@@ -437,12 +449,18 @@ def calls(
     sequence: list[dict[str, Any]],
     *,
     needs: list[str] | None = None,
+    without: list[str] | None = None,
+    destination_policy: list[str] | None = None,
     write: dict[str, Any] | None = None,
     extra: list[dict[str, Any]] | None = None,
 ) -> None:
     fixture: dict[str, Any] = {"description": description, "ontology": ONTOLOGY}
     if needs:
         fixture["needs"] = needs
+    if without:
+        fixture["without"] = without
+    if destination_policy is not None:
+        fixture["destination_policy"] = destination_policy
     fixture["bindings"] = standard_bindings(write) + (extra or [])
     fixture["sequence"] = sequence
     if name in call_fixtures:
@@ -745,6 +763,52 @@ calls(
         call("write", RUN, A, approve=ALICE),
         call("undo", RUN),
     ],
+)
+
+
+# Destination policies (sections 4.4.2, 5.18.4 and 5.18.10): a layer that does
+# not see a composite's nested calls cannot tell where a send it invokes goes,
+# so under a policy it refuses the composite; a layer that sees them checks
+# each nested send's destination as a call of its own.
+POLICY = ["https://hooks.example.com/*"]
+SENDS = [
+    rec("notify", "send", destination="/to"),
+    rec("relay", "invoke", invokes=["notify"]),
+    rec("outer", "invoke", invokes=["relay"]),
+]
+HOOK = {"to": "https://hooks.example.com/a"}
+ELSEWHERE = {"to": "https://elsewhere.example.net/a"}
+calls(
+    "composite_send_unseen_under_policy",
+    "Under a destination policy, a layer that does not see a composite's nested calls refuses with F504 a composite whose invokes reach, directly or through another composite, a binding that performs send, before approval and the checkpoint; a send of its own is checked by its destination.",
+    [
+        call("save", RUN),
+        call("relay", refuse("F504"), approve=ALICE),
+        call("outer", refuse("F504"), approve=ALICE),
+        call("notify", refuse("F504"), ELSEWHERE, approve=ALICE),
+        call("notify", RUN, HOOK, approve=ALICE),
+    ],
+    without=["nested_calls"],
+    destination_policy=POLICY,
+    extra=SENDS,
+)
+calls(
+    "composite_send_seen_under_policy",
+    "Under a destination policy, a layer that sees a composite's nested calls checks each nested send's destination as a call of its own: the composite's approval and checkpoint do not cover a destination the policy does not allow.",
+    [
+        call("save", RUN),
+        call(
+            "relay",
+            RUN,
+            approve=ALICE,
+            nested=[call("notify", refuse("F504"), ELSEWHERE)],
+        ),
+        call("save", RUN),
+        call("relay", RUN, approve=ALICE, nested=[call("notify", RUN, HOOK)]),
+    ],
+    needs=["nested_calls"],
+    destination_policy=POLICY,
+    extra=SENDS,
 )
 
 

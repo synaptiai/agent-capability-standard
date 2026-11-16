@@ -2,17 +2,61 @@
 
 This changelog tracks changes to the **Agent Capability Standard specification** itself. For plugin and project-level changes, see the [root CHANGELOG](../CHANGELOG.md).
 
-## Unreleased
+## v1.2.0 (Candidate Standard, unreleased)
 
-### Proposed
-- **[RFC-0005](RFC-0005-tool-calling-hosts.md)** (Draft, target 1.2.0):
-  how the Standard applies to a host where a model chooses tool calls and no
-  workflow runs. It defines a safety layer and a tool binding record, says
-  how `requires` edges, checkpoints and approval apply to a sequence of
-  calls, how a refusal is reported, how an output travels on a text-only
-  channel, and one evidence anchor item, with a conformance class and
-  call-sequence fixtures. Nothing in it is normative until a Standard
-  version carries it.
+### Added — Standard v1.2.0 (Candidate Standard), RFC-0005 to RFC-0010
+- **[STANDARD-v1.2.0](STANDARD-v1.2.0.md)** with ontology 2.2.0. Every change
+  is backward compatible: a workflow valid under 1.1.0 is valid under 1.2.0
+  and runs the same way unless its host opts in to a new feature, and a
+  change that would invalidate a 1.1 workflow is phased in as a warning.
+  v1.0.0 and v1.1.0 remain supported. Appendix D of v1.2.0 lists every
+  change; its sections follow the RFCs, all six Accepted:
+  - **[RFC-0005](RFC-0005-tool-calling-hosts.md)**, tool-calling hosts
+    (§5.18, D.1): tool bindings, unbound and composite tools, checkpoints
+    and approval over calls, refusals and records, text-only results, the
+    capability checks, and the safety-layer class SL with binding and
+    call-sequence fixtures (§10.4).
+  - **[RFC-0006](RFC-0006-host-protocol-approval-and-runs.md)**, host
+    protocol, approval and runs (§5.14, §5.19, §6.4, D.2 and D.3): the
+    approval digest and its vectors, resuming a deferred run, the run's
+    actor, the host protocol's actions, responses, time, saving and
+    cancelling, error reasons, and audit and run records.
+  - **[RFC-0007](RFC-0007-delegation-catalogs-and-diagnostics.md)**,
+    delegation, catalogs and diagnostics (§5.1.1, §5.15, §9.8, D.4):
+    catalog sets and qualified ids, agent manifests and the workflow field
+    `agents`, `continues`, model families, step domains, inquiry answers,
+    and diagnostic locations.
+  - **[RFC-0008](RFC-0008-evidence-grounding-and-secrets.md)**, evidence,
+    grounding and secrets (§5.20, §6.5 to §6.7, D.5): the extension
+    `grounding@1` and grounding policies (F505), one evidence anchor type
+    with the `acs:` scheme, evidence stores, secrets and redaction. It
+    answers the evidence-anchor question the RFC-0005 draft left open.
+  - **[RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md)**,
+    checkpoint, rollback, send and memory (§4.4.1, §4.4.2, §4.5, D.6):
+    checkpoint and rollback outputs, idempotency keys and destination
+    policies, memory scopes and their guarantees.
+  - **[RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md)**,
+    profiles, trust, versioning and schema dialect (§4.1.2, §5.21, §8,
+    §11.5 to §11.7, D.7): domain profiles applied by hosts, safety layers
+    and validators, the trust score and conflict resolution, ontology
+    versions, version declaration with the start operation's `header`, and
+    the contract schema dialect.
+- **Codes** V110, V111, R407, R408, F505 (raised), F506 and W617 to W626
+  (§9); a V-code keeps its meaning when a safety layer reports it for a call.
+- **Conformance** (§10): the class SL for safety layers, and normative
+  vectors and fixtures for each area above.
+
+### Changed — clarifications of 1.1 semantics
+- Each section of Appendix D opens with the clarifications that apply to
+  1.0 and 1.1 workflows too: checkpoint use for steps (§5.2.2), the default
+  approval request and the digest input (§5.14), parallel groups and `join`
+  at run time (§5.2.3), tick boundaries, retry backoff and the members the
+  executor computes (§5.19), an approval's `recheck` (§5.14), contract
+  schemas as a dialect (§4.1.2), entity ids (§7.1), the trust score and
+  conflict resolution (§8), and version declaration (§11.5).
+
+### Unchanged
+- **[RFC-0002](RFC-0002-agent-reliability-profile.md)** stays a Draft.
 
 ## v1.1.0 (2026-10-28)
 

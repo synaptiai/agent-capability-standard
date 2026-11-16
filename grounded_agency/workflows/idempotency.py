@@ -38,6 +38,15 @@ def inputs_sha256(inputs: Any) -> str:
     return hashlib.sha256(_core.canonical_json(inputs).encode()).hexdigest()
 
 
+def _replay(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """The ``Output`` a done entry answers with: its value and, when the
+    effect's response carried one, its ``evidence_seen``."""
+    response: dict[str, Any] = {"kind": "Output", "value": entry["value"]}
+    if "evidence_seen" in entry:
+        response["evidence_seen"] = entry["evidence_seen"]
+    return response
+
+
 class IdempotencyLog:
     """At most one effect per idempotency key (STANDARD v1.2 §4.4.2).
 
@@ -46,7 +55,7 @@ class IdempotencyLog:
     runs (§5.19.4) must give it a path. Each entry keeps the key, the
     capability, the SHA-256 of the canonical inputs, whether the effect is
     ``started`` or ``done``, when, the destination (redacted, §6.7) and,
-    once done, the output it answered with.
+    once done, the output it answered with and its ``evidence_seen``.
     """
 
     def __init__(
@@ -82,11 +91,14 @@ class IdempotencyLog:
         most once per key. ``effect`` returns the response (``Output`` or
         ``Error``); it returns an ``Error`` only when nothing took effect,
         and raises when it cannot tell (the entry then stays ``started``, so
-        a later attempt is answered ``outcome_unknown``). A delegation that
-        names the one it ``replaces`` asks for a new effect and is passed
-        straight to ``effect``, as is an action with no key."""
+        a later attempt is answered ``outcome_unknown``). An attempt whose
+        key was done is answered with the ``Output`` it got, its
+        ``evidence_seen`` included (§5.20). An action with no key is passed
+        straight to ``effect``. A delegation that names the one it
+        ``replaces`` has a key of its own (§4.4.2), so it is kept like any
+        other: a re-delivery of it is answered, not performed again."""
         key = action.get("idempotency_key")
-        if not isinstance(key, str) or action.get("replaces") is not None:
+        if not isinstance(key, str):
             return effect()
         capability = str(action.get("capability", ""))
         digest = inputs_sha256(action.get("inputs"))
@@ -106,7 +118,7 @@ class IdempotencyLog:
                         "was done (STANDARD §4.4.2, §5.19.2)",
                     }
                 if entry["state"] == "done":
-                    return {"kind": "Output", "value": entry["value"]}
+                    return _replay(entry)
                 return {
                     "kind": "Error",
                     "code": "R402",
@@ -130,9 +142,12 @@ class IdempotencyLog:
         response = effect()
         with self._lock:
             if response.get("kind") == "Output":
-                self._record(
-                    {**started, "state": "done", "value": response.get("value")}
-                )
+                done = {**started, "state": "done", "value": response.get("value")}
+                # The host's attestation (§5.20) is part of the answer: a
+                # replay without it would fail an attested policy (F505).
+                if "evidence_seen" in response:
+                    done["evidence_seen"] = response["evidence_seen"]
+                self._record(done)
             else:
                 self._record({"key": key, "state": "cleared"})
         return response
@@ -141,13 +156,13 @@ class IdempotencyLog:
         self, since_ms: int, *, run_id: str, capability: str | None = "send"
     ) -> list[dict[str, Any]]:
         """The effects that took effect or may have, at or after
-        ``since_ms``, under the keys of run ``run_id`` (prefix
-        ``<run_id>:``; nested runs share the run's id), of ``capability``
+        ``since_ms``, under the keys of run ``run_id`` (``<run_id>:<n>``,
+        ``<n>`` digits, so a run whose id starts with ``<run_id>:`` is
+        another run; nested runs share the run's id), of ``capability``
         (any, when None), oldest first: what a rollback lists as
         ``not_covered`` (§4.4.1). Each entry's ``state`` is ``done``, or
         ``started`` for one whose outcome is unknown (its effect raised, or
         is still running): it may have gone out."""
-        prefix = f"{run_id}:"
         with self._lock:
             entries = list(self._entries.values())
         return sorted(
@@ -155,7 +170,7 @@ class IdempotencyLog:
                 dict(e)
                 for e in entries
                 if e["state"] in ("done", "started")
-                and e["key"].startswith(prefix)
+                and e["key"].rpartition(":")[0] == run_id
                 and e["at"] >= since_ms
                 and (capability is None or e["capability"] == capability)
             ),

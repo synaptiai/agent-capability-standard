@@ -1,0 +1,127 @@
+{
+  "description": "Under a destination policy, a layer that sees a composite's nested calls checks each nested send's destination as a call of its own: the composite's approval and checkpoint do not cover a destination the policy does not allow.",
+  "ontology": "2.2.0",
+  "needs": [
+    "nested_calls"
+  ],
+  "destination_policy": [
+    "https://hooks.example.com/*"
+  ],
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    },
+    {
+      "tool": "notify",
+      "ontology": "2.2.0",
+      "capability": "send",
+      "destination": "/to"
+    },
+    {
+      "tool": "relay",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "notify"
+      ]
+    },
+    {
+      "tool": "outer",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "relay"
+      ]
+    }
+  ],
+  "sequence": [
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "relay",
+      "approve": [
+        "alice"
+      ],
+      "nested": [
+        {
+          "call": "notify",
+          "args": {
+            "to": "https://elsewhere.example.net/a"
+          },
+          "expect": {
+            "refuse": "F504"
+          }
+        }
+      ],
+      "expect": "run"
+    },
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "relay",
+      "approve": [
+        "alice"
+      ],
+      "nested": [
+        {
+          "call": "notify",
+          "args": {
+            "to": "https://hooks.example.com/a"
+          },
+          "expect": "run"
+        }
+      ],
+      "expect": "run"
+    }
+  ]
+}

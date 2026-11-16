@@ -698,4 +698,4 @@ The table [Words the two standards use differently](integrations/standard_agents
 
 ---
 
-See also: [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) for formal definitions.
+See also: [STANDARD-v1.2.0.md](../spec/STANDARD-v1.2.0.md) for formal definitions.

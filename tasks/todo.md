@@ -93,32 +93,114 @@ that accept it, implemented in the same change):
   implement each rule, with conformance fixtures.
 
 Workstreams:
-- [ ] S1 Tool-calling hosts and the hook layer (RFC-0005): ACS-01, 02, 03,
+- [x] S1 Tool-calling hosts and the hook layer (RFC-0005): ACS-01, 02, 03,
       07, 08, 36, 38, 39, 41, 55, 57
-- [ ] S2a Approval, deferral and run identity (RFC-0006): ACS-10, 11, 12,
+- [x] S2a Approval, deferral and run identity (RFC-0006): ACS-10, 11, 12,
       13, 35, 44
-- [ ] S2b Host protocol and executor conformance (RFC-0006): ACS-14, 15, 20,
+- [x] S2b Host protocol and executor conformance (RFC-0006): ACS-14, 15, 20,
       30, 31, 32, 33, 34, 37, 45, 62
-- [ ] S3 Validator, delegation and catalogs (RFC-0007): ACS-04, 09, 16, 17,
+- [x] S3 Validator, delegation and catalogs (RFC-0007): ACS-04, 09, 16, 17,
       24, 29, 46, 47, 49, 50, 54
-- [ ] S4 Evidence, grounding and secrets (RFC-0008): ACS-06, 21, 22, 23, 40,
+- [x] S4 Evidence, grounding and secrets (RFC-0008): ACS-06, 21, 22, 23, 40,
       51, 53, 58
-- [ ] S5 Checkpoint, rollback, send and memory (RFC-0009): ACS-18, 19, 26,
+- [x] S5 Checkpoint, rollback, send and memory (RFC-0009): ACS-18, 19, 26,
       27, 48, 52
-- [ ] S6 Profiles, trust, versioning, schema dialect and packaging
+- [x] S6 Profiles, trust, versioning, schema dialect and packaging
       (RFC-0010): ACS-05, 25, 28, 42, 56, 59, 64
 
 Phases:
-- [ ] 1. Design: one design per workstream, an adversarial review, a
+- [x] 1. Design: one design per workstream, an adversarial review, a
       revision; then a cross-stream consistency pass that fixes shared shapes
       and allocates the new diagnostic codes
-- [ ] 2. Foundation: STANDARD-v1.2.0.md base, ontology and canonical schema
+- [x] 2. Foundation: STANDARD-v1.2.0.md base, ontology and canonical schema
       deltas, new codes, version lines, validator support for 1.2
-- [ ] 3. Implementation: S1, S3, S5, S6 in parallel worktrees; S2a, S2b, S4
+- [x] 3. Implementation: S1, S3, S5, S6 in parallel worktrees; S2a, S2b, S4
       in one chain (they share the executor); merge
-- [ ] 4. Verification: every CI check, site checks, adversarial review of the
+- [x] 4. Verification: every CI check, site checks, adversarial review of the
       whole change, fixes
-- [ ] 5. Findings file, CHANGELOG, Appendix D, RFC statuses
+- [x] 5. Findings file, CHANGELOG, Appendix D, RFC statuses
+
+**Round 3 review.**
+
+*Done.* Standard 1.2.0 (Candidate) and ontology 2.2.0, with RFC-0005 to
+RFC-0010 Accepted by the maintainer's instruction (RFC-0002 stays a Draft).
+The seven workstreams (designs in `tasks/standard-1.2/designs/`, records in
+`tasks/standard-1.2/progress/`) were each implemented, reviewed twice and
+fixed, then merged in order; a finishing step gave the Python adapter the
+output-contract row so that both reference layers claim class SL. All 64 ACS
+findings are `fixed`, each resolution naming what implements it (the counts
+in `index.yaml`, the integration guide and the CHANGELOG say so). Phase 4
+reviewed the whole change by area: 59 issues in round 1 (34 in the
+Standard text, findings, site and documents; 2 in the Rust core; 20 in the
+SDK, hooks and skills, 19 of them distinct and 18 real, one, the `header`
+keyword, already documented; 3 in the TypeScript package): every real one
+fixed, with a test where code changed, and the other recorded with its
+evidence (`progress/PHASE4.md`). Phase 5 merged
+the streams' CHANGELOG entries into one [Unreleased] entry (an intro,
+Upgrading grouped by component and naming every behaviour change, then
+Added, Changed and Fixed; checked mechanically that no entry's text was
+lost), completed Appendix D (§11.7's two JSON Schemas), rewrote the
+integration guide's ACS section (accepted, what stays open) and its stale
+"no JavaScript build" rows, added "What Standard 1.2.0 Adds" to the README
+and corrected its skill counts, and corrected two resolutions (ACS-01's call
+fixture count, 30; ACS-49's last sentence, which named an optional
+follow-up as if it were pending).
+
+*Follow-ups of the round* (scratch list, each checked): the CLAUDE.md hooks
+bullet, the adapter's output-contract row, the `index.yaml` counts, the
+§10.3 digest-vectors slot, chrono, `agents` below 1.2 as W616 (RFC-0010 and
+S6's resolution) and `identity_error`'s version argument were done. The
+timing test `edge_checks_scale_linearly` was not only load: the validator
+took twice main's time (3.0 s against 1.5 s in debug, 1.7x margin to its
+5 s bound) because every step deep-copied its capability's resolved output
+schema into the scope, and ontology 2.2.0 made those schemas about four
+times larger (callgrind, both trees). The scope now borrows the schemas
+from the context (`core/src/validate/{mod,exprs,bindings,recovery}.rs`):
+1.75 s, every timing test within 0.25 s of main's. The npm audit advisory
+(astro 7.4.5, moderate) is in `site/package-lock.json` unchanged from
+main, and concerns `@astrojs/node`'s image endpoint, which the static site
+does not use: not ours, not fixed here. The figure-gap run in §5.14 that sat
+at 1799.98px was restructured by 09a0574 (1644px); the page's longest
+enforced run is now 1795px, and seven others are within 40px of the 1800px
+limit, by construction (figures were added until each run fit). The sweep
+here measures exactly as CI does: Playwright 1.64.1's headless shell 1248
+gives, on a page this phase did not touch, the same runs to the pixel as
+CI's last Site run on main (4178, 2045, 3369 and 2906px on
+/rfcs/proposals/oasf-safety-extensions/). So no rendering difference
+separates CI from a local sweep, and an edit that lengthens one of those
+runs fails both; giving each several lines of margin needs new figures in
+eight sections, a design task left open.
+
+*Checked.* See `progress/PHASE4.md` for each area's checks. Phase 5, on
+the final tree: Rust as CI runs it (fmt; clippy plain, `python` and `wasm`;
+`cargo test --locked`, 257 unit tests and the integration tests; the
+WebAssembly interface tests; MSRV 1.88 `check`); the extension rebuilt;
+every `tools/validate_*.py`, `validate_workflows.py --strict` and every
+domain catalog and example `--strict`; the generators' `--check`
+(`sync_skill_schemas`, `gen_runtime_fixtures` 353, `gen_call_fixtures` 33
+and 30, `gen_trigger_vectors`, `gen_standard_agents_binding`,
+`gen_capability_json_schemas`); `pytest tests/` (4498 passed, 18 skipped),
+`benchmarks/tests/` (69) and `scripts/run_conformance.py`; the TypeScript
+package rebuilt with its WebAssembly core (1817 tests) and the binding (191
+passed, 2 skipped); the site's check, tests (1172) and build, axe and the
+figure-gap sweep (CI's headless shell) on the five pages this phase changed
+(/spec/1.2.0/, /start/overview/, /guides/standard-agents/,
+/community/release-notes/, /community/roadmap/): no violations, no
+enforced run over 1800px (/start/overview/ 1503px).
+
+*Not done.* Versions change only at a release: `plugin.json` stays 2.0.0
+(the release that carries this is 3.0.0), `pyproject.toml` and
+`grounded_agency.__version__` 0.1.0, and Standard 1.2.0 stays a Candidate
+dated unreleased in the ROADMAP. `@synaptiai/acs-core` is not on npm until
+the repository enables publishing. SA 0.2.0 does not say that definition
+code may load WebAssembly, so no ACS workflow has run inside an SA thread,
+and the binding has still not run in an SA runtime. Outside the findings:
+`examples/digital_twin_sync_loop.workflow_catalog.yaml` still copies three
+reference workflows, which a qualified invoke could replace once the
+reference catalog (1.1.0) carries a manifest. The RFCs' open questions
+stay open for later versions, among them RFC-0007's dependencies between
+catalogs (question 1) and a `name:tag` whose tag starts with a letter and
+holds a digit (question 8).
 
 ## Round 2: fix our side, pull request, merge
 

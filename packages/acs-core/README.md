@@ -4,9 +4,11 @@ The Agent Capability Standard core for TypeScript, with two entries:
 
 - `@synaptiai/acs-core`, plain TypeScript: the capability ontology as types
   and data, effective safety flags, canonical JSON and approval digests,
-  secret redaction, tool binding records, and capability outputs carried as
-  text. It is host-neutral: nothing in it reads a particular agent
-  framework's state. The
+  I-JSON checks, secret redaction, evidence anchors and grounding,
+  destination policies and durations, tool binding records, capability
+  outputs carried as text, agent manifests, model families, step domains
+  and diagnostic paths. It is host-neutral: nothing in it reads a
+  particular agent framework's state. The
   [Standard Agents binding](../../examples/standard_agents/README.md) is
   built on it.
 - `@synaptiai/acs-core/wasm`: the reference core itself (validator,
@@ -33,6 +35,11 @@ Package 0.1.0 implements the Agent Capability Standard 1.2.0
 | `duration` | `parseDurationMs(text)`: a duration (section 5.10.1) in whole milliseconds, rounded up as the core rounds it, or null for text outside the grammar |
 | `binding` | `checkBindings(records, options)`: loads tool binding records (section 5.18.1) and computes each tool's effective flags, the tools a composite invokes included, with the diagnostics of section 5.18 (S303, S304, V101, V105, V107, V109, V110, W602; with the offered tools, W617, V111, V102 and F506). `annotationRecord` reads the record a Standard Agents `acs` annotation carries |
 | `output` | `encodeCapabilityOutput` and `decodeCapabilityOutput`: a capability output as the I-JSON text of the object, with every required field (section 5.18.9), else `CapabilityOutputError` (R402) |
+| `ijson` | `iJsonProblem(value)`: null for an I-JSON value (RFC 7493) within the limits the reference executor applies (section 5.14: finite numbers, integers within ±2^53, no lone surrogate, plain objects and arrays, at most `MAX_DEPTH` levels), else what is wrong and where; `parseJsonExact(text)`: `JSON.parse` that reads an integer literal beyond 2^53 as a `bigint`, which `iJsonProblem` refuses, so read JSON text with it wherever its values are then checked as I-JSON |
+| `agents` | Agent manifests (section 5.15.1): `manifestMaxima(manifest, readOnly)`, the highest flags a manifest's capabilities allow (or its read-only ones), and `joinMaxima`; `checkTask(manifest, task)`, the task names a manifest does not declare and the required ones a task lacks (section 5.15.2); `workflowTarget` and `agentsApply`, the version a workflow targets (section 11.5) and whether its `agents` has effect (1.2 or later) |
+| `families` | `modelFamily(modelId)`: the model family a host derives from a model identifier (section 5.15), null when it attests none; `isModelFamily` |
+| `domains` | `isDomainId` and `selectImplementation(domain, available)`: the implementation a host selects for a step's `domain` (section 5.2.4): the domain, else its longest prefix ending before a `.`, else the one for no domain, else `UnsupportedDomainError` (R402 `unsupported_domain`, section 5.19.7) |
+| `issues` | `issuePath(location)`: a diagnostic's location as one dot-and-bracket path (`review.steps[1].gates[0].when`), for a format that wants one (section 9.8) |
 
 ```ts
 import { canonicalize, digest, effectiveFlags, redactJson } from '@synaptiai/acs-core';
@@ -47,8 +54,12 @@ The tests read the conformance vectors in place:
 `tests/conformance/secrets/redact.json`,
 `tests/conformance/secrets/credentials.json`, the grounding vectors
 `tests/conformance/grounding/check.json`, the destination vectors
-`tests/conformance/destinations/match.json` and the binding fixtures of
-the safety-layer class, `tests/conformance/bindings/*.json`.
+`tests/conformance/destinations/match.json`, the output vectors
+`tests/conformance/output/vectors.json`, the agent maxima, model family and
+domain vectors (`tests/conformance/agents/maxima.json`,
+`tests/conformance/families/derive.json`,
+`tests/conformance/domains/match.json`) and the binding fixtures of the
+safety-layer class, `tests/conformance/bindings/*.json`.
 
 ## The core through WebAssembly
 

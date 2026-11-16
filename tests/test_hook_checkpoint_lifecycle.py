@@ -57,6 +57,37 @@ def _marker(project: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
+_GIT_ENV = {
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+}
+
+
+def _git(path: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=path,
+        env={**os.environ, **_GIT_ENV},
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _clean_repo(path: Path) -> Path:
+    """A repository with one commit and a tree that is HEAD's."""
+    if shutil.which("git") is None:
+        pytest.skip("git not installed")
+    path.mkdir(parents=True, exist_ok=True)
+    _git(path, "init", "-q")
+    (path / "a.txt").write_text("a\n")
+    _git(path, "add", "a.txt")
+    _git(path, "commit", "-q", "-m", "init")
+    return path
+
+
 def test_a_successful_stash_create_writes_the_marker(tmp_path: Path) -> None:
     before = int(time.time())
     result = _run(
@@ -74,11 +105,82 @@ def test_a_successful_stash_create_writes_the_marker(tmp_path: Path) -> None:
 
 
 def test_a_clean_tree_restores_to_head(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": ""}), tmp_path)
     marker = _marker(tmp_path)
     assert marker is not None
     assert marker["commit"] == "HEAD"
     assert marker["checkpoint_id"].startswith("clean-")
+
+
+@pytest.mark.parametrize("change", ["worktree", "index"])
+def test_empty_output_over_a_changed_tree_writes_no_marker(
+    tmp_path: Path, change: str
+) -> None:
+    """Empty output means nothing was saved: HEAD restores the state only
+    when the tracked files and the index are HEAD's. Over a changed tree a
+    'clean' marker would let the next write pass with a checkpoint that
+    cannot bring the change back."""
+    _clean_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("uncommitted\n")
+    if change == "index":
+        _git(tmp_path, "add", "a.txt")
+    result = _run(TAKE, _stash("git stash create", {"stdout": ""}), tmp_path)
+    assert result.returncode == 0
+    assert _marker(tmp_path) is None
+
+
+def test_empty_output_outside_a_repository_writes_no_marker(tmp_path: Path) -> None:
+    _run(TAKE, _stash("git stash create", {"stdout": ""}), tmp_path)
+    assert _marker(tmp_path) is None
+
+
+@pytest.mark.parametrize("stdout", ["", SHA])
+def test_a_call_run_in_the_background_writes_no_marker(
+    tmp_path: Path, stdout: str
+) -> None:
+    """A background call has not finished when the hook runs: its output is
+    not the command's, so it records nothing."""
+    _clean_repo(tmp_path)
+    payload = _stash("git stash create", {"stdout": stdout})
+    payload["tool_input"]["run_in_background"] = True
+    assert _run(TAKE, payload, tmp_path).returncode == 0
+    assert _marker(tmp_path) is None
+
+
+@pytest.mark.parametrize("stdout", ["", SHA])
+def test_a_stash_of_another_repository_writes_no_marker(
+    tmp_path: Path, stdout: str
+) -> None:
+    project = _clean_repo(tmp_path / "project")
+    elsewhere = _clean_repo(tmp_path / "elsewhere")
+    payload = {**_stash("git stash create", {"stdout": stdout}), "cwd": str(elsewhere)}
+    assert _run(TAKE, payload, project).returncode == 0
+    assert _marker(project) is None
+    # Run in the project (a subdirectory of it included), the same call writes it.
+    (project / "sub").mkdir()
+    payload["cwd"] = str(project / "sub")
+    assert _run(TAKE, payload, project).returncode == 0
+    marker = _marker(project)
+    assert marker is not None and marker["commit"] == (stdout or "HEAD")
+
+
+def test_output_that_is_not_a_commit_writes_no_marker(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
+    _run(TAKE, _stash("git stash create", {"stdout": "warning: x"}), tmp_path)
+    assert _marker(tmp_path) is None
+
+
+def test_a_long_line_is_read_in_bounded_time_and_writes_no_marker(
+    tmp_path: Path,
+) -> None:
+    """split_words reads a line of at most 4096 bytes; a longer one is not
+    read (and a UTF-8 locale does not slow the reading)."""
+    _clean_repo(tmp_path)
+    command = "git stash create " + "a" * 100_000
+    result = _run(TAKE, _stash(command, {"stdout": SHA}), tmp_path, LC_ALL="C.UTF-8")
+    assert result.returncode == 0
+    assert _marker(tmp_path) is None
 
 
 @pytest.mark.parametrize(
@@ -122,28 +224,12 @@ def test_a_clean_repository_then_a_write(tmp_path: Path) -> None:
     """In a real repository with a clean tree, `git stash create` prints
     nothing; the restore point is HEAD, and the Write that follows is
     allowed and uses the marker."""
-    if shutil.which("git") is None:
-        pytest.skip("git not installed")
-    env = {
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@example.invalid",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@example.invalid",
-    }
-    run = {
-        "cwd": tmp_path,
-        "env": {**os.environ, **env},
-        "check": True,
-        "capture_output": True,
-    }
-    subprocess.run(["git", "init", "-q"], **run)
-    (tmp_path / "a.txt").write_text("a\n")
-    subprocess.run(["git", "add", "a.txt"], **run)
-    subprocess.run(["git", "commit", "-q", "-m", "init"], **run)
-    stashed = subprocess.run(["git", "stash", "create"], text=True, **run)
-    assert stashed.stdout == ""
+    _clean_repo(tmp_path)
+    stashed = _git(tmp_path, "stash", "create")
+    assert stashed == ""
 
-    _run(TAKE, _stash("git stash create", {"stdout": stashed.stdout}), tmp_path)
+    payload = {**_stash("git stash create", {"stdout": stashed}), "cwd": str(tmp_path)}
+    _run(TAKE, payload, tmp_path)
     marker = _marker(tmp_path)
     assert marker is not None and marker["commit"] == "HEAD"
 
@@ -200,17 +286,11 @@ def test_a_checkpoint_whose_turn_ended_can_still_be_restored(tmp_path: Path) -> 
 
 def test_an_expired_checkpoint_can_still_be_restored(tmp_path: Path) -> None:
     now = int(time.time())
-    claude = tmp_path / ".claude"
-    claude.mkdir()
-    (claude / "checkpoint.ok").write_text(
-        json.dumps(
-            {
-                "checkpoint_id": SHA,
-                "commit": SHA,
-                "created_at": now - 120,
-                "expires_at": now - 60,
-            }
-        )
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    marker = _marker(tmp_path)
+    assert marker is not None
+    (tmp_path / ".claude" / "checkpoint.ok").write_text(
+        json.dumps({**marker, "created_at": now - 120, "expires_at": now - 60})
     )
     write = {
         "tool_name": "Write",
@@ -259,3 +339,34 @@ def test_stop_exits_0_without_a_claude_directory(tmp_path: Path) -> None:
         timeout=30,
     )
     assert result.returncode == 0
+
+
+def test_a_restore_looks_up_one_entry_not_the_history(tmp_path: Path) -> None:
+    """A successful `git stash create` enters its commit in
+    .claude/checkpoints/commits/, and a restore looks that entry up: it
+    reads no file of the history (used/, ended/), which grows with every
+    checkpoint taken, so the check takes the same time however long the
+    history is (a check that ran past the hook's timeout would let the
+    call run)."""
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    entry = tmp_path / ".claude" / "checkpoints" / "commits" / SHA
+    assert entry.is_file() and entry.read_text() == ""
+    _run(STOP, {"hook_event_name": "Stop"}, tmp_path)
+    assert _marker(tmp_path) is None
+    assert _restore(tmp_path, SHA).returncode == 0
+    # A record in the history alone, which nothing entered, restores nothing.
+    ended = tmp_path / ".claude" / "checkpoints" / "ended"
+    ended.mkdir(parents=True, exist_ok=True)
+    (ended / "planted.1").write_text(
+        json.dumps({"checkpoint_id": OTHER, "commit": OTHER})
+    )
+    other = _restore(tmp_path, OTHER)
+    assert other.returncode == 2
+    assert other.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+
+
+def test_a_clean_tree_enters_no_commit(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
+    _run(TAKE, _stash("git stash create", {"stdout": ""}), tmp_path)
+    assert _marker(tmp_path) is not None
+    assert not (tmp_path / ".claude" / "checkpoints" / "commits").exists()

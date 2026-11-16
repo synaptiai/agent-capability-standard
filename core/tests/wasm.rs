@@ -373,6 +373,57 @@ fn the_run_operations_through_the_interface() {
 }
 
 #[test]
+fn start_and_resume_refuse_a_non_string_attendance_or_records() {
+    // A member left out or null takes its default; any other JSON type is
+    // refused, as the Python binding refuses it (a host that wrote
+    // `records: ["actions"]` would otherwise lose its per-step records).
+    let ctx = context();
+    let catalog = json!({"w": {"goal": "g", "risk": "low", "steps": [
+        {"capability": "retrieve", "purpose": "p", "store_as": "r", "input_bindings": {"target": "x"}}]}});
+    let start = |extra: Value| {
+        let mut options = json!({"run_id": "r", "now_ms": 0, "header": "1.2.0"});
+        options
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        call(
+            json!({"op": "run.start", "context": ctx, "catalog": catalog,
+            "workflow": "w", "options": options}),
+        )
+    };
+    for key in ["attendance", "records"] {
+        for bad in [json!(true), json!(0), json!(["actions"]), json!({})] {
+            let answer = start(json!({ key: bad }));
+            assert_eq!(kind(&answer), "bad_request", "{key}: {bad} -> {answer}");
+            assert!(
+                answer["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&format!("'{key}' must be a string")),
+                "{answer}"
+            );
+        }
+        assert!(start(json!({ key: null }))["ok"]["run"].is_u64());
+    }
+    let run = start(json!({}))["ok"]["run"].clone();
+    for bad in [json!(true), json!(0), json!(["unattended"])] {
+        let answer = call(json!({"op": "run.resume", "run": run, "now_ms": 1, "attendance": bad}));
+        assert_eq!(kind(&answer), "bad_request", "{bad} -> {answer}");
+    }
+    // A well-typed attendance reaches the run, which did not end deferred.
+    for good in [json!(null), json!("unattended")] {
+        let answer = call(json!({"op": "run.resume", "run": run, "now_ms": 1, "attendance": good}));
+        assert_eq!(kind(&answer), "run", "{good} -> {answer}");
+    }
+    // yaml.parse's max_bytes: a number of bytes, or left out or null.
+    let parse = |max: Value| call(json!({"op": "yaml.parse", "text": "x: 1", "max_bytes": max}));
+    assert_eq!(kind(&parse(json!("4"))), "bad_request");
+    assert_eq!(kind(&parse(json!(-1))), "bad_request");
+    assert_eq!(parse(json!(null))["ok"], json!({"x": 1}));
+    assert_eq!(kind(&parse(json!(2))), "yaml");
+}
+
+#[test]
 fn start_needs_the_header_member() {
     let ctx = context();
     let catalog = json!({"w": {"goal": "g", "risk": "low", "steps": [

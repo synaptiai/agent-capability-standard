@@ -325,7 +325,22 @@ def test_half_life_days(text: str, days: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["P0D", "P00D", "10D", "P10", "P1W", "PT240H", "P1.5D", "P-1D", "", 10]
+    "text",
+    [
+        "P0D",
+        "P00D",
+        "10D",
+        "P10",
+        "P1W",
+        "PT240H",
+        "P1.5D",
+        "P-1D",
+        "",
+        10,
+        # Digits outside ASCII, which `\\d` and int() would read as 10
+        "P\u0661\u0660D",
+        "P\uff11\uff10D",
+    ],
 )
 def test_half_life_days_refuses_other_forms(text: Any) -> None:
     with pytest.raises(ValueError):

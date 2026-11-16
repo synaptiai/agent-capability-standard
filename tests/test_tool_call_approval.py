@@ -1225,6 +1225,40 @@ class TestEvidenceToolInput:
             assert SECRET not in text and "[REDACTED]" in text
 
     @pytest.mark.asyncio
+    async def test_structured_credentials_in_the_input_are_redacted(self) -> None:
+        """Headers as JSON members, a camelCase credential name and a
+        credential used as a member name never reach the exported record
+        (§6.7: a credential inside a header never goes into evidence)."""
+        store = EvidenceStore()
+        hook = create_evidence_collector(store, include_tool_input=True)
+        token = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+        call = {
+            "tool_name": "mcp__http__get",
+            "tool_input": {
+                "url": "https://api.example.com/v1",
+                "headers": {
+                    "Authorization": "Basic dXNlcjpodW50ZXIyMjIy",
+                    "Cookie": "sessionid=9f8e7d6c5b4a39281706",
+                },
+                "accessToken": "abcd1234efgh",
+                "tokens_by_owner": {token: "ana"},
+            },
+            "tool_response": {"ok": True},
+        }
+
+        await hook(call, "h1", None)
+
+        exported = json.dumps(store.to_list())
+        for secret in (
+            "dXNlcjpodW50ZXIyMjIy",
+            "9f8e7d6c5b4a39281706",
+            "abcd1234efgh",
+            token,
+        ):
+            assert secret not in exported
+        assert "https://api.example.com/v1" in exported
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("keep", [False, True])
     async def test_config_member_reaches_the_wrapped_hooks(
         self, ontology_path: str, tmp_path: Path, keep: bool

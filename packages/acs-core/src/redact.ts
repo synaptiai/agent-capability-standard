@@ -17,8 +17,17 @@
  * password, an assignment to a credential name (`password`, `token`,
  * `api_key`, ..., alone or ending a longer name) of four characters or more,
  * PEM private key bodies, AWS access key ids, GitHub and Slack tokens, `sk-`
- * keys and JWTs. In a JSON value, a string member whose name is a credential
- * name is redacted whole.
+ * keys and JWTs. In a JSON value, a member whose name ends in a credential
+ * name (in any case, after any prefix: `accessToken`, `dbPassword`,
+ * `x-api-key`) or in `authorization` or `cookie` (the structured
+ * `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie`
+ * headers) is a secret member: its value is redacted whole when it is a
+ * string of four characters or more or a number, and when it is an array or
+ * an object, each such string and number in it is. Booleans and null are
+ * kept. A member name is redacted as any
+ * string is: a name that holds a secret is replaced by its redacted text, and
+ * one that would then repeat a name already in its object gets ` (2)`,
+ * ` (3)`, ... so that no member is lost.
  *
  * The patterns are ASCII: no `u` flag, so `\b` and case-insensitive
  * matching are ASCII-only, as `re.ASCII` makes them in Python; whitespace is
@@ -37,7 +46,9 @@
  * name whose value is quoted with no whitespace and 8 or more characters, or
  * unquoted, 12 or more characters, mixing letters and digits; prose such as
  * `token: rotate monthly` passes. `tests/conformance/secrets/credentials.json`
- * pins the rule for the three.
+ * pins the rule for the three. In JSON data, which is not prose, it also
+ * recognises what redaction replaces in a secret member, unless the string
+ * is a placeholder: data holding a secret the host recognises is refused.
  */
 import type { Json } from './canonical.js';
 
@@ -69,9 +80,10 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   new RegExp(`(?<![A-Za-z0-9])bearer${WS}+(?<secret>[A-Za-z0-9._~+/=-]{8,})`, 'dgi'),
   // The password of a URL's userinfo.
   new RegExp(`\\b[A-Za-z][A-Za-z0-9+.-]*://[^${NOT_WS}/:@]+:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
-  // Assignments to a credential name, in code, query strings and JSON text.
+  // Assignments to a credential name, alone or at the end of a longer name
+  // (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text.
   new RegExp(
-    `(?<![A-Za-z0-9])(?:${NAMES})["']?${WS}*[=:]${WS}*["']?` + `(?<secret>${char(`${NOT_WS}"'&,;`)}{4,})`,
+    `(?:${NAMES})["']?${WS}*[=:]${WS}*["']?` + `(?<secret>${char(`${NOT_WS}"'&,;`)}{4,})`,
     'dgi',
   ),
   // AWS access key ids.
@@ -86,7 +98,17 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   /\b(?<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/dg,
 ];
 
-const SECRET_MEMBER = new RegExp(`^(?:[\\s\\S]*[_-])?(?:${NAMES})$`, 'i');
+/** A member name that ends in a credential name, or names a header that carries one. */
+const SECRET_MEMBER = new RegExp(`^[\\s\\S]*(?:${NAMES}|authorization|cookie)$`, 'i');
+
+/**
+ * Whether a value in a secret member is redacted: a string of four
+ * characters or more other than the marker, or a number.
+ */
+function secretScalar(value: Json): boolean {
+  if (typeof value === 'string') return [...value].length >= MIN_SECRET_LENGTH && value !== MARKER;
+  return typeof value === 'number';
+}
 
 /** The registered values a redactor replaces: long enough, distinct, longest first. */
 function registered(secrets: readonly string[]): string[] {
@@ -140,34 +162,52 @@ function pointerToken(key: string): string {
 export function redactJson(value: Json, secrets: readonly string[] = []): { value: Json; pointers: string[] } {
   const values = registered(secrets);
   const pointers: string[] = [];
-  const walk = (v: Json, pointer: string): Json => {
+  // `secret`: `v` is within a secret member, whose strings and numbers are
+  // redacted whole.
+  const walk = (v: Json, pointer: string, secret: boolean): Json => {
     if (typeof v === 'string') {
       const text = redactWith(v, values, DEFAULT_PATTERNS);
       if (text !== v) pointers.push(pointer);
       return text;
     }
-    if (Array.isArray(v)) return v.map((item, i) => walk(item, `${pointer}/${i}`));
+    if (Array.isArray(v)) {
+      return v.map((item, i) => {
+        const here = `${pointer}/${i}`;
+        if (secret && secretScalar(item)) {
+          pointers.push(here);
+          return MARKER;
+        }
+        return walk(item, here, secret);
+      });
+    }
     if (v !== null && typeof v === 'object') {
       const out: { [key: string]: Json } = {};
       for (const [k, item] of Object.entries(v)) {
-        const here = `${pointer}/${pointerToken(k)}`;
-        if (
-          typeof item === 'string' &&
-          [...item].length >= MIN_SECRET_LENGTH &&
-          item !== MARKER &&
-          SECRET_MEMBER.test(k)
-        ) {
-          out[k] = MARKER;
-          pointers.push(here);
+        let name = redactWith(k, values, DEFAULT_PATTERNS);
+        const renamed = name !== k;
+        if (renamed) {
+          // A name that holds a secret: never repeat another.
+          let unique = name;
+          for (let n = 2; Object.hasOwn(out, unique) || Object.hasOwn(v, unique); n++) {
+            unique = `${name} (${n})`;
+          }
+          name = unique;
+        }
+        const here = `${pointer}/${pointerToken(name)}`;
+        if (renamed) pointers.push(here);
+        const memberSecret = secret || SECRET_MEMBER.test(k);
+        if (memberSecret && secretScalar(item)) {
+          out[name] = MARKER;
+          if (!renamed) pointers.push(here);
         } else {
-          out[k] = walk(item, here);
+          out[name] = walk(item, here, memberSecret);
         }
       }
       return out;
     }
     return v;
   };
-  return { value: walk(value, ''), pointers };
+  return { value: walk(value, '', false), pointers };
 }
 
 /** Whether {@link redactJson} would change `value`. */
@@ -219,6 +259,19 @@ function credentialText(text: string): boolean {
   return false;
 }
 
+/**
+ * Whether JSON data holds, in a secret member, a value redaction replaces
+ * that is not a placeholder.
+ */
+function secretMemberValue(value: Json, secret: boolean): boolean {
+  if (secret && secretScalar(value)) return !(typeof value === 'string' && PLACEHOLDER.test(value));
+  if (Array.isArray(value)) return value.some((v) => secretMemberValue(v, secret));
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).some(([k, v]) => secretMemberValue(v, secret || SECRET_MEMBER.test(k)));
+  }
+  return false;
+}
+
 /** Every string in a JSON value, member names included. */
 function stringsIn(value: Json, out: string[]): void {
   if (typeof value === 'string') out.push(value);
@@ -243,5 +296,8 @@ export function holdsCredential(value: Json, secrets: readonly string[] = []): b
   const values = registered(secrets);
   if (strings.some((s) => values.some((v) => s.includes(v)))) return true;
   if (strings.some(credentialText)) return true;
-  return typeof value !== 'string' && credentialText(JSON.stringify(value));
+  if (typeof value === 'string') return false;
+  // Data, not prose: what redaction replaces in a secret member.
+  if (secretMemberValue(value, false)) return true;
+  return credentialText(JSON.stringify(value));
 }

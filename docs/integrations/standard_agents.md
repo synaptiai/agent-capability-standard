@@ -49,8 +49,9 @@ was checked and what was not.
   [`@synaptiai/acs-core`](../../packages/acs-core/README.md) loads it through
   a WebAssembly JSON interface (`@synaptiai/acs-core/wasm`). SA does not say
   that definition code can load WebAssembly.
-- **Changes are proposed to both standards**, listed at the end. The most
-  important is a hook in SA that can decline a tool call before it runs.
+- **Changes to both standards are listed at the end.** Those to ACS are
+  made: they are Standard 1.2.0. Those to SA are proposals, the most
+  important a hook that can decline a tool call before it runs.
 
 ## What each standard covers
 
@@ -819,12 +820,13 @@ capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 28
+the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 30
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
-constants (its maximum age, `MAX_APPROVERS`). The one fixture it skips needs a call of an unbound
-tool, which a Standard Agents tool without the binding's wrapper never
-brings to the binding.
+constants (its maximum age, `MAX_APPROVERS`). It skips two: one needs a call
+of an unbound tool, which a Standard Agents tool without the binding's
+wrapper never brings to the binding, and the other is for a layer that does
+not see the calls a composite makes, which the binding sees.
 
 ## Running ACS workflows with Standard Agents
 
@@ -841,11 +843,11 @@ from either standard.
 title: Three ways to run an ACS workflow with Standard Agents
 ---
 flowchart TB
-  accDescr: With the executor in Python, outside Standard Agents, an agent is reached through the Thread Client API and performs one capability, which needs nothing new from either standard; running the executor inside a thread, with a handler as its host or a tool the model calls advancing the run, needs a JavaScript build of the executor that does not exist yet.
+  accDescr: With the executor in Python, outside Standard Agents, an agent is reached through the Thread Client API and performs one capability, which needs nothing new from either standard; running the executor inside a thread, with a handler as its host or a tool the model calls advancing the run, needs a runtime that can load the executor's WebAssembly build, which SA 0.2.0 does not promise.
   q{"Where does the ACS executor run?"}
   q -->|outside, in Python| out["A Standard Agent performs one capability, through the Thread Client API"]
   out --> today(["Needs nothing new"])
-  q -->|inside a thread| inside["Needs a JavaScript build of the executor"]
+  q -->|inside a thread| inside["Needs a runtime that can load the WebAssembly executor"]
   inside --> h["A handler-backed side is the host"]
   inside --> t["A tool the model calls advances the run"]
 ```
@@ -853,8 +855,8 @@ flowchart TB
 | Arrangement | How | State |
 |---|---|---|
 | The executor outside, an SA agent as one capability | The Python host answers `InvokeCapability` by creating a thread, sending the inputs as a message and reading the result, through the [Thread Client API](https://standardagentspec.org/0.2.0/specification/threads/client-api) | Needs nothing new, with any runtime that exposes that API (a runtime "**SHOULD**"). It has not been built or run here. The result is the agent's last message, parsed as JSON |
-| A handler as the host | A handler-backed side restores the run from the thread's key-value store on each inbound message, answers the pending action, performs the next ones and saves the run | Needs the executor in JavaScript |
-| A tool the model calls | A function tool submits the model's output for the pending step and returns the next step | Needs the executor in JavaScript. Order is advisory unless every tool that can mutate guards itself, as grounded tools do |
+| A handler as the host | A handler-backed side restores the run from the thread's key-value store on each inbound message, answers the pending action, performs the next ones and saves the run | Needs `@synaptiai/acs-core/wasm` loaded in definition code, which SA 0.2.0 does not say a runtime allows |
+| A tool the model calls | A function tool submits the model's output for the pending step and returns the next step | Needs `@synaptiai/acs-core/wasm` loaded in definition code, as above. Order is advisory unless every tool that can mutate guards itself, as grounded tools do |
 
 Whichever arrangement runs the executor, the host turns the string a tool, a
 sub-prompt or the Thread Client API returns into the capability's output by
@@ -883,7 +885,7 @@ documents rather than file paths (`AcsCore`, `CoreContext.start`,
 code can load WebAssembly, which SA 0.2.0 does not say; the package's plain
 TypeScript entry (the ontology table, effective flags, canonical JSON, the
 digest) has no such dependency. See
-[Changes proposed to ACS](#changes-proposed-to-the-agent-capability-standard).
+[What stays open](#what-stays-open).
 
 Until then, the rules a workflow would enforce by position are enforced per
 call by grounded tools. That covers the checkpoint and approval rules. It does
@@ -1119,18 +1121,19 @@ delivery guarantee; the thread file system has no durability or isolation
 rules like the key-value store's; a parked human turn has no deadline; and a
 child returns text and files but no structured data.
 
-## Changes proposed to the Agent Capability Standard
+## Changes to the Agent Capability Standard
 
 The mapping tested ACS against a host it was not designed around, and found
 gaps of its own: 64 findings, listed with their evidence and their status in
 [`findings_agent_capability_standard.yaml`](../research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml).
-What could be fixed without changing the Standard's text has been fixed in
-this repository. The rules a binding needs were proposed in
-[RFC-0005](../../spec/RFC-0005-tool-calling-hosts.md), which was accepted:
-they are [§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts) and the safety-layer class
-([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)) of Standard 1.2.0. The rest waits
-for the maintainers' decision, as [GOVERNANCE](../../spec/GOVERNANCE.md)
-requires for normative changes.
+All 64 are fixed. Those that needed no new normative text were fixed in this
+repository first. The rest are in [Standard 1.2.0](../../spec/STANDARD-v1.2.0.md),
+a Candidate Standard whose changes
+[RFC-0005](../../spec/RFC-0005-tool-calling-hosts.md) to
+[RFC-0010](../../spec/RFC-0010-profiles-trust-versioning-and-dialect.md)
+record and the maintainers accepted, as [GOVERNANCE](../../spec/GOVERNANCE.md)
+requires for normative changes. Every change is backward compatible: a
+workflow valid under 1.1.0 validates and runs as before.
 
 ### Fixed in this repository
 
@@ -1158,33 +1161,71 @@ requires for normative changes.
   a host or safety layer applies them, and §5.21 says what each rule changes:
   the reference executor, the Python adapter and this binding (a grounded
   tool's `profiles`) apply their flags, person requirements, grounding
-  policies and minimum confidence, and refuse a profile whose destination
-  policy they do not check yet (no shipped profile sets one); the validator
-  given a profile reports the flags it raises. The executor's trace kinds
+  policies, minimum confidence and destination policies
+  (`allowed_destinations`, §4.4.2; no shipped profile sets one); the
+  validator given a profile reports the flags it raises. The executor's trace kinds
   are listed and tested.
 
-### Accepted from RFC-0005
+### Accepted in Standard 1.2.0
 
-1. **How the rules apply to a stream of tool calls.** Standard 1.1.0 defined
-   its rules over the steps of a workflow and no safety layer. Standard 1.2.0
-   says what a `requires` edge means over a sequence of calls, how long a
-   checkpoint stays valid and when it is used up, what an approval for a call
-   shows and binds, and how a refusal and a layer's own failure are reported.
+1. **How the rules apply to a stream of tool calls** (RFC-0005). Standard
+   1.1.0 defined its rules over the steps of a workflow and no safety layer.
+   Standard 1.2.0 says what a `requires` edge means over a sequence of calls,
+   how long a checkpoint stays valid and when it is used up, what an approval
+   for a call shows and binds, and how a refusal and a layer's own failure
+   are reported ([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)),
+   with a conformance class for safety layers
+   ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)).
    The reference implementations had disagreed on several of these; the
    Python SDK adapter and this binding now pass the same fixtures.
-2. **A tool binding record.** The word "tool" did not occur in Standard
-   1.1.0. Standard 1.2.0 has one record (capability, domain, declared flags,
-   ontology version, the tools a composite invokes) and the rules for an
-   unbound tool, a tool that performs several capabilities, a tool whose
-   capability depends on its arguments and a tool that only signals the host.
-3. **One evidence anchor item.** `evidence_anchors` had no item schema, and
-   the schemas and the Python SDK used three different vocabularies of anchor
-   kinds. Standard 1.2.0 has one evidence anchor (§6.5, RFC-0008), which
-   this binding's tools return and its trace records, and a rule that keeps
-   secrets out of evidence, audit records and stored data
+2. **A tool binding record** (RFC-0005). The word "tool" did not occur in
+   Standard 1.1.0. Standard 1.2.0 has one record (capability, domain,
+   declared flags, ontology version, the tools a composite invokes) and the
+   rules for an unbound tool, a tool that performs several capabilities, a
+   tool whose capability depends on its arguments and a tool that only
+   signals the host.
+3. **One evidence anchor item** (RFC-0008). `evidence_anchors` had no item
+   schema, and the schemas and the Python SDK used three different
+   vocabularies of anchor kinds. Standard 1.2.0 has one evidence anchor
+   ([§6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)), which this
+   binding's tools return and its trace records; grounding policies that the
+   executor and the safety layers check
+   ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)); and a rule that
+   keeps secrets out of evidence, audit records and stored data
    ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)).
+4. **Approval, runs and the host protocol** (RFC-0006). The approval request
+   and its digest are stated in full, approvers can be attested, and a
+   deferred run can be resumed
+   ([§5.14.1](../../spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)).
+   The host protocol is a published schema,
+   `schemas/host_protocol.schema.json`
+   ([§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol)), with
+   cancellation, wake-up times and a run record every host keeps, and
+   executors have a conformance class, EX
+   ([§10.5](../../spec/STANDARD-v1.2.0.md#105-executor-conformance)).
+5. **What crosses a delegation** (RFC-0007, RFC-0009). With agent manifests
+   and a workflow's `agents`, a `delegate` step's flags follow its target
+   ([§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets)). A
+   delegate's effects are outside its delegator's checkpoints, and a
+   rollback reaches only what its checkpoint captured
+   ([§5.15.4](../../spec/STANDARD-v1.2.0.md#5154-checkpoints-across-a-delegation)).
+   Catalogs gain manifests and qualified names
+   ([§5.1.1](../../spec/STANDARD-v1.2.0.md#511-catalog-manifests-and-qualified-names)).
+6. **Checkpoints, sends and memory** (RFC-0009): what a checkpoint captures
+   and a rollback restores
+   ([§4.4.1](../../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)),
+   idempotency keys and destination policies for transmissions
+   ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)), and memory
+   scopes ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
+7. **What applying a domain profile changes** (RFC-0010). Executors, safety
+   layers and validators apply profiles, which only tighten
+   ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)); the
+   contracts' schema dialect is defined
+   ([§4.1.2](../../spec/STANDARD-v1.2.0.md#412-schema-dialect)), and so is
+   how a document cites the ontology's version
+   ([§11.6](../../spec/STANDARD-v1.2.0.md#116-ontology-versions)).
 
-### Still open
+### What stays open
 
 - **Publishing and loading the core in an SA runtime.** What a
   tool-calling binding needs (the ontology table, effective flags, canonical
@@ -1196,22 +1237,11 @@ requires for normative changes.
   repository enables publishing (`.github/workflows/publish-npm.yml`). What
   stays open is SA's: whether definition code may load WebAssembly, and how
   a packed agent's npm dependencies are resolved (bundle the package to be
-  safe). This was the roadmap's
+  safe). Until a runtime allows it, an ACS workflow does not run inside an
+  SA thread ([Running ACS workflows](#running-acs-workflows-with-standard-agents)).
+  This was the roadmap's
   [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
   item.
-- **What crosses a delegation**, for a checkpoint: a delegate's effects are
-  outside its delegator's checkpoints, and a rollback reaches only what its
-  checkpoint captured, as Standard 1.2.0
-  [§5.15.4](../../spec/STANDARD-v1.2.0.md#5154-checkpoints-across-a-delegation)
-  says. (A delegation's flags following its target, with agent manifests
-  and `agents`, landed in Standard 1.2.0,
-  [§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets).)
-- **The host protocol as a published schema**, with a conformance class for
-  executors: Standard 1.2.0 gives it, as
-  [§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol),
-  `schemas/host_protocol.schema.json` and class EX (§10.5), with
-  cancellation, wake-up times and a run record every host keeps; what stays
-  open is a JavaScript build to run it in a thread.
 
 Standard Agents also does several things ACS could learn from: numbered,
 testable runtime rules for storage; `uses`, a declared and enforced list of

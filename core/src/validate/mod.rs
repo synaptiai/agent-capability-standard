@@ -549,9 +549,10 @@ pub fn validate_set(
 /// Names and schemas visible to a binding: earlier steps' outputs and the
 /// workflow's declared inputs.
 #[derive(Default, Clone)]
-pub(crate) struct Scope {
-    /// store_as → resolved producer output schema.
-    pub stores: IndexMap<String, Value>,
+pub(crate) struct Scope<'c> {
+    /// store_as → resolved producer output schema, borrowed from the
+    /// context's contracts: a step does not copy its capability's schema.
+    pub stores: IndexMap<String, &'c Value>,
     /// input name → resolved input schema.
     pub inputs: IndexMap<String, Value>,
     /// Roots that may be absent at runtime: optional inputs and the outputs
@@ -1041,9 +1042,7 @@ impl WorkflowCheck<'_> {
             // so there its output is present; later steps see it as absent
             // if the step can be skipped.
             if let Some(store) = store {
-                scope
-                    .stores
-                    .insert(store.to_string(), contracts.output.clone());
+                scope.stores.insert(store.to_string(), &contracts.output);
                 scope.maybe_absent.remove(store);
             }
             for g in gates.iter().filter(|g| g.phase == exprs::Phase::After) {

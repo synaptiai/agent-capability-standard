@@ -10,7 +10,7 @@ workflows (step capabilities in order; a domain in brackets):
 ### 1. `monitor_and_replan`
 - **Goal:** Detect world changes that invalidate the current plan and trigger replanning when needed.
 - **Declared risk:** medium
-- **Steps:** observe → state → compare[assumption_validation] → detect[plan-invalidation] → critique → plan → audit
+- **Steps:** observe → state → compare[assumption_validation] → detect[plan_invalidation] → critique → plan → audit
 
 ### 2. `clarify_intent`
 - **Goal:** Resolve ambiguous user requests through targeted clarification questions.

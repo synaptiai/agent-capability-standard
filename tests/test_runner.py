@@ -935,18 +935,18 @@ def _requests(seen: list[dict[str, Any]]) -> list[dict[str, Any]]:
 @pytest.mark.parametrize(
     "name",
     [
-        "resume_retry_keeps_queue",
+        "resume_loop_keeps_queue",
         "resume_recheck_reask",
-        "resume_deferred_handler_loop",
     ],
 )
 def test_a_queued_step_names_its_action_until_it_goes_on(
     validator: _core.Validator, name: str
 ) -> None:
-    """A re-entered queued step keeps its queued action through a retry and
-    a re-ask after a recheck: every request names it and, in an attended
-    resumption, is put to a person, with no mandate_ref; its decisions land
-    on the queued record, the only record of the step (§5.14.1)."""
+    """A re-entered queued step keeps its queued action through a recovery
+    loop before it calls its capability and a re-ask after a recheck: every
+    request names it and, in an attended resumption, is put to a person,
+    with no mandate_ref; its decisions land on the queued record, the only
+    record of the step (§5.14.1)."""
     run, seen = _played(validator, name)
     first, *again = [a for a in _requests(seen) if "queued_action_id" in a]
     assert again, name
@@ -981,6 +981,38 @@ def test_requests_outside_the_queue_name_no_queued_action(
     assert queued == [(2, "run-1/w/2/0"), (2, None)]
 
 
+@pytest.mark.parametrize(
+    ("name", "queued"),
+    [
+        ("resume_failed_call_then_loop", "run-1/w/2/0"),
+        ("resume_failed_call_then_loop_actions", "run-1/w/2/2"),
+    ],
+)
+def test_a_queued_step_whose_call_failed_carried_its_action_out(
+    validator: _core.Validator, name: str, queued: str
+) -> None:
+    """A re-entered queued step that called its capability carried its
+    queued action out, though the call failed: the queued record keeps that
+    pass, failed, with its decision and idempotency key, and the recovery
+    loop's pass is a new action, asked without the queued action, with a
+    record, decision and key of its own (§5.14.1 items 6, 7; §6.4)."""
+    run, seen = _played(validator, name)
+    calls = [
+        a["idempotency_key"]
+        for a in seen
+        if a["kind"] == "InvokeCapability" and a["capability"] == "mutate"
+    ]
+    assert len(set(calls)) == 2, calls
+    first, again = _requests(seen)
+    assert first["queued_action_id"] == queued
+    assert "queued_action_id" not in again
+    mutates = [r for r in run.next()["action_records"] if r["capability"] == "mutate"]
+    assert mutates[0]["action_id"] == queued
+    assert [r["status"] for r in mutates] == ["failed", "executed"]
+    assert [r["idempotency_key"] for r in mutates] == calls
+    assert [r["approval"]["decision_id"] for r in mutates] == ["d1", "d2"]
+
+
 def test_a_loop_during_a_resumption_does_not_run_the_deferred_handler(
     validator: _core.Validator,
 ) -> None:
@@ -999,8 +1031,9 @@ def test_a_loop_during_a_resumption_does_not_run_the_deferred_handler(
     assert (end["kind"], end["outcome"]) == ("Completed", "escalated"), end
     records = {r["action_id"]: r["status"] for r in end["action_records"]}
     assert records == {
-        "run-1/w/3/0": "executed",
+        "run-1/w/3/0": "failed",
         "run-1/w/oncall/3/1": "executed",
+        "run-1/w/3/2": "executed",
     }
 
 
@@ -1030,10 +1063,10 @@ def test_a_resumed_run_stamps_what_it_supersedes(
 def test_a_loop_during_a_resumption_does_not_repeat_what_ran_ahead(
     validator: _core.Validator,
 ) -> None:
-    """A retry during a resumption runs the step again and goes on with the
-    resumption: a step that ran in the first run and declares
+    """A recovery loop during a resumption runs the step again and goes on
+    with the resumption: a step that ran in the first run and declares
     after_deferral: run is not run again, so it delegates once (§5.14.1)."""
-    run, seen = _played(validator, "resume_retry_keeps_queue")
+    run, seen = _played(validator, "resume_failed_call_then_loop")
     calls = [a["capability"] for a in seen if a["kind"] == "InvokeCapability"]
     assert calls.count("delegate") == 1
     assert calls.count("mutate") == 2

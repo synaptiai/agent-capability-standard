@@ -86,6 +86,12 @@ jobs:
       - name: Check generated skill files are in sync
         run: python tools/sync_skill_schemas.py --check
 
+      # The generators below check every fixture against its JSON Schema with
+      # jsonschema, a dev dependency. The steps above run on the package's
+      # own dependencies alone, so they are installed only here.
+      - name: Install the generators' dependencies
+        run: pip install -e ".[dev]" -c constraints.txt
+
       - name: Check runtime fixtures are generated
         run: python scripts/gen_runtime_fixtures.py --check
 

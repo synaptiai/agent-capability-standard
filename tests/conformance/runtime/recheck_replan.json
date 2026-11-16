@@ -111,7 +111,8 @@
     },
     {
       "expect": {
-        "kind": "RequestApproval"
+        "kind": "RequestApproval",
+        "step": 3
       },
       "respond": {
         "kind": "Decision",
@@ -126,6 +127,7 @@
     {
       "expect": {
         "kind": "RecheckSource",
+        "step": 3,
         "source": "${p.steps}",
         "compare": "digest"
       },

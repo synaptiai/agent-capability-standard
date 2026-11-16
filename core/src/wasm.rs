@@ -182,6 +182,20 @@ fn time(v: &Value, key: &str) -> Result<u64, Fail> {
     })
 }
 
+/// An optional string member: left out or `null` is `None`; a member of
+/// any other type is refused rather than read as left out, as the Python
+/// binding refuses it.
+fn optional_string<'a>(req: &'a Req, key: &str) -> Result<Option<&'a str>, Fail> {
+    match req.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(_) => Err(Fail::new(
+            "bad_request",
+            format!("'{key}' must be a string"),
+        )),
+    }
+}
+
 fn list(req: &Req, key: &str) -> Result<Vec<Value>, Fail> {
     match req.get(key) {
         None | Some(Value::Null) => Ok(Vec::new()),
@@ -254,11 +268,7 @@ fn hex(text: &str) -> Result<Vec<u8>, Fail> {
 }
 
 fn key(req: &Req) -> Result<Option<Vec<u8>>, Fail> {
-    match req.get("key_hex") {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(k)) => hex(k).map(Some),
-        Some(_) => Err(Fail::new("bad_request", "'key_hex' must be a string")),
-    }
+    optional_string(req, "key_hex")?.map(hex).transpose()
 }
 
 /// The reference roots of an `expr.check` request: each root's schema and
@@ -280,7 +290,7 @@ impl Scope for JsonScope<'_> {
 
 /// A request's `attendance`: `attended` (the default) or `unattended`.
 fn attendance(o: &Req) -> Result<Attendance, Fail> {
-    match o.get("attendance").and_then(Value::as_str) {
+    match optional_string(o, "attendance")? {
         None | Some("attended") => Ok(Attendance::Attended),
         Some("unattended") => Ok(Attendance::Unattended),
         Some(other) => Err(Fail::new(
@@ -327,7 +337,7 @@ fn set_options(o: &Req) -> Result<SetOptions, Fail> {
 fn start_options(ctx: &Context, o: &Req) -> Result<StartOptions, Fail> {
     let header = header(o, "header", "options.")?;
     let attendance = attendance(o)?;
-    let records = match o.get("records").and_then(Value::as_str) {
+    let records = match optional_string(o, "records")? {
         None | Some("approvals") => RecordMode::Approvals,
         Some("actions") => RecordMode::Actions,
         Some(other) => {
@@ -384,10 +394,12 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
         })),
         "yaml.parse" => {
             let text = string(req, "text")?;
-            let max = req
-                .get("max_bytes")
-                .and_then(Value::as_u64)
-                .unwrap_or(yaml::DEFAULT_MAX_BYTES);
+            let max = match req.get("max_bytes") {
+                None | Some(Value::Null) => yaml::DEFAULT_MAX_BYTES,
+                Some(v) => v.as_u64().ok_or_else(|| {
+                    Fail::new("bad_request", "'max_bytes' must be a number of bytes")
+                })?,
+            };
             if text.len() as u64 > max {
                 return Err(Fail::new(
                     "yaml",

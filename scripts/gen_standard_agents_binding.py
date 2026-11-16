@@ -243,8 +243,11 @@ def render_annotation_schema(ontology: dict[str, Any]) -> str:
             },
             "domain": {
                 "type": "string",
-                "minLength": 1,
-                "description": "The capability's domain parameter, e.g. `config`.",
+                "pattern": r"^[a-z0-9][a-z0-9_]*(\.[a-z0-9][a-z0-9_]*)*$",
+                "description": (
+                    "The capability's domain parameter, a domain id (section "
+                    "5.2.4), e.g. `config` or `image.object`."
+                ),
             },
             "flags": {
                 "type": "object",

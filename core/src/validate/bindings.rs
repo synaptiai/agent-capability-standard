@@ -33,7 +33,7 @@ enum Producer<'s> {
 }
 
 fn resolve_root<'s>(scope: &'s Scope, root: &str) -> Option<Producer<'s>> {
-    if let Some(s) = scope.stores.get(root) {
+    if let Some(&s) = scope.stores.get(root) {
         return Some(Producer::Store(s));
     }
     scope.inputs.get(root).map(Producer::Input)

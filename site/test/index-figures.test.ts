@@ -229,6 +229,8 @@ describe('/spec/ conformance coverage', () => {
       (checkText.match(/"id":/g) ?? []).length,
       dir('tests/conformance/runtime').length,
       dir('tests/conformance/contrib').length,
+      dir('tests/conformance/bindings').length,
+      dir('tests/conformance/calls').length,
     ]);
     expect(pass + fail).toBeGreaterThan(80);
     // All validator codes together (pass and fail fixtures), and each other part's codes.
@@ -237,6 +239,14 @@ describe('/spec/ conformance coverage', () => {
     expect(got[3]!.codes).toEqual(listed(/"expect":\s*\[([^\]]*)\]/g, checkText));
     expect(got[4]!.codes).toEqual(ends('tests/conformance/runtime'));
     expect(got[5]!.codes).toEqual(ends('tests/conformance/contrib'));
+    // A binding fixture's expected diagnostics; a call fixture's refusals,
+    // nested calls included.
+    const all = (d: string, re: RegExp) => new Set(dir(d).flatMap((f) => [...repoText(`${d}/${f}`).matchAll(re)].map((m) => m[1]!)));
+    expect(got[6]!.codes).toEqual(all('tests/conformance/bindings', /"code":\s*"([A-Z]\d{3})"/g));
+    expect(got[7]!.codes).toEqual(all('tests/conformance/calls', /"refuse(?:_output)?":\s*"([A-Z]\d{3})"/g));
+    for (const code of ['V110', 'V111', 'F506', 'W617', 'F504', 'R402']) {
+      expect(new Set([...got[6]!.codes, ...got[7]!.codes]).has(code), code).toBe(true);
+    }
   });
 });
 

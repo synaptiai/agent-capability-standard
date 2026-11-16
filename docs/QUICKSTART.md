@@ -396,7 +396,7 @@ Each domain provides:
 | Build your own workflow | [TUTORIAL.md](TUTORIAL.md) |
 | Understand key terms | [GLOSSARY.md](GLOSSARY.md) |
 | Work with images, audio, video | [MODALITY_HANDLING.md](guides/MODALITY_HANDLING.md) |
-| Read the full spec | [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) |
+| Read the full spec | [STANDARD-v1.2.0.md](../spec/STANDARD-v1.2.0.md) |
 | Understand conformance levels | [CONFORMANCE.md](../spec/CONFORMANCE.md) |
 
 ## Common Issues

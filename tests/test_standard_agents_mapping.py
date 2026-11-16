@@ -197,6 +197,7 @@ def test_findings_match_the_index_and_have_the_documented_fields(
     findings: dict[str, dict[str, Any]],
 ) -> None:
     documented = set(index["meta"]["finding_fields"])
+    questioned = set(index["meta"]["question_fields"])
     for about, entry in index["findings"].items():
         doc = findings[about]
         assert doc["about"] == about
@@ -240,8 +241,15 @@ def test_findings_match_the_index_and_have_the_documented_fields(
             assert statuses == stated, about
         for q in doc.get("questions", []):
             assert q["question"].strip() and q["refs"], q["id"]
+            assert q["depends"].strip(), q["id"]
+            # Every field is documented; only this standard's questions are
+            # answered, each by a section of the Standard.
+            assert set(q) <= questioned, (q["id"], set(q) - questioned)
             if "finding" in q:
                 assert q["finding"] in ids, q["id"]
+            if "answer" in q:
+                assert about == "agent_capability_standard", q["id"]
+                assert "§" in q["answer"], q["id"]
 
 
 def test_a_finding_covered_by_a_proposal_names_one_that_exists(

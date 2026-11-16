@@ -44,12 +44,15 @@ The binding depends on the TypeScript package
 [`@synaptiai/acs-core`](../../packages/acs-core/README.md) of this repository
 (`file:../../packages/acs-core`), which holds the ontology table, effective
 flags, canonical JSON, the digest, the binding checks and the text-only
-output rule. Build it first:
+output rule. Build it first; the binding imports only its plain-TypeScript
+entry, so `build:ts` is enough (the package's full `npm run build` also
+bundles the schema documents through its WebAssembly core, which
+`npm run build:wasm` builds with Rust first):
 
 ```bash
 cd packages/acs-core
 npm ci
-npm run build   # dist/, which the binding imports
+npm run build:ts   # dist/, which the binding imports
 cd ../../examples/standard_agents
 npm ci
 npm run check   # type-check against the published @standardagents/spec types

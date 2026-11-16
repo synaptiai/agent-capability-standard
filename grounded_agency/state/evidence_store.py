@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _MAX_METADATA_SIZE_BYTES = 1024  # 1KB max per anchor
 _MAX_METADATA_DEPTH = 2  # No deeply nested structures
 _MAX_KEY_LENGTH = 64  # SEC-008: Maximum metadata key length
-_VALID_KEY_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+_VALID_KEY_PATTERN = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 
 # SEC-008: Explicit denylist for dangerous metadata keys.
 # These keys can cause prototype pollution or class manipulation
@@ -80,7 +80,7 @@ def _validate_metadata_key(key: str) -> bool:
         return False
     if key in _DENIED_KEYS:
         return False
-    return bool(_VALID_KEY_PATTERN.match(key))
+    return bool(_VALID_KEY_PATTERN.fullmatch(key))
 
 
 def _validate_metadata_depth(value: Any, current_depth: int = 0) -> bool:

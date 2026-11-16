@@ -84,3 +84,79 @@ def test_read_only_in_both(tmp_path: Path, command: str) -> None:
         timeout=30,
     )
     assert result.returncode == 0
+
+
+def _hook(tmp_path: Path, command: str) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "permission_mode": "bypassPermissions",
+    }
+    return subprocess.run(
+        ["bash", str(HOOK)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Quotes the shell removes: the option is the same.
+        'git log -1 "--format=%x7b%x22a%x22: 1%x7d" "--output=.claude/s.json"',
+        'git diff "--output=pwn.txt"',
+        "git diff --out''put=pwn.txt",
+        'git stash show -p "--output=x"',
+        "file '-C' -m f",
+        # Abbreviations getopt_long and git accept.
+        "git diff --outp=x",
+        "git log --out=x",
+        "file --compi -m mymagic",
+        # A pathname expansion may be any file name, an option included.
+        "git diff *",
+        "file *",
+        # An unbalanced quote.
+        "git log 'x",
+    ],
+)
+def test_a_quoted_abbreviated_or_expanded_option_is_gated_in_both(
+    tmp_path: Path, command: str
+) -> None:
+    classified = mapper.ToolCapabilityMapper().map_tool("Bash", {"command": command})
+    assert classified.requires_checkpoint and classified.requires_approval, command
+    result = _hook(tmp_path, command)
+    assert result.returncode == 2, command
+    assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize(
+    "command",
+    [
+        'grep "a b" f',
+        'git log --format="%H %s" -3',
+        "git log -- '*.py'",
+        "ls *.md",
+    ],
+)
+def test_quoted_and_expanded_read_only_words_stay_read_only(
+    tmp_path: Path, command: str
+) -> None:
+    classified = mapper.ToolCapabilityMapper().map_tool("Bash", {"command": command})
+    assert classified.capability_id == "observe", command
+    assert _hook(tmp_path, command).returncode == 0, command
+
+
+def test_both_checkpoint_hooks_split_words_alike() -> None:
+    """posttooluse_take_checkpoint.sh reads a `git stash create` line as the
+    pre-tool-use hook does: the same split_words function."""
+    take = (HOOK.parent / "posttooluse_take_checkpoint.sh").read_text(encoding="utf-8")
+    pattern = re.compile(r"^split_words\(\) \{\n.*?^\}\n", re.MULTILINE | re.DOTALL)
+    pre_fn, take_fn = pattern.search(TEXT), pattern.search(take)
+    assert pre_fn and take_fn
+    assert pre_fn.group(0) == take_fn.group(0)

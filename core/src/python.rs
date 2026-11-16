@@ -455,7 +455,6 @@ fn start_err(py: Python<'_>, e: StartError) -> PyErr {
         StartError::Inputs(_)
         | StartError::Program(_)
         | StartError::Identity(_)
-        | StartError::Unsupported(_)
         | StartError::Grounding(_)
         | StartError::Policy(_)
         | StartError::Header(_) => PyValueError::new_err(message),
@@ -583,10 +582,10 @@ impl PyRun {
     /// Validate `catalog` and start `workflow`. Raises ValueError when the
     /// catalog does not validate (with the error diagnostics as the second
     /// argument), the inputs do not match the workflow's, `actor_identity`
-    /// is not an `agent_identity` (§5.17), or an option is malformed or not
-    /// implemented yet. `catalogs` are the other catalogs of the catalog's
-    /// set (§5.1.1) and `agents` agent manifests (§5.15.1), as for
-    /// `validate_catalog`; a refused set or manifest raises ValueError.
+    /// is not an `agent_identity` (§5.17), or an option is malformed.
+    /// `catalogs` are the other catalogs of the catalog's set (§5.1.1) and
+    /// `agents` agent manifests (§5.15.1), as for `validate_catalog`; a
+    /// refused set or manifest raises ValueError.
     ///
     /// `header` is required: the version the catalog's `# Standard
     /// version:` header declares, or None for a catalog without one

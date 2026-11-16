@@ -39,7 +39,7 @@ const pairs = (list: { code: string; location?: { tool: string }; tool?: string 
 
 describe('binding fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(33);
+    expect(CASES).toHaveLength(35);
   });
 
   it.each(CASES)('%s', (_name, fixture) => {

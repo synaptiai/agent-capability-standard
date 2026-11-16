@@ -12,6 +12,9 @@ Tests the grounded_agency package components:
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -777,8 +780,17 @@ class TestCheckpointReservation:
     async def test_context_without_tool_use_id_still_needs_a_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
+        """With no valid checkpoint the refusal is F501, as for a call with
+        an id: the missing checkpoint is what to fix first."""
         callback = adapter._make_permission_callback()
-        assert _denied(await callback("Write", {}, SimpleNamespace()))
+        pre = adapter._make_pretooluse_safety_hook()
+        for context in (SimpleNamespace(), None):
+            denied = await callback("Write", {}, context)
+            assert _denied(denied)
+            assert denied.message.startswith("F501 CHECKPOINT_REQUIRED:")
+        result = await pre({"tool_name": "Write", "tool_input": {}}, None, None)
+        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("F501 CHECKPOINT_REQUIRED:")
 
     @pytest.mark.asyncio
     async def test_denied_call_releases_its_reservation(
@@ -880,6 +892,7 @@ class TestHooks:
     async def test_checkpoint_recorder_hook(
         self,
         checkpoint_tracker: CheckpointTracker,
+        tmp_path: Path,
     ):
         """The call that saves the state takes the checkpoint, not the call
         that loads the skill (STANDARD 1.2.0 §5.18.6)."""
@@ -899,11 +912,14 @@ class TestHooks:
         await hook(skill, "skill_123", None)
         assert not checkpoint_tracker.has_valid_checkpoint()
 
-        def stash(command: str, response: dict[str, Any]) -> dict[str, Any]:
+        def stash(
+            command: str, response: dict[str, Any], **call: Any
+        ) -> dict[str, Any]:
             return {
                 "tool_name": "Bash",
-                "tool_input": {"command": command},
+                "tool_input": {"command": command, **call},
                 "tool_response": response,
+                "cwd": str(tmp_path),
             }
 
         # A failed git stash create and a git stash store take none.
@@ -921,9 +937,54 @@ class TestHooks:
         assert active.metadata["untracked_not_captured"] is True
 
         # A clean tree: nothing printed, HEAD is the restore point.
+        _clean_repo(tmp_path)
         await hook(stash("git stash create", {"stdout": ""}), "b3", None)
         active = checkpoint_tracker.get_active_checkpoint()
         assert active is not None and active.metadata["commit"] == "HEAD"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("change", "call", "stdout"),
+        [
+            ("worktree", {}, ""),
+            ("index", {}, ""),
+            (None, {"run_in_background": True}, ""),
+            (None, {"run_in_background": True}, "0123456789abcdef" * 2 + "01234567"),
+            (None, {}, "warning: not a commit"),
+            (None, {}, "0123456789abcdef" * 2 + "01234567\nmore"),
+        ],
+    )
+    async def test_checkpoint_recorder_takes_no_unverified_checkpoint(
+        self,
+        checkpoint_tracker: CheckpointTracker,
+        tmp_path: Path,
+        change: str | None,
+        call: dict[str, Any],
+        stdout: str,
+    ):
+        """Empty output means nothing was saved: HEAD restores the state only
+        when the tracked files and the index are HEAD's. A background call's
+        output is not yet the command's, and output that is not one commit
+        id names nothing to restore. None of these takes a checkpoint."""
+        from grounded_agency.hooks.skill_tracker import create_checkpoint_recorder
+
+        _clean_repo(tmp_path)
+        if change is not None:
+            (tmp_path / "a.txt").write_text("uncommitted\n")
+        if change == "index":
+            _git(tmp_path, "add", "a.txt")
+        hook = create_checkpoint_recorder(checkpoint_tracker)
+        await hook(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "git stash create", **call},
+                "tool_response": {"stdout": stdout},
+                "cwd": str(tmp_path),
+            },
+            "b1",
+            None,
+        )
+        assert not checkpoint_tracker.has_valid_checkpoint()
 
     @pytest.mark.asyncio
     async def test_skill_tracker_ignores_non_skill(
@@ -944,6 +1005,31 @@ class TestHooks:
 
         # No checkpoint should be created
         assert not checkpoint_tracker.has_valid_checkpoint()
+
+
+def _git(path: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(path), *args],
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        },
+        check=True,
+        capture_output=True,
+    )
+
+
+def _clean_repo(path: Path) -> None:
+    """A repository with one commit whose tree is HEAD's."""
+    if shutil.which("git") is None:
+        pytest.skip("git not installed")
+    _git(path, "init", "-q")
+    (path / "a.txt").write_text("a\n")
+    _git(path, "add", "a.txt")
+    _git(path, "commit", "-q", "-m", "init")
 
 
 # =============================================================================

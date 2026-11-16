@@ -50,8 +50,9 @@ Standard 1.2.0 is accepted by
   out of records;
 - what a checkpoint holds and a rollback restores, transmissions and
   destination policies, and memory scopes;
-- domain profiles applied by validators and executors, the trust arithmetic,
-  ontology versions and the schema dialect of capability contracts.
+- domain profiles applied by executors, safety layers and validators, the
+  trust arithmetic, ontology versions and the schema dialect of capability
+  contracts.
 
 [Appendix D](STANDARD-v1.2.0.md#appendix-d-changes-from-110) of the 1.2.0 text
 lists every change from 1.1.0.

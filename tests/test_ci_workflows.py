@@ -5,11 +5,16 @@ one that reads the two workflow files (with the core's YAML loader). It
 checks that `publish-npm.yml` builds with CI's Rust toolchain, runs only
 from `main` or a pushed tag (release.yml's guard), checks out the tag and
 refuses one whose commit is not on `main`, and that every job that builds
-the WebAssembly module names the toolchain that has the wasm32 target.
+the WebAssembly module names the toolchain that has the wasm32 target. It
+also checks that each script a CI step runs can import what it needs from
+what its job has installed by then.
 """
 
 from __future__ import annotations
 
+import ast
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -105,3 +110,60 @@ def test_every_wasm_build_names_its_toolchain() -> None:
             assert "--target wasm32-unknown-unknown" in runs, name
             assert 'RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"' in runs, name
     assert seen == 2
+
+
+# What `pip install -e "."` gives a script besides the standard library: the
+# package's one dependency (pyproject.toml, pyyaml) and the package itself.
+BASE_MODULES = {"yaml", "grounded_agency"}
+
+
+def module_imports(script: Path) -> set[str]:
+    """The top-level modules a script imports when it starts: those of its
+    module-level import statements."""
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+def test_scripts_import_only_what_their_job_installed() -> None:
+    """A script that a CI step runs before its job installs the dev extra
+    imports only the standard library, the package's own dependencies and
+    modules beside it: a generator that imports jsonschema (a dev
+    dependency) fails with ModuleNotFoundError in a job that installed
+    only the package."""
+    checked = 0
+    for name, job in CI["jobs"].items():
+        defaults = (job.get("defaults") or {}).get("run") or {}
+        workdir = ROOT / defaults.get("working-directory", ".")
+        dev = False
+        for step in steps(job):
+            run = str(step.get("run", ""))
+            if "pip install" in run and ".[dev]" in run:
+                dev = True
+            if dev:
+                continue
+            for script in re.findall(r"\bpython3? (\S+\.py)\b", run):
+                path = workdir / script
+                beside = {
+                    p.stem
+                    for p in path.parent.iterdir()
+                    if p.suffix == ".py" or (p / "__init__.py").is_file()
+                }
+                missing = (
+                    module_imports(path)
+                    - set(sys.stdlib_module_names)
+                    - BASE_MODULES
+                    - beside
+                )
+                assert not missing, (
+                    f"{name}: step {step.get('name')!r} runs {script}, which "
+                    f"imports {sorted(missing)} before the job installs the "
+                    "dev extra"
+                )
+                checked += 1
+    assert checked > 0

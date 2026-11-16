@@ -200,6 +200,24 @@ class TestParseRecord:
         assert (code, field) in [(e.code_str, e.location["field"]) for e in errors]
 
     @pytest.mark.parametrize(
+        ("member", "value"),
+        [
+            ("ontology", "2.2.0\n"),
+            ("ontology", "\uff12.\uff12.\uff10"),  # fullwidth digits
+            ("ontology", "\u0662.\u0662.\u0660"),  # Arabic-Indic digits
+            ("standard", "1.2\n"),
+        ],
+    )
+    def test_a_version_is_ascii_digits_and_nothing_after(
+        self, member: str, value: str
+    ) -> None:
+        """Step 1 reads a version as the TypeScript loader does: `$` would
+        accept a final newline and `\\d` any Unicode digit."""
+        binding, errors = parse_record(_rec(capability="send", **{member: value}))
+        assert binding is None
+        assert ("S303", member) in [(e.code_str, e.location["field"]) for e in errors]
+
+    @pytest.mark.parametrize(
         "extra",
         [
             {"x-build": 2**53},

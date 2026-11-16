@@ -80,6 +80,39 @@ def test_flags_vector(validator: _core.Validator, vector: dict[str, Any]) -> Non
     } == vector["expect"]
 
 
+@pytest.mark.parametrize("vector", EFFECTIVE["calls"], ids=lambda v: v["name"])
+def test_call_vector(
+    ontology_path: str, tmp_path: Path, vector: dict[str, Any]
+) -> None:
+    """The adapter's layer raises each applied profile's flags for every
+    capability a call performs, at the call's effective risk (§5.21.3,
+    §5.18.3): a binding's `additional_capabilities` do not escape a
+    profile."""
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=vector["profiles"],
+        )
+    )
+    mapper = adapter.mapper
+    mapper.register_binding(
+        {
+            "tool": "mcp__srv__tool",
+            "ontology": mapper.ontology_version,
+            **vector["binding"],
+        }
+    )
+    mapping = mapper.map_tool("mcp__srv__tool", {})
+    assert {
+        "risk": mapping.risk,
+        "mutation": mapping.mutation,
+        "requires_checkpoint": mapping.requires_checkpoint,
+        "requires_approval": mapping.requires_approval,
+        "person": mapper.person_required(mapping),
+    } == vector["expect"]
+
+
 @pytest.mark.parametrize("vector", EFFECTIVE["policy"], ids=lambda v: v["name"])
 def test_policy_vector(validator: _core.Validator, vector: dict[str, Any]) -> None:
     assert validator.profile_policy(vector["profiles"]) == vector["expect"]
@@ -455,8 +488,20 @@ def test_strict_mode_off_refuses_a_raised_checkpoint(
         with pytest.raises(ProfileError, match="strict_mode=False") as caught:
             adapter(False)
         assert "checkpoint_policy" in str(caught.value)
+        assert " yet" not in str(caught.value)
     else:
         assert adapter(False).profiles
+
+
+@pytest.mark.parametrize("rule", ["grounding", "minimum_confidence", "destinations"])
+def test_only_the_checkpoint_rule_can_go_unapplied(rule: str) -> None:
+    """Every applier applies a profile's grounding, minimum confidence and
+    destinations, so refuse_unapplied knows only the checkpoint rule."""
+    profiles = AppliedProfiles(
+        [{"domain": "d", "version": "1.0.0", "allowed_destinations": ["mailto:*"]}]
+    )
+    with pytest.raises(KeyError):
+        profiles.refuse_unapplied((rule,), "x")
 
 
 @pytest.mark.parametrize(

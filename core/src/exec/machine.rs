@@ -283,7 +283,8 @@ impl<'a> Machine<'a> {
         // A queued step a resumption re-entered continues its queued
         // action: the record its deferral left is updated in place, with
         // every decision and refusal of the step until it goes on or
-        // carries the action out, a re-ask and a retry included (§5.14.1).
+        // carries the action out (`carry_out_queued`), a re-ask and a
+        // recovery loop before then included (§5.14.1).
         if let Some(r) = self.queued_record() {
             let always_ask = self.always_ask();
             self.stamp(r);
@@ -576,28 +577,17 @@ impl<'a> Machine<'a> {
         reason.annotate(&mut detail);
         self.trace_step("step_failed", detail);
         // Record mode `actions` (§6.4): a step that fails after it started
-        // has a `failed` record of the pass; an approved one keeps its own,
-        // which says why.
+        // has a `failed` record of the pass.
         if self.st.records_mode == RecordMode::Actions {
             let cur = &self.frame_ref().cur;
-            match cur.record {
-                None if cur.started => {
-                    let r = self.record("failed", None);
-                    self.frame().cur.record = Some(r);
-                    let record = self.st.rec_mut(r);
-                    record["code"] = json!(code);
-                    if let Some(t) = &reason.token {
-                        record["reason_code"] = json!(t);
-                    }
+            if cur.record.is_none() && cur.started {
+                let r = self.record("failed", None);
+                self.frame().cur.record = Some(r);
+                let record = self.st.rec_mut(r);
+                record["code"] = json!(code);
+                if let Some(t) = &reason.token {
+                    record["reason_code"] = json!(t);
                 }
-                Some(r) if self.st.rec(r)["status"] == "approved" => {
-                    let record = self.st.rec_mut(r);
-                    record["code"] = json!(code);
-                    if let Some(t) = &reason.token {
-                        record["reason_code"] = json!(t);
-                    }
-                }
-                _ => {}
             }
         }
         self.frame().cur.error = Some(StepError {
@@ -605,6 +595,11 @@ impl<'a> Machine<'a> {
             message,
             reason: reason.token,
         });
+        // In either mode, an approved record of the step is `failed`, with
+        // the code and the reason, from the moment the step fails: its
+        // failure modes' checkpoint or rollback, or a cancel before they
+        // finish, does not change what happened to the action (§5.19.5).
+        self.record_failed();
         self.set_stage(Stage::Failure)
     }
 
@@ -708,9 +703,10 @@ impl<'a> Machine<'a> {
     /// The top frame ends: the run ends, or the parent's invoke step gets
     /// the result.
     fn end_frame(&mut self, end: Result<(Outcome, Option<String>), Fail>) -> Flow {
-        // The frame fails while its step has failed (a failure mode's
-        // rollback or checkpoint failed too, or there was no checkpoint to
-        // roll back to): an approved record of the step is failed (§6.4).
+        // The frame fails while its step has failed: an approved record of
+        // the step is failed (§6.4). `step_error_with` failed it already; a
+        // state an earlier executor saved while the step's failure mode ran
+        // may still hold it `approved`.
         if end.is_err() && self.frame_ref().cur.error.is_some() {
             self.record_failed();
         }
@@ -1589,6 +1585,20 @@ impl<'a> Machine<'a> {
         }
     }
 
+    /// The re-entered queued step performs its capability (calls it,
+    /// starts its nested run, waits for its event or evaluates its
+    /// quorum): it carries its queued action out, whatever the result, and
+    /// the action closes. Its record is that pass's (§6.4): a failure marks
+    /// it `failed`, and a recovery loop that runs the step again asks for a
+    /// new action, with a record of its own (§5.14.1 items 6, 7).
+    fn carry_out_queued(&mut self) {
+        if self.frame_ref().cur.record.is_some()
+            && self.frame_ref().cur.record == self.queued_record()
+        {
+            self.frame().queued = None;
+        }
+    }
+
     fn decide(
         &mut self,
         decision_id: String,
@@ -1921,6 +1931,7 @@ impl<'a> Machine<'a> {
             } else {
                 None
             };
+            self.carry_out_queued();
             return self.emit(
                 Body::AwaitEvent {
                     step: index,
@@ -1956,6 +1967,7 @@ impl<'a> Machine<'a> {
                 self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
             // The executor runs the quorum itself: the step starts here.
             self.frame().cur.started = true;
+            self.carry_out_queued();
             let result = quorum::evaluate(q, self.frame_ref(), identities);
             self.trace_step("quorum", json!({"tally": result.output["tally"]}));
             self.frame().cur.output = Some(result.output);
@@ -1987,6 +1999,7 @@ impl<'a> Machine<'a> {
         if let Some(r) = cur.record {
             self.st.rec_mut(r)["idempotency_key"] = json!(key);
         }
+        self.carry_out_queued();
         self.emit(
             Body::InvokeCapability {
                 step: index,
@@ -2066,6 +2079,7 @@ impl<'a> Machine<'a> {
         self.trace_step("invoke_started", json!({"workflow": key}));
         // Its nested run starts: so has the step (§5.19.5).
         self.frame().cur.started = true;
+        self.carry_out_queued();
         self.undefer_nested();
         let mut frame = Frame::new(&key, child_inputs);
         frame.marked = self.always_ask();
@@ -2152,6 +2166,20 @@ impl<'a> Machine<'a> {
             return self.exec_error(
                 "R402",
                 format!("{detail}, which the '{capability}' contract requires"),
+            );
+        }
+        // In a workflow that targets 1.2 or later, the output is checked as
+        // §5.18.9's consumer checks one (§5.19.1), as a safety layer checks
+        // a call's (§5.18.10): before grounding (F505) and a minimum
+        // confidence (F504). Retried as any R402. Below 1.2, only the
+        // required fields, as 1.1 did.
+        if self.program.workflows[&self.frame_ref().workflow].targets_1_2
+            && let Some(detail) = contract_value_problem(&value, &step.required_outputs)
+        {
+            let capability = step.capability.clone();
+            return self.exec_error(
+                "R402",
+                format!("the output's {detail}, which the '{capability}' contract does not allow"),
             );
         }
         // A memory step that bound a scope gets that scope or fails (§4.5):
@@ -2257,8 +2285,11 @@ impl<'a> Machine<'a> {
             return self.set_stage(Stage::Execute);
         }
         // `require_record` (§6.4): an audit step that did not write its
-        // record fails, retried as any R402.
+        // record fails, retried as any R402. Below 1.2, `require_record` is
+        // an input the executor passes on and does not read, as 1.1 did
+        // (W616).
         if step.capability == "audit"
+            && self.program.workflows[&self.frame_ref().workflow].targets_1_2
             && self.frame_ref().cur.inputs.get("require_record") == Some(&Value::Bool(true))
             && value.get("recorded") != Some(&Value::Bool(true))
         {
@@ -2565,14 +2596,6 @@ impl<'a> Machine<'a> {
             self.frame().cur.record = Some(r);
         }
         self.set_record_status("executed");
-        // The queued action the step continued is carried out: it closes,
-        // so a recovery loop that runs the step again asks for a new action
-        // (§5.14.1).
-        if self.frame_ref().cur.record.is_some()
-            && self.frame_ref().cur.record == self.queued_record()
-        {
-            self.frame().queued = None;
-        }
         self.trace_step("step_completed", json!({}));
         for (g, gate) in step.gates.iter().enumerate().filter(|(_, g)| g.after) {
             if !self.gate_fires(g, gate) {
@@ -2673,12 +2696,14 @@ impl<'a> Machine<'a> {
             message,
             reason: reason.clone(),
         };
+        // As in `end_frame`: for a state an earlier executor saved while the
+        // failure mode's checkpoint or rollback was pending.
         if self.frame_ref().cur.error.is_some() {
             self.record_failed();
         }
         // An escalation or the end of the run closes the step's queued
         // action (`escalate`, `end_frame`); a loop runs the step again, which
-        // keeps it.
+        // keeps it unless the step carried it out (`carry_out_queued`).
         if fm.action == "escalate" {
             return match fm.goto {
                 Some(h) => self.escalate(h, &code),
@@ -3252,6 +3277,11 @@ impl<'a> Machine<'a> {
             record["status"] = json!("cancelled");
             record["code"] = json!("R408");
             record["reason"] = json!(reason);
+            // The cancel is the record's code now: a reason the action had
+            // before it no longer goes with it (§5.19.7).
+            if let Some(m) = record.as_object_mut() {
+                m.remove("reason_code");
+            }
         };
         // Approved actions may or may not have been carried out; queued ones
         // will not be. A resumed run writes a queued record again with the
@@ -3353,6 +3383,34 @@ impl<'a> Machine<'a> {
             last["reason_code"] = json!(t);
         }
     }
+}
+
+/// What §5.18.9's consumer checks refuse in an output object that has every
+/// field its contract requires (`required`): an `evidence_anchors` that is
+/// present and not an array, or a `confidence` the contract requires that
+/// is not a number from 0 to 1 (a boolean is not a number). `None` when
+/// the output passes.
+fn contract_value_problem(output: &Value, required: &[String]) -> Option<String> {
+    let anchors = output.get("evidence_anchors");
+    if anchors.is_some_and(|a| !a.is_array()) {
+        return Some("'evidence_anchors' is not an array".to_string());
+    }
+    if required.iter().any(|r| r == "confidence") {
+        let c = output.get("confidence");
+        if !c
+            .and_then(Value::as_f64)
+            .is_some_and(|x| (0.0..=1.0).contains(&x))
+        {
+            let shown: String = c
+                .map(Value::to_string)
+                .unwrap_or_default()
+                .chars()
+                .take(64)
+                .collect();
+            return Some(format!("'confidence' {shown} is not a number from 0 to 1"));
+        }
+    }
+    None
 }
 
 /// The evidence anchors of the outputs a nested run stored, in the order of

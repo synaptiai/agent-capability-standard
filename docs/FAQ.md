@@ -547,7 +547,7 @@ Modality profiles add source-type-specific trust weights and grounding requireme
 
 1. Follow the [Quickstart Guide](QUICKSTART.md) (10 min)
 2. Complete the [Tutorial](TUTORIAL.md) (30 min)
-3. Read the [Specification](../spec/STANDARD-v1.1.0.md)
+3. Read the [Specification](../spec/STANDARD-v1.2.0.md)
 
 ### Can I use this commercially?
 

@@ -116,6 +116,17 @@ def _mcp_tool_result(response: Any) -> Any:
     return response
 
 
+def _replace_result(text: str) -> dict[str, Any]:
+    """A PostToolUse answer that replaces the MCP result the session reads
+    with ``text``, a refusal (section 5.18.8)."""
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedMCPToolOutput": [{"type": "text", "text": text}],
+        }
+    }
+
+
 def _find_ontology_path() -> str:
     """
     Find the capability ontology path.
@@ -277,10 +288,12 @@ class GroundedAgentConfig:
             what its ``acs:`` anchors may cite; the layer gives no
             ``evidence_seen`` (a hook does not see the model's request). An
             output that fails is refused with F505, and the call's record is
-            ``failed``. Only the tools ``create_grounded_mcp_server`` serves
-            give the layer their output: Claude Code's own tools return no
-            capability output, so no policy checks their calls (a warning
-            is logged once per such tool).
+            ``failed``. They apply to the output of every MCP tool bound to
+            a capability (a tool ``create_grounded_mcp_server`` serves
+            checks its own result, and the PostToolUse hook checks another
+            server's); Claude Code's own tools return no capability output,
+            so no policy checks their calls (a warning is logged once per
+            such tool).
         call_record_limit: How many call records (and refusals) the adapter
             keeps in memory (``call_records``, ``diagnostics``).
         profiles: Domain profiles applied to every tool call the adapter
@@ -293,9 +306,12 @@ class GroundedAgentConfig:
             (``evidence_policy.require_grounding``, with
             ``required_anchor_types`` as kinds) join ``grounding``, and
             their ``minimum_confidence`` fails an output below it with F504:
-            both apply to the outputs this layer sees, those of the tools
-            ``create_grounded_mcp_server`` serves (a warning is logged once
-            for any other tool they would cover). Their
+            both apply to the output of every MCP tool bound to a
+            capability (a tool ``create_grounded_mcp_server`` serves checks
+            its own result, and the PostToolUse hook checks another
+            server's); Claude Code's own tools return no capability output,
+            and a warning is logged once for each such tool they would
+            cover. Their
             ``allowed_destinations`` are destination policies in force
             beside ``allowed_destinations`` (section 4.4.2). A profile with
             an error refuses the configuration
@@ -777,10 +793,10 @@ class GroundedAgentAdapter:
         # of its output, section 5.20): the post-call hooks do not record
         # it again.
         self._outcome_recorded: set[str] = set()
-        # The tools create_grounded_mcp_server serves: the only calls whose
-        # output this layer sees, so the only ones a grounding policy can
-        # check (section 5.20). Tools a policy would check but cannot,
-        # warned about once each.
+        # The tools create_grounded_mcp_server serves, which check their own
+        # output (section 5.20); the PostToolUse hook checks other servers'
+        # bound MCP tools. Tools a policy would check but whose results carry
+        # no capability output (Claude Code's own), warned about once each.
         self._grounded_tools: set[str] = set()
         self._ungrounded_warned: set[str] = set()
         self.call_records: deque[dict[str, Any]] = deque(
@@ -888,17 +904,20 @@ class GroundedAgentAdapter:
             else (False, None)
         )
         if not found or not isinstance(value, str):
-            why = (
-                "its binding names no destination argument"
-                if mapping.destination is None
-                else f"its argument at {mapping.destination!r} is not a string"
-            )
+            if tool == "Bash":
+                # The classifier's worst case includes send (section 5.18.3).
+                sends, why = "may send", "a command line names no destination it reads"
+            elif mapping.destination is None:
+                sends, why = "sends", "its binding names no destination argument"
+            else:
+                sends = "sends"
+                why = f"its argument at {mapping.destination!r} is not a string"
             return self._refuse(
                 ErrorCode.CONSTRAINT_VIOLATED,
                 mapping,
                 tool,
                 call,
-                f"{tool} sends, and this layer cannot tell where: {why}, so no "
+                f"{tool} {sends}, and this layer cannot tell where: {why}, so no "
                 f"destination policy in force can allow it (STANDARD 1.2.0 §4.4.2)",
             )
         if _core.destination_allowed(self._destinations, value):
@@ -1116,6 +1135,18 @@ class GroundedAgentAdapter:
         with self._state_lock:
             return tool not in self._grounded_tools
 
+    def _may_check_host_result(self, tool: str, args: Any) -> bool:
+        """:meth:`_checks_host_result` for a call whose mapping may not be
+        readable: an MCP tool whose mapping fails counts as checked, so a
+        hook that cannot finish fails closed (section 5.18.8)."""
+        if not tool.startswith("mcp__"):
+            return False
+        try:
+            mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+            return self._checks_host_result(tool, mapping)
+        except Exception:
+            return True
+
     def _host_result_fault(self, tool: str, args: Any, response: Any) -> _Fault | None:
         """What the PostToolUse hook refuses the result of a call with
         (:meth:`_checks_host_result`), without recording it: the result as
@@ -1166,6 +1197,27 @@ class GroundedAgentAdapter:
             with self._state_lock:
                 self._outcome_recorded.add(call)
         return text
+
+    def _unheld_call_refusal(self, mapping: ToolMapping, tool: str) -> str:
+        """The refusal of a call that needs a checkpoint and carries no
+        ``tool_use_id``: F501 when no valid checkpoint exists, as for any
+        call; else R407, since this layer cannot hold one for a call it
+        cannot name (section 5.18.6)."""
+        if not self.checkpoint_tracker.has_valid_checkpoint():
+            return self._refuse(
+                ErrorCode.CHECKPOINT_REQUIRED,
+                mapping,
+                tool,
+                None,
+                _checkpoint_message(mapping, tool, None),
+            )
+        return self._refuse(
+            ErrorCode.SAFETY_CHECK_FAILED,
+            mapping,
+            tool,
+            None,
+            f"{tool} has no tool_use_id, so this layer cannot hold a checkpoint for it",
+        )
 
     def _take_outcome_recorded(self, call: str | None) -> bool:
         """Whether a grounded MCP tool already recorded ``call``'s outcome
@@ -1940,14 +1992,7 @@ class GroundedAgentAdapter:
                 if mapping.requires_checkpoint:
                     scope = (input_data.get("session_id"), input_data.get("agent_id"))
                     if call is None:
-                        message = self._refuse(
-                            ErrorCode.SAFETY_CHECK_FAILED,
-                            mapping,
-                            tool_name,
-                            call,
-                            f"{tool_name} has no tool_use_id, so this layer "
-                            f"cannot hold a checkpoint for it",
-                        )
+                        message = self._unheld_call_refusal(mapping, tool_name)
                         if strict:
                             return deny(message)
                         logger.warning("PreToolUse warning (non-strict): %s", message)
@@ -2108,7 +2153,10 @@ class GroundedAgentAdapter:
         recorded against the call), which then counts as no prerequisite,
         and the hook replaces the result the session reads with the
         refusal (``updatedMCPToolOutput``). A check that cannot be completed
-        is R407, and the result is replaced the same way (section 5.18.8).
+        is R407, and the result is replaced the same way (section 5.18.8):
+        so is a result this hook checks when the hook itself fails. A hold
+        that cannot be used is logged and does not keep the result from
+        being checked.
 
         Returns:
             Async hook callback function
@@ -2124,15 +2172,24 @@ class GroundedAgentAdapter:
             """PostToolUse hook: use the call's hold, record that it ran."""
             holder = tool_use_id or input_data.get("tool_use_id")
             tool_name = input_data.get("tool_name", "")
+            tool_input = input_data.get("tool_input", {})
             try:
                 checkpoint_id = None
                 if holder:
-                    checkpoint_id = tracker.consume_checkpoint(holder)
+                    # The call has run: its result is checked whether or
+                    # not its hold can be used (section 5.18.8).
+                    try:
+                        checkpoint_id = tracker.consume_checkpoint(holder)
+                    except Exception as e:
+                        logger.error(
+                            "Could not use the checkpoint the %s call held: %s",
+                            tool_name,
+                            e,
+                        )
                     if checkpoint_id is not None:
                         logger.info(
                             "Checkpoint %s used by %s", checkpoint_id, tool_name
                         )
-                tool_input = input_data.get("tool_input", {})
                 mapping = mapper.map_tool(tool_name, tool_input)
                 tool_response = input_data.get("tool_response")
                 try:
@@ -2175,14 +2232,25 @@ class GroundedAgentAdapter:
                         checkpoint_id=checkpoint_id,
                     )
                 if refusal is not None:
-                    return {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PostToolUse",
-                            "updatedMCPToolOutput": [{"type": "text", "text": refusal}],
-                        }
-                    }
+                    return _replace_result(refusal)
             except Exception as e:
-                logger.warning("Post-call recorder failed: %s", e)
+                logger.error("Post-call recorder failed: %s", e)
+                # Fail closed (section 5.18.8): a result this layer checks,
+                # or one it cannot tell whether it checks, is not passed on
+                # when the check or its record could not be completed.
+                if self._may_check_host_result(tool_name, tool_input):
+                    message = f"{tool_name}'s result could not be checked: {e}"
+                    try:
+                        refusal = self._fail_call(
+                            ErrorCode.SAFETY_CHECK_FAILED,
+                            UNCLASSIFIED_TOOL,
+                            tool_name,
+                            message,
+                            call=holder,
+                        )
+                    except Exception:
+                        refusal = f"R407 SAFETY_CHECK_FAILED: {message}"
+                    return _replace_result(refusal)
             return {}
 
         return record_after_call
@@ -2359,14 +2427,7 @@ class GroundedAgentAdapter:
 
                 if mapping0.requires_checkpoint:
                     if holder is None:
-                        message = self._refuse(
-                            ErrorCode.SAFETY_CHECK_FAILED,
-                            mapping0,
-                            tool_name,
-                            None,
-                            f"{tool_name} has no tool_use_id, so this layer "
-                            f"cannot hold a checkpoint for it",
-                        )
+                        message = self._unheld_call_refusal(mapping0, tool_name)
                         if strict:
                             return deny(message, None)
                     else:

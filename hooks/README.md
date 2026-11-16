@@ -9,7 +9,7 @@ These hooks directly implement capabilities defined in the standard's VERIFY lay
 | Hook | Event | Purpose |
 |------|-------|---------|
 | `pretooluse_require_checkpoint.sh` | PreToolUse (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) | Classify the call; one checkpoint marker per gated call; ask for approval; let a restore of a recorded checkpoint run as a rollback |
-| `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Write the checkpoint marker after a successful `git stash create`, filing a marker it replaces under `.claude/checkpoints/ended/` |
+| `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Write the checkpoint marker after a successful `git stash create`, with its commit entered in `.claude/checkpoints/commits/`, filing a marker it replaces under `.claude/checkpoints/ended/` |
 | `stop_end_checkpoints.sh` | Stop | End the marker's validity, filing it under `.claude/checkpoints/ended/`: the end of a turn is an execution boundary |
 | `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure (every tool) | Log every tool call as an action record (§6.4), with the configuration that decided it, for the audit trail and provenance; it is not an `audit` step |
 
@@ -146,11 +146,18 @@ table equal to it):
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
 - `Bash`: a command with any of `` ; & | < > $ ` ( ) { } \ `` or a line
   break may be more than one command or expand something, so it is `mutate`.
-  Otherwise it is read as one simple command: an option that writes
-  (`git ... --output`, `file -C`) is `mutate`; `git stash create` takes a
+  Otherwise it is read as one simple command, its words split and dequoted
+  as bash does (`"--output=x"` is `--output=x`; an unbalanced quote, or a
+  line over 4096 bytes, is `mutate`, so the reading takes bounded time and
+  never runs into the hook's time limit): an option that writes is `mutate` (for `git`, `--output` or an
+  abbreviation of it such as `--outp`; for `file`, `-C` or `-p` in any short
+  option, or `--compile` or `--preserve-date` or an abbreviation such as
+  `--compi`), and so is a `git` or `file` command with a word holding an
+  unquoted `*`, `?` or `[`, which bash replaces with file names, options
+  included; `git stash create` takes a
   checkpoint; `git stash list` and `git stash show` only read; `git stash pop
   <commit>` and `git stash apply <commit>` restore one (`rollback`) when
-  `<commit>` is the full id of a commit a checkpoint marker recorded; any
+  `<commit>` is the full id of a commit a checkpoint recorded; any
   other `pop` or `apply`, a bare one included, is `mutate`, since git applies
   any merge commit as if it were a stash; any other `git stash` form
   is `mutate`; a command on the read-only list (`ls`, `cat`, `head`, `tail`,
@@ -161,10 +168,12 @@ table equal to it):
 
 Then:
 
-- **Rollback** (`git stash pop|apply <commit>`): allowed when the marker,
-  or a marker filed under `.claude/checkpoints/used/` or
-  `.claude/checkpoints/ended/`, recorded `<commit>` as its `commit`, so the
-  checkpoint was taken in the project. It uses no checkpoint: one that was
+- **Rollback** (`git stash pop|apply <commit>`): allowed when a checkpoint
+  of the project recorded `<commit>`: the marker's `commit`, or an entry
+  `.claude/checkpoints/commits/<commit>`, which `posttooluse_take_checkpoint.sh`
+  writes for each checkpoint it takes. The check is one lookup, however many
+  checkpoints were taken, so it never runs into the hook's time limit (a hook
+  that times out lets the call run). It uses no checkpoint: one that was
   used, expired, ended with its turn or was replaced can still be restored.
   Restoring anything else is a `mutate`.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
@@ -189,13 +198,20 @@ Then:
 The marker is written by `posttooluse_take_checkpoint.sh` after a `git stash
 create` that succeeded (the call that saves the state takes the checkpoint,
 §5.18.6), and by `CheckpointTracker(marker_dir=".claude")` in the Python SDK.
+The hook writes none for a call run in the background (its output is not
+yet the command's), for one whose `cwd` is in another repository than the
+project's, or for output that is neither a commit id nor empty; empty
+output (nothing to save) gives `HEAD` as the restore point only when the
+project's tracked files and index are `HEAD`'s.
 Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds when that is an integer from 1
 to 1800, else 1800 (the Standard caps a checkpoint's maximum age at 30
-minutes). A new marker replaces the old one, which is filed under
-`.claude/checkpoints/ended/`. `stop_end_checkpoints.sh` files the marker
-there when a turn ends: the end of a turn is an execution boundary. Each
-gated call needs its own checkpoint; every marker filed under `used/` or
-`ended/` stays the record of a checkpoint taken, which a rollback reads.
+minutes). Before it writes the marker, the hook enters the commit in
+`.claude/checkpoints/commits/` (an empty file named by the commit), where a
+rollback looks it up. A new marker replaces the old one, which is filed
+under `.claude/checkpoints/ended/`. `stop_end_checkpoints.sh` files the
+marker there when a turn ends: the end of a turn is an execution boundary.
+Each gated call needs its own checkpoint; every marker filed under `used/`
+or `ended/` stays the record of a checkpoint taken.
 
 ```mermaid
 ---
@@ -340,9 +356,9 @@ These hooks implement runtime enforcement of VERIFY layer requirements:
 |------------|---------------------|
 | `requires_checkpoint: true` | `pretooluse_require_checkpoint.sh` blocks without a valid marker and uses one up per call (F501) |
 | `requires_approval: true` | `pretooluse_require_checkpoint.sh` asks for approval in modes that reach a person, and blocks in others (F502) |
-| `checkpoint` → `rollback` (`requires`) | `pretooluse_require_checkpoint.sh` counts a restore as a rollback only for a commit a marker recorded, so a checkpoint was taken before it; any other restore is a `mutate` (F501) |
+| `checkpoint` → `rollback` (`requires`) | `pretooluse_require_checkpoint.sh` counts a restore as a rollback only for a commit a checkpoint recorded, so a checkpoint was taken before it; any other restore is a `mutate` (F501) |
 | Taking a checkpoint (§5.18.6) | `posttooluse_take_checkpoint.sh` writes the marker after a successful `git stash create` |
-| Execution boundary (§5.18.6) | `stop_end_checkpoints.sh` removes the marker when a turn ends |
+| Execution boundary (§5.18.6) | `stop_end_checkpoints.sh` files the marker under `.claude/checkpoints/ended/` when a turn ends; a rollback can still restore its commit |
 | Audit records (§6.4), the layer's identity (§5.18.8) | `posttooluse_log_tool.sh` writes an action record of every tool call, with the configuration that decided it; the `audit` capability is the `audit` skill's |
 
 The hooks apply no domain profile (Standard 1.2.0 §5.21): to apply one to

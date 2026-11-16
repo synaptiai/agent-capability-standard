@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import load from '../../../tests/conformance/profiles/load.json' with { type: 'json' };
 import effective from '../../../tests/conformance/profiles/effective.json' with { type: 'json' };
 import type { Json } from '../src/canonical.js';
+import { effectiveFlagsOf, joinFlags } from '../src/flags.js';
 import type { CapabilityId, DeclaredFlags } from '../src/ontology.js';
 import { CoreError, type Diagnostic } from '../src/wasm.js';
 import { repositoryContext } from './core.js';
@@ -47,6 +48,24 @@ describe('profile effect vectors', () => {
       const ctx = await repositoryContext();
       const declared = 'declared' in v ? (v.declared as DeclaredFlags) : undefined;
       expect(ctx.profileFlags(v.profiles as Json[], v.capability as CapabilityId, declared)).toEqual(v.expect);
+    });
+  }
+  // A call of a binding that performs several capabilities (§5.18.3): the
+  // core's flags for each capability at the call's effective risk R, joined.
+  for (const v of effective.calls) {
+    it(v.name, async () => {
+      const ctx = await repositoryContext();
+      const binding = v.binding as { capability: CapabilityId; additional_capabilities?: CapabilityId[] };
+      const capabilities = [binding.capability, ...(binding.additional_capabilities ?? [])];
+      let { flags } = effectiveFlagsOf(capabilities);
+      let person = false;
+      const risk = flags.risk;
+      for (const c of capabilities) {
+        const raised = ctx.profileFlags(v.profiles as Json[], c, { risk });
+        flags = joinFlags(flags, raised);
+        person ||= raised.person;
+      }
+      expect({ ...flags, person }).toEqual(v.expect);
     });
   }
   for (const v of effective.policy) {

@@ -1,0 +1,247 @@
+{
+  "description": "A re-entered queued quorum step carries its queued action out when the executor evaluates its quorum: a quorum that is not met (F504), looped back to, asks for a new action with a record of its own beside the failed one (\u00a75.14.1, \u00a75.16).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "input_bindings": {
+            "task": {
+              "diff": "${change}"
+            },
+            "agent": "a"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "task": {
+              "diff": "${change}"
+            },
+            "agent": "b"
+          }
+        },
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "verdicts",
+          "input_bindings": {
+            "accept_from": [
+              "a",
+              "b"
+            ]
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "x",
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          },
+          "requires_approval": true,
+          "input_bindings": {
+            "target": "${verdicts.data}",
+            "constraints": [
+              "two approvals"
+            ],
+            "action_on_violation": "block"
+          },
+          "quorum": {
+            "verdicts": "${verdicts.data}",
+            "reviewers": [
+              "ra",
+              "rb"
+            ],
+            "vocabulary": [
+              "approve",
+              "request_changes"
+            ],
+            "pass_values": [
+              "approve"
+            ],
+            "blocking_values": [
+              "request_changes"
+            ],
+            "min_pass": 2,
+            "pinned_to": "${change}"
+          },
+          "failure_modes": [
+            {
+              "condition": "it failed",
+              "on_error": [
+                "R401",
+                "R402",
+                "F504"
+              ],
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "x",
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ],
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "approval@1",
+          "delegation@1",
+          "quorum@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "receive",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            {
+              "reviewer_id": "a",
+              "value": "approve",
+              "pinned": "c1"
+            },
+            {
+              "reviewer_id": "b",
+              "value": "request_changes",
+              "pinned": "c1"
+            }
+          ],
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+          {
+            "step": 3,
+            "action_id": "run-1/w/3/0"
+          }
+        ]
+      }
+    },
+    {
+      "resume": {
+        "attendance": "attended",
+        "at": 3600000
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 3,
+        "queued_action_id": "run-1/w/3/0"
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 3
+      },
+      "absent": [
+        "queued_action_id"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R404",
+    "action_records": [
+      {
+        "action_id": "run-1/w/3/0",
+        "status": "failed",
+        "code": "F504"
+      },
+      {
+        "action_id": "run-1/w/3/1",
+        "status": "failed",
+        "code": "F504"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "run_resumed",
+    "quorum",
+    "loop",
+    "recovery_exhausted"
+  ]
+}

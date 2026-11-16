@@ -22,12 +22,33 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 # Add parent to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+
+def demo_config(**kw: object) -> GroundedAgentConfig:
+    """The demo's configuration: the repository's ontology, and a fresh
+    checkpoint directory, so no checkpoint of an earlier run is left."""
+    return GroundedAgentConfig(
+        ontology_path=str(
+            Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
+        ),
+        checkpoint_dir=tempfile.mkdtemp(prefix="acs-demo-"),
+        **kw,  # type: ignore[arg-type]
+    )
+
+
+def call(tool_use_id: str) -> SimpleNamespace:
+    """The context Claude Code passes to ``can_use_tool``: it names the call
+    (``tool_use_id``), which holds the checkpoint it uses. A call without
+    one cannot hold a checkpoint, so it is refused (R407)."""
+    return SimpleNamespace(tool_use_id=tool_use_id)
 
 
 async def approve(tool_name: str, tool_input: dict, context: object) -> object:
@@ -62,12 +83,7 @@ async def demo_checkpoint_enforcement():
 
     # Create adapter in strict mode
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            strict_mode=True,
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config(strict_mode=True)
     )
 
     print(f"Ontology version: {adapter.ontology_version}")
@@ -88,7 +104,7 @@ async def demo_checkpoint_enforcement():
     result = await permission_callback(
         "Write",
         {"file_path": "test.txt", "content": "hello"},
-        None,
+        call("demo-1"),
     )
 
     print(f"Permission result for Write: {result}")
@@ -103,12 +119,7 @@ async def demo_safe_mutation():
     print("=" * 60)
 
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            strict_mode=True,
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config(strict_mode=True)
     )
 
     # Create checkpoint FIRST
@@ -126,7 +137,7 @@ async def demo_safe_mutation():
     result = await permission_callback(
         "Write",
         {"file_path": "test.txt", "content": "hello"},
-        None,
+        call("demo-2"),
     )
 
     print(f"Permission result for Write: {result}")
@@ -141,11 +152,7 @@ async def demo_evidence_collection():
     print("=" * 60)
 
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config()
     )
 
     # Simulate evidence from tool uses
@@ -201,11 +208,7 @@ async def demo_tool_mapping():
     print("=" * 60)
 
     adapter = GroundedAgentAdapter(
-        GroundedAgentConfig(
-            ontology_path=str(
-                Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-            ),
-        )
+        demo_config()
     )
 
     # Test various tools
@@ -245,12 +248,7 @@ async def demo_with_sdk():
         print("Claude Agent SDK is available!")
 
         adapter = GroundedAgentAdapter(
-            GroundedAgentConfig(
-                strict_mode=True,
-                ontology_path=str(
-                    Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-                ),
-            )
+            demo_config(strict_mode=True)
         )
 
         # Create checkpoint
@@ -290,11 +288,7 @@ async def demo_with_sdk():
             can_use_tool: object = None
 
         adapter = GroundedAgentAdapter(
-            GroundedAgentConfig(
-                ontology_path=str(
-                    Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
-                ),
-            )
+            demo_config()
         )
 
         base = MockClaudeAgentOptions(allowed_tools=["Read", "Write"])

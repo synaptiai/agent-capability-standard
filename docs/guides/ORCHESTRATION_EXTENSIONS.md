@@ -1,13 +1,15 @@
 # Orchestration Extensions
 
-Standard v1.1 adds optional, versioned **extensions** for what orchestrators
-need beyond a sequence of steps: starting runs on a schedule or an event,
-escalating when recovery runs out, waiting for an event, structured
-approval, delegation hints, review quorums, and checks on who sent an item.
-This guide shows how to use them. The normative text is
-[STANDARD-v1.1.0 §5.9–§5.17](../../spec/STANDARD-v1.1.0.md#59-workflow-extensions);
-the rationale is in [RFC-0003](../../spec/RFC-0003-orchestration-extensions.md)
-and, for sender identity, [RFC-0004](../../spec/RFC-0004-agent-identity.md).
+Standard v1.1 added optional, versioned **extensions** for what
+orchestrators need beyond a sequence of steps: starting runs on a schedule
+or an event, escalating when recovery runs out, waiting for an event,
+structured approval, delegation hints, review quorums, and checks on who
+sent an item; v1.2 adds grounding. This guide shows how to use them. The
+normative text is
+[STANDARD-v1.2.0 §5.9–§5.17 and §5.20](../../spec/STANDARD-v1.2.0.md#59-workflow-extensions);
+the rationale is in [RFC-0003](../../spec/RFC-0003-orchestration-extensions.md),
+for sender identity [RFC-0004](../../spec/RFC-0004-agent-identity.md), and
+for what 1.2 changed RFC-0006 to RFC-0008.
 
 | Extension | What it adds | Validated today |
 |-----------|--------------|-----------------|
@@ -588,8 +590,9 @@ version, size, date or variant, and families compare exactly (STANDARD v1.2
 identifier of the model the delegate ran on:
 
 1. keep the part after the identifier's last `/`;
-2. of that, keep the part after the last `.` or `:` that comes before its
-   first digit or `-`;
+2. of that, keep the part after the last `.` or `:` that is followed by a
+   letter and comes before its first digit or `-`; if it has neither, after
+   the last `.` followed by a letter (a `:` there starts a tag);
 3. the family is the leading run of ASCII letters, lowercased.
 
 | Model identifier (fictional) | Family |
@@ -597,6 +600,7 @@ identifier of the model the delegate ran on:
 | `acme-large-2` | `acme` |
 | `us.acme.acme-large-2-20260101-v1:0` (a platform prefix) | `acme` |
 | `ft:acme-mini-1:org::abc` (a fine-tune) | `acme` |
+| `acme:latest`, `acme:7b` (a tag) | `acme` |
 | `Zephyr/Zephyr-3.1-8B-Instruct` (an organisation path) | `zephyr` |
 | `z3-mini` (a one-letter line) | `z` |
 | `3d-model` | none |

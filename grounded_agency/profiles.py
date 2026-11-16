@@ -36,25 +36,11 @@ logger = logging.getLogger(__name__)
 
 ProfileSource = Mapping[str, Any] | str | os.PathLike[str]
 
-# The rules a profile puts in force besides flags (§5.21.3), by the name
-# AppliedProfiles.refuse_unapplied takes: what each is, and the member that
-# sets it (under evidence_policy, or top-level).
+# The rules a profile puts in force that an applier may not apply, by the
+# name AppliedProfiles.refuse_unapplied takes: what each is, and the member
+# that sets it (under a top-level member, or top-level). Every other rule
+# (grounding, minimum confidence, destinations) is applied by every applier.
 _RULES: dict[str, tuple[str, str, str | None]] = {
-    "grounding": (
-        "a grounding policy (STANDARD v1.2 §5.20)",
-        "require_grounding",
-        "evidence_policy",
-    ),
-    "minimum_confidence": (
-        "a minimum confidence (§5.21.3)",
-        "minimum_confidence",
-        "evidence_policy",
-    ),
-    "destinations": (
-        "a destination policy (§4.4.2)",
-        "allowed_destinations",
-        None,
-    ),
     "checkpoints": (
         "a checkpoint policy that raises requires_checkpoint (§5.21.3)",
         "checkpoint_policy",
@@ -105,17 +91,12 @@ class EffectiveFlags:
 
 def _sets(document: Mapping[str, Any], rule: str) -> bool:
     """Whether a loaded profile puts ``rule`` (a key of ``_RULES``) in
-    force: an empty ``require_grounding`` sets no grounding policy, an empty
-    ``allowed_destinations`` allows no send, and a ``checkpoint_policy``
-    raises a flag only with a value other than ``never`` (§5.21.3)."""
+    force: a ``checkpoint_policy`` raises a flag only with a value other
+    than ``never`` (§5.21.3)."""
     _, member, under = _RULES[rule]
     holder = document.get(under) if under else document
     value = holder.get(member) if isinstance(holder, Mapping) else None
-    if rule == "grounding":
-        return bool(value)
-    if rule == "checkpoints":
-        return isinstance(value, Mapping) and any(v != "never" for v in value.values())
-    return value is not None
+    return isinstance(value, Mapping) and any(v != "never" for v in value.values())
 
 
 @cache
@@ -204,18 +185,18 @@ class AppliedProfiles:
 
     def refuse_unapplied(self, rules: Iterable[str], applier: str) -> None:
         """Refuse these profiles where one puts in force a rule of
-        ``rules`` that ``applier`` does not apply: ``"grounding"`` (a
-        grounding policy, §5.20), ``"minimum_confidence"``,
-        ``"destinations"`` (a destination policy, §4.4.2) or
-        ``"checkpoints"`` (a ``checkpoint_policy`` that raises
-        ``requires_checkpoint``). Applied without the rule, a run or a call
-        would go ahead as if it were absent.
+        ``rules`` that ``applier`` does not apply: ``"checkpoints"`` (a
+        ``checkpoint_policy`` that raises ``requires_checkpoint``), which
+        the adapter with ``strict_mode=False`` does not enforce. Applied
+        without the rule, a call would go ahead as if it were absent. Every
+        applier applies the other rules a profile sets (grounding, a
+        minimum confidence, destinations).
 
         Raises:
             ProfileError: a profile sets one of ``rules``; its
                 ``diagnostics`` is empty (the profiles load, ``applier``
                 cannot apply them).
-            KeyError: a name in ``rules`` is not one of the four.
+            KeyError: a name in ``rules`` is not ``"checkpoints"``.
         """
         for rule in rules:
             what, member, under = _RULES[rule]
@@ -223,7 +204,7 @@ class AppliedProfiles:
             if setting:
                 path = f"{under}.{member}" if under else member
                 raise ProfileError(
-                    f"{applier} does not apply {what} yet, and profile "
+                    f"{applier} does not apply {what}, and profile "
                     f"{', '.join(setting)} sets one ({path}): the profiles are "
                     f"refused rather than applied without it (STANDARD v1.2 "
                     f"§5.21.4)",

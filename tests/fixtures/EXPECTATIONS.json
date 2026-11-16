@@ -676,6 +676,16 @@
     ],
     "note": "No standing mandate covers a step a profile requires a person for"
   },
+  "pass_profile_delegation_approved": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "safety",
+    "profiles": [
+      "tests/fixtures/profiles/block_delegate.profile.yaml"
+    ],
+    "expected_warning_codes": [],
+    "note": "A profile's raised requires_approval clears W621 (Standard v1.2 \u00a75.21.1)"
+  },
   "fail_profile_approval_field_undeclared": {
     "should_pass": false,
     "level": "L1",

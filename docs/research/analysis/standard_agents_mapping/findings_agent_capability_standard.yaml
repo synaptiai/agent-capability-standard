@@ -46,7 +46,7 @@ findings:
     result of an MCP tool bound to a capability, R402: a tool create_grounded_mcp_server serves
     checks its own, and PostToolUse checks another server''s) and claim the class. A call whose
     output is refused has failed: it takes no checkpoint and is no prerequisite that ran. Fixtures:
-    tests/conformance/bindings/ (33) and tests/conformance/calls/ (28, five of them on refused
+    tests/conformance/bindings/ (33) and tests/conformance/calls/ (30, five of them on refused
     outputs), from scripts/gen_call_fixtures.py, with the statements in
     tests/conformance/calls/statements/; the Python adapter runs them in tests/test_binding_fixtures.py
     and tests/test_call_fixtures.py, the Standard Agents binding in
@@ -265,8 +265,11 @@ findings:
     checkpoint policy, the person, grounding through S4''s check in every frame, minimum confidence, waited
     delegations included), exposed to Python (`AppliedProfiles`, `WorkflowRunner(profiles=)`,
     `GroundedAgentConfig(profiles=)` for flags, the person, a composite taking the raised flags and person of
-    the bindings it invokes, grounding and minimum confidence on the outputs of the tools it serves and a
-    report for the rest, `_core.check_confidence`), to TypeScript through the WebAssembly
+    the bindings it invokes, grounding and minimum confidence on the output of every MCP tool bound to a
+    capability (a tool it serves checks its own result, the PostToolUse hook another server''s; Claude
+    Code''s own tools carry no capability output and get a one-time warning), `_core.check_confidence`),
+    each call raised for every capability it performs at its effective risk (§5.21.3, the `calls` vectors
+    of effective.json), to TypeScript through the WebAssembly
     core, and in the Standard Agents binding (`groundedTool({profiles})` at the call''s effective risk with
     its `invokes`, a composite listing a binding a profile requires a person for asked of a person,
     `bindingProfiles` reporting loading warnings). Normative vectors
@@ -644,7 +647,7 @@ findings:
     and refusal; a recovery loop runs again only the steps from its target to the step that looped, a
     deferred handler among them keeping its nested run, and the resumption goes on; the queued actions of a
     run that did not end `deferred` are abandoned. `Run.resume` (core/src/exec/mod.rs, machine.rs),
-    `_core.Run.resume`, `WorkflowRunner.resume`; twenty-seven `resume_*` runtime fixtures,
+    `_core.Run.resume`, `WorkflowRunner.resume`; thirty-two `resume_*` runtime fixtures,
     core/tests/runtime.rs and tests/test_runner.py. RFC-0006 Part A, decision A5.'
   concerns:
   - approval-human
@@ -814,7 +817,8 @@ findings:
   status: fixed
   resolution: 'Standard 1.2.0 §5.15 (Model families), §5.16 and §5.17: families compare exactly
     everywhere, are written `[a-z][a-z0-9_-]*` (W620 for a literal outside it), and a host derives
-    one from the model identifier by one rule; `agent_identity` 1.1.0, the world state''s
+    one from the model identifier by one rule (a `name:tag` identifier gives the name);
+    `agent_identity` 1.1.0, the world state''s
     `AgentIdentity` and `delegate.effective` carry `model_id`, typed and checked against the
     identity (R402) in a workflow that targets 1.2; a 1.1 run reads no `model_id`, as before.
     Code: `core/src/names.rs` (`model_family`), `grounded_agency/coordination/families.py`,
@@ -959,7 +963,7 @@ findings:
     audit_required.
     Run::run_record, RunResult.run_record, WorkflowRunner(archive=); grounded_agency.trust.manual_override;
     create_evidence_collector(required=True); hooks/posttooluse_log_tool.sh reports every call it does not
-    log or cannot sign (exit 1). Fixtures audit_require_record_*, audit_recorded_false_*, run_record_*;
+    log or cannot sign (exit 1), and no skill keeps a log of its own beside it. Fixtures audit_require_record_*, audit_recorded_false_*, run_record_*;
     tests/test_audit_records.py, tests/test_hooks_unit.py. RFC-0006 Part B, decision B10.'
   concerns:
   - evidence-audit-observability
@@ -1441,8 +1445,8 @@ findings:
     members, `cancelled`, a `rejected` that covers executor and safety-layer refusals and
     `approval.decision_id`; the executor''s record mode `actions` records every step that runs, every
     failure-mode checkpoint and every rollback; `audit` records its event under details.event of a record of
-    its own; the trace is not an audit record. The plugin hook''s line is an ActionRecord, the audit skill
-    writes one, CoordinationEvent.to_action_record and the TypeScript actionRecord export them. Fixtures
+    its own; the trace is not an audit record. The plugin hook''s line is an ActionRecord (the skills no
+    longer append free-form lines to .audit/), the audit skill writes one, CoordinationEvent.to_action_record and the TypeScript actionRecord export them. Fixtures
     records_actions_*, records_failure_*, records_default_unchanged; tests/test_audit_records.py validates
     every writer''s records against ActionRecord. RFC-0006 Part B, decision B9.'
   concerns:
@@ -1708,7 +1712,7 @@ findings:
     applies the checks by other means or does not cover those calls. spec/SECURITY.md §5.4 maps every
     condition of the six skills'' hooks to a §5.18.10 or §5.18.8 row or to a model-judged addition; the
     rollback skill''s command hook makes the rollback row''s check in the plugin''s form (a restore must
-    name a commit a checkpoint marker recorded, F503 otherwise), and the `transform` and `persist`
+    name a commit a checkpoint recorded, F503 otherwise, one lookup in .claude/checkpoints/commits/), and the `transform` and `persist`
     secret rows are code where a layer applies §6.7. The send and rollback prompt hooks no longer judge
     approval, checkpoints, rate limits or expiry; the remaining prompt conditions are labelled
     model-judged additions. Tests: tests/test_skill_hooks.py.'
@@ -1867,7 +1871,8 @@ findings:
     is `rollback` only when it restores a checkpoint taken in the scope; a control-only tool is never
     refused and is recorded, and a host action tied to a tool that can be refused is F506. The Python
     mapper classifies Bash by command (a compound line takes the strictest of its commands; `git stash`
-    forms by class, `pop|apply <commit>` a rollback only for a commit a checkpoint recorded) and binds
+    forms by class, `pop|apply <commit>` a rollback only for a commit a checkpoint recorded; a command,
+    expansion or argument it does not recognise gets the worst case, `mutate` and `send`) and binds
     `Skill` as `invoke`; a grounded MCP server serves a control-only tool unguarded; the Standard Agents
     binding has `additional_capabilities` and `controlTool`, and its lint reports F506. Tests:
     tests/test_bash_classification.py, tests/test_mcp_integration.py (TestGroundedServerGuard),
@@ -2056,7 +2061,8 @@ findings:
     Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 10-13 pin the versions.'
   status: fixed
   resolution: '`schemas/interop/standard_agents_mapping.yaml` pins SA 0.2.0, its commit, `@standardagents/spec`
-    0.45.10, Standard 1.1.0, ontology 2.1.0 and the `acs` annotation key with its schema. It records twelve
+    0.45.10, Standard 1.2.0, ontology 2.2.0 (1.1.0 and 2.1.0 when it was fixed) and the `acs` annotation
+    key with its schema. It records twelve
     capability rulings, three anchor `ref` forms, the timestamp units and the identity field map, each
     with the mapping rows it rests on. Review changed `subagent_message` from `is` to `carrier`, because
     tools-contracts#cls-07 leaves its classification by reserved name open, and tightened four notes.
@@ -2310,8 +2316,11 @@ findings:
     `pass_qualified_invoke`, `pass_qualified_invoke_v11_warn`, `fail_qualified_invoke_hidden`,
     `fail_qualified_cycle`, `fail_catalog_manifest*`, `pass_catalog_manifest_v11_warn`,
     `pass_names_warn`, `fail_qualified_invoke_names`; runtime `invoke_qualified_library`,
-    `invoke_computed_not_exported`, `invoke_qualified_non_identifier_name`. Migrating the
-    duplicated example to a qualified invoke waits until the reference catalog carries a manifest.'
+    `invoke_computed_not_exported`, `invoke_qualified_non_identifier_name`. Outside the proposed
+    change: examples/digital_twin_sync_loop.workflow_catalog.yaml still copies three workflows of
+    schemas/workflow_catalog.yaml (a test keeps them identical). It can invoke them by qualified id
+    once the reference catalog carries a manifest, which is a 1.2 feature (W616), and the shipped
+    catalogs still target 1.1.0.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-50
@@ -2430,8 +2439,9 @@ findings:
     `allowed_destinations` (§5.21.3); the executor fails a disallowed `send` with F504
     (`destination_not_allowed`) before approval or a checkpoint; safety layers refuse such calls
     (§5.18.10), the Python adapter (`GroundedAgentConfig.allowed_destinations`, a binding''s
-    `destination` pointer; an unbound tool and a composite whose `invokes` reach a `send` binding are
-    refused, since it cannot tell whether or where they send) and the Standard Agents binding
+    `destination` pointer; an unbound tool, a Bash command whose classification includes `send`
+    (Bash''s worst case, any command it does not recognise) and a composite whose `invokes` reach a
+    `send` binding are refused, since it cannot tell whether or where they send) and the Standard Agents binding
     (`configureLayer`, which every `send` tool obeys; a composite''s profiles reach the sends it
     invokes), so neither conformance statement lists the row; W625 reports a 1.2 `send` whose approval
     hides its destination; §12.5 documents Guarded Send; the send skill cites the policy. One grammar in
@@ -2760,7 +2770,7 @@ findings:
     fixtures that name an approval kind: 11, of which 8 name `approval_requested`.'
   status: fixed
   resolution: docs/guides/RUNNING_WORKFLOWS.md has a new informative section, 'The trace'. It lists the
-    six fields of a trace event and the 34 kinds the reference executor records, with each kind's detail
+    six fields of a trace event and the kinds the reference executor records (39 in 1.2.0), with each kind's detail
     members. It says these are executor trace kinds, not §5.13 event types, and that relaying them is
     left to the host. tests/test_trace_kinds_doc.py compares the list with the kinds core/src/exec passes
     to trace(), with the runtime fixtures' trace_kinds, and with the events and detail members the fixtures'
@@ -2806,8 +2816,10 @@ findings:
     ''How a delegate step maps to a host''. A waiting delegate is a result the host waits for. A plain
     delegate is a non-blocking child. A cap refusal is accepted false or an Error response. A plain delegate''s
     refusal fails nothing unless the workflow tests accepted. The subsection also covers create-or-continue
-    and retries under maxInstances. For ACS-04 it gives the workaround: raise requires_approval or requires_checkpoint
-    on the step, with a YAML example that the validator accepts.'
+    and retries under maxInstances. For ACS-04 it shows Standard 1.2.0''s workflow field `agents`, with a
+    YAML example that the validator accepts given the target''s agent manifest (without it, W621), and states
+    1.1''s workaround in prose: a workflow that does not declare `agents` raises requires_checkpoint and
+    requires_approval on the step by hand, as the reference catalog''s multi_agent_orchestration does.'
   concerns:
   - multi-agent
 - id: ACS-62
@@ -2994,6 +3006,12 @@ questions:
   depends: The item type a binding emits and validates, the `ref` scheme it uses for host artefacts, and
     whether a capability output with no anchors is accepted or refused.
   finding: ACS-06
+  answer: 'An evidence anchor of §6.5: an object with `ref` and `kind` (the event schema''s kinds,
+    `record` for the agent system''s own records and workflow values, or a vendor kind `x-...`) and an
+    optional `digest`; `ref` is opaque except the reserved `acs:` scheme, so a host artefact such as
+    `message:<id>` is a `ref` under a fitting kind. A bare string or another object is a deprecated legacy
+    form, accepted and never counted toward a grounding policy until 2.0. An empty list grounds nothing:
+    the output must then be marked inferred (§3.1, §5.20; RFC-0008 decisions 1 to 3).'
 - id: ACS-Q06
   question: Is a domain profile normative? If so, do `auto_approve`, `require_review`, `require_human`
     and `block_autonomous` change effective `requires_approval` and §5.14, and what do the keys of `checkpoint_policy`
@@ -3006,6 +3024,12 @@ questions:
   depends: Whether a host reads a profile at all and, if it does, which steps it sends to a person, which
     capabilities it refuses to run unattended and where it takes checkpoints.
   finding: ACS-05
+  answer: 'Normative where applied: a host gives profiles to a run, a safety layer to its calls, and a
+    validator may be given them; a workflow''s `profile` field applies nothing (§5.21.1). Each threshold
+    covers a set of risk levels and raises the effective `requires_approval`, so §5.14 asks for approval;
+    `require_human` and `block_autonomous` also require a person (§5.21.3). `checkpoint_policy` keys are
+    capability ids or `*`, its values `always`, `high_risk`, `medium_risk` or `never`; `critical` is
+    deprecated and read as `none` (W603, §5.21.2; RFC-0010 decision 1).'
 - id: ACS-Q07
   question: 'Which capability classifies each of: a write to a remote system through an API (`mutate`
     or `send`); a write to the host''s own durable store (`persist` or `mutate`); a message to an existing
@@ -3046,6 +3070,11 @@ questions:
   depends: Whether a parent's rollback must reach into a child's state, and whether a child agent needs
     a checkpoint tool of its own before it may mutate.
   finding: ACS-18
+  answer: 'A delegate takes its own: a run''s checkpoints never authorise a delegate''s changes, except in
+    a safety layer''s shared scope, where one checkpoint authorises one change by either agent. A rollback
+    restores what its checkpoint captured, whoever changed it, and reaches nothing else (a change elsewhere
+    is reported `delegated`); all-or-nothing needs `read_only: true` or an explicit undo step (§5.15.4,
+    §4.4.1; RFC-0009 decision 7).'
 - id: ACS-Q10
   question: 'How does a host establish `attendance` for a model-driven thread that no trigger started:
     is a run attended when a person can answer, or only when one is present in the session at the moment
@@ -3068,6 +3097,9 @@ questions:
   depends: Whether a host redacts before it stores an event, which §6.2 as written rules out, or stores
     the payload as received, which can put credentials into evidence and audit records.
   finding: ACS-23
+  answer: 'Yes: `raw` is the original unmodified except that each secret is replaced by the redaction
+    marker, a documented-loss transform (§3.2), and the event MAY list where in `redactions`; a secret
+    never enters evidence, events or records (§6.2, §6.7; RFC-0008 decision 9).'
 - id: ACS-Q12
   question: What does a host answer for the pending action when its own execution is stopped, terminated
     or deleted, and does a run ended that way attempt a rollback to the latest checkpoint?
@@ -3078,6 +3110,10 @@ questions:
   depends: Whether a stopped thread answers `Error` and lets retries and failure modes run, leaves the
     run unanswered, or ends it with a recorded cause; and whether what the run changed so far is restored.
   finding: ACS-32
+  answer: 'The host cancels the run (§5.19.5): it ends at once with `Failed` R408, the pending action is
+    withdrawn, and no retry, failure mode, recovery, handler or rollback runs. Approved and planned records
+    become `cancelled`. The executor does not roll back; the terminal action names the latest checkpoint
+    (`checkpoint_id`), which the host may restore itself (RFC-0006 decision B4).'
 - id: ACS-Q13
   question: Must an executor run the members of a `parallel_group` concurrently, or does running them
     in list order, as the reference executor does, conform? Which values of `join` are defined, and what
@@ -3090,6 +3126,11 @@ questions:
   depends: Whether an executor needs concurrent dispatch and a join rule, and whether a host that maps
     group members to separate agents may start them one after another.
   finding: ACS-15
+  answer: 'List order conforms: a group''s members are unordered, and an executor may run them in any
+    order or concurrently; one with a single pending action runs them in list order. A group is complete
+    when every member has finished. `join` has one defined value, `all_complete`; another is W618 and
+    ignored. A recovery that escalates or ends the run abandons unfinished members, and a loop continues
+    from its target (§5.2.3; RFC-0006 decision B8).'
 - id: ACS-Q14
   question: 'Are the strings in a decision''s `approvers` meant to be principals (§5.15), so that `min_approvers`
     counts distinct authenticated parties, or free names, as in the guide''s example `"approvers": ["alice"]`?'
@@ -3101,6 +3142,11 @@ questions:
   depends: 'Whether a host records the authenticated caller''s identifier or a display name, and so whether
     one person under two names can satisfy `min_approvers: 2`.'
   finding: ACS-12
+  answer: 'Without identities, `min_approvers` counts the distinct strings of `approvers`, and the host
+    vouches for them. With `identity@1` a decision may carry `approver_identities`, `approvers` must then
+    list exactly their principals, and approvers are counted by principal, each identity checked against
+    the requested kind and role; in a workflow that targets 1.2 or later, `sender_check` and
+    `accept_trust_classes` make attested identities required (§5.14, §5.17; RFC-0006 decision A4).'
 - id: ACS-Q15
   question: Is `acs` the final annotation key on a Standard Agents tool, or will it be replaced by a name
     the project controls, such as an npm package name or a domain name?

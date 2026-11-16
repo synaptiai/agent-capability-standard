@@ -9,7 +9,17 @@ from typing import Any
 
 import pytest
 
+from grounded_agency import _core
 from grounded_agency.workflows.idempotency import IdempotencyLog
+from tests.runtime_replay import (
+    KEY,
+    RUNTIME,
+    _validator,
+    fill,
+    load,
+    set_options,
+    start,
+)
 
 
 def action(key: str = "r1:3", **inputs: Any) -> dict[str, Any]:
@@ -110,12 +120,58 @@ def test_the_destination_in_the_file_is_redacted(tmp_path: Path) -> None:
     assert "[REDACTED]" in lines[-1]["destination"]
 
 
-def test_replaces_and_unkeyed_pass_through() -> None:
+def test_an_unkeyed_action_passes_through() -> None:
     log, effect = IdempotencyLog(), Effect()
-    log.perform({**action(), "replaces": "t1"}, effect)
-    log.perform({**action(), "replaces": "t1"}, effect)
     log.perform({"capability": "send", "inputs": {}}, effect)
-    assert effect.calls == 3
+    log.perform({"capability": "send", "inputs": {}}, effect)
+    assert effect.calls == 2
+
+
+def test_evidence_seen_is_kept_and_replayed(tmp_path: Path) -> None:
+    # The host's attestation is part of the answer (§5.20): a replay without
+    # it would fail an attested grounding policy (F505) after the effect.
+    path = tmp_path / "keys.jsonl"
+    seen = {
+        "kind": "Output",
+        "value": {"sent": True},
+        "evidence_seen": ["file:report.txt"],
+    }
+    IdempotencyLog(path).perform(action(), Effect(seen))
+    effect = Effect()
+    assert IdempotencyLog(path).perform(action(), effect) == seen
+    assert effect.calls == 0
+    # An output without one is replayed without one.
+    log = IdempotencyLog()
+    log.perform(action("r1:4"), Effect())
+    assert "evidence_seen" not in log.perform(action("r1:4"), Effect())
+
+
+def test_a_replacing_delegation_is_performed_once_per_key() -> None:
+    # The executor gives a delegation that names the one it replaces a key
+    # of its own (§4.4.2) and re-delivers that attempt with the same key
+    # after a restore (§5.19.4): the log answers the re-delivery.
+    fixture = load(RUNTIME / "delegate_replaces_new_key.json")
+    run = start(_validator(), fixture)
+    for entry in fixture["script"][:2]:
+        pending = run.next()
+        run.submit(pending["id"], fill(entry["respond"], pending), fixture["start"])
+    replacing = run.next()
+    assert (replacing["idempotency_key"], replacing["replaces"]) == ("run-1:3", "t1")
+    saved = run.snapshot(KEY)
+    log = IdempotencyLog()
+    accepted = {
+        "kind": "Output",
+        "value": {"accepted": True, "task_id": "t2", "evidence_anchors": []},
+    }
+    first, again = Effect(accepted), Effect()
+    log.perform(replacing, first)
+    restored = _core.Run.restore(
+        _validator(), fixture["catalog"], saved, KEY, **set_options(fixture)
+    )
+    redelivered = restored.next()
+    assert redelivered["idempotency_key"] == "run-1:3"
+    assert log.perform(redelivered, again) == accepted
+    assert (first.calls, again.calls) == (1, 0)
 
 
 def test_performed_since_lists_the_runs_own_keys() -> None:
@@ -127,6 +183,16 @@ def test_performed_since_lists_the_runs_own_keys() -> None:
     keys = [e["key"] for e in log.performed_since(5, run_id="r1")]
     assert keys == ["r1:3", "r1:9"]
     assert log.performed_since(0, run_id="r10") == []
+
+
+def test_performed_since_does_not_list_a_run_whose_id_extends_this_one() -> None:
+    # A run_id is any string (§5.19.2): run "a:1" is not run "a" (§4.4.1:
+    # only the run's own transmissions).
+    log = IdempotencyLog(clock=lambda: 100)
+    for key in ("a:3", "a:1:3", "ab:4"):
+        log.perform(action(key, destination=key, payload=1), Effect())
+    assert [e["key"] for e in log.performed_since(0, run_id="a")] == ["a:3"]
+    assert [e["key"] for e in log.performed_since(0, run_id="a:1")] == ["a:1:3"]
 
 
 def test_performed_since_lists_a_send_whose_outcome_is_unknown() -> None:

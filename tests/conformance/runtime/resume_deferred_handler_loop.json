@@ -1,5 +1,5 @@
 {
-  "description": "A retry of a re-entered queued step during a resumption runs that step again and then goes on with the resumption: the second request names the same queued action, the record is updated in place again, the step that escalated in the first run is not run again, and the deferred handler still runs last, with the escalation's cause (\u00a75.14.1).",
+  "description": "A recovery loop back to a re-entered queued step whose call failed runs that step again and then goes on with the resumption: the step carried its queued action out, so the second request names no queued action and its pass has a record of its own beside the failed one; the step that escalated in the first run is not run again, and the deferred handler still runs last, with the escalation's cause (\u00a75.14.1).",
   "catalog": {
     "w": {
       "goal": "g",
@@ -225,11 +225,13 @@
       "expect": {
         "kind": "RequestApproval",
         "step": 3,
-        "queued_action_id": "run-1/w/3/0",
         "approver": {
           "kind": "human"
         }
       },
+      "absent": [
+        "queued_action_id"
+      ],
       "respond": {
         "kind": "Decision",
         "decision_id": "d2",
@@ -292,6 +294,11 @@
     "action_records": [
       {
         "action_id": "run-1/w/3/0",
+        "status": "failed",
+        "code": "R402"
+      },
+      {
+        "action_id": "run-1/w/3/1",
         "status": "executed"
       }
     ]

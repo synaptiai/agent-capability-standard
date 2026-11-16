@@ -14,7 +14,7 @@
  */
 import type { ThreadState, ToolResult } from '@standardagents/spec';
 import { CAPABILITIES, type CapabilityId, NotCanonicalizableError, parseDuration, parseJsonExact } from '@synaptiai/acs-core';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import {
@@ -26,6 +26,7 @@ import {
   type ApprovalPolicy,
 } from '../src/acs/approval.js';
 import { CHECKPOINT_MAX_AGE_MS, LAYER_NAME, controlTool, groundedTool } from '../src/acs/grounded.js';
+import { configureLayer, resetLayer } from '../src/acs/layer.js';
 import { ONTOLOGY_VERSION, STANDARD_VERSION } from '../src/acs/ontology.js';
 import statement from '../../../tests/conformance/calls/statements/standard_agents_binding.json' with { type: 'json' };
 import statementSchema from '../../../tests/conformance/calls/schema/statement.schema.json' with { type: 'json' };
@@ -38,6 +39,7 @@ interface Binding {
   invokes?: string[];
   approval?: { min_approvers?: number; role?: string; expires?: string };
   control?: true;
+  destination?: string;
 }
 
 interface Call {
@@ -56,6 +58,8 @@ type Step = Call | { boundary: true } | { expire: 'checkpoint' | 'decision' };
 interface Fixture {
   description: string;
   needs?: string[];
+  without?: string[];
+  destination_policy?: string[];
   bindings: Binding[];
   sequence: Step[];
 }
@@ -80,6 +84,16 @@ function outputOf(capability: CapabilityId, seq: number): Record<string, unknown
     output[field] = field === 'evidence_anchors' ? [] : field === 'confidence' ? 1 : field === 'checkpoint_id' ? `cp-${seq}` : true;
   }
   return output;
+}
+
+/** The value an RFC 6901 pointer locates in a call's arguments. */
+function atPointer(args: Record<string, unknown>, pointer: string): unknown {
+  let value: unknown = args;
+  for (const token of pointer.split('/').slice(1)) {
+    const key = token.replaceAll('~1', '/').replaceAll('~0', '~');
+    value = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+  }
+  return value;
 }
 
 function policyOf(binding: Binding): ApprovalPolicy {
@@ -116,6 +130,9 @@ class Runner {
           capability: b.capability!,
           ...(b.additional_capabilities ? { additional_capabilities: b.additional_capabilities } : {}),
           ...(b.invokes ? { invokes: invokes as never } : {}),
+          ...(b.destination !== undefined
+            ? { destination: (args: Record<string, unknown>) => atPointer(args, b.destination!) }
+            : {}),
           approval: policyOf(b),
           description: name,
           args: z.object({}).passthrough(),
@@ -225,13 +242,18 @@ describe("the binding's conformance statement", () => {
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(28);
+    expect(CASES).toHaveLength(30);
   });
+
+  afterEach(() => resetLayer());
 
   it.for(CASES)('%s', async ([_name, fixture], { skip }) => {
     const missing = (fixture.needs ?? []).filter((n) => !FEATURES.has(n));
     // The binding sees no call of a tool it did not define (its statement).
     skip(missing.length > 0, `the binding's conformance statement lacks ${missing.join(', ')}`);
+    const present = (fixture.without ?? []).filter((n) => FEATURES.has(n));
+    skip(present.length > 0, `the fixture is for a layer without ${present.join(', ')}`);
+    if (fixture.destination_policy !== undefined) configureLayer({ destinations: [fixture.destination_policy] });
     const runner = new Runner(fixture.bindings);
     for (const [index, step] of fixture.sequence.entries()) {
       if ('boundary' in step) {

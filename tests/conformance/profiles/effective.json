@@ -1,5 +1,5 @@
 {
-  "description": "Domain profile effect vectors (Agent Capability Standard 1.2.0, section 5.21.3). Normative. `flags`: the effective flags (section 5.2.1) of a step or call of `capability`, with its own `declared` flags, under the profiles given, and whether a person must decide. `policy`: the rules the profiles put in force besides flags. The profiles load without error.",
+  "description": "Domain profile effect vectors (Agent Capability Standard 1.2.0, section 5.21.3). Normative. `flags`: the effective flags (section 5.2.1) of a step or call of `capability`, with its own `declared` flags, under the profiles given, and whether a person must decide. `calls`: the same for a call of a tool `binding` (section 5.18.1) that performs several capabilities: each applied profile raises for each of them, at the call's effective risk (section 5.18.3). `policy`: the rules the profiles put in force besides flags. The profiles load without error.",
   "standard": "1.2.0",
   "ontology": "2.2.0",
   "section": "5.21.3",
@@ -10,7 +10,8 @@
     "profiles": "The profiles applied, in order.",
     "capability": "flags: the step's capability.",
     "declared": "flags: the step's own risk and flags, if any.",
-    "expect": "flags: {risk, mutation, requires_checkpoint, requires_approval, person}. policy: {minimum_confidence (the highest, or null), grounding ([{require, kinds}], one per profile with require_grounding, kinds null for any kind), destinations (one list per profile that sets allowed_destinations), trust_weights (the lowest per key)}."
+    "binding": "calls: the tool binding record's `capability`, `additional_capabilities` and `flags` (section 5.18.1).",
+    "expect": "flags and calls: {risk, mutation, requires_checkpoint, requires_approval, person}. policy: {minimum_confidence (the highest, or null), grounding ([{require, kinds}], one per profile with require_grounding, kinds null for any kind), destinations (one list per profile that sets allowed_destinations), trust_weights (the lowest per key)}."
   },
   "flags": [
     {
@@ -496,6 +497,160 @@
       },
       "expect": {
         "risk": "low",
+        "mutation": false,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": true
+      }
+    }
+  ],
+  "calls": [
+    {
+      "name": "call_block_autonomous_lists_an_additional_capability",
+      "about": "block_autonomous lists a capability the call performs besides its own: a person decides",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "send"
+            ]
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "send"
+        ]
+      },
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": true
+      }
+    },
+    {
+      "name": "call_without_profiles",
+      "about": "the same binding with no profile: the strictest of its capabilities' flags, no person",
+      "profiles": [],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "send"
+        ]
+      },
+      "expect": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true,
+        "person": false
+      }
+    },
+    {
+      "name": "call_checkpoint_policy_names_an_additional_capability",
+      "about": "checkpoint_policy names a capability the call performs besides its own",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "persist": "always"
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "persist"
+        ]
+      },
+      "expect": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "call_block_autonomous_lists_the_primary_capability_only",
+      "about": "block_autonomous lists the call's capability, not the additional one: a person decides",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "retrieve"
+            ]
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "persist"
+        ]
+      },
+      "expect": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": true,
+        "person": true
+      }
+    },
+    {
+      "name": "call_policy_value_at_the_calls_risk",
+      "about": "a capability's medium_risk policy reads the call's effective risk, which its other capability raises to medium",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "retrieve": "medium_risk"
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "delegate"
+        ]
+      },
+      "expect": {
+        "risk": "medium",
+        "mutation": false,
+        "requires_checkpoint": true,
+        "requires_approval": false,
+        "person": false
+      }
+    },
+    {
+      "name": "call_threshold_at_the_calls_risk",
+      "about": "require_human: medium covers the call's effective risk, though not its low-risk capability's own",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "medium"
+          }
+        }
+      ],
+      "binding": {
+        "capability": "retrieve",
+        "additional_capabilities": [
+          "delegate"
+        ]
+      },
+      "expect": {
+        "risk": "medium",
         "mutation": false,
         "requires_checkpoint": false,
         "requires_approval": true,

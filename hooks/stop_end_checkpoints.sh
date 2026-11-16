@@ -5,9 +5,9 @@
 #
 # It files .claude/checkpoint.ok under .claude/checkpoints/ended/ (or removes
 # it, when it is not a regular file or cannot be moved), and keeps
-# .claude/checkpoints/used/ and ended/, the history that a rollback reads: a
-# checkpoint whose validity ended can still be restored. It always exits 0: a
-# Stop hook that exits 2 would stop Claude from stopping.
+# .claude/checkpoints/used/, ended/ and commits/ (the commits a rollback looks
+# up): a checkpoint whose validity ended can still be restored. It always
+# exits 0: a Stop hook that exits 2 would stop Claude from stopping.
 set -uo pipefail
 
 cat > /dev/null 2>&1 || true

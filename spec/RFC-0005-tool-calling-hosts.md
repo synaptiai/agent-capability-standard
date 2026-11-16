@@ -294,9 +294,9 @@ environment settings that change its decisions.
 
 ## Conformance test updates
 
-- Binding fixtures (33; the nine that check offered tools and host
+- Binding fixtures (35; the nine that check offered tools and host
   actions need the `offered_tools` feature) and call-sequence fixtures
-  (28), their schemas, two conformance statements, and runners in Python
+  (30), their schemas, two conformance statements, and runners in Python
   and TypeScript.
 - Capability output vectors, `tests/conformance/output/vectors.json`, which
   both reference codecs of §5.18.9 read.

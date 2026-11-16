@@ -7,9 +7,13 @@ use super::{Report, Scope, StepLoc};
 use crate::diag::Code;
 use crate::expr::{self, SyntaxError, ast::Expr, check};
 
-impl check::Scope for Scope {
+impl check::Scope for Scope<'_> {
     fn root(&self, name: &str) -> Option<check::RootInfo<'_>> {
-        let schema = self.stores.get(name).or_else(|| self.inputs.get(name))?;
+        let schema = self
+            .stores
+            .get(name)
+            .copied()
+            .or_else(|| self.inputs.get(name))?;
         Some(check::RootInfo {
             schema: Some(schema),
             always_present: !self.maybe_absent.contains(name),

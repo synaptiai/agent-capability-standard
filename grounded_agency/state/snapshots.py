@@ -12,7 +12,7 @@ the record of what happened and the host's own records. The store never
 captures, overwrites or removes
 
 - the plugin's ``.claude/`` directory (its audit log and checkpoint marker)
-  and ``.audit/`` (the audit logs its skills write),
+  and ``.audit/`` (where the skills of its earlier releases logged),
 - its own ``store_dir``,
 - every path registered with :meth:`FileSnapshotStore.protect` (the
   checkpoint tracker's state and archive, the idempotency log, the memory
@@ -40,9 +40,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-# The plugin's audit log and checkpoint marker (``.claude/``) and the audit
-# logs its skills write (``.audit/``): never within a checkpoint's reach,
-# whatever the caller excludes.
+# The plugin's audit log and checkpoint marker (``.claude/``) and the logs
+# the skills of its earlier releases wrote (``.audit/``): never within a
+# checkpoint's reach, whatever the caller excludes.
 NEVER_DIRS: tuple[str, ...] = (".claude", ".audit")
 ALWAYS_EXCLUDED: tuple[str, ...] = tuple(f"{d}/**" for d in NEVER_DIRS)
 
@@ -87,7 +87,7 @@ DEFAULT_EXCLUDE: tuple[str, ...] = (".git/**", *SECRET_PATHS)
 
 MECHANISM = "file_copy"
 
-_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 _GLOB = re.compile(r"[*?\[]")
 _MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
@@ -303,7 +303,7 @@ class FileSnapshotStore:
     # ------------------------------------------------------------------
 
     def _check_id(self, checkpoint_id: str) -> None:
-        if not isinstance(checkpoint_id, str) or not _ID.match(checkpoint_id):
+        if not isinstance(checkpoint_id, str) or not _ID.fullmatch(checkpoint_id):
             raise ValueError(
                 f"checkpoint id {checkpoint_id!r} must match {_ID.pattern} "
                 "(a manifest file name)"

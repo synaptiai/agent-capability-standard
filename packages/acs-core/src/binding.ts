@@ -29,6 +29,7 @@
  * 7. The prerequisites are the `requires` sources of the capabilities the
  *    record names (not of its invokes).
  */
+import { isDomainId } from './domains.js';
 import { joinFlags, NO_FLAGS, RISK_LEVELS } from './flags.js';
 import { iJsonProblem } from './ijson.js';
 import {
@@ -232,11 +233,17 @@ export function parseRecord(record: unknown): { binding: Parsed | null; errors: 
     const value = record['capability'];
     if (typeof value !== 'string' || value === '') wrong('capability', `'capability' must be a capability id, not ${JSON.stringify(value)}`);
   }
-  for (const member of ['domain', 'classifier'] as const) {
-    if (has(member)) {
-      const value = record[member];
-      if (typeof value !== 'string' || value === '') wrong(member, `'${member}' must be a non-empty string`);
+  if (has('domain')) {
+    // A domain id (§5.18.1, §5.2.4). Unlike a step's (W620), a binding's of
+    // another form is S303: tool bindings are new in 1.2.
+    const value = record['domain'];
+    if (typeof value !== 'string' || !isDomainId(value)) {
+      wrong('domain', `'domain' must be a domain id (segments [a-z0-9][a-z0-9_]* joined by '.'), not ${JSON.stringify(value)}`);
     }
+  }
+  if (has('classifier')) {
+    const value = record['classifier'];
+    if (typeof value !== 'string' || value === '') wrong('classifier', "'classifier' must be a non-empty string");
   }
 
   const flags: Parsed['flags'] = {};

@@ -1,0 +1,5 @@
+# A person decides every delegation (Standard v1.2 §5.21.3).
+domain: block-delegate
+version: "1.0.0"
+risk_thresholds:
+  block_autonomous: [delegate]

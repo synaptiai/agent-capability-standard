@@ -45,20 +45,26 @@ pub fn is_model_family(s: &str) -> bool {
 /// The model family a host derives from a model's identifier (§5.15):
 ///
 /// 1. the part of the identifier after its last `/`;
-/// 2. of that, the part after the last `.` or `:` that comes before its
-///    first ASCII digit or `-` (any `.` or `:` when it has neither);
+/// 2. of that, the part after the last `.` or `:` that is followed by an
+///    ASCII letter and comes before its first ASCII digit or `-`; when it
+///    has neither, after the last `.` followed by a letter (a `:` there
+///    starts a tag, as in `acme:latest`);
 /// 3. the leading run of ASCII letters of the rest, lowercased.
 ///
 /// `None` when that run is empty: the host attests no family.
 pub fn model_family(model_id: &str) -> Option<String> {
     let rest = model_id.rsplit('/').next().unwrap_or(model_id);
-    let stop = rest
-        .find(|c: char| c.is_ascii_digit() || c == '-')
-        .unwrap_or(rest.len());
-    let rest = match rest[..stop].rfind(['.', ':']) {
-        Some(i) => &rest[i + 1..],
-        None => rest,
-    };
+    let bytes = rest.as_bytes();
+    let (head, separators): (&[u8], &[u8]) =
+        match bytes.iter().position(|&b| b.is_ascii_digit() || b == b'-') {
+            Some(stop) => (&bytes[..stop], b".:"),
+            None => (bytes, b"."),
+        };
+    let cut = (0..head.len()).rev().find(|&i| {
+        separators.contains(&head[i]) && bytes.get(i + 1).is_some_and(u8::is_ascii_alphabetic)
+    });
+    // A separator is ASCII, so the byte after it starts a character.
+    let rest = cut.map_or(rest, |i| &rest[i + 1..]);
     let family: String = rest
         .chars()
         .take_while(char::is_ascii_alphabetic)
@@ -205,6 +211,11 @@ mod tests {
             ("Bolt/BoltChat-7B", Some("boltchat")),
             ("z3-mini", Some("z")),
             ("acme-large-2@20260101", Some("acme")),
+            ("acme:latest", Some("acme")),
+            ("acme:7b", Some("acme")),
+            ("vendor/acme:latest", Some("acme")),
+            ("vendor:acme-large-2", Some("acme")),
+            ("us.acme:7b", Some("acme")),
             ("3d-model", None),
             ("", None),
         ] {

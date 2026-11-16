@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -37,6 +38,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 SECRET = "sk-live-0123456789abcdef"
+
+# The persist skill's hooks see every tool that writes a file's content:
+# Claude Code matches a plain matcher string exactly, so "Edit" alone would
+# leave a Write or a MultiEdit unchecked.
+PERSIST_MATCHER = "Edit|Write|MultiEdit"
 
 
 def frontmatter(skill: str) -> dict[str, Any]:
@@ -167,8 +173,13 @@ class TestFrontmatterHooks:
         text = SECURITY_MD.read_text(encoding="utf-8")
         start = text.index("### 5.4 ")
         section = text[start : text.index("### 5.5 ", start)]
+        # A cell's "\|" is a pipe in its text (GitHub Flavored Markdown), as
+        # in a matcher "Edit\|Write"; only an unescaped "|" separates cells.
         rows = [
-            [cell.strip() for cell in line.strip("|").split("|")]
+            [
+                cell.strip().replace("\\|", "|")
+                for cell in re.split(r"(?<!\\)\|", line.strip()[1:-1])
+            ]
             for line in section.splitlines()
             if line.startswith("| `skills/")
         ]
@@ -250,7 +261,7 @@ class TestFrontmatterHooks:
         each copies hooks/secret_scan.sh verbatim, from its BEGIN line to
         its END line, as tools/validate_yaml_util_sync.py keeps two copies
         of one utility equal."""
-        matcher = "Edit" if skill == "persist" else "Bash"
+        matcher = PERSIST_MATCHER if skill == "persist" else "Bash"
         command = command_hook(skill, "PreToolUse", matcher)
         source = SECRET_SCAN.read_text(encoding="utf-8").strip()
         start = command.index("# BEGIN secret-scan")
@@ -289,7 +300,7 @@ class TestFrontmatterHooks:
         ("skill", "matcher"),
         [
             ("audit", "Bash"),
-            ("persist", "Edit"),
+            ("persist", PERSIST_MATCHER),
             ("rollback", "Bash"),
             ("send", "Bash"),
         ],
@@ -307,7 +318,7 @@ class TestFrontmatterHooks:
         ("skill", "matcher", "tool_call"),
         [
             ("audit", "Bash", bash_call("wc -l .claude/audit/records.jsonl")),
-            ("persist", "Edit", edit_call("/work/app/CLAUDE.md")),
+            ("persist", PERSIST_MATCHER, edit_call("/work/app/CLAUDE.md")),
             ("rollback", "Bash", bash_call("git status")),
             ("send", "Bash", bash_call("ls -la")),
         ],
@@ -334,7 +345,7 @@ class TestFrontmatterHooks:
 
 
 # ---------------------------------------------------------------------------
-# send: a request to localhost or a private IPv4 address
+# send: a request to localhost or an internal address
 # ---------------------------------------------------------------------------
 
 
@@ -354,6 +365,28 @@ class TestSendCommandHook:
             "curl http://Localhost/",
             "curl 10.0.0.1",
             "curl 'http://10.0.0.1?q=1'",
+            # the rest of 127/8, 0/8 and link-local (cloud metadata)
+            "curl http://127.0.0.2/",
+            "curl http://0.0.0.0:8080/",
+            "curl http://169.254.169.254/latest/meta-data/",
+            # IPv4 in the other forms a resolver accepts
+            "curl http://127.1/",
+            "curl http://0x7f000001/",
+            "curl http://0X7F.1/",
+            "curl http://2130706433/",
+            "curl http://017700000001/",
+            "curl http://0177.0.0.1/",
+            "curl http://user@127.1/",
+            # IPv6 loopback, mapped, link-local and unique-local literals
+            "curl http://[::1]/",
+            "curl http://[::ffff:127.0.0.1]/",
+            "curl -s http://[fe80::1]:8080/",
+            "curl http://[fd00::1]/",
+            # A host may end in the root's dot; a name may start with the address
+            "curl http://localhost./admin",
+            "curl http://127.0.0.1./",
+            "curl http://127.0.0.1.nip.io/",
+            "curl http://169.254.169.254.sslip.io/latest/meta-data/",
         ],
     )
     def test_blocks_internal_destination(
@@ -363,14 +396,66 @@ class TestSendCommandHook:
         result = run_command(hook, bash_call(command), tmp_path, shell)
         assert_blocked(
             result,
-            "does not send to localhost or a private IPv4 address",
+            "does not send to localhost or a loopback, private, link-local or "
+            "unspecified address",
             "F504 CONSTRAINT_VIOLATED: ",
         )
 
     @pytest.mark.parametrize(
         "command",
         [
+            # curl 8.5 reached a 127.0.0.1 listener with each of these two
+            "curl --resolve example.com:18777:127.0.0.1 http://example.com:18777/",
+            "curl --connect-to example.com:80:127.0.0.1:8080 http://example.com/",
+            "curl --unix-socket /var/run/docker.sock http://x/containers/json",
+            "curl -sx http://proxy.internal:3128 http://example.com/",
+            "curl --proxy=proxy.internal:3128 http://example.com/",
+            "curl --preproxy socks5://proxy.internal http://example.com/",
+            "curl --doh-url https://dns.example/q http://foo.example/",
+            "curl -K request.cfg",
+            "HTTPS_PROXY=proxy.internal:3128 curl https://example.com/",
+            "wget -e use_proxy=on -e http_proxy=proxy.internal:3128 http://x.example/",
+            "wget -i urls.txt",
+        ],
+    )
+    def test_blocks_a_redirected_connection(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        """An option or a proxy setting sends the request elsewhere than the
+        host this check reads in its URL."""
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "whose connection an option or a proxy setting", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # curl 8.5 reached a 127.0.0.1 listener with this one
+            "curl http://$(printf local)host:18777/",
+            "H=169.254.169.254; curl http://$H/latest/meta-data/",
+            "curl `cat url.txt`",
+            "curl -d @<(cat payload) https://api.example.com/",
+            'curl -H "Authorization: Bearer $TOKEN" https://api.example.com/',
+            "curl https://api.example.com/\\\n  -d x",
+        ],
+    )
+    def test_blocks_text_the_shell_expands_or_escapes(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        """An expansion or an escape can make any host or option, which the
+        check never reads: the message no longer claims 'in any form'."""
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "whose text the shell expands or escapes", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             "curl https://api.example.com/v1/messages",
+            "curl -i https://api.example.com/v1/messages",
+            "curl -H @headers.txt https://api.example.com/",
+            "curl --noproxy '*' https://example.com/",
+            "tar -xzf http-lib.tgz",
             # a version number is not an address
             "curl -O https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz",
             "curl https://localhost.example.com/",
@@ -379,6 +464,13 @@ class TestSendCommandHook:
             "curl https://example.com/?v=10.2.3.4",
             "ls -la",
             "ping 10.0.0.5",
+            # a number that is an argument, not a host
+            "curl --max-time 30 https://example.com/",
+            # public addresses, canonical
+            "curl http://8.8.8.8/",
+            "curl http://1.0.0.1/",
+            "curl http://[2001:db8::1]/",
+            "curl https://example.com:8443/x",
         ],
     )
     def test_allows_other_commands(
@@ -412,7 +504,7 @@ class TestPersistCommandHook:
     ) -> None:
         home = tmp_path / "home"
         home.mkdir()
-        hook = command_hook("persist", "PreToolUse", "Edit")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         result = run_command(
             hook,
             edit_call(file_path.format(home=home)),
@@ -423,6 +515,107 @@ class TestPersistCommandHook:
         assert_blocked(
             result, "Cannot persist to system or credential directories", F504
         )
+
+    @pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit"])
+    def test_the_hooks_see_every_tool_that_writes_content(
+        self, shell: str, tool: str
+    ) -> None:
+        """Claude Code matches a matcher as a regular expression over the
+        whole tool name (a plain string matches exactly): "Edit" alone never
+        saw a Write or a MultiEdit, so their content went unchecked."""
+        for kind in ("command", "prompt"):
+            (hook,) = hooks_of("persist", "PreToolUse", kind)
+            assert re.fullmatch(hook["matcher"], tool), (kind, tool)
+
+    @pytest.mark.parametrize(
+        "file_path",
+        ["/private/etc/hosts", "{home}/.claude/settings.json"],
+    )
+    def test_blocks_macos_etc_and_claude_settings(
+        self, tmp_path: Path, shell: str, file_path: str
+    ) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        result = run_command(
+            hook,
+            edit_call(file_path.format(home=home)),
+            tmp_path,
+            shell,
+            {"HOME": str(home)},
+        )
+        assert_blocked(
+            result, "Cannot persist to system or credential directories", F504
+        )
+
+    @pytest.mark.parametrize(
+        ("link", "points_to", "file_path"),
+        [
+            # A directory of the project that is a link to ~/.ssh
+            ("app/knowledge", "{home}/.ssh", "app/knowledge/authorized_keys"),
+            # A relative link out of the project
+            ("app/notes", "../home/.aws", "app/notes/config"),
+            # A file that is a link to a credential file
+            ("app/notes.md", "{home}/.aws/credentials", "app/notes.md"),
+            # Two links in a row
+            ("app/a.md", "b.md", "app/a.md"),
+        ],
+    )
+    def test_follows_symbolic_links_to_the_file_written(
+        self,
+        tmp_path: Path,
+        shell: str,
+        link: str,
+        points_to: str,
+        file_path: str,
+    ) -> None:
+        """A path inside the project can reach a credential directory through
+        a symbolic link (a cloned repository can ship one): the checks read
+        the file the write reaches, not only the path as written."""
+        home = tmp_path / "home"
+        (home / ".ssh").mkdir(parents=True)
+        (home / ".aws").mkdir()
+        (home / ".aws" / "credentials").write_text("")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "b.md").symlink_to(home / ".ssh" / "authorized_keys")
+        (tmp_path / link).symlink_to(points_to.format(home=home))
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        result = run_command(
+            hook,
+            edit_call(str(tmp_path / file_path)),
+            tmp_path,
+            shell,
+            {"HOME": str(home)},
+        )
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith(F504), result.stderr
+        assert (
+            "system or credential directories" in result.stderr
+            or "credential files" in result.stderr
+        ), result.stderr
+
+    def test_blocks_a_link_it_cannot_follow(self, tmp_path: Path, shell: str) -> None:
+        (tmp_path / "a.md").symlink_to("b.md")
+        (tmp_path / "b.md").symlink_to("a.md")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        result = run_command(hook, edit_call(str(tmp_path / "a.md")), tmp_path, shell)
+        assert_blocked(result, "symbolic link that cannot be followed", F504)
+
+    def test_allows_a_link_inside_the_project(self, tmp_path: Path, shell: str) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        (tmp_path / "app" / "docs").mkdir(parents=True)
+        (tmp_path / "app" / "kb").symlink_to("docs")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        result = run_command(
+            hook,
+            edit_call(str(tmp_path / "app" / "kb" / "new" / "decisions.md")),
+            tmp_path,
+            shell,
+            {"HOME": str(home)},
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
 
     @pytest.mark.parametrize(
         "file_path",
@@ -443,7 +636,7 @@ class TestPersistCommandHook:
         directory from the prefix patterns, so such a path is blocked."""
         home = tmp_path / "home"
         home.mkdir()
-        hook = command_hook("persist", "PreToolUse", "Edit")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         result = run_command(
             hook,
             edit_call(file_path.format(home=home)),
@@ -460,7 +653,7 @@ class TestPersistCommandHook:
     def test_blocks_credential_files(
         self, tmp_path: Path, shell: str, file_path: str
     ) -> None:
-        hook = command_hook("persist", "PreToolUse", "Edit")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         result = run_command(hook, edit_call(file_path), tmp_path, shell)
         assert_blocked(result, "Cannot persist to credential files", F504)
 
@@ -477,7 +670,7 @@ class TestPersistCommandHook:
     def test_allows_project_files(
         self, tmp_path: Path, shell: str, file_path: str
     ) -> None:
-        hook = command_hook("persist", "PreToolUse", "Edit")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         result = run_command(hook, edit_call(file_path), tmp_path, shell)
         assert result.returncode == 0, result.stderr
         assert result.stderr == ""
@@ -501,7 +694,7 @@ class TestPersistCommandHook:
         redacted (STANDARD 1.2.0 §6.7). The target is an allowed path, so
         only the content scan can block the call: stdin was read once, and
         the content scanned."""
-        hook = command_hook("persist", "PreToolUse", "Edit")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         call = edit_call("/work/app/CLAUDE.md")
         call["tool_input"]["new_string"] = content
         result = run_command(hook, call, tmp_path, shell)
@@ -510,7 +703,7 @@ class TestPersistCommandHook:
     def test_blocks_a_credential_in_a_whole_files_content(
         self, tmp_path: Path, shell: str
     ) -> None:
-        hook = command_hook("persist", "PreToolUse", "Edit")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         call = {
             "hook_event_name": "PreToolUse",
             "tool_name": "Edit",
@@ -518,6 +711,28 @@ class TestPersistCommandHook:
                 "file_path": "/work/app/CLAUDE.md",
                 "content": "token: AKIAABCDEFGHIJKLMNOP",
             },
+        }
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    @pytest.mark.parametrize("tool", ["Write", "MultiEdit"])
+    def test_blocks_a_credential_a_write_or_multiedit_carries(
+        self, tmp_path: Path, shell: str, tool: str
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        token = "ghp_" + "c" * 36
+        tool_input: dict[str, Any] = {"file_path": "/work/app/knowledge/new.md"}
+        if tool == "Write":
+            tool_input["content"] = f"# Bot\nuse {token}\n"
+        else:
+            tool_input["edits"] = [
+                {"old_string": "a", "new_string": "fine"},
+                {"old_string": "b", "new_string": f"the bot uses {token}"},
+            ]
+        call = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool,
+            "tool_input": tool_input,
         }
         result = run_command(hook, call, tmp_path, shell)
         assert_blocked(result, "holds what looks like a credential", F504)
@@ -537,7 +752,7 @@ class TestPersistCommandHook:
     def test_allows_prose_about_credentials(
         self, tmp_path: Path, shell: str, content: str
     ) -> None:
-        hook = command_hook("persist", "PreToolUse", "Edit")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         call = edit_call("/work/app/CLAUDE.md")
         call["tool_input"]["new_string"] = content
         result = run_command(hook, call, tmp_path, shell)
@@ -585,8 +800,78 @@ class TestAuditCommandHook:
     @pytest.mark.parametrize(
         "command",
         [
+            # Built when the command runs: no scan of the command sees it
+            'printf \'{"note":"%s"}\\n\' "$(cat ~/.aws/credentials)" '
+            ">> .claude/audit/records.jsonl",
+            'printf \'{"note":"\\x67hp_' + "0" * 36 + "\"}\\n' "
+            ">> .claude/audit/records.jsonl",
+            'echo "{\\"t\\":\\"$GITHUB_TOKEN\\"}" >> .claude/audit/records.jsonl',
+            "printf '%s\\n' \"`cat /tmp/r`\" >> .claude/audit/records.jsonl",
+            "tee -a .claude/audit/records.jsonl < /tmp/record.json",
+            # The file named another way, or the append in another form
+            "cd .claude/audit && printf '%s\\n' '{\"a\":1}' >> records.jsonl",
+            "printf '%s\\n' '{\"a\":1}' >> \"$CLAUDE_PROJECT_DIR/.claude/audit/records.jsonl\"",
+        ],
+    )
+    def test_blocks_a_record_built_when_the_command_runs(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        """A record whose text an expansion, an escape or a redirect builds
+        at run time is not in the command the hook reads, so any command
+        that names the records file and could build text is refused; the
+        one append form writes a literal record (STANDARD 1.2.0 §6.7)."""
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "may not expand, escape or redirect text", F504)
+
+    def test_reads_the_record_with_its_json_escapes_resolved(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = (
+            "printf '%s\\n' '{\"note\":\"\\u0067hp_"
+            + "0" * 36
+            + '"}\' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"'
+        )
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "cite it by reference or digest", F504)
+
+    @pytest.mark.parametrize("record", ["[1,2]", "not json", '{"a":1} {"b":2}'])
+    def test_blocks_a_record_that_is_not_one_object(
+        self, tmp_path: Path, shell: str, record: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = f"printf '%s\\n' '{record}' >> .claude/audit/records.jsonl"
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "is not one JSON object", F504)
+
+    def test_allows_the_skills_own_example_line(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        text = (SKILLS_DIR / "audit" / "SKILL.md").read_text(encoding="utf-8")
+        start = text.index("```json\n", text.index("**The line step 6 appends**"))
+        line = text[start + len("```json\n") : text.index("\n```", start)]
+        assert "'" not in line and line.startswith("{")
+        command = (
+            f"printf '%s\\n' '{line}' "
+            '>> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"'
+        )
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             'printf \'%s\\n\' \'{"event":"deploy","output_sha256":"ab12"}\' '
             ">> .claude/audit/records.jsonl",
+            'printf \'%s\\n\' \'{"msg":"it\\"s done"}\' '
+            '>> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"',
+            'tail -n 1 "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl" '
+            "| jq -r '.hmac // empty'",
+            'mv "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl" '
+            '"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.20260101T000000Z.jsonl"',
             "wc -l .claude/audit/records.jsonl",
             # A secret in a command that does not touch the records file is
             # other hooks' business.
@@ -645,15 +930,17 @@ ROLLBACK_ENV = {**GIT_ENV, "CLAUDE_PROJECT_DIR": ""}
 
 def checkpoint(repo: Path, where: str = "marker") -> str:
     """Take a checkpoint as the plugin does: `git stash create` (which writes
-    no refs/stash, so `git stash list` stays empty) and a marker recording
-    its commit, live or filed under used/ or ended/."""
+    no refs/stash, so `git stash list` stays empty), its commit entered in
+    .claude/checkpoints/commits/ and a marker recording it, live or filed
+    under used/ or ended/."""
     (repo / "a.txt").write_text("two\n")
     sha = git(repo, "stash", "create", "checkpoint:x").strip()
     assert git(repo, "stash", "list") == ""
     record = json.dumps({"checkpoint_id": sha, "commit": sha})
     claude = repo / ".claude"
+    (claude / "checkpoints" / "commits").mkdir(parents=True)
+    (claude / "checkpoints" / "commits" / sha).touch()
     if where == "marker":
-        claude.mkdir()
         (claude / "checkpoint.ok").write_text(record)
     else:
         (claude / "checkpoints" / where).mkdir(parents=True)
@@ -677,6 +964,21 @@ class TestRollbackCommandHook:
         for command in (f"git stash apply {sha}", f"git stash pop {sha}"):
             result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
             assert result.returncode == 0, result.stderr
+
+    def test_a_filed_marker_without_its_entry_restores_nothing(
+        self, repo: Path, shell: str
+    ) -> None:
+        """The hook looks the commit up in .claude/checkpoints/commits/ (one
+        lookup, however long the history): a record filed under ended/ that
+        nothing entered restores nothing."""
+        sha = checkpoint(repo, "ended")
+        (repo / ".claude" / "checkpoints" / "commits" / sha).unlink()
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        result = run_command(
+            hook, bash_call(f"git stash apply {sha}"), repo, shell, ROLLBACK_ENV
+        )
+        assert result.returncode == 2
+        assert result.stderr.startswith("F503 ROLLBACK_FAILED: ")
 
     @pytest.mark.parametrize(
         "command",
@@ -766,84 +1068,74 @@ TOOL_INPUTS: dict[str, dict[str, Any]] = {
     "Grep": {"pattern": SECRET, "path": "/work/app"},
 }
 
-LOG_HOOKS = [
-    (skill, hook["matcher"])
-    for skill in SKILLS_WITH_HOOKS
-    for hook in hooks_of(skill, "PostToolUse", "command")
-]
 
-
-@pytest.mark.parametrize("shell", SHELLS)
-@pytest.mark.parametrize(("skill", "matcher"), LOG_HOOKS)
-class TestSkillLogHooks:
-    def test_logs_a_digest_and_not_the_input(
-        self, tmp_path: Path, shell: str, skill: str, matcher: str
-    ) -> None:
-        tool_input = TOOL_INPUTS[matcher]
-        tool_call = {
-            "hook_event_name": "PostToolUse",
-            "tool_name": matcher,
-            "tool_input": tool_input,
-            "tool_response": {"stdout": SECRET},
-        }
-        command = command_hook(skill, "PostToolUse", matcher)
-        result = run_command(command, tool_call, tmp_path, shell)
-        assert result.returncode == 0, result.stderr
-
-        logs = list((tmp_path / ".audit").glob("*.log"))
-        assert len(logs) == 1, "one log file under .audit/"
-        lines = logs[0].read_text(encoding="utf-8").splitlines()
-        assert len(lines) == 1, "one line per call"
-
-        line = lines[0]
-        assert f"| {matcher} | input_sha256: {input_digest(tool_input)}" in line
-        assert SECRET not in line
-        for value in tool_input.values():
-            if isinstance(value, str):
-                assert value not in line, "the tool input is not written"
-
-    def test_unreadable_call_is_logged_without_a_digest(
-        self, tmp_path: Path, shell: str, skill: str, matcher: str
-    ) -> None:
-        command = command_hook(skill, "PostToolUse", matcher)
-        # a DIGEST in the environment is not taken for the call's digest
-        result = run_command(
-            command, f"not json {SECRET}", tmp_path, shell, {"DIGEST": "f" * 64}
-        )
-        assert result.returncode == 0
-
-        (log,) = (tmp_path / ".audit").glob("*.log")
-        line = log.read_text(encoding="utf-8")
-        assert "input_sha256: unavailable" in line
-        assert SECRET not in line
+@pytest.mark.parametrize("skill", SKILLS_WITH_HOOKS)
+def test_no_skill_keeps_a_log_of_its_own(skill: str) -> None:
+    """A host's log of what it did is written as action records (STANDARD
+    1.2.0 §6.4), and a capture that fails is reported, never silently: the
+    plugin's log hook, registered for every tool, does both. No skill keeps
+    a free-form log of its own beside it."""
+    assert hooks_of(skill, "PostToolUse", "command") == []
+    assert hooks_of(skill, "PostToolUseFailure", "command") == []
+    plugin = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+    for event in ("PostToolUse", "PostToolUseFailure"):
+        assert any(
+            group.get("matcher") == "*"
+            and any(
+                h["command"].endswith("/posttooluse_log_tool.sh")
+                for h in group["hooks"]
+            )
+            for group in plugin[event]
+        ), event
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
-def test_skill_log_digest_matches_the_plugin_audit_log(tmp_path: Path) -> None:
-    """The same call has the same digest in a skill's log and in audit.log."""
+@pytest.mark.parametrize("tool", sorted(TOOL_INPUTS))
+def test_the_plugin_log_records_a_digest_and_not_the_input(
+    tmp_path: Path, tool: str
+) -> None:
+    """The calls the skills make (Bash, Edit, Read, Grep) are logged by the
+    plugin's hook as action records with a digest of the input in place of
+    the input."""
     tool_call = {
         "hook_event_name": "PostToolUse",
-        "tool_name": "Bash",
-        "tool_input": TOOL_INPUTS["Bash"],
+        "tool_name": tool,
+        "tool_input": TOOL_INPUTS[tool],
+        "tool_response": {"stdout": SECRET},
     }
-    command = command_hook("send", "PostToolUse", "Bash")
-    assert run_command(command, tool_call, tmp_path, SHELLS[0]).returncode == 0
-    skill_line = (tmp_path / ".audit" / "send-operations.log").read_text()
-
     env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
-    subprocess.run(
+    result = subprocess.run(
         ["bash", str(POSTTOOLUSE_HOOK)],
         input=json.dumps(tool_call),
         capture_output=True,
         text=True,
         env=env,
         timeout=30,
-        check=True,
     )
-    entry = json.loads((tmp_path / ".claude" / "audit.log").read_text())
+    assert result.returncode == 0, result.stderr
+    text = (tmp_path / ".claude" / "audit.log").read_text(encoding="utf-8")
+    (entry,) = [json.loads(line) for line in text.splitlines()]
+    assert entry["details"]["input_sha256"] == input_digest(TOOL_INPUTS[tool])
+    assert SECRET not in text
+    assert not (tmp_path / ".audit").exists()
 
-    assert entry["details"]["input_sha256"] == input_digest(TOOL_INPUTS["Bash"])
-    assert f"input_sha256: {entry['details']['input_sha256']}" in skill_line
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+def test_a_log_that_cannot_be_written_is_reported(tmp_path: Path) -> None:
+    """§6.4: a capture that fails is reported where the operator sees it:
+    the hook exits non-zero with the reason on stderr, never silently."""
+    (tmp_path / ".claude").write_text("not a directory")
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
+    result = subprocess.run(
+        ["bash", str(POSTTOOLUSE_HOOK)],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "curl x"}}),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert result.returncode not in (0, 2)
+    assert result.stderr.strip()
 
 
 class TestPromptHooksAreModelJudgedAdditions:

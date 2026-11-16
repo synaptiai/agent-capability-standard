@@ -401,6 +401,9 @@ host's `decision_id`.
 An `audit` step that binds `require_record: true` fails (R402, reason
 `not_recorded`) when its output's `recorded` is not `true`, and retries
 apply; without it the step completes and a later gate may read `recorded`.
+The executor reads `require_record` only in a workflow that targets 1.2 or
+later: below 1.2 it passes the input on, as 1.1 did, and the validator
+reports W616.
 
 Every run also has a **run record**
 ([§5.19.8](../../spec/STANDARD-v1.2.0.md#5198-the-runs-record)), an
@@ -507,7 +510,8 @@ Cancelling ends the run at once with `Failed` R408
 ([§5.19.5](../../spec/STANDARD-v1.2.0.md#5195-cancelling-a-run)). No retry,
 failure mode, recovery loop, handler or rollback runs: the executor does not
 roll back, and a host that wants the effects undone restores
-`checkpoint_id` itself. Approved and queued records become `cancelled`; in
+`checkpoint_id` itself. Approved and queued records become `cancelled` (a
+step that failed has already made its approved record `failed`); in
 record mode `actions`, so does a new record of every step, in every nested
 run, that had started (a step waiting out a retry's backoff, a waiting
 `delegate` whose delegation was sent), but not one still waiting for its
@@ -537,7 +541,7 @@ its `wake_at`.
 
 ```python
 with lock(run_key):
-    run = runner.restore(load(run_key), key=KEY)
+    run = runner.restore(load(run_key), key=KEY, actor_identity=actor)
     turn = runner.advance(run, host, save=lambda s: store(run_key, s), key=KEY)
     log.extend(run.take_trace())                # events carry seq: a repeat shows
     if turn.result is None:
@@ -548,6 +552,10 @@ with lock(run_key):
     elif turn.wake_at is not None:
         set_timer(run_key, turn.wake_at)
 ```
+
+`actor` is the identity the run was started for: a restore that names it
+refuses the run of any other principal, so a turn cannot continue a run for
+someone else (§5.17). Leave it out only for a run started without one.
 
 Treat an inbound message, an approval decision and a timer alike: each is a
 reason to run a turn. An ended run's `turn.result.action_records` are the
@@ -579,12 +587,12 @@ wake-up time or the next poll.
 A snapshot holds a fixed part (about 0.5 kB), each stored step's output and
 the inputs it ran with, the action records (about 0.3 kB each, 0.6 kB with an
 approval), the trace (about 0.15 kB an event, three to six a step) and the
-pending action. Measured at the end of each of the 260 runtime fixtures, a
-snapshot is 1.2 kB to 35 kB (median 2.9 kB), of which the trace is about
-42%; the terminal action no longer stores copies of the records and outputs
-(in 1.1 that copy was a median 13%, up to 26%, of a finished run's state).
-With the trace and settled records taken out, the same states are 1.0 kB to
-12 kB (median 1.5 kB). For a store with a size cap, take the trace every turn,
+pending action. Measured at the end of each of the 368 runtime fixtures, a
+snapshot is 1.2 kB to 35 kB (median 2.8 kB), of which the trace is about
+42% (47% of all their bytes together); the terminal action no longer stores
+copies of the records and outputs (in 1.1 that copy was a median 13%, up to
+26%, of a finished run's state). With the trace and settled records taken
+out, the same states are 1.0 kB to 12 kB (median 1.4 kB). For a store with a size cap, take the trace every turn,
 take the records into your audit store, and keep large values out of stores
 by passing references to them.
 
@@ -635,9 +643,10 @@ host = Host(
   scope names (root-relative patterns, or paths: a directory names
   everything under it; by SHA-256, with a manifest and a digest;
   directories 0700, copies 0600), excludes secret-bearing file names by
-  default, and never captures, overwrites or removes `.claude/` or
-  `.audit/` (the plugin's audit logs), its own store, the tracker's state
-  and marker, or any path registered with `Host(protected_paths=...)` or
+  default, and never captures, overwrites or removes `.claude/` (the
+  plugin's audit log) or `.audit/` (where its earlier releases' skills
+  logged), its own store, the tracker's state and marker, or any path
+  registered with `Host(protected_paths=...)` or
   `Host.protect` (the memory and key files are registered for you, and the
   runner registers its `evidence_store` file): a rollback changes the world
   back, not the record of it. A `rollback` step's output reports
@@ -646,9 +655,12 @@ host = Host(
   file included), `changes_reverted` and `verification` (over everything
   the checkpoint captured, so a partial rollback matches only when the
   rest is unchanged); the executor's `Rollback` gets
-  `RolledBack` only on a full restore, with this run's transmissions as
-  `not_covered` (a send whose outcome is unknown among them, with `detail`
-  `outcome unknown`), and F503 otherwise.
+  `RolledBack` only on a full restore, and F503 otherwise. Both list in
+  `not_covered` what this run changed since the checkpoint that no
+  rollback restores: its transmissions (`transmitted`; a send whose
+  outcome is unknown among them, with `detail` `outcome unknown`) and the
+  entries its `persist` steps wrote (`outside_scope`, as `memory
+  <scope>:<key>`), since no checkpoint captures the memory store.
 - **Memory** ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
   `MemoryStore` keeps entries by scope (`run` is the `run_id`, which every
   nested run shares; `session` is the host's `session_id`; `user` and
@@ -664,9 +676,10 @@ host = Host(
 - **Sends** ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
   Call `self.send_once(action, effect)` from your `send` implementation:
   with an `IdempotencyLog`, an attempt whose key already transmitted gets
-  that output again, one whose earlier attempt may have transmitted gets
-  `outcome_unknown`, and a key reused with other inputs gets
-  `key_conflict`. A host that saves runs keeps its keys as long:
+  that output again (its `evidence_seen` included), one whose earlier
+  attempt may have transmitted gets `outcome_unknown`, and a key reused
+  with other inputs gets `key_conflict`. A host that saves runs keeps its
+  keys as long:
   `run`, `advance` and `drive` with `save=` refuse a log without a path.
   Keep `run_id`s unique (the runner refuses one it has used).
 - **Destination policies.** `WorkflowRunner.start(..., destinations=[[...]])`
@@ -912,9 +925,14 @@ resumption is attended, even where its approver is a standing mandate, and
 the request names its queued action in `queued_action_id`; the `planned`
 record of that action is updated in place, under the same `action_id`, so
 the queue entry you hold closes on it. A request asked again after a
-recheck, or in a retry of the step, names the same action, and its decision
-lands on the same record; once the action is carried out, a loop back to
-the step asks for a new one. A record the resumption decides or supersedes
+recheck, or when a recovery loop runs the step again before it goes on,
+names the same action, and its decision lands on the same record (a retry
+of the step does not ask again). The action is carried out once the step
+calls its capability (or waits for its event, starts its nested run, or
+has its quorum evaluated), whether or not that succeeds: a loop back to
+the step after that asks for a new action, with a record of its own, and
+the queued record keeps the pass that ran, with its decision and
+idempotency key. A record the resumption decides or supersedes
 takes the time and the actor of then. A recovery loop during the resumption
 runs again only the steps from its target to the step that looped, and the
 resumption then goes on: a step that ran ahead, such as an
@@ -1015,5 +1033,6 @@ it declares no `shows`, and the `shown` values), and a `tool_call` vector the
 approval of a tool call; each gives the canonical JSON (RFC 8785) of `shown`
 and the `digest`. The file is described under
 [Test suite requirements](../../spec/CONFORMANCE.md#test-suite-requirements),
-and the trust vectors beside it (`tests/conformance/trust/`) under
-[Informative vectors](../../spec/CONFORMANCE.md#informative-vectors).
+and the trust vectors beside it (`tests/conformance/trust/`), also
+normative, under
+[Normative vectors of Standard 1.2.0](../../spec/CONFORMANCE.md#normative-vectors-of-standard-120-103).

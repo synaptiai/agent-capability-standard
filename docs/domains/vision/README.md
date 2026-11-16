@@ -54,13 +54,13 @@ block_autonomous:
 
 ### Checkpoint Policy
 
-Vision workflows require checkpoints before any action that:
-- Modifies source imagery
-- Produces a final classification output
-- Generates new images
-- Processes large batches
+The profile requires a checkpoint before each step or call that:
+- Modifies source imagery (`mutate`)
+- Writes a final classification or a generated image out (`persist`)
+- Carries medium or high risk, such as a large batch
 
-The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+Classifying or generating an image in memory (`classify`, `generate`) needs
+none until the result is written out. The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
 
 ```yaml
 checkpoint_policy:
@@ -75,7 +75,12 @@ checkpoint_policy:
 
 ## Capability Usage
 
-The 36 atomic capabilities apply to vision through domain parameterization:
+The 36 atomic capabilities apply to vision through domain parameterization.
+Each output's `evidence_anchors` are evidence anchors (Standard 1.2.0 §6.5):
+a `kind`, which the profile's `required_anchor_types` count, and a `ref` in
+the forms of the [modality guide](../../guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality);
+an `acs:` ref names a value the step was given, such as its prompt
+(§5.20). Other data stay out of the anchors.
 
 ### Detection
 
@@ -91,10 +96,8 @@ detect:
         bounding_box: [120, 45, 180, 90]
         confidence: 0.92
     evidence_anchors:
-      - type: image_reference
-        ref: "camera://line-4/frame-12847"
-      - type: bounding_box
-        coordinates: [120, 45, 180, 90]
+      - kind: sensor
+        ref: "image:camera://line-4/frame-12847:bbox:120,45,180,90"
 ```
 
 ### Classification
@@ -109,10 +112,8 @@ classify:
     label: "outdoor"
     confidence: 0.89
     evidence_anchors:
-      - type: image_reference
-        ref: "s3://dataset/img_0042.jpg"
-      - type: confidence_score
-        value: 0.89
+      - kind: file
+        ref: "image:s3://dataset/img_0042.jpg:full_frame"
 ```
 
 ### Generation
@@ -128,10 +129,8 @@ generate:
   output:
     image_ref: "generated://uuid-abc123"
     evidence_anchors:
-      - type: source_modality
-        ref: "text prompt"
-      - type: modality_hash
-        value: "sha256:..."
+      - kind: record
+        ref: "acs:prompt"
 ```
 
 ### Transformation
@@ -144,11 +143,10 @@ transform:
     operations: ["denoise", "normalize", "resize"]
   output:
     image_ref: "processed://frame-001.png"
+    operations_applied: ["denoise", "normalize", "resize"]
     evidence_anchors:
-      - type: image_reference
-        ref: "camera://raw/frame-001.raw"
-      - type: pixel_evidence
-        operations_applied: ["denoise", "normalize", "resize"]
+      - kind: sensor
+        ref: "image:camera://raw/frame-001.raw:full_frame"
 ```
 
 ## Available Workflows

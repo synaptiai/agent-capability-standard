@@ -1,0 +1,48 @@
+{
+  "description": "In a 1.2 workflow, a confidence the contract does not require is not checked by the contract (audit's): the step completes; a minimum confidence would check it (F504, \u00a75.21.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "audit",
+          "purpose": "audit step",
+          "store_as": "a",
+          "input_bindings": {
+            "event": {
+              "what": "deploy"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": true,
+          "confidence": 5,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": []
+}

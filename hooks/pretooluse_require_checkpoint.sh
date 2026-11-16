@@ -22,16 +22,24 @@
 #   - Write, Edit, MultiEdit, NotebookEdit: mutate.
 #   - Bash: a command with any of ; & | < > $ ` ( ) { } \ or a line break may
 #     be more than one simple command or expand something: mutate. Otherwise
-#     its words are read as exactly one simple command:
-#       - an option that writes (git --output..., file -C / --compile): mutate;
+#     its words are read as bash reads them, as exactly one simple command
+#     (split_words: '...' and "..." quote, and the quotes are removed, so
+#     "--output=x" is --output=x; an unbalanced quote, or a line over 4096
+#     bytes, is mutate):
+#       - an option that writes: for git, --output or any abbreviation of it
+#         (--out, --outp, ...); for file, -C in any short option cluster, -p,
+#         or --compile or --preserve-date or any abbreviation of them
+#         (--compi); and, for git and file, a word with an unquoted *, ? or
+#         [, which bash replaces with file names, options included: mutate;
 #       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
 #         writes the marker once it succeeded); git stash list|show: observe;
 #         git stash pop|apply <commit>: rollback when <commit> is the full id
-#         of a commit a checkpoint marker recorded (the marker, or one filed
-#         under .claude/checkpoints/used/ or .claude/checkpoints/ended/); any
-#         other pop or apply, a bare one included, is mutate, since git
-#         applies any merge commit as if it were a stash; any other git stash
-#         form: mutate;
+#         of a commit a checkpoint recorded (the marker's, or one
+#         posttooluse_take_checkpoint.sh entered in
+#         .claude/checkpoints/commits/, a lookup of one file however many
+#         checkpoints were taken); any other pop or apply, a bare one
+#         included, is mutate, since git applies any merge commit as if it
+#         were a stash; any other git stash form: mutate;
 #       - a command on READ_ONLY: observe (allowed, nothing used);
 #       - anything else: mutate.
 #
@@ -64,6 +72,9 @@
 # SEC-001: Prevents stale checkpoint.ok bypass
 # SEC-006: Uses CLAUDE_PROJECT_DIR for absolute path resolution
 set -euo pipefail
+# Read the command as bytes, alike in every locale: a multibyte locale makes
+# each character read in split_words several times slower.
+export LC_ALL=C
 
 block() {
   echo "$1" >&2
@@ -97,18 +108,69 @@ READ_ONLY=(ls cat head tail wc pwd grep stat file du df which whoami uname echo 
 # it, has no associative arrays.)
 GIT_STASH_CLASSES=(create=checkpoint list=observe show=observe pop=rollback apply=rollback)
 
+# Read a line that holds none of ; & | < > $ ` ( ) { } \ (refused before, so
+# nothing in it expands but a pathname pattern) into WORDS, as bash splits
+# and dequotes it: '...' and "..." quote literally, and unquoted blanks
+# separate words. GLOBBED is 1 when a word holds an unquoted *, ? or [,
+# which bash replaces with file names. Fails on an unbalanced quote, and on
+# a line over 4096 bytes: each character read costs time that grows with the
+# line, so a long one could hold the hook past Claude Code's 60-second limit,
+# after which the call runs unchecked.
+# posttooluse_take_checkpoint.sh holds the same function; a test keeps them so.
+split_words() {
+  local line="$1" ch quote="" word="" inword=0 i
+  WORDS=()
+  GLOBBED=0
+  if [ "${#line}" -gt 4096 ]; then return 1; fi
+  for ((i = 0; i < ${#line}; i++)); do
+    ch="${line:i:1}"
+    if [ -n "$quote" ]; then
+      if [ "$ch" = "$quote" ]; then quote=""; else word+="$ch"; fi
+      continue
+    fi
+    case "$ch" in
+      \' | \") quote="$ch"; inword=1 ;;
+      ' ' | $'\t')
+        if [ "$inword" = 1 ]; then WORDS+=("$word"); fi
+        word=""
+        inword=0
+        ;;
+      \* | \? | \[) GLOBBED=1; word+="$ch"; inword=1 ;;
+      *) word+="$ch"; inword=1 ;;
+    esac
+  done
+  if [ -n "$quote" ]; then return 1; fi
+  if [ "$inword" = 1 ]; then WORDS+=("$word"); fi
+  return 0
+}
+
+# Whether $1 is a long option that is, or abbreviates, one of the names that
+# follow (getopt_long and git take any prefix of an option's name).
+long_option_of() {
+  local name="${1#--}" option
+  if [[ "$1" != --?* ]]; then return 1; fi
+  name="${name%%=*}"
+  for option in "${@:2}"; do
+    if [ -n "$name" ] && [[ "$option" == "$name"* || "$name" == "$option"* ]]; then return 0; fi
+  done
+  return 1
+}
+
 # Whether one simple command, given as its words, has an option that writes:
-# the mapper's _writes rules for the commands on READ_ONLY.
+# the mapper's _writes rules for the commands on READ_ONLY. GLOBBED (set by
+# split_words): a word bash expands may be any option.
 writes() {
   local word
   if [ "$1" = "git" ]; then
+    if [ "$GLOBBED" = 1 ]; then return 0; fi
     for word in "$@"; do
-      if [[ "$word" == --output* ]]; then return 0; fi
+      if long_option_of "$word" output; then return 0; fi
     done
   elif [ "$1" = "file" ]; then
+    if [ "$GLOBBED" = 1 ]; then return 0; fi
     for word in "${@:2}"; do
-      if [ "$word" = "--compile" ]; then return 0; fi
-      if [[ "$word" == -* && "$word" != --* && "${word:1}" == *C* ]]; then return 0; fi
+      if long_option_of "$word" compile preserve-date; then return 0; fi
+      if [[ "$word" == -* && "$word" != --* && "${word:1}" == *[Cp]* ]]; then return 0; fi
     done
   fi
   return 1
@@ -124,7 +186,11 @@ classify_bash() {
     echo mutate
     return
   fi
-  read -r -a words <<< "$command"
+  if ! split_words "$command"; then
+    echo mutate
+    return
+  fi
+  words=("${WORDS[@]}")
   if writes "${words[@]}"; then
     echo mutate
     return
@@ -183,20 +249,24 @@ fi
 marker="${claude_dir}/checkpoint.ok"
 used_dir="${claude_dir}/checkpoints/used"
 # Markers whose validity ended unused (expired, the turn ended, or a newer
-# checkpoint replaced them): history a rollback reads, like used/.
+# checkpoint replaced them), kept like used/.
 ended_dir="${claude_dir}/checkpoints/ended"
+# One empty file per commit a checkpoint recorded, named by the commit:
+# posttooluse_take_checkpoint.sh enters each before it writes the marker.
+commits_dir="${claude_dir}/checkpoints/commits"
 
-# Whether a checkpoint marker of this project, the current one or one filed
-# under used/ or ended/, recorded the commit $1 as its restore point (its
-# "commit"). A checkpoint can be restored valid or not (§5.18.6).
+# Whether a checkpoint of this project recorded the commit $1 (a full commit
+# id, so a safe file name) as its restore point: the current marker's
+# "commit", or an entry in commits/. One lookup, however many checkpoints
+# were taken. A checkpoint can be restored valid or not (§5.18.6).
 recorded_commit() {
-  local file
-  for file in "$marker" "$used_dir"/* "$ended_dir"/*; do
-    if [ -f "$file" ] && [ ! -L "$file" ] \
-      && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$file" 2>/dev/null)" = "$1" ]; then
-      return 0
-    fi
-  done
+  if [ -f "$commits_dir/$1" ] && [ ! -L "$commits_dir/$1" ]; then
+    return 0
+  fi
+  if [ -f "$marker" ] && [ ! -L "$marker" ] \
+    && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$marker" 2>/dev/null)" = "$1" ]; then
+    return 0
+  fi
   return 1
 }
 

@@ -10,7 +10,10 @@
 // - `after` or `before` a block: the k-th (0-based) block of that kind in the
 //   section, whose text starts with `startsWith` (the first 40 characters of
 //   its first line, whitespace collapsed). The check makes an edit to the
-//   Standard fail the build instead of silently moving a figure;
+//   Standard fail the build instead of silently moving a figure. `after` a
+//   list may name one of its items (`item`, 0-based, with the start of its
+//   text): the figure then goes directly after that item, the list split
+//   there and the items after it continuing its numbering;
 // - `wrap`: around that block, which becomes the figure's drawing (a source
 //   table enriched in place, such as the §5.8.3 codes as diagnostic tiles).
 // Block kinds: `table`, `code` (a fenced block), `list`, `paragraph`.
@@ -22,10 +25,18 @@ export interface SpecSlot {
   key: string;
   level: number;
   section: string;
-  at: 'heading' | { place: 'after' | 'before' | 'wrap'; block: SlotBlock; index: number; startsWith: string };
+  at: 'heading' | { place: 'after' | 'before' | 'wrap'; block: SlotBlock; index: number; startsWith: string; item?: SlotItem };
+}
+
+/** An item of a list, by its place in the list (0-based) and the start of its text, whitespace collapsed. */
+export interface SlotItem {
+  index: number;
+  startsWith: string;
 }
 
 const after = (block: SlotBlock, index: number, startsWith: string) => ({ place: 'after' as const, block, index, startsWith });
+// Directly after one item of a list, which is split there (a figure that shows that item).
+const afterItem = (index: number, startsWith: string, item: SlotItem) => ({ place: 'after' as const, block: 'list' as const, index, startsWith, item });
 // A field table drawn as a Port column, the table folded under it (TABLE_FIGURES in spec-tail-figures).
 const fieldTable = (index = 0) => ({ place: 'wrap' as const, block: 'table' as const, index, startsWith: 'Field Type Required Description' });
 // A table whose Code column is drawn as diagnostic tiles (CODE_TABLE_FIGURES in spec-tail-figures);
@@ -68,10 +79,11 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'silent-source', level: 3, section: '5.13 ', at: after('code', 1, 'failure_modes:') },
   { key: 'wait-replay', level: 3, section: '5.13 ', at: { place: 'before', block: 'paragraph', index: 7, startsWith: 'Delays. A step may declare delay, a dura' } },
   { key: 'approval', level: 3, section: '5.14 ', at: after('table', 0, 'Field Description') },
-  { key: 'approval-unattended-replay', level: 3, section: '5.14 ', at: after('list', 0, 'in_session: the party attending the run ') },
-  { key: 'deferral-replay', level: 3, section: '5.14 ', at: after('list', 3, 'fail (default) → F502.') },
-  { key: 'resume-replay', level: 4, section: '5.14.1 ', at: after('paragraph', 1, 'Runs that did not end deferred. A run th') },
-  { key: 'resume-skip-replay', level: 4, section: '5.14.1 ', at: after('list', 0, 'What it keeps. Its stores, inputs, injec') },
+  { key: 'approval-unattended-replay', level: 3, section: '5.14 ', at: after('paragraph', 4, 'The mode changes neither the shown value') },
+  { key: 'recheck-replay', level: 3, section: '5.14 ', at: after('list', 3, 'reask (default): the step is asked again') },
+  { key: 'deferral-replay', level: 3, section: '5.14 ', at: after('list', 4, 'fail (default) → F502.') },
+  { key: 'resume-replay', level: 4, section: '5.14.1 ', at: after('paragraph', 0, 'A run that ended with outcome deferred c') },
+  { key: 'resume-skip-replay', level: 4, section: '5.14.1 ', at: afterItem(0, 'What it keeps. Its stores, inputs, injec', { index: 5, startsWith: 'The record. A re-entered step continues' }) },
   { key: 'delegate', level: 3, section: '5.15 ', at: after('code', 0, '- capability: delegate') },
   { key: 'family-replay', level: 3, section: '5.15 ', at: after('list', 0, 'keep the part of the identifier after it') },
   { key: 'manifest-replay', level: 4, section: '5.15.1 ', at: after('table', 0, 'Field Required Description') },
@@ -93,7 +105,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'capability-checks', level: 4, section: '5.18.10 ', at: codeTable('Capability Check Code') },
   { key: 'protocol-actions', level: 4, section: '5.19.1 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Action The host Responses' } },
   { key: 'protocol-replay', level: 4, section: '5.19.1 ', at: after('list', 2, "outputs: the root workflow's stores at t") },
-  { key: 'response-replay', level: 4, section: '5.19.1 ', at: after('paragraph', 6, 'An Error carries a code and a message, a') },
+  { key: 'response-replay', level: 4, section: '5.19.1 ', at: after('paragraph', 6, 'An Error carries its kind and a code, an') },
   { key: 'wake-replay', level: 4, section: '5.19.3 ', at: after('list', 0, 'A Sleep ends at a tick whose time is at ') },
   { key: 'cancel-replay', level: 4, section: '5.19.5 ', at: after('paragraph', 0, 'A host MAY cancel a run that has not end') },
   { key: 'reason-replay', level: 4, section: '5.19.7 ', at: after('paragraph', 0, 'An Error response MAY carry a reason, a ') },
@@ -106,7 +118,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'profile-rules', level: 4, section: '5.21.3 ', at: codeTable('Member In force as Code', 1) },
   { key: 'schema-shelf', level: 3, section: '6.1 ', at: 'heading' },
   { key: 'table-6.3', level: 3, section: '6.3 ', at: fieldTable() },
-  { key: 'audit-replay', level: 3, section: '6.4 ', at: after('paragraph', 3, 'The audit capability. An audit step reco') },
+  { key: 'audit-replay', level: 3, section: '6.4 ', at: { place: 'before', block: 'paragraph', index: 3, startsWith: 'The audit capability. An audit step reco' } },
   { key: 'table-6.5', level: 3, section: '6.5 ', at: fieldTable() },
   { key: 'table-6.6', level: 3, section: '6.6 ', at: fieldTable() },
   { key: 'secret-replay', level: 3, section: '6.7 ', at: after('list', 0, 'an evidence anchor, an evidence record o') },

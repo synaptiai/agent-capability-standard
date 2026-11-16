@@ -9,7 +9,7 @@ context: fork
 agent: general-purpose
 hooks:
   PreToolUse:
-    - matcher: "Edit"
+    - matcher: "Edit|Write|MultiEdit"
       hooks:
         - type: prompt
           prompt: |
@@ -21,7 +21,9 @@ hooks:
             PERSIST DATA VALIDATION CHECK
 
             The tool call follows this prompt as JSON; the target file is
-            tool_input.file_path and the content to write is tool_input.new_string.
+            tool_input.file_path and the content to write is tool_input.new_string
+            (Edit), tool_input.content (Write) or each tool_input.edits[].new_string
+            (MultiEdit).
 
             Verify before persisting:
             1. NO credentials, API keys, or secrets in content
@@ -41,36 +43,73 @@ hooks:
           command: |
             # Code-decided checks (STANDARD 1.2.0 §5.18.10): the target file is not
             # a system or credential file, and the content holds no credential
-            # (§6.7). Claude Code passes the tool call as JSON on stdin, read once
-            # here; exit 2 blocks the call and the reason on stderr is shown to
-            # Claude. A call that cannot be read is blocked.
+            # (§6.7). Claude Code passes the tool call (Edit, Write or MultiEdit)
+            # as JSON on stdin, read once here; exit 2 blocks the call and the
+            # reason on stderr is shown to Claude. A call that cannot be read is
+            # blocked.
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             TARGET="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             case "$TARGET" in
               "~/"*) TARGET="${HOME}/${TARGET#??}" ;;
             esac
-            # A path with '//', '.' or '..' segments is not compared as written
-            # (/tmp/../etc/passwd is /etc/passwd), so it is blocked
-            case "$TARGET" in
-              *//*|*/./*|*/.|*/../*|*/..|../*|..)
-                echo "F504 CONSTRAINT_VIOLATED: Cannot persist to a path with '//', '.' or '..' segments; give the normalised path" >&2
-                exit 2
-                ;;
-            esac
-            # Block writes to system directories and to credential directories under the home directory
-            case "$TARGET" in
-              /etc/*|/usr/*|/bin/*|/sbin/*|"${HOME}"/.ssh/*|"${HOME}"/.aws/*|"${HOME}"/.config/*)
-                echo "F504 CONSTRAINT_VIOLATED: Cannot persist to system or credential directories" >&2
-                exit 2
-                ;;
-            esac
-            # Block writes to credential files
-            if printf '%s\n' "$TARGET" | grep -qiE "(\.env|credentials|secrets|password|\.pem|\.key)$"; then
-              echo "F504 CONSTRAINT_VIOLATED: Cannot persist to credential files" >&2
-              exit 2
+            # The file the write reaches: symbolic links followed. The deepest
+            # directory of the path that exists, as `cd -P` resolves it, then the
+            # rest of the path; a target that is itself a link is followed (at
+            # most 8 links). Fails on a link it cannot read.
+            resolve() {
+              R_PATH="$1"
+              R_LINKS=0
+              while :; do
+                case "$R_PATH" in /*) ;; *) R_PATH="$(pwd -P)/$R_PATH" ;; esac
+                R_DIR="${R_PATH%/*}"
+                R_REST="${R_PATH##*/}"
+                while [ -n "$R_DIR" ] && [ ! -d "$R_DIR" ]; do
+                  R_REST="${R_DIR##*/}/$R_REST"
+                  R_DIR="${R_DIR%/*}"
+                done
+                R_DIR="$(cd -P "${R_DIR:-/}" 2>/dev/null && pwd -P)" || return 1
+                R_PATH="${R_DIR%/}/$R_REST"
+                [ -L "$R_PATH" ] || break
+                R_LINKS=$((R_LINKS + 1))
+                [ "$R_LINKS" -le 8 ] || return 1
+                R_TO="$(readlink "$R_PATH" 2>/dev/null)" || return 1
+                case "$R_TO" in /*) R_PATH="$R_TO" ;; *) R_PATH="${R_PATH%/*}/$R_TO" ;; esac
+              done
+              printf '%s\n' "$R_PATH"
+            }
+            REAL="$TARGET"
+            if [ -n "$TARGET" ]; then
+              REAL="$(resolve "$TARGET")" || { echo "F504 CONSTRAINT_VIOLATED: Cannot persist through a symbolic link that cannot be followed" >&2; exit 2; }
             fi
-            # The content written: an Edit's new_string, or a whole file's content
-            CONTENT="$(printf '%s' "$INPUT" | jq -r '[.tool_input.new_string, .tool_input.content] | map(select(type == "string")) | join("\n")' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            HOME_REAL="$(cd -P "${HOME:-/}" 2>/dev/null && pwd -P)" || HOME_REAL="${HOME:-}"
+            # Each check reads the path as written and the file it reaches
+            for P in "$TARGET" "$REAL"; do
+              # A path with '//', '.' or '..' segments is not compared as written
+              # (/tmp/../etc/passwd is /etc/passwd), so it is blocked
+              case "$P" in
+                *//*|*/./*|*/.|*/../*|*/..|../*|..)
+                  echo "F504 CONSTRAINT_VIOLATED: Cannot persist to a path with '//', '.' or '..' segments; give the normalised path" >&2
+                  exit 2
+                  ;;
+              esac
+              # Block writes to system directories (/private/etc is macOS's /etc),
+              # to credential directories under the home directory, and to Claude
+              # Code's own settings there
+              case "$P" in
+                /etc/*|/private/etc/*|/usr/*|/bin/*|/sbin/*|"${HOME}"/.ssh/*|"${HOME}"/.aws/*|"${HOME}"/.config/*|"${HOME}"/.claude/*|"${HOME_REAL}"/.ssh/*|"${HOME_REAL}"/.aws/*|"${HOME_REAL}"/.config/*|"${HOME_REAL}"/.claude/*)
+                  echo "F504 CONSTRAINT_VIOLATED: Cannot persist to system or credential directories" >&2
+                  exit 2
+                  ;;
+              esac
+              # Block writes to credential files
+              if printf '%s\n' "$P" | grep -qiE "(\.env|credentials|secrets|password|\.pem|\.key)$"; then
+                echo "F504 CONSTRAINT_VIOLATED: Cannot persist to credential files" >&2
+                exit 2
+              fi
+            done
+            # The content written: an Edit's new_string, a Write's content, or
+            # each new_string of a MultiEdit's edits
+            CONTENT="$(printf '%s' "$INPUT" | jq -r '[.tool_input.new_string, .tool_input.content, (.tool_input.edits | if type == "array" then .[] | objects | .new_string else empty end)] | map(select(type == "string")) | join("\n")' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
             # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
             SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
@@ -98,18 +137,6 @@ hooks:
               exit 2
             fi
             exit 0
-  PostToolUse:
-    - matcher: "Edit"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[PERSIST] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Edit | input_sha256: ${DIGEST:-unavailable}" >> .audit/persist-operations.log 2>/dev/null || true
 ---
 
 ## Intent

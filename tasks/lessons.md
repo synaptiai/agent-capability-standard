@@ -203,3 +203,86 @@ on every tool call. A reviewer found it by running the real binary.
 **Rule.** When a hook's input handling changes, test it with the host's
 actual stdin (a `socket.socketpair()` end for Claude Code on Linux) or run it
 under the host itself, not only through `subprocess.run(input=...)`.
+
+## List every route a call takes before saying a layer enforces a rule (round 3)
+
+**What happened.** Every workstream's reviews found the same defect class:
+a rule a safety layer was said to enforce held on the main route and was
+skipped on another. Profiles' grounding and destination rules were accepted
+and never applied; a composite tool ran a nested call that a profile
+required a person for, or carried none of the flags a profile raised for the
+tools it invokes; unbound tools and composites passed a destination policy;
+grounding skipped Claude Code's own tools without a word; arguments the
+permission flow changed skipped the secret checks; a non-boolean `is_error`
+skipped the output checks; a served tool that was not an `SdkMcpTool` ran
+unguarded; an error while using a call's hold let PostToolUse pass the call.
+
+**Rule.** Before writing that a layer applies a rule, list every route by
+which a call reaches a tool (served tool, another server's tool, unbound
+tool, composite and nested call, changed arguments, Bash, a failure inside
+the check itself) and test each one: it applies the rule or refuses the
+call. A configuration the layer accepts but does not enforce is a fail-open
+path: refuse it when it is loaded (§5.21.4).
+
+## A rule in two languages needs a shared vector at each boundary (round 3)
+
+**What happened.** The Python and TypeScript implementations disagreed
+again and again on edges no vector covered: numbers in exponent form and
+integers beyond 2^53 (the output codec, the I-JSON check), `approval.role:
+null`, `digest: null` against an absent digest, `acs:` indices above
+2^53 − 1, model identifiers of the form `name:tag` (Rust, Python and
+TypeScript all wrong the same way). Each was found by a reviewer, not by a
+test.
+
+**Rule.** Put a rule implemented in more than one language in a
+language-neutral vector file first and run every implementation on it.
+When one implementation changes, add vectors at the boundary it touched
+(2^53 and one past it, exponent forms, null against absent, case, a
+separator inside an identifier). Prefer one implementation in the core,
+called from the others.
+
+## Gate every new check on the workflow's target, and pin 1.1 with a fixture (round 3)
+
+**What happened.** Several 1.2 checks first applied to every workflow and
+broke valid 1.1 ones: `agents` in a 1.1 workflow was S303 (W604 before), the
+`continues` checks, the memory `scope` echo and the `model_id` identity check
+failed 1.0 and 1.1 runs, and `require_record` was read in a 1.1 run while
+the other 1.2 features were gated.
+
+**Rule.** A rule that 1.1 did not have applies only when the workflow
+targets 1.2 or later (`>= (1, 2)`, never `== (1, 2)`), and lands with a
+`*_v11_*` fixture that pins the 1.1 behaviour: same codes, actions and trace.
+Replay the earlier fixtures on `main` and on the branch before calling the
+change compatible.
+
+## Leave margin under a measured limit, measured as CI measures (round 3)
+
+**What happened.** The figure-gap sweep's limit is 1800px. Streams tuned
+runs on the Standard's page to just under it with a full Chrome
+(`ACS_CHROMIUM`), while CI measures with Playwright's headless shell, whose
+line breaks differ: measured that way, three runs were over (up to 1822px)
+and one sat at 1799.98px. The headless shell reproduces CI's numbers to the
+pixel; the full Chrome does not. The timing
+test `edge_checks_scale_linearly` "flaked under load" with a 1.7x margin;
+measured against `main`, the validator had become twice as slow, because
+each step deep-copied a capability schema that ontology 2.2.0 made four
+times larger.
+
+**Rule.** Measure a limit with the tool CI uses (the pinned Playwright
+headless shell, `ACS_CHROMIUM` unset) and leave a margin of several lines,
+not pixels. When a timing test fails under load, time it on `main` and on
+the branch before blaming the load, and profile the difference (callgrind on
+the test binary) when the branch is slower.
+
+## A number typed into prose drifts; recount before closing (round 3)
+
+**What happened.** Fixture counts, trace kinds and snapshot sizes written
+into resolutions, RFCs, the CHANGELOG and guides went stale as later
+streams added fixtures: "fifteen runtime fixtures" for seventeen, "sixteen
+`resume_*`", "28 call-sequence fixtures" for 30 in a finding resolution and
+the integration guide, after the review that added the two.
+
+**Rule.** Where a count can be computed, let a test or the site compute it.
+Where prose must state one, grep for the old number in every document when
+a change alters it, and recount every stated number before the records are
+closed.
