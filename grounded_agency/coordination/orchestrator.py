@@ -711,9 +711,19 @@ class OrchestrationRuntime:
         if step.capability == "inquire":
             ambiguous_input = ctx.get("ambiguous_input", "")
             max_questions = ctx.get("max_questions", 3)
-            questions = []
+            # Each question has an id and an answer_type, and the output an
+            # inquiry_id, so its answers can be keyed and correlated
+            # (STANDARD v1.2 §5.13.1).
+            questions: list[dict[str, Any]] = []
             if ambiguous_input:
-                questions.append(f"Could you clarify: {ambiguous_input!r}?")
+                questions.append(
+                    {
+                        "id": "q1",
+                        "question": f"Could you clarify: {ambiguous_input!r}?",
+                        "parameter": "ambiguous_input",
+                        "answer_type": "text",
+                    }
+                )
             inquire_id = os.urandom(16).hex()
             anchor = self._record_coordination_evidence(
                 ref_prefix="inquire",
@@ -732,8 +742,19 @@ class OrchestrationRuntime:
                 step=step,
                 status=StepStatus.COMPLETED,
                 output={
-                    "questions": questions,
-                    "ambiguity_analysis": ambiguous_input,
+                    "inquiry_id": inquire_id,
+                    "questions": questions[: max(int(max_questions), 0)]
+                    if isinstance(max_questions, int)
+                    else questions,
+                    "ambiguity_analysis": {
+                        "missing_parameters": (
+                            ["ambiguous_input"] if ambiguous_input else []
+                        ),
+                        "conflicting_interpretations": [],
+                        "confidence_without_clarification": (
+                            0.5 if ambiguous_input else 1.0
+                        ),
+                    },
                     "evidence_anchors": [anchor.to_dict()],
                     "confidence": 0.5 if ambiguous_input else 1.0,
                 },

@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..capabilities.registry import CapabilityRegistry
+from . import manifest as agent_manifest
+from .families import is_model_family, model_family
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,64 @@ class AgentDescriptor:
         default_factory=lambda: types.MappingProxyType({})
     )
     registered_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    # The task inputs the agent accepts, in the form of workflow inputs
+    # (STANDARD v1.2 §5.15.1); None accepts any task.
+    task_inputs: types.MappingProxyType | None = None
+
+    @classmethod
+    def from_manifest(
+        cls,
+        manifest: dict[str, Any],
+        registry: CapabilityRegistry,
+        *,
+        trust_score: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> AgentDescriptor:
+        """The descriptor of the agent an agent manifest describes (STANDARD
+        v1.2 §5.15.1): its ``agent``, ``capabilities`` and ``task``.
+
+        Raises:
+            ValueError: The manifest cannot be used, or lists a capability
+                the ontology does not define (a descriptor is for an agent
+                this runtime can delegate to).
+        """
+        agent_manifest.check_agent_manifest(manifest, registry)
+        unknown = sorted(
+            c for c in manifest["capabilities"] if registry.get_capability(c) is None
+        )
+        if unknown:
+            raise ValueError(f"Unknown capabilities not in ontology: {unknown}")
+        task = manifest.get("task")
+        return cls(
+            agent_id=manifest["agent"],
+            capabilities=frozenset(manifest["capabilities"]),
+            trust_score=trust_score,
+            metadata=types.MappingProxyType(dict(metadata) if metadata else {}),
+            task_inputs=None if task is None else types.MappingProxyType(dict(task)),
+        )
+
+    def manifest(self, registry: CapabilityRegistry) -> dict[str, Any]:
+        """The agent's manifest (STANDARD v1.2 §5.15.1): ``agent``, the
+        Standard and ontology versions it cites, its capabilities in sorted
+        order, and its ``task`` when it declares one."""
+        out: dict[str, Any] = {
+            "agent": self.agent_id,
+            "standard": "1.2",
+            "ontology": ".".join(registry.version.split(".")[:2]),
+            "capabilities": sorted(self.capabilities),
+        }
+        if self.task_inputs is not None:
+            out["task"] = {k: dict(v) for k, v in self.task_inputs.items()}
+        return out
+
+    def maxima(
+        self, registry: CapabilityRegistry, read_only: bool = False
+    ) -> dict[str, Any] | None:
+        """The agent's maxima, or with ``read_only`` its read-only maxima
+        (STANDARD v1.2 §5.15.1)."""
+        return agent_manifest.manifest_maxima(
+            {"capabilities": sorted(self.capabilities)}, registry, read_only
+        )
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.trust_score <= 1.0:
@@ -77,19 +137,40 @@ class AgentDescriptor:
     def identity(self) -> dict[str, Any]:
         """The agent's ``agent_identity`` (STANDARD v1.1 §5.17, RFC-0004).
 
-        The principal is ``agent_id``. ``role``, ``model_family``, ``owner``,
-        ``authenticated_by`` and ``trust_class`` are taken from ``metadata``
-        when present there as strings. Pass it as a run's ``actor_identity``,
-        or have a host report it with the events this agent sends.
+        The principal is ``agent_id``. ``role``, ``model_family``,
+        ``model_id``, ``owner``, ``authenticated_by`` and ``trust_class`` are
+        taken from ``metadata`` when present there as strings. With a
+        ``model_id`` and no ``model_family``, the family is derived from the
+        identifier (STANDARD v1.2 §5.15). Pass it as a run's
+        ``actor_identity``, or have a host report it with the events this
+        agent sends.
 
         Raises ``ValueError`` when ``authenticated_by`` or ``trust_class`` is
-        not one of the identity schema's values.
+        not one of the identity schema's values, or ``model_family`` is not
+        written ``[a-z][a-z0-9_-]*`` (families compare exactly).
         """
         identity: dict[str, Any] = {"principal": self.agent_id, "kind": "agent"}
-        for key in ("role", "model_family", "owner", "authenticated_by", "trust_class"):
+        for key in (
+            "role",
+            "model_family",
+            "model_id",
+            "owner",
+            "authenticated_by",
+            "trust_class",
+        ):
             value = self.metadata.get(key)
             if isinstance(value, str):
                 identity[key] = value
+        if "model_family" not in identity and "model_id" in identity:
+            derived = model_family(identity["model_id"])
+            if derived is not None:
+                identity["model_family"] = derived
+        family = identity.get("model_family")
+        if family is not None and not is_model_family(family):
+            raise ValueError(
+                f"model_family {family!r} is not written [a-z][a-z0-9_-]*; "
+                "families compare exactly (STANDARD v1.2 §5.15)"
+            )
         mechanism = identity.get("authenticated_by")
         if mechanism is not None and not (
             mechanism in AUTHENTICATION_MECHANISMS
@@ -167,6 +248,31 @@ class AgentRegistry:
                 raise ValueError(f"Agent registry is full ({self._max_agents} agents)")
             self._agents[descriptor.agent_id] = descriptor
         logger.debug("Registered agent %s with capabilities %s", agent_id, caps)
+        return descriptor
+
+    def register_manifest(
+        self,
+        manifest: dict[str, Any],
+        *,
+        trust_score: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> AgentDescriptor:
+        """Register the agent an agent manifest describes (STANDARD v1.2
+        §5.15.1), with its declared task inputs.
+
+        Raises ``ValueError`` when the manifest cannot be used or lists a
+        capability the ontology does not define.
+        """
+        descriptor = AgentDescriptor.from_manifest(
+            manifest, self._cap_registry, trust_score=trust_score, metadata=metadata
+        )
+        with self._lock:
+            if (
+                len(self._agents) >= self._max_agents
+                and descriptor.agent_id not in self._agents
+            ):
+                raise ValueError(f"Agent registry is full ({self._max_agents} agents)")
+            self._agents[descriptor.agent_id] = descriptor
         return descriptor
 
     def unregister(self, agent_id: str) -> bool:

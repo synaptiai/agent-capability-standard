@@ -1993,7 +1993,7 @@ class TestExecuteWorkflowStepInvokeInquire:
         )
         assert result.status == StepStatus.COMPLETED
         assert len(result.output["questions"]) >= 1
-        assert "unclear request" in result.output["questions"][0]
+        assert "unclear request" in result.output["questions"][0]["question"]
         assert result.output["confidence"] == 0.5
         assert len(result.output["evidence_anchors"]) >= 1
 

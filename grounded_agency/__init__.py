@@ -58,6 +58,16 @@ from .coordination import (
     SyncStrategy,
     TaskLifecycleError,
 )
+from .coordination.families import is_model_family, model_family
+from .coordination.inquiry import AnswerError, match_answers
+from .coordination.manifest import (
+    check_agent_manifest,
+    check_task,
+    join_maxima,
+    load_agent_manifest,
+    manifest_maxima,
+    target_maxima,
+)
 from .discovery import (
     CapabilityGap,
     CapabilityMatch,
@@ -92,9 +102,15 @@ from .state.evidence_store import (
 from .state.jsonl_evidence_store import JsonlEvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
 from .state.redaction import Redactor
+from .workflows.domains import (
+    UnsupportedDomain,
+    is_domain_id,
+    select_implementation,
+)
 from .workflows.engine import (
     BindingError,
     StepStatus,
+    UnboundedDelegation,
     WorkflowDefinition,
     WorkflowEngine,
     WorkflowStep,
@@ -171,6 +187,22 @@ __all__ = [
     "DelegationProtocol",
     "DelegationTask",
     "DelegationResult",
+    # Agent manifests, model families, inquiry answers and step domains
+    # (STANDARD v1.2 §5.15.1, §5.15, §5.13.1, §5.2.4)
+    "check_agent_manifest",
+    "load_agent_manifest",
+    "manifest_maxima",
+    "join_maxima",
+    "target_maxima",
+    "check_task",
+    "UnboundedDelegation",
+    "model_family",
+    "is_model_family",
+    "match_answers",
+    "AnswerError",
+    "select_implementation",
+    "is_domain_id",
+    "UnsupportedDomain",
     "SyncPrimitive",
     "SyncBarrier",
     "SyncResult",

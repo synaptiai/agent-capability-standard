@@ -826,8 +826,6 @@ fn check_cited_versions(
     to_py(py, &value)
 }
 
-/// A duration of the §5.10.1 grammar in whole milliseconds, rounded up (so
-/// only a zero duration is 0). ValueError when it is not a duration.
 /// The model family a host derives from a model identifier (STANDARD v1.2
 /// §5.15), or None when the rule gives none.
 #[pyfunction]
@@ -835,6 +833,8 @@ fn model_family(model_id: &str) -> Option<String> {
     crate::names::model_family(model_id)
 }
 
+/// A duration of the §5.10.1 grammar in whole milliseconds, rounded up (so
+/// only a zero duration is 0). ValueError when it is not a duration.
 #[pyfunction]
 fn duration_ms(text: &str) -> PyResult<u64> {
     let d = duration::parse(text).map_err(PyValueError::new_err)?;
