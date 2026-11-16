@@ -100,6 +100,23 @@ async def test_changed_arguments_that_need_a_checkpoint_are_f501(
 
 
 @pytest.mark.asyncio
+async def test_changed_arguments_that_hold_a_credential_are_f504(
+    adapter: GroundedAgentAdapter,
+) -> None:
+    """Arguments the host changed are checked again against every row of
+    §5.18.10, the persist and audit secret rows included (§6.7): the call
+    would run with them."""
+    secret = {"todos": [{"content": "deploy with AKIAABCDEFGHIJKLMNOP"}]}
+    callback = adapter._make_permission_callback(_host(secret))
+    result = await callback("TodoWrite", {"todos": [{"content": "deploy"}]}, _ctx("t1"))
+    assert not _allowed(result)
+    assert result.message.startswith("F504 CONSTRAINT_VIOLATED:")
+    assert "AKIAABCDEFGHIJKLMNOP" not in result.message
+    # The call is no longer allowed: a grounded tool would refuse it.
+    assert not adapter.take_allowed("TodoWrite", secret)
+
+
+@pytest.mark.asyncio
 async def test_changed_arguments_of_an_approved_call_are_f502(
     adapter: GroundedAgentAdapter,
 ) -> None:

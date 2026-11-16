@@ -1,0 +1,96 @@
+{
+  "description": "Record mode actions: a failure-mode checkpoint has its own record, and the recovery loop's pass of the step a new one (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "failure_modes": [
+            {
+              "condition": "it fails",
+              "on_error": "R402",
+              "action": "pause_and_checkpoint",
+              "recovery": {
+                "goto_step": "r",
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint"
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp2"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            1
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "failed",
+        "capability": "retrieve",
+        "code": "R402"
+      },
+      {
+        "status": "executed",
+        "capability": "checkpoint",
+        "checkpoint_id": "cp2"
+      },
+      {
+        "status": "executed",
+        "capability": "retrieve"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions"
+}

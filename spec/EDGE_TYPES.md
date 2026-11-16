@@ -14,8 +14,9 @@ This document defines the 7 edge types supported by the ontology.
 
 **Runs before.** Throughout, step A *runs before* step B when A comes earlier
 in the workflow's step list **and is not in the same `parallel_group`** as B.
-Steps of one parallel group run concurrently, so neither completes before the
-other starts.
+Steps of one parallel group are not ordered: an executor may run them in any
+order or concurrently (STANDARD §5.2.3), so neither can be relied on to
+complete before the other starts.
 
 **Changes in 1.1.0.** `precedes`, `conflicts_with` and `soft_requires` were
 under-specified in 1.0.0 and implementations disagreed. 1.1.0 states their
@@ -45,7 +46,7 @@ This means: a `checkpoint` MUST exist before any `mutate` operation.
 
 **Transitivity:** No. If A requires B and B requires C, A does not automatically require C.
 
-**Coexistence with `precedes`:** Some capability pairs have both a `requires` and a `precedes` edge. For example, `checkpoint → mutate` has both: `requires` enforces the safety invariant (mutations need a prior checkpoint), while `precedes` enforces temporal ordering. These serve complementary roles: `requires` demands the checkpoint's presence before every mutation, while `precedes` only orders the two when both appear. A workflow that mutates with a checkpoint running concurrently in the same parallel group violates both.
+**Coexistence with `precedes`:** Some capability pairs have both a `requires` and a `precedes` edge. For example, `checkpoint → mutate` has both: `requires` enforces the safety invariant (mutations need a prior checkpoint), while `precedes` enforces temporal ordering. These serve complementary roles: `requires` demands the checkpoint's presence before every mutation, while `precedes` only orders the two when both appear. A workflow that puts a mutation and its checkpoint in the same parallel group, where they are not ordered, violates both.
 
 ---
 

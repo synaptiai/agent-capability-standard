@@ -620,5 +620,120 @@
       "V106",
       "S303"
     ]
+  },
+  "pass_approver_identity": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "pass_approver_identity_1_1_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": [
+      "W604",
+      "W616"
+    ]
+  },
+  "fail_approver_identity_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "fail_approver_identity_vocabulary": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303"
+    ]
+  },
+  "pass_join_unknown_warns": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced",
+    "expected_warning_codes": [
+      "W618"
+    ]
+  },
+  "pass_group_mate_read_warns": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "advanced",
+    "expected_warning_codes": [
+      "W619"
+    ]
+  },
+  "pass_audit_require_record": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "bindings",
+    "expected_warning_codes": []
+  },
+  "fail_audit_require_record_type": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "bindings",
+    "expected_error_codes": [
+      "B203"
+    ]
+  },
+  "pass_grounding_policy": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "fail_grounding_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "pass_grounding_key_in_1_1_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": [
+      "W604"
+    ]
+  },
+  "fail_grounding_missing_require": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S304"
+    ]
+  },
+  "fail_grounding_bad_kind": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303"
+    ]
+  },
+  "fail_grounding_unknown_capability": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V101"
+    ]
+  },
+  "pass_audit_retention_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W614"
+    ]
   }
 }

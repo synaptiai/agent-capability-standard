@@ -1,0 +1,124 @@
+{
+  "description": "A run that ended deferred can be cancelled: its queued action is cancelled and will not be carried out; the deferrals stay in the report (\u00a75.19.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Completed",
+        "outcome": "deferred"
+      }
+    },
+    {
+      "cancel": {
+        "reason": "queue dropped",
+        "at": 10
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R408",
+    "step": null,
+    "action_records": [
+      {
+        "status": "cancelled",
+        "code": "R408"
+      }
+    ],
+    "deferred": [
+      {
+        "step": 2,
+        "store_as": "m"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "run_record": {
+    "status": "cancelled",
+    "details": {
+      "records": 1
+    }
+  }
+}

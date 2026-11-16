@@ -82,8 +82,8 @@ trajectory:  # Optional: predicted path to outcome
   - timestamp: string
     state: any
 reasoning: string  # Explanation of prediction logic
-confidence: 0..1  # Confidence in prediction methodology
-evidence_anchors: ["file:line", "data:source"]
+confidence: number  # probability that the prediction holds (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "data:source", kind: record}]
 assumptions: []  # Critical assumptions
 invalidation_conditions: []  # What would invalidate this prediction
 ```
@@ -98,8 +98,8 @@ invalidation_conditions: []  # What would invalidate this prediction
 | `trajectory` | array | Path from current to predicted state |
 | `reasoning` | string | Explanation of prediction logic |
 | `invalidation_conditions` | array | What would make prediction invalid |
-| `confidence` | number | 0.0-1.0 confidence in the prediction methodology (distinct from `probability`) |
-| `evidence_anchors` | array | References to the data the prediction rests on |
+| `confidence` | number | Probability, 0.0-1.0, that the prediction holds (§4.1.1); distinct from `probability`, the predicted event's probability |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the data the prediction rests on |
 | `assumptions` | array | Critical assumptions |
 
 ## Examples
@@ -138,8 +138,8 @@ trajectory:
 reasoning: "Based on team velocity of 1.5 stories/day and current progress, projecting linear completion. Historical sprints show 70% completion rate."
 confidence: 0.7
 evidence_anchors:
-  - "tool:jira:sprint-history"
-  - "tool:jira:current-burndown"
+  - {ref: "tool:jira:sprint-history", kind: tool}
+  - {ref: "tool:jira:current-burndown", kind: tool}
 assumptions:
   - "Team velocity remains consistent"
   - "Story estimates are accurate"
@@ -183,8 +183,8 @@ trajectory:
 reasoning: "Current growth rate of 0.5% per day on 80% utilized 500GB disk. Linear projection shows critical threshold in ~20 days."
 confidence: 0.8
 evidence_anchors:
-  - "command:df -h /data"
-  - "tool:monitoring:disk-trend-7d"
+  - {ref: "command:df -h /data", kind: tool}
+  - {ref: "tool:monitoring:disk-trend-7d", kind: tool}
 assumptions:
   - "Growth rate continues at current pace"
   - "No bulk data imports or exports"

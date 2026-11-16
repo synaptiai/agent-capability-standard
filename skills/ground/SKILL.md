@@ -87,8 +87,8 @@ contradictions:
 gaps:
   - description: string  # What evidence is missing
     would_provide: string  # What it would establish
-confidence: 0..1
-evidence_anchors: ["file:line", "url", "command:output"]
+confidence: number  # probability that the grounding judgement is right (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "https://...", kind: url}, {ref: "command:output", kind: tool}]
 assumptions: []
 ```
 
@@ -101,8 +101,8 @@ assumptions: []
 | `evidence` | array | Supporting evidence with sources and excerpts |
 | `contradictions` | array | Evidence that contradicts the claim |
 | `gaps` | array | Missing evidence that would strengthen grounding |
-| `confidence` | number | 0.0-1.0 confidence in the grounding judgement |
-| `evidence_anchors` | array | References to every source consulted |
+| `confidence` | number | Probability, 0.0-1.0, that the grounding judgement is right (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to every source consulted |
 | `assumptions` | array | Explicit assumptions |
 
 ## Examples
@@ -145,9 +145,9 @@ gaps:
     would_provide: "Confirmation that configured version is actually used"
 confidence: 0.95
 evidence_anchors:
-  - "Gemfile:42"
-  - "config/initializers/stripe.rb:3"
-  - "Gemfile.lock:156"
+  - {ref: "file:Gemfile:42", kind: file}
+  - {ref: "file:config/initializers/stripe.rb:3", kind: file}
+  - {ref: "file:Gemfile.lock:156", kind: file}
 assumptions:
   - "Configuration is loaded at runtime"
   - "No environment-specific overrides"
@@ -194,9 +194,9 @@ gaps:
     would_provide: "Whether admin accounts have different requirements"
 confidence: 0.40
 evidence_anchors:
-  - "app/models/user.rb:15"
-  - "config/devise.yml:8"
-  - "app/controllers/sessions_controller.rb:23"
+  - {ref: "file:app/models/user.rb:15", kind: file}
+  - {ref: "file:config/devise.yml:8", kind: file}
+  - {ref: "file:app/controllers/sessions_controller.rb:23", kind: file}
 assumptions:
   - "2FA support exists but enforcement unclear"
 ```
@@ -233,8 +233,8 @@ gaps:
     would_provide: "Performance claims with methodology"
 confidence: 0.1
 evidence_anchors:
-  - "README.md:5"
-  - "docs/architecture.md (no relevant content)"
+  - {ref: "file:README.md:5", kind: file}
+  - {ref: "file:docs/architecture.md (no relevant content)", kind: file}
 assumptions:
   - "No performance data available in provided sources"
 ```

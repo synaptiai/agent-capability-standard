@@ -171,10 +171,11 @@ export function diagnosticTiles(table: Element, byCode: Map<string, Diagnostic>,
   return n;
 }
 
-/** The tables whose codes become tiles: the Code column of §5.8.3 and §9.2 to §9.7, and the codes in §5.16's field descriptions. */
+/** The tables whose codes become tiles: the Code column of §5.8.3 and §9.2 to §9.7, the codes in §5.16's field descriptions and in §5.19.1's responses. */
 const TILE_SECTIONS: readonly { level: number; section: string; column?: string }[] = [
   { level: 4, section: '5.8.3 ' },
   { level: 3, section: '5.16 ', column: 'Description' },
+  { level: 4, section: '5.19.1 ', column: 'Responses' },
   ...['9.2 ', '9.3 ', '9.4 ', '9.5 ', '9.6 ', '9.7 '].map((section) => ({ level: 3, section })),
   // §5.18's code tables (CODE_TABLE_FIGURES).
   ...Object.values(CODE_TABLE_FIGURES).map(({ level, section }) => ({ level, section })),

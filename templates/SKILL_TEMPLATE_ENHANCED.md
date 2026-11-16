@@ -46,12 +46,15 @@ agent: <explore|general-purpose>
    - <What to look for>
    - <How to handle edge cases>
 
-3) **Ground claims**: Attach evidence anchors to all non-trivial assertions
-   - Format: `file:line`, `url`, or `tool:<tool_name>:<output_ref>`
+3) **Ground claims**: Attach evidence anchors to all non-trivial assertions (STANDARD v1.2 §3.1, §6.5)
+   - Each anchor is `{ref, kind}`: `{ref: "file:src/app.py#L10-L20", kind: file}`, `{ref: "https://...", kind: url}`, `{ref: "tool:<tool_name>:<output_ref>", kind: tool}`; an output that reports an action cites its record, `{ref: "<action>:<id>", kind: record}`
+   - Cite only evidence you had: what you read, what you were given, what a tool returned
+   - An `excerpt` quotes the evidence; never quote a secret in one (§6.7)
+   - With no evidence, mark the output inferred: `inference_method` (`model_knowledge`, `deduction`, `induction`, `abduction`, `analogy`, `statistical`, `simulation`, `assumption`) and `confidence` (§4.1.1)
 
 4) **Format output**: Structure results according to the output contract below
 
-5) **Assess confidence**: Rate 0.0-1.0 based on evidence quality and completeness
+5) **Assess confidence**: The probability, 0.0-1.0, that the output's claim is correct (§4.1.1), estimated from the evidence's quality and completeness
 
 ## Output Contract
 
@@ -61,8 +64,9 @@ Return a structured object:
 <primary_result_field>: <schema or type description>
 <secondary_field>: <schema or type>
 # Always include these standard fields:
-confidence: 0..1  # Numeric confidence score
-evidence_anchors: ["file:line", "url", "tool:..."]  # Evidence references
+confidence: 0..1  # probability that the output's claim is correct (STANDARD v1.2 §4.1.1)
+evidence_anchors: [{ref: "file:src/app.py#L10-L20", kind: file}, {ref: "https://...", kind: url}, {ref: "tool:...", kind: tool}]  # evidence anchors (§6.5)
+inference_method: string  # only when nothing grounds the output: how it was reached (§3.1, §4.1.1)
 assumptions: []  # Explicit assumptions made
 ```
 
@@ -71,8 +75,9 @@ assumptions: []  # Explicit assumptions made
 | Field | Type | Description |
 |-------|------|-------------|
 | `<primary_result_field>` | <type> | <What this field represents> |
-| `confidence` | number | 0.0-1.0 based on evidence quality |
-| `evidence_anchors` | array[string] | File:line references, URLs, or tool outputs |
+| `confidence` | number | Probability, 0.0-1.0, that <the output's claim> (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | What the output is based on: `{ref, kind}` per piece of evidence |
+| `inference_method` | string | How an output not grounded in evidence was reached (§3.1, §4.1.1) |
 | `assumptions` | array[string] | Explicitly stated assumptions |
 
 ## Examples

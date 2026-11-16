@@ -1615,7 +1615,7 @@ Common profile validation errors and their fixes:
 [workflow_name] step N (capability): V102 'capability' must come after 'other_cap' (precedes), but 'other_cap' first appears at step M
 ```
 
-**Cause:** The first form: the ontology defines a `requires` edge from `other_cap` to `capability`, but `other_cap` does not run earlier in the workflow. The second form: a `precedes` edge, where both capabilities appear but the target comes first (or runs concurrently in the same `parallel_group`).
+**Cause:** The first form: the ontology defines a `requires` edge from `other_cap` to `capability`, but `other_cap` does not run earlier in the workflow. The second form: a `precedes` edge, where both capabilities appear but the target comes first (or shares its `parallel_group`, whose members are not ordered).
 
 **Fix:** Either add (or move) the prerequisite capability as an earlier step outside the step's parallel group, or verify the edge is correct in the ontology. `requires` edges are hard dependencies; `precedes` edges only constrain order when both capabilities are present -- the validator rejects workflows that violate either.
 

@@ -10,7 +10,7 @@ use crate::cron::Cron;
 use crate::diag::{Code, Diagnostic};
 use crate::{duration, yaml};
 
-/// The extensions Standard v1.1 defines, as `name@major` (§5.9); this
+/// The extensions the Standard defines, as `name@major` (§5.9); this
 /// validator checks all of them. Must-understand only works if a consumer
 /// never claims an extension it does not check, so add one here only
 /// together with its checks; any other declaration is refused (V106).
@@ -22,6 +22,7 @@ pub(crate) const EXTENSIONS: &[&str] = &[
     "delegation@1",
     "quorum@1",
     "identity@1",
+    "grounding@1",
 ];
 
 const TRIGGER_KEYS: &[&str] = &["kind", "schedule", "event", "attendance"];
@@ -35,6 +36,16 @@ const EVENT_SCHEMA_FILE: &str = "event_schema.yaml";
 const EVENT_POINTER: &str = "/event";
 /// Below the event object: where it keeps its source kinds.
 const SOURCE_KINDS_POINTER: &str = "/properties/source/properties/kind/enum";
+
+/// Whether `wf` declares `extension` in `workflow_extensions.requires`,
+/// as [`Declared::read`] would find it, without reporting anything.
+pub(crate) fn declares(wf: &Map<String, Value>, extension: &str) -> bool {
+    wf.get("workflow_extensions")
+        .and_then(Value::as_object)
+        .and_then(|e| e.get("requires"))
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|x| x.as_str() == Some(extension)))
+}
 
 /// The extensions a workflow declares in `workflow_extensions.requires`.
 #[derive(Default)]
@@ -288,15 +299,31 @@ pub(crate) enum Positive {
     Allowed,
 }
 
+/// W614 for an `audit` step's literal `retention` outside the duration
+/// grammar (§6.3, §5.10.1): the store it is written to cannot apply it. A
+/// reference is passed on unchecked.
+pub(crate) fn audit_retention(
+    step: &Map<String, Value>,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    if step.get("capability").and_then(Value::as_str) == Some("audit") {
+        literal_duration(
+            step,
+            "retention",
+            Positive::Allowed,
+            "the store cannot apply it (§6.3)",
+            at,
+            report,
+        );
+    }
+}
+
 /// W614 for `input_bindings.<key>` when it is a literal string (no `${`)
 /// that the §5.10.1 grammar rejects, or, with [`Positive::Required`], that is
 /// zero. Field `input_bindings.<key>`, message `<key>: <error>; <why>`. One
 /// implementation for every duration input the executor or a host must
 /// apply (`audit`'s `retention`, `persist`'s `ttl`).
-#[allow(
-    dead_code,
-    reason = "the 1.2 workstreams' input checks call it (FOUNDATION F1.12)"
-)]
 pub(crate) fn literal_duration(
     step: &Map<String, Value>,
     key: &str,
@@ -897,5 +924,33 @@ mod tests {
         assert!(step(json!("PT90S")).is_empty());
         assert!(step(json!(null)).is_empty());
         assert_eq!(step(json!("five minutes")), ["W614"]);
+    }
+
+    #[test]
+    fn audit_retentions() {
+        let step = |capability: &str, retention: serde_json::Value| {
+            let catalog = json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.1",
+                "steps": [{"capability": capability, "purpose": "p", "store_as": "a",
+                    "input_bindings": {"event": "e", "retention": retention}}]}});
+            validate_catalog(&ctx(), &catalog, None)
+                .diagnostics
+                .into_iter()
+                .filter(|d| d.code.as_str() == "W614")
+                .map(|d| (d.message, d.location.get("field").cloned()))
+                .collect::<Vec<_>>()
+        };
+        for ok in ["2555d", "P30D", "${x.r}"] {
+            assert!(step("audit", json!(ok)).is_empty(), "{ok}");
+        }
+        let bad = step("audit", json!("whenever"));
+        assert_eq!(bad.len(), 1);
+        assert!(
+            bad[0].0.starts_with("retention: ") && bad[0].0.ends_with("(§6.3)"),
+            "{}",
+            bad[0].0
+        );
+        assert_eq!(bad[0].1, Some(json!("input_bindings.retention")));
+        // Another capability's `retention` is its own business.
+        assert!(step("persist", json!("whenever")).is_empty());
     }
 }

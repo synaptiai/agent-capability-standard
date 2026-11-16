@@ -1,5 +1,5 @@
 /**
- * Approval records (STANDARD v1.1.0 §5.14) for a Standard Agents thread.
+ * Approval records (STANDARD v1.2.0 §5.14) for a Standard Agents thread.
  *
  * A grounded tool that needs approval calls `requestApproval`, which stores
  * what the approver must see under the digest of those values. A person then
@@ -14,7 +14,14 @@
  */
 import type { ThreadUser } from '@standardagents/spec';
 import { digest as digestOf, type Json } from '@synaptiai/acs-core';
-import { KEYS, type ApprovalDecision, type ApprovalRecord, type ApprovalRound, type Store } from './records.js';
+import {
+  KEYS,
+  type AgentIdentity,
+  type ApprovalDecision,
+  type ApprovalRecord,
+  type ApprovalRound,
+  type Store,
+} from './records.js';
 
 /**
  * The most distinct approvers a tool's policy may require for one call: the
@@ -62,6 +69,47 @@ export type ApprovalState = 'pending' | 'approved' | 'rejected' | 'expired' | 'u
 /** The identity fields of the authenticated caller that a decision records. */
 export type Approver = Pick<ThreadUser, 'id' | 'roles'>;
 
+/** What the deployment asserts about the callers who decide (§5.17). */
+export interface ApproverOptions {
+  /**
+   * The kind of party a caller is: `ThreadUser` does not say, so it is the
+   * deployment's assertion (default `human`).
+   */
+  kind?: AgentIdentity['kind'];
+  /** The thread owner's `ThreadUser.id` (`state.userId`): that caller's trust class is `owner`. */
+  ownerId?: string;
+}
+
+/** The `authenticated_by` of a caller the Standard Agents runtime authenticated. */
+export const SA_CALLER = 'x-acs.sa-caller';
+
+/** The principal the binding gives a `ThreadUser.id`. */
+export function principalOf(userId: string): string {
+  return `sa-user:${userId}`;
+}
+
+/**
+ * The authenticated caller as an approver identity (STANDARD v1.2.0 §5.17),
+ * per `schemas/interop/standard_agents_mapping.yaml` (`identity.parties.
+ * endpoint_caller`): principal `sa-user:<id>`, the kind the deployment
+ * asserts, the requested `role` when the caller holds it, `authenticated_by:
+ * x-acs.sa-caller`, and `trust_class: owner` when the caller owns the thread.
+ */
+export function approverIdentity(
+  approver: Approver,
+  request: Pick<ApprovalRecord, 'role'>,
+  options: ApproverOptions = {},
+): AgentIdentity {
+  const holdsRole = request.role !== undefined && (approver.roles ?? []).includes(request.role);
+  return {
+    principal: principalOf(approver.id),
+    kind: options.kind ?? 'human',
+    ...(holdsRole ? { role: request.role } : {}),
+    authenticated_by: SA_CALLER,
+    ...(options.ownerId !== undefined && options.ownerId === approver.id ? { trust_class: 'owner' as const } : {}),
+  };
+}
+
 export class ApprovalError extends Error {
   constructor(
     readonly reason: 'unknown_request' | 'not_authorized' | 'already_decided' | 'closed',
@@ -98,12 +146,25 @@ export function approvalState(record: ApprovalRecord, now: number): ApprovalStat
   if (!Number.isInteger(record.min_approvers) || record.min_approvers < 1) return 'pending';
   const expires = record.expires_ms;
   if (expires !== undefined && !(expires > 0)) return 'expired';
+  const counted = countedDecisions(record, now);
+  if (new Set(counted.map((d) => d.approver)).size >= record.min_approvers) return 'approved';
   const deadline = approvalDeadline(record);
-  const counted = record.decisions.filter(
+  return deadline !== undefined && now > deadline ? 'expired' : 'pending';
+}
+
+/**
+ * The approvals of the request's current round that count at time `now`
+ * (`approvalState`): without `expires_ms`, every approval; with it, those
+ * given by the deadline and still within `expires_ms` of when they were
+ * given. A call's record lists the approvers of exactly these (§5.17), so
+ * an approval that has lapsed by the call is not among them.
+ */
+export function countedDecisions(record: ApprovalRecord, now: number): ApprovalDecision[] {
+  const expires = record.expires_ms;
+  const deadline = approvalDeadline(record);
+  return record.decisions.filter(
     (d) => d.decision === 'approved' && (expires === undefined || (d.at <= deadline! && now <= d.at + expires)),
   );
-  if (new Set(counted.map((d) => d.approver)).size >= record.min_approvers) return 'approved';
-  return deadline !== undefined && now > deadline ? 'expired' : 'pending';
 }
 
 async function pending(store: Store): Promise<string[]> {
@@ -229,6 +290,10 @@ export async function listPendingApprovals(store: Store, now: number): Promise<A
  * So the request is read again after the decision is written, and the
  * decision is refused (`closed`) if a call has used the request, or asked
  * again, in between; `consumeApproval` does the same from the other side.
+ *
+ * The decision records the caller as an approver identity
+ * (`approverIdentity`, with `options`), which the call's trace entry then
+ * carries (§5.17).
  */
 export async function decideApproval(
   store: Store,
@@ -237,6 +302,7 @@ export async function decideApproval(
   decision: 'approved' | 'rejected',
   now: number,
   round?: number,
+  options: ApproverOptions = {},
 ): Promise<ApprovalRecord> {
   const record = await readApproval(store, digest);
   if (!record) throw new ApprovalError('unknown_request', `no approval request has digest ${digest}`);
@@ -265,6 +331,7 @@ export async function decideApproval(
     decision_id: `${digest.slice(0, 12)}-${current}.${approver.id}`,
     decision,
     approver: approver.id,
+    approver_identity: approverIdentity(approver, record, options),
     at: now,
   };
   if (decision === 'rejected') {

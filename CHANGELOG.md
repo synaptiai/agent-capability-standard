@@ -177,8 +177,236 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (secrets and redaction, §6.7; the destination policy, §4.4.2; for the
   adapter, the output contract of a tool's result): they meet class SL
   except those checks, and claim it once they apply them.
+- Standard Agents binding: a trace entry's `approval.approvers` (and
+  `GroundedCall.approvers`) are now the approvers' principals,
+  `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
+  `approval.approver_identities`; compare approvers by principal. They list
+  only the approvers whose approvals counted when the call ran
+  (`countedDecisions`): one that had lapsed under `expires_ms` is left out.
+  `POST acs/approvals` takes the digest in either case.
+  `decideApproval` takes an optional last argument, `ApproverOptions`
+  (`kind`, `ownerId`). Decisions stored by an earlier version have no
+  identity, and a call that uses one records no `approver_identities`.
+- Reference executor: the saved state of a run that deferred steps holds two
+  more members (`ahead`, and `parked` for a nested run that ended deferred);
+  a state with deferrals that an earlier version saved still restores, but
+  cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
+  new one. The state of a run that never deferred is unchanged.
+- Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
+  version 2. The terminal action is derived from the state rather than
+  stored with copies of the records and outputs, every action carries
+  `run_id`, and the state may hold the record mode and the chain heads of
+  what a host took; version-1 snapshots still restore (a finished run's
+  stored terminal action must equal the one derived). Actions and records
+  gain members (`run_id`; on records `run_id`, `frame`, `step`,
+  `capability`, `checkpoint_id`, `code`, `approval.decision_id`); code that
+  compares whole actions or records must allow them. `_core.Run.next()`
+  returns a fresh dict each time, `Run.tick` returns whether it changed the
+  run, and `Run::next` in Rust returns an owned `Action`.
+- `WorkflowRunner`: `run` and `start` take `attendance=None` (the trigger's
+  attendance, else attended, as before) and refuse a caller-given `run_id`
+  the runner has already started (`RunStartError`): a `run_id` must be
+  unique among the runs whose records or keys the host keeps (§5.19.2).
+  `drive` is now a loop of `advance` turns: it sleeps until the run's
+  wake-up time (`run.wake_at()`) instead of a deadline it computed, and
+  calls `Host.withdraw` for an action the run timed out. `RunResult` gains
+  `run_id`, `reason`, `checkpoint_id` and `run_record`.
+- Coordination: the orchestrator's `audit` step returns the `audit`
+  contract's output (`recorded`, `audit_id`, `record`, `timestamp`,
+  `evidence_anchors`) instead of `{"audited": true}`, and records only the
+  step's `event`, `context` and `retention`, the event under
+  `details.event` of a record of the log's own (Standard 1.2.0 §6.4).
+- Plugin audit log: each line of `.claude/audit.log` is now an action
+  record (Standard 1.2.0 §6.4): `action_id`, `timestamp`, `actor`,
+  `intent`, `status`, `tool`, `call_id`, `details` (`event`, `skill`,
+  `input_sha256`), `recorded_by`, `prev_hmac`, `hmac`. Logs that mix old and
+  new lines still verify. The hook now reports, as a non-blocking error
+  (exit 1, the reason on standard error), every call it does not log or
+  cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
+  line with `hmac: "no-hmac-available"`, which broke the chain), a line that
+  could not be built, an unreadable last line, an unavailable digest.
+- Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
+  an action record of its own (Standard 1.2.0 §6.4), with the event under
+  `details.event`, the collected `audit_record`, `changes` and `provenance`
+  under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (else
+  the hook's default key), so `tools/verify_audit_log.py --log-file
+  .claude/audit/records.jsonl` checks the file. Lines an earlier version
+  wrote (`audit_id`, `timestamp`, `event`, `context`, `retention`,
+  `audit_record`, `changes`, `provenance`) carry no chain and do not verify:
+  move an existing file aside and let the skill start a new one (it does so
+  itself when the last line has no `hmac`), and read the old members under
+  `details` in new lines.
+- Reference executor: an approved step that fails now has a `failed`
+  record, with the step's code, also when its failure mode's rollback or
+  checkpoint then fails (F503, F501) or finds no checkpoint to roll back
+  to; 1.1 left that record `approved`, which a cancellation would then turn
+  into `cancelled` and which held back `take_records` for the rest of the
+  run. A record a resumed run reuses no longer keeps the `checkpoint_id` of
+  an earlier pass.
+- Python SDK, evidence (Standard 1.2.0 §6.5, §6.6):
+  - Anchor kinds are §6.5's: `tool_output` and `command` anchors are now
+    `tool`, `mutation` and coordination anchors `record`. The old names are
+    accepted with a `DeprecationWarning` (`kind` reads back the new one; a
+    former `mutation` keeps its high priority), any other free kind becomes
+    a vendor kind `x-...`, and a query by an old name (`get_by_kind("command")`)
+    returns what it returned before, by ref prefix, with the warning; a query
+    by a free kind (`get_by_kind("observation")`) is answered by its vendor
+    kind (`x-observation`), with the warning.
+    `get_for_capability_output()` warns: use `evidence_anchors_for()`, which
+    returns §6.5 objects. An empty `ref` or a malformed `digest` is a
+    `ValueError`, and `EvidenceAnchor.from_dict` refuses a `digest` of
+    `null` too.
+  - A store keeps a frozen copy of each anchor: assigning to an anchor read
+    back from a store, or calling `mark_critical()` on it, raises
+    `FrozenInstanceError`, and its metadata is read-only. Your own anchor is
+    not frozen. `add_anchor` returns the record kept.
+  - Record ids are never reused: `clear()` no longer resets the sequence,
+    and the records it drops count in `info().removed`.
+  - Every store redacts what it keeps (§6.7). With
+    `evidence_include_tool_input=True` a call's input is kept redacted, not
+    as given; the collector keeps no `digest` of a response that holds a
+    recognised secret.
+  - `CoordinationAuditLog.record` redacts `details`; the runner redacts the
+    message of every `Error` it submits; the adapter redacts its call
+    records and refusal messages.
+  - `GroundedAgentAdapter.create_checkpoint` records the checkpoint's anchor
+    (`checkpoint:<id>`, kind `record`, capability `checkpoint`) in the
+    adapter's evidence store: `len(evidence_store)` and `get_evidence()`
+    count it, and subscribers are notified.
+  - `OrchestrationRuntime.execute_workflow_step` returns the contracts'
+    outputs, grounded in the record of the action (§6.5): `invoke` and
+    `inquire` give `evidence_anchors` as §6.5 objects (were ref strings: read
+    `anchor["ref"]`); `audit` gives `{ref: "audit:<audit_id>", kind:
+    "record"}` and its `store`; `delegate` gains `evidence_anchors`; and
+    `synchronize` gives `{synchronized, agreed_state, participants,
+    evidence_anchors}` instead of the agreed state itself (read
+    `output["agreed_state"]`).
+- Python SDK, tool calls: a `persist` call (`TodoWrite`, a tool bound to
+  `persist`) or an `audit` call whose data holds a credential-shaped value
+  (a key or token format, a credential assignment, a URL's userinfo
+  password, an `Authorization` header's value) is refused with F504
+  (Standard 1.2.0 §5.18.10, §6.7), also when the host's permission flow
+  changes the call's arguments.
+- Standard Agents binding: `fileAnchor` returns `{ref, kind: 'file', digest:
+  'sha256:...'}` instead of `metadata.sha256`; every trace entry's
+  `evidence_anchors` and `error` are stored redacted (default patterns,
+  plus the tool's `secrets`), as are the notifications; a `persist` or
+  `audit` tool refuses data that holds a credential (F504), a URL's
+  userinfo password and an `Authorization` header's value included.
+- Plugin: the `persist` skill refuses content that holds a credential-shaped
+  value (a URL's userinfo password and an `Authorization` header's value
+  included), and the `audit` skill an append to
+  `.claude/audit/records.jsonl` that holds one (F504); both hooks' refusals
+  now open with the Standard's
+  code and name (`F504 CONSTRAINT_VIOLATED:`, `R407 SAFETY_CHECK_FAILED:`).
+- Validator: an `audit` step's literal `retention` outside the duration
+  grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
+  1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
 
 ### Added
+- Standard 1.2.0, host protocol, runs and audit records
+  ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part B;
+  findings ACS-14, ACS-15, ACS-20, ACS-30, ACS-31, ACS-32, ACS-33, ACS-34,
+  ACS-37, ACS-45, ACS-62):
+  - §5.19 Host Protocol: every action and response, the members the
+    executor computes and the outputs it composes, the run operations, the
+    tick boundaries and wake-up time, the host's obligations (one writer,
+    save before acting, at-least-once delivery keyed by `run_id` and `id`,
+    a unique `run_id`, integrity and a key where others can change stored
+    states), cancellation (R408), protocol traffic, error reasons and the
+    run record every host keeps; `schemas/host_protocol.schema.json`
+    requires `run_id` on every action. Class EX (§10.5): the runtime
+    fixtures are normative for executors, after an audit of every member
+    they pin (the generator refuses a fixture that pins an unlisted one).
+  - Reference executor: `Run::cancel`, `wake_at`, `take_trace`,
+    `take_records`, `taken_heads` (SHA-256 chain heads over what was taken)
+    and `run_record`; record mode `actions` (`StartOptions.records`,
+    `records="actions"`), with a record for every step that runs, every
+    failure-mode checkpoint and every rollback; an `audit` step that binds
+    `require_record: true` fails R402, reason `not_recorded`, when it did not
+    record. Python: `_core.Run` gains the same operations, `_core.next_fire`;
+    `WorkflowRunner.advance`, `cancel`, `archive=`, `save=`/`key=` (on
+    `run`, `drive`, `advance`, `resume` and `cancel`), `run_ids=` and
+    `event_seen=` (host stores for used `run_id`s and seen `event_id`s),
+    `start(records=, trigger=, event=)`; `Host.withdraw`, `HostCannotServe`,
+    `RunArchiveError`, `Turn`; `grounded_agency.workflows.protocol` (typed
+    actions and responses) and `grounded_agency.workflows.triggers`
+    (`OverlapGate`, `EventGate`, `trigger_attendance`, `next_fire`).
+    `CoordinationEvent` keeps its record's `intent`, so the orchestrator's
+    `audit` step returns the record its log exports.
+  - §5.10.2 Evaluating Triggers: the host's duties, event acceptance with
+    one run per `event_id`, fire times in the schedule's time zone (RFC 5545
+    for clock changes), `every` anchored at the Unix epoch, `overlap` and
+    missed fire times; a run an `invoke` step starts always has its
+    invoker's attendance, whatever its `invoke` trigger declares; normative
+    trigger vectors (`tests/conformance/triggers/`, from
+    `scripts/gen_trigger_vectors.py`).
+  - §5.2.3 Parallel Groups: members are unordered and the reference executor
+    runs them in list order; W618 (`UNKNOWN_JOIN`) and W619
+    (`GROUP_MATE_READ`).
+  - §6.4 Audit Records and §8.4 Manual Overrides: the action record and the
+    canonical event are the audit records; `CoordinationEvent.to_action_record`,
+    `CoordinationAuditLog.export_action_records`,
+    `grounded_agency.trust.manual_override` and
+    `TrustModel.manual_override`; the evidence collector's `required=True`
+    reports a capture that failed; the audit skill writes a record of its own
+    with the event under `details.event`; the safety layers export their
+    records of calls as action records, each with the `recorded_by` of the
+    layer that decided the call: the Python SDK adapter's
+    `export_action_records(scope)` (each call record gains `seq`, its number
+    in the scope) and the Standard Agents binding's `actionRecord(entry,
+    scope)`.
+  - 44 runtime fixtures (`cancel_*`, `wake_at_*`, `records_*`,
+    `run_record_*`, `parallel_group_*`, `audit_*`, `error_reason_*`,
+    `invoke_trigger_attendance_*`,
+    `response_extra_members_ignored`, `action_has_run_id`,
+    `approval_record_decision_id`), whose script may hold `tick` with
+    `changed`, `wake_at` and `cancel` entries and whose fixture may state
+    `records` and `run_record`; four validator fixtures (W618, W619,
+    `require_record`).
+- Standard 1.2.0, approval, deferral and run identity
+  ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part A;
+  findings ACS-10, ACS-11, ACS-12, ACS-13, ACS-35, ACS-44):
+  - §5.14 states the request for a step with no or a partial `approval`
+    field, what the approval digest is computed over (the shown array,
+    RFC 8785, lowercase hexadecimal, compared regardless of case), the
+    integer bound as the executor applies it, that whatever reads values
+    from JSON text refuses a member name twice in one object (the core's
+    `exec::read_json` does), and the meaning of `in_session` and
+    `out_of_band`. `tests/conformance/approval/digests.json`
+    is normative under §10.3, with a vector for a `shows` reference that
+    resolves to nothing.
+  - Resuming a deferred run (§5.14.1): `_core.Run.resume`,
+    `WorkflowRunner.resume` and `RunResult.resumable`. The deferred steps
+    run again as the same run, with the steps that ran ahead of them that
+    they read and a checkpoint step a queued mutation binds; a nested run
+    that ended deferred continues; a queued step is asked afresh (of a
+    person when attended), every request of the step names
+    `queued_action_id` (a re-ask after a recheck and a retry included) until
+    its action is carried out, and its `planned` record is updated in place
+    with each decision and refusal; a queued record the resumption decides
+    or supersedes takes the time and actor of then. A recovery loop during
+    a resumption runs again only the steps from its target to the step that
+    looped, a deferred handler among them keeping its nested run, and the
+    resumption then goes on, so nothing that ran ahead runs twice. Trace
+    kinds `run_resumed` and `invoke_resumed`.
+  - With `identity@1`, an approval decision may attest its approvers
+    (`approver_identities`); approvers are then counted by principal and
+    checked against the requested kind and role, and the record lists the
+    approvers that counted (`ActionRecord.approval.approver_identities`). In
+    a workflow that targets 1.2, the approver may require `sender_check`
+    and `accept_trust_classes` (V106 without `identity@1`, S303 when
+    malformed); in an earlier target they stay unknown fields (W604) and
+    get W616.
+  - A run keeps its actor (§5.17): `Run.restore` and
+    `WorkflowRunner.restore` take `actor_identity` and refuse another
+    principal; a resumption may name a new actor, which the trace and later
+    records show.
+  - 41 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
+    `resume` entry and the `{{digest_upper}}` placeholder) and four
+    validator fixtures (`*approver_identity*`). Each `step` digest vector
+    gives what its step shows from (`bindings`, `recheck_read`), so an
+    executor can be checked against the file alone.
 - [Standard Agents interoperability](docs/integrations/standard_agents.md):
   a mapping of this standard against the Standard Agent Specification 0.2.0,
   how to build a grounded agent on it, and the changes proposed to each
@@ -249,6 +477,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
   `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
   `additional_capabilities` and `invokes` with one-shot nesting tokens.
+- Standard 1.2.0, evidence, grounding and secrets
+  ([RFC-0008](spec/RFC-0008-evidence-grounding-and-secrets.md); findings
+  ACS-06, ACS-21, ACS-22, ACS-23, ACS-40, ACS-51, ACS-53, ACS-58):
+  - §3.1 defines grounded and inferred outputs; §4.1.1 defines
+    `confidence`, `inference_method` and `uncertainty`; §6.5 one evidence
+    anchor (`ref`, `kind`, `timestamp`, `excerpt`, `digest`; kinds with
+    `record` and `x-...`; the `acs:` ref scheme; bare strings and other
+    objects deprecated), the evidence available to a producer, and how an
+    output reporting an action is grounded (a `record` anchor); §6.6 evidence
+    records, stores and the `acs.evidence_recorded` notification; §6.7
+    secrets in records; §6.3 retention follows the store, and `audit`
+    reports its `store`.
+  - §5.20 Grounding: the extension `grounding@1` and host policies (a list,
+    covering nested runs) make the reference executor check host outputs:
+    `acs:` citations covered by a bound reference, the `Output` response's
+    `evidence_seen`, `attested`; F505 is raised and can fire a failure
+    mode; with `grounding@1` an `invoke` step carries its nested run's
+    anchors. In a 1.2 target `grounding` without the extension is V106.
+    Python: `_core.check_grounding`, `Run.trace(since=...)`,
+    `Run.trace_seq`, `grounded_agency.grounding` (`GroundingPolicy`,
+    `check_grounding_output`), `WorkflowRunner.run(grounding=...)`,
+    `GroundedAgentConfig.grounding` (applied to the outputs of the tools
+    `create_grounded_mcp_server` serves; a refused output's call record is
+    `failed` with F505 and the call id, and a policy that requires the
+    capability of a call whose output the adapter cannot see, such as
+    Claude Code's own tools, is warned about once per tool). TypeScript
+    package: `evidence.ts` (`checkGrounding`, `groundingPolicies`, `covers`,
+    `refsIn`) and `holdsCredential`; the binding's `grounding`, `seen` and
+    `secrets` options. A host policy with a member other than `require`,
+    `kinds`, `attested` and `x-...` is refused in all three languages; an
+    `acs:` reference holds no index above 2^53 - 1.
+  - Vectors: `tests/conformance/grounding/check.json` (normative, run in
+    Rust, Python and TypeScript); `tests/conformance/secrets/credentials.json`
+    (informative: the credential shapes the refusals of `persist` and
+    `audit` data recognise, run in Python, TypeScript and the plugin's shell
+    scan); 23 `grounding_*` runtime fixtures and
+    `error_reason_secret_in_data`; seven workflow fixtures.
+  - Evidence stores: `EvidenceStoreProtocol`, `EvidenceRecord`, `StoreInfo`,
+    a durable `JsonlEvidenceStore` (repairs a torn last line),
+    `subscribe()`, `record_capture_failure()`; the runner's
+    `evidence_store` records the evidence of outputs the core kept, and its
+    `redactor` registers the host's secrets; `GroundedAgentConfig` gains
+    `evidence_store` and `secret_values`; `EvidenceAnchor.from_checkpoint`,
+    and `create_checkpoint` records it. Binding: `exportEvidence`,
+    `getEvidence`, `findEvidence`, `exportEvidenceJsonl`,
+    `EVIDENCE_STORE_INFO`, `checkpointAnchor`.
+  - `schemas/interop/evidence.schema.json` is listed in §6.1; the catalog
+    schema accepts `grounding@1`.
+  - Plugin: `hooks/secret_scan.sh`, the one scan the `persist` and `audit`
+    skills' hooks copy; every skill's `evidence_anchors` examples are §6.5
+    anchors, and the capability skills gloss `confidence` as §4.1.1 defines
+    it.
 - Approval digest vectors of kind `tool_call` for a call's shown values.
 - Capability output vectors (informative), `tests/conformance/output/vectors.json`,
   which the Python and TypeScript codecs of §5.18.9 both pass. TypeScript
@@ -312,6 +592,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   second (W602), as STANDARD 5.2.1 requires of a step.
 - Python SDK: evidence anchors stored a tool's input, which can hold
   credentials; they now store it only with `evidence_include_tool_input`.
+- Python SDK: `OrchestrationRuntime(evidence_store=...)` given an empty store
+  (falsy, `len` 0) used a new one instead; it now uses the store it is
+  given.
 - Python SDK: `wrap_options` replaced the host's `can_use_tool` callback; it
   now chains to it.
 - Plugin hooks: the persist, rollback and send skills' command hooks exited 1,

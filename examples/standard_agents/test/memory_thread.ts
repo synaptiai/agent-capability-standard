@@ -28,6 +28,10 @@ export interface MemoryThread {
   tools: Map<string, Invocable>;
   /** What `state.queueTool` was asked to run. */
   queuedTools: { name: string; args: Record<string, unknown> }[];
+  /** What `state.emit` sent to the thread's clients, in order. */
+  emitted: { event: string; data: unknown }[];
+  /** When a test sets it, `state.emit` throws it. */
+  emitFails?: Error;
   /** Each `state.invokeTool` call the runtime received, in order. */
   invoked: { name: string; args: Record<string, unknown> }[];
   /** Awaited before the runtime runs an invoked tool, when a test sets it. */
@@ -50,6 +54,7 @@ export function memoryThread(): MemoryThread {
   const queued: QueueMessageInput[] = [];
   const tools = new Map<string, Invocable>();
   const queuedTools: { name: string; args: Record<string, unknown> }[] = [];
+  const emitted: { event: string; data: unknown }[] = [];
   const invoked: { name: string; args: Record<string, unknown> }[] = [];
   // eslint-disable-next-line prefer-const
   let thread: MemoryThread;
@@ -98,6 +103,12 @@ export function memoryThread(): MemoryThread {
     queueTool: (name: string, args: Record<string, unknown> = {}): void => {
       queuedTools.push({ name, args });
     },
+    // A custom event to the thread's connected clients, delivered at most
+    // once; this one records it.
+    emit: (event: string, data?: unknown): void => {
+      if (thread.emitFails) throw thread.emitFails;
+      emitted.push({ event, data });
+    },
   };
 
   // Any other member is a mistake in a test, so it fails loudly.
@@ -126,6 +137,7 @@ export function memoryThread(): MemoryThread {
     queued,
     tools,
     queuedTools,
+    emitted,
     invoked,
     endpointState: () => endpoint,
     siblingCall: async (name: string, args: Record<string, unknown>) => {

@@ -1,0 +1,212 @@
+{
+  "description": "Under a new actor, a resumed run writes again each queued record it changes: the decided one takes the time of its decision, and the one it supersedes (its step's condition is now false) the time of the supersession; both take the new actor, where the first run's records had the first (\u00a75.14.1, \u00a75.17).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m1",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            },
+            "when_unattended": "defer_to_queue"
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m2",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "condition": "${m1.success} == false",
+          "skip_if_false": true
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "Completed",
+        "outcome": "deferred",
+        "deferred": [
+          {
+            "step": 2
+          },
+          {
+            "step": 3
+          }
+        ],
+        "action_records": [
+          {
+            "timestamp": "1970-01-01T00:00:00.000Z",
+            "actor_identity": {
+              "principal": "agent-a"
+            },
+            "action_id": "run-1/w/2/0"
+          },
+          {
+            "timestamp": "1970-01-01T00:00:00.000Z",
+            "actor_identity": {
+              "principal": "agent-a"
+            },
+            "action_id": "run-1/w/3/1"
+          }
+        ]
+      }
+    },
+    {
+      "resume": {
+        "attendance": "attended",
+        "at": 3600000,
+        "actor_identity": {
+          "principal": "agent-b",
+          "kind": "agent"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2,
+        "queued_action_id": "run-1/w/2/0"
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "CreateCheckpoint",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Checkpoint",
+        "checkpoint_id": "cp2"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      },
+      "at": 3660000
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "deferred": [],
+    "action_records": [
+      {
+        "action_id": "run-1/w/2/0",
+        "status": "executed",
+        "timestamp": "1970-01-01T01:00:00.000Z",
+        "actor_identity": {
+          "principal": "agent-b"
+        }
+      },
+      {
+        "action_id": "run-1/w/3/1",
+        "status": "rejected",
+        "timestamp": "1970-01-01T01:01:00.000Z",
+        "actor": "agent",
+        "actor_identity": {
+          "principal": "agent-b"
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "run_resumed",
+    "step_skipped"
+  ],
+  "actor_identity": {
+    "principal": "agent-a",
+    "kind": "agent"
+  }
+}

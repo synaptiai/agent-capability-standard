@@ -1,0 +1,50 @@
+{
+  "description": "An audit step that binds require_record: true fails R402, reason not_recorded, when its output's recorded is not true (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "audit",
+          "purpose": "audit step",
+          "store_as": "a",
+          "input_bindings": {
+            "event": {
+              "what": "deploy"
+            },
+            "require_record": true
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "audit"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "recorded": false,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "reason": "not_recorded",
+    "step": 0
+  },
+  "trace_kinds": []
+}

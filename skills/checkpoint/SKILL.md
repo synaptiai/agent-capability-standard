@@ -131,8 +131,8 @@ pre_mutation_state:
   hash: string | null  # Combined hash of all checkpointed content
   summary: string  # Human-readable state summary
 next_safe_actions: array[string]  # What can now safely proceed
-confidence: number  # 0.0-1.0
-evidence_anchors: ["tool:bash:...", "file:..."]
+confidence: number  # probability that the checkpoint restores the state it reports (§4.1.1)
+evidence_anchors: [{ref: "checkpoint:<checkpoint_id>", kind: record}, {ref: "tool:bash:...", kind: tool}, {ref: "file:...", kind: file}]  # the checkpoint's own record grounds the output (STANDARD v1.2 §3.1)
 assumptions: []
 ```
 
@@ -150,8 +150,8 @@ assumptions: []
 | `expiry` | string | When the checkpoint expires, or null |
 | `pre_mutation_state.hash` | string | Integrity hash of captured state |
 | `next_safe_actions` | array | Actions that can now safely proceed |
-| `confidence` | number | 0.0-1.0 based on checkpoint integrity verification |
-| `evidence_anchors` | array | Proof of checkpoint creation |
+| `confidence` | number | Probability, 0.0-1.0, that the checkpoint restores the state it reports (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Proof of checkpoint creation |
 | `assumptions` | array | Explicit assumptions (e.g., "git available") |
 
 ## Examples
@@ -188,8 +188,9 @@ next_safe_actions:
   - "mutate: Modify files in scope"
 confidence: 1.0
 evidence_anchors:
-  - "tool:bash:git stash push -m 'checkpoint:chk_20240115_143022_a7b3c9:Before refactoring API handlers'"
-  - "tool:bash:git stash list | head -1"
+  - {ref: "checkpoint:chk_20240115_143022_a7b3c9", kind: record}
+  - {ref: "tool:bash:git stash push -m 'checkpoint:chk_20240115_143022_a7b3c9:Before refactoring API handlers'", kind: tool}
+  - {ref: "tool:bash:git stash list | head -1", kind: tool}
 assumptions:
   - "Git repository is initialized and clean"
   - "No merge conflicts in working tree"
@@ -230,8 +231,9 @@ next_safe_actions:
   - "mutate: Apply config migration"
 confidence: 0.95
 evidence_anchors:
-  - "file:.checkpoints/chk_20240115_150000_config/manifest.json"
-  - "tool:bash:sha256sum config/production.yaml"
+  - {ref: "checkpoint:chk_20240115_150000_config", kind: record}
+  - {ref: "file:.checkpoints/chk_20240115_150000_config/manifest.json", kind: file}
+  - {ref: "tool:bash:sha256sum config/production.yaml", kind: tool}
 assumptions:
   - ".checkpoints directory exists and is writable"
 ```

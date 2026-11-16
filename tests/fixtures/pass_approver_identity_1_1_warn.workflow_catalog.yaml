@@ -1,0 +1,35 @@
+# Standard version: 1.1.0
+# Positive fixture with warnings (STANDARD v1.2 §5.17, §11.5): in a workflow
+# that targets 1.1, the approver's sender_check is an unknown field, as it is
+# in 1.1 (W604), and a feature new in 1.2 (W616); neither the validator nor
+# the executor applies it. Declare spec_version "1.2" to have it enforced.
+approver_identity_1_1:
+  goal: Apply a change approved by a person, written for 1.1.
+  risk: high
+  spec_version: "1.1"
+  workflow_extensions:
+    requires: [approval@1]
+  steps:
+  - capability: checkpoint
+    purpose: Save a restore point before the change.
+    store_as: cp
+    input_bindings:
+      scope: release
+  - capability: constrain
+    purpose: Check the change against the release policy.
+    store_as: policy
+    input_bindings:
+      target: release
+      constraints: [release-policy]
+  - capability: mutate
+    purpose: Apply the release change.
+    store_as: applied
+    input_bindings:
+      target: release
+      operation: {promote: candidate}
+    approval:
+      approver:
+        kind: human
+        sender_check: [directory_id]
+  success:
+  - The change is applied once a person approves

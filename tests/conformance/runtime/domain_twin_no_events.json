@@ -337,7 +337,7 @@
                 "R402"
               ],
               "action": "rollback",
-              "recovery": "Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded."
+              "recovery": "Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 \u00a75.19.8) records the failure."
             }
           ],
           "input_bindings": {
@@ -374,7 +374,7 @@
                 "R402"
               ],
               "action": "rollback",
-              "recovery": "Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded."
+              "recovery": "Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 \u00a75.19.8) records the failure."
             }
           ],
           "input_bindings": {
@@ -409,7 +409,7 @@
                 "R402"
               ],
               "action": "rollback",
-              "recovery": "Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded."
+              "recovery": "Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 \u00a75.19.8) records the failure."
             }
           ],
           "input_bindings": {

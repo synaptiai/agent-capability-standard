@@ -1,0 +1,98 @@
+{
+  "description": "An acs: citation that a reference the step binds covers (the bound path a prefix of the cited one) is established and counts (\u00a75.20).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        },
+        {
+          "capability": "transform",
+          "purpose": "transform step",
+          "store_as": "t",
+          "input_bindings": {
+            "input": "${r.data: object}",
+            "target_format": "json"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "grounding@1"
+        ]
+      },
+      "grounding": {
+        "require": [
+          "transform"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": {
+            "items": [
+              1,
+              2
+            ]
+          },
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "file:a.txt",
+              "kind": "file"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "transform",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "output": {},
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "acs:r.data.items[0]",
+              "kind": "record"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "grounding"
+  ]
+}

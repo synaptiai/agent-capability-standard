@@ -1,0 +1,69 @@
+{
+  "description": "Under attested, an anchor the host does not attest does not count; not marked inferred, the output fails (F505).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "grounding@1"
+        ]
+      },
+      "grounding": {
+        "require": [
+          "retrieve"
+        ],
+        "attested": true
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": {
+            "items": [
+              1,
+              2
+            ]
+          },
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "file:a.txt",
+              "kind": "file"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F505",
+    "step": 0
+  },
+  "trace_kinds": []
+}

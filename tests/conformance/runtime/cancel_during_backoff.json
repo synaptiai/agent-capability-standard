@@ -1,0 +1,66 @@
+{
+  "description": "A step waiting out a retry's backoff has started (its first attempt ran): cancelling records it once, and the run does not wait (\u00a75.19.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "retry": {
+            "max": 2,
+            "backoff": "linear"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    },
+    {
+      "expect": {
+        "kind": "Sleep",
+        "until": 1000
+      }
+    },
+    {
+      "cancel": {
+        "reason": "stop",
+        "at": 10
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R408",
+    "action_records": [
+      {
+        "status": "cancelled",
+        "capability": "retrieve"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions"
+}

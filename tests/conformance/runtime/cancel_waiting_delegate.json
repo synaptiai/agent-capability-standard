@@ -1,0 +1,79 @@
+{
+  "description": "A waiting delegate whose delegation was sent has started: cancelling records it (\u00a75.19.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "timeout": "2h",
+          "input_bindings": {
+            "task": {
+              "review": "x"
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "review.done"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "task_id": "t1",
+          "accepted": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "correlate": {
+          "task_id": "t1"
+        }
+      }
+    },
+    {
+      "cancel": {
+        "reason": "stop"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R408",
+    "action_records": [
+      {
+        "status": "cancelled",
+        "capability": "delegate",
+        "code": "R408"
+      }
+    ]
+  },
+  "trace_kinds": [],
+  "records": "actions"
+}

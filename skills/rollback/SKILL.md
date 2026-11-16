@@ -169,8 +169,8 @@ verification:
   match: boolean  # restored_state.hash == checkpoint_hash
 warnings: array[string]  # Any issues encountered
 next_actions: array[string]  # Suggested follow-up
-confidence: number  # 0.0-1.0
-evidence_anchors: ["tool:bash:...", "file:..."]
+confidence: number  # probability that the state now matches the checkpoint (§4.1.1)
+evidence_anchors: [{ref: "rollback:<checkpoint_id>", kind: record}, {ref: "tool:bash:...", kind: tool}, {ref: "file:...", kind: file}]  # the restore's own record grounds the output (STANDARD v1.2 §3.1)
 assumptions: []
 ```
 
@@ -186,8 +186,8 @@ assumptions: []
 | `verification.match` | boolean | Whether restored state matches checkpoint |
 | `warnings` | array | Issues like orphaned files or partial restore |
 | `next_actions` | array | What to do next (re-plan, investigate, etc.) |
-| `confidence` | number | 0.0-1.0 based on verification match |
-| `evidence_anchors` | array | Proof of restoration |
+| `confidence` | number | Probability, 0.0-1.0, that the state now matches the checkpoint (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Proof of restoration |
 | `assumptions` | array | Explicit assumptions made |
 
 ## Examples
@@ -230,9 +230,10 @@ next_actions:
   - "plan: Create new plan with smaller incremental changes"
 confidence: 1.0
 evidence_anchors:
-  - "tool:bash:git stash pop stash@{0}"
-  - "tool:bash:git diff --stat HEAD"
-  - "tool:bash:sha256sum src/api/handlers/*.py"
+  - {ref: "rollback:chk_20240115_143022_a7b3c9", kind: record}
+  - {ref: "tool:bash:git stash pop stash@{0}", kind: tool}
+  - {ref: "tool:bash:git diff --stat HEAD", kind: tool}
+  - {ref: "tool:bash:sha256sum src/api/handlers/*.py", kind: tool}
 assumptions:
   - "No other changes made to stashed files since checkpoint"
 ```
@@ -277,9 +278,10 @@ next_actions:
   - "plan: Investigate migration script issue"
 confidence: 0.95
 evidence_anchors:
-  - "tool:bash:cp .checkpoints/chk_20240115_150000_config/production.yaml config/"
-  - "tool:bash:rm config/production.yaml.bak"
-  - "file:config/production.yaml:1"
+  - {ref: "rollback:chk_20240115_150000_config", kind: record}
+  - {ref: "tool:bash:cp .checkpoints/chk_20240115_150000_config/production.yaml config/", kind: tool}
+  - {ref: "tool:bash:rm config/production.yaml.bak", kind: tool}
+  - {ref: "file:config/production.yaml:1", kind: file}
 assumptions:
   - "Checkpoint backup file is not corrupted"
 ```

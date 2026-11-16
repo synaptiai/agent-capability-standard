@@ -27,16 +27,37 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
 In a JSON value, a string member whose name is a credential name (as above)
 is redacted whole. The assignment rule is deliberately broad: replacing a
 word of prose costs little where a secret would cost much.
+
+A refusal is another matter: ``persist`` data or an ``audit`` record that
+holds a secret is refused, not redacted (§6.7), and a refusal of ordinary
+project knowledge (``token: rotate monthly``) would cost much.
+:meth:`Redactor.holds_credential` therefore recognises only
+credential-shaped values: a registered value, the key and token formats
+above (PEM private keys, AWS, GitHub, Slack, ``sk-`` keys, JWTs, a bearer
+token of 20 or more characters), the password of a URL's userinfo unless it
+is a placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``,
+``****``), an ``Authorization`` or ``Proxy-Authorization`` header's value of
+8 or more token characters mixing letters and digits, and an assignment to a
+credential name whose value is quoted with no whitespace and 8 or more
+characters, or unquoted, 12 or more characters, mixing letters and digits.
+The plugin's ``hooks/secret_scan.sh`` applies the same rule, and
+``tests/conformance/secrets/credentials.json`` pins it for the three.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import re
-from collections.abc import Iterable, Sequence
-from typing import Any
+from collections.abc import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .evidence_store import EvidenceAnchor
 
 __all__ = [
     "DEFAULT_PATTERNS",
+    "holds_credential",
     "DEFAULT_REDACTOR",
     "MARKER",
     "Redactor",
@@ -113,6 +134,69 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 """The default patterns; each marks the secret with the group ``secret``."""
 
+# Credential shapes a refusal relies on (holds_credential): the formats of
+# keys and tokens, no prose. hooks/secret_scan.sh holds the same ones.
+_CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.ASCII),
+    re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}", re.ASCII),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{36}", re.ASCII),
+    re.compile(r"github_pat_[A-Za-z0-9_]{22,}", re.ASCII),
+    re.compile(r"xox[abprs]-[A-Za-z0-9-]{10,}", re.ASCII),
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}", re.ASCII),
+    re.compile(rf"[Bb]earer{_WS}+[A-Za-z0-9._~+/=-]{{20,}}", re.ASCII),
+    re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}", re.ASCII),
+)
+_ASSIGN = rf"(?:{_NAMES})[\"']?{_WS}*[:=]{_WS}*"
+# A quoted value with no whitespace, 8 or more characters.
+_QUOTED_CREDENTIAL = re.compile(
+    rf"{_ASSIGN}[\"'][^{_NOT_WS}\"']{{8,}}[\"']", re.ASCII | re.IGNORECASE
+)
+# An unquoted value of 12 or more characters with letters and digits.
+_UNQUOTED_VALUE = re.compile(
+    rf"{_ASSIGN}(?P<value>[^{_NOT_WS}\"']{{12,}})", re.ASCII | re.IGNORECASE
+)
+# The password of a URL's userinfo (``scheme://user:<value>@``) ...
+_URL_PASSWORD = re.compile(
+    rf"[A-Za-z][A-Za-z0-9+.-]*://[^{_NOT_WS}/:@]+:(?P<value>[^{_NOT_WS}/@]+)@",
+    re.ASCII,
+)
+# ... unless it is a placeholder (``password``, ``<password>``, ``${PW}``,
+# ``****``).
+_PLACEHOLDER = re.compile(
+    r"[$<{*\[].*|password|passwd|pwd|pass|secret|token", re.ASCII | re.IGNORECASE
+)
+# An Authorization or Proxy-Authorization header's value, after its scheme:
+# 8 or more token characters with letters and digits.
+_AUTHORIZATION_VALUE = re.compile(
+    rf"(?:proxy-)?authorization[\"']?{_WS}*[:=]{_WS}*[\"']?"
+    rf"(?:(?:basic|bearer|token|digest|negotiate){_WS}+)?"
+    r"(?P<value>[A-Za-z0-9._~+/=-]{8,})",
+    re.ASCII | re.IGNORECASE,
+)
+
+
+def _letters_and_digits(value: str) -> bool:
+    return bool(re.search(r"[0-9]", value) and re.search(r"[A-Za-z]", value))
+
+
+def _credential_text(text: str) -> bool:
+    """Whether ``text`` holds a credential-shaped value."""
+    if any(p.search(text) for p in _CREDENTIAL_SHAPES):
+        return True
+    if _QUOTED_CREDENTIAL.search(text):
+        return True
+    if any(
+        not _PLACEHOLDER.fullmatch(m.group("value"))
+        for m in _URL_PASSWORD.finditer(text)
+    ):
+        return True
+    return any(
+        _letters_and_digits(m.group("value"))
+        for pattern in (_UNQUOTED_VALUE, _AUTHORIZATION_VALUE)
+        for m in pattern.finditer(text)
+    )
+
+
 # A member name that is a credential name, alone or ending a longer name.
 _SECRET_MEMBER = re.compile(
     rf"(?:.*[_-])?(?:{_NAMES})", re.ASCII | re.IGNORECASE | re.DOTALL
@@ -172,6 +256,42 @@ class Redactor:
         """Whether :meth:`redact` would change ``value``."""
         return bool(self.redact(value)[1])
 
+    def holds_credential(self, value: Any) -> bool:
+        """Whether ``value`` (a string or JSON data) holds a registered
+        value or a credential-shaped value (the module's rule for refusals:
+        no prose such as ``token: rotate monthly``). A JSON value is read as
+        its JSON text, so ``{"api_key": "..."}`` is an assignment."""
+        strings: list[str] = []
+        _strings_in(value, strings)
+        if any(v in s for v in self._values for s in strings):
+            return True
+        if any(_credential_text(s) for s in strings):
+            return True
+        if isinstance(value, str):
+            return False
+        # A member whose name is a credential name: its JSON text is an
+        # assignment.
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except TypeError, ValueError:
+            return False
+        return _credential_text(text)
+
+    def redact_anchor(self, anchor: EvidenceAnchor) -> EvidenceAnchor:
+        """``anchor`` with every secret in its ``ref``, ``excerpt`` and
+        metadata values replaced (§6.5, §6.7): the anchor itself when
+        nothing changes, else a new (unfrozen) anchor."""
+        ref, ref_changed = self.redact_text(anchor.ref)
+        excerpt, excerpt_changed = (
+            self.redact_text(anchor.excerpt)
+            if anchor.excerpt is not None
+            else (None, False)
+        )
+        metadata, pointers = self.redact(_plain(anchor.metadata))
+        if not (ref_changed or excerpt_changed or pointers):
+            return anchor
+        return dataclasses.replace(anchor, ref=ref, excerpt=excerpt, metadata=metadata)
+
     def _walk(self, value: Any, pointer: str, pointers: list[str]) -> Any:
         if isinstance(value, str):
             text, changed = self.redact_text(value)
@@ -198,6 +318,29 @@ class Redactor:
                 self._walk(v, f"{pointer}/{i}", pointers) for i, v in enumerate(value)
             ]
         return value
+
+
+def _strings_in(value: Any, out: list[str]) -> None:
+    """Every string in a JSON value, member names included."""
+    if isinstance(value, str):
+        out.append(value)
+    elif isinstance(value, Mapping):
+        for k, v in value.items():
+            out.append(str(k))
+            _strings_in(v, out)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _strings_in(v, out)
+
+
+def _plain(value: Any) -> Any:
+    """JSON data from a read-only copy (mappings to dicts, tuples to
+    lists), so that :meth:`Redactor.redact` walks it."""
+    if isinstance(value, Mapping):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
 
 
 def _replace_secret(m: re.Match[str]) -> str:
@@ -228,3 +371,8 @@ def redact(value: Any) -> tuple[Any, list[str]]:
 def holds_secret(value: Any) -> bool:
     """:meth:`Redactor.holds_secret` of :data:`DEFAULT_REDACTOR`."""
     return DEFAULT_REDACTOR.holds_secret(value)
+
+
+def holds_credential(value: Any) -> bool:
+    """:meth:`Redactor.holds_credential` of :data:`DEFAULT_REDACTOR`."""
+    return DEFAULT_REDACTOR.holds_credential(value)

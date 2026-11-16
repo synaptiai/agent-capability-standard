@@ -1,10 +1,12 @@
 """The approval digest vectors (tests/conformance/approval/digests.json,
-STANDARD v1.1.0 §5.14) hold against the reference executor and against a
+STANDARD v1.2.0 §5.14 and §5.18.7, normative under §10.3) hold against the
+reference executor and against a
 computation that uses neither the executor nor the generator: an RFC 8785
 serializer written here, and ``hashlib``.
 
-Each vector is replayed from its own fields alone (``approval``, ``inputs``,
-``shown``), so the file is enough to reproduce a digest on an executor.
+Each vector is replayed from its own fields alone (``approval``, ``inputs``
+or ``bindings``, ``recheck_read``), so the file is enough to reproduce a
+digest on an executor; ``shown`` is only compared.
 
 Also checked here: what the executor asks for a step that needs approval and
 has no ``approval`` field. The runtime fixture ``checkpoint_per_mutation``
@@ -176,14 +178,22 @@ def test_the_typescript_package_tests_against_this_file() -> None:
     assert not list(BINDING_FIXTURES.glob("*.json"))
 
 
-def test_the_vectors_are_informative_and_named() -> None:
-    assert DOC["standard"] == "1.1.0"
-    assert DOC["section"] == "5.14"
-    assert DOC["status"] == "informative"
+def test_the_vectors_are_normative_and_named() -> None:
+    """§10.3 names the file: its canonical text and digests are normative
+    for §5.14 and §5.18.7."""
+    assert DOC["standard"] == "1.2.0"
+    assert DOC["section"] == "5.14, 5.18.7"
+    assert DOC["status"] == "normative"
     assert len(set(IDS)) == len(IDS)
     for vector in CASES:
         assert set(vector) <= set(DOC["fields"]), vector["name"]
         assert {"name", "kind", "about", "shown", "canonical", "digest"} <= set(vector)
+
+
+def test_every_vector_has_a_known_kind() -> None:
+    """A `step` vector describes a workflow step's request; a `tool_call`
+    vector a tool call's approval, whose shown values are `[call]`."""
+    for vector in CASES:
         assert vector["kind"] in ("step", "tool_call"), vector["name"]
         if vector["kind"] == "step":
             assert "approval" in vector and "call" not in vector, vector["name"]
@@ -217,6 +227,9 @@ def test_the_vectors_cover_what_the_digest_depends_on() -> None:
         next(v for v in CASES if v["name"] == "no_approval_field")["approval"] is None
     )
     assert "recheck" in shown["asked_again_after_recheck"][-1]
+    # A reference that resolves to nothing is null, in its place.
+    assert shown["unresolved_reference"][0] is None
+    assert len(shown["unresolved_reference"]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -269,13 +282,13 @@ def replay(
     """Run a workflow built from the vector's fields. Returns its approval
     requests and how the run ended.
 
-    The values its references resolve to are read back from ``shown``: a
-    ``shows`` entry at index ``i`` resolved to ``shown[i]``. The request the
+    The step's references resolve against the vector's ``bindings``: the
+    workflow input ``setting`` and the store ``current``, which the step
+    before it returns. A recheck reads ``recheck_read``. The request the
     vector describes is answered with the vector's digest, so the run
     completes only if the executor accepts that digest."""
     approval = vector["approval"]
-    shows = (approval or {}).get("shows")
-    resolved = dict(zip(shows or [], vector["shown"], strict=False))
+    bindings = vector.get("bindings", {})
     change: dict[str, Any] = {
         "capability": "mutate",
         "purpose": "Apply the change.",
@@ -313,14 +326,14 @@ def replay(
         validator,
         {"replay": workflow},
         "replay",
-        {"setting": resolved.get("${setting}", "any")},
+        {"setting": bindings.get("setting", "any")},
         header=None,
         attendance="attended",
         run_id="replay",
         now_ms=0,
     )
     outputs: dict[str, dict[str, Any]] = {
-        "retrieve": {"data": resolved.get("${current.data}"), "confidence": 1.0},
+        "retrieve": bindings.get("current", {"data": None, "confidence": 1.0}),
         "checkpoint": {"checkpoint_id": "cp-1"},
         "mutate": {"success": True},
     }
@@ -347,8 +360,7 @@ def replay(
         else:
             assert kind == "RecheckSource", action
             # The source as the vector says it was read: changed.
-            current = vector["shown"][-1]["recheck"]["current"]
-            response = {"kind": "Current", "value": current}
+            response = {"kind": "Current", "value": vector["recheck_read"]}
         run.submit(action["id"], response, 0)
     raise AssertionError(f"{vector['name']}: the run did not end")
 
@@ -368,6 +380,20 @@ def test_the_executor_asks_with_the_vector(
         # The first request showed the declared values alone.
         assert same_json(requests[0]["shown"], vector["shown"][:-1])
         assert requests[0]["digest"] != request["digest"]
+
+
+@pytest.mark.parametrize("vector", STEP_CASES, ids=STEP_IDS)
+def test_a_step_vector_says_what_its_step_shows_from(vector: dict[str, Any]) -> None:
+    """§10.3: an executor shows each `step` vector's values from the vector
+    alone. Without `shows`, from its `inputs`; with `shows`, its references
+    resolve against `bindings`; asked again after a recheck, the recheck
+    read `recheck_read`. Nothing is read back from `shown`."""
+    approval = vector["approval"] or {}
+    assert ("inputs" in vector) == ("shows" not in approval)
+    assert ("bindings" in vector) == ("shows" in approval)
+    assert ("recheck_read" in vector) == ("recheck" in approval)
+    for field in ("inputs", "bindings", "recheck_read"):
+        assert field not in vector or field in DOC["fields"], field
 
 
 def test_the_executor_refuses_the_digest_of_other_values(

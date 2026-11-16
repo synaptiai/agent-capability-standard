@@ -40,8 +40,9 @@ import hmac
 import inspect
 import json
 import logging
+import re
 import threading
-from collections import Counter, deque
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -52,11 +53,17 @@ from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
 from .errors import ErrorCode, ValidationError, text_form
+from .grounding import GroundingPolicy, as_policies, check_output
 from .hooks.evidence_collector import create_evidence_collector
 from .hooks.skill_tracker import create_checkpoint_recorder
 from .state.checkpoint_tracker import MAX_AGE_MINUTES, CheckpointTracker
-from .state.evidence_store import EvidenceAnchor, EvidenceStore
+from .state.evidence_store import (
+    EvidenceAnchor,
+    EvidenceStore,
+    EvidenceStoreProtocol,
+)
 from .state.rate_limiter import RateLimitConfig, RateLimiter
+from .state.redaction import DEFAULT_REDACTOR, Redactor
 
 if TYPE_CHECKING:
     from .coordination.orchestrator import OrchestrationRuntime
@@ -75,6 +82,9 @@ logger = logging.getLogger("grounded_agency.adapter")
 PROMPTING_PERMISSION_MODES: frozenset[str] = frozenset(
     {"default", "acceptEdits", "plan"}
 )
+
+# A call argument an `acs:` anchor can cite (a §5.3 identifier).
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 
 
 def _find_ontology_path() -> str:
@@ -223,7 +233,25 @@ class GroundedAgentConfig:
             ``"off"``: the adapter asks for no approval (outside class SL).
         evidence_include_tool_input: If True, evidence anchors keep each
             tool call's input, and a Bash command's text, in their
-            metadata. Off by default: inputs can hold credentials.
+            metadata, redacted by the store (STANDARD v1.2 §6.7). Off by
+            default: inputs can hold credentials.
+        evidence_store: The evidence store the adapter writes to (§6.6):
+            any :class:`EvidenceStoreProtocol`, such as a durable
+            ``JsonlEvidenceStore``. None: a new in-memory ``EvidenceStore``.
+        secret_values: The host's own secrets (§6.7), registered with the
+            evidence store's and the coordination audit log's redactor so
+            they never reach an anchor or a record. Never part of
+            ``recorded_by``.
+        grounding: Grounding policies the layer applies to the output of
+            each call whose capability one requires (§5.20): one
+            :class:`GroundingPolicy` or several. A call's argument names are
+            what its ``acs:`` anchors may cite; the layer gives no
+            ``evidence_seen`` (a hook does not see the model's request). An
+            output that fails is refused with F505, and the call's record is
+            ``failed``. Only the tools ``create_grounded_mcp_server`` serves
+            give the layer their output: Claude Code's own tools return no
+            capability output, so no policy checks their calls (a warning
+            is logged once per such tool).
         call_record_limit: How many call records (and refusals) the adapter
             keeps in memory (``call_records``, ``diagnostics``).
     """
@@ -244,6 +272,9 @@ class GroundedAgentConfig:
     approval: Literal["ask", "off"] = "ask"
     evidence_include_tool_input: bool = False
     call_record_limit: int = 10000
+    evidence_store: EvidenceStoreProtocol | None = None
+    secret_values: tuple[str, ...] = ()
+    grounding: tuple[GroundingPolicy, ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
@@ -271,6 +302,14 @@ class GroundedAgentConfig:
                 f"call_record_limit must be a positive integer, got "
                 f"{self.call_record_limit!r}"
             )
+        # One policy or several; each was checked against the ontology when
+        # it was made (an unknown id is a ValueError naming V101).
+        self.grounding = as_policies(self.grounding)  # type: ignore[arg-type]
+        if isinstance(self.secret_values, str) or not all(
+            isinstance(v, str) for v in self.secret_values
+        ):
+            raise ValueError("secret_values must be a sequence of strings")
+        self.secret_values = tuple(self.secret_values)
 
 
 def _error(code: ErrorCode, message: str, location: dict[str, Any]) -> ValidationError:
@@ -350,6 +389,76 @@ def _now_iso(clock: Callable[[], datetime]) -> str:
     return clock().isoformat()
 
 
+# A call record's decision as an audit record's status (STANDARD 1.2.0
+# section 6.4): an allowed call that has no outcome yet is approved, a call
+# put to the host's permission flow is planned until it is decided, and a
+# refusal is rejected with its code. A boundary records no action.
+_CALL_STATUS = {
+    "allowed": "approved",
+    "asked": "planned",
+    "refused": "rejected",
+    "ran": "executed",
+    "failed": "failed",
+}
+
+# The call record members an audit record holds as its own members; every
+# other member is kept under ``details``.
+_CALL_MAPPED = frozenset(
+    {"seq", "at", "tool", "capability", "call", "checkpoint_id", "recorded_by"}
+)
+
+
+def call_action_record(entry: dict[str, Any], scope: str) -> dict[str, Any] | None:
+    """One of the adapter's ``call_records`` as an audit record (STANDARD
+    1.2.0 section 6.4), the shape the layer exports its records in.
+
+    ``scope`` names the layer scope (section 5.18.5): it is the record's
+    ``run_id`` and prefixes its ``action_id``, ``<scope>/<seq>``. A refusal is
+    ``rejected`` with its diagnostic's ``code``; a call the host's permission
+    flow approved in its session has ``approval`` with ``mode: in_session``
+    and the digest of what was shown (section 5.18.7). ``recorded_by`` is the
+    layer's, as the call record holds it. Every other member of the call
+    record (``decision``, ``permission_mode``, ``diagnostic``, ...) is kept
+    under ``details``. Returns None for a boundary entry, which records no
+    action.
+    """
+    status = _CALL_STATUS.get(entry.get("decision", ""))
+    if status is None:
+        return None
+    tool = entry["tool"]
+    record: dict[str, Any] = {
+        "action_id": f"{scope}/{entry['seq']}",
+        "run_id": scope,
+        "timestamp": entry["at"],
+        "actor": "agent",
+        "intent": f"{tool} call",
+        "status": status,
+        "tool": tool,
+    }
+    if entry.get("capability"):
+        record["capability"] = entry["capability"]
+    if entry.get("call"):
+        record["call_id"] = entry["call"]
+    if entry.get("checkpoint_id"):
+        record["checkpoint_id"] = entry["checkpoint_id"]
+    diagnostic = entry.get("diagnostic")
+    if isinstance(diagnostic, dict) and diagnostic.get("code"):
+        record["code"] = diagnostic["code"]
+    mapped = set(_CALL_MAPPED)
+    if entry.get("approvers") == ["in_session"] and entry.get("digest"):
+        record["approval"] = {
+            "digest": entry["digest"],
+            "decision": "approved",
+            "mode": "in_session",
+        }
+        mapped |= {"approvers", "digest"}
+    details = {k: v for k, v in entry.items() if k not in mapped}
+    if details:
+        record["details"] = details
+    record["recorded_by"] = dict(entry["recorded_by"])
+    return record
+
+
 @dataclass
 class GroundedAgentAdapter:
     """
@@ -394,7 +503,7 @@ class GroundedAgentAdapter:
     registry: CapabilityRegistry = field(init=False)
     mapper: ToolCapabilityMapper = field(init=False)
     checkpoint_tracker: CheckpointTracker = field(init=False)
-    evidence_store: EvidenceStore = field(init=False)
+    evidence_store: EvidenceStoreProtocol = field(init=False)
     rate_limiter: RateLimiter = field(init=False)
     cost_summary: CostSummary = field(init=False)
 
@@ -424,7 +533,19 @@ class GroundedAgentAdapter:
             clock=now,
             max_age_minutes=self.config.expiry_minutes,
         )
-        self.evidence_store = EvidenceStore()
+        # The layer's redactor (STANDARD v1.2 §6.7): what it recognises as a
+        # secret, the host's own values included. Its records, refusals and
+        # evidence are redacted with it, and persist and audit calls whose
+        # data holds a credential are refused (§5.18.10).
+        self.redactor = Redactor(self.config.secret_values)
+        # ``is None``, not ``or``: an empty store is falsy (``len`` 0) and is
+        # still the store the host gave.
+        self.evidence_store = (
+            self.config.evidence_store
+            if self.config.evidence_store is not None
+            else EvidenceStore(redactor=self.redactor)
+        )
+        self._register_secrets()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
         # The layer's records (STANDARD 1.2.0 section 5.18.8). History
         # counts from the adapter's start: one adapter is one scope.
@@ -438,11 +559,25 @@ class GroundedAgentAdapter:
         self._state_lock = threading.Lock()
         self._executed: set[str] = set()
         # Calls this layer allowed, by (tool, digest of the arguments), not
-        # yet run: what a grounded MCP tool checks (take_allowed).
-        self._allowed: Counter[tuple[str, str]] = Counter()
+        # yet run, each with its call id (tool_use_id) when it has one, in
+        # the order allowed: what a grounded MCP tool checks (take_allowed).
+        self._allowed: dict[tuple[str, str], list[str | None]] = {}
+        # Calls whose outcome a grounded MCP tool recorded (an F505 refusal
+        # of its output, section 5.20): the post-call hooks do not record
+        # it again.
+        self._outcome_recorded: set[str] = set()
+        # The tools create_grounded_mcp_server serves: the only calls whose
+        # output this layer sees, so the only ones a grounding policy can
+        # check (section 5.20). Tools a policy would check but cannot,
+        # warned about once each.
+        self._grounded_tools: set[str] = set()
+        self._ungrounded_warned: set[str] = set()
         self.call_records: deque[dict[str, Any]] = deque(
             maxlen=self.config.call_record_limit
         )
+        # Each call record's number in this scope, from 1: the audit
+        # record's action_id (export_action_records).
+        self._record_seq = 0
         self.diagnostics: deque[ValidationError] = deque(
             maxlen=self.config.call_record_limit
         )
@@ -458,6 +593,130 @@ class GroundedAgentAdapter:
 
         self.cost_summary = CostSummary()
 
+    def _register_secrets(self) -> None:
+        """Register ``config.secret_values`` with the evidence store's and
+        the coordination audit log's redactor (§6.7). A component that uses
+        the shared default redactor gets the layer's, so the values never
+        reach a redactor other adapters share."""
+        values = self.config.secret_values
+        if not values:
+            return
+        components: list[Any] = [self.evidence_store]
+        if self.orchestrator is not None:
+            components.append(self.orchestrator.audit_log)
+        for component in components:
+            redactor = getattr(component, "redactor", None)
+            if redactor is None:
+                logger.warning(
+                    "%s has no redactor; the registered secrets do not reach it",
+                    type(component).__name__,
+                )
+                continue
+            if redactor is DEFAULT_REDACTOR:
+                component.redactor = self.redactor
+            elif redactor is not self.redactor:
+                for v in values:
+                    redactor.add_secret(v)
+
+    def _secret_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None, args: Any
+    ) -> str | None:
+        """The F504 refusal of a ``persist`` call whose data, or an
+        ``audit`` call whose record, holds a secret the layer recognises
+        (§5.18.10, §6.7): refused, not redacted, since memory is read back
+        as fact. None for any other call."""
+        capabilities = set(mapping.capabilities) & {"persist", "audit"}
+        if not capabilities or not self.redactor.holds_credential(args):
+            return None
+        what = (
+            "the data it would store"
+            if "persist" in capabilities
+            else "the record it would append"
+        )
+        return self._refuse(
+            ErrorCode.CONSTRAINT_VIOLATED,
+            mapping,
+            tool,
+            call,
+            f"{what} holds what looks like a credential; persist where the "
+            f"secret is kept, or cite it by reference, not the secret "
+            f"(STANDARD v1.2 §6.7)",
+        )
+
+    # ------------------------------------------------------------------
+    # Grounding of call outputs (STANDARD v1.2 section 5.20)
+    # ------------------------------------------------------------------
+
+    def check_call_output(
+        self,
+        tool: str,
+        args: Any,
+        output: Any,
+        call: str | None = None,
+    ) -> str | None:
+        """Apply ``config.grounding`` to a call's output (§5.20 *Hosts
+        outside a workflow*). The call's argument names are the references
+        it binds (an ``acs:<argument>`` anchor may cite one), and no
+        ``evidence_seen`` is given. Returns the refusal's text form (F505,
+        kept in ``diagnostics`` and a call record) when the output fails a
+        policy that requires the call's capability, else None. ``output``
+        that is not an object fails as an output with no anchors."""
+        if not self.config.grounding:
+            return None
+        mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+        capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
+        policies = [
+            p for p in self.config.grounding if capability and p.requires(capability)
+        ]
+        if not policies:
+            return None
+        bound = [
+            k
+            for k in (args if isinstance(args, dict) else {})
+            if isinstance(k, str) and _IDENTIFIER.fullmatch(k)
+        ]
+        message: str | None = None
+        if not isinstance(output, dict):
+            message = (
+                f"{tool}'s result holds no {capability} output (section 5.18.9), "
+                "so nothing grounds it, and a grounding policy requires "
+                f"{capability} (section 5.20)"
+            )
+        else:
+            for policy in policies:
+                result = check_output(output, policy, bound_refs=bound)
+                if not result.ok:
+                    message = f"{tool}'s output: {result.message}"
+                    break
+        if message is None:
+            return None
+        # The call has run (section 5.20): its outcome is a failure with the
+        # code, recorded against the call, not a refusal of a call that did
+        # not run. The post-call hooks do not record it again.
+        text = self._refuse(
+            ErrorCode.PROVENANCE_MISSING,
+            mapping,
+            tool,
+            call,
+            message,
+            outcome="failed",
+        )
+        if call is not None:
+            with self._state_lock:
+                self._outcome_recorded.add(call)
+        return text
+
+    def _take_outcome_recorded(self, call: str | None) -> bool:
+        """Whether a grounded MCP tool already recorded ``call``'s outcome
+        (and forget it)."""
+        if call is None:
+            return False
+        with self._state_lock:
+            if call in self._outcome_recorded:
+                self._outcome_recorded.discard(call)
+                return True
+            return False
+
     # ------------------------------------------------------------------
     # Records (STANDARD 1.2.0 section 5.18.8)
     # ------------------------------------------------------------------
@@ -472,7 +731,7 @@ class GroundedAgentAdapter:
         changed, not for every record."""
         from . import __version__, _core
 
-        settings = {
+        settings: dict[str, Any] = {
             "strict_mode": self.config.strict_mode,
             "approval": self.config.approval,
             "expiry_minutes": self.config.expiry_minutes,
@@ -487,6 +746,10 @@ class GroundedAgentAdapter:
             "ontology_version": self.registry.version,
             "prompting_modes": sorted(PROMPTING_PERMISSION_MODES),
         }
+        if self.config.grounding:
+            # The policies behind F505 refusals (section 5.20); no secret
+            # value is ever part of the configuration's digest.
+            settings["grounding"] = [p.to_dict() for p in self.config.grounding]
         key = (self.mapper.records_revision, _core.canonical_json(settings))
         cached = self._config_digest
         if cached is not None and cached[0] == key:
@@ -524,10 +787,24 @@ class GroundedAgentAdapter:
         if call is not None:
             entry["call"] = call
         entry["decision"] = decision
-        entry.update({k: v for k, v in details.items() if v is not None})
+        kept = {k: v for k, v in details.items() if v is not None}
+        # A record of a call carries no secret (§6.7).
+        kept, _ = self.redactor.redact(kept)
+        entry.update(kept)
         entry["recorded_by"] = self.recorded_by
         with self._state_lock:
+            self._record_seq += 1
+            entry["seq"] = self._record_seq
             self.call_records.append(entry)
+
+    def export_action_records(self, scope: str) -> list[dict[str, Any]]:
+        """The call records still kept, as audit records (STANDARD 1.2.0
+        section 6.4), in the order written; ``scope`` names the layer scope
+        (see ``call_action_record``). A boundary entry has none."""
+        with self._state_lock:
+            entries = list(self.call_records)
+        records = (call_action_record(entry, scope) for entry in entries)
+        return [record for record in records if record is not None]
 
     def _refuse(
         self,
@@ -536,10 +813,16 @@ class GroundedAgentAdapter:
         tool: str,
         call: str | None,
         message: str,
+        *,
+        outcome: Literal["refused", "failed"] = "refused",
         **details: Any,
     ) -> str:
         """A refusal (section 5.18.8): the §9.8 diagnostic, kept in
-        ``diagnostics`` and a call record; returns its text form."""
+        ``diagnostics`` and a call record; returns its text form. Its message
+        is redacted (§6.7): a diagnostic carries no secret. ``outcome`` is
+        the record's decision: ``refused`` for a call that does not run,
+        ``failed`` for one that ran and whose result is refused (F505)."""
+        message, _ = self.redactor.redact_text(message)
         location: dict[str, Any] = {"tool": tool}
         if mapping is not UNCLASSIFIED_TOOL and mapping.capability_id:
             location["capability"] = mapping.capability_id
@@ -550,7 +833,7 @@ class GroundedAgentAdapter:
             self.diagnostics.append(error)
         try:
             self._record(
-                "refused",
+                outcome,
                 tool,
                 mapping,
                 call,
@@ -638,12 +921,38 @@ class GroundedAgentAdapter:
                 )
         return None
 
-    def _allow_token(self, tool: str, args: Any, delta: int = 1) -> None:
+    def _allow_token(
+        self, tool: str, args: Any, delta: int = 1, call: str | None = None
+    ) -> None:
+        """Grant (``delta`` > 0) or withdraw (``delta`` < 0) the decision for
+        a call of ``tool`` with ``args``; a withdrawal takes ``call``'s own
+        grant when it has one, else the oldest."""
         key = (tool, _args_key(args))
         with self._state_lock:
-            self._allowed[key] += delta
-            if self._allowed[key] <= 0:
+            calls = self._allowed.setdefault(key, [])
+            if delta > 0:
+                calls.extend([call] * delta)
+            for _ in range(-delta):
+                if not calls:
+                    break
+                if call in calls:
+                    calls.remove(call)
+                else:
+                    calls.pop(0)
+            if not calls:
                 del self._allowed[key]
+
+    def _take_allowed(self, tool: str, args: Any) -> tuple[bool, str | None]:
+        """:meth:`take_allowed`, and the call id of the decision used."""
+        key = (tool, _args_key(args))
+        with self._state_lock:
+            calls = self._allowed.get(key)
+            if not calls:
+                return False, None
+            call = calls.pop(0)
+            if not calls:
+                del self._allowed[key]
+            return True, call
 
     def take_allowed(self, tool: str, args: Any) -> bool:
         """Use up this layer's decision for a call of ``tool`` with ``args``.
@@ -653,14 +962,42 @@ class GroundedAgentAdapter:
         the call reached the tool without the layer allowing it, and the
         tool refuses with R407 (section 5.18.8).
         """
-        key = (tool, _args_key(args))
+        return self._take_allowed(tool, args)[0]
+
+    def _register_grounded_tool(self, tool: str) -> None:
+        """Note that ``create_grounded_mcp_server`` serves ``tool``: its
+        output reaches this layer, so a grounding policy checks it."""
         with self._state_lock:
-            if self._allowed.get(key, 0) <= 0:
-                return False
-            self._allowed[key] -= 1
-            if self._allowed[key] <= 0:
-                del self._allowed[key]
-            return True
+            self._grounded_tools.add(tool)
+
+    def _warn_unchecked_output(self, mapping: ToolMapping, tool: str) -> None:
+        """Warn, once per tool, that a grounding policy requires the
+        capability of a call whose output this layer never sees (a tool
+        that ``create_grounded_mcp_server`` does not serve, Claude Code's
+        own tools included): section 5.20 is not applied to it."""
+        if not self.config.grounding or mapping is UNCLASSIFIED_TOOL:
+            return
+        required = sorted(
+            {
+                c
+                for c in mapping.capabilities
+                for p in self.config.grounding
+                if p.requires(c)
+            }
+        )
+        if not required:
+            return
+        with self._state_lock:
+            if tool in self._grounded_tools or tool in self._ungrounded_warned:
+                return
+            self._ungrounded_warned.add(tool)
+        logger.warning(
+            "A grounding policy requires %s, but %s is not a tool "
+            "create_grounded_mcp_server serves: its result is not a capability "
+            "output this layer sees, so section 5.20 is not applied to its calls",
+            ", ".join(required),
+            tool,
+        )
 
     def _get_or_create_workflow_engine(self) -> Any:
         """Lazy-create a WorkflowEngine for discovery integration."""
@@ -934,6 +1271,7 @@ class GroundedAgentAdapter:
                 ended = tracker.end_validity(f"turn ended in session {session}")
                 with self._state_lock:
                     self._allowed.clear()
+                    self._outcome_recorded.clear()
                 self._record(
                     "boundary",
                     "",
@@ -1100,6 +1438,11 @@ class GroundedAgentAdapter:
                         )
                     )
 
+                refusal = self._secret_refusal(mapping, tool_name, call, tool_input)
+                if refusal is not None:
+                    return deny(refusal)
+                self._warn_unchecked_output(mapping, tool_name)
+
                 refusal = self._prerequisite_refusal(mapping, tool_name, call)
                 if refusal is not None:
                     if strict:
@@ -1199,7 +1542,7 @@ class GroundedAgentAdapter:
                             )
                         )
                     message = _approval_request(mapping, tool_name)
-                    self._allow_token(tool_name, tool_input)
+                    self._allow_token(tool_name, tool_input, call=call)
                     self._record(
                         "asked",
                         tool_name,
@@ -1212,7 +1555,7 @@ class GroundedAgentAdapter:
                     logger.info("PreToolUse asks: %s", message)
                     return decide("ask", message)
 
-                self._allow_token(tool_name, tool_input)
+                self._allow_token(tool_name, tool_input, call=call)
                 self._record(
                     "allowed",
                     tool_name,
@@ -1296,13 +1639,14 @@ class GroundedAgentAdapter:
                 if not is_error and mapping is not UNCLASSIFIED_TOOL:
                     with self._state_lock:
                         self._executed.update(mapping.capabilities)
-                self._record(
-                    "failed" if is_error else "ran",
-                    tool_name,
-                    mapping,
-                    holder,
-                    checkpoint_id=checkpoint_id,
-                )
+                if not self._take_outcome_recorded(holder):
+                    self._record(
+                        "failed" if is_error else "ran",
+                        tool_name,
+                        mapping,
+                        holder,
+                        checkpoint_id=checkpoint_id,
+                    )
             except Exception as e:
                 logger.warning("Post-call recorder failed: %s", e)
             return {}
@@ -1336,13 +1680,14 @@ class GroundedAgentAdapter:
                         tool_name,
                         checkpoint_id,
                     )
-                self._record(
-                    "failed",
-                    tool_name,
-                    None,
-                    holder,
-                    checkpoint_id=checkpoint_id,
-                )
+                if not self._take_outcome_recorded(holder):
+                    self._record(
+                        "failed",
+                        tool_name,
+                        None,
+                        holder,
+                        checkpoint_id=checkpoint_id,
+                    )
             except Exception as e:
                 logger.warning("Failure recorder failed: %s", e)
             return {}
@@ -1503,7 +1848,7 @@ class GroundedAgentAdapter:
                             "set GroundedAgentConfig(approval='off').",
                             tool_name,
                         )
-                        self._allow_token(tool_name, input_data, -1)
+                        self._allow_token(tool_name, input_data, -1, holder)
                         return deny(
                             self._refuse(
                                 ErrorCode.APPROVAL_REQUIRED,
@@ -1519,7 +1864,7 @@ class GroundedAgentAdapter:
                         )
                     checkpoint_id, refusal = use_checkpoint(mapping0, tool_name, holder)
                     if refusal is not None:
-                        self._allow_token(tool_name, input_data, -1)
+                        self._allow_token(tool_name, input_data, -1, holder)
                         return deny(refusal, None)
                     self._record(
                         "allowed",
@@ -1535,7 +1880,7 @@ class GroundedAgentAdapter:
                 if inspect.isawaitable(result):
                     result = await result
                 if not _is_allow(result):
-                    self._allow_token(tool_name, input_data, -1)
+                    self._allow_token(tool_name, input_data, -1, holder)
                     if asks and mapping0.requires_approval:
                         reason = getattr(result, "message", "") or "denied"
                         return deny(
@@ -1558,7 +1903,9 @@ class GroundedAgentAdapter:
                 if _args_key(args1) != _args_key(input_data):
                     # Section 5.18.7, changed arguments: classify again.
                     mapping1 = mapper.map_tool(tool_name, args1)
-                    refusal = self._prerequisite_refusal(mapping1, tool_name, holder)
+                    refusal = self._secret_refusal(
+                        mapping1, tool_name, holder, args1
+                    ) or self._prerequisite_refusal(mapping1, tool_name, holder)
                     if refusal is None and (
                         mapping1.requires_checkpoint
                         and not mapping0.requires_checkpoint
@@ -1582,10 +1929,10 @@ class GroundedAgentAdapter:
                             f"the decision was on other arguments",
                         )
                     if refusal is not None:
-                        self._allow_token(tool_name, input_data, -1)
+                        self._allow_token(tool_name, input_data, -1, holder)
                         return deny(refusal, holder)
-                    self._allow_token(tool_name, input_data, -1)
-                    self._allow_token(tool_name, args1)
+                    self._allow_token(tool_name, input_data, -1, holder)
+                    self._allow_token(tool_name, args1, call=holder)
                     if (
                         mapping0.requires_checkpoint
                         and not mapping1.requires_checkpoint
@@ -1594,7 +1941,7 @@ class GroundedAgentAdapter:
 
                 checkpoint_id, refusal = use_checkpoint(mapping1, tool_name, holder)
                 if refusal is not None:
-                    self._allow_token(tool_name, args1, -1)
+                    self._allow_token(tool_name, args1, -1, holder)
                     return deny(refusal, None)
                 digest = None
                 if mapping1.requires_approval:
@@ -1653,11 +2000,22 @@ class GroundedAgentAdapter:
         """
         if isinstance(scope, str):
             scope = [scope]
-        return self.checkpoint_tracker.create_checkpoint(
+        checkpoint_id = self.checkpoint_tracker.create_checkpoint(
             scope=scope,
             reason=reason,
             expiry_minutes=self.config.expiry_minutes,
         )
+        # The record of the action grounds the checkpoint's output (§3.1).
+        try:
+            self.evidence_store.append(
+                EvidenceAnchor.from_checkpoint(checkpoint_id), capability="checkpoint"
+            )
+        except Exception as e:  # noqa: BLE001 - best-effort capture (§6.4)
+            logger.warning("Could not record the checkpoint's evidence: %s", e)
+            report = getattr(self.evidence_store, "record_capture_failure", None)
+            if callable(report):
+                report(None, str(e))
+        return checkpoint_id
 
     def consume_checkpoint(self) -> str | None:
         """
@@ -1682,11 +2040,19 @@ class GroundedAgentAdapter:
         Returns:
             List of evidence reference strings
         """
-        return self.evidence_store.get_recent(n)
+        recent = getattr(self.evidence_store, "get_recent", None)
+        if callable(recent):
+            return list(recent(n))
+        records = self.evidence_store.records()
+        return [r.anchor.ref for r in records[max(0, len(records) - n) :]]
 
     def get_mutations(self) -> list[EvidenceAnchor]:
-        """Get all mutation evidence anchors."""
-        return self.evidence_store.get_mutations()
+        """Get all mutation evidence anchors (refs ``mutation:``)."""
+        return [
+            r.anchor
+            for r in self.evidence_store.records()
+            if r.anchor.ref.startswith("mutation:")
+        ]
 
     @property
     def ontology_version(self) -> str:

@@ -81,6 +81,7 @@ codes! {
     ApprovalRequired = "F502", "APPROVAL_REQUIRED", Error;
     RollbackFailed = "F503", "ROLLBACK_FAILED", Error;
     ConstraintViolated = "F504", "CONSTRAINT_VIOLATED", Error;
+    // A grounding policy's check of an output failed (STANDARD v1.2 §5.20).
     ProvenanceMissing = "F505", "PROVENANCE_MISSING", Error;
     GatedControlAction = "F506", "GATED_CONTROL_ACTION", Error;
 

@@ -211,12 +211,13 @@ pub(crate) fn check_delay(
     if duration_field(value, "delay", &at, report).is_some_and(|d| d.is_zero()) {
         report.push(s303(&at, "delay", "delay must be longer than zero".into()));
     }
-    // Its group runs at the same time: whether the others wait is unclear.
+    // Its group's members are not ordered (§5.2.3): whether the others
+    // wait is unclear.
     if step.contains_key("parallel_group") {
         report.push(s303(
             &at,
             "delay",
-            "a step in a parallel_group cannot delay: the group runs concurrently".into(),
+            "a step in a parallel_group cannot delay: the group's members are not ordered and may run concurrently".into(),
         ));
     }
 }

@@ -13,6 +13,8 @@ else, with the standard library only:
   ``conflict_resolution_function.formula`` names
 - :class:`TrustModel`: the values of ``authority_trust_model.yaml``, with the
   three functions applied to them
+- :func:`manual_override`: a manual override (§8.4), refused or recorded as
+  the model's ``overrides`` say, before it takes effect
 
 ``tests/conformance/trust/*.json`` holds language-neutral vectors for the
 three functions.
@@ -31,15 +33,19 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 __all__ = [
     "TRUST_CLASS_PREFIX",
+    "OverrideRefused",
     "TrustModel",
     "decay_factor",
     "half_life_days",
+    "manual_override",
     "static_weight",
     "trust_score",
 ]
@@ -229,6 +235,8 @@ class TrustModel:
     """``decay_model.half_life``, in days."""
     min_trust: float | None = None
     """``decay_model.min_trust``: the floor on the decay factor, if set."""
+    overrides: Mapping[str, Any] = field(default_factory=dict)
+    """``overrides``: what a manual override needs (§8.4)."""
 
     @classmethod
     def from_mapping(cls, model: Mapping[str, Any]) -> TrustModel:
@@ -257,6 +265,7 @@ class TrustModel:
             min_trust=(
                 None if min_trust is None else _unit(min_trust, "decay_model.min_trust")
             ),
+            overrides=dict(model.get("overrides") or {}),
         )
 
     def decay_factor(self, age_days: float) -> float:
@@ -300,3 +309,81 @@ class TrustModel:
             self.decay_factor(age_days),
             confidence,
         )
+
+    def manual_override(
+        self,
+        *,
+        target: str,
+        previous: Any,
+        value: Any,
+        actor_identity: Mapping[str, Any] | None,
+        anchors: Sequence[Mapping[str, Any]],
+        record: Callable[[dict[str, Any]], None],
+        now: str | None = None,
+    ) -> dict[str, Any]:
+        """:func:`manual_override` under the model's ``overrides``."""
+        return manual_override(
+            {"overrides": self.overrides},
+            target=target,
+            previous=previous,
+            value=value,
+            actor_identity=actor_identity,
+            anchors=anchors,
+            record=record,
+            now=now,
+        )
+
+
+class OverrideRefused(ValueError):
+    """A manual override the trust model's ``overrides`` do not allow
+    (STANDARD v1.2 §8.4): overrides are off, or it cites no anchor where one
+    is required."""
+
+
+def manual_override(
+    model: Mapping[str, Any],
+    *,
+    target: str,
+    previous: Any,
+    value: Any,
+    actor_identity: Mapping[str, Any] | None,
+    anchors: Sequence[Mapping[str, Any]],
+    record: Callable[[dict[str, Any]], None],
+    now: str | None = None,
+) -> dict[str, Any]:
+    """A manual override of ``target`` (a trust score, or which value won a
+    conflict), from ``previous`` to ``value``, by ``actor_identity``
+    (STANDARD v1.2 §8.4), under the loaded trust model's ``overrides``.
+
+    It is refused (:class:`OverrideRefused`) when ``allow_manual_override``
+    is false, or ``requires_anchors`` is true and ``anchors`` is empty. With
+    ``audit_required`` (the default), its action record is handed to
+    ``record`` before this returns, and an exception ``record`` raises
+    propagates: the override then does not take effect. Apply the value only
+    after this returns. Returns the action record.
+    """
+    rules: Mapping[str, Any] = model.get("overrides") or {}
+    if rules.get("allow_manual_override") is False:
+        raise OverrideRefused("the trust model allows no manual override (§8.4)")
+    if rules.get("requires_anchors", True) and not anchors:
+        raise OverrideRefused(
+            "a manual override cites at least one evidence anchor for the value "
+            "it sets (§8.4)"
+        )
+    timestamp = now or datetime.now(UTC).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z"
+    )
+    rec: dict[str, Any] = {
+        "action_id": uuid.uuid4().hex,
+        "timestamp": timestamp,
+        "actor": (actor_identity or {}).get("kind", "agent"),
+        "intent": f"manual trust override of {target}",
+        "status": "executed",
+        "details": {"target": target, "previous": previous, "value": value},
+        "anchors": [dict(a) for a in anchors],
+    }
+    if actor_identity is not None:
+        rec["actor_identity"] = dict(actor_identity)
+    if rules.get("audit_required", True):
+        record(rec)
+    return rec

@@ -190,7 +190,7 @@ requirement of the other.
 | `synchronize`, quorum ([§5.16](../../spec/STANDARD-v1.1.0.md#516-quorum)) | No agreement or voting construct | ACS only | Built from several children and code that counts |
 | `inquire` | A human-backed side: the session parks until input arrives | Fits | A tool returns the questions and the model puts them to the person in a reply that hands over the turn |
 | Nothing comparable | `parentHooks`: hooks a child requires of its parent, failing closed ([Agents §6](https://standardagentspec.org/0.2.0/specification/agents#6-required-parent-hooks)) | SA only | A grounded child can require its audit hook on whoever composes it |
-| Nothing comparable | Handoff: another agent takes over the same thread | SA only | The end of one actor's run and the start of another's |
+| Nothing comparable | Handoff: another agent takes over the same thread | SA only | The end of one actor's run and the start of another's: the host cancels the source agent's ACS run if it has not ended (§5.17, §5.19.5 of 1.2); a run that ended `deferred` may instead be resumed under the agent that took over (§5.14.1). A saved run is never restored under it |
 | Safety flags of what a delegate may do | No machine-readable statement of a child's effects | ACS only | A parent cannot know that a child mutates. Each agent grounds its own tools |
 
 ### Workflows
@@ -231,9 +231,12 @@ model family for a child. Two of them touch evidence:
   `prefilter_llm_history` change what one model request sees, and must leave
   the stored history untouched. Evidence stays on record, but a model can be
   shown less than the record holds.
-- **Secrets.** A tool declares which of its variables are `secret`. ACS has no
-  normative rule keeping secret values out of evidence anchors (some skills
-  say so in prose), so the author of a grounded tool has to.
+- **Secrets.** A tool declares which of its variables are `secret`. Standard
+  1.2.0 keeps secrets out of evidence, records, notifications, diagnostics
+  and stored memory
+  ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)): the binding
+  redacts every trace entry it writes with default patterns, and a grounded
+  tool's `secrets` option registers the deployment's own values.
 
 ## A grounded Standard Agent today
 
@@ -561,11 +564,11 @@ flowchart TB
 
 | §5.14 field | In the binding |
 |---|---|
-| `approver.kind: human` | The authenticated caller of the endpoint. That the caller is a person is the deployment's assertion |
+| `approver.kind: human` | The authenticated caller of the endpoint, recorded as an approver identity per the identity map (`endpoint_caller`): principal `sa-user:<id>`, `kind: human` as the deployment's assertion, `role` when the caller holds the requested one, `authenticated_by: x-acs.sa-caller`, and `trust_class: owner` when the caller owns the thread. The trace entry's `approval` carries the approvers that counted when the call ran (an approval that had lapsed is not listed): their principals in `approvers` and their `approver_identities` (§5.17 of 1.2) |
 | `approver.role` | `approval.role`, checked against the caller's `roles` |
 | `approver.min_approvers` | `approval.min_approvers`, an integer of at least 1, counting distinct callers whose approval has not expired |
-| `mode` | Not distinguished: the Standard names `in_session` and `out_of_band` without defining them. The decision always arrives through the endpoint, not the conversation |
-| `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON |
+| `mode` | Decisions arrive through an authenticated endpoint, separate from the conversation: `out_of_band` (§5.14 of 1.2) |
+| `shows`, `binds_to: digest` | The action, capability and arguments; the digest of their canonical JSON, which the endpoint takes in either case and stores in lowercase |
 | `recheck` | Implicit: the digest is recomputed from the arguments at the moment the tool runs |
 | `expires` | `approval.expires_ms`. As in the reference executor, no approval is accepted later than `expires_ms` after the request, and one stored later counts for nothing. Each approval then counts for `expires_ms` after it was given: the executor uses a decision when it arrives, a tool when the model calls again, so a request can be used up to twice `expires_ms` after it was made, however many approvers decide. A rejection is accepted until the request is used or expires, since it can only stop the call |
 | `approver.kind: standing_mandate`, `when_unattended` | Not implemented: an unapproved call is refused, which is `when_unattended: fail` |
@@ -634,7 +637,11 @@ Each call, refused ones too, becomes an entry in a trace kept in the thread's
 key-value store: the tool, its capability, a digest of its arguments, the
 outcome, the checkpoint and approval it used, the composite call that covered
 it, the layer that decided it (`recorded_by`), and its evidence anchors. A
-control tool's call is an entry with `control: true`. The entry is written as
+control tool's call is an entry with `control: true`. `actionRecord(entry,
+scope)` exports an entry as an audit record
+([§6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)), with the thread as
+`scope`: a refused call is `rejected` with its code, and the record keeps the
+entry's `recorded_by`. The entry is written as
 `started` before the tool's own code runs and completed when it returns, so a
 call that is cut off in between (the client API's stop route "**MUST** abort
 the execution in flight") still shows what it used.
@@ -655,6 +662,51 @@ Two SA limits shape this part:
 - **A tool result has no metadata slot.** `HookToolResult` is `status`,
   `result`, `error`, `stack` and `attachments`. Evidence has to travel inside
   `result`, as text the model also reads.
+
+An evidence anchor is the Standard's one item of `evidence_anchors`
+([§6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)): `{ref, kind}`
+with an optional `digest` of what was read. The example tools return such
+anchors (`fileAnchor` gives `{ref: 'file:...', kind: 'file', digest:
+'sha256:...'}`), and `checkpoint_config` also cites the record of the
+checkpoint it took, `{ref: 'checkpoint:<id>', kind: 'record'}`: an output
+that reports an action is grounded by that action's record (§3.1). A bare
+string or another object is a deprecated legacy form: the default output
+check accepts it, as 1.1's did.
+
+The thread's trace is its evidence store
+([§6.6](../../spec/STANDARD-v1.2.0.md#66-evidence-records-and-stores)):
+`exportEvidence(state)` gives the thread's anchors as `EvidenceRecord`s
+(`record_id` `<threadId>/<seq>/<index>`, the execution as `run_id`, the
+step, capability, tool and call id), `getEvidence(state, recordId)` one by
+its id, `findEvidence(state, {capability, kind, run_id})` those that match,
+and `exportEvidenceJsonl(state)` the JSON Lines export, each in the order
+they were appended. The store is deleted with its thread, so it is `session`
+durability, not bounded (`EVIDENCE_STORE_INFO`): evidence that must outlive
+the thread is exported when it is written. When a call completes with
+evidence anchors, the binding emits `acs.evidence_recorded` through
+`state.emit`, at most once and only to connected clients: it is a
+notification, not the record, and an `emit` that is missing or throws never
+fails the call.
+
+A grounded tool takes three more options:
+
+- **`grounding`**: one policy or a list
+  ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). When a policy
+  requires the tool's capability, an output that is neither grounded nor
+  marked inferred (`inference_method` and `confidence`) is refused with F505
+  and its entry recorded `failed`. A policy naming a capability the
+  ontology does not define throws when the tool is defined (V101). Without
+  the option the output check is 1.1's: items, `inference_method` and an
+  optional `confidence` are not checked.
+- **`seen`**: what the call's producer had, as `evidence_seen`: only what
+  this call received (`refsIn(args)`) and what the tool's own code read
+  during `execute`. Never the stored trace: a ref there was seen by an
+  earlier request, not by this one.
+- **`secrets`**: values the redactor replaces besides its default patterns.
+  Redaction is always on: every trace entry's `evidence_anchors` and
+  `error`, and every notification, pass through it. A `persist` or `audit`
+  tool refuses data that holds a credential-shaped value or a registered
+  secret (F504, §5.18.10).
 
 ### Checking a prompt before it runs
 
@@ -715,10 +767,9 @@ checkpoint's maximum age (ten minutes), how it obtains approval (recorded
 through the endpoint) and how it keeps a check and its use atomic (the
 runtime's order, and `serially` within a realm). It lists its host gaps, the
 rows of the table above that rest on SA behaviour the text does not state, and
-the checks of §5.18.10 it does not apply yet: the secret checks of `persist`
-and `audit`, the redaction of the records and evidence it writes (an
-output's `evidence_anchors` are copied into the trace as they are) and of a
-`transform` output it records (§6.7), and the destination policy of `send`.
+the checks of §5.18.10 it does not apply yet: the destination policy of
+`send`. It applies the secret checks of `persist` and `audit` and redacts
+every trace entry it writes (§6.7).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
@@ -772,11 +823,11 @@ With a handler as host, each executor action has a Standard Agents mechanism:
 |---|---|
 | `InvokeCapability` | `state.invokeTool(name, inputs)`, or a child agent for `delegate`. The result string is parsed and checked against the capability's output contract |
 | `CreateCheckpoint`, `Rollback` | A grounded `checkpoint` or `rollback` tool |
-| `RequestApproval` | An approval record and an authenticated endpoint, as in the binding. The executor supplies the shown values and the digest |
+| `RequestApproval` | An approval record and an authenticated endpoint, as in the binding. The executor supplies the shown values and the digest. The prompt to the approvers is protocol traffic, not a `send` step, when it carries only the action's values ([STANDARD §5.19.6](../../spec/STANDARD-v1.2.0.md#5196-protocol-traffic)) |
 | `AwaitEvent` | The handler returns. An inbound message, a child's completion, or an authenticated endpoint that queues the event wakes it |
-| `Sleep`, deadlines | `scheduleEffect(name, args, delay)` with an effect that queues a message. SA requires only that an effect is enqueued and its arguments kept, so the handler also calls `run.tick(now)` on every inbound message |
-| `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code |
-| The run between turns | `run.snapshot()` in the key-value store or a file, restored at the start of the next turn |
+| `Sleep`, deadlines | `scheduleEffect(name, args, run.wake_at() - now)` with an effect that queues a message: `wake_at` is the earliest time a tick changes the run ([STANDARD §5.19.3](../../spec/STANDARD-v1.2.0.md#5193-time)). SA requires only that an effect is enqueued and its arguments kept, so the handler also calls `run.tick(now)` on every inbound message |
+| `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code. Delivering the result is protocol traffic (§5.19.6). The run's record (§5.19.8) and its action records go where the handler keeps its audit records |
+| The run between turns | `run.snapshot()` in the key-value store, restored at the start of the next turn. The runtime runs one execution per thread, which gives the one writer a run needs ([§5.19.4](../../spec/STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)); the handler saves after every change, before it acts. A client that stops an execution leaves an interrupted turn: the next turn restores the latest state, unless the handler cancels the run. To stay within the store's value-size cap, the handler moves `run.take_trace()` into thread storage and `run.take_records()` into its audit records each turn |
 
 What stands in the way is the language, not the design. The reference core is
 a Rust crate with Python bindings. It compiles for `wasm32-unknown-unknown`
@@ -1030,7 +1081,8 @@ requires for normative changes.
    capability depends on its arguments and a tool that only signals the host.
 3. **One evidence anchor item.** `evidence_anchors` had no item schema, and
    the schemas and the Python SDK used three different vocabularies of anchor
-   kinds. RFC-0005 left this to the evidence rules of Standard 1.2.0.
+   kinds. Standard 1.2.0 has one evidence anchor (§6.5, RFC-0008), which
+   this binding's tools return and its trace records.
 
 ### Still open
 
@@ -1050,10 +1102,15 @@ requires for normative changes.
   an agent manifest would let a validator derive a `delegate` step's flags
   from its target. Until then a workflow author raises the step's flags
   ([How a delegate step maps to a host](#how-a-delegate-step-maps-to-a-host)).
-- **What applying a domain profile changes**, and **a rule that keeps
-  secrets out of evidence, audit records and stored data**, both normative.
+- **What applying a domain profile changes**, normative. (The rule that
+  keeps secrets out of evidence, audit records and stored data is Standard
+  1.2.0's [§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records).)
 - **The host protocol as a published schema**, with a conformance class for
-  executors; today it is described in a guide and defined in Rust types.
+  executors: Standard 1.2.0 gives it, as
+  [§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol),
+  `schemas/host_protocol.schema.json` and class EX (§10.5), with
+  cancellation, wake-up times and a run record every host keeps; what stays
+  open is a JavaScript build to run it in a thread.
 
 Standard Agents also does several things ACS could learn from: numbered,
 testable runtime rules for storage; `uses`, a declared and enforced list of

@@ -114,7 +114,10 @@ The open items are listed below.
 
 ### Runtime and ecosystem
 
-- [Streaming events for real-time evidence collection](https://github.com/synaptiai/agent-capability-standard/issues/77)
+- [Streaming events for real-time evidence collection](https://github.com/synaptiai/agent-capability-standard/issues/77):
+  delivered in the Standard 1.2.0 Candidate as the optional
+  `acs.evidence_recorded` notification (STANDARD-v1.2.0 §6.6), which the
+  Python evidence stores and the Standard Agents binding send
 - [Trust calibration tooling](https://github.com/synaptiai/agent-capability-standard/issues/78)
 - [Domain profile marketplace](https://github.com/synaptiai/agent-capability-standard/issues/79)
 - [Automated compliance reporting](https://github.com/synaptiai/agent-capability-standard/issues/80)

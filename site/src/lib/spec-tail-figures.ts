@@ -90,8 +90,11 @@ export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
  */
 export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: string; what: string }>> = {
   'table-4.1': { section: '4.1 ', name: 'Capability fields', what: 'A capability' },
+  'table-5.1': { section: '5.1 ', name: 'Fields every workflow defines', what: 'The part every workflow defines' },
   'table-5.18.1': { section: '5.18.1 ', name: 'Tool binding fields', what: 'A tool binding' },
   'table-6.3': { section: '6.3 ', name: 'World-state fields', what: 'A world state snapshot' },
+  'table-6.5': { section: '6.5 ', name: 'Evidence anchor fields', what: 'An evidence anchor' },
+  'table-6.6': { section: '6.6 ', name: 'Evidence record fields', what: 'An evidence record' },
 };
 
 // ---------------------------------------------- §5.18 code tables
@@ -533,6 +536,57 @@ export function suiteCaption(parts: SuitePart[]): string {
     return p.count === 1 ? words.replace(/s$/, '') : words;
   };
   return `The repository's conformance suite: ${andList(parts.map((p) => `${p.count} ${name(p)}`))}; ${name(top)} are the largest part.`;
+}
+
+// ------------------------------------------------ the approval digest vectors (§10.3)
+
+export const DIGEST_VECTORS_SOURCE = 'tests/conformance/approval/digests.json';
+
+export interface DigestGroup {
+  label: string;
+  count: number;
+  /** The group's name for one vector and for several, for the caption. */
+  one: string;
+  many: string;
+}
+
+const DIGEST_GROUPS = [
+  { label: 'Steps that declare shows', one: 'step that declares shows', many: 'steps that declare shows' },
+  { label: 'Steps that show their resolved inputs', one: 'step that shows its resolved inputs', many: 'steps that show their resolved inputs' },
+  { label: 'Steps asked again after a recheck', one: 'step asked again after a recheck', many: 'steps asked again after a recheck' },
+  { label: 'Tool calls', one: 'tool call', many: 'tool calls' },
+] as const;
+
+/**
+ * The approval digest vectors §10.3 makes normative, grouped by what they
+ * show (§5.14, §5.18.7): a step's `shows` values, a step's resolved inputs
+ * (no `shows`), a step asked again after a recheck, and a tool call. Checked
+ * against §10.3, which must name the file and both kinds, and against the
+ * file, which must say it is normative.
+ */
+export function digestVectors(text: string, where: string): DigestGroup[] {
+  const prose = sectionBlocks(text, '10.3 ', where).map((b) => toString(b)).join(' ');
+  for (const k of [DIGEST_VECTORS_SOURCE, 'step', 'tool_call']) {
+    if (!prose.includes(k)) throw new Error(`${where}: §10.3 no longer names ${k}`);
+  }
+  type Vector = { name: string; kind: string; approval?: { shows?: unknown; recheck?: unknown } | null };
+  const doc = JSON.parse(readRepoFile(DIGEST_VECTORS_SOURCE)) as { status?: unknown; vectors?: Vector[] };
+  if (doc.status !== 'normative' || !Array.isArray(doc.vectors)) throw new Error(`${DIGEST_VECTORS_SOURCE}: not a normative list of vectors`);
+  const groupOf = (v: Vector): number => {
+    if (v.kind === 'tool_call') return 3;
+    if (v.kind !== 'step') throw new Error(`${DIGEST_VECTORS_SOURCE}: vector ${v.name} has kind ${v.kind}`);
+    if (v.approval?.recheck) return 2;
+    return v.approval && 'shows' in v.approval ? 0 : 1;
+  };
+  const counts = DIGEST_GROUPS.map(() => 0);
+  for (const v of doc.vectors) counts[groupOf(v)]!++;
+  return DIGEST_GROUPS.map((g, i) => ({ ...g, count: counts[i]! })).filter((g) => g.count > 0);
+}
+
+export function digestCaption(groups: DigestGroup[]): string {
+  const total = groups.reduce((a, g) => a + g.count, 0);
+  const parts = groups.map((g) => plural(g.count, g.one, g.many));
+  return `The ${plural(total, 'normative approval digest vector', 'normative approval digest vectors')}: ${andList(parts)}; each gives the canonical JSON of what is shown and its SHA-256.`;
 }
 
 // ---------------------------------------------- F-S30 which change bumps which number

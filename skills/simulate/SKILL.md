@@ -89,8 +89,8 @@ simulation_meta:
   steps_executed: number
   branches_explored: number
   assumptions: array[string]
-confidence: 0..1
-evidence_anchors: ["model:component", "assumption:id"]
+confidence: number  # probability that the simulated outcome is what would happen (§4.1.1)
+evidence_anchors: [{ref: "model:component", kind: record}, {ref: "assumption:id", kind: record}]
 ```
 
 ### Field Definitions
@@ -102,8 +102,8 @@ evidence_anchors: ["model:component", "assumption:id"]
 | `final_state` | object | Most likely end state |
 | `insights` | array | Risks, opportunities, and surprises found |
 | `simulation_meta` | object | Simulation parameters and assumptions |
-| `confidence` | number | 0.0-1.0 confidence in the simulation model |
-| `evidence_anchors` | array | References to the model components and assumptions used |
+| `confidence` | number | Probability, 0.0-1.0, that the simulated outcome is what would happen (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the model components and assumptions used |
 
 ## Examples
 
@@ -197,9 +197,9 @@ simulation_meta:
     - "CI environment matches production"
 confidence: 0.75
 evidence_anchors:
-  - "Gemfile:dependencies"
-  - "rails upgrade guide:7.0"
-  - "gem:devise_token_auth:compatibility"
+  - {ref: "file:Gemfile:dependencies", kind: file}
+  - {ref: "rails upgrade guide:7.0", kind: x-doc}
+  - {ref: "gem:devise_token_auth:compatibility", kind: x-doc}
 ```
 
 ### Example 2: Simulate Failure Scenario
@@ -287,9 +287,9 @@ simulation_meta:
     - "Cache TTL is 5 minutes"
 confidence: 0.65
 evidence_anchors:
-  - "config/database.yml:pool_settings"
-  - "app/services/circuit_breaker.rb"
-  - "architecture:failure_modes"
+  - {ref: "file:config/database.yml:pool_settings", kind: file}
+  - {ref: "file:app/services/circuit_breaker.rb", kind: file}
+  - {ref: "architecture:failure_modes", kind: x-doc}
 ```
 
 ## Verification

@@ -190,6 +190,7 @@ So `block_autonomous`, `require_human`, `checkpoint_policy` and `minimum_confide
 | A step runs only on a valid checkpoint and a decision on what the approver was shown, where its flags require them | The reference executor ([Running workflows](../guides/RUNNING_WORKFLOWS.md#what-the-executor-enforces)) |
 | A tool call needs a checkpoint (F501, strict mode) and is put to the host for approval (F502), where its capability requires them | The Python adapter ([Claude Agent SDK integration](../integrations/claude_agent_sdk.md)) |
 | A Write, Edit, MultiEdit, NotebookEdit or Bash call needs a valid checkpoint marker (F501) | The plugin hook ([Safety hooks](../../hooks/README.md)) |
+| A profile's `evidence_policy`, when a host applies it, is a grounding policy: outputs are grounded or marked inferred (F505, [§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)) | The executor, the Python adapter and the binding |
 
 ## Related Documentation
 

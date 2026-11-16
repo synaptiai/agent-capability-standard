@@ -1,0 +1,169 @@
+{
+  "description": "A quorum's constrain output is built by the executor and not checked, though a policy requires constrain (\u00a73.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "input_bindings": {
+            "task": {
+              "diff": "d"
+            },
+            "agent": "a"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "task": {
+              "diff": "d"
+            },
+            "agent": "b"
+          }
+        },
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "verdicts",
+          "input_bindings": {
+            "accept_from": [
+              "a",
+              "b"
+            ]
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "gate",
+          "input_bindings": {
+            "target": "${verdicts.data}",
+            "constraints": [
+              "two approvals"
+            ],
+            "action_on_violation": "block"
+          },
+          "quorum": {
+            "verdicts": "${verdicts.data}",
+            "reviewers": [
+              "ra",
+              "rb"
+            ],
+            "vocabulary": [
+              "approve",
+              "request_changes"
+            ],
+            "pass_values": [
+              "approve"
+            ],
+            "blocking_values": [
+              "request_changes"
+            ],
+            "min_pass": 2,
+            "pinned_to": "${change}"
+          }
+        }
+      ],
+      "inputs": {
+        "change": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1",
+          "quorum@1",
+          "grounding@1"
+        ]
+      },
+      "grounding": {
+        "require": [
+          "constrain"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {
+    "change": "c1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "receive",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": [
+            {
+              "reviewer_id": "a",
+              "value": "approve",
+              "pinned": "c1"
+            },
+            {
+              "reviewer_id": "b",
+              "value": "approve",
+              "pinned": "c1"
+            }
+          ],
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "gate": {
+        "compliant": true,
+        "evidence_anchors": []
+      }
+    }
+  },
+  "trace_kinds": [
+    "quorum"
+  ]
+}

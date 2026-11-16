@@ -9,7 +9,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from ..state.evidence_store import EvidenceAnchor, EvidenceStore
+from ..state.evidence_store import (
+    COORDINATION_REF_PREFIXES,
+    EvidenceAnchor,
+    EvidenceStore,
+)
 from .audit import CoordinationAuditLog
 
 
@@ -32,7 +36,9 @@ def record_coordination_evidence(
     Args:
         evidence_store: Store to persist the anchor.
         audit_log: Log to record the audit event.
-        ref_prefix: Prefix for the evidence ref (e.g. ``"sync"``).
+        ref_prefix: Prefix for the evidence ref (e.g. ``"sync"``); one of
+            ``COORDINATION_REF_PREFIXES`` (without its colon), where a new
+            prefix is added.
         ref_id: Unique ID appended to the prefix.
         event_type: Audit event type string.
         source_agent_id: Agent that initiated the action.
@@ -44,9 +50,16 @@ def record_coordination_evidence(
         evidence_refs_override: Override the evidence_refs list on the
             audit event.  When ``None``, uses ``[anchor.ref]``.
     """
+    if f"{ref_prefix}:" not in COORDINATION_REF_PREFIXES:
+        raise ValueError(
+            f"coordination ref prefix {ref_prefix!r} is not one of "
+            f"{COORDINATION_REF_PREFIXES}; add it there"
+        )
+    # The record of a coordination action its producer performed grounds
+    # the action's output (STANDARD v1.2 §3.1): kind ``record``.
     anchor = EvidenceAnchor(
         ref=f"{ref_prefix}:{ref_id}",
-        kind="coordination",
+        kind="record",
         timestamp=datetime.now(UTC).isoformat(),
         metadata=metadata,
     )

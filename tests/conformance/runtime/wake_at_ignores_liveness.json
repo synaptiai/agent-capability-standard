@@ -1,0 +1,67 @@
+{
+  "description": "Liveness is the host's to watch, never a wake-up time: a wait's wake-up time is its deadline plus 1 ms, whatever its probe interval (\u00a75.19.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "receive",
+          "purpose": "receive step",
+          "store_as": "r",
+          "timeout": "2h",
+          "wait": {
+            "event_type": "job.done",
+            "liveness": {
+              "mode": "probe",
+              "interval": "10m"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "deadline": 7200000
+      }
+    },
+    {
+      "wake_at": 7200001
+    },
+    {
+      "tick": 600000,
+      "changed": false
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent"
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "job.done"
+        }
+      },
+      "at": 600000
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": []
+}

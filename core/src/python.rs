@@ -8,7 +8,7 @@ use pyo3::exceptions::{
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::diag::{Code, Diagnostic, Severity};
 use crate::exec::{self, Attendance, RecordMode, Response, RestoreError, StartError, StartOptions};
@@ -324,6 +324,7 @@ fn start_err(py: Python<'_>, e: StartError) -> PyErr {
         | StartError::Program(_)
         | StartError::Identity(_)
         | StartError::Unsupported(_)
+        | StartError::Grounding(_)
         | StartError::Header(_) => PyValueError::new_err(message),
     }
 }
@@ -482,17 +483,22 @@ impl PyRun {
         Ok(PyRun { run })
     }
 
-    /// Resume a run from `snapshot()`, against the same catalog. With a key,
-    /// the snapshot's HMAC must match. The catalog's header, and the other
-    /// start options, are the ones the run started with (kept in the state).
+    /// Continue a run from `snapshot()`, against the same catalog. With a
+    /// key, the snapshot's HMAC must match. The catalog's header, and the
+    /// other start options, are the ones the run started with (kept in the
+    /// state). With `actor_identity`, the actor the host continues the run
+    /// for: a principal other than the run's is refused (ValueError), as is
+    /// any actor for a run started without one (STANDARD v1.2 §5.17).
     #[staticmethod]
-    #[pyo3(signature = (validator, catalog, snapshot, key = None, *, catalogs = None, agents = None))]
+    #[pyo3(signature = (validator, catalog, snapshot, key = None, *, actor_identity = None, catalogs = None, agents = None))]
+    #[allow(clippy::too_many_arguments)]
     fn restore(
         py: Python<'_>,
         validator: PyRef<'_, Validator>,
         catalog: &Bound<'_, PyAny>,
         snapshot: &Bound<'_, PyAny>,
         key: Option<Vec<u8>>,
+        actor_identity: Option<&Bound<'_, PyAny>>,
         catalogs: Option<&Bound<'_, PyAny>>,
         agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
@@ -500,14 +506,51 @@ impl PyRun {
         let catalog = catalog_from_py(catalog)?;
         let snapshot: exec::Snapshot = serde_json::from_value(from_py(snapshot)?)
             .map_err(|e| PyValueError::new_err(format!("malformed snapshot: {e}")))?;
+        let options = exec::RestoreOptions {
+            actor_identity: actor_identity.map(from_py).transpose()?,
+        };
         let ctx = &validator.ctx;
         let run = py
-            .detach(|| exec::Run::restore(ctx, &catalog, &snapshot, key.as_deref()))
+            .detach(|| exec::Run::restore_with(ctx, &catalog, &snapshot, key.as_deref(), options))
             .map_err(|e| match e {
                 RestoreError::Start(s) => start_err(py, s),
                 other => PyValueError::new_err(other.to_string()),
             })?;
         Ok(PyRun { run })
+    }
+
+    /// Resume a run that ended `deferred` (STANDARD v1.2 §5.14.1): it
+    /// continues, as the same run, with the steps it deferred, under
+    /// `attendance` from now on and, with `actor_identity`, a new actor
+    /// (§5.17). ValueError when the run did not end deferred, the actor is
+    /// not an `agent_identity`, or the state does not keep what resuming
+    /// needs (a state saved before this executor kept it). Resume one saved
+    /// state once.
+    #[pyo3(signature = (*, attendance = "attended", now_ms, actor_identity = None))]
+    fn resume(
+        &mut self,
+        py: Python<'_>,
+        attendance: &str,
+        now_ms: u64,
+        actor_identity: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<()> {
+        let attendance = match attendance {
+            "attended" => Attendance::Attended,
+            "unattended" => Attendance::Unattended,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "attendance must be 'attended' or 'unattended', not '{other}'"
+                )));
+            }
+        };
+        let options = exec::ResumeOptions {
+            attendance,
+            now_ms,
+            actor_identity: actor_identity.map(from_py).transpose()?,
+        };
+        let run = &mut self.run;
+        py.detach(|| run.resume(options))
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// The pending action, or the terminal one (`Completed`/`Failed`).
@@ -533,9 +576,11 @@ impl PyRun {
     }
 
     /// Pass the time: ends a due `Sleep`, times out a pending action.
-    fn tick(&mut self, py: Python<'_>, now_ms: u64) {
+    /// True when it changed the run (STANDARD v1.2 §5.19.2): a new action is
+    /// pending, or the run ended.
+    fn tick(&mut self, py: Python<'_>, now_ms: u64) -> bool {
         let run = &mut self.run;
-        py.detach(|| run.tick(now_ms));
+        py.detach(|| run.tick(now_ms))
     }
 
     #[getter]
@@ -543,8 +588,22 @@ impl PyRun {
         self.run.is_finished()
     }
 
-    fn trace(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        to_py(py, &Value::Array(self.run.trace().to_vec()))
+    /// The `seq` the run's next trace event gets: read it before a submit,
+    /// and `trace(since=...)` gives what the submit added.
+    #[getter]
+    fn trace_seq(&self) -> u64 {
+        self.run.trace_seq()
+    }
+
+    /// The trace events the run holds; with `since`, those whose `seq` is
+    /// at least `since` (a runner reads what one submit added).
+    #[pyo3(signature = (since = None))]
+    fn trace(&self, py: Python<'_>, since: Option<u64>) -> PyResult<Py<PyAny>> {
+        let events = self.run.trace();
+        let from = since.map_or(0, |s| {
+            events.partition_point(|e| e["seq"].as_u64().is_some_and(|q| q < s))
+        });
+        to_py(py, &Value::Array(events[from..].to_vec()))
     }
 
     fn action_records(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -558,6 +617,62 @@ impl PyRun {
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         to_py(py, &value)
     }
+
+    // ---- the host protocol's run operations (STANDARD v1.2 §5.19) ----
+
+    /// The run's identifier (§5.19.2).
+    #[getter]
+    fn run_id(&self) -> String {
+        self.run.run_id().to_string()
+    }
+
+    /// The earliest time at which a tick changes the run, or None (§5.19.3).
+    fn wake_at(&self) -> Option<u64> {
+        self.run.wake_at()
+    }
+
+    /// Cancel the run (§5.19.5): it ends with `Failed` R408, `reason` as
+    /// its message. ValueError when it ended otherwise than `deferred`.
+    fn cancel(&mut self, py: Python<'_>, reason: &str, now_ms: u64) -> PyResult<()> {
+        let run = &mut self.run;
+        py.detach(|| run.cancel(reason, now_ms))
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// Take the trace out of the run's state (§5.19.4); `seq` goes on.
+    fn take_trace(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        to_py(py, &Value::Array(self.run.take_trace()))
+    }
+
+    /// Take the settled action records out of the run's state (§5.19.4).
+    fn take_records(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        to_py(py, &Value::Array(self.run.take_records()))
+    }
+
+    /// The chain heads over what was taken (§5.19.4): `{"records": ...,
+    /// "trace": ...}`, each empty while nothing was taken.
+    #[getter]
+    fn taken_sha256(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let (records, trace) = self.run.taken_heads();
+        to_py(py, &serde_json::json!({"records": records, "trace": trace}))
+    }
+
+    /// The run's record (§5.19.8), or None while the run goes on.
+    fn run_record(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        match self.run.run_record() {
+            Some(r) => to_py(py, &r),
+            None => Ok(py.None()),
+        }
+    }
+}
+
+/// The first fire time of a validated schedule trigger (`{cron|every,
+/// timezone}`) strictly after `after_ms`, or None (STANDARD v1.2 §5.10.2).
+/// ValueError when the schedule cannot be read.
+#[pyfunction]
+fn next_fire(schedule: &Bound<'_, PyAny>, after_ms: u64) -> PyResult<Option<u64>> {
+    let schedule = from_py(schedule)?;
+    crate::trigger::next_fire(&schedule, after_ms).map_err(PyValueError::new_err)
 }
 
 /// A value as I-JSON (RFC 7493): plain Python data within ±2^53 and at most
@@ -630,6 +745,70 @@ fn destination_allowed(policies: Vec<Vec<String>>, destination: &str) -> bool {
     destination::allowed(&policies, destination)
 }
 
+/// §5.20's check of one output against a grounding policy (STANDARD
+/// v1.2): `policy` is `{kinds?, attested?}` (a `require` is not needed for
+/// one output); `bound_refs` the reference bodies the step's
+/// `input_bindings` make (for a call, its argument names); `evidence_seen`
+/// the host's attestation, None when absent (an empty list attests that the
+/// producer saw nothing). Returns `{status: grounded|inferred|refused, code:
+/// None|"F505", message, counted, legacy, unattested}` (the counts are 0 for
+/// a refused output). ValueError for a malformed policy (a member other
+/// than `require`, `kinds`, `attested` and `x-...` included) or a bound
+/// reference that is not a reference body.
+#[pyfunction]
+#[pyo3(signature = (output, policy, bound_refs = None, evidence_seen = None))]
+fn check_grounding(
+    py: Python<'_>,
+    output: &Bound<'_, PyAny>,
+    policy: &Bound<'_, PyAny>,
+    bound_refs: Option<Vec<String>>,
+    evidence_seen: Option<Vec<String>>,
+) -> PyResult<Py<PyAny>> {
+    let output = from_py(output)?;
+    let Value::Object(p) = from_py(policy)? else {
+        return Err(PyTypeError::new_err("policy must be a dict"));
+    };
+    if let Some(e) = grounding::unknown_member(p.keys()) {
+        return Err(PyValueError::new_err(format!("policy: {e}")));
+    }
+    let kinds: Option<Vec<String>> = match p.get("kinds") {
+        None | Some(Value::Null) => None,
+        Some(k) => Some(
+            serde_json::from_value(k.clone())
+                .map_err(|_| PyValueError::new_err("policy.kinds must be a list of strings"))?,
+        ),
+    };
+    let attested = match p.get("attested") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(PyValueError::new_err("policy.attested must be a boolean")),
+    };
+    // The policy's shape; its `require` does not matter for one output.
+    let policy = grounding::Policy::new(vec!["output".into()], kinds, attested)
+        .map_err(|e| PyValueError::new_err(format!("policy.{e}")))?;
+    let bound =
+        grounding::parse_bound(&bound_refs.unwrap_or_default()).map_err(PyValueError::new_err)?;
+    let result = match grounding::check(&output, &policy, &bound, evidence_seen.as_deref()) {
+        Ok(c) => json!({
+            "status": c.status,
+            "code": null,
+            "message": "",
+            "counted": c.counted,
+            "legacy": c.legacy,
+            "unattested": c.unattested,
+        }),
+        Err(message) => json!({
+            "status": "refused",
+            "code": "F505",
+            "message": message,
+            "counted": 0,
+            "legacy": 0,
+            "unattested": 0,
+        }),
+    };
+    to_py(py, &result)
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -645,6 +824,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(duration_ms, m)?)?;
     m.add_function(wrap_pyfunction!(check_destination_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(destination_allowed, m)?)?;
+    m.add_function(wrap_pyfunction!(next_fire, m)?)?;
+    m.add_function(wrap_pyfunction!(check_grounding, m)?)?;
     let spec_versions: Vec<String> = validate::semantics::SUPPORTED_VERSIONS
         .iter()
         .map(|(a, b)| format!("{a}.{b}"))

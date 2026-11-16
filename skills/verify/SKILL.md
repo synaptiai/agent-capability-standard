@@ -98,8 +98,8 @@ coverage:
   checked: integer  # Number of checks run
   total: integer  # Total checks possible
   percentage: number  # Coverage percentage
-confidence: number  # 0.0-1.0
-evidence_anchors: ["file:line", "tool:bash:...", "test:..."]
+confidence: number  # probability that the verdict is right (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "tool:bash:...", kind: tool}, {ref: "test:...", kind: record}]
 assumptions: []  # Explicit assumptions made
 ```
 
@@ -113,8 +113,8 @@ assumptions: []  # Explicit assumptions made
 | `violations` | array | Failed conditions with expected vs. actual |
 | `fix_suggestions` | array | Actionable suggestions to fix violations |
 | `coverage` | object | Metrics about verification coverage |
-| `confidence` | number | 0.0-1.0 based on evidence quality and check coverage |
-| `evidence_anchors` | array | File:line, URLs, or tool output references |
+| `confidence` | number | Probability, 0.0-1.0, that the verdict is right (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | File:line, URLs, or tool output references |
 | `assumptions` | array | Explicit assumptions about expected behavior |
 
 ## Examples
@@ -158,8 +158,8 @@ coverage:
   percentage: 100.0
 confidence: 0.95
 evidence_anchors:
-  - "tool:bash:pytest tests/test_calculator.py -v"
-  - "src/calculator.py:42"
+  - {ref: "tool:bash:pytest tests/test_calculator.py -v", kind: tool}
+  - {ref: "file:src/calculator.py:42", kind: file}
 assumptions:
   - "Test environment has pytest installed"
   - "Tests are deterministic"
@@ -197,8 +197,8 @@ coverage:
   percentage: 100.0
 confidence: 1.0
 evidence_anchors:
-  - "config/production.yaml:1-45"
-  - "schemas/config.json:1"
+  - {ref: "file:config/production.yaml:1-45", kind: file}
+  - {ref: "file:schemas/config.json:1", kind: file}
 assumptions:
   - "JSON Schema draft-07 validation semantics"
 ```

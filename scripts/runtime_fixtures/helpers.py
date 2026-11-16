@@ -56,3 +56,46 @@ POLICY = st(
     "policy",
     input_bindings={"target": "config", "constraints": ["policy"]},
 )
+
+
+def resume(attendance="attended", at=None, actor=None):
+    """A script entry that resumes a run that ended deferred (STANDARD v1.2
+    §5.14.1): with `attendance` from then on, at time `at` (default: the
+    script's time so far) and, with `actor`, a new actor_identity."""
+    r = {"attendance": attendance}
+    if at is not None:
+        r["at"] = at
+    if actor is not None:
+        r["actor_identity"] = actor
+    return {"resume": r}
+
+
+def err(code, message="m", reason=None, **extra):
+    """An Error response; `reason` (§5.19.7) and other members when given."""
+    e = {"kind": "Error", "code": code, "message": message}
+    if reason is not None:
+        e["reason"] = reason
+    e.update(extra)
+    return e
+
+
+def tick(t, changed=None):
+    """A script entry that gives the run the time `t` (STANDARD v1.2
+    §5.19.3); with `changed`, whether the tick must change the run."""
+    e = {"tick": t}
+    if changed is not None:
+        e["changed"] = changed
+    return e
+
+
+def wake(at):
+    """A script entry: the run's wake-up time is `at` (None: none)."""
+    return {"wake_at": at}
+
+
+def cancel(reason, at=None):
+    """A script entry that cancels the run (§5.19.5)."""
+    c = {"reason": reason}
+    if at is not None:
+        c["at"] = at
+    return {"cancel": c}

@@ -1,0 +1,72 @@
+{
+  "description": "Invoked from an unattended run, a nested run whose invoke trigger declares attended is unattended: its step's human approver is not asked, the step fails (F502), and so does the invoke step (R402) (\u00a75.10, \u00a75.10.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child"
+          }
+        }
+      ]
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            }
+          },
+          "requires_approval": true
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1",
+          "triggers@1"
+        ]
+      },
+      "triggers": [
+        {
+          "kind": "invoke",
+          "attendance": "attended"
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "unattended",
+  "start": 0,
+  "script": [],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0,
+    "frame": [
+      "w"
+    ]
+  },
+  "trace_kinds": [
+    "approval_unattended",
+    "invoke_returned"
+  ]
+}
