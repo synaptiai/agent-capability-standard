@@ -218,6 +218,16 @@ names. For a quick run on the pages a change touches:
 `node scripts/check-axe.mjs --paths /guides/standard-agents/`. It fails on any
 axe violation, for example a Markdown table whose header cell is empty.
 
+`check:axe` then runs `scripts/check-runs.mjs`, the figure-gap sweep: a page
+in the enforced scope (`site/src/lib/runs.ts`: every generated template, the
+current Standard and a few guides) fails with a run of text longer than
+1800px at 1440px wide that holds no figure and is not an exempt run there.
+Line breaks differ between Chromium builds, so a run within a few lines of the
+limit can pass with one and fail with another. CI measures with the headless
+shell of the revision the pinned `playwright` names: install it with
+`npx playwright install chromium` and leave `ACS_CHROMIUM` unset to measure as
+CI does, for example `node scripts/check-runs.mjs --paths /spec/1.2.0/ --all`.
+
 `npm run build` fails when a Markdown link or `#anchor` does not resolve, when
 rendered heading ids differ from GitHub's ids for the source, and, in
 `scripts/check-dist.mjs`, when a link in the built HTML, the Markdown copies or

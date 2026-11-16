@@ -4417,20 +4417,20 @@ uses the feature gets W616:
 | 1.1 | `workflow_extensions.requires` (and so every extension; the advisory `supports_*` flags are 1.0), gate `phase`, gate `action: end`, the `in` operator, failure-mode `when` and `on_error` |
 | 1.2 | approver `sender_check` and `accept_trust_classes` (§5.14, §5.17); the workflow field `agents` (§5.15.2) and the `delegate` input `continues` (§5.15.3); an `invoke` target that is a qualified id and names no workflow of the invoker's catalog, whether or not a catalog given has its id (§5.1.1), and a catalog manifest (§5.1.1, reported at the manifest when the file's header targets an earlier version); the extension `grounding@1` and the workflow field `grounding` (§5.20); F505 in a failure mode's `on_error` (§5.12); the `audit` input `require_record` (§6.4); the `persist` and `recall` input `scope` (§4.5) |
 
-Declaring the version a feature is new in, or a later one, clears it. A
-feature is new in a version when a consumer of the version before would
-refuse a workflow that uses it or run it differently: a workflow or step
-field, a field value, an extension, or an input the executor reads. An input
-only a host reads is not: an older consumer reports it as W604 and passes it
-on (§5.5); §11.6 governs it. A W616 is reported at the feature's first use:
-a step field at its step, with `field` relative to the step (§9.8).
-
 | Code | A workflow or catalog is reported when |
 |------|----------------------------------------|
 | W605 | It declares no version: neither `spec_version` nor a header |
 | V109 | The version it declares is not one the validator supports |
 | S303 | Its `spec_version` is not a string |
 | W616 | It targets an earlier version than a feature it uses (the table above): once per feature, at its first use |
+
+Declaring the version a feature is new in, or a later one, clears its W616.
+A feature is new in a version when a consumer of the version before would
+refuse a workflow that uses it or run it differently: a workflow or step
+field, a field value, an extension, or an input the executor reads. An input
+only a host reads is not: an older consumer reports it as W604 and passes it
+on (§5.5); §11.6 governs it. A W616 is reported at the feature's first use:
+a step field at its step, with `field` relative to the step (§9.8).
 
 ### 11.6 Ontology Versions
 

@@ -3,6 +3,7 @@
 // values come from plain scans of the sources (the Standard's text, the
 // fixtures' JSON, the schema and policy files) or from the spec's formulas,
 // never from the code under test.
+import type { Element, Root } from 'hast';
 import { describe, expect, it } from 'vitest';
 import { renderRepoFile } from './pipeline';
 import { repoText, standardFileVersions } from './independent';
@@ -48,6 +49,29 @@ describe('figure slots', () => {
   it('places the wait replay directly before the paragraph that opens "Delays."', async () => {
     const html = (await renderRepoFile(STD)).code;
     expect(html).toMatch(/data-fig-slot="wait-replay" data-fig-at="here"><\/div>\s*<p><strong>Delays\.<\/strong>/);
+  });
+
+  it('places the skipped-step replay after item 6 of §5.14.1, the list going on at 7', async () => {
+    const html = (await renderRepoFile(STD)).code;
+    expect(html).toMatch(/<li><strong>The record\.<\/strong>[\s\S]*?<\/li>\s*<\/ol>\s*<div data-fig-slot="resume-skip-replay" data-fig-at="here"><\/div>\s*<ol start="7">\s*<li><strong>Ending early\.<\/strong>/);
+  });
+
+  it('fails when the list item a slot names no longer starts with its recorded words', async () => {
+    const edited = text.replace('**The record.** A re-entered step', '**The entry.** A re-entered step');
+    await expect(renderRepoFile(STD, edited)).rejects.toThrow(/slot resume-skip-replay: item 6 of list 1 of §5\.14\.1 starts "The entry\./);
+  });
+
+  it('reports an item placement after the last item of its list', () => {
+    const li = (t: string): Element => ({ type: 'element', tagName: 'li', properties: {}, children: [{ type: 'text', value: t }] });
+    const tree: Root = {
+      type: 'root',
+      children: [
+        { type: 'element', tagName: 'h3', properties: {}, children: [{ type: 'text', value: '9.9 Example' }] },
+        { type: 'element', tagName: 'ol', properties: {}, children: [li('One.'), li('Two.')] },
+      ],
+    };
+    const at = { place: 'after' as const, block: 'list' as const, index: 0, startsWith: 'One.', item: { index: 1, startsWith: 'Two.' } };
+    expect(placeSlots(tree, [{ key: 'x', level: 3, section: '9.9 ', at }])).toEqual(['slot x: list 1 of §9.9 has 2 item(s), none after item 2']);
   });
 
   it('fails when a block a slot names no longer starts with its recorded words', async () => {
