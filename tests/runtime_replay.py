@@ -24,7 +24,8 @@ RUNTIME = ROOT / "tests" / "conformance" / "runtime"
 FIXTURES = sorted(RUNTIME.glob("*.json"))
 
 # The fixture members that are start options, by the name ``Run.start``
-# gives them (the same name in both).
+# gives them (the same name in both). A fixture's ``catalogs`` are
+# ``{catalog, header}`` objects, passed as ``(catalog, header)`` pairs.
 START_MEMBERS = (
     "header",
     "attendance",
@@ -80,7 +81,21 @@ def start_options(fixture: dict[str, Any]) -> dict[str, Any]:
     is present."""
     if "header" not in fixture:
         raise KeyError("a runtime fixture states its catalog's header (or null)")
-    return {k: fixture[k] for k in START_MEMBERS if k in fixture}
+    options = {k: fixture[k] for k in START_MEMBERS if k in fixture}
+    options.update(set_options(fixture))
+    return options
+
+
+def set_options(fixture: dict[str, Any]) -> dict[str, Any]:
+    """The other catalogs of the fixture's catalog set and its agent
+    manifests (STANDARD v1.2 §5.1.1, §5.15.1), as ``Run.start`` and
+    ``Run.restore`` take them; empty when the fixture states neither."""
+    options: dict[str, Any] = {}
+    if "catalogs" in fixture:
+        options["catalogs"] = [(c["catalog"], c["header"]) for c in fixture["catalogs"]]
+    if "agents" in fixture:
+        options["agents"] = fixture["agents"]
+    return options
 
 
 def start(
@@ -113,7 +128,9 @@ def resume(
     and restored, as a host keeps it while the run waits, and resumed with
     the entry's attendance (default attended), time and actor."""
     saved = run.snapshot(KEY)
-    run = _core.Run.restore(_validator(), fixture["catalog"], saved, KEY)
+    run = _core.Run.restore(
+        _validator(), fixture["catalog"], saved, KEY, **set_options(fixture)
+    )
     options = entry["resume"]
     run.resume(
         attendance=options.get("attendance", "attended"),

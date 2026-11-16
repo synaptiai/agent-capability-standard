@@ -1,0 +1,15 @@
+# Standard version: 1.1.0
+# continues in a 1.1 workflow (STANDARD v1.2 §5.15.3, §11.5): W616.
+review:
+  goal: Continue a review.
+  risk: low
+  inputs:
+    prior: {type: string, required: true}
+  steps:
+  - capability: delegate
+    purpose: Continue the reviewer's work.
+    store_as: review_b
+    input_bindings:
+      agent: reviewer-a
+      task: {draft: d}
+      continues: "${prior}"

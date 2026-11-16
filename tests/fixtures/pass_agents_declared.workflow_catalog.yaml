@@ -1,0 +1,14 @@
+# Standard version: 1.2.0
+# A declared agent with a manifest (STANDARD v1.2 §5.15.2): its known maxima
+# clear W621.
+review:
+  goal: Have a reviewer critique the draft.
+  risk: low
+  agents: [reviewer-a]
+  steps:
+  - capability: delegate
+    purpose: Ask the reviewer.
+    store_as: review_a
+    input_bindings:
+      agent: reviewer-a
+      task: {draft: d}

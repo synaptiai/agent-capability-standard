@@ -1,0 +1,18 @@
+{
+  "description": "Domain selection vectors (Agent Capability Standard 1.2.0, section 5.2.4). Normative. A host that serves a capability through implementations each for one domain id, or for none, selects the one for a step: the implementation for the step's domain; else the one for the longest proper prefix of the step's domain that ends before a '.'; else its implementation for no domain; else none (the step fails, R402, reason unsupported_domain). Domain ids compare by code point, with no case folding. In `implementations` and `expect`, \"\" stands for the implementation for no domain; `domain` null is a step without a domain; `expect` null is none.",
+  "cases": [
+    {"name": "exact among several", "domain": "image.object", "implementations": ["image", "image.object", "text"], "expect": "image.object"},
+    {"name": "longest prefix", "domain": "image.object.face", "implementations": ["image", "image.object"], "expect": "image.object"},
+    {"name": "two levels down", "domain": "image.object.face.left", "implementations": ["image", ""], "expect": "image"},
+    {"name": "a prefix ends only at a dot", "domain": "image.objects", "implementations": ["image", "image.object"], "expect": "image"},
+    {"name": "exact beats a prefix listed first", "domain": "text.summary", "implementations": ["text", "text.summary"], "expect": "text.summary"},
+    {"name": "the domain-less implementation as fallback", "domain": "audio.speech", "implementations": ["image", ""], "expect": ""},
+    {"name": "none", "domain": "audio.speech", "implementations": ["image", "text"], "expect": null},
+    {"name": "a step without a domain takes the domain-less one", "domain": null, "implementations": ["image", ""], "expect": ""},
+    {"name": "a step without a domain and only specific ones", "domain": null, "implementations": ["image", "text"], "expect": null},
+    {"name": "a non-canonical domain matches exactly", "domain": "Text.Feature", "implementations": ["Text.Feature", "text"], "expect": "Text.Feature"},
+    {"name": "no case folding", "domain": "Text.Feature", "implementations": ["text", "text.feature"], "expect": null},
+    {"name": "no implementations", "domain": "text", "implementations": [], "expect": null},
+    {"name": "a digit may lead a segment", "domain": "image.3d.mesh", "implementations": ["image.3d", "image"], "expect": "image.3d"}
+  ]
+}

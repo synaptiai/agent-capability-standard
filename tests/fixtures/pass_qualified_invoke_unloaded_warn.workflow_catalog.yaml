@@ -1,0 +1,13 @@
+# Standard version: 1.2.0
+# A qualified id of a catalog that is not loaded (STANDARD v1.2 §5.1.1):
+# W607, as for a bare name the catalog lacks.
+check:
+  goal: Run a workflow of a catalog not given.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run another catalog's workflow.
+    store_as: x_out
+    workflow_id: other.cat/x
+    input_bindings:
+      workflow: other.cat/x

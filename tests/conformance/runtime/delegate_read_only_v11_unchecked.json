@@ -1,0 +1,57 @@
+{
+  "description": "The same delegation in a 1.1 workflow runs as in 1.1: the attestation is not checked (\u00a75.15.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "read",
+          "input_bindings": {
+            "agent": "x",
+            "task": {
+              "q": "d"
+            },
+            "read_only": true
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "header": "1.1.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {},
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": []
+}

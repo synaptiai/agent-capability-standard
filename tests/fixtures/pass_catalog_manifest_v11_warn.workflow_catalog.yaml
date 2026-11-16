@@ -1,0 +1,14 @@
+# Standard version: 1.1.0
+# A catalog manifest in a file whose header targets 1.1 (STANDARD v1.2
+# §5.1.1, §11.5): W616.
+catalog:
+  id: acs.fixtures.solo
+  version: 1.0.0
+w:
+  goal: Read a record.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}

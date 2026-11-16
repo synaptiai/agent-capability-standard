@@ -1,0 +1,23 @@
+# Standard version: 1.2.0
+# The same workflow as pass_agents_approval_block, validated without the
+# manifests (STANDARD v1.2 §5.15.2): the approval block is not S303; W621.
+write:
+  goal: Have the writer update a table.
+  risk: high
+  agents: [db-writer]
+  workflow_extensions:
+    requires: [approval@1]
+  steps:
+  - capability: checkpoint
+    purpose: Save the state.
+    store_as: cp
+    input_bindings: {scope: state}
+  - capability: delegate
+    purpose: Ask the writer to update the table.
+    store_as: write_out
+    input_bindings:
+      agent: db-writer
+      task: {table: t}
+    approval:
+      approver: {kind: human}
+      when_unattended: fail

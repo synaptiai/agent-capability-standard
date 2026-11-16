@@ -1,0 +1,20 @@
+{
+  "description": "Agent manifest maxima vectors (Agent Capability Standard 1.2.0, section 5.15.1), against ontology 2.2.0. Normative. A manifest's maxima are the highest `risk` and the OR of `mutation`, `requires_checkpoint` and `requires_approval` over its capabilities' ontology values (low and false for none); its read-only maxima the same over the capabilities whose ontology `mutation` is false. The join of several maxima is the highest risk and the OR of each boolean. A manifest that lists a capability the ontology does not define has no maxima (null), and neither does a join that includes it.",
+  "ontology": "2.2.0",
+  "cases": [
+    {"name": "reader", "capabilities": ["retrieve", "critique", "explain"], "read_only": false, "maxima": {"risk": "low", "mutation": false, "requires_checkpoint": false, "requires_approval": false}},
+    {"name": "writer", "capabilities": ["retrieve", "checkpoint", "mutate"], "read_only": false, "maxima": {"risk": "high", "mutation": true, "requires_checkpoint": true, "requires_approval": true}},
+    {"name": "writer, read-only", "capabilities": ["retrieve", "checkpoint", "mutate"], "read_only": true, "maxima": {"risk": "low", "mutation": false, "requires_checkpoint": false, "requires_approval": false}},
+    {"name": "execute keeps its approval when read-only", "capabilities": ["retrieve", "execute"], "read_only": true, "maxima": {"risk": "medium", "mutation": false, "requires_checkpoint": false, "requires_approval": true}},
+    {"name": "no capability", "capabilities": [], "read_only": false, "maxima": {"risk": "low", "mutation": false, "requires_checkpoint": false, "requires_approval": false}},
+    {"name": "delegate only", "capabilities": ["delegate"], "read_only": false, "maxima": {"risk": "medium", "mutation": false, "requires_checkpoint": false, "requires_approval": false}},
+    {"name": "audit", "capabilities": ["audit"], "read_only": false, "maxima": {"risk": "low", "mutation": true, "requires_checkpoint": false, "requires_approval": false}},
+    {"name": "audit, read-only: excluded", "capabilities": ["audit"], "read_only": true, "maxima": {"risk": "low", "mutation": false, "requires_checkpoint": false, "requires_approval": false}},
+    {"name": "an unknown capability", "capabilities": ["retrieve", "divine"], "read_only": false, "maxima": null}
+  ],
+  "joins": [
+    {"name": "reader and writer", "manifests": [["retrieve", "critique"], ["retrieve", "checkpoint", "mutate"]], "read_only": false, "maxima": {"risk": "high", "mutation": true, "requires_checkpoint": true, "requires_approval": true}},
+    {"name": "reader and writer, read-only", "manifests": [["retrieve", "critique"], ["retrieve", "checkpoint", "mutate"]], "read_only": true, "maxima": {"risk": "low", "mutation": false, "requires_checkpoint": false, "requires_approval": false}},
+    {"name": "a join with an unknown capability", "manifests": [["retrieve"], ["divine"]], "read_only": false, "maxima": null}
+  ]
+}

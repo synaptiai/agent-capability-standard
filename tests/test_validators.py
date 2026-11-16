@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -225,6 +226,22 @@ def test_example_catalog_matches_the_reference_catalog() -> None:
         assert workflow == reference[name], name
 
 
+def fixture_set(fixtures: Path, meta: dict[str, Any]) -> dict[str, Any]:
+    """An expectation's ``catalogs`` and ``agents`` (STANDARD v1.2 §10.3) as
+    validator arguments: further catalogs of the catalog set, and agent
+    manifests (a file, or a directory of ``*.agent.yaml`` files)."""
+    agents: list[str] = []
+    for a in meta.get("agents", []):
+        p = fixtures / a
+        agents += (
+            [str(m) for m in sorted(p.glob("*.agent.yaml"))] if p.is_dir() else [str(p)]
+        )
+    return {
+        "catalogs": [str(fixtures / c) for c in meta.get("catalogs", [])] or None,
+        "agents": agents or None,
+    }
+
+
 def test_w615_only_where_expected() -> None:
     """The fixtures bind every required input, so W615 appears only in those
     that expect it. The core's unit tests filter W615 out of their code
@@ -235,9 +252,11 @@ def test_w615_only_where_expected() -> None:
     expectations = json.loads(
         (ROOT / "tests" / "fixtures" / "EXPECTATIONS.json").read_text()
     )
+    fixtures = ROOT / "tests" / "fixtures"
     for name, meta in expectations.items():
-        path = ROOT / "tests" / "fixtures" / f"{name}.workflow_catalog.yaml"
-        emitted = {d["code"] for d in validator.validate_file(path)["diagnostics"]}
+        path = fixtures / f"{name}.workflow_catalog.yaml"
+        report = validator.validate_file(path, **fixture_set(fixtures, meta))
+        emitted = {d["code"] for d in report["diagnostics"]}
         expected = "W615" in meta.get("expected_warning_codes", [])
         assert ("W615" in emitted) == expected, name
 
@@ -1336,3 +1355,71 @@ class TestValidateRFCs:
         assert result.returncode != 0
         assert "Traceback" not in result.stderr, result.stderr
         assert "Could not read" in result.stdout
+
+
+def _resolved_depth(doc: Any, pointer: str) -> tuple[int, int]:
+    """How many tokens of an RFC 6901 pointer resolve in ``doc``, and how
+    many it has."""
+    if pointer == "":
+        return 0, 0
+    tokens = [t.replace("~1", "/").replace("~0", "~") for t in pointer[1:].split("/")]
+    node = doc
+    for i, token in enumerate(tokens):
+        if isinstance(node, dict) and token in node:
+            node = node[token]
+        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+            node = node[int(token)]
+        else:
+            return i, len(tokens)
+    return len(tokens), len(tokens)
+
+
+def test_every_fixture_diagnostic_has_an_exact_path() -> None:
+    """Every diagnostic about a catalog document carries ``location.path``
+    (STANDARD v1.2 §9.8), an RFC 6901 pointer that resolves in that
+    document (another catalog of the set when ``catalog`` names it), or,
+    for a finding about a member that is missing, whose workflow or step
+    does; and ``field`` ends with the pointer's last token, so the two name
+    the same member."""
+    import yaml
+
+    from grounded_agency import _core
+
+    fixtures = ROOT / "tests" / "fixtures"
+    validator = _core.Validator(ROOT / "schemas" / "capability_ontology.yaml", ROOT)
+    expectations = json.loads((fixtures / "EXPECTATIONS.json").read_text())
+    # Findings about a member the document lacks: a required field or input,
+    # the version, a flag the step does not declare, a plan it does not give.
+    missing_members = {"S304", "W605", "W615", "V103", "F501", "W606"}
+    for name, meta in expectations.items():
+        path = fixtures / f"{name}.workflow_catalog.yaml"
+        docs: dict[str | None, Any] = {None: yaml.safe_load(path.read_text())}
+        for c in meta.get("catalogs", []):
+            doc = yaml.safe_load((fixtures / c).read_text())
+            docs[doc["catalog"]["id"]] = doc
+        report = validator.validate_file(path, **fixture_set(fixtures, meta))
+        for d in report["diagnostics"]:
+            loc = d["location"]
+            if (
+                loc.get("field") == "# Standard version"
+                or "profile" in loc
+                or "tool" in loc
+            ):
+                assert "path" not in loc, (name, d)
+                continue
+            assert "path" in loc, (name, d)
+            depth, length = _resolved_depth(docs[loc.get("catalog")], loc["path"])
+            anchor = (1 if "workflow" in loc else 0) + (2 if "step" in loc else 0)
+            assert depth == length or (
+                d["code"] in missing_members and depth >= anchor
+            ), (name, d)
+            if "field" in loc and loc["path"]:
+                last = (
+                    loc["path"].rsplit("/", 1)[1].replace("~1", "/").replace("~0", "~")
+                )
+                assert loc["field"].endswith(last) or loc["field"].endswith(
+                    f"[{last}]"
+                ), (
+                    name,
+                    d,
+                )

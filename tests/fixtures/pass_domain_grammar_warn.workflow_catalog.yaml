@@ -1,0 +1,27 @@
+# Standard version: 1.1.0
+# Step domains (STANDARD v1.2 §5.2.4): Text.Feature and plan-invalidation are
+# not domain ids (W620); image.3d and multimodal.text_to_image are.
+domains:
+  goal: Detect in several domains.
+  risk: low
+  steps:
+  - capability: detect
+    purpose: Detect a text feature.
+    store_as: d1
+    domain: Text.Feature
+    input_bindings: {data: doc, pattern: p}
+  - capability: detect
+    purpose: Detect a plan invalidation.
+    store_as: d2
+    domain: plan-invalidation
+    input_bindings: {data: plan, pattern: p}
+  - capability: detect
+    purpose: Detect a 3D object.
+    store_as: d3
+    domain: image.3d
+    input_bindings: {data: scan, pattern: p}
+  - capability: detect
+    purpose: Detect in a generated image.
+    store_as: d4
+    domain: multimodal.text_to_image
+    input_bindings: {data: picture, pattern: p}

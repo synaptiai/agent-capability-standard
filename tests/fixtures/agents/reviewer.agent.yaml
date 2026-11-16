@@ -1,0 +1,6 @@
+# An agent manifest (STANDARD v1.2 §5.15.1) for the S3 fixtures: a reviewer
+# that only reads and critiques (maxima: low, nothing required).
+agent: reviewer-a
+standard: "1.2"
+ontology: "2.2"
+capabilities: [retrieve, critique, explain]

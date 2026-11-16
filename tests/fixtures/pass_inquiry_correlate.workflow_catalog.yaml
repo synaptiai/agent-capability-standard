@@ -1,0 +1,24 @@
+# Standard version: 1.2.0
+# Answers to an inquiry (STANDARD v1.2 §5.13.1): a wait correlates on the
+# inquiry's id, and a gate reads the typed answers.
+ask_owner:
+  goal: Ask the owner and wait for the answers.
+  risk: low
+  workflow_extensions:
+    requires: [wait@1]
+  steps:
+  - capability: inquire
+    purpose: Ask the owner what to do.
+    store_as: q
+    input_bindings: {ambiguous_input: request}
+  - capability: receive
+    purpose: Wait for the owner's answers.
+    store_as: answers_out
+    timeout: 2h
+    wait:
+      event_type: inquiry.answered
+      correlate: {inquiry_id: "${q.inquiry_id}"}
+    gates:
+    - when: "${answers_out.data[0].answers: array<object>} == null"
+      action: stop
+      phase: after

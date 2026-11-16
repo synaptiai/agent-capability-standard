@@ -1,0 +1,18 @@
+# Standard version: 1.2.0
+# A declaration weaker than the target maxima (STANDARD v1.2 §5.15.2): W602.
+write:
+  goal: Have the writer update a table.
+  risk: high
+  agents: [db-writer]
+  steps:
+  - capability: checkpoint
+    purpose: Save the state.
+    store_as: cp
+    input_bindings: {scope: state}
+  - capability: delegate
+    purpose: Ask the writer to update the table.
+    store_as: write_out
+    requires_approval: false
+    input_bindings:
+      agent: db-writer
+      task: {table: t}

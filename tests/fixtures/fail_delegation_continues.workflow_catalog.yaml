@@ -1,0 +1,19 @@
+# Standard version: 1.2.0
+# continues with a literal fresh_context: true (STANDARD v1.2 §5.15.3): S303.
+review:
+  goal: Continue a review.
+  risk: low
+  workflow_extensions:
+    requires: [delegation@1]
+  inputs:
+    prior: {type: string, required: true}
+  steps:
+  - capability: delegate
+    purpose: Continue the reviewer's work.
+    store_as: review_b
+    input_bindings:
+      agent: reviewer-a
+      task: {draft: d}
+      continues: "${prior}"
+      fresh_context: true
+      read_only: true
