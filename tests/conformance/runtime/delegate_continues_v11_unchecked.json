@@ -1,0 +1,72 @@
+{
+  "description": "In a 1.1 workflow, continues is an input the executor passes on, as 1.1 did: a continuation that binds fresh_context: true, whose host attests a fresh context and returns the task_id it continues, completes (\u00a75.15.3 applies from 1.2; W616).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "agent": "x",
+            "task": {
+              "q": "d"
+            },
+            "continues": "${prior}",
+            "fresh_context": true
+          }
+        }
+      ],
+      "inputs": {
+        "prior": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "header": "1.1.0",
+  "workflow": "w",
+  "inputs": {
+    "prior": "t0"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "inputs": {
+          "continues": "t0",
+          "fresh_context": true
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t0",
+          "effective": {
+            "fresh_context": true
+          },
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": []
+}

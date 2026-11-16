@@ -460,7 +460,9 @@ findings:
     binding''s `issuePath` (`packages/acs-core/src/issues.ts`). Tests:
     `tests/test_validators.py::test_every_fixture_diagnostic_has_an_exact_path`,
     `core/tests/delegation_catalogs.rs` (`colliding_keys_get_exact_paths`,
-    `columns_count_code_points`), the fixtures'' `expected_locations`.'
+    `columns_count_code_points`), the fixtures'' `expected_locations`; a finding inside a step,
+    W616 for a step member included, carries `step` and `capability` (the same test checks it on
+    every fixture).'
   concerns:
   - packaging-conformance-governance
   related:
@@ -1338,10 +1340,12 @@ findings:
   resolution: 'Standard 1.2.0 §5.15.1 (Agent Manifests): the supporting schema
     `schemas/agent_manifest_schema.yaml` 1.0.0 (`agent`, `standard`, `ontology`, `capabilities`,
     optional `task`); maxima and read-only maxima derived from the ontology; a manifest that cannot
-    be used is refused when loaded, and an unknown capability is V101 where it is used. Code:
+    be used is refused when loaded (each task input''s members typed as `agent_task_input` says),
+    and an unknown capability is V101 where it is used. Code:
     `core/src/agents.rs`, `grounded_agency/coordination/manifest.py` and
     `AgentDescriptor.from_manifest`/`manifest`/`maxima`, `packages/acs-core/src/agents.ts`, and the
-    binding''s `deriveAgentManifest`, which refuses to derive from unannotated tools; vectors
+    binding''s `deriveAgentManifest`, which follows `invokes` and refuses to derive from unannotated
+    or ungiven invoked tools and from declared flags its capabilities do not carry; vectors
     `tests/conformance/agents/maxima.json`; fixture `fail_agents_unknown_capability`.'
   concerns:
   - multi-agent
@@ -2105,13 +2109,14 @@ findings:
     with no diagnostic. Read schemas/workflow_catalog.yaml lines 1674-1690 and spec/STANDARD-v1.1.0.md
     lines 222-230.'
   status: fixed
-  resolution: 'Standard 1.2.0 §5.15.2 (Delegation Targets): the workflow field `agents`, allowed
-    only in a workflow that targets 1.2 (S303 otherwise, so an older consumer refuses it); a literal
-    target not listed is V107, a computed one is refused by the executor (R402), a listed agent a
-    static host does not provide is V107 at `agents[i]` (the binding''s `lintDelegationTargets`),
-    and W622 reports a computed target without `agents`. Code: `core/src/validate/delegation.rs`
+  resolution: 'Standard 1.2.0 §5.15.2 (Delegation Targets): the workflow field `agents`, which
+    applies only in a workflow that targets 1.2, so an older consumer refuses a workflow that relies
+    on it (V109); below 1.2 it is ignored, as by a 1.1 consumer, and W616 (§11.5). A literal target
+    not listed is V107, a computed one is refused by the executor (R402), a listed agent a static
+    host does not provide is V107 at `agents[i]` (the binding''s `lintDelegationTargets`), and W622
+    reports a computed target without `agents`. Code: `core/src/validate/delegation.rs`
     (`check_agents_field`, `check_targets`), `core/src/exec/machine.rs`; fixtures
-    `fail_agents_without_1_2`, `pass_agents_declared`, `fail_agents_undeclared_target`,
+    `pass_agents_v11_warn`, `pass_agents_declared`, `fail_agents_undeclared_target`,
     `fail_agents_shape`, `pass_unbounded_delegation_warn`; runtime `agents_computed_unlisted`.'
   concerns:
   - workflow-execution
@@ -2417,8 +2422,10 @@ findings:
     literal agent''s declaration is S303/S304 as for `invoke`, and the executor refuses any other
     before delegating (R402). Code: `core/src/validate/delegation.rs`,
     `core/src/validate/inputs.rs`, `core/src/exec/machine.rs`, `DelegationProtocol.delegate`, the
-    binding''s `taskRefusal` (Standard Agents'' `subagent_arguments_required`); fixture
-    `fail_agents_task`; runtime `agents_task_refused`.'
+    binding''s `taskRefusal` (Standard Agents'' `subagent_arguments_required`); a manifest whose task
+    input breaks `agent_task_input` (`required: "yes"`) is refused when loaded, in the core and the
+    SDK; fixture `fail_agents_task`; runtime `agents_task_refused`; tests
+    `agents::tests::task_inputs_are_typed`, `tests/test_agent_manifest.py::test_task_inputs_are_typed`.'
   concerns:
   - multi-agent
 - id: ACS-55

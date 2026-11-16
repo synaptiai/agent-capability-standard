@@ -598,8 +598,10 @@ package's `modelFamily` implement it. A host may attest the exact model as
 ### Declaring the agents you delegate to (1.2)
 
 A workflow that declares `spec_version: "1.2"` may list the agents its
-`delegate` steps may delegate to (§5.15.2). In an older workflow `agents` is
-S303, so an older consumer refuses the workflow instead of ignoring it:
+`delegate` steps may delegate to (§5.15.2). The 1.2 declaration is what makes
+an older consumer refuse the workflow instead of ignoring the list. In a
+workflow that targets 1.1, `agents` has no effect, for this executor as for
+a 1.1 one, and the validator reports W616:
 
 ```yaml
 # Standard version: 1.2.0
@@ -679,7 +681,10 @@ A continued delegate keeps what it did before, so `continues` with a literal
 continuation fails the step (R402). `continues` that resolves to null
 delegates anew, which is Standard Agents' create-or-continue. Every call
 returns a `task_id` of its own, never the one it continues, so a waiting
-delegate matches only its own result and `replaces` names one call.
+delegate matches only its own result and `replaces` names one call. These
+rules apply in a workflow that targets 1.2; in a 1.1 workflow, `continues` is
+W616 and the executor passes it on to the host without checking it, as 1.1
+did.
 
 ## Sender identity (`identity@1`)
 

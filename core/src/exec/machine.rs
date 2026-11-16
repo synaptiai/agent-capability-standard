@@ -2094,8 +2094,11 @@ impl<'a> Machine<'a> {
             let effective = value.get("effective");
             let attests = |k: &str| effective.and_then(|e| e.get(k)) == Some(&Value::Bool(true));
             // A continued delegation (§5.15.3) never has a fresh context,
-            // and returns a task_id of its own.
-            if let Some(Value::String(continues)) = inputs.get("continues") {
+            // and returns a task_id of its own. Below 1.2, `continues` is an
+            // input the executor passes on and does not read, as 1.1 did.
+            if wf.targets_1_2
+                && let Some(Value::String(continues)) = inputs.get("continues")
+            {
                 if attests("fresh_context") {
                     return self.exec_error(
                         "R402",

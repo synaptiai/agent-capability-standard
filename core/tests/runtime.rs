@@ -992,16 +992,28 @@ fn start_refuses_a_malformed_actor_identity() {
     for bad in [
         serde_json::json!({"kind": "agent"}),
         serde_json::json!({"principal": "a", "kind": "agent", "role": 1}),
+        // agent_identity_schema.yaml types model_id as a string.
+        serde_json::json!({"principal": "a", "kind": "agent", "model_id": 5}),
+        serde_json::json!({"principal": "a", "kind": "agent", "model_id": {"x": 1}}),
     ] {
         let options = StartOptions {
-            actor_identity: Some(bad),
+            actor_identity: Some(bad.clone()),
             ..opts()
         };
-        assert!(matches!(
-            Run::start(&ctx, &one_step(), "w", topic(), options),
-            Err(acs_core::exec::StartError::Identity(_))
-        ));
+        assert!(
+            matches!(
+                Run::start(&ctx, &one_step(), "w", topic(), options),
+                Err(acs_core::exec::StartError::Identity(_))
+            ),
+            "{bad}"
+        );
     }
+    let good = serde_json::json!({"principal": "a", "kind": "agent", "model_id": "acme-large-2"});
+    let options = StartOptions {
+        actor_identity: Some(good),
+        ..opts()
+    };
+    assert!(Run::start(&ctx, &one_step(), "w", topic(), options).is_ok());
 }
 
 #[test]

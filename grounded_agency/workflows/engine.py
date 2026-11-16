@@ -881,7 +881,9 @@ class WorkflowEngine:
 
         All loaded workflows are validated together, so references between
         them resolve. With ``workflow_name``, only that workflow's
-        diagnostics are returned.
+        diagnostics are returned: those of the primary catalog's workflow of
+        that name, never a library's (a library's diagnostics carry its
+        ``catalog`` id, STANDARD v1.2 §9.8).
 
         Entries of a loaded catalog that were too malformed to load as
         workflows are validated too.
@@ -900,7 +902,12 @@ class WorkflowEngine:
         diagnostics = [ValidationError.from_core(d) for d in report["diagnostics"]]
         if workflow_name is None:
             return diagnostics
-        return [d for d in diagnostics if d.location.get("workflow") == workflow_name]
+        return [
+            d
+            for d in diagnostics
+            if d.location.get("workflow") == workflow_name
+            and "catalog" not in d.location
+        ]
 
     def _known(self, workflow_name: str) -> bool:
         """Loaded, or held as an entry too malformed to load."""
@@ -989,12 +996,18 @@ class WorkflowEngine:
         objects (the counterpart of :meth:`validate_all`).
 
         Returns:
-            Dict mapping each workflow with errors to its errors
+            Dict mapping each workflow with errors to its errors: a primary
+            workflow by its name, a library's by its qualified id
+            ``<catalog id>/<name>`` (STANDARD v1.2 §5.1.1), so a library
+            workflow's errors are never a primary one's of the same name
         """
         results: dict[str, list[ValidationError]] = {}
         for d in self.validate_report():
             if d.severity is Severity.ERROR:
                 name = str(d.location.get("workflow", ""))
+                if "catalog" in d.location:
+                    catalog = str(d.location["catalog"])
+                    name = f"{catalog}/{name}" if name else catalog
                 results.setdefault(name, []).append(d)
         return results
 

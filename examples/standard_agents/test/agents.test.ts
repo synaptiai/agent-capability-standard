@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { manifestMaxima } from '@synaptiai/acs-core';
 import { declaredAgents, deriveAgentManifest, ManifestDerivationError, taskRefusal } from '../src/acs/agents.js';
+import { groundedTool } from '../src/acs/grounded.js';
 import { lintDelegationTargets } from '../src/acs/lint.js';
 
 const acs = (record: Record<string, unknown>) => ({ annotations: { acs: record } });
@@ -36,6 +38,85 @@ describe('agent manifests of Standard Agents agents (STANDARD 1.2.0 §5.15.1)', 
     }
     // An unannotated control-only tool is no gap: control: true is its annotation.
     expect(() => deriveAgentManifest({ name: 'a', tools: { done: acs({ control: true }) } })).not.toThrow();
+  });
+
+  const thrown = (derive: () => unknown): ManifestDerivationError => {
+    try {
+      derive();
+    } catch (e) {
+      expect(e).toBeInstanceOf(ManifestDerivationError);
+      return e as ManifestDerivationError;
+    }
+    throw new Error('derivation did not throw');
+  };
+
+  it('follows what a composite invokes, and refuses an invoked tool it is not given', () => {
+    const args = z.object({});
+    const dbWrite = groundedTool({
+      name: 'db_write',
+      capability: 'mutate',
+      description: 'write a row',
+      args,
+      execute: async () => ({ success: true, evidence_anchors: [] }),
+    });
+    const deploy = groundedTool({
+      name: 'deploy',
+      capability: 'execute',
+      invokes: { db_write: dbWrite } as never,
+      description: 'deploy',
+      args,
+      execute: async () => ({ result: true, evidence_anchors: [] }) as never,
+    });
+    // The composite's annotation copies its joined flags; a manifest cannot
+    // carry them, so the invoked tool must be given for its capability.
+    const error = thrown(() => deriveAgentManifest({ name: 'deployer', tools: { deploy } }));
+    expect(error.unresolvedInvokes).toEqual(['db_write']);
+    expect(error.message).toContain('invoked tools not given: db_write');
+    // Given as a helper the prompts do not offer, its capability counts, so
+    // a delegation to the agent needs a checkpoint.
+    const manifest = deriveAgentManifest({ name: 'deployer', tools: { deploy }, invoked: { db_write: dbWrite } });
+    expect(manifest.capabilities).toEqual(['execute', 'mutate']);
+    expect(manifestMaxima(manifest)).toEqual({
+      risk: 'high',
+      mutation: true,
+      requires_checkpoint: true,
+      requires_approval: true,
+    });
+    // Offered too, it is followed once; transitively, a helper's own invokes.
+    const chain = deriveAgentManifest({
+      name: 'chain',
+      tools: { top: acs({ capability: 'invoke', invokes: ['mid'] }) },
+      invoked: { mid: acs({ capability: 'retrieve', invokes: ['low'] }), low: acs({ capability: 'send' }) },
+    });
+    expect(chain.capabilities).toEqual(['invoke', 'retrieve', 'send']);
+    expect(thrown(() => deriveAgentManifest({ name: 'a', tools: { top: acs({ capability: 'invoke', invokes: ['mid'] }) }, invoked: { mid: {} } })).unannotated).toEqual(['mid']);
+  });
+
+  it('refuses a tool whose declared flags exceed its capabilities', () => {
+    const migrate = acs({ capability: 'execute', flags: { risk: 'high', mutation: true, requires_checkpoint: true } });
+    const error = thrown(() => deriveAgentManifest({ name: 'migrator', tools: { run_migration: migrate } }));
+    expect(error.raisedFlags).toEqual(['run_migration']);
+    // Flags no stricter than the ontology's (or weaker, which are ignored) are no gap.
+    const same = deriveAgentManifest({
+      name: 'ok',
+      tools: { run: acs({ capability: 'execute', flags: { risk: 'medium', requires_approval: true } }) },
+    });
+    expect(same.capabilities).toEqual(['execute']);
+    expect(() =>
+      deriveAgentManifest({ name: 'ok', tools: { w: acs({ capability: 'mutate', flags: { risk: 'low' } }) } }),
+    ).not.toThrow();
+    // A grounded tool's declared flags are in its annotation too.
+    const stricter = groundedTool({
+      name: 'search_all',
+      capability: 'search',
+      flags: { requires_approval: true },
+      description: 'search',
+      args: z.object({}),
+      execute: async () => ({ results: [], evidence_anchors: [] }) as never,
+    });
+    expect(thrown(() => deriveAgentManifest({ name: 's', tools: { search_all: stricter } })).raisedFlags).toEqual([
+      'search_all',
+    ]);
   });
 
   it('refuses a task that does not fit', () => {

@@ -372,10 +372,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   that may act on the world unchecked is W621 and one with a computed agent
   and no `agents` is W622; an accepted `read_only` delegation whose host
   does not attest `effective.read_only` fails the step (R402), not retried.
-  The field `agents` is S303 in a workflow that does not target 1.2. A
-  delegation that binds `continues` and attests a fresh context, or returns
-  the `task_id` it continues, fails (R402). An attested identity's
+  A delegation that binds `continues` and attests a fresh context, or
+  returns the `task_id` it continues, fails (R402). An attested identity's
   `model_id` must equal `effective.model_id` (R402).
+- Executor (every Standard version): an identity's `model_id` is a string,
+  as `agent_identity_schema.yaml` 1.1.0 says; an identity whose `model_id`
+  is not is malformed, so it refuses the run's start as the actor identity
+  and fails what reports it, like an identity with a non-string `role`.
+- Validator, workflows that target 1.0 or 1.1: the workflow field `agents`
+  and the `delegate` input `continues` are W616 where 1.1 reported W604
+  (with no version, W605 alone); the executor still ignores `agents` and
+  passes `continues` on unread there. A qualified `invoke` target
+  (`<catalog id>/<name>` naming no workflow of the caller's catalog) is W616
+  too, whatever catalogs are given. Every W616 about a step member (1.1
+  features such as gate `phase` included) now carries the step's `step` and
+  `capability` with `field` relative to the step (`gates[0].phase`, not
+  `steps[0].gates[0].phase`), and is sorted with that step's findings; its
+  code and `location.path` are unchanged.
 - Python SDK: `AgentDescriptor.identity()` refuses a `model_family` not
   written `[a-z][a-z0-9_-]*` (`ValueError`) and derives one from a
   `model_id` in its metadata; `DelegationProtocol.delegate()` refuses a task
@@ -636,9 +649,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - §5.2.4 domain ids and the host's selection rule; §5.13.1 typed,
     correlatable answers to `inquire`; §4.3 the scope of `conflicts_with`;
     §9.8 every location key, `path` and `catalog`.
-  - §11.5: `continues`, a catalog manifest and an `invoke` target that
-    resolves as a qualified id are 1.2 features (W616 in a workflow or
-    catalog that targets 1.0 or 1.1); `agents` below 1.2 is S303.
+  - §11.5: `agents`, `continues`, a catalog manifest and an `invoke` target
+    that is a qualified id are 1.2 features (W616 in a workflow or catalog
+    that targets 1.0 or 1.1, located at the step for a step member).
   - Rust: `names`, `agents` and `catalogs` modules; `validate::validate_set`,
     `validate_with` takes `catalogs` and `agents` beside the profiles;
     `Run::start_set`, `Run::restore_set` and `SetOptions`;
@@ -660,11 +673,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `UnsupportedDomainError`, `isDomainId`, `issuePath`; `CoreContext`'s
     `validate`, `start` and `restore` take `catalogs` and `agents`
     (`SetArgs`). Binding:
-    `deriveAgentManifest` (refuses unannotated tools and missing subagent
-    manifests), `taskRefusal`, `declaredAgents`, `lintDelegationTargets`;
+    `deriveAgentManifest` (follows `invokes`, with `invoked` for helper
+    tools the prompts do not offer; refuses unannotated tools, invoked tools
+    not given, declared flags stricter than a tool's capabilities and missing
+    subagent manifests), `taskRefusal`, `declaredAgents`, `lintDelegationTargets`;
     `AgentIdentity.model_id`.
   - Conformance: 36 workflow fixtures with `catalogs`, `agents` and
-    `expected_locations`; 15 runtime fixtures; normative vectors
+    `expected_locations`; 18 runtime fixtures (two of them,
+    `agents_maxima_with_profile_person` and
+    `agents_read_only_maxima_with_profile_checkpoint`, with a profile
+    applied; `delegate_continues_v11_unchecked` pins 1.1); normative vectors
     `tests/conformance/domains/match.json`, `agents/maxima.json`,
     `families/derive.json` and `inquiry/answers.json`.
 - Approval digest vectors of kind `tool_call` for a call's shown values.

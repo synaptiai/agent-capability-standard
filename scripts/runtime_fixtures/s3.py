@@ -318,6 +318,42 @@ def _continues(add):
         inputs={"prior": "t1"},
         header=V12,
     )
+    add(
+        "delegate_continues_v11_unchecked",
+        "In a 1.1 workflow, continues is an input the executor passes on, as 1.1 "
+        "did: a continuation that binds fresh_context: true, whose host attests a "
+        "fresh context and returns the task_id it continues, completes (§5.15.3 "
+        "applies from 1.2; W616).",
+        {
+            "w": wf(
+                [
+                    delegate(
+                        "rb",
+                        "x",
+                        task={"q": "d"},
+                        continues="${prior}",
+                        fresh_context=True,
+                    )
+                ],
+                inputs={"prior": {"type": "string", "required": True}},
+                requires=["delegation@1"],
+                risk="low",
+            )
+        },
+        [
+            {
+                "expect": inv(
+                    "delegate",
+                    step=0,
+                    inputs={"continues": "t0", "fresh_context": True},
+                ),
+                "respond": accepted("t0", fresh_context=True),
+            }
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        inputs={"prior": "t0"},
+        header=V11,
+    )
 
     def waiting(store, **bindings):
         return delegate(

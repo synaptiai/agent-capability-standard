@@ -965,8 +965,32 @@ pub(crate) struct Feature {
     pub since: (u64, u64),
     /// How a message names it.
     pub name: &'static str,
-    /// The field of its first use in a workflow, if the workflow uses it.
-    pub first_use: fn(&Map<String, Value>) -> Option<String>,
+    /// Its first use in a workflow, if the workflow uses it.
+    pub first_use: fn(&Map<String, Value>) -> Option<Use>,
+}
+
+/// Where a feature is first used: a workflow field (`step` none), or a
+/// field of step `step`, relative to it (§9.8).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Use {
+    pub step: Option<usize>,
+    pub field: String,
+}
+
+impl Use {
+    fn workflow(field: impl Into<String>) -> Use {
+        Use {
+            step: None,
+            field: field.into(),
+        }
+    }
+
+    fn step(step: usize, field: impl Into<String>) -> Use {
+        Use {
+            step: Some(step),
+            field: field.into(),
+        }
+    }
 }
 
 /// §11.5's table of features new after 1.0, in the order W616 reports them.
@@ -980,7 +1004,7 @@ pub(crate) const FEATURES: &[Feature] = &[
         name: "'workflow_extensions.requires'",
         first_use: |wf| {
             matches!(wf.get("workflow_extensions"), Some(Value::Object(ext)) if ext.contains_key("requires"))
-                .then(|| "workflow_extensions.requires".to_string())
+                .then(|| Use::workflow("workflow_extensions.requires"))
         },
     },
     Feature {
@@ -1003,16 +1027,16 @@ pub(crate) const FEATURES: &[Feature] = &[
         first_use: |wf| {
             for (i, step) in objects(wf.get("steps")) {
                 if uses_in(step.get("condition")) {
-                    return Some(format!("steps[{i}].condition"));
+                    return Some(Use::step(i, "condition"));
                 }
                 for (g, gate) in objects(step.get("gates")) {
                     if uses_in(gate.get("when")) {
-                        return Some(format!("steps[{i}].gates[{g}].when"));
+                        return Some(Use::step(i, format!("gates[{g}].when")));
                     }
                 }
                 for (f, fm) in objects(step.get("failure_modes")) {
                     if uses_in(fm.get("when")) {
-                        return Some(format!("steps[{i}].failure_modes[{f}].when"));
+                        return Some(Use::step(i, format!("failure_modes[{f}].when")));
                     }
                 }
             }
@@ -1060,7 +1084,7 @@ pub(crate) const FEATURES: &[Feature] = &[
                         .get("input_bindings")
                         .and_then(|b| b.get("require_record"))
                         .is_some())
-                .then(|| format!("steps[{i}].input_bindings.require_record"))
+                .then(|| Use::step(i, "input_bindings.require_record"))
             })
         },
     },
@@ -1074,7 +1098,7 @@ pub(crate) const FEATURES: &[Feature] = &[
                 .and_then(|e| e.get("requires"))
                 .and_then(Value::as_array)
                 .and_then(|r| r.iter().position(|x| x == "grounding@1"))
-                .map(|i| format!("workflow_extensions.requires[{i}]"))
+                .map(|i| Use::workflow(format!("workflow_extensions.requires[{i}]")))
         },
     },
     Feature {
@@ -1091,10 +1115,16 @@ pub(crate) const FEATURES: &[Feature] = &[
             })
         },
     },
-    // S3 (§5.15.3): a delegate step's `continues`. (An invoke target that
-    // resolves as a qualified id and a catalog manifest are 1.2 features
-    // too; they need the catalog set, so `invoke::check` and
-    // `catalog::check_manifest` report them.)
+    // S3 (§5.15.2, §5.15.3): the workflow field `agents` and a delegate
+    // step's `continues`. (A qualified invoke target and a catalog manifest
+    // are 1.2 features too; `invoke::check` reports the first, which needs
+    // the catalog's names, and `catalog::check_manifest` the second, which
+    // needs the file header.)
+    Feature {
+        since: (1, 2),
+        name: "the workflow field 'agents'",
+        first_use: |wf| wf.contains_key("agents").then(|| Use::workflow("agents")),
+    },
     Feature {
         since: (1, 2),
         name: "the delegate input 'continues'",
@@ -1105,21 +1135,21 @@ pub(crate) const FEATURES: &[Feature] = &[
                         .get("input_bindings")
                         .and_then(Value::as_object)
                         .is_some_and(|b| b.contains_key("continues")))
-                .then(|| format!("steps[{i}].input_bindings.continues"))
+                .then(|| Use::step(i, "input_bindings.continues"))
             })
         },
     },
 ];
 
-/// The field `steps[i].approval.approver.<key>` of the first step whose
-/// approval's approver names `key`.
-fn first_approver_field(wf: &Map<String, Value>, key: &str) -> Option<String> {
+/// The field `approval.approver.<key>` of the first step whose approval's
+/// approver names `key`.
+fn first_approver_field(wf: &Map<String, Value>, key: &str) -> Option<Use> {
     objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
         step.get("approval")
             .and_then(|a| a.get("approver"))
             .and_then(Value::as_object)
             .is_some_and(|ap| ap.contains_key(key))
-            .then(|| format!("steps[{i}].approval.approver.{key}"))
+            .then(|| Use::step(i, format!("approval.approver.{key}")))
     })
 }
 
@@ -1135,17 +1165,17 @@ fn objects(v: Option<&Value>) -> Vec<(usize, &Map<String, Value>)> {
     }
 }
 
-/// The field `steps[i].<list>[j].<key>` of the first item, in step order,
-/// of a step's `list` (`gates`, `failure_modes`) for which `key` names one.
+/// The field `<list>[j].<key>` of step `i`'s first item, in step order, of
+/// a step's `list` (`gates`, `failure_modes`) for which `key` names one.
 fn first_in_items(
     wf: &Map<String, Value>,
     list: &str,
     key: impl Fn(&Map<String, Value>) -> Option<&'static str>,
-) -> Option<String> {
+) -> Option<Use> {
     objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
         objects(step.get(list))
             .into_iter()
-            .find_map(|(j, item)| key(item).map(|k| format!("steps[{i}].{list}[{j}].{k}")))
+            .find_map(|(j, item)| key(item).map(|k| Use::step(i, format!("{list}[{j}].{k}"))))
     })
 }
 
@@ -1169,13 +1199,15 @@ fn uses_in(v: Option<&Value>) -> bool {
 
 /// W616 for a feature new in `since` used at `field` by something that
 /// targets `version` (as declared: `1.0` or `1.0.0`), declared by a
-/// workflow's `spec_version` or, when `by_header`, by the file's header.
-/// Shared by the workflow check and S3's catalog-manifest check.
+/// workflow's `spec_version` or, when `by_header`, by the file's header;
+/// `locate` gives it its workflow and step before `field` (§9.8). Shared by
+/// the workflow check and the qualified invoke target's.
 pub(crate) fn version_feature_diag(
     name: &str,
     since: (u64, u64),
     version: &str,
     by_header: bool,
+    locate: impl FnOnce(Diagnostic) -> Diagnostic,
     field: impl Into<String>,
 ) -> Diagnostic {
     let (since_major, since_minor) = since;
@@ -1197,18 +1229,19 @@ pub(crate) fn version_feature_diag(
             format!("declare spec_version \"{since_major}.{since_minor}\""),
         )
     };
-    Diagnostic::new(
+    locate(Diagnostic::new(
         Code::VersionFeatureMismatch,
         format!(
             "the workflow targets standard {version} by {declared_in}, but {name} is new in {since_major}.{since_minor} and a {target} consumer does not know it"
         ),
-    )
+    ))
     .at("field", field.into())
     .suggest(fix)
 }
 
 /// W616, once per feature at its first use, for each feature of
-/// [`FEATURES`] newer than `target` (§11.5).
+/// [`FEATURES`] newer than `target` (§11.5). A use in a step is located at
+/// the step (§9.8).
 fn newer_features(
     wf: &Map<String, Value>,
     target: (u64, u64),
@@ -1218,15 +1251,34 @@ fn newer_features(
     report: &mut Report,
 ) {
     for feature in FEATURES.iter().filter(|f| f.since > target) {
-        if let Some(field) = (feature.first_use)(wf) {
-            report.push(at(version_feature_diag(
+        if let Some(found) = (feature.first_use)(wf) {
+            report.push(version_feature_diag(
                 feature.name,
                 feature.since,
                 version,
                 by_header,
-                field,
-            )));
+                |d| match found.step {
+                    Some(i) => at_step(at(d), wf, i),
+                    None => at(d),
+                },
+                found.field,
+            ));
         }
+    }
+}
+
+/// Locate a diagnostic at step `i` of `wf`: its index and, when the step
+/// names one, its capability (§9.8).
+pub(crate) fn at_step(d: Diagnostic, wf: &Map<String, Value>, i: usize) -> Diagnostic {
+    let d = d.at("step", i);
+    match wf
+        .get("steps")
+        .and_then(|s| s.get(i))
+        .and_then(|s| s.get("capability"))
+        .and_then(Value::as_str)
+    {
+        Some(cap) => d.at("capability", cap),
+        None => d,
     }
 }
 
@@ -1577,20 +1629,28 @@ mod tests {
             report
                 .diagnostics
                 .iter()
-                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .map(|d| {
+                    let step = d.location.get("step").map(|s| format!("{s}: "));
+                    format!(
+                        "{}{}",
+                        step.unwrap_or_default(),
+                        d.location["field"].as_str().unwrap()
+                    )
+                })
                 .collect::<Vec<_>>()
         };
+        // A use in a step is located at the step, its field relative to it.
         assert_eq!(
             fields((1, 0), "1.0"),
             [
                 "workflow_extensions.requires",
-                "steps[0].gates[0].phase",
-                "steps[0].condition"
+                "0: gates[0].phase",
+                "0: condition"
             ]
         );
         assert!(fields((1, 1), "1.1").is_empty());
         assert!(fields((1, 2), "1.2.0").is_empty());
-        let d = version_feature_diag("gate 'phase'", (1, 1), "1.0.0", true, "f");
+        let d = version_feature_diag("gate 'phase'", (1, 1), "1.0.0", true, |d| d, "f");
         assert_eq!(
             d.message,
             "the workflow targets standard 1.0.0 by the file's '# Standard version' header, but gate 'phase' is new in 1.1 and a 1.0 consumer does not know it"

@@ -100,7 +100,7 @@ pub(crate) fn check(ns: &Namespace<'_>, invocations: &[Invocation], report: &mut
     let mut resolved: Vec<(&Invocation, &str)> = Vec::new();
     let mut qualified_reported = HashSet::new();
     for inv in invocations {
-        if ns.resolver.resolves_qualified(&inv.workflow, &inv.target)
+        if ns.resolver.is_qualified(&inv.workflow, &inv.target)
             && qualified_reported.insert(inv.workflow.as_str())
         {
             qualified_feature(ns, inv, report);
@@ -190,12 +190,13 @@ pub(crate) fn check(ns: &Namespace<'_>, invocations: &[Invocation], report: &mut
     }
 }
 
-/// W616 at `inv`, the first invoke step of its workflow whose target
-/// resolves through its qualified form, when the workflow targets a
-/// version before 1.2 (§11.5): a 1.1 consumer resolves names in one
-/// catalog only. Reported as the other features are, at the workflow with
-/// the step's field; nothing for a workflow that declares no supported
-/// version (W605 or V109 says so).
+/// W616 at `inv`, the first invoke step of its workflow whose target is a
+/// qualified id (§5.1.1), when the workflow targets a version before 1.2
+/// (§11.5): a 1.1 consumer resolves names in one catalog only. Whether the
+/// target resolves does not matter (W607 or V107 says when it does not), so
+/// the warning does not depend on the catalogs given. Located at the step,
+/// as the other features are; nothing for a workflow that declares no
+/// supported version (W605 or V109 says so).
 fn qualified_feature(ns: &Namespace<'_>, inv: &Invocation, report: &mut Report) {
     const SINCE: (u64, u64) = (1, 2);
     let Some(Value::Object(wf)) = ns.get(&inv.workflow) else {
@@ -214,16 +215,18 @@ fn qualified_feature(ns: &Namespace<'_>, inv: &Invocation, report: &mut Report) 
     if supported.is_none() {
         return;
     }
-    report.push(
-        semantics::version_feature_diag(
-            "an invoke target that is a qualified id",
-            SINCE,
-            version,
-            by_header,
-            format!("steps[{}].{}", inv.step, inv.field),
-        )
-        .at("workflow", inv.workflow.as_str()),
-    );
+    report.push(semantics::version_feature_diag(
+        "an invoke target that is a qualified id",
+        SINCE,
+        version,
+        by_header,
+        |d| {
+            d.at("workflow", inv.workflow.as_str())
+                .at("step", inv.step)
+                .at("capability", "invoke")
+        },
+        inv.field,
+    ));
 }
 
 /// A literal invocation input against the target's declared inputs. The
@@ -371,6 +374,39 @@ mod tests {
         let literal = json!({"capability": "invoke", "purpose": "p", "store_as": "i",
                              "input_bindings": {"workflow": "elsewhere"}});
         assert_eq!(codes(json!({"a": wf(json!([literal]))})), ["W607"]);
+    }
+
+    /// A qualified target in a workflow that targets 1.1 is W616 whatever
+    /// the catalogs given (§11.5), located at its step (§9.8); a name of the
+    /// workflow's own catalog, or a legacy name that is not a qualified id,
+    /// is not.
+    #[test]
+    fn a_qualified_target_below_1_2_is_a_version_warning() {
+        use crate::diag::Code;
+        let ctx = super::super::tests::ctx();
+        let report = super::super::validate_catalog(
+            &ctx,
+            &json!({"a": wf(json!([invoke("other.cat/x", "i")]))}),
+            None,
+        );
+        let found: Vec<_> = report.diagnostics.iter().map(|d| d.code.as_str()).collect();
+        assert_eq!(found, ["W616", "W607"]);
+        let d = &report.diagnostics[0];
+        assert_eq!(d.code, Code::VersionFeatureMismatch);
+        assert_eq!(
+            Value::Object(d.location.clone()),
+            json!({"workflow": "a", "step": 0, "capability": "invoke",
+                   "field": "workflow_id", "path": "/a/steps/0/workflow_id"})
+        );
+        // From 1.2, only the unresolved target.
+        let mut v12 = wf(json!([invoke("other.cat/x", "i")]));
+        v12["spec_version"] = json!("1.2");
+        assert_eq!(codes(json!({"a": v12})), ["W607"]);
+        // Not a qualified id: no catalog id before the '/'.
+        assert_eq!(
+            codes(json!({"a": wf(json!([invoke("Other/x", "i")]))})),
+            ["W607"]
+        );
     }
 
     #[test]

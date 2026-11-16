@@ -929,3 +929,29 @@ into `round3/b`); what S5 needs:
   `SetArgs` on `CoreContext.validate`, `start`, `restore`.
   `_core.validate_catalog`/`Validator.validate(_file)` take `profiles`
   positionally and `catalogs`, `agents` keyword-only.
+
+## After S3 review round 1
+
+- **W616 is located at its step** (§9.8, §11.5). `semantics::Feature`'s
+  `first_use` now returns `Option<Use>`: `Use::workflow(field)` for a
+  workflow field, `Use::step(i, field)` for a member of step `i`, with
+  `field` relative to the step (`input_bindings.scope`, not
+  `steps[0].input_bindings.scope`); `newer_features` adds `step` and the
+  step's `capability`. **S5**: write the `persist`/`recall` `scope` row that
+  way. `tests/test_validators.py::test_every_fixture_diagnostic_has_an_exact_path`
+  now checks, on every fixture, that a finding whose `path` is inside a step
+  carries that `step` and the step's `capability`, and a step-relative
+  `field`.
+- **`agents` below 1.2 is W616, not S303** (a `FEATURES` row, field
+  `agents`), and its shape is checked only from 1.2; `continues`'s S303 and
+  R402 apply only from 1.2 (runtime fixture
+  `delegate_continues_v11_unchecked`). Fixture `fail_agents_without_1_2` is
+  now `pass_agents_v11_warn`. Two sentences outside S3's files still say
+  the S303: `spec/RFC-0010-profiles-trust-versioning-and-dialect.md` ("and
+  S3 the S303 for `agents` before 1.2") and the resolution of S6's finding
+  in `findings_agent_capability_standard.yaml` ("and the S303 for `agents`
+  before 1.2"). Their owner (or phase 4) should say W616 instead.
+- **A qualified `invoke` target is W616 whatever the set**: any target that
+  `names::split_qualified` accepts and that names no workflow of the
+  caller's catalog (`Resolver::is_qualified`, which replaced
+  `resolves_qualified`).

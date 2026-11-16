@@ -97,8 +97,34 @@ def check_agent_manifest(
         if not isinstance(task, Mapping):
             raise fail("'task' must be a mapping of task inputs")
         for name, spec in task.items():
-            if not isinstance(spec, Mapping):
-                raise fail(f"task input '{name}' must be a mapping")
+            problem = _task_input_problem(spec)
+            if problem is not None:
+                raise fail(f"task input '{name}': {problem}")
+
+
+def _task_input_problem(spec: Any) -> str | None:
+    """What makes a task input break ``agent_task_input`` (§5.15.1), or
+    None: ``type`` a type name or a non-empty list of them, ``required`` a
+    boolean, ``description`` and ``ref`` strings, ``properties`` a mapping.
+    Refusing these keeps ``required: "yes"`` from reading as optional."""
+    if not isinstance(spec, Mapping):
+        return "must be a mapping"
+    if "type" in spec:
+        t = spec["type"]
+        if not (
+            isinstance(t, str)
+            or (isinstance(t, list) and t and all(isinstance(x, str) for x in t))
+        ):
+            return "'type' must be a type name or a non-empty list of them"
+    for key, ok, what in (
+        ("required", lambda v: isinstance(v, bool), "a boolean"),
+        ("description", lambda v: isinstance(v, str), "a string"),
+        ("properties", lambda v: isinstance(v, Mapping), "a mapping"),
+        ("ref", lambda v: isinstance(v, str), "a string"),
+    ):
+        if key in spec and not ok(spec[key]):
+            return f"'{key}' must be {what}, found {type(spec[key]).__name__}"
+    return None
 
 
 def join_maxima(*maxima: Maxima | None) -> Maxima | None:

@@ -87,12 +87,15 @@ and a duplicate are refused when loaded. Stored maxima, a canonical (§6.1)
 schema and workflow-side manifest references were rejected (see
 Alternatives).
 
-### 2) `agents` is the author's explicit opt-in, and needs 1.2
+### 2) `agents` is the author's explicit opt-in, and applies from 1.2
 A workflow field `agents` lists the agents its delegate steps may delegate
-to. It is allowed only in a workflow that targets 1.2 or later (S303
-otherwise), so a workflow that uses it declares 1.2 and a 1.1 consumer
-refuses it (V109) instead of ignoring the field and running its delegates
-without the raised checkpoint and approval. Declaring it: restricts targets
+to. It applies only in a workflow that targets 1.2 or later, so a workflow
+that relies on it declares 1.2 and a 1.1 consumer refuses it (V109) instead
+of ignoring the field and running its delegates without the raised
+checkpoint and approval. In a workflow that targets an earlier version, the
+executor ignores the field as a 1.1 consumer does, and W616 tells the author
+to declare 1.2 (W605 when the workflow declares no version). In a 1.2
+workflow, declaring it: restricts targets
 (V107 static, R402 at run time; a static host reports a listed agent it does
 not provide as V107); raises a delegate step's ontology baseline to its
 target maxima (a literal agent's, or the join of every listed agent's for a
@@ -125,7 +128,8 @@ computed in a workflow without `agents`. Their remedies are 1.2 features, so
 they do not apply to 1.1 workflows.
 
 ### 5) `continues` is a base input, and every call has its own `task_id`
-A delegation that continues an earlier one never has a fresh context: S303
+In a workflow that targets 1.2, a delegation that continues an earlier one
+never has a fresh context: S303
 with a literal `fresh_context: true` (so such a reviewer never satisfies
 `require_fresh_context`, which already requires the literal), R402 when the
 host attests a fresh context; null delegates anew. Every delegation call,
@@ -134,7 +138,8 @@ correlation and `replaces` name one call; `continues` may name any earlier
 call of the chain. It is not governed by `delegation@1`: that would make a
 1.1 workflow that bound it (W604) invalid (V106), and a 1.1 consumer of
 `delegation@1` does not know it anyway; W616 reports it in a workflow that
-targets an earlier version (§11.5).
+targets an earlier version (§11.5), where the executor passes it on unread,
+as 1.1 did, so none of these rules applies there.
 
 ### 6) Model families: exact, lowercase, derived by one rule
 Families compare by exact code-point equality everywhere. A host derives a
@@ -157,9 +162,11 @@ other unresolved target, a bare name included, stays W607, so no 1.1 target
 changes code. Cycles, triggers, inputs, waits and unattended propagation work
 across the set. The executor resolves computed targets the same way.
 Workflow names SHOULD be identifiers (W620). A 1.1 consumer resolves names
-in one catalog only, so an `invoke` target that resolves as a qualified id,
-and a catalog manifest in a file whose header targets 1.0 or 1.1, get W616
-(§11.5).
+in one catalog only, so an `invoke` target that is a qualified id and names
+no workflow of its own catalog (whether or not a catalog given has its id,
+so the warning does not depend on the set validated), and a catalog manifest
+in a file whose header targets 1.0 or 1.1, get W616 (§11.5). Like every
+W616 about a step member, the first is reported at its step (§9.8).
 
 ### 8) Domain ids and selection
 A domain id is lowercase segments joined by dots, underscores inside a
@@ -203,16 +210,21 @@ invalid, and no 1.1 workflow runs differently, unless it opts in:
 - by declaring 1.2 (W621, W622, the `read_only` attestation) and, in such a
   workflow, `agents` (target maxima, V107, no delegation without manifests,
   task checks, executor refusals); `agents` in a workflow that does not
-  declare 1.2 is S303, which a 1.1 workflow could only meet by carrying an
-  unknown key of that name (none in the repository);
-- by binding `continues` (its S303 and R402), a new optional input (§11.4);
+  declare 1.2 is ignored, as a 1.1 consumer ignores it, and reported W616
+  where 1.1 reported W604;
+- by binding `continues` in such a workflow (its S303 and R402), a new
+  optional input (§11.4); below 1.2 it is W616 where 1.1 reported W604, and
+  the executor passes it on unread, as before;
 - by being given with other catalogs or using a qualified id (catalog sets);
   a single catalog validates and runs exactly as before, a bare name that
   does not resolve stays W607, and a `catalog` mapping with `steps` is still
   a workflow.
 
 W620 and W623 are new warnings for every version, phased in before any
-error. A host that cannot enforce `read_only` refuses the delegation, which
+error. A W616 about a step member (a 1.1 feature included) now carries its
+step's `step` and `capability`, with `field` relative to the step, so it is
+reported with that step's other findings (§9.8); its code and `path` are
+unchanged. A host that cannot enforce `read_only` refuses the delegation, which
 states 1.1's "must not change anything" as a host rule; a host derives model
 families by the rule of §5.15. The ontology (2.2.0),
 `agent_identity_schema.yaml` (1.1.0) and the canonical
@@ -231,17 +243,21 @@ a delegate step whose target maxima are unknown.
 - Validator fixtures (`tests/fixtures/`): 36 new fixtures, with agent
   manifests under `tests/fixtures/agents/` and catalogs of sets under
   `tests/fixtures/catalogs/`; every fixture that uses a 1.2 feature has a
-  1.2 header, except the two that pin its W616 (a catalog manifest and a
-  qualified `invoke` target under a 1.1 header), and each states its exact
+  1.2 header, except the four that pin its W616 under a 1.1 header
+  (`agents`, `continues`, a catalog manifest and a qualified `invoke`
+  target), and each states its exact
   error and warning sets; expectations gain `catalogs`, `agents` and
   `expected_locations`, and two existing fixtures pin locations. The Rust,
   Python and WebAssembly harnesses pass the catalogs and manifests alike.
-- Runtime fixtures (`tests/conformance/runtime/`): fifteen new runs for
+- Runtime fixtures (`tests/conformance/runtime/`): eighteen new runs for
   raised flags, target, unknown-manifest and task refusals, `read_only`
   attestation (not retried; 1.2 without `agents`; 1.1 unchanged),
-  `continues` (fresh, null, its own `task_id`, a stale result not matched),
-  catalog sets, `model_id` consistency and exact family comparison; the
-  format gains `catalogs` and `agents`.
+  `continues` (fresh, null, its own `task_id`, a stale result not matched;
+  1.1 unchanged), catalog sets, `model_id` consistency, exact family
+  comparison, and target maxima with an applied profile
+  (`agents_maxima_with_profile_person`,
+  `agents_read_only_maxima_with_profile_checkpoint`); the format gains
+  `catalogs` and `agents`.
 - New language-neutral vectors, normative for what they state:
   `tests/conformance/domains/match.json`,
   `tests/conformance/agents/maxima.json`,
@@ -261,17 +277,23 @@ a delegate step whose target maxima are unknown.
   alone would work mechanically, but target maxima need manifests, and
   every 1.2 delegation a host has none for would then be refused. `agents`
   is the author's explicit opt-in that the host can supply them; the 1.2
-  declaration it requires is what makes older consumers refuse it. The
+  declaration it applies under is what makes older consumers refuse it. The
   `read_only` attestation and the two warnings do key on the version alone.
-- **`agents` under any target, with W616 for a 1.1 target.** Rejected: a 1.1
-  consumer would ignore the field (W604) and run the delegates with 1.1
-  flags, silently dropping the protection the author opted into.
+- **`agents` applied under any target, with W616 for a 1.1 target.**
+  Rejected: a 1.1 consumer would ignore the field (W604) and run the
+  delegates with 1.1 flags, so the same workflow would run with different
+  flags on different consumers.
+- **`agents` as S303 in a workflow that does not target 1.2.** Rejected: 1.1
+  reports an unknown workflow field as W604, so a valid 1.1 workflow that
+  carried the key would become invalid, and the error would protect nothing,
+  since the executor ignores the field below 1.2 as a 1.1 consumer does.
+  W616 tells the author the field needs 1.2.
 - **Delegating with the `delegate` node's flags when manifests are missing
   at run time.** Rejected: it fails open.
 - **Retrying a delegation whose `read_only` was not attested.** Rejected:
   every retry is another unchecked delegation to a host that ignored it.
 - **A new extension (`agents@1`, `delegation@2`) for `agents` and
-  `continues`.** Rejected: the 1.2 declaration `agents` requires already
+  `continues`.** Rejected: the 1.2 declaration under which they apply already
   makes an older consumer refuse the workflow, and a second declaration
   would split delegation semantics.
 - **A continuation that reuses the `task_id` it continues.** Rejected: a

@@ -28,11 +28,15 @@ const INPUTS: &[(&str, &[&str])] = &[
     ("synchronize", &["accept_from"]),
 ];
 
-/// V106 for each `delegation@1` input bound without the declaration.
+/// V106 for each `delegation@1` input bound without the declaration;
+/// in a workflow that targets 1.2 or later (`targets_1_2`), S303 for
+/// `continues` with a literal `fresh_context: true` (§5.15.3: below 1.2,
+/// `continues` is W616 and an input the executor passes on, as 1.1 did).
 pub(crate) fn check(
     loc: &StepLoc<'_>,
     step: &Map<String, Value>,
     declared: &Declared,
+    targets_1_2: bool,
     report: &mut Report,
 ) {
     let Some(Value::Object(bindings)) = step.get("input_bindings") else {
@@ -41,7 +45,8 @@ pub(crate) fn check(
     if loc.capability == "delegate" {
         // A continued delegation keeps what its delegate did before
         // (§5.15.3), so it never has a fresh context.
-        if bindings.contains_key("continues")
+        if targets_1_2
+            && bindings.contains_key("continues")
             && bindings.get("fresh_context") == Some(&Value::Bool(true))
         {
             report.push(
@@ -124,9 +129,10 @@ pub(crate) fn check(
     }
 }
 
-/// The workflow field `agents` (§5.15.2): allowed only in a workflow that
-/// targets 1.2 or later, and then a non-empty list of distinct non-empty
-/// strings (S303 otherwise).
+/// The workflow field `agents` (§5.15.2) of a workflow that targets 1.2 or
+/// later: a non-empty list of distinct non-empty strings (S303 otherwise).
+/// Below 1.2, or with no version, the field is ignored, by the executor as by
+/// an older consumer: it is W616 there (`semantics::FEATURES`), or W605.
 pub(crate) fn check_agents_field(
     wf: &Map<String, Value>,
     target: Option<(u64, u64)>,
@@ -136,19 +142,12 @@ pub(crate) fn check_agents_field(
     let Some(v) = wf.get("agents") else {
         return;
     };
+    if target.is_none_or(|t| t < (1, 2)) {
+        return;
+    }
     let s303 = |field: String, message: String| {
         at(Diagnostic::new(Code::SchemaValidationFailed, message)).at("field", field)
     };
-    if target.is_none_or(|t| t < (1, 2)) {
-        report.push(
-            s303(
-                "agents".into(),
-                "'agents' needs a workflow that targets 1.2 or later (§5.15.2): an older consumer would ignore it and delegate without the flags it raises".into(),
-            )
-            .suggest("declare spec_version \"1.2\" so that an older consumer refuses the workflow instead of ignoring it"),
-        );
-        return;
-    }
     let Value::Array(items) = v else {
         report.push(s303(
             "agents".into(),
@@ -358,5 +357,38 @@ mod tests {
                           "input_bindings": {"agents": ["a", "b"], "state": {},
                                              "accept_from": ["a"]}});
         assert_eq!(codes(catalog(json!([sync]), &[])), ["V106"]);
+    }
+
+    /// Below 1.2, `agents` is ignored (by this executor as by a 1.1
+    /// consumer): W616, whatever its shape, never S303; with no version,
+    /// W605 alone. From 1.2, its shape is checked (S303).
+    #[test]
+    fn agents_below_1_2_is_a_version_warning() {
+        let with = |version: Option<&str>, agents: Value| {
+            let mut w = json!({"goal": "g", "risk": "low", "agents": agents,
+                               "steps": [delegate(json!({}))]});
+            if let Some(v) = version {
+                w["spec_version"] = json!(v);
+            }
+            codes(json!({"w": w}))
+        };
+        assert_eq!(with(Some("1.1"), json!(["a"])), ["W616"]);
+        assert_eq!(with(Some("1.0"), json!(42)), ["W616"]);
+        assert_eq!(with(None, json!(["a"])), ["W605"]);
+        assert_eq!(with(Some("1.2"), json!(42)), ["S303", "W621"]);
+    }
+
+    /// Below 1.2, `continues` is an input a 1.1 consumer passes on: W616,
+    /// and no S303 with `fresh_context: true` (§5.15.3 applies from 1.2).
+    #[test]
+    fn continues_rules_apply_from_1_2() {
+        let step = delegate(json!({"continues": "t0", "fresh_context": true}));
+        assert_eq!(
+            codes(catalog(json!([step.clone()]), &["delegation@1"])),
+            ["W616"]
+        );
+        let mut w = catalog(json!([step]), &["delegation@1"]);
+        w["w"]["spec_version"] = json!("1.2");
+        assert_eq!(codes(w), ["S303", "W621"]);
     }
 }

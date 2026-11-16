@@ -98,14 +98,16 @@ impl Resolver {
         self.origin.get(key).copied().unwrap_or(0)
     }
 
-    /// Whether `target`, named by a step of `caller`, resolves through its
-    /// qualified form (§5.1.1): it names no workflow of the caller's own
-    /// catalog, and a workflow of a catalog of the set by its id. A 1.1
-    /// consumer cannot resolve it (§11.5).
-    pub fn resolves_qualified(&self, caller: &str, target: &str) -> bool {
+    /// Whether `target`, named by a step of `caller`, is a qualified id
+    /// (§5.1.1): it names no workflow of the caller's own catalog and has
+    /// the form `<catalog id>/<name>`, whether or not a catalog of the set
+    /// has that id. A 1.1 consumer resolves it as a plain name in its own
+    /// catalog (§11.5).
+    pub fn is_qualified(&self, caller: &str, target: &str) -> bool {
         let own = self.catalog_of(caller);
-        !self.names.get(own).is_some_and(|n| n.contains(target))
-            && matches!(self.resolve(caller, target), Resolved::Key(_))
+        !target.starts_with("x-")
+            && !self.names.get(own).is_some_and(|n| n.contains(target))
+            && names::split_qualified(target).is_some()
     }
 
     /// Resolve `target`, named by a step of the workflow `caller` (a

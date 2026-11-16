@@ -139,7 +139,7 @@ fn colliding_keys_get_exact_paths() {
 }
 
 #[test]
-fn agents_needs_a_1_2_target() {
+fn agents_applies_from_a_1_2_target() {
     for version in [Some("1.1"), Some("1.0"), None] {
         let mut w = json!({"goal": "g", "risk": "low", "agents": ["db-writer"],
                            "steps": [delegate("db-writer")]});
@@ -147,10 +147,16 @@ fn agents_needs_a_1_2_target() {
             w["spec_version"] = json!(v);
         }
         let diags = report(json!({"w": w}), Options::default());
+        // Ignored below 1.2, as by an older consumer: W616 at the field (or,
+        // with no version, W605), never an error.
+        let expected = if version.is_some() { "W616" } else { "W605" };
         assert!(
-            diags
-                .iter()
-                .any(|d| d["code"] == "S303" && d["location"]["field"] == "agents"),
+            diags.iter().any(|d| d["code"] == expected
+                && (expected == "W605" || d["location"]["field"] == "agents")),
+            "{version:?}: {diags:?}"
+        );
+        assert!(
+            !diags.iter().any(|d| d["severity"] == "error"),
             "{version:?}: {diags:?}"
         );
         // Nothing the field switches on applies: no V107, W621 or W622.
@@ -298,6 +304,17 @@ fn a_refused_set_or_manifest_refuses_the_start() {
         agents: vec![json!({"agent": "a"})],
     };
     assert!(start(&catalog, &bad_agent, "w", Map::new()).is_err());
+    // A task input that breaks agent_task_input refuses the manifest, so
+    // `required: "yes"` never lets a delegation run without the input.
+    let untyped = SetOptions {
+        catalogs: Vec::new(),
+        agents: vec![
+            json!({"agent": "db-writer", "standard": "1.2", "ontology": "2.2",
+            "capabilities": ["retrieve"], "task": {"table": {"type": 42, "required": "yes"}}}),
+        ],
+    };
+    let err = start(&catalog, &untyped, "w", Map::new()).err().unwrap();
+    assert!(err.contains("task input 'table'"), "{err}");
     // A workflow of another catalog is not a root.
     let lib = json!({"catalog": {"id": "lib", "version": "1.0.0", "exports": ["v"]},
                      "v": catalog["w"].clone()});

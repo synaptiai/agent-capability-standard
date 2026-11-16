@@ -1460,7 +1460,9 @@ def test_every_fixture_diagnostic_has_an_exact_path() -> None:
     document (another catalog of the set when ``catalog`` names it), or,
     for a finding about a member that is missing, whose workflow or step
     does; and ``field`` ends with the pointer's last token, so the two name
-    the same member."""
+    the same member. A finding whose pointer is inside a step concerns that
+    step, so it carries ``step`` and the step's ``capability`` (§9.8), and
+    its ``field`` is relative to the step."""
     import yaml
 
     from grounded_agency import _core
@@ -1488,6 +1490,16 @@ def test_every_fixture_diagnostic_has_an_exact_path() -> None:
                 assert "path" not in loc, (name, d)
                 continue
             assert "path" in loc, (name, d)
+            tokens = loc["path"].split("/")
+            if "workflow" in loc and len(tokens) > 3 and tokens[2] == "steps":
+                assert loc.get("step") == int(tokens[3]), (name, d)
+                key = tokens[1].replace("~1", "/").replace("~0", "~")
+                wf = docs[loc.get("catalog")][key]
+                step = wf["steps"][int(tokens[3])]
+                capability = step.get("capability") if isinstance(step, dict) else None
+                if isinstance(capability, str):
+                    assert loc.get("capability") == capability, (name, d)
+                assert not loc.get("field", "").startswith("steps["), (name, d)
             depth, length = _resolved_depth(docs[loc.get("catalog")], loc["path"])
             anchor = (1 if "workflow" in loc else 0) + (2 if "step" in loc else 0)
             assert depth == length or (

@@ -949,7 +949,7 @@ impl WorkflowCheck<'_> {
             );
             wait::check_delay(&loc, step, &declared, self.report);
             approval::check_after_deferral(&loc, step, &declared, self.report);
-            delegation::check(&loc, step, &declared, self.report);
+            delegation::check(&loc, step, &declared, targets_1_2, self.report);
             if cap == "delegate" {
                 delegation::check_targets(
                     &loc,
@@ -2197,18 +2197,31 @@ pub(crate) mod tests {
                 .diagnostics
                 .iter()
                 .filter(|d| d.code == Code::VersionFeatureMismatch)
-                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .map(|d| d.location["path"].as_str().unwrap().to_string())
                 .collect::<Vec<_>>()
         };
         // Once per feature, at its first use, in the order met.
         let all = [
-            "workflow_extensions.requires",
-            "steps[0].gates[0].phase",
-            "steps[0].gates[0].action",
-            "steps[0].gates[0].when",
-            "steps[0].failure_modes[0].when",
-            "steps[0].failure_modes[0].on_error",
+            "/w/workflow_extensions/requires",
+            "/w/steps/0/gates/0/phase",
+            "/w/steps/0/gates/0/action",
+            "/w/steps/0/gates/0/when",
+            "/w/steps/0/failure_modes/0/when",
+            "/w/steps/0/failure_modes/0/on_error",
         ];
+        // A use in a step is located at it (§9.8): step, capability and a
+        // field relative to the step.
+        let w = json!({"goal": "g", "risk": "low", "spec_version": "1.0", "steps": [step]});
+        let d = validate_catalog(&ctx(), &json!({"w": w}), None)
+            .diagnostics
+            .into_iter()
+            .find(|d| d.code == Code::VersionFeatureMismatch)
+            .unwrap();
+        assert_eq!(
+            Value::Object(d.location),
+            json!({"workflow": "w", "step": 0, "capability": "search",
+                "field": "gates[0].phase", "path": "/w/steps/0/gates/0/phase"})
+        );
         assert_eq!(w1616(Some("1.0"), None, true), all);
         assert_eq!(w1616(None, Some("1.0.0"), false), all[1..]);
         // spec_version takes precedence over the header.

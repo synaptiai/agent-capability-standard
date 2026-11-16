@@ -87,9 +87,64 @@ def test_check_refuses_what_the_core_refuses(registry: CapabilityRegistry) -> No
         (_manifest("a", ["x", "x"]), "twice"),
         (_manifest("a", [], flags={}), "unknown member"),
         (_manifest("a", [], task=[]), "'task'"),
+        (_manifest("a", [], task={"t": 1}), "task input 't': must be a mapping"),
     ]:
         with pytest.raises(ValueError, match=why):
             check_agent_manifest(bad, registry)
+
+
+BAD_TASK_INPUTS = [
+    ({"type": 42}, "'type'"),
+    ({"type": []}, "'type'"),
+    ({"type": "string", "required": "yes"}, "'required' must be a boolean"),
+    ({"description": 1}, "'description'"),
+    ({"properties": []}, "'properties'"),
+    ({"ref": True}, "'ref'"),
+]
+
+
+@pytest.mark.parametrize(("spec", "why"), BAD_TASK_INPUTS)
+def test_task_inputs_are_typed(
+    registry: CapabilityRegistry, spec: dict[str, Any], why: str
+) -> None:
+    """A task input breaking ``agent_task_input`` refuses the manifest, in
+    the SDK and in the core alike (§5.15.1): ``required: "yes"`` must not
+    make a required input optional."""
+    from grounded_agency import _core
+
+    bad = _manifest("db-writer", ["retrieve"], task={"table": spec})
+    with pytest.raises(ValueError, match=f"task input 'table': {why}"):
+        check_agent_manifest(bad, registry)
+    with pytest.raises(ValueError, match=f"task input 'table': {why}"):
+        AgentRegistry(registry).register_manifest(bad)
+    catalog = {
+        "w": {
+            "goal": "g",
+            "risk": "low",
+            "spec_version": "1.2",
+            "agents": ["db-writer"],
+            "steps": [
+                {
+                    "capability": "delegate",
+                    "purpose": "p",
+                    "store_as": "d",
+                    "input_bindings": {"agent": "db-writer", "task": {}},
+                }
+            ],
+        }
+    }
+    validator = _core.Validator(ONTOLOGY, ROOT)
+    with pytest.raises(ValueError, match=f"task input 'table': {why}"):
+        validator.validate(catalog, agents=[bad])
+    # Well typed, the required input is enforced (S304).
+    good = _manifest(
+        "db-writer", ["retrieve"], task={"table": {"type": "string", "required": True}}
+    )
+    check_agent_manifest(good, registry)
+    codes = {
+        d["code"] for d in validator.validate(catalog, agents=[good])["diagnostics"]
+    }
+    assert "S304" in codes
 
 
 def test_descriptor_round_trips_a_manifest(registry: CapabilityRegistry) -> None:
@@ -177,6 +232,48 @@ def test_engine_libraries_and_the_manifest() -> None:
     assert manifest.catalog_data()["catalog"]["id"] == "acs.fixtures.solo"
     assert manifest.validate_report() == []
     assert "spec_version" not in manifest.catalog_data()["catalog"]
+
+
+def test_library_diagnostics_are_not_a_same_named_primary_workflows(
+    tmp_path: Path,
+) -> None:
+    """A library's diagnostics carry its ``catalog`` id (§9.8): the engine
+    never reports them as those of the primary workflow of the same name."""
+    (tmp_path / "main.yaml").write_text(
+        "# Standard version: 1.2.0\n"
+        "catalog: {id: acme.main, version: 1.0.0}\n"
+        "inner:\n"
+        "  goal: g\n"
+        "  risk: low\n"
+        "  steps:\n"
+        "  - {capability: retrieve, purpose: p, store_as: r,"
+        " input_bindings: {target: t}}\n"
+    )
+    (tmp_path / "lib.yaml").write_text(
+        "# Standard version: 1.2.0\n"
+        "catalog: {id: acme.lib, version: 1.0.0, exports: [inner]}\n"
+        "inner:\n"
+        "  goal: g\n"
+        "  risk: low\n"
+        "  steps:\n"
+        "  - {capability: divine, purpose: p, store_as: r}\n"
+    )
+    engine = WorkflowEngine(ONTOLOGY)
+    engine.load_catalog(tmp_path / "main.yaml")
+    assert engine.validate_capabilities("inner") == []
+    engine.load_library(tmp_path / "lib.yaml")
+    report = engine.validate_report()
+    assert [(d.code.value, d.location.get("catalog")) for d in report] == [
+        ("V101", "acme.lib")
+    ]
+    assert engine.validate_report("inner") == []
+    assert engine.validate_capabilities("inner") == []
+    assert engine.validate_bindings("inner") == []
+    assert engine.validate_edge_constraints("inner") == []
+    assert list(engine.validate_all()) == ["acme.lib/inner"]
+    assert [
+        d.code.value for d in engine.validate_all_structured()["acme.lib/inner"]
+    ] == ["V101"]
 
 
 def test_runner_runs_with_the_engines_libraries_and_manifests() -> None:

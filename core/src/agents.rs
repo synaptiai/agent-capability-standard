@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 
 use crate::ontology::Ontology;
 use crate::validate::{Flags, check_cited};
+use crate::yaml;
 
 /// More manifests than this in one set is refused: a host has far fewer
 /// agents, and each costs a lookup per delegate step.
@@ -152,8 +153,10 @@ impl Agents {
         let task = match m.get("task") {
             None => None,
             Some(Value::Object(t)) => {
-                if let Some((k, _)) = t.iter().find(|(_, v)| !v.is_object()) {
-                    return fail(format!("task input '{k}' must be a mapping"));
+                for (k, v) in t {
+                    if let Err(what) = task_input(v) {
+                        return fail(format!("task input '{k}': {what}"));
+                    }
                 }
                 Some(t.clone())
             }
@@ -187,9 +190,46 @@ impl Agents {
     }
 }
 
+/// A task input against `agent_task_input` (§5.15.1): a mapping whose
+/// `type` is a type name or a non-empty list of them, `required` a boolean,
+/// `description` and `ref` strings and `properties` a mapping; other members
+/// are allowed. A manifest that breaks it is refused, so `required: "yes"`
+/// never reads as optional.
+fn task_input(v: &Value) -> Result<(), String> {
+    let Value::Object(m) = v else {
+        return Err("must be a mapping".to_string());
+    };
+    let type_ok = |t: &Value| match t {
+        Value::String(_) => true,
+        Value::Array(a) => !a.is_empty() && a.iter().all(Value::is_string),
+        _ => false,
+    };
+    if let Some(t) = m.get("type")
+        && !type_ok(t)
+    {
+        return Err("'type' must be a type name or a non-empty list of them".to_string());
+    }
+    for key in ["required", "description", "properties", "ref"] {
+        let Some(v) = m.get(key) else { continue };
+        let (ok, what) = match key {
+            "required" => (v.is_boolean(), "a boolean"),
+            "properties" => (v.is_object(), "a mapping"),
+            _ => (v.is_string(), "a string"),
+        };
+        if !ok {
+            return Err(format!(
+                "'{key}' must be {what}, found {}",
+                yaml::kind_of(v)
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The agents a workflow declares (§5.15.2), when it targets 1.2 or later
 /// and `agents` is a non-empty list of distinct non-empty strings; `None`
-/// otherwise (both are S303 in the validator).
+/// otherwise (below 1.2 the field is ignored, W616; a malformed list is
+/// S303).
 pub fn declared(wf: &Map<String, Value>, target: Option<(u64, u64)>) -> Option<Vec<&str>> {
     if target.is_none_or(|t| t < (1, 2)) {
         return None;
@@ -389,6 +429,46 @@ mod tests {
         }
         let dup = Agents::load(&[manifest("a", &[]), manifest("a", &[])], &o).unwrap_err();
         assert!(dup.contains("two agent manifests"));
+    }
+
+    /// A task input's members are typed as `agent_task_input` says: a
+    /// manifest that breaks it is refused, naming the agent, the input and
+    /// the member, so `required: "yes"` never makes a required input
+    /// optional.
+    #[test]
+    fn task_inputs_are_typed() {
+        let o = ontology();
+        let with = |input: Value| {
+            let mut m = manifest("db-writer", &["retrieve"]);
+            m["task"] = json!({"table": input});
+            Agents::load(&[m], &o)
+        };
+        for good in [
+            json!({}),
+            json!({"type": "string", "required": true, "description": "d"}),
+            json!({"type": ["string", "null"], "properties": {}, "ref": "r", "x-ui": 1}),
+        ] {
+            assert!(with(good.clone()).is_ok(), "{good}");
+        }
+        for (bad, why) in [
+            (json!({"type": 42}), "'type'"),
+            (json!({"type": []}), "'type'"),
+            (json!({"type": ["string", 1]}), "'type'"),
+            (
+                json!({"required": "yes"}),
+                "'required' must be a boolean, found string",
+            ),
+            (json!({"description": 1}), "'description'"),
+            (json!({"properties": []}), "'properties'"),
+            (json!({"ref": true}), "'ref'"),
+        ] {
+            let err = with(bad).unwrap_err();
+            assert!(
+                err.starts_with("agent manifest 'db-writer': task input 'table': ")
+                    && err.contains(why),
+                "{err} lacks {why}"
+            );
+        }
     }
 
     #[test]

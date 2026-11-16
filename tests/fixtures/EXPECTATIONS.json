@@ -942,19 +942,20 @@
       "W623"
     ]
   },
-  "fail_agents_without_1_2": {
-    "should_pass": false,
+  "pass_agents_v11_warn": {
+    "should_pass": true,
     "level": "L1",
     "category": "delegation",
-    "expected_error_codes": [
-      "S303"
+    "expected_warning_codes": [
+      "W616"
     ],
     "expected_locations": [
       {
-        "code": "S303",
+        "code": "W616",
         "path": "/review/agents"
       }
-    ]
+    ],
+    "note": "The workflow field agents in a workflow that targets 1.1 (Standard v1.2 \u00a75.15.2, \u00a711.5): ignored there, as by a 1.1 consumer"
   },
   "pass_agents_declared": {
     "should_pass": true,

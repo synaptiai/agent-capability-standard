@@ -2065,6 +2065,7 @@ pub(crate) fn identity_error(v: &Value) -> Option<String> {
     for key in [
         "role",
         "model_family",
+        "model_id",
         "owner",
         "authenticated_by",
         "trust_class",

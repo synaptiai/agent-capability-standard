@@ -422,7 +422,7 @@ A workflow MAY define:
 | `workflow_extensions` | object | Extension declarations (§5.9) |
 | `triggers` | array | How runs start (§5.10) |
 | `grounding` | object | Grounding policy (`grounding@1`, §5.20) |
-| `agents` | array of strings | The agents its `delegate` steps may delegate to; only in a workflow that targets 1.2 or later (§5.15.2) |
+| `agents` | array of strings | The agents its `delegate` steps may delegate to; it applies only in a workflow that targets 1.2 or later (§5.15.2) |
 | `domain` | string | The domain of the profile the workflow is written for (a domain profile's `domain`). Descriptive: it changes no validation or execution, and it is neither the step field `domain` (§5.2.4) nor a default for it |
 | `profile` | string | The domain profile written for (its `domain` or a path); applies nothing (§5.21) |
 | `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
@@ -933,11 +933,10 @@ waiting or approval semantics.
 | `grounding@1` | workflow `grounding`; the check of host outputs (§5.20) |
 
 The workflow field `agents` (§5.15.2) and the `delegate` input `continues`
-(§5.15.3) are base members of 1.2, governed by no extension. `agents` is
-allowed only in a workflow that targets 1.2 or later (S303 otherwise), so a
-workflow that uses it declares 1.2 and an older consumer refuses it (V109)
-instead of ignoring it. `continues` in a workflow that targets an earlier
-version is W616 (§11.5).
+(§5.15.3) are base members of 1.2, governed by no extension. Their rules
+apply in a workflow that targets 1.2 or later; in one that targets an
+earlier version, either is W616 (§11.5), and the executor ignores `agents`
+and passes `continues` on, as an older consumer does.
 
 `failure_modes[].when` and `.on_error` are part of base 1.1, not an
 extension: a consumer that ignores them only loses an optional trigger.
@@ -1696,8 +1695,11 @@ that leaves out a capability the agent can exercise.
 A workflow that targets 1.2 or later (§11.5) MAY declare `agents`, the agents
 its `delegate` steps may delegate to: a non-empty list of distinct, non-empty
 strings (else S303). In a workflow that targets an earlier version or
-declares none, `agents` is S303: declaring it is an opt-in that an older
-consumer must refuse (V109), not ignore.
+declares none, `agents` has no effect: an executor of this version ignores
+it, as an older consumer does, the workflow's delegate steps keep the
+`delegate` node's flags, and a validator checks none of the rules below but
+reports W616, or W605 for a workflow with no version (§11.5): declare 1.2 to
+apply it.
 
 ```yaml
 agents: [reviewer-a, db-writer]
@@ -1770,7 +1772,11 @@ In a workflow that targets 1.2 or later:
 
 A `delegate` step may bind `continues`: the `task_id` of an earlier delegation
 (`${review_a.task_id}`, or an input) whose delegate the host continues
-instead of starting a new one. The delegate keeps what it did before, so:
+instead of starting a new one. In a workflow that targets an earlier version
+than 1.2, `continues` is W616 (§11.5) and an input the executor passes on
+without reading it, as an older consumer does; the rules below apply in a
+workflow that targets 1.2 or later. The delegate keeps what it did before,
+so:
 
 - a step that binds `continues` and a literal `fresh_context: true` is S303.
   A reviewer that binds `continues` therefore never satisfies a quorum's
@@ -4072,22 +4078,21 @@ uses the feature gets W616:
 | New in | Features |
 |--------|----------|
 | 1.1 | `workflow_extensions.requires` (and so every extension; the advisory `supports_*` flags are 1.0), gate `phase`, gate `action: end`, the `in` operator, failure-mode `when` and `on_error` |
-| 1.2 | approver `sender_check` and `accept_trust_classes` (§5.14, §5.17); the `delegate` input `continues` (§5.15.3); an `invoke` target that is a qualified id (§5.1.1) and a catalog manifest (§5.1.1, reported at the manifest when the file's header targets an earlier version); the extension `grounding@1` and the workflow field `grounding` (§5.20); F505 in a failure mode's `on_error` (§5.12); the `audit` input `require_record` (§6.4); the `persist` and `recall` input `scope` (§4.5) |
+| 1.2 | approver `sender_check` and `accept_trust_classes` (§5.14, §5.17); the workflow field `agents` (§5.15.2) and the `delegate` input `continues` (§5.15.3); an `invoke` target that is a qualified id and names no workflow of the invoker's catalog, whether or not a catalog given has its id (§5.1.1), and a catalog manifest (§5.1.1, reported at the manifest when the file's header targets an earlier version); the extension `grounding@1` and the workflow field `grounding` (§5.20); F505 in a failure mode's `on_error` (§5.12); the `audit` input `require_record` (§6.4); the `persist` and `recall` input `scope` (§4.5) |
 
 Declaring the version a feature is new in, or a later one, clears it. A
 feature is new in a version when a consumer of the version before would
 refuse a workflow that uses it or run it differently: a workflow or step
 field, a field value, an extension, or an input the executor reads. An input
 only a host reads is not: an older consumer reports it as W604 and passes it
-on (§5.5); §11.6 governs it. A feature that an older consumer must refuse
-(V109), not ignore, is allowed only in a workflow that targets its version:
-the workflow field `agents` (§5.15.2).
+on (§5.5); §11.6 governs it. A W616 is reported at the feature's first use:
+a step field at its step, with `field` relative to the step (§9.8).
 
 | Code | A workflow or catalog is reported when |
 |------|----------------------------------------|
 | W605 | It declares no version: neither `spec_version` nor a header |
 | V109 | The version it declares is not one the validator supports |
-| S303 | Its `spec_version` is not a string; or it uses `agents` and targets 1.0 or 1.1 or declares no version |
+| S303 | Its `spec_version` is not a string |
 | W616 | It targets an earlier version than a feature it uses (the table above): once per feature, at its first use |
 
 ### 11.6 Ontology Versions
