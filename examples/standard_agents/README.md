@@ -176,7 +176,15 @@ their `allowed_destinations` for that tool.
 key-value store (§4.5): scope `session` (the thread), an envelope with the
 data's `stored_at` and, with a `ttl`, its `expires_at`, after which a recall
 does not find it; data or a key holding a credential is refused
-(`secret_in_data`).
+(`secret_in_data`). What §4.5 asks a host to state, for its one scope:
+entries survive a restart of the host, since the runtime keeps thread values
+in durable per-thread storage that survives process restarts and redeploys
+(Standard Agents Runtime, Durable Key-Value Store); they are retained while
+the thread lasts, unless their `ttl` ends them first, and the binding
+deletes none; a value is limited to `max_value_bytes` (1,000,000 bytes of
+JSON text by default; `over_capacity` above it), and the binding sets no
+limit on the number of entries, so the runtime's own caps on key length,
+value size and key count, which it may set, are the limits.
 
 A restore point counts only in the execution it was taken in, and for ten
 minutes at most, so the order that works is: ask, wait for the approval, then

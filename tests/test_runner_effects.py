@@ -205,6 +205,34 @@ def test_the_executors_rollback_lists_this_runs_transmissions(tmp_path: Path) ->
     )
 
 
+def test_a_rollback_lists_a_send_whose_outcome_is_unknown(tmp_path: Path) -> None:
+    _, host = files_host(tmp_path, idempotency=IdempotencyLog())
+    checkpoint = host.create_checkpoint({"step": 0, "frame": ["w"]})["checkpoint_id"]
+
+    def timed_out() -> dict[str, Any]:
+        raise TimeoutError("the request went out; no answer came back")
+
+    with pytest.raises(TimeoutError):
+        host.send_once(
+            {
+                "run_id": "r1",
+                "capability": "send",
+                "idempotency_key": "r1:4",
+                "inputs": {"destination": "ops", "payload": 1},
+            },
+            timed_out,
+        )
+    answer = host.rollback({"checkpoint_id": checkpoint, "run_id": "r1"})
+    assert answer["kind"] == "RolledBack"
+    assert answer["not_covered"] == [
+        {
+            "item": "send to ops (r1:4)",
+            "reason": "transmitted",
+            "detail": "outcome unknown",
+        }
+    ]
+
+
 def test_a_failed_restore_is_f503(tmp_path: Path) -> None:
     _, host = files_host(tmp_path)
     checkpoint = host.create_checkpoint({"step": 0, "frame": ["w"]})["checkpoint_id"]
@@ -341,4 +369,88 @@ def test_a_memory_refusal_is_an_error_with_its_reason(tmp_path: Path) -> None:
         "Error",
         "R402",
         "unsupported_scope",
+    )
+
+
+ROLLBACK_ON_FAIL = {
+    "w": {
+        "goal": "g",
+        "risk": "medium",
+        "spec_version": "1.2",
+        "steps": [
+            {
+                "capability": "checkpoint",
+                "purpose": "p",
+                "store_as": "cp",
+                "input_bindings": {"scope": "*"},
+            },
+            {
+                "capability": "verify",
+                "purpose": "p",
+                "store_as": "v",
+                "input_bindings": {"target": "x", "criteria": ["c"]},
+                "failure_modes": [
+                    {
+                        "condition": "c",
+                        "when": "${v.passed} == false",
+                        "action": "rollback",
+                    }
+                ],
+            },
+        ],
+    }
+}
+
+
+@pytest.mark.parametrize("bad", [None, {}, "x", [1]])
+def test_a_malformed_not_covered_is_refused(bad: Any) -> None:
+    # §5.19.1: a `RolledBack` whose `not_covered` is not a list of objects
+    # is refused as malformed; `null` is not read as absent.
+    from grounded_agency import _core
+
+    run = _core.Run.start(
+        _core.Validator(ONTOLOGY, ROOT),
+        ROLLBACK_ON_FAIL,
+        "w",
+        header=None,
+        run_id="r",
+        now_ms=0,
+    )
+    a = run.next()
+    run.submit(
+        a["id"],
+        {"kind": "Output", "value": {"checkpoint_id": "cp1", "evidence_anchors": []}},
+        0,
+    )
+    a = run.next()
+    run.submit(
+        a["id"],
+        {
+            "kind": "Output",
+            "value": {"passed": False, "evidence_anchors": [], "confidence": 0.9},
+        },
+        0,
+    )
+    rollback = run.next()
+    assert rollback["kind"] == "Rollback"
+    with pytest.raises(ValueError, match="malformed"):
+        run.submit(rollback["id"], {"kind": "RolledBack", "not_covered": bad}, 0)
+    assert run.next() == rollback
+    run.submit(rollback["id"], {"kind": "RolledBack"}, 0)
+    assert run.next()["kind"] == "Failed"
+
+
+@pytest.mark.parametrize(
+    "destinations",
+    [["ops@example.com"], ["https://hooks.example.com/*"], "ops", [["ok"], [1]]],
+)
+def test_a_flat_list_of_patterns_is_a_type_error(
+    runner: WorkflowRunner, destinations: Any
+) -> None:
+    # A string is a sequence of strings: without the check, a flat list of
+    # patterns became a policy of one-character patterns.
+    with pytest.raises(TypeError, match="list of"):
+        runner.start("send_report", {"to": "ops"}, destinations=destinations)
+    assert runner.start(
+        "send_report", {"to": "ops"}, destinations=[["ops@example.com"]]
     )

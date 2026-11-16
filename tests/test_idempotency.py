@@ -129,6 +129,24 @@ def test_performed_since_lists_the_runs_own_keys() -> None:
     assert log.performed_since(0, run_id="r10") == []
 
 
+def test_performed_since_lists_a_send_whose_outcome_is_unknown() -> None:
+    # The effect raised after the request may have gone out: the entry stays
+    # started, a retry is answered outcome_unknown, and a rollback must
+    # still list it as a transmission (§4.4.1).
+    log = IdempotencyLog(clock=lambda: 5)
+    with pytest.raises(TimeoutError):
+        log.perform(action("r:3"), Effect(TimeoutError("no answer")))
+    log.perform(action("r:4", destination="x", payload=1), Effect())
+    log.perform(
+        action("r:6", destination="y", payload=1),
+        Effect({"kind": "Error", "code": "R401", "message": "refused"}),
+    )
+    assert [(e["key"], e["state"]) for e in log.performed_since(0, run_id="r")] == [
+        ("r:3", "started"),
+        ("r:4", "done"),
+    ]
+
+
 def test_a_torn_last_line_is_skipped(tmp_path: Path) -> None:
     path = tmp_path / "keys.jsonl"
     IdempotencyLog(path).perform(action(), Effect())
@@ -136,4 +154,53 @@ def test_a_torn_last_line_is_skipped(tmp_path: Path) -> None:
         f.write('{"key": "r1:4", "sta')
     effect = Effect()
     assert IdempotencyLog(path).perform(action(), effect)["kind"] == "Output"
+    assert effect.calls == 0
+
+
+def test_an_entry_after_a_torn_line_survives_a_restart(tmp_path: Path) -> None:
+    # The torn line is cut off on load, so the next entry is a line of its
+    # own: a send whose outcome is unknown stays unknown after a restart,
+    # and is not transmitted again (§4.4.2).
+    path = tmp_path / "keys.jsonl"
+    IdempotencyLog(path).perform(action("r:1"), Effect())
+    with path.open("ab") as f:
+        f.write(b'{"at": 1, "capability": "send", "inputs_sha')
+    timeout = Effect(TimeoutError("no answer"))
+    with pytest.raises(TimeoutError):
+        IdempotencyLog(path).perform(action("r:3"), timeout)
+    again = Effect()
+    answer = IdempotencyLog(path).perform(action("r:3"), again)
+    assert (answer["kind"], answer["reason"]) == ("Error", "outcome_unknown")
+    assert (timeout.calls, again.calls) == (1, 0)
+    # Every line of the file is whole.
+    lines = path.read_bytes().split(b"\n")
+    assert lines[-1] == b"" and all(json.loads(line) for line in lines[:-1])
+
+
+def test_more_entries_after_a_torn_line_load(tmp_path: Path) -> None:
+    path = tmp_path / "keys.jsonl"
+    IdempotencyLog(path).perform(action("r:1"), Effect())
+    with path.open("ab") as f:
+        f.write(b'{"key": "r:2", "sta')
+    log = IdempotencyLog(path)
+    log.perform(action("r:4"), Effect())
+    log.perform(action("r:5"), Effect())
+    reloaded = IdempotencyLog(path)
+    effect = Effect()
+    for key in ("r:1", "r:4", "r:5"):
+        assert reloaded.perform(action(key), effect)["kind"] == "Output"
+    assert effect.calls == 0
+
+
+def test_a_whole_last_entry_without_its_newline_is_kept(tmp_path: Path) -> None:
+    path = tmp_path / "keys.jsonl"
+    IdempotencyLog(path).perform(action("r:1"), Effect())
+    text = path.read_bytes()
+    path.write_bytes(text[:-1])  # the newline was not written
+    log = IdempotencyLog(path)
+    log.perform(action("r:2"), Effect())
+    effect = Effect()
+    reloaded = IdempotencyLog(path)
+    for key in ("r:1", "r:2"):
+        assert reloaded.perform(action(key), effect)["kind"] == "Output"
     assert effect.calls == 0

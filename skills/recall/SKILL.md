@@ -89,7 +89,7 @@ assumptions: array[string]  # Assumptions about memory validity
 |-------|------|-------------|
 | `found` | boolean | Whether a live entry has exactly the key in the scope |
 | `data` | any | The entry's data, or the `default` input when none is found |
-| `scope` | string | The scope used; a step that binds `scope` fails unless this echoes it (R402, `unsupported_scope`) |
+| `scope` | string | The scope used; a step of a 1.2 workflow that binds `scope` fails unless this echoes it (R402, `unsupported_scope`) |
 | `stored_at` | string | ISO 8601 date-time the entry was stored |
 | `expires_at` | string | When the entry ends, for an entry with a `ttl` |
 | `x-related` | array | Related memories, best match first; never the entry itself |

@@ -621,6 +621,37 @@ def _memory(add):
     )
 
     add(
+        "persist_scope_v11_unchecked",
+        "In a 1.1 workflow, scope is an input the executor passes on, as 1.1"
+        " did: a persist step that binds scope session completes on an output"
+        " that does not echo it (§4.5 applies from 1.2; W616).",
+        {
+            "w": wf(
+                [
+                    st(
+                        "persist",
+                        "m",
+                        input_bindings={
+                            "data": {"a": 1},
+                            "key": "k",
+                            "scope": "session",
+                        },
+                    )
+                ]
+            )
+        },
+        [
+            {
+                "expect": inv("persist", inputs={"scope": "session"}),
+                "respond": out(stored=True, key="k"),
+            }
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["step_completed"],
+        header="1.1.0",
+    )
+
+    add(
         "persist_scope_unbound",
         "A persist step that binds no scope is not checked: an output without"
         " scope completes, as in 1.1 (§4.5).",

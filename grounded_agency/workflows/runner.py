@@ -164,8 +164,9 @@ class Host:
 
     def _transmitted_since(self, since_ms: int, run_id: str) -> list[dict[str, str]]:
         """This run's transmissions since ``since_ms``: what a rollback
-        lists as ``not_covered`` (``transmitted``, §4.4.1). Destinations
-        are redacted (§6.7)."""
+        lists as ``not_covered`` (``transmitted``, §4.4.1), a send whose
+        outcome is unknown included, since it may have gone out (its
+        ``detail`` says so). Destinations are redacted (§6.7)."""
         log = getattr(self, "idempotency", None)
         if log is None:
             return []
@@ -177,7 +178,10 @@ class Host:
                 if isinstance(destination, str)
                 else f"send ({entry['key']})"
             )
-            out.append({"item": item, "reason": "transmitted"})
+            reported = {"item": item, "reason": "transmitted"}
+            if entry["state"] != "done":
+                reported["detail"] = "outcome unknown"
+            out.append(reported)
         return out
 
     def _restore(
@@ -647,7 +651,9 @@ class WorkflowRunner:
         they are in force for every ``send`` step of the run and its nested
         runs, which fails F504 (``destination_not_allowed``) before approval
         when one does not allow its destination. A pattern that is not one
-        refuses the start.
+        refuses the start; a policy given as a string, not a list of
+        patterns, raises TypeError (``[["https://hooks.example.com/*"]]``
+        is one policy of one pattern).
 
         The executor is given no catalog header (``header=None``, STANDARD
         v1.2 §11.5) unless the catalog carries a manifest (§5.1.1; then its
@@ -672,6 +678,7 @@ class WorkflowRunner:
         """
         now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
         _check_ms(now)
+        policies = _destination_policies(destinations)
         if records not in RECORD_MODES:
             raise RunStartError(
                 f"records must be one of {RECORD_MODES}, not {records!r}", []
@@ -708,7 +715,7 @@ class WorkflowRunner:
                 profiles=self._profiles.documents or None,
                 records=records,
                 grounding=[p.to_dict() for p in as_policies(grounding)] or None,
-                destinations=[list(p) for p in destinations or ()] or None,
+                destinations=policies,
                 catalogs=self._engine.libraries() or None,
                 agents=self._engine.agent_manifests() or None,
             )
@@ -1315,6 +1322,31 @@ def _check_key(key: Any) -> None:
     """A snapshot key must be bytes."""
     if key is not None and not isinstance(key, (bytes, bytearray)):
         raise TypeError(f"key must be bytes, not {type(key).__name__}")
+
+
+def _destination_policies(
+    destinations: Sequence[Sequence[str]] | None,
+) -> list[list[str]] | None:
+    """The host's destination policies as the core takes them (§4.4.2). A
+    string is a sequence of strings too, so a flat list of patterns would
+    silently become one-character patterns: it is refused as the host's
+    bug, as is a pattern that is not a string."""
+    if destinations is None:
+        return None
+    if isinstance(destinations, str):
+        raise TypeError(
+            "destinations must be a list of policies, each a list of patterns, "
+            "not a string"
+        )
+    policies = []
+    for policy in destinations:
+        if isinstance(policy, str) or not all(isinstance(p, str) for p in policy):
+            raise TypeError(
+                "each policy is a list of patterns (destinations=[[pattern, ...], "
+                f"...]), not {policy!r}"
+            )
+        policies.append(list(policy))
+    return policies or None
 
 
 def _check_ms(now: Any) -> None:

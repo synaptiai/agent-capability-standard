@@ -393,6 +393,16 @@ impl Body {
     }
 }
 
+/// A member that, when present, must be a list: `null` is refused rather
+/// than read as absent (`#[serde(default)]` gives `None` when it is
+/// absent).
+fn present_list<'de, D>(d: D) -> Result<Option<Vec<Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<Value>::deserialize(d).map(Some)
+}
+
 /// The host's answer to the pending action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
@@ -420,8 +430,14 @@ pub enum Response {
     /// The checkpoint is restored: everything it captured is back
     /// (§4.4.1). `not_covered` lists changes since the checkpoint that it
     /// never covered (a transmission, a delegate's change elsewhere).
+    /// Absent is `None`; a member that is not a list (`null` included) is
+    /// refused as malformed (§5.19.1).
     RolledBack {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present_list"
+        )]
         not_covered: Option<Vec<Value>>,
     },
     Decision {
@@ -2060,9 +2076,11 @@ fn grounding_error(ctx: &Context, policies: &[grounding::Policy]) -> Option<Stri
 }
 
 /// A pending `InvokeCapability` read from a state that predates idempotency
-/// keys gets `<run_id>:<id>`, its own id (§5.19.4), and so does the step it
+/// keys gets `<run_id>:<id>`, its own id (§5.19.4), and so do the step it
 /// is for, so that the later attempts of its pass reuse the key and every
-/// `InvokeCapability` the executor delivers carries one (§4.4.2).
+/// `InvokeCapability` the executor delivers carries one (§4.4.2), and the
+/// record of the pass the step already wrote, which carries the pass's key
+/// (§6.4) and is not written again when that attempt succeeds.
 fn fill_idempotency_key(state: &mut State) {
     let Some(p) = state.pending.as_mut() else {
         return;
@@ -2076,8 +2094,16 @@ fn fill_idempotency_key(state: &mut State) {
     };
     let filled = format!("{}:{}", state.run_id, p.action.id);
     *key = Some(filled.clone());
-    if let Some(f) = state.frames.last_mut() {
-        f.cur.idempotency_key = Some(filled);
+    let Some(f) = state.frames.last_mut() else {
+        return;
+    };
+    f.cur.idempotency_key = Some(filled.clone());
+    // A record the host has already taken is not in the state.
+    if let Some(r) = f.cur.record
+        && r >= state.records_base
+        && let Some(record) = state.records.get_mut(r - state.records_base)
+    {
+        record["idempotency_key"] = json!(filled);
     }
 }
 

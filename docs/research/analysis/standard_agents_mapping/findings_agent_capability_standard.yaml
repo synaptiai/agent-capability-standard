@@ -1292,13 +1292,14 @@ findings:
   resolution: 'Standard 1.2.0 §4.5 (Memory), accepted from RFC-0009: optional `scope` on `persist` and
     `recall` (`run` = the run the host started and every run nested in it, `session`, `user`, `project`,
     `global`, `x-` names), each defined by visibility and lifetime and echoed in the output; the
-    executor fails a step that binds a scope the output does not echo (R402, `unsupported_scope`); `ttl`
+    executor fails a 1.2 step that binds a scope the output does not echo (R402, `unsupported_scope`); `ttl`
     is a §5.10.1 duration longer than zero (W614 for a literal outside it, `unsupported_ttl` from a
     host); `stored_at` on both, `persist.timestamp` deprecated (W603); W626 for an unknown literal
     scope; W616 for the input in a 1.0 or 1.1 workflow. Implemented in core/src/exec/machine.rs
     (`output()`), core/src/validate/effects.rs and grounded_agency/state/memory.py; the persist and
     recall skills follow it. Tests: core/tests/effects.rs; runtime fixtures `persist_scope_echo`,
-    `persist_scope_mismatch`, `recall_scope_absent`, `persist_scope_unbound`; validator fixtures
+    `persist_scope_mismatch`, `recall_scope_absent`, `persist_scope_unbound`,
+    `persist_scope_v11_unchecked`; validator fixtures
     `warn_memory_inputs`, `warn_persist_timestamp`, `pass_memory_scope_v11_warn`;
     tests/conformance/memory/store.json.'
   concerns:
@@ -2241,7 +2242,9 @@ findings:
     retention and limits per scope. Normative vectors tests/conformance/memory/store.json, passed by
     grounded_agency/state/memory.py (`MemoryStore`, in memory and on file: tests/test_memory_store.py)
     and by the Standard Agents binding''s `memoryTools` (session scope:
-    examples/standard_agents/test/memory.test.ts); runtime fixture `persist_stored_false_completes`.'
+    examples/standard_agents/test/memory.test.ts); runtime fixture `persist_stored_false_completes`.
+    Each host states durability, retention and limits: `MemoryStore.statement()`, and for `memoryTools`
+    examples/standard_agents/README.md and docs/integrations/standard_agents.md.'
   concerns:
   - checkpoint-rollback-state
   related:
@@ -2409,7 +2412,8 @@ findings:
     `allowed_destinations` (§5.21.3); the executor fails a disallowed `send` with F504
     (`destination_not_allowed`) before approval or a checkpoint; safety layers refuse such calls
     (§5.18.10), the Python adapter (`GroundedAgentConfig.allowed_destinations`, a binding''s
-    `destination` pointer) and the Standard Agents binding (`configureLayer`, which every `send` tool
+    `destination` pointer; a composite whose `invokes` reach a `send` binding is refused, since it does
+    not see nested calls) and the Standard Agents binding (`configureLayer`, which every `send` tool
     obeys), so neither conformance statement lists the row; W625 reports a 1.2 `send` whose approval
     hides its destination; §12.5 documents Guarded Send; the send skill cites the policy. One grammar in
     core/src/destination.rs (Python through `_core`) and one in packages/acs-core/src/destinations.ts.

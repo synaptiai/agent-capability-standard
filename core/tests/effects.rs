@@ -193,12 +193,26 @@ fn idempotency_key_filled_on_v1_restore() {
         let frames = s["frames"].as_array_mut().unwrap();
         let cur = frames.last_mut().unwrap()["cur"].as_object_mut().unwrap();
         cur.remove("idempotency_key");
+        // The send's approved record, written before the key existed.
+        for record in s["records"].as_array_mut().unwrap() {
+            record.as_object_mut().unwrap().remove("idempotency_key");
+        }
     });
+    let key = json!(format!("r:{}", first["id"]));
     let mut run = Run::restore(&ctx, &cat, &v1, None).unwrap();
     let pending = action(&run);
+    assert_eq!(pending["idempotency_key"], key);
+    // The record of the pass gets the key too (§6.4), although the
+    // restored attempt succeeds and the step is not called again.
+    let mut done = Run::restore(&ctx, &cat, &v1, None).unwrap();
+    let end = answer(&mut done, sent());
+    assert_eq!(end["kind"], "Completed");
     assert_eq!(
-        pending["idempotency_key"],
-        json!(format!("r:{}", first["id"]))
+        (
+            end["action_records"][0]["capability"].as_str(),
+            &end["action_records"][0]["idempotency_key"]
+        ),
+        (Some("send"), &key)
     );
     let retry = answer(&mut run, error("R401", None));
     assert_eq!(retry["idempotency_key"], pending["idempotency_key"]);
@@ -572,6 +586,13 @@ fn rolled_back_bad_reason_refused() {
         );
         assert!(matches!(refused, Err(SubmitError::Malformed(_))), "{bad}");
         assert_eq!(run.snapshot(None), before, "{bad}");
+    }
+    // A `not_covered` that is present but not a list is malformed (§5.19.1):
+    // `null` is refused, not read as absent.
+    for bad in [json!(null), json!({}), json!("a")] {
+        let r =
+            serde_json::from_value::<Response>(json!({"kind": "RolledBack", "not_covered": bad}));
+        assert!(r.is_err(), "{bad}");
     }
     // A `RolledBack` without the member deserialises as in 1.1.
     let r: Response = serde_json::from_value(json!({"kind": "RolledBack"})).unwrap();

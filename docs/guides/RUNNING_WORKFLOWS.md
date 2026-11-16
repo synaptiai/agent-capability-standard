@@ -173,9 +173,10 @@ the digest and the expiry, never other stores or inputs of the run.
   resolved, before anyone is asked to approve it and before a checkpoint is
   used; a failure mode can match it with `on_error: F504`
   ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
-- **Memory scope echo.** A `persist` or `recall` step that binds `scope`
-  fails with R402 (`unsupported_scope`, retried as any R402) unless the
-  output's `scope` equals it
+- **Memory scope echo.** A `persist` or `recall` step of a 1.2 workflow
+  that binds `scope` fails with R402 (`unsupported_scope`, retried as any
+  R402) unless the output's `scope` equals it; in a 1.0 or 1.1 workflow
+  `scope` is W616 and passed on unchecked
   ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
 - **Steps that report.** A `rollback` step completes whatever its
   `restored` says, and a `persist` step whatever its `stored` says: check
@@ -641,7 +642,8 @@ host = Host(
   item its `scope` names that the checkpoint did not capture),
   `changes_reverted` and `verification`; the executor's `Rollback` gets
   `RolledBack` only on a full restore, with this run's transmissions as
-  `not_covered`, and F503 otherwise.
+  `not_covered` (a send whose outcome is unknown among them, with `detail`
+  `outcome unknown`), and F503 otherwise.
 - **Memory** ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
   `MemoryStore` keeps entries by scope (`run` is the `run_id`, which every
   nested run shares; `session` is the host's `session_id`; `user` and

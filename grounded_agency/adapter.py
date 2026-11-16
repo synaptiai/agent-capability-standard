@@ -789,11 +789,37 @@ class GroundedAgentAdapter:
         """The F504 refusal of a call of a tool that performs ``send`` whose
         destination a destination policy in force does not allow, or whose
         destination this layer cannot tell (section 4.4.2, 5.18.10): read
-        at the binding's ``destination`` pointer. None for any other call,
-        and when no policy is in force. The destination is not repeated: it
-        is in the call's input (section 6.7)."""
-        if not self._destinations or "send" not in mapping.capabilities:
+        at the binding's ``destination`` pointer. A composite that invokes,
+        transitively, a binding that performs ``send`` is refused too: this
+        layer does not see a tool's nested calls (section 5.18.4), so it
+        cannot tell where they send. None for any other call, and when no
+        policy is in force. The destination is not repeated: it is in the
+        call's input (section 6.7)."""
+        if not self._destinations:
             return None
+        if "send" in mapping.capabilities:
+            refusal = self._direct_destination_refusal(mapping, tool, call, args)
+            if refusal is not None:
+                return refusal
+        senders = self.mapper.invoked_senders(mapping)
+        if not senders:
+            return None
+        return self._refuse(
+            ErrorCode.CONSTRAINT_VIOLATED,
+            mapping,
+            tool,
+            call,
+            f"{tool} invokes {', '.join(senders)}, which "
+            f"{'sends' if len(senders) == 1 else 'send'}, and this layer does not "
+            f"see a tool's nested calls, so it cannot tell where they go and no "
+            f"destination policy in force can allow them (STANDARD 1.2.0 §4.4.2, "
+            f"§5.18.4)",
+        )
+
+    def _direct_destination_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None, args: Any
+    ) -> str | None:
+        """:meth:`_destination_refusal` for the call's own ``send``."""
         found, value = (
             _json_pointer(args, mapping.destination)
             if mapping.destination is not None

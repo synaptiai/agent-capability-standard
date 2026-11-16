@@ -8,9 +8,13 @@
  * be listed): an entry whose `expires_at` has passed reads as missing. The
  * one scope provided is `session`, the thread (the default); any other is
  * refused with `unsupported_scope`. Data or a key holding a secret is
- * refused with `secret_in_data`, and nothing is stored (§6.7). The store
- * keeps entries while the thread lasts; its limit on a value is
- * `max_value_bytes` (the UTF-8 length of the value's JSON text).
+ * refused with `secret_in_data`, and nothing is stored (§6.7). What §4.5
+ * asks a host to state: entries survive a restart (the runtime keeps thread
+ * values in durable storage across restarts and redeploys); they are kept
+ * while the thread lasts, unless their `ttl` ends them, and the tools delete
+ * none; a value is limited to `max_value_bytes` (the UTF-8 length of its
+ * JSON text), and the tools set no limit on the number of entries (the
+ * runtime's own caps, which it may set, apply).
  *
  * The tools pass the session cases of `tests/conformance/memory/store.json`
  * (`test/memory.test.ts`); the pure functions `persistEntry` and

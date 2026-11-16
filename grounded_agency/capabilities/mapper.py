@@ -954,6 +954,25 @@ class ToolCapabilityMapper:
             )
         return mapping.person_required
 
+    def invoked_senders(self, mapping: ToolMapping) -> list[str]:
+        """The bindings ``mapping`` invokes, transitively, that perform
+        ``send`` (sections 4.4.2, 5.18.4), in the order found. This mapper's
+        layer does not see a composite's nested calls, so it cannot tell
+        where they send."""
+        found: list[str] = []
+        seen: set[str] = set()
+        queue = list(mapping.invokes)
+        while queue:
+            name = queue.pop(0)
+            if name in seen:
+                continue
+            seen.add(name)
+            invoked = self._dynamic_mappings.get(name, UNCLASSIFIED_TOOL)
+            if "send" in invoked.capabilities:
+                found.append(name)
+            queue.extend(invoked.invokes)
+        return found
+
     def _apply_profiles(self, mapping: ToolMapping) -> ToolMapping:
         """``mapping`` with the flags the applied profiles raise for each of
         its capabilities at its risk, and ``person_required`` when one of

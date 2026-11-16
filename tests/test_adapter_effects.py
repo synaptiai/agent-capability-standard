@@ -108,6 +108,60 @@ async def test_an_applied_profiles_destination_policy_alone_is_in_force(
     assert reason(await pre(none, {"to": "mailto:ops@example.com"}, "c2")) is not None
 
 
+def bind_composite(adapter: GroundedAgentAdapter, *invokes: str) -> None:
+    adapter.mapper.register_binding(
+        {
+            "tool": "mcp__mail__digest_and_deliver",
+            "standard": "1.2.0",
+            "ontology": adapter.registry.version,
+            "capability": "generate",
+            "invokes": list(invokes),
+        }
+    )
+
+
+async def pre_tool(
+    adapter: GroundedAgentAdapter, tool: str, args: dict[str, Any], call: str
+) -> Any:
+    hook = adapter._make_pretooluse_safety_hook()
+    return await hook({"tool_name": tool, "tool_input": args}, call, None)
+
+
+@pytest.mark.asyncio
+async def test_a_composite_that_invokes_a_send_is_f504_under_a_policy(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """§5.18.4: every check but checkpoint and approval applies to nested
+    calls. This layer does not see them, so a composite whose bindings
+    send, directly or through another composite, is refused while a
+    destination policy is in force (§4.4.2)."""
+    adapter = make(ontology_path, tmp_path, allowed_destinations=POLICY)
+    bind_send(adapter)
+    bind_composite(adapter, "mcp__mail__deliver")
+    adapter.mapper.register_binding(
+        {
+            "tool": "mcp__mail__weekly",
+            "standard": "1.2.0",
+            "ontology": adapter.registry.version,
+            "capability": "generate",
+            "invokes": ["mcp__mail__digest_and_deliver"],
+        }
+    )
+    adapter.create_checkpoint(["*"], "t")
+    for tool in ("mcp__mail__digest_and_deliver", "mcp__mail__weekly"):
+        denied = reason(await pre_tool(adapter, tool, {"topic": "x"}, f"c-{tool}"))
+        assert denied is not None and denied.startswith("F504 CONSTRAINT_VIOLATED:")
+        assert "mcp__mail__deliver" in denied and "nested" in denied
+    # No policy, no check.
+    free = make(ontology_path, tmp_path / "2")
+    bind_send(free)
+    bind_composite(free, "mcp__mail__deliver")
+    free.create_checkpoint(["*"], "t")
+    assert (
+        reason(await pre_tool(free, "mcp__mail__digest_and_deliver", {}, "c3")) is None
+    )
+
+
 @pytest.mark.asyncio
 async def test_no_policy_no_check(ontology_path: str, tmp_path: Path) -> None:
     adapter = make(ontology_path, tmp_path)

@@ -138,7 +138,8 @@ step (§5.15.4).
 `run` (the run the host started and every run nested in it), `session`,
 `user`, `project`, `global` and `x-` names, defined by visibility and
 lifetime, echoed in the output and enforced by the executor when a step
-binds a scope. `ttl` is a §5.10.1 duration (W614 otherwise). `stored: true`
+of a 1.2 workflow binds a scope (below 1.2, `scope` is W616 and passed on).
+`ttl` is a §5.10.1 duration (W614 otherwise). `stored: true`
 means read-after-write and an I-JSON round trip; `stored: false` means
 nothing changed. Data holding a secret the host recognises is refused
 (`secret_in_data`, §6.7). `stored_at` is the shared name; `persist`'s
@@ -162,8 +163,9 @@ credentials scoped to allowed origins are recommended.
 
 Every ontology and canonical schema change is an optional field or a
 description (§11.4). The executor's behaviour for a 1.1 workflow is unchanged
-unless a host opts in: a host that gives destination policies, or a step that
-binds the new `scope` input (a key that was W604 in 1.1). W624 and W625 apply
+unless a host opts in by giving destination policies: a 1.1 step that binds
+the new `scope` input (a key that was W604 in 1.1) gets W616, and the
+executor passes the input on without checking the echo, as 1.1 did. W624 and W625 apply
 only to workflows that target 1.2; W626 and the new W614 and W603 cases apply
 to all versions and hit nothing in the repository. New host duties
 (at-most-once per key and no replay under a reused key, memory guarantees
@@ -185,7 +187,8 @@ destination to its `send` step's `approval.shows`.
   profile policy with no host policy; a URL against a suffix pattern;
   `on_error: F504`), rollback steps that do not restore (complete; checked
   by a gate), `RolledBack` with `not_covered` (transmitted, delegated),
-  memory scope echo and its absence, `stored: false`.
+  memory scope echo and its absence, no check in a 1.1 workflow, `stored:
+  false`.
 - Validator fixtures for W624, W625, W626, the W614 `ttl` case and the W603
   `timestamp` case, and their exemptions; and the W616 for `scope` in a 1.1
   workflow, located at its first step.

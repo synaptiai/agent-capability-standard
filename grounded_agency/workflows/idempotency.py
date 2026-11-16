@@ -140,10 +140,13 @@ class IdempotencyLog:
     def performed_since(
         self, since_ms: int, *, run_id: str, capability: str | None = "send"
     ) -> list[dict[str, Any]]:
-        """The effects done at or after ``since_ms`` under the keys of run
-        ``run_id`` (prefix ``<run_id>:``; nested runs share the run's id),
-        of ``capability`` (any, when None), oldest first: what a rollback
-        lists as ``not_covered`` (§4.4.1)."""
+        """The effects that took effect or may have, at or after
+        ``since_ms``, under the keys of run ``run_id`` (prefix
+        ``<run_id>:``; nested runs share the run's id), of ``capability``
+        (any, when None), oldest first: what a rollback lists as
+        ``not_covered`` (§4.4.1). Each entry's ``state`` is ``done``, or
+        ``started`` for one whose outcome is unknown (its effect raised, or
+        is still running): it may have gone out."""
         prefix = f"{run_id}:"
         with self._lock:
             entries = list(self._entries.values())
@@ -151,7 +154,7 @@ class IdempotencyLog:
             (
                 dict(e)
                 for e in entries
-                if e["state"] == "done"
+                if e["state"] in ("done", "started")
                 and e["key"].startswith(prefix)
                 and e["at"] >= since_ms
                 and (capability is None or e["capability"] == capability)
@@ -192,16 +195,40 @@ class IdempotencyLog:
         if len(text) > _MAX_LOG_BYTES:
             raise ValueError(f"idempotency log {self._path} is too large")
         # The last entry per key wins. A torn last line (a crash while it
-        # was appended) is skipped; one anywhere else is an error.
-        lines = [line for line in text.decode().splitlines() if line.strip()]
-        for i, line in enumerate(lines):
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                if i == len(lines) - 1:
+        # was appended) is skipped and cut off, so that the next entry is
+        # appended on a line of its own; one anywhere else is an error.
+        chunks = text.split(b"\n")
+        offset = 0
+        torn_at: int | None = None
+        for i, chunk in enumerate(chunks):
+            if chunk.strip():
+                try:
+                    entry = json.loads(chunk)
+                except ValueError:
+                    if any(c.strip() for c in chunks[i + 1 :]):
+                        raise
+                    torn_at = offset
                     break
-                raise
-            if entry.get("state") == "cleared":
-                self._entries.pop(entry["key"], None)
-            else:
-                self._entries[entry["key"]] = entry
+                if entry.get("state") == "cleared":
+                    self._entries.pop(entry["key"], None)
+                else:
+                    self._entries[entry["key"]] = entry
+            offset += len(chunk) + 1
+        if torn_at is not None:
+            self._repair(torn_at, b"")
+        elif text and not text.endswith(b"\n"):
+            # A whole entry whose newline was not written: end its line.
+            self._repair(len(text), b"\n")
+
+    def _repair(self, length: int, tail: bytes) -> None:
+        """Cut the log to ``length`` bytes and append ``tail``."""
+        assert self._path is not None
+        fd = os.open(self._path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            os.ftruncate(fd, length)
+            if tail:
+                os.lseek(fd, length, os.SEEK_SET)
+                os.write(fd, tail)
+            os.fsync(fd)
+        finally:
+            os.close(fd)

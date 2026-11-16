@@ -2156,8 +2156,11 @@ impl<'a> Machine<'a> {
         }
         // A memory step that bound a scope gets that scope or fails (§4.5):
         // a host that does not know the input would store or look up
-        // elsewhere without saying so. Retried as any R402.
+        // elsewhere without saying so. Retried as any R402. Below 1.2,
+        // `scope` is an input the executor passes on and does not read, as
+        // 1.1 did (W616).
         if matches!(step.capability.as_str(), "persist" | "recall")
+            && self.program.workflows[&self.frame_ref().workflow].targets_1_2
             && let Some(bound) = self
                 .frame_ref()
                 .cur

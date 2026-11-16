@@ -464,7 +464,13 @@ refused with F504 before any approval is asked for. The destination is
 (`destination: (args) => args.to`); a tool's own `profiles` add their
 policies. `memoryTools()` gives a `persist` and a `recall` tool on the
 thread's store (scope `session`), which pass the session cases of
-`tests/conformance/memory/store.json`.
+`tests/conformance/memory/store.json`. Its entries survive a restart of the
+host (the runtime MUST keep thread values across process restarts and
+redeploys), are retained while the thread lasts unless their `ttl` ends
+them, and are limited to `max_value_bytes` per value (1,000,000 by
+default), with no limit of the binding's on their number: the runtime's
+own caps on key length, value size and key count, which it MAY set, apply
+(§4.5, what a host states).
 
 ### Checkpoints
 

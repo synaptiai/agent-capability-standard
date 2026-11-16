@@ -594,6 +594,9 @@ of `persist` and of `recall` carries `scope`, the scope used. When a step
 binds `scope` and it resolves to a value, the executor fails the step (R402,
 reason `unsupported_scope`) unless the output's `scope` equals that value: a
 host that does not know the input would use another scope without saying so.
+The check applies in a workflow that targets 1.2 or later; in an earlier
+one, `scope` is W616 and the executor passes it on, as an older consumer
+does (§11.5).
 
 **`stored: true`** asserts that the data is stored under the key in the
 scope: from the time the `persist` step completes, a `recall` of that key in
@@ -2994,8 +2997,8 @@ action carries it as `reason` when the run ends with that failure, and the
 step's action record as `reason_code` (§6.4). The executor raises
 `not_recorded` itself for an `audit` step (§6.4),
 `destination_not_allowed` with F504 for a `send` step (§4.4.2),
-`unsupported_scope` with R402 for a `persist` or `recall` step whose output
-does not echo its scope (§4.5), and `below_minimum_confidence` and
+`unsupported_scope` with R402 for a `persist` or `recall` step of a 1.2
+workflow whose output does not echo its scope (§4.5), and `below_minimum_confidence` and
 `invalid_confidence` with F504 for an output an applied profile's minimum
 confidence covers (§5.21.3).
 

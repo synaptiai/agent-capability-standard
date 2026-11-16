@@ -414,12 +414,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `WorkflowRunner.start/run(destinations=...)`,
     `GroundedAgentConfig(allowed_destinations=...)` and the binding's
     `configureLayer({destinations})` give the host's own; an invalid
-    pattern is refused.
-  - A `persist` or `recall` step that binds `scope` fails R402
-    (`unsupported_scope`) unless the output echoes the scope. Steps that do
-    not bind it are unchanged.
+    pattern is refused, and a `WorkflowRunner` policy given as a string
+    rather than a list of patterns raises `TypeError`. While a policy is in
+    force, `GroundedAgentAdapter` also refuses (F504) a composite whose
+    `invokes` reach a binding that performs `send`: it does not see nested
+    calls, so it cannot tell where they go.
+  - A `persist` or `recall` step of a workflow that targets 1.2 and binds
+    `scope` fails R402 (`unsupported_scope`) unless the output echoes the
+    scope. Steps that do not bind it, and those of a 1.0 or 1.1 workflow
+    (where `scope` is W616 and passed on), are unchanged.
   - `RolledBack` may carry `not_covered`, which the executor validates (a
-    malformed one is refused), traces and records.
+    malformed one, `null` included, is refused), traces and records.
   - Validator: W624 (a 1.2 `rollback` step whose `restored` nothing
     checks), W625 (a 1.2 `send` approval whose `shows` hides its
     destination), W626 (an unknown literal memory scope), W614 for a
@@ -427,7 +432,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     a reference to `persist`'s deprecated `timestamp` (read `stored_at`),
     and W616 for a 1.0 or 1.1 workflow that binds the memory `scope`.
   - Python SDK: `WorkflowRunner.run/advance/drive(save=...)` refuses a host
-    whose `IdempotencyLog` is in memory (give it a path); with a
+    whose `IdempotencyLog` is in memory (give it a path); a rollback by
+    `Host` lists a send whose outcome is unknown as transmitted
+    (`detail: "outcome unknown"`); with a
     `MemoryStore`, a run's `run` scope ends with the run. `Host.__init__`
     takes keyword-only `memory`, `idempotency`, `session_id`, `user`,
     `project` and `protected_paths`; a subclass that calls
@@ -815,7 +822,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `expires_at`, `delegate.effective.checkpointed`.
 - Normative vectors `tests/conformance/destinations/match.json` (run by the
   core, Python and TypeScript) and `tests/conformance/memory/store.json`;
-  21 runtime fixtures (idempotency keys, destination refusals, rollback
+  22 runtime fixtures (idempotency keys, destination refusals, rollback
   reports, memory scope echo) and 8 validator fixtures.
 - Python SDK: `FileSnapshotStore` (checkpoint content that never captures
   the host's own records; `CheckpointTracker(snapshots=...)`,

@@ -224,7 +224,7 @@ assumptions: array[string]  # Explicit assumptions
 |-------|------|-------------|
 | `stored` | boolean | True: a later `recall` of the key in the scope returns the data until the entry ends (read-after-write, §4.5); false: nothing was written or replaced |
 | `key` | string | Storage key the data lives under (destination and section) |
-| `scope` | string | The scope used; a step that binds `scope` fails unless this echoes it (R402, `unsupported_scope`) |
+| `scope` | string | The scope used; a step of a 1.2 workflow that binds `scope` fails unless this echoes it (R402, `unsupported_scope`) |
 | `stored_at` | string | ISO 8601 date-time the entry was stored |
 | `expires_at` | string | When the entry ends, for an entry with a `ttl`; from then on a `recall` does not find it |
 | `timestamp` | string | Deprecated: the same instant as `stored_at`; read `stored_at` (a reference to it is W603) |
