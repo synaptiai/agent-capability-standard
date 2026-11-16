@@ -7,7 +7,6 @@ user-invocable: true
 allowed-tools: Read, Edit, Write, Bash
 context: fork
 agent: general-purpose
-layer: EXECUTE
 ---
 
 ## Intent

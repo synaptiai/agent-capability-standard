@@ -29,6 +29,14 @@ fn matches(expected: &Value, actual: &Value) -> bool {
     }
 }
 
+/// Whether `action` holds the member `path` names (member names joined by
+/// `.`, as a script entry's `absent` lists them).
+fn holds(action: &Value, path: &str) -> bool {
+    path.split('.')
+        .try_fold(action, |node, name| node.get(name))
+        .is_some()
+}
+
 /// Replace `"{{digest}}"` in a response with the pending action's digest,
 /// and `"{{digest_upper}}"` with it in uppercase.
 fn fill(response: &Value, action: &Value) -> Value {
@@ -268,6 +276,13 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
                 matches(expect, &action),
                 "{name}: script[{i}]: expected {expect}\n  got {action}"
             );
+            for path in entry["absent"].as_array().into_iter().flatten() {
+                let path = path.as_str().unwrap();
+                assert!(
+                    !holds(&action, path),
+                    "{name}: script[{i}]: {path} must be absent\n  got {action}"
+                );
+            }
         }
         if let Some(respond) = entry.get("respond") {
             if let Some(at) = entry.get("at").and_then(Value::as_u64) {
@@ -1179,16 +1194,10 @@ fn the_header_is_validated_and_kept() {
 #[test]
 fn start_refuses_options_not_implemented_yet() {
     let ctx = ctx();
-    let cases = [
-        StartOptions {
-            profiles: vec![serde_json::json!({"domain": "d"})],
-            ..opts()
-        },
-        StartOptions {
-            destinations: vec![vec!["ops".into()]],
-            ..opts()
-        },
-    ];
+    let cases = [StartOptions {
+        destinations: vec![vec!["ops".into()]],
+        ..opts()
+    }];
     for options in cases {
         assert!(matches!(
             Run::start(&ctx, &one_step(), "w", topic(), options),
@@ -1197,19 +1206,13 @@ fn start_refuses_options_not_implemented_yet() {
     }
     // Nor does a restore accept a state that holds one.
     let run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
-    for (key, value) in [
-        ("profiles", serde_json::json!([{"domain": "d"}])),
-        ("destinations", serde_json::json!([["ops"]])),
-    ] {
-        let snap = forged(&run.snapshot(None), |s| s[key] = value.clone());
-        assert!(
-            matches!(
-                Run::restore(&ctx, &one_step(), &snap, None),
-                Err(acs_core::exec::RestoreError::Malformed(_))
-            ),
-            "{key}"
-        );
-    }
+    let snap = forged(&run.snapshot(None), |s| {
+        s["destinations"] = serde_json::json!([["ops"]]);
+    });
+    assert!(matches!(
+        Run::restore(&ctx, &one_step(), &snap, None),
+        Err(acs_core::exec::RestoreError::Malformed(_))
+    ));
 }
 
 #[test]

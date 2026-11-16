@@ -310,12 +310,15 @@ def _grounding_refusal(
     call: str | None = None,
 ) -> str | None:
     """The F505 refusal of a call's output under the adapter's grounding
-    policies (STANDARD v1.2 section 5.20), or None. The output is the
-    result's ``structuredContent`` when it is an object, else the capability
-    output its text carries (section 5.18.9); an error result is no output
-    and is passed on. ``call`` is the call's id (the decision it used), so
-    the failure is recorded against the call that ran."""
-    if not adapter.config.grounding or not isinstance(result, dict):
+    policies (STANDARD v1.2 section 5.20), or its F504 under a minimum
+    confidence, or None. The output is the result's ``structuredContent``
+    when it is an object, else the capability output its text carries
+    (section 5.18.9); an error result is no output and is passed on. ``call`` is the call's id (the decision it used), so
+    the failure is recorded against the call that ran. The rules are the
+    adapter's: its configuration's grounding policies and those of the
+    domain profiles it applies, and their minimum confidence (section
+    5.21.3)."""
+    if not adapter._checks_call_outputs or not isinstance(result, dict):
         return None
     if result.get("is_error"):
         return None

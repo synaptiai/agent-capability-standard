@@ -57,6 +57,12 @@ pub struct Step {
     pub raw: Map<String, Value>,
     pub requires_checkpoint: bool,
     pub requires_approval: bool,
+    /// An applied profile requires a person for this step (§5.21.3): it
+    /// is asked as an always-ask step is, but marks nothing.
+    pub person: bool,
+    /// The profiles that require the person (the trace's
+    /// `person_required`).
+    pub raised_by: Vec<String>,
     pub required_outputs: Vec<String>,
     pub handler: bool,
     pub condition: Option<Expr>,
@@ -143,6 +149,13 @@ pub struct Program {
     /// contracts its steps use: a snapshot is only restored against what it
     /// was taken from.
     pub digest: String,
+    /// The domain profiles applied to the run (§5.21): saved with the run
+    /// as given, and loaded again when it is restored.
+    pub policy: Policy,
+    /// The grounding policies the applied profiles put in force (§5.21.3,
+    /// §5.20), one per profile with `require_grounding`: like a host's,
+    /// they apply in every frame.
+    pub grounding: Vec<crate::grounding::Policy>,
 }
 
 fn parse(src: &str) -> Result<Expr, String> {
@@ -180,23 +193,27 @@ impl Program {
         catalog: &Value,
         root: &str,
         header: Option<&str>,
+        policy: Policy,
     ) -> Result<Program, String> {
         Self::build_set(
             ctx,
             CatalogSet::single(catalog, header),
             &Agents::default(),
             root,
+            policy,
         )
     }
 
     /// Prepare every workflow of a catalog set (§5.1.1) with the agent
-    /// manifests `agents` (§5.15.1). `root` names a workflow of the primary
-    /// catalog. The set must already have passed validation.
+    /// manifests `agents` (§5.15.1) and the applied profiles' `policy`
+    /// (§5.21). `root` names a workflow of the primary catalog. The set must
+    /// already have passed validation.
     pub fn build_set(
         ctx: &Context,
         set: CatalogSet<'_>,
         agents: &Agents,
         root: &str,
+        policy: Policy,
     ) -> Result<Program, String> {
         if !set.primary.is_object() {
             return Err("the catalog is not a mapping".to_string());
@@ -210,7 +227,7 @@ impl Program {
             }
             let target = crate::validate::semantics::target(raw, ns.header_of(key));
             let declared = crate::agents::declared(raw, target);
-            let mut workflow = Self::workflow(ctx, key, raw, agents, declared.as_deref())?;
+            let mut workflow = Self::workflow(ctx, key, raw, agents, declared.as_deref(), &policy)?;
             workflow.targets_1_2 = target.is_some_and(|t| t >= (1, 2));
             workflow.agents = declared.map(|d| d.into_iter().map(str::to_string).collect());
             workflows.insert(key.to_string(), workflow);
@@ -254,6 +271,8 @@ impl Program {
             resolver: ns.resolver.clone(),
             agents: agents.clone(),
             digest,
+            grounding: policy.grounding(),
+            policy,
         })
     }
 
@@ -263,6 +282,7 @@ impl Program {
         raw: &Map<String, Value>,
         agents: &Agents,
         delegable: Option<&[&str]>,
+        policy: &Policy,
     ) -> Result<Workflow, String> {
         let declared: Vec<String> = raw
             .get("workflow_extensions")
@@ -286,7 +306,7 @@ impl Program {
                 return Err(format!("{name}: step {index} is not a mapping"));
             };
             steps.push(Self::step(
-                ctx, name, index, step, list, &declared, agents, delegable,
+                ctx, name, index, step, list, &declared, agents, delegable, policy,
             )?);
         }
         let grounding = declared
@@ -318,6 +338,7 @@ impl Program {
         declared: &[String],
         agents: &Agents,
         delegable: Option<&[&str]>,
+        policy: &Policy,
     ) -> Result<Step, String> {
         let at = |what: &str| format!("{wf}: step {index}: {what}");
         let has = |ext: &str| declared.iter().any(|d| d == ext);
@@ -475,10 +496,16 @@ impl Program {
             crate::agents::Target::Free
         };
         let unbounded = target.why_unknown();
-        // The effective flags (§5.2.1), as the validator computes them, with
-        // the delegation targets' maxima. S6 adds the applied profiles.
-        let flags =
-            crate::validate::effective(node, raw, target.maxima(), &Policy::default()).flags;
+        // The effective flags (§5.2.1), as the validator computes them:
+        // raised by the delegation targets' maxima (§5.15.2) and the
+        // applied profiles (§5.21.3).
+        let effective = crate::validate::effective(node, raw, target.maxima(), policy);
+        let flags = effective.flags;
+        let raised_by = if effective.person {
+            policy.labels_raising(&capability, flags.risk)
+        } else {
+            Vec::new()
+        };
         let (requires_checkpoint, requires_approval) =
             (flags.requires_checkpoint, flags.requires_approval);
         // Acting on the world: a checkpoint or approval requirement, a
@@ -519,6 +546,8 @@ impl Program {
                 .map(str::to_string),
             requires_checkpoint,
             requires_approval,
+            person: effective.person,
+            raised_by,
             required_outputs,
             handler: has("recovery@1") && capability == "invoke" && flag("handler"),
             delay,
@@ -552,6 +581,7 @@ mod tests {
     use serde_json::json;
 
     use super::Program;
+    use crate::profile::Policy;
     use crate::validate::tests::ctx;
 
     #[test]
@@ -568,7 +598,7 @@ mod tests {
              "input_bindings": {"input": "${r.data[0:2]: array<object>}",
                                 "target_format": "x ${s.confidence} y"}}
         ]}});
-        let program = Program::build(&ctx(), &catalog, "w", None).unwrap();
+        let program = Program::build(&ctx(), &catalog, "w", None, Policy::default()).unwrap();
         let w = &program.workflows["w"];
         let bodies: Vec<String> = w.steps[2]
             .bound
@@ -586,7 +616,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("workflow_extensions");
-        let program = Program::build(&ctx(), &plain, "w", None).unwrap();
+        let program = Program::build(&ctx(), &plain, "w", None, Policy::default()).unwrap();
         assert!(program.workflows["w"].grounding.is_none());
     }
 }

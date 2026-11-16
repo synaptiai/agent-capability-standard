@@ -6681,6 +6681,7 @@ RECORD = {
     "intent": "6.4",
     "status": "6.4",
     "always_ask": "5.17",
+    "person_required": "5.21.3",
     "approval": "5.14",
     "reason": "6.3",
     "reason_code": "5.19.7",

@@ -1,12 +1,14 @@
 # Personal Assistant Domain Profile
 # Calibrated for task management, scheduling, communication, and information research.
 #
-# Status: informative data for hosts and workflow authors. No shipped component
-# loads or selects this profile; see "Status of Domain Profiles" in
+# Status: applied where a host, a safety layer or a validator applies it
+# (Standard v1.2 §5.21); see "Status of Domain Profiles" in
 # docs/domains/README.md.
 
 domain: personal-assistant
-version: "1.0.0"
+version: "2.0.0"
+standard: "1.2.0"
+ontology: "2.2.0"
 description: |
   Profile for personal productivity assistants.
   Emphasizes user preference learning, communication safety,
@@ -46,17 +48,21 @@ risk_thresholds:
     - mutate              # Never modify external systems autonomously
 
 checkpoint_policy:
-  before_send_message: always     # Always checkpoint before sending
-  before_schedule_change: always  # Always checkpoint calendar changes
-  before_delegation: always       # Always checkpoint before delegating
-  before_purchase: always         # Always checkpoint financial actions
-  before_data_share: always       # Always checkpoint sharing user data
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_send_message and before_data_share -> send; before_schedule_change
+  # -> mutate; before_delegation -> delegate; before_purchase -> execute.
+  send: always
+  mutate: always
+  delegate: always
+  execute: always
 
 evidence_policy:
   required_anchor_types:
-    - user_instruction
-    - system_data
-    - timestamp
+    # §6.5 kinds: user_instruction -> human_note; system_data -> record; plus
+    # the kinds of domain_sources. timestamp is not a kind.
+    - human_note
+    - api
+    - record
   minimum_confidence: 0.75  # Moderate confidence for personal tasks
   require_grounding:
     - send                  # Communications need clear user intent

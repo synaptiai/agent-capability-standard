@@ -28,10 +28,13 @@ def run_fixture(
 ) -> dict:
     """Validate one fixture, writing its suggestions JSON to ``suggestions``
     (one file per run, so concurrent runs and stale output cannot mix). The
-    expectation's ``catalogs`` (further catalogs of the catalog set) and
-    ``agents`` (agent manifests) are paths relative to ``tests/fixtures/``
-    (STANDARD v1.2 §10.3)."""
+    expectation's ``profiles`` are repository-relative domain profiles to
+    validate it with (STANDARD v1.2 §5.21); its ``catalogs`` (further
+    catalogs of the catalog set) and ``agents`` (agent manifests) are paths
+    relative to ``tests/fixtures/`` (STANDARD v1.2 §10.3)."""
     extra: list[str] = []
+    for p in (meta or {}).get("profiles", []):
+        extra += ["--profile", str(ROOT / p)]
     for c in (meta or {}).get("catalogs", []):
         extra += ["--with-catalog", str(FIX / c)]
     for a in (meta or {}).get("agents", []):

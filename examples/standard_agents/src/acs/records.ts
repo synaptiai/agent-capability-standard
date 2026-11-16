@@ -219,6 +219,10 @@ export interface TraceEntry {
   args_digest?: string;
   /** Why the call was refused. */
   code?: RefusalCode;
+  /** The failure's reason token (STANDARD 1.2.0 §5.19.7), when it has one. */
+  reason_code?: 'below_minimum_confidence' | 'invalid_confidence';
+  /** An applied domain profile required a person for the call (§5.21.3). */
+  person_required?: true;
   /**
    * The `seq` of the composite whose invocation covered this call
    * (STANDARD 1.2.0 §5.18.4): a nested call skips the approval and the
@@ -327,7 +331,7 @@ export async function appendTrace(
 export async function completeTrace(
   store: Store,
   started: TraceEntry,
-  outcome: Pick<TraceEntry, 'at' | 'status' | 'code'> & Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>,
+  outcome: Pick<TraceEntry, 'at' | 'status' | 'code'> & Partial<Pick<TraceEntry, 'error' | 'evidence_anchors' | 'reason_code'>>,
   secrets: readonly string[] = [],
 ): Promise<TraceEntry> {
   const stored: TraceEntry = { ...started, ...redacted(outcome, secrets) };
@@ -380,6 +384,8 @@ export interface ActionRecord {
   call_id?: string;
   checkpoint_id?: string;
   code?: string;
+  reason_code?: string;
+  person_required?: true;
   approval?: {
     digest: string;
     decision: 'approved';
@@ -433,6 +439,8 @@ export function actionRecord(entry: TraceEntry, scope: string): ActionRecord {
   if (entry.tool_call_id !== undefined) record.call_id = entry.tool_call_id;
   if (entry.checkpoint_id !== undefined) record.checkpoint_id = entry.checkpoint_id;
   if (entry.code !== undefined) record.code = entry.code;
+  if (entry.reason_code !== undefined) record.reason_code = entry.reason_code;
+  if (entry.person_required) record.person_required = true;
   if (entry.approval !== undefined) {
     const { digest, approvers, approver_identities, decision_ids } = entry.approval;
     record.approval = { digest, decision: 'approved', approvers: [...approvers] };

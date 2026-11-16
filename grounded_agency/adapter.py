@@ -40,15 +40,17 @@ import hmac
 import inspect
 import json
 import logging
+import os
 import re
 import threading
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from . import _core
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
@@ -56,6 +58,7 @@ from .errors import ErrorCode, ValidationError, text_form
 from .grounding import GroundingPolicy, as_policies, check_output
 from .hooks.evidence_collector import create_evidence_collector
 from .hooks.skill_tracker import create_checkpoint_recorder
+from .profiles import AppliedProfiles
 from .state.checkpoint_tracker import MAX_AGE_MINUTES, CheckpointTracker
 from .state.evidence_store import (
     EvidenceAnchor,
@@ -254,6 +257,34 @@ class GroundedAgentConfig:
             is logged once per such tool).
         call_record_limit: How many call records (and refusals) the adapter
             keeps in memory (``call_records``, ``diagnostics``).
+        profiles: Domain profiles applied to every tool call the adapter
+            covers (STANDARD 1.2.0 section 5.21), each a loaded profile or
+            the path of a profile file (``adapter.profiles``): their
+            ``risk_thresholds`` and ``checkpoint_policy`` raise the flags of
+            the call's capability, and ``require_human`` and
+            ``block_autonomous`` require a person's approval (records carry
+            ``person_required``). Their grounding policies
+            (``evidence_policy.require_grounding``, with
+            ``required_anchor_types`` as kinds) join ``grounding``, and
+            their ``minimum_confidence`` fails an output below it with F504:
+            both apply to the outputs this layer sees, those of the tools
+            ``create_grounded_mcp_server`` serves (a warning is logged once
+            for any other tool they would cover). The adapter checks no
+            send's destination yet, so a profile that sets
+            ``allowed_destinations`` refuses the configuration rather than
+            be applied without it, as does a profile with an error
+            (:class:`~grounded_agency.profiles.ProfileError`). Profiles need
+            ``approval="ask"``: with approvals off, the approvals they
+            require would be skipped. With ``strict_mode=False``, which
+            only logs a missing checkpoint, a profile whose
+            ``checkpoint_policy`` raises ``requires_checkpoint`` (a value
+            other than ``never``) refuses the configuration too.
+        schema_root: The directory the ontology's ``$ref`` paths are
+            relative to (STANDARD 1.2.0 section 4.1.2). Default: the
+            directory above the ontology's (the repository root for
+            ``schemas/capability_ontology.yaml``). A contract whose ``$ref``
+            names nothing there, is cyclic or nests too deep refuses the
+            configuration (``ValueError``).
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -272,6 +303,8 @@ class GroundedAgentConfig:
     approval: Literal["ask", "off"] = "ask"
     evidence_include_tool_input: bool = False
     call_record_limit: int = 10000
+    profiles: Sequence[Mapping[str, Any] | str | os.PathLike[str]] = ()
+    schema_root: str | None = None
     evidence_store: EvidenceStoreProtocol | None = None
     secret_values: tuple[str, ...] = ()
     grounding: tuple[GroundingPolicy, ...] = ()
@@ -280,6 +313,12 @@ class GroundedAgentConfig:
         """Refuse a setting this adapter cannot honour."""
         if self.approval not in ("ask", "off"):
             raise ValueError(f"approval must be 'ask' or 'off', got {self.approval!r}")
+        if self.profiles and self.approval == "off":
+            raise ValueError(
+                "domain profiles need approval='ask': with approvals off, the "
+                "approvals a profile requires would be skipped (STANDARD 1.2.0 "
+                "section 5.21)"
+            )
         minutes = self.expiry_minutes
         if (
             isinstance(minutes, bool)
@@ -351,8 +390,23 @@ def _checkpoint_message(
     )
 
 
-def _approval_request(mapping: ToolMapping, tool_name: str) -> str:
-    """Why a tool call is put to the host's permission flow (F502)."""
+def _approval_request(mapping: ToolMapping, tool_name: str, person: bool) -> str:
+    """Why a tool call is put to the host's permission flow (F502). When an
+    applied profile requires a person (``person``), the reason says so: a
+    host's ``can_use_tool`` callback reads it, and only a person's decision
+    counts for such a call (STANDARD 1.2.0 section 5.21.3)."""
+    if person:
+        return text_form(
+            _error(
+                ErrorCode.APPROVAL_REQUIRED,
+                f"{_subject(mapping, tool_name)} requires approval by a person: "
+                f"an applied domain profile requires one for it or for a "
+                f"binding it invokes (require_human or block_autonomous, "
+                f"STANDARD 1.2.0 §5.21.3), so no automatic decision counts. "
+                f"It runs only if a person approves this call.",
+                {},
+            )
+        )
     return text_form(
         _error(
             ErrorCode.APPROVAL_REQUIRED,
@@ -416,11 +470,13 @@ def call_action_record(entry: dict[str, Any], scope: str) -> dict[str, Any] | No
     ``run_id`` and prefixes its ``action_id``, ``<scope>/<seq>``. A refusal is
     ``rejected`` with its diagnostic's ``code``; a call the host's permission
     flow approved in its session has ``approval`` with ``mode: in_session``
-    and the digest of what was shown (section 5.18.7). ``recorded_by`` is the
-    layer's, as the call record holds it. Every other member of the call
-    record (``decision``, ``permission_mode``, ``diagnostic``, ...) is kept
-    under ``details``. Returns None for a boundary entry, which records no
-    action.
+    and the digest of what was shown (section 5.18.7). A call an applied
+    domain profile required a person for has ``person_required`` (section
+    5.21.3), and a failure's reason is ``reason_code`` (section 5.19.7).
+    ``recorded_by`` is the layer's, as the call record holds it. Every other
+    member of the call record (``decision``, ``permission_mode``,
+    ``diagnostic``, ...) is kept under ``details``. Returns None for a
+    boundary entry, which records no action.
     """
     status = _CALL_STATUS.get(entry.get("decision", ""))
     if status is None:
@@ -445,6 +501,16 @@ def call_action_record(entry: dict[str, Any], scope: str) -> dict[str, Any] | No
     if isinstance(diagnostic, dict) and diagnostic.get("code"):
         record["code"] = diagnostic["code"]
     mapped = set(_CALL_MAPPED)
+    if isinstance(entry.get("reason"), str):
+        # The failure's reason token (section 5.19.7), as a step's record
+        # holds it.
+        record["reason_code"] = entry["reason"]
+        mapped.add("reason")
+    if entry.get("person_required") is True:
+        # An applied domain profile required a person for the call
+        # (section 5.21.3): an ActionRecord member, as a step's record holds it.
+        record["person_required"] = True
+        mapped.add("person_required")
     if entry.get("approvers") == ["in_session"] and entry.get("digest"):
         record["approval"] = {
             "digest": entry["digest"],
@@ -521,7 +587,42 @@ class GroundedAgentAdapter:
         # Load now, so an ontology that cannot be read fails here and not
         # at the first tool call.
         _ = self.registry.ontology
-        self.mapper = ToolCapabilityMapper(self.registry)
+        self._schema_root = (
+            Path(self.config.schema_root)
+            if self.config.schema_root is not None
+            else Path(self.config.ontology_path).resolve().parent.parent
+        )
+        # The core loads the ontology too, resolving every contract's $ref:
+        # one outside the schema dialect refuses the configuration, as it
+        # refuses the validator and the executor (STANDARD 1.2.0 section
+        # 4.1.2).
+        core = _core.Validator(str(self.config.ontology_path), str(self._schema_root))
+        # Domain profiles (STANDARD 1.2.0 section 5.21), checked against the
+        # adapter's ontology; an error refuses the configuration, and so
+        # does a rule on sends, which this adapter does not check, and
+        # (strict_mode=False only logs a missing checkpoint) a raised
+        # checkpoint requirement (section 5.21.4). A grounding policy and a
+        # minimum confidence are in force on the outputs the layer receives
+        # (the served tools'), and reported for each other tool whose calls
+        # they would check (_warn_unchecked_output, section 5.21.4).
+        self.profiles = AppliedProfiles(self.config.profiles, validator=core)
+        self.profiles.refuse_unapplied(("destinations",), "this adapter")
+        if not self.config.strict_mode:
+            self.profiles.refuse_unapplied(
+                ("checkpoints",), "this adapter with strict_mode=False"
+            )
+        self.mapper = ToolCapabilityMapper(self.registry, profiles=self.profiles)
+        # The grounding policies the layer applies to call outputs (section
+        # 5.20): the configuration's, then one per applied profile with
+        # require_grounding, whose kinds are its required_anchor_types
+        # (section 5.21.3).
+        from_profiles = (
+            GroundingPolicy.from_profile(g) for g in self.profiles.grounding
+        )
+        self._grounding: tuple[GroundingPolicy, ...] = (
+            *self.config.grounding,
+            *(p for p in from_profiles if p is not None),
+        )
         now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
         self._now = now
         # The tracker enforces the layer's maximum age on every checkpoint,
@@ -592,6 +693,10 @@ class GroundedAgentAdapter:
         from .query import CostSummary
 
         self.cost_summary = CostSummary()
+        if self.profiles:
+            # Every record's digest covers the profiles: one that has no
+            # I-JSON form refuses the configuration here, not at a record.
+            _ = self.recorded_by
 
     def _register_secrets(self) -> None:
         """Register ``config.secret_values`` with the evidence store's and
@@ -647,6 +752,13 @@ class GroundedAgentAdapter:
     # Grounding of call outputs (STANDARD v1.2 section 5.20)
     # ------------------------------------------------------------------
 
+    @property
+    def _checks_call_outputs(self) -> bool:
+        """Whether :meth:`check_call_output` applies any rule: a grounding
+        policy (the configuration's or an applied profile's, section 5.21.3)
+        or the profiles' minimum confidence."""
+        return bool(self._grounding) or self.profiles.minimum_confidence is not None
+
     def check_call_output(
         self,
         tool: str,
@@ -654,21 +766,26 @@ class GroundedAgentAdapter:
         output: Any,
         call: str | None = None,
     ) -> str | None:
-        """Apply ``config.grounding`` to a call's output (§5.20 *Hosts
-        outside a workflow*). The call's argument names are the references
-        it binds (an ``acs:<argument>`` anchor may cite one), and no
-        ``evidence_seen`` is given. Returns the refusal's text form (F505,
-        kept in ``diagnostics`` and a call record) when the output fails a
-        policy that requires the call's capability, else None. ``output``
-        that is not an object fails as an output with no anchors."""
-        if not self.config.grounding:
+        """Apply the grounding policies (``config.grounding``, then the
+        applied profiles', section 5.21.3) and the profiles' minimum
+        confidence to a call's output (§5.20 *Hosts outside a workflow*).
+        The call's argument names are the references it binds (an
+        ``acs:<argument>`` anchor may cite one), and no ``evidence_seen`` is
+        given. Returns the refusal's text form (F505, or F504 with reason
+        ``below_minimum_confidence`` or ``invalid_confidence``, kept in
+        ``diagnostics`` and a call record) when the output fails, else None.
+        Grounding is checked first, as the executor checks it. ``output``
+        that is not an object fails a grounding policy as an output with no
+        anchors; it has no confidence for a minimum to check."""
+        if not self._checks_call_outputs:
             return None
+        minimum = self.profiles.minimum_confidence
         mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
         capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
-        policies = [
-            p for p in self.config.grounding if capability and p.requires(capability)
-        ]
-        if not policies:
+        if not capability:
+            return None
+        policies = [p for p in self._grounding if p.requires(capability)]
+        if not policies and minimum is None:
             return None
         bound = [
             k
@@ -676,7 +793,9 @@ class GroundedAgentAdapter:
             if isinstance(k, str) and _IDENTIFIER.fullmatch(k)
         ]
         message: str | None = None
-        if not isinstance(output, dict):
+        code = ErrorCode.PROVENANCE_MISSING
+        reason: str | None = None
+        if policies and not isinstance(output, dict):
             message = (
                 f"{tool}'s result holds no {capability} output (section 5.18.9), "
                 "so nothing grounds it, and a grounding policy requires "
@@ -688,18 +807,25 @@ class GroundedAgentAdapter:
                 if not result.ok:
                     message = f"{tool}'s output: {result.message}"
                     break
+        if message is None and minimum is not None:
+            fault = _core.check_confidence(output, minimum)
+            if fault is not None:
+                message = f"{tool}'s output: {fault['message']} (section 5.21.3)"
+                code = ErrorCode.CONSTRAINT_VIOLATED
+                reason = fault["reason"]
         if message is None:
             return None
         # The call has run (section 5.20): its outcome is a failure with the
         # code, recorded against the call, not a refusal of a call that did
         # not run. The post-call hooks do not record it again.
         text = self._refuse(
-            ErrorCode.PROVENANCE_MISSING,
+            code,
             mapping,
             tool,
             call,
             message,
             outcome="failed",
+            reason=reason,
         )
         if call is not None:
             with self._state_lock:
@@ -746,6 +872,9 @@ class GroundedAgentAdapter:
             "ontology_version": self.registry.version,
             "prompting_modes": sorted(PROMPTING_PERMISSION_MODES),
         }
+        if self.profiles:
+            # The applied profiles decide calls too (section 5.21).
+            settings["profiles"] = self.profiles.documents
         if self.config.grounding:
             # The policies behind F505 refusals (section 5.20); no secret
             # value is ever part of the configuration's digest.
@@ -784,6 +913,10 @@ class GroundedAgentAdapter:
                 entry["control"] = True
         else:
             entry["capability"] = None
+        # An applied profile required a person (section 5.21.3), for an
+        # unbound tool too: it is treated as mutate (section 5.18.2).
+        if mapping is not None and self.mapper.person_required(mapping):
+            entry["person_required"] = True
         if call is not None:
             entry["call"] = call
         entry["decision"] = decision
@@ -971,32 +1104,35 @@ class GroundedAgentAdapter:
             self._grounded_tools.add(tool)
 
     def _warn_unchecked_output(self, mapping: ToolMapping, tool: str) -> None:
-        """Warn, once per tool, that a grounding policy requires the
-        capability of a call whose output this layer never sees (a tool
-        that ``create_grounded_mcp_server`` does not serve, Claude Code's
-        own tools included): section 5.20 is not applied to it."""
-        if not self.config.grounding or mapping is UNCLASSIFIED_TOOL:
+        """Warn, once per tool, that a grounding policy (the
+        configuration's or an applied profile's) requires the capability of
+        a call whose output this layer never sees, or that a profile sets a
+        minimum confidence for it (a tool that ``create_grounded_mcp_server``
+        does not serve, Claude Code's own tools included): section 5.20, and
+        the minimum of section 5.21.3, are not applied to it."""
+        if mapping is UNCLASSIFIED_TOOL or not self._checks_call_outputs:
             return
         required = sorted(
-            {
-                c
-                for c in mapping.capabilities
-                for p in self.config.grounding
-                if p.requires(c)
-            }
+            {c for c in mapping.capabilities for p in self._grounding if p.requires(c)}
         )
-        if not required:
+        if not required and self.profiles.minimum_confidence is None:
             return
         with self._state_lock:
             if tool in self._grounded_tools or tool in self._ungrounded_warned:
                 return
             self._ungrounded_warned.add(tool)
+        rules = []
+        if required:
+            rules.append(f"a grounding policy requires {', '.join(required)}")
+        if self.profiles.minimum_confidence is not None:
+            rules.append("an applied profile sets a minimum confidence")
         logger.warning(
-            "A grounding policy requires %s, but %s is not a tool "
-            "create_grounded_mcp_server serves: its result is not a capability "
-            "output this layer sees, so section 5.20 is not applied to its calls",
-            ", ".join(required),
+            "For %s, %s; but it is not a tool create_grounded_mcp_server "
+            "serves: its result is not a capability output this layer sees, so "
+            "neither section 5.20 nor the minimum of section 5.21.3 is applied "
+            "to its calls",
             tool,
+            " and ".join(rules),
         )
 
     def _get_or_create_workflow_engine(self) -> Any:
@@ -1007,6 +1143,7 @@ class GroundedAgentAdapter:
             self._workflow_engine = WorkflowEngine(
                 ontology_path=self.config.ontology_path,
                 checkpoint_tracker=self.checkpoint_tracker,
+                schema_root=self._schema_root,
             )
         return self._workflow_engine
 
@@ -1541,7 +1678,9 @@ class GroundedAgentAdapter:
                                 f"so no decision can bind to them: {e}",
                             )
                         )
-                    message = _approval_request(mapping, tool_name)
+                    message = _approval_request(
+                        mapping, tool_name, self.mapper.person_required(mapping)
+                    )
                     self._allow_token(tool_name, tool_input, call=call)
                     self._record(
                         "asked",
@@ -1591,7 +1730,12 @@ class GroundedAgentAdapter:
             # Non-strict, after an error: approval is a rule of its own and
             # still applies.
             if asks and mapping.requires_approval:
-                return decide("ask", _approval_request(mapping, tool_name))
+                try:
+                    person = self.mapper.person_required(mapping)
+                except Exception:
+                    # The request must still go out: say a person decides.
+                    person = True
+                return decide("ask", _approval_request(mapping, tool_name, person))
             return {}
 
         return check_before_tool
@@ -1681,10 +1825,21 @@ class GroundedAgentAdapter:
                         checkpoint_id,
                     )
                 if not self._take_outcome_recorded(holder):
+                    # Mapped as the PostToolUse recorder maps it: the record
+                    # names the capability and keeps the call's
+                    # person_required (section 5.21.3). A mapping that fails
+                    # loses neither the record nor the failure.
+                    try:
+                        mapping: ToolMapping | None = self.mapper.map_tool(
+                            tool_name, input_data.get("tool_input", {})
+                        )
+                    except Exception as e:
+                        logger.warning("Failure recorder cannot map: %s", e)
+                        mapping = None
                     self._record(
                         "failed",
                         tool_name,
-                        None,
+                        mapping,
                         holder,
                         checkpoint_id=checkpoint_id,
                     )

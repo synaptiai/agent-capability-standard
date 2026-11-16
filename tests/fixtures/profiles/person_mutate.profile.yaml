@@ -1,0 +1,7 @@
+# A person approves every mutate step; no standing mandate covers it
+# (Standard v1.2 §5.21.3).
+domain: person-mutate
+version: "1.0.0"
+risk_thresholds:
+  block_autonomous:
+    - mutate

@@ -25,6 +25,8 @@ def adapter(ontology_path: str, tmp_path: Path) -> GroundedAgentAdapter:
     adapter = GroundedAgentAdapter(
         GroundedAgentConfig(
             ontology_path=str(path),
+            # The copy's contract $refs are relative to the repository.
+            schema_root=str(Path(ontology_path).parent.parent),
             checkpoint_dir=str(tmp_path / ".cp"),
             approval="off",
         )

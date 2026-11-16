@@ -65,6 +65,9 @@ def describe(d: dict[str, Any]) -> str:
     """One line for a diagnostic: where, code, message, and any hint."""
     loc = d.get("location", {})
     where = []
+    if "profile" in loc:
+        field = f" {loc['field']!r}" if loc.get("field") else ""
+        where.append(f"profile {loc['profile']}{field}")
     if "workflow" in loc and "catalog" in loc:
         where.append(f"[{loc['catalog']}:{loc['workflow']}]")
     elif "workflow" in loc:
@@ -128,6 +131,13 @@ def main() -> None:
     ap.add_argument("--catalog", default=None, help="Override workflow catalog path.")
     ap.add_argument("--strict", action="store_true", help="Treat warnings as errors.")
     ap.add_argument(
+        "--profile",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="A domain profile to apply (STANDARD v1.2 §5.21); repeatable.",
+    )
+    ap.add_argument(
         "--with-catalog",
         action="append",
         default=[],
@@ -160,10 +170,12 @@ def main() -> None:
         else:
             manifests.append(str(p))
     try:
+        profiles = [_core.load_yaml(str(p)) for p in args.profile]
         report = _core.validate_catalog(
             str(wf_path),
             str(ONTO),
             str(ROOT),
+            profiles=profiles or None,
             catalogs=[str(c) for c in args.with_catalog] or None,
             agents=manifests or None,
         )

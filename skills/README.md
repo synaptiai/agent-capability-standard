@@ -113,14 +113,14 @@ Multi-agent and user interaction.
 
 ## Composed Skills (6)
 
-> **Note:** Four of these skills run one of the [12 reference workflows](../schemas/workflow_catalog.yaml): `debug-workflow`, `gap-analysis-workflow`, `digital-twin-bootstrap` and `digital-twin-sync-workflow`. `perspective-validation` and `discover-capabilities` run no catalog workflow. Additional workflows can be composed by following the [Tutorial](../docs/TUTORIAL.md).
+> **Note:** Four of these skills run one of the [12 reference workflows](../schemas/workflow_catalog.yaml): `debug-workflow`, `capability-gap-analysis`, `digital-twin-bootstrap` and `digital-twin-sync-loop`. `perspective-validation` and `discover-capabilities` run no catalog workflow. Additional workflows can be composed by following the [Tutorial](../docs/TUTORIAL.md).
 
 | Skill | Description |
 |-------|-------------|
 | `debug-workflow` | Execute a safe, auditable debugging workflow |
-| `gap-analysis-workflow` | Identify missing capabilities and propose additions |
+| `capability-gap-analysis` | Identify missing capabilities and propose additions |
 | `digital-twin-bootstrap` | Initialize a digital twin from scratch |
-| `digital-twin-sync-workflow` | Synchronize digital twin state with reality |
+| `digital-twin-sync-loop` | Synchronize digital twin state with reality |
 | `perspective-validation` | Generate a PVC report for socio-technical review |
 | `discover-capabilities` | Detect the capabilities a task needs and synthesize a workflow |
 
@@ -179,19 +179,28 @@ Risk level and rules
 ```
 
 The eight frontmatter keys shown are in all 42 skills, and so are the five
-sections. Two more keys are in some skills only:
+sections. Each key has one owner: the [Agent Skills
+specification](https://agentskills.io/specification), Claude Code, or this
+standard (ACS).
 
-| Key | In | What it holds |
-|-----|----|---------------|
-| `layer` | 13 skills: 12 capability skills and `discover-capabilities` | A cognitive layer. The other 29 skills have no such key, and neither does the template (`templates/SKILL_TEMPLATE_ENHANCED.md`). A capability's layer is the one the ontology gives it (`layers` in `schemas/capability_ontology.yaml`), which each capability skill's generated `schemas/output_schema.yaml` repeats; do not read it from the frontmatter |
-| `hooks` | 6 skills: `audit`, `checkpoint`, `persist`, `rollback`, `send`, `transform` | Claude Code hooks the skill declares |
+| Key | Defined by | In | Notes |
+|-----|-----------|----|-------|
+| `name` | Agent Skills (required) | 42 | 1–64 characters `a-z`, `0-9`, `-`, not starting or ending with `-`, no `--`; equal to the directory name |
+| `description` | Agent Skills (required) | 42 | 1–1024 characters |
+| `allowed-tools` | Agent Skills (optional, experimental), read by Claude Code | 42 | Agent Skills specifies a space-separated list; these skills write Claude Code's comma-separated form |
+| `license`, `compatibility` | Agent Skills (optional) | 0 | |
+| `metadata` | Agent Skills (optional) | 0 | A map of strings; ACS keeps any data of its own here, under keys starting `acs-` |
+| `argument-hint`, `disable-model-invocation`, `user-invocable`, `context`, `agent` | Claude Code | 42 | |
+| `hooks` | Claude Code | 6 | `audit`, `checkpoint`, `persist`, `rollback`, `send`, `transform` |
 
-No skill declares a version.
-
-The frontmatter `name` is the directory name, except in two composed skills:
-`skills/capability-gap-analysis/` declares `gap-analysis-workflow`, and
-`skills/digital-twin-sync-loop/` declares `digital-twin-sync-workflow`. The
-[Composed Skills](#composed-skills-6) table lists the frontmatter names.
+The Agent Skills reference validator (`skills-ref validate`) refuses keys
+outside the six Agent Skills keys, so these skills are Claude Code skills
+that follow the Agent Skills format with Claude Code's extensions. A
+capability's layer is the ontology's (`layers` in
+`schemas/capability_ontology.yaml`, which each capability skill's generated
+`schemas/output_schema.yaml` repeats); no skill declares one. No skill
+declares a version. `tests/test_skill_frontmatter.py` checks every skill
+against this table.
 
 ## Layer Execution Flow
 

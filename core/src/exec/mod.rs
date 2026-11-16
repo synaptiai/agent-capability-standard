@@ -224,8 +224,9 @@ pub struct StartOptions {
     pub header: Option<String>,
     /// Which action records the run writes (§6.4).
     pub records: RecordMode,
-    /// Domain profiles to apply (§5.21). Workstream S6 applies them; until
-    /// then a non-empty list is refused.
+    /// Domain profiles to apply (§5.21), as given. They are checked when
+    /// the run starts (an error refuses it), cover every step of the run
+    /// and of its nested runs, and are saved with it.
     pub profiles: Vec<Value>,
     /// The host's grounding policies (§5.20): each applies to the steps of
     /// the run and of its nested runs. A policy that requires a capability
@@ -253,9 +254,6 @@ impl StartOptions {
     /// policy it was given were absent. Each workstream removes its line
     /// when it implements the member.
     fn unimplemented(&self) -> Option<&'static str> {
-        if !self.profiles.is_empty() {
-            return Some("profiles (§5.21)");
-        }
         if !self.destinations.is_empty() {
             return Some("destination policies (§4.4.2)");
         }
@@ -666,6 +664,10 @@ pub(crate) struct StepState {
     /// its nested run used one (§5.17).
     #[serde(default)]
     pub always_ask: bool,
+    /// An applied profile requires a person for the step (§5.21.3), and
+    /// the trace says so: traced once per step. It marks nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person: bool,
     /// A `delegate` step that waits (§5.13): the delegation's output, once
     /// the host has delegated; the step then waits for the result.
     #[serde(default)]
@@ -1209,16 +1211,6 @@ impl Run {
         header: Option<&str>,
         profiles: &[Value],
     ) -> Result<Program, StartError> {
-        if let Some(what) = (validate::Options {
-            profiles: profiles.to_vec(),
-            ..validate::Options::default()
-        })
-        .unimplemented()
-        {
-            return Err(StartError::Unsupported(format!(
-                "this validator does not implement {what} yet"
-            )));
-        }
         let agents =
             crate::agents::Agents::load(&set.agents, &ctx.ontology).map_err(StartError::Program)?;
         let others: Vec<crate::catalogs::Member<'_>> = set
@@ -1231,13 +1223,8 @@ impl Run {
             header,
             others: &others,
         };
-        let report = validate::validate_set(
-            ctx,
-            catalog_set,
-            &agents,
-            &crate::profile::Policy::default(),
-        )
-        .map_err(|e| StartError::Program(e.to_string()))?;
+        let (report, policy) = validate::validate_profiled(ctx, catalog_set, &agents, profiles)
+            .map_err(|e| StartError::Program(e.to_string()))?;
         let errors: Vec<Diagnostic> = report
             .diagnostics
             .into_iter()
@@ -1246,7 +1233,13 @@ impl Run {
         if !errors.is_empty() {
             return Err(StartError::Invalid(errors));
         }
-        Program::build_set(ctx, catalog_set, &agents, workflow).map_err(StartError::Program)
+        // A profile rule whose check this executor does not apply yet is
+        // refused, as `StartOptions::unimplemented` refuses the host's own
+        // policies: a run never goes ahead as if the rule were absent.
+        if let Some(what) = policy.unenforced() {
+            return Err(StartError::Unsupported(what.to_string()));
+        }
+        Program::build_set(ctx, catalog_set, &agents, workflow, policy).map_err(StartError::Program)
     }
 
     fn machine(&mut self) -> Machine<'_> {
@@ -1571,7 +1564,7 @@ impl Run {
         }
         // Members this executor does not implement yet: it could not have
         // written a state that holds them.
-        if !state.profiles.is_empty() || !state.destinations.is_empty() {
+        if !state.destinations.is_empty() {
             return Err(RestoreError::Malformed(
                 "the state holds a start option this executor does not implement".into(),
             ));

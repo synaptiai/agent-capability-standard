@@ -121,11 +121,18 @@ python scripts/gen_capability_json_schemas.py --check  # CI: fail on drift
 ### Check the TypeScript package (in `packages/acs-core/`)
 ```bash
 cd packages/acs-core
-npm ci          # install the exact versions in package-lock.json
-npm run check   # type-check
-npm test        # vitest; reads the conformance vectors in tests/conformance/ in place
-npm run build   # compile to dist/, which the package exports
+npm ci             # install the exact versions in package-lock.json
+npm run build:wasm # build core/ for WebAssembly into dist/acs_core.wasm
+npm run build      # compile to dist/ and bundle dist/documents.json
+npm run check      # type-check
+npm test           # vitest; reads tests/conformance/ in place, and replays the fixtures through the WebAssembly core
 ```
+`build:wasm` needs the `wasm32-unknown-unknown` target of the toolchain
+`RUSTUP_TOOLCHAIN` names (`rustup target add wasm32-unknown-unknown
+--toolchain <toolchain>`). The package is published to npm from a tag
+`acs-core-vX.Y.Z` on `main` by `.github/workflows/publish-npm.yml`, when the
+repository variable `NPM_PUBLISH_ENABLED` is `true` and the secret
+`NPM_TOKEN` is set (a dry run otherwise).
 A host-neutral TypeScript module (one that imports nothing from
 `@standardagents/spec`) goes in `packages/acs-core/src/` and its tests in
 `packages/acs-core/test/`; code that reads or describes Standard Agents state
@@ -134,14 +141,15 @@ under `examples/standard_agents/test/fixtures/`.
 
 ### Check the Standard Agents binding (TypeScript, in `examples/standard_agents/`)
 ```bash
+(cd packages/acs-core && npm ci --ignore-scripts && npm run build:ts)
 cd examples/standard_agents
 npm ci          # install the exact versions in package-lock.json
 npm run check   # type-check against the published @standardagents/spec types
 npm test        # vitest
 ```
 The binding depends on the package with `file:../../packages/acs-core` and
-imports its built `dist/`: run `npm ci` and `npm run build` in
-`packages/acs-core` first.
+imports its built `dist/` (the plain-TypeScript entry, so `build:ts` is
+enough): the first line builds it.
 
 ### Run conformance tests (optional, local only)
 ```bash
@@ -166,7 +174,9 @@ cd core
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo clippy --all-targets --features python -- -D warnings
+cargo clippy --all-targets --features wasm -- -D warnings
 cargo test
+cargo test --features wasm --test wasm
 ```
 
 CI pins the toolchain that runs these (`RUST_TOOLCHAIN` in
@@ -314,7 +324,7 @@ Capabilities are organized into 9 cognitive layers (defined in ontology):
 
 Skills are at `skills/<skill-name>/SKILL.md` (flat structure, not nested by category). Each skill has:
 
-- YAML frontmatter with `name`, `description`, `allowed-tools` and `agent` type (`layer` is in 13 of the 42 skills; the ontology gives every capability's layer, see `skills/README.md`)
+- YAML frontmatter with `name` (the directory name), `description`, `allowed-tools` and `agent` type; each key's owner (Agent Skills, Claude Code or ACS) is in `skills/README.md`, and no skill declares a `layer` (the ontology gives every capability's layer)
 - Intent and success criteria
 - Input/output contracts with `domain` parameter for specialization
 - Procedure steps with evidence grounding
@@ -425,6 +435,13 @@ Give the release its `## [vX.Y.Z] — date` section in `CHANGELOG.md`, then push
 ```bash
 python scripts/release_notes.py vX.Y.Z
 ```
+
+The plugin release that carries the renamed skills (`/capability-gap-analysis`,
+`/digital-twin-sync-loop`, ACS-59) changes two slash commands, so under
+SemVer it is a plugin MAJOR version (3.0.0). The TypeScript package has its
+own tag, `acs-core-vX.Y.Z` on `main` (its version in
+`packages/acs-core/package.json`), which `.github/workflows/publish-npm.yml`
+publishes.
 
 ## Claude Agent SDK Integration
 

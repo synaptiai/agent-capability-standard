@@ -239,30 +239,34 @@ fn load_catalog(
 /// loaded: FileNotFoundError and the other OSError subclasses for the
 /// filesystem, as `load_yaml` does, ValueError otherwise.
 ///
-/// `catalogs` are the other catalogs of its catalog set (STANDARD v1.2
-/// §5.1.1) and `agents` agent manifests (§5.15.1): paths or mappings. A set
-/// or manifest that is refused raises ValueError.
+/// `profiles`: domain profiles to apply (STANDARD v1.2 §5.21), as dicts;
+/// their diagnostics come first in the report. `catalogs` are the other
+/// catalogs of its catalog set (§5.1.1) and `agents` agent manifests
+/// (§5.15.1): paths or mappings. A set or manifest that is refused raises
+/// ValueError.
 #[pyfunction]
-#[pyo3(signature = (catalog_path, ontology_path, schema_root, *, catalogs = None, agents = None))]
+#[pyo3(signature = (catalog_path, ontology_path, schema_root, profiles = None, *, catalogs = None, agents = None))]
 fn validate_catalog(
     py: Python<'_>,
     catalog_path: PathBuf,
     ontology_path: PathBuf,
     schema_root: PathBuf,
+    profiles: Option<&Bound<'_, PyAny>>,
     catalogs: Option<&Bound<'_, PyAny>>,
     agents: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let profiles = profiles_from_py(profiles)?;
     if catalogs.is_none_or(|c| c.is_none()) && agents.is_none_or(|a| a.is_none()) {
         let report = py
             .detach(|| {
                 let ctx = Context::load(&ontology_path, &schema_root)?;
-                validate::validate_catalog_file(&ctx, &catalog_path)
+                validate::validate_catalog_file_with(&ctx, &catalog_path, &profiles)
             })
             .map_err(load_err)?;
         return report_to_py(py, &report);
     }
     let (catalog, header) = load_file_with_header(&catalog_path)?;
-    let opts = options(header, catalogs, agents)?;
+    let opts = options(header, profiles, catalogs, agents)?;
     let report = py
         .detach(|| {
             let ctx = Context::load(&ontology_path, &schema_root)?;
@@ -270,6 +274,33 @@ fn validate_catalog(
         })
         .map_err(load_err)?;
     report_to_py(py, &report)
+}
+
+/// Domain profiles given from Python: a list (of dicts, normally; anything
+/// else in it is reported by the profile checks, S303).
+fn profiles_from_py(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<Value>> {
+    match obj.map(from_py).transpose()? {
+        None => Ok(Vec::new()),
+        Some(Value::Array(a)) => Ok(a),
+        Some(_) => Err(PyTypeError::new_err("profiles must be a list")),
+    }
+}
+
+/// `ValueError((message, diagnostics))` when `report` has an error.
+fn refuse_profiles(py: Python<'_>, report: &Report) -> PyResult<()> {
+    let errors: Vec<&Diagnostic> = report.errors().collect();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    let value = serde_json::to_value(&errors).unwrap_or(Value::Null);
+    let first = errors
+        .first()
+        .map(|d| format!("{}: {}", d.code.as_str(), d.message))
+        .unwrap_or_default();
+    Err(PyValueError::new_err((
+        format!("the domain profiles are refused (STANDARD v1.2 §5.21.2): {first}"),
+        to_py(py, &value)?,
+    )))
 }
 
 /// A validator bound to one ontology, loaded once. The ontology's contracts
@@ -294,25 +325,27 @@ impl Validator {
     }
 
     /// Validate a catalog file; same result as `validate_catalog`.
-    #[pyo3(signature = (path, *, catalogs = None, agents = None))]
+    #[pyo3(signature = (path, profiles = None, *, catalogs = None, agents = None))]
     fn validate_file(
         &self,
         py: Python<'_>,
         path: PathBuf,
+        profiles: Option<&Bound<'_, PyAny>>,
         catalogs: Option<&Bound<'_, PyAny>>,
         agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
+        let profiles = profiles_from_py(profiles)?;
         if catalogs.is_none_or(|c| c.is_none()) && agents.is_none_or(|a| a.is_none()) {
             let report = py
                 .detach(|| {
                     self.ctx.schemas.clear_cache();
-                    validate::validate_catalog_file(&self.ctx, &path)
+                    validate::validate_catalog_file_with(&self.ctx, &path, &profiles)
                 })
                 .map_err(load_err)?;
             return report_to_py(py, &report);
         }
         let (catalog, header) = load_file_with_header(&path)?;
-        let opts = options(header, catalogs, agents)?;
+        let opts = options(header, profiles, catalogs, agents)?;
         let report = py
             .detach(|| {
                 self.ctx.schemas.clear_cache();
@@ -322,6 +355,61 @@ impl Validator {
         report_to_py(py, &report)
     }
 
+    /// Check domain profiles (STANDARD v1.2 §5.21.2): their diagnostics, in
+    /// a report of the `validate` shape.
+    fn check_profiles(&self, py: Python<'_>, profiles: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        let profiles = profiles_from_py(Some(profiles))?;
+        let mut report = Report::default();
+        crate::profile::Policy::load(&profiles, &self.ctx.ontology, &mut report);
+        report_to_py(py, &report)
+    }
+
+    /// The effective flags of a step or call of `capability` under
+    /// `profiles` (STANDARD v1.2 §5.2.1, §5.21.3), with the step's own
+    /// `declared` flags: `{"risk", "mutation", "requires_checkpoint",
+    /// "requires_approval", "person", "warnings"}`. Raises ValueError, with
+    /// the diagnostics, when the profiles have an error or the capability is
+    /// unknown.
+    #[pyo3(signature = (profiles, capability, declared = None))]
+    fn profile_flags(
+        &self,
+        py: Python<'_>,
+        profiles: &Bound<'_, PyAny>,
+        capability: &str,
+        declared: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let profiles = profiles_from_py(Some(profiles))?;
+        let declared = match declared.map(from_py).transpose()? {
+            None => None,
+            Some(Value::Object(m)) => Some(m),
+            Some(_) => return Err(PyTypeError::new_err("declared must be a dict")),
+        };
+        let mut report = Report::default();
+        let policy = crate::profile::Policy::load(&profiles, &self.ctx.ontology, &mut report);
+        refuse_profiles(py, &report)?;
+        let mut flags = policy
+            .flags_json(&self.ctx.ontology, capability, declared.as_ref())
+            .ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "capability '{capability}' not found in ontology (V101)"
+                ))
+            })?;
+        flags["warnings"] = serde_json::to_value(&report.diagnostics).unwrap_or(Value::Null);
+        to_py(py, &flags)
+    }
+
+    /// The rules `profiles` put in force besides flags (STANDARD v1.2
+    /// §5.21.3): `{"minimum_confidence", "grounding": [{"require",
+    /// "kinds"}], "destinations", "trust_weights"}`. Raises ValueError, with
+    /// the diagnostics, when the profiles have an error.
+    fn profile_policy(&self, py: Python<'_>, profiles: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        let profiles = profiles_from_py(Some(profiles))?;
+        let mut report = Report::default();
+        let policy = crate::profile::Policy::load(&profiles, &self.ctx.ontology, &mut report);
+        refuse_profiles(py, &report)?;
+        to_py(py, &policy.rules_json())
+    }
+
     /// The ontology's contracts with every `$ref` resolved, by capability in
     /// ontology order: `{id: {"input": schema, "output": schema}}`.
     fn contracts(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -329,19 +417,21 @@ impl Validator {
     }
 
     /// Validate an in-memory catalog (a mapping of workflow name to
-    /// workflow). `header` stands in for a file's `# Standard version:`.
+    /// workflow). `header` stands in for a file's `# Standard version:`;
+    /// `profiles` are domain profiles to apply (STANDARD v1.2 §5.21);
     /// `catalogs` and `agents` as for `validate_catalog`.
-    #[pyo3(signature = (catalog, header = None, *, catalogs = None, agents = None))]
+    #[pyo3(signature = (catalog, header = None, profiles = None, *, catalogs = None, agents = None))]
     fn validate(
         &self,
         py: Python<'_>,
         catalog: &Bound<'_, PyAny>,
         header: Option<String>,
+        profiles: Option<&Bound<'_, PyAny>>,
         catalogs: Option<&Bound<'_, PyAny>>,
         agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let catalog = catalog_from_py(catalog)?;
-        let opts = options(header, catalogs, agents)?;
+        let opts = options(header, profiles_from_py(profiles)?, catalogs, agents)?;
         let report = py
             .detach(|| {
                 self.ctx.schemas.clear_cache();
@@ -431,17 +521,18 @@ fn agents_from_py(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<Value>> {
     Ok(out)
 }
 
-/// The validator options for a catalog with these set members.
+/// The validator options for a catalog with these profiles and set members.
 fn options(
     header: Option<String>,
+    profiles: Vec<Value>,
     catalogs: Option<&Bound<'_, PyAny>>,
     agents: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<validate::Options> {
     Ok(validate::Options {
         header,
+        profiles,
         catalogs: catalogs_from_py(catalogs)?,
         agents: agents_from_py(agents)?,
-        ..validate::Options::default()
     })
 }
 
@@ -550,11 +641,7 @@ impl PyRun {
             }
         };
         let ctx = &validator.ctx;
-        let profiles = match profiles.map(from_py).transpose()? {
-            None => Vec::new(),
-            Some(Value::Array(a)) if a.iter().all(Value::is_object) => a,
-            Some(_) => return Err(PyTypeError::new_err("profiles must be a list of dicts")),
-        };
+        let profiles = profiles_from_py(profiles)?;
         let grounding = grounding_from_py(grounding, ctx)?;
         let destinations = match destinations {
             None => Vec::new(),
@@ -921,6 +1008,30 @@ fn check_grounding(
     to_py(py, &result)
 }
 
+/// A domain profile's minimum confidence applied to one output (STANDARD
+/// v1.2 §5.21.3): None when the output passes (it is not an object, has no
+/// `confidence`, or one at or above `minimum`), else `{code: "F504",
+/// reason: below_minimum_confidence|invalid_confidence, message}`.
+#[pyfunction]
+fn check_confidence(
+    py: Python<'_>,
+    output: &Bound<'_, PyAny>,
+    minimum: f64,
+) -> PyResult<Py<PyAny>> {
+    if !(0.0..=1.0).contains(&minimum) {
+        return Err(PyValueError::new_err(
+            "minimum must be a number from 0 to 1",
+        ));
+    }
+    match crate::profile::check_confidence(&from_py(output)?, minimum) {
+        None => Ok(py.None()),
+        Some(fault) => to_py(
+            py,
+            &json!({"code": "F504", "reason": fault.reason(), "message": fault.message(minimum)}),
+        ),
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -939,6 +1050,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(destination_allowed, m)?)?;
     m.add_function(wrap_pyfunction!(next_fire, m)?)?;
     m.add_function(wrap_pyfunction!(check_grounding, m)?)?;
+    m.add_function(wrap_pyfunction!(check_confidence, m)?)?;
     let spec_versions: Vec<String> = validate::semantics::SUPPORTED_VERSIONS
         .iter()
         .map(|(a, b)| format!("{a}.{b}"))

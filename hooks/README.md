@@ -347,4 +347,8 @@ These hooks implement runtime enforcement of VERIFY layer requirements:
 | Execution boundary (§5.18.6) | `stop_end_checkpoints.sh` removes the marker when a turn ends |
 | Audit records (§6.4), the layer's identity (§5.18.8) | `posttooluse_log_tool.sh` writes an action record of every tool call, with the configuration that decided it; the `audit` capability is the `audit` skill's |
 
+The hooks apply no domain profile (Standard 1.2.0 §5.21): to apply one to
+tool calls, use the Python adapter (`GroundedAgentConfig(profiles=...)`), or
+a host that gives profiles to its runs.
+
 See `schemas/capability_ontology.yaml` for full capability definitions.

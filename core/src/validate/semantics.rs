@@ -1091,9 +1091,9 @@ pub(crate) const FEATURES: &[Feature] = &[
             })
         },
     },
-    // S3 (§5.15.3): a delegate step's `continues`. (A qualified invoke
-    // target resolved in another catalog and a catalog manifest are 1.2
-    // features too; they need the catalog set, so `invoke::check` and
+    // S3 (§5.15.3): a delegate step's `continues`. (An invoke target that
+    // resolves as a qualified id and a catalog manifest are 1.2 features
+    // too; they need the catalog set, so `invoke::check` and
     // `catalog::check_manifest` report them.)
     Feature {
         since: (1, 2),

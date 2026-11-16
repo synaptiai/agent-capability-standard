@@ -204,9 +204,15 @@ pub fn parse_ref(body: &str) -> Result<Ref, RefError> {
                         "malformed reference '${{{raw}}}': leading zeros in index '{t}'"
                     )));
                 }
-                t.parse::<usize>().map(Some).map_err(|_| {
-                    RefError::path(format!("malformed reference '${{{raw}}}': index too large"))
-                })
+                // Parsed as u64 on every target, then held as a usize: an
+                // index beyond the platform's usize is beyond any array, so
+                // saturating keeps its meaning, and a 32-bit target (the
+                // WebAssembly core) reads the same references as a 64-bit one.
+                t.parse::<u64>()
+                    .map(|n| Some(usize::try_from(n).unwrap_or(usize::MAX)))
+                    .map_err(|_| {
+                        RefError::path(format!("malformed reference '${{{raw}}}': index too large"))
+                    })
             };
             match inner.split_once(':') {
                 Some((a, b)) => path.push(Seg::Slice(num(a)?, num(b)?)),

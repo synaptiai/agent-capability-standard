@@ -200,3 +200,35 @@ def test_runner_runs_with_the_engines_libraries_and_manifests() -> None:
     managed.load_agents(FIXTURES / "agents")
     with pytest.raises(Exception, match="F501"):
         WorkflowRunner(managed).start("write", now_ms=0)
+
+
+def test_runner_applies_profiles_and_manifests_together() -> None:
+    """A run's delegate step takes its target's maxima (§5.15.2) and the
+    applied profiles (§5.21.3) alike: the maxima raise its approval, and a
+    profile that blocks autonomous delegation asks that approval of a
+    person."""
+    from grounded_agency.workflows.runner import WorkflowRunner
+
+    engine = _engine_with("pass_agents_approval_block")
+    engine.load_agents(FIXTURES / "agents")
+    person = {
+        "domain": "person-delegate",
+        "version": "1.0.0",
+        "risk_thresholds": {"block_autonomous": ["delegate"]},
+    }
+    for profiles, expect_person in (((), False), ((person,), True)):
+        run = WorkflowRunner(engine, profiles=profiles).start("write", now_ms=0)
+        checkpoint = run.next()
+        assert checkpoint["capability"] == "checkpoint"
+        run.submit(
+            checkpoint["id"],
+            {
+                "kind": "Output",
+                "value": {"checkpoint_id": "c1", "evidence_anchors": []},
+            },
+            0,
+        )
+        approval = run.next()
+        assert approval["kind"] == "RequestApproval"
+        assert approval["step"] == 1
+        assert approval["approver"].get("always_ask", False) is expect_person

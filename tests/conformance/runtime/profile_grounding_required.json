@@ -1,0 +1,65 @@
+{
+  "description": "require_grounding: [classify] applies to a 1.1 workflow: a classify output with no anchors fails its step with F505.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "classify",
+          "purpose": "classify step",
+          "store_as": "c",
+          "input_bindings": {
+            "item": "x"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "classify"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "labels": [
+            "a"
+          ],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F505",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed"
+  ],
+  "profiles": [
+    {
+      "domain": "grounded",
+      "version": "1.0.0",
+      "evidence_policy": {
+        "require_grounding": [
+          "classify"
+        ],
+        "required_anchor_types": [
+          "file"
+        ]
+      }
+    }
+  ]
+}

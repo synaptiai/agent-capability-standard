@@ -28,8 +28,9 @@ export interface SpecSlot {
 const after = (block: SlotBlock, index: number, startsWith: string) => ({ place: 'after' as const, block, index, startsWith });
 // A field table drawn as a Port column, the table folded under it (TABLE_FIGURES in spec-tail-figures).
 const fieldTable = (index = 0) => ({ place: 'wrap' as const, block: 'table' as const, index, startsWith: 'Field Type Required Description' });
-// A §5.18 table whose Code column is drawn as diagnostic tiles (CODE_TABLE_FIGURES in spec-tail-figures).
-const codeTable = (startsWith: string) => ({ place: 'wrap' as const, block: 'table' as const, index: 0, startsWith });
+// A table whose Code column is drawn as diagnostic tiles (CODE_TABLE_FIGURES in spec-tail-figures);
+// `index` is the table's place among the section's tables.
+const codeTable = (startsWith: string, index = 0) => ({ place: 'wrap' as const, block: 'table' as const, index, startsWith });
 
 export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'requirements', level: 3, section: '1.2 ', at: after('list', 0, 'MUST, MUST NOT, SHALL, SHALL NOT: Absolu') },
@@ -37,6 +38,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'principles', level: 2, section: '3. ', at: 'heading' },
   { key: 'safety-order', level: 3, section: '3.3 ', at: after('list', 0, 'A checkpoint MUST run before every mutat') },
   { key: 'table-4.1', level: 3, section: '4.1 ', at: fieldTable() },
+  { key: 'dialect-forms', level: 4, section: '4.1.2 ', at: codeTable('Form Meaning Rendering Code') },
   { key: 'layers', level: 3, section: '4.2 ', at: 'heading' },
   { key: 'edges', level: 3, section: '4.3 ', at: 'heading' },
   { key: 'safety', level: 3, section: '4.4 ', at: 'heading' },
@@ -91,14 +93,20 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'run-records', level: 4, section: '5.19.8 ', at: after('paragraph', 0, 'Every run has a run record: an action re') },
   { key: 'grounding-replay', level: 3, section: '5.20 ', at: after('table', 0, 'Field Description') },
   { key: 'citation-replay', level: 3, section: '5.20 ', at: after('list', 0, 'A value that is not a list fails the ste') },
+  { key: 'table-5.21.2', level: 4, section: '5.21.2 ', at: fieldTable() },
+  { key: 'profile-codes', level: 4, section: '5.21.2 ', at: codeTable('Code A profile is reported when', 1) },
+  { key: 'profile-raises', level: 4, section: '5.21.3 ', at: codeTable('Member Raises Code') },
+  { key: 'profile-rules', level: 4, section: '5.21.3 ', at: codeTable('Member In force as Code', 1) },
   { key: 'schema-shelf', level: 3, section: '6.1 ', at: 'heading' },
   { key: 'table-6.3', level: 3, section: '6.3 ', at: fieldTable() },
   { key: 'audit-replay', level: 3, section: '6.4 ', at: after('paragraph', 3, 'The audit capability. An audit step reco') },
   { key: 'table-6.5', level: 3, section: '6.5 ', at: fieldTable() },
   { key: 'table-6.6', level: 3, section: '6.6 ', at: fieldTable() },
   { key: 'secret-replay', level: 3, section: '6.7 ', at: after('list', 0, 'an evidence anchor, an evidence record o') },
+  { key: 'table-7.1', level: 3, section: '7.1 ', at: fieldTable() },
   { key: 'merge-thresholds', level: 3, section: '7.3 ', at: 'heading' },
-  { key: 'decay', level: 3, section: '8.1 ', at: 'heading' },
+  { key: 'decay', level: 3, section: '8.1 ', at: after('paragraph', 2, 'Field authority is not a factor of the s') },
+  { key: 'table-8.4', level: 3, section: '8.4 ', at: fieldTable() },
   { key: 'families', level: 3, section: '9.1 ', at: 'heading' },
   { key: 'codes-9.2', level: 3, section: '9.2 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
   { key: 'codes-9.3', level: 3, section: '9.3 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
@@ -108,11 +116,13 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'codes-9.6', level: 3, section: '9.6 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
   { key: 'codes-9.7', level: 3, section: '9.7 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
   { key: 'levels', level: 3, section: '10.1 ', at: 'heading' },
-  { key: 'suite', level: 3, section: '10.3 ', at: 'heading' },
+  { key: 'suite', level: 3, section: '10.3 ', at: after('list', 0, 'Positive fixtures (valid workflows that M') },
   { key: 'digest-vectors', level: 3, section: '10.3 ', at: after('paragraph', 3, 'The approval digest vectors (tests/confo') },
   { key: 'sl-fixtures', level: 3, section: '10.4 ', at: after('list', 1, 'A call names call (the tool), args (defa') },
   { key: 'fixture-entries', level: 3, section: '10.5 ', at: after('list', 1, '{"expect": A, "respond": R, "at": T}: th') },
   { key: 'bumps', level: 3, section: '11.4 ', at: 'heading' },
+  { key: 'version-codes', level: 3, section: '11.5 ', at: codeTable('Code A workflow or catalog is reported w', 1) },
+  { key: 'citing-codes', level: 3, section: '11.6 ', at: codeTable('Code A consumer reports a cited document', 1) },
   { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },
   { key: 'pattern-0', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 0, startsWith: '- capability: plan' } },
   { key: 'pattern-1', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 1, startsWith: '- capability: retrieve' } },

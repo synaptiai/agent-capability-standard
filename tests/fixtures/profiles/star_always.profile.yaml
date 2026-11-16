@@ -1,0 +1,6 @@
+# Every step but a checkpoint step needs a checkpoint before it (Standard
+# v1.2 §5.21.3: "*" never covers checkpoint).
+domain: star-always
+version: "1.0.0"
+checkpoint_policy:
+  "*": always

@@ -1,0 +1,1067 @@
+{
+  "description": "Domain profile load vectors (Agent Capability Standard 1.2.0, section 5.21.2). Normative. Each vector gives the profiles applied together, in order, and the diagnostics loading them reports: errors and warnings, each with its code, its location.profile (the profile's domain, or #<i>, its zero-based position, when it has no valid domain) and its location.field. Both lists are exact; their order is free.",
+  "standard": "1.2.0",
+  "ontology": "2.2.0",
+  "section": "5.21.2",
+  "status": "normative",
+  "fields": {
+    "name": "The vector's id.",
+    "about": "The rule it pins.",
+    "profiles": "The profiles given, in order.",
+    "expect.errors": "Every error diagnostic, as {code, profile, field}.",
+    "expect.warnings": "Every warning diagnostic, as {code, profile, field}."
+  },
+  "vectors": [
+    {
+      "name": "minimal",
+      "about": "domain and version are all a profile needs",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0"
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "not_a_mapping",
+      "about": "a profile that is not a mapping",
+      "profiles": [
+        [
+          1
+        ]
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "#0",
+            "field": ""
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "missing_domain",
+      "about": "domain is required; the profile is named by its position",
+      "profiles": [
+        {
+          "version": "1.0.0"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S304",
+            "profile": "#0",
+            "field": "domain"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "missing_version",
+      "about": "version is required",
+      "profiles": [
+        {
+          "domain": "d"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S304",
+            "profile": "d",
+            "field": "version"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "domain_not_kebab",
+      "about": "domain is kebab-case; an invalid one does not name the profile",
+      "profiles": [
+        {
+          "domain": "Data_Analysis",
+          "version": "1.0.0"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "#0",
+            "field": "domain"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "domain_starts_with_digit",
+      "about": "domain starts with a lower-case letter; a digit first is outside its grammar",
+      "profiles": [
+        {
+          "domain": "3d-vision",
+          "version": "1.0.0"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "#0",
+            "field": "domain"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "version_not_semver",
+      "about": "version is MAJOR.MINOR.PATCH",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "version"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "unknown_member",
+      "about": "an unknown top-level member is ignored with W604",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "foo": 1
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": [
+          {
+            "code": "W604",
+            "profile": "d",
+            "field": "foo"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vendor_member",
+      "about": "a top-level x- member is never reported",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "x-owner": "a"
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "threshold_unknown_level",
+      "about": "a threshold is none, low, medium or high",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "auto_approve": "extreme"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "risk_thresholds.auto_approve"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "threshold_critical_deprecated",
+      "about": "critical is deprecated and read as none",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_human": "critical"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": [
+          {
+            "code": "W603",
+            "profile": "d",
+            "field": "risk_thresholds.require_human"
+          }
+        ]
+      }
+    },
+    {
+      "name": "threshold_unknown_member",
+      "about": "risk_thresholds is closed: a misspelled member is an error",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "require_humen": "low"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "risk_thresholds.require_humen"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "threshold_vendor_member_refused",
+      "about": "risk_thresholds is closed: an x- member too (x- is exempt only at the top level)",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "x-note": "a"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "risk_thresholds.x-note"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "block_unknown_capability",
+      "about": "block_autonomous lists capability ids",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "mutate",
+              "mutatee"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "V101",
+            "profile": "d",
+            "field": "risk_thresholds.block_autonomous[1]"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "block_not_list",
+      "about": "block_autonomous is a list",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": "mutate"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "risk_thresholds.block_autonomous"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "block_duplicate",
+      "about": "block_autonomous need not list distinct ids: a repeated one has no further effect",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "mutate",
+              "mutate"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "checkpoint_label_key",
+      "about": "checkpoint_policy keys are capability ids or *, not labels",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "before_send": "always"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "V101",
+            "profile": "d",
+            "field": "checkpoint_policy.before_send"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "checkpoint_misspelled_id",
+      "about": "a misspelled capability id is V101 (with the hint mutate)",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "mutat": "always"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "V101",
+            "profile": "d",
+            "field": "checkpoint_policy.mutat"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "checkpoint_key_checkpoint",
+      "about": "a checkpoint step never needs a checkpoint before it",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "checkpoint": "always"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "checkpoint_policy.checkpoint"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "checkpoint_star_key",
+      "about": "* covers every capability but checkpoint",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "*": "high_risk"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "checkpoint_bad_value",
+      "about": "a rule is always, high_risk, medium_risk or never",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "mutate": "sometimes"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "checkpoint_policy.mutate"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "checkpoint_never_weaker",
+      "about": "never has no effect where the ontology requires a checkpoint",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "mutate": "never"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": [
+          {
+            "code": "W602",
+            "profile": "d",
+            "field": "checkpoint_policy.mutate"
+          }
+        ]
+      }
+    },
+    {
+      "name": "checkpoint_never_requires_edge",
+      "about": "never has no effect where a checkpoint requires edge of the ontology requires one (rollback)",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "rollback": "never"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": [
+          {
+            "code": "W602",
+            "profile": "d",
+            "field": "checkpoint_policy.rollback"
+          }
+        ]
+      }
+    },
+    {
+      "name": "checkpoint_never_no_requirement",
+      "about": "never where the ontology requires none: nothing to report",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "retrieve": "never"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "trust_class_key",
+      "about": "trust_class:<class> names a trust class",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "trust_weights": {
+            "trust_class:peer_agent": 0.2
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "trust_class_unknown",
+      "about": "the class must be a trust class of agent_identity",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "trust_weights": {
+            "trust_class:robot": 0.2
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "trust_weights.trust_class:robot"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "trust_weight_out_of_range",
+      "about": "a weight is a number from 0 to 1",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "trust_weights": {
+            "plc": 1.5
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "trust_weights.plc"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "trust_weight_boolean",
+      "about": "a boolean is not a weight",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "trust_weights": {
+            "plc": true
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "trust_weights.plc"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "trust_source_key_grammar",
+      "about": "a source key is a lower-case letter, then lower-case letters, digits, _, . or -",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "trust_weights": {
+            "Bad Key": 0.5
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "trust_weights.Bad Key"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "anchor_kinds_valid",
+      "about": "anchor kinds of section 6.5, vendor kinds included",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "required_anchor_types": [
+              "file",
+              "x-lab_result"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "anchor_kind_not_a_kind",
+      "about": "an entry that is not an anchor kind",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "required_anchor_types": [
+              "timestamp"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.required_anchor_types[0]"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "anchor_kinds_empty",
+      "about": "required_anchor_types lists at least one kind",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "required_anchor_types": []
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.required_anchor_types"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "anchor_kinds_duplicate",
+      "about": "the kinds are distinct",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "required_anchor_types": [
+              "file",
+              "file"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.required_anchor_types[1]"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "grounding_duplicate",
+      "about": "require_grounding lists distinct capability ids",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "require_grounding": [
+              "classify",
+              "classify"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.require_grounding[1]"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "grounding_unknown_capability",
+      "about": "require_grounding lists capability ids",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "require_grounding": [
+              "predikt"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "V101",
+            "profile": "d",
+            "field": "evidence_policy.require_grounding[0]"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "evidence_unknown_member",
+      "about": "evidence_policy is closed",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "minimum_confidense": 0.9
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.minimum_confidense"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "minimum_confidence_out_of_range",
+      "about": "minimum_confidence is a number from 0 to 1",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "minimum_confidence": 1.2
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.minimum_confidence"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "minimum_confidence_boolean",
+      "about": "a boolean is not a confidence",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "minimum_confidence": false
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.minimum_confidence"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "domain_source_boolean_trust",
+      "about": "informative members are type-checked too",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "domain_sources": [
+            {
+              "name": "s",
+              "default_trust": true
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "domain_sources[0].default_trust"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "workflows_duplicate",
+      "about": "workflows is informative: a repeated id is not reported",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "workflows": [
+            "a",
+            "a"
+          ]
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "not_i_json",
+      "about": "every member has an exact JSON form (I-JSON): an integer beyond 2^53 is refused, in a vendor member too",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "x-n": 1152921504606846977
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "x-n"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "standard_current",
+      "about": "the Standard and ontology the profile is written for",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "standard": "1.2.0",
+          "ontology": "2.2.0"
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "standard_unsupported",
+      "about": "a standard the implementation does not support",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "standard": "2.0"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "V109",
+            "profile": "d",
+            "field": "standard"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "standard_malformed",
+      "about": "a cited version is MAJOR.MINOR[.PATCH]",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "standard": "v1"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "standard"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "ontology_other_major",
+      "about": "another ontology major is not compatible (section 11.6)",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "ontology": "3.0.0"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "V109",
+            "profile": "d",
+            "field": "ontology"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "ontology_later_minor",
+      "about": "a later minor of the same major is accepted",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "ontology": "2.9"
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "destinations_invalid",
+      "about": "allowed_destinations is a destination policy (section 4.4.2)",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "allowed_destinations": [
+            "*"
+          ]
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "allowed_destinations[0]"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "destinations_duplicate",
+      "about": "a destination policy may repeat a pattern, to no further effect",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "allowed_destinations": [
+            "mailto:*",
+            "mailto:*"
+          ]
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "two_profiles_each_reported",
+      "about": "each profile is checked on its own and named in its diagnostics",
+      "profiles": [
+        {
+          "version": "1.0.0"
+        },
+        {
+          "domain": "d2",
+          "version": "x"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S304",
+            "profile": "#0",
+            "field": "domain"
+          },
+          {
+            "code": "S303",
+            "profile": "d2",
+            "field": "version"
+          }
+        ],
+        "warnings": []
+      }
+    }
+  ]
+}

@@ -74,8 +74,8 @@ Four workflows have a skill that runs them step by step:
 | Workflow | Skill Directory | Skill name |
 |----------|-----------------|------------|
 | `debug_code_change` | `skills/debug-workflow/` | `debug-workflow` |
-| `capability_gap_analysis` | `skills/capability-gap-analysis/` | `gap-analysis-workflow` |
-| `digital_twin_sync_loop` | `skills/digital-twin-sync-loop/` | `digital-twin-sync-workflow` |
+| `capability_gap_analysis` | `skills/capability-gap-analysis/` | `capability-gap-analysis` |
+| `digital_twin_sync_loop` | `skills/digital-twin-sync-loop/` | `digital-twin-sync-loop` |
 | `digital_twin_bootstrap` | `skills/digital-twin-bootstrap/` | `digital-twin-bootstrap` |
 
 `world_model_build` has no skill of its own: `digital-twin-bootstrap` runs it

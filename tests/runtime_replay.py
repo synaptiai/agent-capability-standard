@@ -61,6 +61,17 @@ def matches(expected: Any, actual: Any) -> bool:
     return bool(expected == actual) and type(expected) is type(actual)
 
 
+def holds(action: Any, path: str) -> bool:
+    """Whether ``action`` holds the member ``path`` names: member names
+    joined by ``.``, as a script entry's ``absent`` lists them."""
+    node = action
+    for name in path.split("."):
+        if not isinstance(node, dict) or name not in node:
+            return False
+        node = node[name]
+    return True
+
+
 def fill(response: Any, action: dict[str, Any]) -> Any:
     """``response`` with ``"{{digest}}"`` replaced by the action's digest, and
     ``"{{digest_upper}}"`` by it in uppercase."""
@@ -151,8 +162,8 @@ def play(
     ``wake_at`` checks the wake-up time; each ``cancel`` cancels the run
     (§5.19.5); each ``resume`` resumes the run (:func:`resume`; the run
     returned is the resumed one); each other entry reads the pending action
-    (``expect(i, expected, action)`` checks it, when given) and submits the
-    response, if any."""
+    (``expect(i, expected, action)`` checks it, when given, and so is each
+    member the entry's ``absent`` lists) and submits the response, if any."""
     now = fixture["start"]
     for i, entry in enumerate(fixture["script"]):
         if "tick" in entry:
@@ -177,6 +188,8 @@ def play(
         action = run.next()
         if expect is not None and "expect" in entry:
             expect(i, entry["expect"], action)
+            for path in entry.get("absent", ()):
+                assert not holds(action, path), (i, f"{path} must be absent", action)
         if "respond" in entry:
             now = entry.get("at", now)
             run.submit(action["id"], fill(entry["respond"], action), now)

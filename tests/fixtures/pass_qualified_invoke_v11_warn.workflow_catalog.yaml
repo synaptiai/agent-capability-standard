@@ -1,0 +1,23 @@
+# Standard version: 1.1.0
+# An invoke of another catalog's exported workflow by qualified id in a
+# catalog whose header targets 1.1: a 1.1 consumer resolves names in one
+# catalog only, so the qualified target is W616 at its first use (STANDARD
+# v1.2 §5.1.1, §11.5).
+check:
+  goal: Check a target with the library.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run the library's check.
+    store_as: checked
+    workflow_id: acs.fixtures.lib/shared_check
+    input_bindings:
+      workflow: acs.fixtures.lib/shared_check
+      input: {target: x}
+  - capability: invoke
+    purpose: Run the library's check again; the feature is reported once.
+    store_as: checked_again
+    workflow_id: acs.fixtures.lib/shared_check
+    input_bindings:
+      workflow: acs.fixtures.lib/shared_check
+      input: {target: y}

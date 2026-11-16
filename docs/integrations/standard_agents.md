@@ -45,10 +45,11 @@ was checked and what was not.
   The digest is the same one the ACS reference executor computes. SA
   authenticates a caller; that the caller is a person is for the deployment
   to ensure.
-- **ACS workflows cannot yet run inside an SA runtime.** The reference
-  executor is Rust with Python bindings and SA definitions are TypeScript. The
-  core compiles to WebAssembly unchanged; it lacks a JavaScript interface, and
-  SA does not say that definition code can load WebAssembly.
+- **ACS workflows can run in process from TypeScript, but not yet inside an
+  SA runtime.** The reference executor is Rust; the TypeScript package
+  [`@synaptiai/acs-core`](../../packages/acs-core/README.md) loads it through
+  a WebAssembly JSON interface (`@synaptiai/acs-core/wasm`). SA does not say
+  that definition code can load WebAssembly.
 - **Changes are proposed to both standards**, listed at the end. The most
   important is a hook in SA that can decline a tool call before it runs.
 
@@ -688,7 +689,7 @@ evidence anchors, the binding emits `acs.evidence_recorded` through
 notification, not the record, and an `emit` that is missing or throws never
 fails the call.
 
-A grounded tool takes three more options:
+A grounded tool takes four more options:
 
 - **`grounding`**: one policy or a list
   ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). When a policy
@@ -707,6 +708,25 @@ A grounded tool takes three more options:
   `error`, and every notification, pass through it. A `persist` or `audit`
   tool refuses data that holds a credential-shaped value or a registered
   secret (F504, §5.18.10).
+- **`profiles`**: the domain profiles the layer applies
+  ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)), as the core
+  computes them: `bindingProfiles(context, documents)` with a `CoreContext`
+  of `@synaptiai/acs-core/wasm`, once, passed to every tool. They raise
+  each capability's flags at the call's effective risk, with the tools it
+  `invokes`, and a composite's flags for what the tools it invokes perform,
+  transitively, so profiles given to a composite alone reach its nested
+  calls; a call they require a person for counts only approvals the
+  deployment attests as a person's (`kind: human`) and its entries carry
+  `person_required`. A composite that invokes such a tool needs a person's
+  approval too, since its approval covers the nested call (§5.18.4); a
+  nested call that needs a person is not covered by an approval no person
+  gave. Their grounding policies join `grounding`; and an output below
+  their `minimum_confidence` fails with F504 (`reason_code`), after the
+  grounding check. A profile with an error throws, and so does one that
+  sets `allowed_destinations`, a destination policy this binding does not
+  check yet; each warning (a misspelled member is W604, and ignored) goes
+  to `onWarning`, `console.warn` by default, and stays in `warnings`. The
+  profiles are part of every record's `config_sha256`.
 
 ### Checking a prompt before it runs
 
@@ -829,13 +849,14 @@ With a handler as host, each executor action has a Standard Agents mechanism:
 | `Completed`, `Failed` | `state.stopSession({ result })`. SA gives code no way to end a session as failed, so a `Failed` run is a successful stop whose `result` carries the code. Delivering the result is protocol traffic (§5.19.6). The run's record (§5.19.8) and its action records go where the handler keeps its audit records |
 | The run between turns | `run.snapshot()` in the key-value store, restored at the start of the next turn. The runtime runs one execution per thread, which gives the one writer a run needs ([§5.19.4](../../spec/STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)); the handler saves after every change, before it acts. A client that stops an execution leaves an interrupted turn: the next turn restores the latest state, unless the handler cancels the run. To stay within the store's value-size cap, the handler moves `run.take_trace()` into thread storage and `run.take_records()` into its audit records each turn |
 
-What stands in the way is the language, not the design. The reference core is
-a Rust crate with Python bindings. It compiles for `wasm32-unknown-unknown`
-without source changes, but exports no JavaScript interface, and its context
-loads the ontology from file paths. A WebAssembly build also needs a runtime
-whose definition code can load WebAssembly, which SA 0.2.0 does not say; a
-plain TypeScript build of what a tool-calling binding needs (the ontology
-table, effective flags, canonical JSON, the digest) has no such dependency. See
+What stands in the way is the runtime, not the design. The reference core is
+a Rust crate; the TypeScript package's `./wasm` entry runs it in process
+through a JSON interface over WebAssembly, with a context built from bundled
+documents rather than file paths (`AcsCore`, `CoreContext.start`,
+`CoreRun.next`/`submit`/`snapshot`). That needs a runtime whose definition
+code can load WebAssembly, which SA 0.2.0 does not say; the package's plain
+TypeScript entry (the ontology table, effective flags, canonical JSON, the
+digest) has no such dependency. See
 [Changes proposed to ACS](#changes-proposed-to-the-agent-capability-standard).
 
 Until then, the rules a workflow would enforce by position are enforced per
@@ -1090,9 +1111,14 @@ requires for normative changes.
 - **Vectors other implementations can test against**: the reference
   executor's approval digests and the trust score arithmetic of §8, listed in
   [CONFORMANCE.md](../../spec/CONFORMANCE.md).
-- **Documents that say what is enforced.** Domain profiles are presented as
-  informative data, which they are: no shipped component applies one. The
-  executor's trace kinds are listed and tested.
+- **Documents that say what is enforced.** Domain profiles take effect where
+  a host or safety layer applies them, and §5.21 says what each rule changes:
+  the reference executor, the Python adapter and this binding (a grounded
+  tool's `profiles`) apply their flags, person requirements, grounding
+  policies and minimum confidence, and refuse a profile whose destination
+  policy they do not check yet (no shipped profile sets one); the validator
+  given a profile reports the flags it raises. The executor's trace kinds
+  are listed and tested.
 
 ### Accepted from RFC-0005
 
@@ -1111,27 +1137,29 @@ requires for normative changes.
 3. **One evidence anchor item.** `evidence_anchors` had no item schema, and
    the schemas and the Python SDK used three different vocabularies of anchor
    kinds. Standard 1.2.0 has one evidence anchor (§6.5, RFC-0008), which
-   this binding's tools return and its trace records.
+   this binding's tools return and its trace records, and a rule that keeps
+   secrets out of evidence, audit records and stored data
+   ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)).
 
 ### Still open
 
-- **A JavaScript build of the core.** What a tool-calling binding needs
-  (the ontology table, effective flags, canonical JSON, the digest, the
-  binding checks and the text-only output rule) is in the TypeScript package
-  [`@synaptiai/acs-core`](../../packages/acs-core/README.md) of this
-  repository, which the binding imports; the package is not yet published to
-  npm. A WebAssembly interface to the validator and executor would let ACS
-  workflows run inside a Standard Agents thread; the crate already compiles
-  for `wasm32-unknown-unknown` unchanged. This is the roadmap's
+- **Publishing and loading the core in an SA runtime.** What a
+  tool-calling binding needs (the ontology table, effective flags, canonical
+  JSON, the digest, the binding checks and the text-only output rule) is in
+  the TypeScript package [`@synaptiai/acs-core`](../../packages/acs-core/README.md),
+  which the binding imports, and its `./wasm` entry runs the reference
+  validator and executor, domain profiles included, in process. The package
+  is published to npm from a tag `acs-core-vX.Y.Z` on `main` once the
+  repository enables publishing (`.github/workflows/publish-npm.yml`). What
+  stays open is SA's: whether definition code may load WebAssembly, and how
+  a packed agent's npm dependencies are resolved (bundle the package to be
+  safe). This was the roadmap's
   [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
   item.
 - **What crosses a delegation**, for a checkpoint: a delegate's effects are
   outside its delegator's checkpoints. (A delegation's flags following its
   target, with agent manifests and `agents`, landed in Standard 1.2.0,
   [§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets).)
-- **What applying a domain profile changes**, normative. (The rule that
-  keeps secrets out of evidence, audit records and stored data is Standard
-  1.2.0's [§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records).)
 - **The host protocol as a published schema**, with a conformance class for
   executors: Standard 1.2.0 gives it, as
   [§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol),

@@ -25,3 +25,5 @@ pub mod yaml;
 
 #[cfg(feature = "python")]
 mod python;
+#[cfg(feature = "wasm")]
+pub mod wasm;

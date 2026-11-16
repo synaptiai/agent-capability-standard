@@ -1,13 +1,15 @@
 //! Invocations between catalog workflows (STANDARD v1.1 §5.10, §5.12):
 //! unknown targets (W607), invoke cycles (V105), targets whose triggers
-//! do not allow being invoked (V107), and literal inputs the target does
-//! not declare (S303) or that miss a required one (S304).
+//! do not allow being invoked (V107), literal inputs the target does not
+//! declare (S303) or that miss a required one (S304), and a qualified
+//! target in a workflow that targets 1.0 or 1.1 (W616, STANDARD v1.2
+//! §11.5).
 
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-use super::{Report, StepLoc};
+use super::{Report, StepLoc, semantics};
 use crate::catalogs::{Namespace, Resolved};
 use crate::diag::{Code, Diagnostic};
 use crate::names;
@@ -96,7 +98,13 @@ pub(crate) fn check(ns: &Namespace<'_>, invocations: &[Invocation], report: &mut
     };
     let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut resolved: Vec<(&Invocation, &str)> = Vec::new();
+    let mut qualified_reported = HashSet::new();
     for inv in invocations {
+        if ns.resolver.resolves_qualified(&inv.workflow, &inv.target)
+            && qualified_reported.insert(inv.workflow.as_str())
+        {
+            qualified_feature(ns, inv, report);
+        }
         let key = match ns.resolver.resolve(&inv.workflow, &inv.target) {
             Resolved::Key(k) => k,
             Resolved::Unresolved => {
@@ -180,6 +188,42 @@ pub(crate) fn check(ns: &Namespace<'_>, invocations: &[Invocation], report: &mut
             ));
         }
     }
+}
+
+/// W616 at `inv`, the first invoke step of its workflow whose target
+/// resolves through its qualified form, when the workflow targets a
+/// version before 1.2 (§11.5): a 1.1 consumer resolves names in one
+/// catalog only. Reported as the other features are, at the workflow with
+/// the step's field; nothing for a workflow that declares no supported
+/// version (W605 or V109 says so).
+fn qualified_feature(ns: &Namespace<'_>, inv: &Invocation, report: &mut Report) {
+    const SINCE: (u64, u64) = (1, 2);
+    let Some(Value::Object(wf)) = ns.get(&inv.workflow) else {
+        return;
+    };
+    let (version, by_header) = match wf.get("spec_version") {
+        Some(Value::String(v)) => (v.as_str(), false),
+        Some(_) => return,
+        None => match ns.header_of(&inv.workflow) {
+            Some(h) => (h, true),
+            None => return,
+        },
+    };
+    let supported = semantics::parse_version(version)
+        .filter(|v| semantics::SUPPORTED_VERSIONS.contains(v) && *v < SINCE);
+    if supported.is_none() {
+        return;
+    }
+    report.push(
+        semantics::version_feature_diag(
+            "an invoke target that is a qualified id",
+            SINCE,
+            version,
+            by_header,
+            format!("steps[{}].{}", inv.step, inv.field),
+        )
+        .at("workflow", inv.workflow.as_str()),
+    );
 }
 
 /// A literal invocation input against the target's declared inputs. The

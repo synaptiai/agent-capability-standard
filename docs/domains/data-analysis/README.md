@@ -10,7 +10,7 @@ The data analysis domain profile is calibrated for environments where:
 - **Statistics require rigor** — Uncertainty must be explicit
 - **Models need governance** — Drift detection and retraining
 
-The profile is informative data. It states what this domain calls for; no shipped component loads it or enforces its settings, so the checkpoints and approvals a deployment needs have to be written into its workflows or implemented by its host. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for which components apply it, its grounding policy (`require_grounding`) and minimum confidence included.
 
 ## Domain Profile
 
@@ -55,6 +55,20 @@ Data analysis requires checkpoints before:
 - Deploying models
 - Publishing reports
 - Modifying pipeline configurations
+
+The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+
+```yaml
+checkpoint_policy:
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_data_mutation -> mutate; before_model_deployment -> execute;
+  # before_report_publish -> send; before_pipeline_change (high_risk) and
+  # during_batch_job (medium_risk) -> "*": medium_risk.
+  mutate: always
+  execute: always
+  send: always
+  "*": medium_risk
+```
 
 ## Available Workflows
 
@@ -168,11 +182,10 @@ model:
 
 ```yaml
 evidence_policy:
-  required_anchor_types:
-    - data_lineage
-    - query_hash
-    - statistical_summary
-    - methodology_reference  # Custom: require methodology
+  required_anchor_types:     # Anchor kinds (Standard 1.2.0 §6.5)
+    - record                 # Data lineage
+    - x-methodology          # A vendor kind: require methodology
+  require_grounding: [measure, predict]
   minimum_confidence: 0.85  # Higher for regulated industry
 ```
 

@@ -89,7 +89,8 @@ profile_schema:
           items:
             type: string
           description: Capability ids whose steps and calls require approval by a
-            person each time (never autonomous). An unknown id - V101.
+            person each time (never autonomous). An unknown id - V101; a repeated
+            one has no further effect.
     checkpoint_policy:
       type: object
       description: |
@@ -110,10 +111,12 @@ profile_schema:
       properties:
         required_anchor_types:
           type: array
+          minItems: 1
+          uniqueItems: true
           items:
             type: string
             pattern: '^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$'
-          description: Anchor kinds (Standard v1.2 §6.5) of which an anchor counts
+          description: Distinct anchor kinds (Standard v1.2 §6.5) of which an anchor counts
             toward grounding; the kinds of the grounding policy require_grounding
             states (§5.20). Without require_grounding, no effect.
         minimum_confidence:
@@ -126,9 +129,10 @@ profile_schema:
             applied profiles.
         require_grounding:
           type: array
+          uniqueItems: true
           items:
             type: string
-          description: Capabilities whose outputs must be grounded or marked
+          description: Distinct capabilities whose outputs must be grounded or marked
             inferred; a grounding policy's require (Standard v1.2 §5.20). An
             unknown id - V101.
     allowed_destinations:

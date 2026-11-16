@@ -15,6 +15,7 @@ import {
   layerUsage,
   producerSteps,
   schemaDescription,
+  schemaGroups,
   schemaListing,
   schemaRows,
   sortedTrustWeights,
@@ -366,6 +367,9 @@ describe('schemas listing', () => {
     expect(entries.filter((e) => e.group === 'required').map((e) => e.name).sort()).toEqual(canonicalSchemaNames().sort());
     expect(entries.some((e) => e.source.startsWith('schemas/workflows/'))).toBe(false);
     expect(entries.filter((e) => e.source.startsWith('schemas/profiles/')).map((e) => e.name)).toEqual(['profiles/profile_schema.yaml']);
+    // §6.1 of 1.2.0 names the profile schema among the supporting schemas (§5.21).
+    expect(entries.find((e) => e.name === 'profiles/profile_schema.yaml')?.group).toBe('supporting');
+    expect(schemaGroups('1.2.0').some((g) => (g.key as string) === 'profiles')).toBe(false);
   });
 });
 

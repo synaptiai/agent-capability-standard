@@ -564,7 +564,7 @@ Resolution strategies:
 
 Entity matching across sources requires:
 
-**Hierarchical Namespaces**: `namespace:type:id`
+**Hierarchical Namespaces**: `<class>:<namespace>/<local_id>` (Standard 1.2.0 §7.1)
 **Alias Scoring**: Weighted confidence for potential matches
 **Merge/Split Rules**: When to combine or divide records
 **Hard Constraints**: Never merge incompatible types

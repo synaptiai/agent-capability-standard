@@ -789,30 +789,143 @@ Workstreams should run `npm run check:axe` (or at least
   pins the refusal rule for Python, TypeScript and `hooks/secret_scan.sh`;
   a stream that changes the scan re-syncs the skills' copies.
 
+## 2026-11-16 — S6 review round 1 (affects S2b, S4, S5)
+
+- **A profile rule no check reads is refused, not ignored.**
+  `profile::Policy::unenforced()` names a profile's grounding policy
+  (`require_grounding`) or destination policy (`allowed_destinations`), and
+  `Run::prepare` (`core/src/exec/mod.rs`, so start, restore, Python and
+  WebAssembly) refuses it with `StartError::Unsupported`, as
+  `StartOptions::unimplemented()` refuses the host's own. **S4**, when its
+  grounding check reads `self.program.policy.grounding()`, deletes the
+  grounding line; **S5**, when its send check reads
+  `self.program.policy.destinations()`, deletes the destination line (S6
+  Pending items 1 and 5). The Python adapter refuses the same rules and
+  `minimum_confidence` (`self.profiles.refuse_unapplied(...)` in
+  `GroundedAgentAdapter.__post_init__`): S4's adapter output check and
+  S5's send check delete their names there. §5.21.4 states the rule: an
+  implementation refuses a profile that sets a rule it does not put in
+  force.
+- **Fixture format: `absent`.** A runtime fixture's script entry may list
+  `absent`: member paths (`approver.mandate_ref`) the pending action must
+  not hold. It is in `tests/conformance/runtime/schema/fixture.schema.json`
+  and checked by `tests/runtime_replay.py` `play`, `core/tests/runtime.rs`
+  `play` and `packages/acs-core/test/wasm-runtime.test.ts` `play`. **S2b**
+  keeps it when it edits those files and lists it among the script entry
+  members in §10.5.
+- **Same-file `$ref` in contracts.** `SchemaStore::resolve_node_in(node,
+  doc, budget)` resolves `#<pointer>` in `doc`; `Context::new` resolves
+  contracts with it against the ontology, so §4.1.2's same-file form loads.
+- **The adapter loads its ontology through the core.**
+  `GroundedAgentAdapter` builds `_core.Validator(ontology_path,
+  schema_root)` for every configuration (`GroundedAgentConfig.schema_root`,
+  default the ontology's grandparent, as `WorkflowEngine`): a contract
+  `$ref` that names nothing refuses the configuration.
+
+## 2026-11-16 — S6 integrated with the chain (round3/a), for S3 and S5
+
+- **Profiles' grounding is wired.** `Program.grounding` (the applied
+  profiles' policies) joins `grounding_check`'s chain after the workflow's
+  and the host's; `Policy::unenforced` names only a destination policy.
+  **S5** deletes that last line (and `unenforced` with it) when its send
+  check reads `self.program.policy.destinations()`, and the adapter's
+  `refuse_unapplied(("destinations",), ...)` call and the binding's
+  `unappliedRule` (`examples/standard_agents/src/acs/profiles.ts`) when
+  their send checks read the profiles' destinations (S6 progress, item 5).
+- **The binding applies profiles per tool**: `groundedTool({profiles})`,
+  `bindingProfiles(core, documents)`; trace entries carry
+  `person_required` and `reason_code`, which `actionRecord` exports. S5's
+  `configureLayer` may take the same `BindingProfiles` for the layer.
+- **WebAssembly run operations.** `core/src/wasm.rs` has `run.resume`,
+  `run.cancel`, `run.wake_at`, `run.run_id`, `run.trace` (`since`),
+  `run.trace_seq`, `run.take_trace`, `run.take_records`,
+  `run.taken_sha256`, `run.run_record`; `packages/acs-core/test/wasm-runtime.test.ts`
+  plays every script entry. **S3**: start options `catalogs` and `agents`
+  go through `start_options` there, and the harness's `SUPPORTED` filter
+  goes when they do.
+- **W616.** `FEATURES` holds S2a's, S2b's and S4's 1.2 rows; **S3** and
+  **S5** append theirs (§11.5's table already names them).
+- **Fixtures.** `NORMATIVE_MEMBERS` lists `person_required` (§5.21.3) on
+  records. `absent` is in §10.5 and CONFORMANCE's entry table.
+
+
+## 2026-11-16 — S6 integration review round 1 (for S5)
+
+- **Binding: the person requirement through composites.** `groundedTool`
+  computes profile flags at the call's effective risk (with `invokes`), keeps
+  a `PERSON` set beside `EFFECTIVE` (a composite listing a person-required
+  tool is person-required), and a `NestingToken` carries the composite's
+  `person`: a person-required nested call is covered only by a composite
+  whose approval was a person's (§5.21.3, §5.18.4). **S5**: if
+  `configureLayer` takes the profiles for the layer, keep both.
+- **Binding: `ProfileCore.checkProfiles`.** `bindingProfiles(core,
+  documents, {onWarning})` reports and keeps the loading warnings
+  (`BindingProfiles.warnings`).
+- **Adapter.** `GroundedAgentAdapter._checks_call_outputs` is the one gate
+  for checking a call's output (config grounding, the profiles' grounding,
+  a minimum confidence), used by `mcp.py`'s served tools;
+  `call_action_record` exports `person_required` as the top-level
+  `ActionRecord` member.
+
+## 2026-11-16 — S6 integration review round 2 (for S3 and S5)
+
+- **Composites under profiles.** The Python adapter's
+  `ToolCapabilityMapper._apply_profiles` ORs in the raised flags and person
+  requirement of each binding a composite `invokes`, transitively (its cache
+  clears when `records_revision` moves). The binding keeps `PERFORMS`
+  (capability, effective risk) pairs beside `EFFECTIVE` and `PERSON`, and a
+  composite's profiles raise its flags for what its nested calls perform at
+  their own R. **S5**: if `configureLayer` takes the profiles for the layer,
+  keep both.
+- **§5.21.4** says how a safety layer puts output rules in force (§5.20's
+  hosts outside a workflow, on the capability outputs it receives; the rest
+  named in its statement and reported per tool).
+- **WebAssembly `run.start`** answers `{run, warnings}`; `CoreContext.start`
+  reports them to `StartArgs.onWarning`. **S3**: keep `warnings` when
+  `start_options` gains `catalogs` and `agents`.
 
 ## 2026-11-16 — S3 (delegation, catalogs and diagnostics), for the streams after it
 
-- **§2 Terms is two tables** (S5): the general terms, then, after the
-  `host-loop` figure, "Terms of hosts, runs, catalogs and delegation"
-  (S1's, S2b's and S3's rows). S5's four rows go in the second table, before
-  S3's four. The site reads §2's run terms from every table.
-- **§5.15 figures** (S5): `family-replay`, `manifest-replay`,
-  `agents-replay`, `read-only-replay` and `continue-replay` draw S3's runtime
-  fixtures; §5.15.4 follows `continue-replay`. A long §5.15.4 needs a figure
-  of its own.
-- **Validator entry points** (S6): `validate::validate_set(ctx, set, agents,
-  policy)` is the one validation function; `validate_with` builds the set and
-  loads the agent manifests from `Options`, and still refuses `profiles`.
-  S6's `validate_catalog_with` wraps `validate_set` with the applied
-  profiles' policy. `Program::build_set` and `Run::prepare` pass
-  `Policy::default()` beside the target maxima; S6 passes the profiles'
-  policy there. Diagnostics carrying `profile` or `tool` get no `path`
-  (`validate/location.rs`).
-- **W616 features** (S6, §11.5): `continues` is a `FEATURES` entry; a
-  catalog manifest in a file whose header targets 1.0 or 1.1 is W616 from
-  `validate/catalog.rs`; `agents` is S303 below 1.2. S6's
-  `warn_version_feature_1_2` fixture must use `continues`.
-- **Runtime fixture keys**: `catalogs` (`[{catalog, header}]`) and `agents`
-  are passed by both harnesses (`fixture_set` in `core/tests/runtime.rs`,
-  `set_options` in `tests/runtime_replay.py`) to `Run::start_set` /
-  `Run.start(catalogs=..., agents=...)` and to restore.
+S3 is merged after S6 (`round3/S3sync-base`, then the integration branch
+into `round3/b`); what S5 needs:
+
+- **§2 Terms is three tables**: general and run terms (the `host-loop`
+  figure follows it); S6's "Terms of domain profiles, contracts, entities
+  and ordering"; "Terms of tool-calling hosts, catalogs and delegation"
+  (S1's tool-calling rows, then S3's four). S5's rows go in the third
+  table, before S3's four. The site reads §2's run terms from every table.
+- **§5.15 figures**: `family-replay`, `manifest-replay`, `agents-replay`,
+  `read-only-replay` and `continue-replay` draw S3's runtime fixtures;
+  §5.15.4 follows `continue-replay`. A long §5.15.4 needs a figure of its
+  own.
+- **§10.3's last run is close to the limit**: from the digest-vector figure
+  to §10.4's safety-layer figure it is about 1690px at 1440px wide (S3's
+  vector sentence, S4's grounding paragraph, S6's trust and profile
+  paragraph, §10.4's first paragraphs). Text S5 adds there needs a figure or
+  a tighter paragraph; the fixture keys (`catalogs`, `agents`,
+  `expected_locations`) are in §10.3's first paragraph, the runtime ones in
+  §10.5's fixture paragraph.
+- **Validator entry points**: `Options::unimplemented()` is gone.
+  `validate::validate_with` builds the catalog set and loads the agent
+  manifests; `validate_profiled(ctx, set, agents, profiles)` loads the
+  profiles (diagnostics first) and calls `validate_set(ctx, set, agents,
+  &policy)`. `Run::prepare` uses `validate_profiled`, refuses
+  `Policy::unenforced()` (the destination line is S5's to delete) and calls
+  `Program::build_set(ctx, set, agents, root, policy)`.
+- **Effective flags**: `semantics::effective(node, step, target_maxima,
+  policy)` everywhere: a delegate step is the stricter of its target's
+  maxima and the profiles. Diagnostics carrying `profile` or `tool` get no
+  `path` (`validate/location.rs`).
+- **W616**: `FEATURES` holds S3's `continues`; the catalog manifest's W616
+  is in `validate/catalog.rs` and a qualified `invoke` target's in
+  `validate/invoke.rs` (they need the catalog set). S5 appends its
+  `persist`/`recall` `scope` row to `FEATURES`.
+- **Catalog sets everywhere**: runtime fixtures' `catalogs`
+  (`[{catalog, header}]`) and `agents` are passed by the Rust
+  (`core/tests/runtime.rs`), Python (`tests/runtime_replay.py`) and
+  WebAssembly (`packages/acs-core/test/wasm-runtime.test.ts`) harnesses, to
+  start and restore. WebAssembly: `validate` and `run.restore` take
+  `catalogs` and `agents`, `run.start` takes them in `options`; TypeScript
+  `SetArgs` on `CoreContext.validate`, `start`, `restore`.
+  `_core.validate_catalog`/`Validator.validate(_file)` take `profiles`
+  positionally and `catalogs`, `agents` keyword-only.

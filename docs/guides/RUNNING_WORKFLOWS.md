@@ -593,6 +593,53 @@ changes, `every` counted from the Unix epoch), `OverlapGate` (the `skip`,
 seen ids for deduplication across restarts) and `trigger_attendance` (an
 `invoke` trigger's run always has its invoker's attendance).
 
+## Applying domain profiles
+
+A host applies domain profiles (Standard 1.2.0 §5.21) to every run it
+starts: `WorkflowRunner(engine, profiles=[...])`, each a loaded profile or
+the path of a profile file. They are checked when the runner is built
+(`ProfileError` on an error: a misspelled capability id, or a misspelled
+member of `risk_thresholds` or `evidence_policy`, both closed mappings, is
+an error, not an ignored setting) and again when a run starts, cover the
+steps of nested runs, and are saved with the run's snapshot. An unknown
+top-level member is W604 and ignored (§5.21.2): `AppliedProfiles` logs it
+at WARNING with the member meant (`did you mean 'checkpoint_policy'?`) and
+keeps it in `warnings`. A workflow's `profile` field applies nothing. The
+executor does not check a profile's destination policy
+(`allowed_destinations`, §4.4.2) yet: a run under a profile that sets one
+does not start (`RunStartError`), rather than run without the rule; no
+shipped profile sets one. What changes in a run under a profile:
+
+- **Approvals.** A step whose effective risk `require_review` covers, or
+  that is above `auto_approve`, needs approval, as a step whose
+  `requires_approval` is true does.
+- **A person, for the step itself.** A step `require_human` or
+  `block_autonomous` covers is asked of a person: the request names a
+  `human` approver with `always_ask: true` and no `mandate_ref`, whatever
+  its `approver` declares, and no standing mandate covers it; an unattended
+  run does not ask, and `when_unattended` applies. The requirement marks no
+  data, so a step that reads its output is asked by its own rules. The
+  trace records `person_required` (with the `profiles` that require it),
+  and the step's action records carry `person_required: true`.
+- **Checkpoints.** A step `checkpoint_policy` covers needs a checkpoint
+  before it, as one whose `requires_checkpoint` is true does; a
+  `checkpoint` step is exempt.
+- **Grounding.** `evidence_policy.require_grounding` is a grounding policy
+  (§5.20) whose kinds are `required_anchor_types`: it is checked as one the
+  host gives at start (`grounding=`), in every frame, and an output of a
+  capability it lists that is neither grounded nor marked inferred fails
+  the step with F505.
+- **Confidence.** With `minimum_confidence`, an output whose `confidence`
+  is below it fails the step with F504, reason `below_minimum_confidence`,
+  and one whose `confidence` is not a number from 0 to 1 with F504, reason
+  `invalid_confidence`; a failure mode's `on_error: [F504]` matches both.
+  The grounding check comes first.
+
+`tools/validate_workflows.py --profile <path>` validates a catalog as a run
+under the profile would be checked (F501, W606, W608). `AppliedProfiles`
+(`grounded_agency.profiles`) answers a profile's effective flags and rules
+through the core.
+
 ## The trace
 
 The trace is the executor's own record of a run: one event for each
@@ -644,13 +691,14 @@ members of its `detail`.
 | `step_skipped` | The step does not run: its condition is false, a gate skipped it, or it needed approval and `when_unattended: skip` applied | `reason` |
 | `step_deferred` | The step is deferred (§5.14) | `reason` |
 | `step_completed` | The step has its output, before its after-gates are evaluated | none |
-| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the host's reason token (§5.19.7), `reason_ignored` a `reason` the host gave that is not one | `code`, `message`, `reason`, `reason_ignored` |
+| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the failure's reason token (§5.19.7), the host's or one the executor raises itself (`below_minimum_confidence`, say), `reason_ignored` a `reason` the host gave that is not one | `code`, `message`, `reason`, `reason_ignored` |
 | `expression_error` | A condition, a gate's `when` or a failure mode's `when` did not evaluate (R405) | `site`, `code`, `message` |
 | `gate_fired` | A gate fires, whatever its action | `gate`, `action`, `message` |
 | `run_ended` | A gate with `action: end` ends the run, or the nested run it fired in | `message` |
 | `delay_started` | A step's `delay` begins | `until` |
 | `delay_finished` | The delay is over | none |
 | `always_ask` | A step that requires approval uses an item from an always-ask trust class (§5.17), so a person is asked | none |
+| `person_required` | A step that requires approval is one an applied domain profile requires a person for (§5.21.3), so a person is asked; recorded once per step, and it marks no data | `profiles` |
 | `approval_requested` | A `RequestApproval` action is issued | `digest` |
 | `approval_decided` | A decision arrives; `valid` is true only when it lets the step go ahead | `decision_id`, `decision`, `valid` |
 | `approval_unattended` | The run is unattended and no standing mandate covers the step, so `when_unattended` applies | `when_unattended`, `reason` |
@@ -710,6 +758,13 @@ snapshot = run.snapshot(key=b"secret")       # canonical JSON + SHA-256 + HMAC
 run = runner.restore(snapshot, key=b"secret")  # refuses tampered snapshots
 result = runner.drive(run, host)
 ```
+
+To start a run on the core directly, `_core.Run.start` needs `header`, a
+required keyword: the version the catalog file's `# Standard version:`
+header declares, or `None` for a catalog without one (Standard 1.2.0
+§11.5). `WorkflowRunner` supplies it: the engine writes each loaded file's
+header into its workflows as their `spec_version`, which takes precedence,
+so the runner passes `header=None`.
 
 A snapshot only restores against the catalog (and ontology) it was taken
 from, and a signed snapshot only with its key; `restore` raises
@@ -845,8 +900,9 @@ flowchart TB
 ```
 
 A fixture may give `catalogs` (the other catalogs of its catalog set, each
-with its `header`) and `agents` (agent manifests); both harnesses start and
-restore the run with them. Validator fixtures may give the same keys in
+with its `header`) and `agents` (agent manifests); the harnesses (Rust,
+Python and the TypeScript package's WebAssembly replay) start and restore
+the run with them. Validator fixtures may give the same keys in
 `tests/fixtures/EXPECTATIONS.json`, and `expected_locations`: each a `code`
 and the `path` (§9.8) it must be reported at.
 

@@ -130,6 +130,20 @@ def test_pinned_acs_versions_are_those_the_binding_implements(
         assert tuple(map(int, made.split("."))) <= tuple(map(int, pinned.split(".")))
 
 
+def test_the_cited_versions_are_accepted(mapping: dict[str, Any]) -> None:
+    """Standard v1.2 §11.6: the mapping's cited Standard and ontology pass the
+    consumer check against the current ontology (it has no loader outside
+    this test, which checks it as the OASF adapter checks its mapping)."""
+    from grounded_agency.versions import check_cited
+
+    ontology = yaml.safe_load(ONTOLOGY.read_text(encoding="utf-8"))
+    check_cited(
+        mapping["meta"]["agent_capability_standard"],
+        ontology_version=ontology["meta"]["version"],
+        document=str(MAPPING),
+    )
+
+
 def test_versions_are_strings(mapping: dict[str, Any]) -> None:
     """A bare 1.0 would load as a number; every version here is quoted."""
     meta = mapping["meta"]

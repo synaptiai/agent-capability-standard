@@ -25,20 +25,23 @@ export function glyphOrNull(key: string): string | null {
 
 // ------------------------------------------------------------- F-D2 ladder
 
-/** The risk levels a step can carry (Standard §4.1); `critical` never applies to a step. */
+/** The risk levels a step can carry (Standard §4.1). */
 export const LADDER_LEVELS = ['low', 'medium', 'high'] as const;
 export type LadderLevel = (typeof LADDER_LEVELS)[number];
 export type Outcome = 'auto' | 'review' | 'human' | 'gap';
 
-/** Order of the threshold enums in profile_schema.yaml (low < medium < high < critical). */
-const RANK: Readonly<Record<string, number>> = { low: 0, medium: 1, high: 2, critical: 3 };
+/** The threshold values (Standard 1.2.0 §5.21.3): `none` covers no level;
+ * the deprecated `critical` is read as `none` (W603). */
+const RANK: Readonly<Record<string, number>> = { none: 0, low: 1, medium: 2, high: 3, critical: 0 };
 
 /**
- * What happens to a step at one risk level (visual spec 3.5, F-D2), read from
- * the field descriptions in profile_schema.yaml: require_human is the minimum
- * level that needs a person to carry it out, require_review the minimum level
- * that needs review, auto_approve the maximum level approved automatically.
- * A level none of them covers is a gap.
+ * What an applied profile does to a step at one risk level (visual spec 3.5,
+ * F-D2), by Standard 1.2.0 §5.21.3: a threshold covers a set of levels.
+ * `require_human: L` covers L and above and needs a person each time;
+ * `require_review: L` covers L and above and needs approval, as does a level
+ * above `auto_approve`; a level `auto_approve` covers adds nothing. Where no
+ * threshold says anything, the profile adds nothing and the ontology's flags
+ * decide.
  */
 export function ladderOutcome(thresholds: Obj, level: LadderLevel): Outcome {
   const at = (field: string): number | undefined => {
@@ -46,12 +49,11 @@ export function ladderOutcome(thresholds: Obj, level: LadderLevel): Outcome {
     return typeof v === 'string' && v in RANK ? RANK[v] : undefined;
   };
   const l = RANK[level]!;
-  const human = at('require_human');
-  if (human !== undefined && human <= l) return 'human';
-  const review = at('require_review');
-  if (review !== undefined && review <= l) return 'review';
+  const covers = (t: number | undefined) => t !== undefined && t !== 0 && t <= l;
+  if (covers(at('require_human'))) return 'human';
   const auto = at('auto_approve');
-  if (auto !== undefined && l <= auto) return 'auto';
+  if (covers(at('require_review')) || (auto !== undefined && l > auto)) return 'review';
+  if (auto !== undefined) return 'auto';
   return 'gap';
 }
 
@@ -59,8 +61,8 @@ export const OUTCOME_WORD: Readonly<Record<Outcome, string>> = { auto: 'Auto', r
 export const OUTCOME_TEXT: Readonly<Record<Outcome, string>> = {
   auto: 'approved automatically',
   review: 'a person reviews it',
-  human: 'a person carries it out',
-  gap: 'no threshold covers it',
+  human: 'a person approves each one',
+  gap: "the ontology's flags decide",
 };
 /** The approve:* glyph of each outcome; a gap has none. */
 export const OUTCOME_GLYPH: Readonly<Record<Outcome, string | null>> = {
@@ -153,19 +155,20 @@ export function checkpointPolicyIsFigure(p: CheckpointPolicy): boolean {
   return p.levels.length > 1;
 }
 
-/** "All 5 triggers: always" when one level is used (the 1.1.5 fallback), else null. */
+/** "All 5 rules: always" when one level is used (the 1.1.5 fallback), else null.
+ * A rule's key is a capability id or `*` (Standard 1.2.0 §5.21.3). */
 export function checkpointHeader(p: CheckpointPolicy): string | null {
-  return p.levels.length === 1 ? `All ${p.triggers.length} triggers: ${policyWord(p.levels[0]!.level)}` : null;
+  return p.levels.length === 1 ? `All ${p.triggers.length} rules: ${policyWord(p.levels[0]!.level)}` : null;
 }
 
 export function checkpointCaption(p: CheckpointPolicy): string {
-  if (p.triggers.length === 0) return 'The profile names no checkpoint triggers.';
+  if (p.triggers.length === 0) return 'The profile names no checkpoint rules.';
   if (p.levels.length === 1) {
     const level = p.levels[0]!.level;
-    const all = `All ${p.triggers.length} triggers are set to ${policyWord(level)}`;
-    return level === 'always' ? `${all}, so a checkpoint is made before each of them every time.` : `${all}.`;
+    const all = `All ${p.triggers.length} rules are set to ${policyWord(level)}`;
+    return level === 'always' ? `${all}, so a step of each capability they name needs a checkpoint every time.` : `${all}.`;
   }
-  return `${plural(p.triggers.length, 'trigger')}: ${andList(p.levels.map((l) => `${l.count} ${policyWord(l.level)}`))}.`;
+  return `${plural(p.triggers.length, 'rule')}: ${andList(p.levels.map((l) => `${l.count} ${policyWord(l.level)}`))}.`;
 }
 
 // ----------------------------------------------------- F-D4 evidence policy

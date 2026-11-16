@@ -89,6 +89,7 @@ def register(add):
     _continues(add)
     _catalogs(add)
     _families(add)
+    _with_profiles(add)
 
 
 def _targets(add):
@@ -551,4 +552,99 @@ def _families(add):
         ["quorum"],
         inputs={"change": "c1"},
         header=V11,
+    )
+
+
+def _with_profiles(add):
+    """Target maxima (§5.15.2) and domain profiles (§5.21.3) together: each
+    raises the delegate step's flags, and the stricter of the two holds."""
+    person_delegate = {
+        "domain": "person-delegate",
+        "version": "1.0.0",
+        "risk_thresholds": {"block_autonomous": ["delegate"]},
+    }
+    add(
+        "agents_maxima_with_profile_person",
+        "A delegation to an agent that may mutate takes its manifest's maxima "
+        "(a checkpoint before it, approval), and a profile that blocks autonomous "
+        "delegation requires a person for that approval: it is asked of a human "
+        "with always_ask and no mandate, and its record carries person_required "
+        "(§5.15.2, §5.21.3).",
+        {"w": v12([CP, delegate("write", "db-writer")], agents=["db-writer"])},
+        [
+            {
+                "expect": inv("checkpoint", step=0),
+                "respond": out(checkpoint_id="c1"),
+            },
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "step": 1,
+                    "approver": {"kind": "human", "always_ask": True},
+                },
+                "absent": ["approver.mandate_ref"],
+                "respond": approve("d1", who=("dana",)),
+            },
+            {
+                "expect": inv("delegate", step=1, inputs={"agent": "db-writer"}),
+                "respond": accepted(),
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {
+                    "capability": "delegate",
+                    "status": "executed",
+                    "person_required": True,
+                    "approval": {"approvers": ["dana"]},
+                }
+            ],
+        },
+        ["person_required", "approval_requested", "approval_decided"],
+        header=V12,
+        agents=[DB_WRITER],
+        profiles=[person_delegate],
+    )
+    reviewer = {**READER_A, "agent": "reviewer"}
+    checkpoint_delegate = {
+        "domain": "checkpoint-delegate",
+        "version": "1.0.0",
+        "checkpoint_policy": {"delegate": "always"},
+    }
+    add(
+        "agents_read_only_maxima_with_profile_checkpoint",
+        "A delegation to a read-only agent needs no checkpoint by its maxima, "
+        "but a profile's checkpoint policy for delegate raises it: the step "
+        "needs the checkpoint before it, and its action record names it "
+        "(§5.15.2, §5.21.3, §6.4).",
+        {
+            "w": v12(
+                [CP, delegate("review", "reviewer", task={"draft": "d"})],
+                agents=["reviewer"],
+            )
+        },
+        [
+            {
+                "expect": inv("checkpoint", step=0),
+                "respond": out(checkpoint_id="c1"),
+            },
+            {
+                "expect": inv("delegate", step=1, inputs={"agent": "reviewer"}),
+                "respond": accepted(),
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {"capability": "checkpoint", "checkpoint_id": "c1"},
+                {"capability": "delegate", "status": "executed", "checkpoint_id": "c1"},
+            ],
+        },
+        header=V12,
+        agents=[reviewer],
+        profiles=[checkpoint_delegate],
+        records="actions",
     )

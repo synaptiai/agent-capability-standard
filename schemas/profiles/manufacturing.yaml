@@ -1,12 +1,14 @@
 # Manufacturing Domain Profile
 # Calibrated for industrial automation, production monitoring, and quality control.
 #
-# Status: informative data for hosts and workflow authors. No shipped component
-# loads or selects this profile; see "Status of Domain Profiles" in
+# Status: applied where a host, a safety layer or a validator applies it
+# (Standard v1.2 §5.21); see "Status of Domain Profiles" in
 # docs/domains/README.md.
 
 domain: manufacturing
-version: "1.0.0"
+version: "2.0.0"
+standard: "1.2.0"
+ontology: "2.2.0"
 description: |
   Profile for manufacturing and industrial automation environments.
   Emphasizes safety-critical operations, sensor data reliability,
@@ -46,19 +48,24 @@ risk_thresholds:
     - send                # Never autonomous external communications
 
 checkpoint_policy:
-  before_actuator_command: always   # Always checkpoint before machine control
-  before_process_change: always     # Always checkpoint before production changes
-  before_quality_decision: always   # Always checkpoint before accept/reject
-  before_maintenance_action: always # Always checkpoint before maintenance
-  before_parameter_update: high_risk # Checkpoint if parameter change is high-risk
-  during_batch_processing: medium_risk # Checkpoint at batch milestones
+  # Standard v1.2 §5.21: capability ids or "*". From 1.0.0's labels:
+  # before_actuator_command and before_maintenance_action -> execute;
+  # before_process_change, before_quality_decision and before_parameter_update
+  # -> mutate; during_batch_processing (medium_risk) -> "*".
+  execute: always
+  mutate: always
+  "*": medium_risk
 
 evidence_policy:
   required_anchor_types:
-    - sensor_reading
-    - system_log
-    - operator_confirmation
-    - timestamp
+    # §6.5 kinds: sensor_reading -> sensor; system_log -> log;
+    # operator_confirmation -> human_note; plus the kinds of domain_sources.
+    # timestamp is not a kind.
+    - log
+    - sensor
+    - human_note
+    - api
+    - record
   minimum_confidence: 0.85  # High confidence required for manufacturing
   require_grounding:
     - predict               # Predictions must be grounded

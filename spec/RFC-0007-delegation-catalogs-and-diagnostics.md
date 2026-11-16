@@ -156,7 +156,10 @@ another loaded catalog that lacks the workflow, or hides it, is V107; every
 other unresolved target, a bare name included, stays W607, so no 1.1 target
 changes code. Cycles, triggers, inputs, waits and unattended propagation work
 across the set. The executor resolves computed targets the same way.
-Workflow names SHOULD be identifiers (W620).
+Workflow names SHOULD be identifiers (W620). A 1.1 consumer resolves names
+in one catalog only, so an `invoke` target that resolves as a qualified id,
+and a catalog manifest in a file whose header targets 1.0 or 1.1, get W616
+(§11.5).
 
 ### 8) Domain ids and selection
 A domain id is lowercase segments joined by dots, underscores inside a
@@ -225,12 +228,14 @@ that does not fit the agent's declaration, and `effective_flags` raises for
 a delegate step whose target maxima are unknown.
 
 ## Conformance test updates
-- Validator fixtures (`tests/fixtures/`): 35 new fixtures, with agent
+- Validator fixtures (`tests/fixtures/`): 36 new fixtures, with agent
   manifests under `tests/fixtures/agents/` and catalogs of sets under
   `tests/fixtures/catalogs/`; every fixture that uses a 1.2 feature has a
-  1.2 header, and each states its exact error and warning sets; expectations
-  gain `catalogs`, `agents` and `expected_locations`, and two existing
-  fixtures pin locations.
+  1.2 header, except the two that pin its W616 (a catalog manifest and a
+  qualified `invoke` target under a 1.1 header), and each states its exact
+  error and warning sets; expectations gain `catalogs`, `agents` and
+  `expected_locations`, and two existing fixtures pin locations. The Rust,
+  Python and WebAssembly harnesses pass the catalogs and manifests alike.
 - Runtime fixtures (`tests/conformance/runtime/`): fifteen new runs for
   raised flags, target, unknown-manifest and task refusals, `read_only`
   attestation (not retried; 1.2 without `agents`; 1.1 unchanged),
