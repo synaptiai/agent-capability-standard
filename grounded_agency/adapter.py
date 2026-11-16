@@ -13,8 +13,9 @@ options to inject:
   changed are classified again) and uses its checkpoint up when the call is
   allowed, after passing the decision to the host's own ``can_use_tool``
 - PostToolUse hooks for evidence collection, the checkpoint recorder (a
-  successful state-saving call takes a checkpoint) and the use of a held
-  checkpoint by a call that ran
+  successful state-saving call takes a checkpoint), the use of a held
+  checkpoint by a call that ran, and the output check of a bound tool of
+  another MCP server (R402, F505, F504), whose refused result it replaces
 - A Stop hook: the end of a turn is an execution boundary
 
 The layer's scope is the adapter instance: every session and subagent it
@@ -48,7 +49,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from . import _core
 from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
@@ -89,6 +90,30 @@ PROMPTING_PERMISSION_MODES: frozenset[str] = frozenset(
 
 # A call argument an `acs:` anchor can cite (a §5.3 identifier).
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+
+
+class _Fault(NamedTuple):
+    """Why a call's result is refused (R402, F505 or F504), before it is
+    recorded: the arguments of :meth:`GroundedAgentAdapter._fail_call`."""
+
+    code: ErrorCode
+    mapping: ToolMapping
+    tool: str
+    message: str
+    reason: str | None = None
+
+
+def _mcp_tool_result(response: Any) -> Any:
+    """An MCP tool's result as a PostToolUse hook receives it
+    (``tool_response``), in the form
+    :func:`~grounded_agency.capabilities.output.tool_result_output` reads:
+    Claude Code passes the result's content items, or a result that holds
+    them; a text is the one text item the session reads."""
+    if isinstance(response, list):
+        return {"content": response}
+    if isinstance(response, str):
+        return {"content": [{"type": "text", "text": response}]}
+    return response
 
 
 def _find_ontology_path() -> str:
@@ -302,6 +327,23 @@ class GroundedAgentConfig:
             ``schemas/capability_ontology.yaml``). A contract whose ``$ref``
             names nothing there, is cyclic or nests too deep refuses the
             configuration (``ValueError``).
+        check_outputs: Whether the result of a call of an MCP tool bound to
+            a capability must carry that capability's output and satisfy its
+            output contract (STANDARD 1.2.0 sections 5.18.9 and 5.18.10): the
+            I-JSON text of the output object as its one text content item,
+            with every field the contract requires. A tool that
+            ``create_grounded_mcp_server`` serves is checked as it returns;
+            a bound tool of another MCP server (``register_mcp_tool``,
+            ``load_bindings``) at PostToolUse, which replaces a refused
+            result with the refusal. The SDK's server delivers only a
+            result's content (and ``is_error``) to the session, so the text is
+            the output; a ``structuredContent`` member is not read. A result
+            that does not carry the output is the failure of the call that
+            ran, R402, recorded against the call. On (default). ``False``
+            skips only that check (outside class SL): the grounding policies
+            and a minimum confidence still read the output the one text item
+            carries. Claude Code's own tools return results in their own
+            forms, which carry no capability output, and are never checked.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -327,6 +369,7 @@ class GroundedAgentConfig:
     grounding: tuple[GroundingPolicy, ...] = ()
     allowed_destinations: Sequence[str] | None = None
     snapshots: FileSnapshotStore | None = None
+    check_outputs: bool = True
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
@@ -648,8 +691,9 @@ class GroundedAgentAdapter:
         # does (strict_mode=False only logs a missing checkpoint) a raised
         # checkpoint requirement (section 5.21.4). A grounding policy and a
         # minimum confidence are in force on the outputs the layer receives
-        # (the served tools'), and reported for each other tool whose calls
-        # they would check (_warn_unchecked_output, section 5.21.4).
+        # (the MCP tools' bound to a capability), and reported for each other
+        # tool whose calls they would check (_warn_unchecked_output, section
+        # 5.21.4).
         self.profiles = AppliedProfiles(self.config.profiles, validator=core)
         # The destination policies in force for send calls (section 4.4.2):
         # the configuration's, then each applied profile's (5.21.3).
@@ -922,6 +966,12 @@ class GroundedAgentAdapter:
         Grounding is checked first, as the executor checks it. ``output``
         that is not an object fails a grounding policy as an output with no
         anchors; it has no confidence for a minimum to check."""
+        fault = self._output_fault(tool, args, output)
+        return None if fault is None else self._fail_call(*fault, call=call)
+
+    def _output_fault(self, tool: str, args: Any, output: Any) -> _Fault | None:
+        """What :meth:`check_call_output` refuses ``output`` with, without
+        recording it."""
         if not self._checks_call_outputs:
             return None
         minimum = self.profiles.minimum_confidence
@@ -960,9 +1010,148 @@ class GroundedAgentAdapter:
                 reason = fault["reason"]
         if message is None:
             return None
-        # The call has run (section 5.20): its outcome is a failure with the
-        # code, recorded against the call, not a refusal of a call that did
-        # not run. The post-call hooks do not record it again.
+        return _Fault(code, mapping, tool, message, reason)
+
+    def check_call_result(
+        self,
+        tool: str,
+        args: Any,
+        result: Any,
+        call: str | None = None,
+    ) -> str | None:
+        """Check the result of a call that has run, as the session reads
+        it: its capability output and the output rules (STANDARD 1.2.0
+        sections 5.18.9, 5.18.10, 5.20, 5.21.3), in the executor's order.
+        ``create_grounded_mcp_server``'s tools call it with their result; the
+        PostToolUse hook calls it for a bound tool of another MCP server
+        (:meth:`_host_result_fault`).
+
+        1. With ``config.check_outputs``, the result must carry the
+           capability's output as the session reads it
+           (:func:`~grounded_agency.capabilities.output.tool_result_output`:
+           the I-JSON text of the output object as its one text item; the
+           SDK's server does not deliver ``structuredContent``) and satisfy
+           the capability's output contract; otherwise R402.
+        2. Then :meth:`check_call_output`: the grounding policies (F505) and
+           the profiles' minimum confidence (F504), on that output.
+
+        An error result carries no output and is passed on: the call
+        failed, and the post-call hooks record it. A result is an error
+        only when its ``is_error`` is ``True``, as the session receives it;
+        any other value is checked. A tool with no capability (unbound) has
+        no output contract. With ``check_outputs`` off (outside class SL)
+        step 1 is skipped, and step 2 reads the output the one text item
+        carries, the text the session reads (:meth:`_unchecked_output`).
+        Returns the refusal's text form, recorded against ``call`` as the
+        failure of the call that ran (decision ``failed``), or None."""
+        fault = self._result_fault(tool, args, result)
+        return None if fault is None else self._fail_call(*fault, call=call)
+
+    def _result_fault(self, tool: str, args: Any, result: Any) -> _Fault | None:
+        """What :meth:`check_call_result` refuses ``result`` with, without
+        recording it. The same result gives the same answer, so hooks that
+        run side by side on one result agree on it."""
+        if isinstance(result, dict) and result.get("is_error") is True:
+            return None
+        if not self.config.check_outputs:
+            if not self._checks_call_outputs or not isinstance(result, dict):
+                return None
+            return self._output_fault(
+                tool, args, self._unchecked_output(tool, args, result)
+            )
+        mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+        capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
+        if not capability:
+            return None
+        from .capabilities.output import CapabilityOutputError, tool_result_output
+
+        try:
+            output = tool_result_output(capability, result, self.registry)
+        except CapabilityOutputError as e:
+            return _Fault(
+                ErrorCode.EXECUTION_FAILED,
+                mapping,
+                tool,
+                f"{tool}'s result: {e.error.message} (section 5.18.9)",
+            )
+        return self._output_fault(tool, args, output)
+
+    def _unchecked_output(
+        self, tool: str, args: Any, result: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """The output of a result with ``check_outputs`` off: the capability
+        output its one text item carries, the text the session reads, else
+        None. A ``structuredContent`` member is not delivered to the session
+        and is not read."""
+        texts = [
+            c.get("text")
+            for c in result.get("content") or []
+            if isinstance(c, dict) and c.get("type") == "text"
+        ]
+        mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+        capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
+        if len(texts) != 1 or not isinstance(texts[0], str) or not capability:
+            return None
+        from .capabilities.output import CapabilityOutputError, decode_capability_output
+
+        try:
+            return decode_capability_output(capability, texts[0], self.registry)
+        except CapabilityOutputError:
+            return None
+
+    def _checks_host_result(self, tool: str, mapping: ToolMapping) -> bool:
+        """Whether this layer checks the result of a call of ``tool`` at
+        PostToolUse: a tool of an MCP server that ``create_grounded_mcp_server``
+        does not serve (another server, or one served with
+        ``require_layer=False``), bound to a capability. Its result reaches
+        the hook as the MCP result the session reads, and the hook can
+        replace it (sections 5.18.9, 5.18.10). A served tool checks its own
+        result (:meth:`check_call_result`); a control-only or unbound tool
+        has no output contract; Claude Code's own tools return results in
+        their own forms, which carry no capability output."""
+        if not tool.startswith("mcp__"):
+            return False
+        if mapping is UNCLASSIFIED_TOOL or mapping.control or not mapping.capability_id:
+            return False
+        with self._state_lock:
+            return tool not in self._grounded_tools
+
+    def _host_result_fault(self, tool: str, args: Any, response: Any) -> _Fault | None:
+        """What the PostToolUse hook refuses the result of a call with
+        (:meth:`_checks_host_result`), without recording it: the result as
+        the hook receives it (``tool_response``: the content items, or a
+        result that holds them) checked as :meth:`check_call_result` checks
+        a served tool's. The same input gives the same answer, so the hooks
+        that run side by side on one result (the checkpoint recorder and the
+        post-call recorder) agree on it."""
+        mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+        if not self._checks_host_result(tool, mapping):
+            return None
+        return self._result_fault(tool, args, _mcp_tool_result(response))
+
+    def _refuses_host_result(self, tool: str, args: Any, response: Any) -> bool:
+        """Whether the PostToolUse hook refuses this result: the checkpoint
+        recorder's test (a call whose output is refused takes no
+        checkpoint, section 5.18.6)."""
+        return self._host_result_fault(tool, args, response) is not None
+
+    def _fail_call(
+        self,
+        code: ErrorCode,
+        mapping: ToolMapping,
+        tool: str,
+        message: str,
+        reason: str | None = None,
+        *,
+        call: str | None,
+        checkpoint_id: str | None = None,
+    ) -> str:
+        """Refuse the output of a call that has run (sections 5.18.10,
+        5.20): its outcome is a failure with the code, recorded against the
+        call, not a refusal of a call that did not run. The post-call hooks
+        do not record it again. A call whose output is refused has failed:
+        it takes no checkpoint (§5.18.6) and is not a prerequisite that ran
+        (§5.18.5)."""
         text = self._refuse(
             code,
             mapping,
@@ -971,6 +1160,7 @@ class GroundedAgentAdapter:
             message,
             outcome="failed",
             reason=reason,
+            checkpoint_id=checkpoint_id,
         )
         if call is not None:
             with self._state_lock:
@@ -1027,6 +1217,10 @@ class GroundedAgentAdapter:
         if self.config.allowed_destinations is not None:
             # The host policy behind F504 refusals of sends (section 4.4.2).
             settings["allowed_destinations"] = list(self.config.allowed_destinations)
+        if not self.config.check_outputs:
+            # Results pass on unchecked (no R402, section 5.18.10); the
+            # default, checked, leaves the digest as it was.
+            settings["check_outputs"] = False
         key = (self.mapper.records_revision, _core.canonical_json(settings))
         cached = self._config_digest
         if cached is not None and cached[0] == key:
@@ -1102,7 +1296,8 @@ class GroundedAgentAdapter:
         ``diagnostics`` and a call record; returns its text form. Its message
         is redacted (§6.7): a diagnostic carries no secret. ``outcome`` is
         the record's decision: ``refused`` for a call that does not run,
-        ``failed`` for one that ran and whose result is refused (F505)."""
+        ``failed`` for one that ran and whose result is refused (R402, F505,
+        F504)."""
         message, _ = self.redactor.redact_text(message)
         location: dict[str, Any] = {"tool": tool}
         if mapping is not UNCLASSIFIED_TOOL and mapping.capability_id:
@@ -1255,15 +1450,20 @@ class GroundedAgentAdapter:
         """Warn, once per tool, that a grounding policy (the
         configuration's or an applied profile's) requires the capability of
         a call whose output this layer never sees, or that a profile sets a
-        minimum confidence for it (a tool that ``create_grounded_mcp_server``
-        does not serve, Claude Code's own tools included): section 5.20, and
-        the minimum of section 5.21.3, are not applied to it."""
+        minimum confidence for it (a tool whose result carries no capability
+        output: Claude Code's own tools, which return results in their own
+        forms): section 5.20, and the minimum of section 5.21.3, are not
+        applied to it. The tools ``create_grounded_mcp_server`` serves and
+        the bound tools of other MCP servers are checked
+        (:meth:`check_call_result`, :meth:`_checks_host_result`)."""
         if mapping is UNCLASSIFIED_TOOL or not self._checks_call_outputs:
             return
         required = sorted(
             {c for c in mapping.capabilities for p in self._grounding if p.requires(c)}
         )
         if not required and self.profiles.minimum_confidence is None:
+            return
+        if self._checks_host_result(tool, mapping):
             return
         with self._state_lock:
             if tool in self._grounded_tools or tool in self._ungrounded_warned:
@@ -1275,10 +1475,10 @@ class GroundedAgentAdapter:
         if self.profiles.minimum_confidence is not None:
             rules.append("an applied profile sets a minimum confidence")
         logger.warning(
-            "For %s, %s; but it is not a tool create_grounded_mcp_server "
-            "serves: its result is not a capability output this layer sees, so "
-            "neither section 5.20 nor the minimum of section 5.21.3 is applied "
-            "to its calls",
+            "For %s, %s; but its result is not a capability output this "
+            "layer sees (it is not the result of an MCP tool bound to a "
+            "capability), so neither section 5.20 nor the minimum of section "
+            "5.21.3 is applied to its calls",
             tool,
             " and ".join(rules),
         )
@@ -1365,6 +1565,7 @@ class GroundedAgentAdapter:
             self.checkpoint_tracker,
             self.mapper,
             expiry_minutes=self.config.expiry_minutes,
+            refuses_output=self._refuses_host_result,
         )
         post_hooks.append(self._wrap_hook(recorder))
 
@@ -1901,6 +2102,14 @@ class GroundedAgentAdapter:
         1.2.0 section 5.18.6). A call that succeeded counts each of its
         capabilities as run, for the prerequisites of later calls.
 
+        The result of a call of a bound tool of another MCP server is
+        checked here (:meth:`_host_result_fault`, sections 5.18.9, 5.18.10):
+        a refused output fails the call that ran (R402, F505 or F504,
+        recorded against the call), which then counts as no prerequisite,
+        and the hook replaces the result the session reads with the
+        refusal (``updatedMCPToolOutput``). A check that cannot be completed
+        is R407, and the result is replaced the same way (section 5.18.8).
+
         Returns:
             Async hook callback function
         """
@@ -1923,17 +2132,41 @@ class GroundedAgentAdapter:
                         logger.info(
                             "Checkpoint %s used by %s", checkpoint_id, tool_name
                         )
-                mapping = mapper.map_tool(tool_name, input_data.get("tool_input", {}))
+                tool_input = input_data.get("tool_input", {})
+                mapping = mapper.map_tool(tool_name, tool_input)
                 tool_response = input_data.get("tool_response")
-                is_error = False
+                try:
+                    fault = self._host_result_fault(
+                        tool_name, tool_input, tool_response
+                    )
+                except Exception as e:
+                    # Fail closed (section 5.18.8): the output check could
+                    # not be completed, so the result is not passed on.
+                    fault = _Fault(
+                        ErrorCode.SAFETY_CHECK_FAILED,
+                        mapping,
+                        tool_name,
+                        f"{tool_name}'s result could not be checked: {e}",
+                    )
+                refusal = (
+                    None
+                    if fault is None
+                    else self._fail_call(
+                        *fault, call=holder, checkpoint_id=checkpoint_id
+                    )
+                )
+                is_error = refusal is not None
                 if isinstance(tool_response, dict):
-                    is_error = bool(tool_response.get("is_error", False))
+                    is_error = is_error or bool(tool_response.get("is_error", False))
                 elif tool_response is not None and hasattr(tool_response, "is_error"):
-                    is_error = bool(getattr(tool_response, "is_error", False))
+                    is_error = is_error or bool(
+                        getattr(tool_response, "is_error", False)
+                    )
                 if not is_error and mapping is not UNCLASSIFIED_TOOL:
                     with self._state_lock:
                         self._executed.update(mapping.capabilities)
-                if not self._take_outcome_recorded(holder):
+                recorded = self._take_outcome_recorded(holder)
+                if refusal is None and not recorded:
                     self._record(
                         "failed" if is_error else "ran",
                         tool_name,
@@ -1941,6 +2174,13 @@ class GroundedAgentAdapter:
                         holder,
                         checkpoint_id=checkpoint_id,
                     )
+                if refusal is not None:
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PostToolUse",
+                            "updatedMCPToolOutput": [{"type": "text", "text": refusal}],
+                        }
+                    }
             except Exception as e:
                 logger.warning("Post-call recorder failed: %s", e)
             return {}

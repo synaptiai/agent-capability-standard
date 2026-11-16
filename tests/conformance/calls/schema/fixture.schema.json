@@ -41,6 +41,9 @@
         "approve": { "$ref": "#/$defs/decided_by" },
         "reject": { "$ref": "#/$defs/decided_by" },
         "fails": { "const": true },
+        "returns": {
+          "description": "What the tool returns as its output, in place of what its output contract requires (section 5.18.10): any JSON value, null included (a present member, whatever its value, replaces the contract's output), given to the layer in the form its host carries a capability output. A nested call's member applies to that nested call alone."
+        },
         "nested": { "type": "array", "items": { "$ref": "#/$defs/call" } },
         "expect": {
           "oneOf": [
@@ -50,10 +53,18 @@
               "required": ["refuse"],
               "additionalProperties": false,
               "properties": { "refuse": { "enum": ["F501", "F502", "F503", "F504", "R407", "V102"] } }
+            },
+            {
+              "description": "The call ran (it used its checkpoint and decision) and the layer refused its output (section 5.18.10).",
+              "type": "object",
+              "required": ["refuse_output"],
+              "additionalProperties": false,
+              "properties": { "refuse_output": { "enum": ["R402"] } }
             }
           ]
         }
-      }
+      },
+      "not": { "required": ["fails", "returns"] }
     },
     "event": {
       "oneOf": [

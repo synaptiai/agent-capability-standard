@@ -7,8 +7,10 @@
  * past the ten-minute maximum age; an expired decision moves it past the
  * binding's `approval.expires`. Approvals are recorded before the call
  * (`requestApproval`, then `decideApproval` for each approver). A nested
- * call is made by the tool's own code with `state.invokeTool`. Fixtures
- * whose `needs` the binding's conformance statement lacks are skipped.
+ * call is made by the tool's own code with `state.invokeTool`. A tool
+ * returns what its output contract requires, or what the call `returns`,
+ * which the binding checks (§5.18.10). Fixtures whose `needs` the binding's
+ * conformance statement lacks are skipped.
  */
 import type { ThreadState, ToolResult } from '@standardagents/spec';
 import { CAPABILITIES, type CapabilityId, NotCanonicalizableError, parseDuration, parseJsonExact } from '@synaptiai/acs-core';
@@ -44,8 +46,9 @@ interface Call {
   approve?: string[];
   reject?: string[];
   fails?: true;
+  returns?: unknown;
   nested?: Call[];
-  expect: 'run' | { refuse: string };
+  expect: 'run' | { refuse: string } | { refuse_output: string };
 }
 
 type Step = Call | { boundary: true } | { expire: 'checkpoint' | 'decision' };
@@ -120,9 +123,13 @@ class Runner {
           execute: async (state: ThreadState, _args, call) => {
             const script = this.scripts.get(name);
             for (const nested of script?.nested ?? []) {
-              this.nestedOutcomes.set(nested, outcome(await state.invokeTool(nested.call, nested.args ?? {})));
+              // A nested call runs under its own step: its `returns`,
+              // `fails` and `nested`, not those of an earlier call.
+              const result = await this.scripted(nested, () => state.invokeTool(nested.call, nested.args ?? {}));
+              this.nestedOutcomes.set(nested, outcome(result));
             }
             if (script?.fails) throw new Error(`${name} failed`);
+            if (script !== undefined && 'returns' in script) return script.returns as never;
             return outputOf(b.capability!, call.seq) as never;
           },
         });
@@ -160,17 +167,37 @@ class Runner {
     }
   }
 
+  /** Run `body` with `step` as what the current call of its tool does. */
+  async scripted<T>(step: Call, body: () => Promise<T>): Promise<T> {
+    const earlier = this.scripts.get(step.call);
+    this.scripts.set(step.call, step);
+    try {
+      return await body();
+    } finally {
+      if (earlier === undefined) this.scripts.delete(step.call);
+      else this.scripts.set(step.call, earlier);
+    }
+  }
+
   async call(step: Call): Promise<string> {
     await this.decide(step);
-    this.scripts.set(step.call, step);
     const tool = this.t.tools.get(step.call)!;
-    return outcome(await tool.execute(this.t.state, step.args ?? {}));
+    return outcome(await this.scripted(step, () => tool.execute(this.t.state, step.args ?? {})));
   }
 }
 
 /** A refusal's code, or `run` for a call that started (whether it then succeeded or failed). */
 function outcome(result: ToolResult): string {
   return result.error_code ?? 'run';
+}
+
+/**
+ * The outcome a step expects. A refused output's call ran; its code is what
+ * the call returns, and the fixture's later steps show that it ran.
+ */
+function expected(step: Call): string {
+  const want = step.expect;
+  return want === 'run' ? 'run' : 'refuse' in want ? want.refuse : want.refuse_output;
 }
 
 describe("the binding's conformance statement", () => {
@@ -191,12 +218,14 @@ describe("the binding's conformance statement", () => {
     expect(statement.approval.max_approvers).toBe(MAX_APPROVERS);
     expect(policyProblems({ min_approvers: MAX_APPROVERS })).toEqual([]);
     expect(policyProblems({ min_approvers: MAX_APPROVERS + 1 })).toHaveLength(1);
+    // Every check of §5.18.10 is applied (class SL).
+    expect('not_applied' in statement).toBe(false);
   });
 });
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(23);
+    expect(CASES).toHaveLength(28);
   });
 
   it.for(CASES)('%s', async ([_name, fixture], { skip }) => {
@@ -217,11 +246,9 @@ describe('call-sequence fixtures', () => {
         }
         continue;
       }
-      const expected = step.expect === 'run' ? 'run' : step.expect.refuse;
-      expect(await runner.call(step), `step ${index} (${step.call})`).toBe(expected);
+      expect(await runner.call(step), `step ${index} (${step.call})`).toBe(expected(step));
       for (const nested of step.nested ?? []) {
-        const want = nested.expect === 'run' ? 'run' : nested.expect.refuse;
-        expect(runner.nestedOutcomes.get(nested), `step ${index}, nested ${nested.call}`).toBe(want);
+        expect(runner.nestedOutcomes.get(nested), `step ${index}, nested ${nested.call}`).toBe(expected(nested));
       }
     }
   });

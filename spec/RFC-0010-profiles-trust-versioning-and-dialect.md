@@ -183,8 +183,8 @@ than a workflow's target, and makes the catalog's header an explicit value
 of the start operation (a version or an explicit none), so the executor and
 the validator apply the same target's rules to the same catalog. W616 reads
 one table of features; the 1.2 features belong to other workstreams (S2a,
-S2b, S3, S4, S5), and each adds its rows, and S3 the S303 for `agents`
-before 1.2, with the feature itself.
+S2b, S3, S4, S5), and each adds its rows with the feature itself (S3's
+include `agents` before 1.2, W616 like every other).
 
 ### 5a) The header reaches the executor
 
@@ -280,7 +280,11 @@ affected.
   `profiles`), among them `pass_profile_star_always`, and for `spec_version`
   1.2 and 1.3. W616 for a 1.2 feature is pinned by
   `warn_version_feature_1_2` (the `audit` input `require_record` under a 1.1
-  header); each workstream adds its features' rows to the table W616 reads.
+  header); each workstream adds its features' rows to the table W616 reads,
+  and every 1.2 feature has a validator fixture that uses it under 1.1
+  (`warn_version_feature_1_2_grounding`,
+  `warn_version_feature_1_2_trust_classes`,
+  `pass_approver_identity_1_1_warn` and the `*_v11_warn` fixtures).
 - The TypeScript package replays the validator, runtime and expression
   fixtures and the profile vectors through the WebAssembly core; its
   interface takes only I-JSON requests, so the profile vector whose member

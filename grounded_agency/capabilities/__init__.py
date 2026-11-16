@@ -6,6 +6,7 @@ from .output import (
     CapabilityOutputError,
     decode_capability_output,
     encode_capability_output,
+    tool_result_output,
 )
 from .registry import CapabilityRegistry
 
@@ -22,4 +23,5 @@ __all__ = [
     "decode_capability_output",
     "encode_capability_output",
     "load_bindings",
+    "tool_result_output",
 ]

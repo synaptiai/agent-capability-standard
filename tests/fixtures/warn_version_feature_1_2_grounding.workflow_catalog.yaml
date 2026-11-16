@@ -1,0 +1,54 @@
+# Standard version: 1.1.0
+# A workflow that targets 1.1 but declares grounding@1 and states a grounding
+# policy, new in 1.2, is W616 (STANDARD v1.2 §5.20, §11.5): once, at the
+# extension's declaration. A failure mode that fires on F505, also new in
+# 1.2, is W616 at its step. Declaring 1.2 clears both.
+grounded_in_1_1:
+  goal: Retrieve a lab report and classify it, each output grounded.
+  risk: low
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    require: [retrieve, classify]
+  steps:
+  - capability: retrieve
+    purpose: Read the lab report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  - capability: classify
+    purpose: Classify the report.
+    store_as: labels
+    input_bindings:
+      item: "${report.data: object}"
+    failure_modes:
+    - condition: The classification cites evidence it did not have.
+      on_error: F505
+      action: stop
+  success:
+  - The report is classified, every output grounded
+grounded_in_1_2:
+  goal: The same features under a workflow that declares 1.2.
+  risk: low
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    require: [retrieve, classify]
+  steps:
+  - capability: retrieve
+    purpose: Read the lab report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  - capability: classify
+    purpose: Classify the report.
+    store_as: labels
+    input_bindings:
+      item: "${report.data: object}"
+    failure_modes:
+    - condition: The classification cites evidence it did not have.
+      on_error: F505
+      action: stop
+  success:
+  - The report is classified, every output grounded

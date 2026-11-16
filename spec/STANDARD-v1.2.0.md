@@ -10,11 +10,10 @@
 [RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
 validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); the Python SDK adapter and the Standard Agents binding implement
-§5.18, and the binding claims class SL (§10.4), the adapter once the
-§5.18.10 row its statement lists as not applied is applied; the
-executor and both layers check grounding (§5.20) and apply domain profiles
-(§5.21); `grounded_agency` implements §7.1's entity ids and §8's
-arithmetic; §7.2 and §7.3 are not implemented
+§5.18 and claim class SL (§10.4); the executor and both layers check
+grounding (§5.20) and apply domain profiles (§5.21); `grounded_agency`
+implements §7.1's entity ids and §8's arithmetic; §7.2 and §7.3 are not
+implemented
 **Date:** 2026-11-15
 **Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported; see §11.5)
 
@@ -2508,7 +2507,7 @@ The edge types (§4.3) apply to calls as follows:
 - **Taking one.** A checkpoint is taken in the scope by a call classified
   `checkpoint` that completed successfully, or by the host's own checkpoint
   operation, which the layer records in the scope. A call that failed takes
-  none. A call that only leads to one, such as loading a skill's
+  none, a call whose output the layer refused included (§5.18.10). A call that only leads to one, such as loading a skill's
   instructions, takes none: the call that saves the state does. The layer
   counts the call; it does not verify what the restore point holds.
 - **One per call.** A checkpoint authorises one call whose effective
@@ -2648,8 +2647,11 @@ the output of an executor's capability call.
 
 Where a host carries a capability output as a string, it travels as the
 I-JSON text (RFC 7493) of the output object, with nothing before or after
-it. A consumer parses the text and checks that it is an object with every
-field the capability's output contract requires; otherwise the output is
+it. A consumer parses the text and checks the output: it is I-JSON (no
+member name twice in one object, no integer beyond ±2^53, §5.14), it is an
+object with every field the capability's output contract requires, its
+`evidence_anchors`, where present, is an array, and a `confidence` the
+contract requires is a number from 0 to 1 (§4.1.1); otherwise the output is
 refused with R402. A host that answers an executor's capability call from
 such a string decodes it by this rule before it answers; a string that
 fails is the step's failure (R402). A producer checks the I-JSON limits of
@@ -2678,6 +2680,21 @@ model) MAY add a refusal; it never satisfies or replaces a required check.
 | `transform` | Where its output is recorded or stored, a secret it read is not carried into the record: it is redacted (§6.7) | — |
 | every capability | Its output satisfies the output contract (§5.18.9) | R402 |
 | every capability | Records and evidence the layer writes carry no secret: it redacts them (§6.7) | — |
+
+The output-contract row applies to each covered call's result that the
+layer receives as a capability output: validated structure, or text as
+§5.18.9 says, checked as §5.18.9's consumer checks the output. A call
+whose output the layer refuses (R402 here; F505 under a grounding policy,
+§5.20; F504 under a minimum confidence, §5.21.3) has run and failed: it
+used the checkpoint and the decision it held (§5.18.6, §5.18.7), takes no
+checkpoint (§5.18.6), and is not a prerequisite that ran (§5.18.5). The layer
+checks the output in the form its host delivers the result: a member its
+host drops before the model or the caller reads the result, such as
+structure beside a text the host passes on alone, is not the output. A
+result its host returns in another form, such as a host tool's file text or
+command output, carries no capability output to check; the layer's
+conformance statement names those calls (§10.4), as §5.21.4 says for the
+output rules of profiles.
 
 A host-specific mechanism, such as a hook declared in a skill's
 frontmatter, is one implementation of these checks. A host that loads a
@@ -3910,7 +3927,7 @@ a prefix that names the implementation (`sa-binding.unclassified`).
 | Code | Name | Description |
 |------|------|-------------|
 | R401 | EXECUTION_TIMEOUT | Step exceeded timeout, or a wait lapsed |
-| R402 | EXECUTION_FAILED | Step execution failed; an `Error` may say why (`reason`, §5.19.7); a capability output on a text-only channel is not I-JSON, not an object, or lacks a required field (§5.18.9) |
+| R402 | EXECUTION_FAILED | Step execution failed; an `Error` may say why (`reason`, §5.19.7); a capability output on a text-only channel is not I-JSON, not an object, or fails its output contract (§5.18.9) |
 | R403 | GATE_BLOCKED | A gate stopped the run, or a condition was false with `skip_if_false: false` |
 | R404 | RECOVERY_EXHAUSTED | Max recovery loops exceeded |
 | R405 | EXPRESSION_ERROR | An expression failed to evaluate (§5.8.2) |
@@ -4182,8 +4199,10 @@ prompt, its decision expiry, the most approvers it can obtain for one call,
 and whether it can verify an approver's role; how it makes a check and its
 use atomic (a lock or reservation, or its host's order); the fixture
 features it supports; its host gaps, the cases in which its host can run
-a covered call without the layer's decision; and any check of §5.18.10 it
-does not apply, which a conforming layer has none of. The statements of the
+a covered call without the layer's decision; the covered calls whose
+results carry no capability output, to which no output check applies
+(§5.18.10, §5.21.4); and any check of §5.18.10 it does not apply, which a
+conforming layer has none of. The statements of the
 reference layers follow `tests/conformance/calls/schema/statement.schema.json`.
 
 **Binding fixtures.** Each fixture holds an `ontology` version, `records`,
@@ -4201,15 +4220,21 @@ check them skips those fixtures and says so in its statement.
 **Call-sequence fixtures.** Each fixture is one scope with a person
 present. Its `bindings` are records under its `ontology`; a tool not listed
 is unbound. A bound tool succeeds and returns what its output contract
-requires; a call of a tool classified `checkpoint` that runs takes a
-checkpoint. Its `sequence` is a list of calls and events:
+requires, or what the call `returns`; a call of a tool classified
+`checkpoint` that runs, and whose output is not refused, takes a
+checkpoint. Its `sequence` is a list of
+calls and events:
 
 - A call names `call` (the tool), `args` (default `{}`), optionally
   `approve` or `reject` (who decided on it beforehand: on its shown value
   §5.18.7, or at the prompt), `fails` (its tool reports an error after it
-  started), `nested` (calls the tool makes while it runs), and `expect`:
-  `"run"` or `{"refuse": <code>}`. A call with neither `approve` nor
-  `reject` is undecided.
+  started), `returns` (its tool's output, any JSON value, null included,
+  which the layer receives as its host carries a capability output),
+  `nested` (calls the tool makes while it runs, each with its own members),
+  and `expect`: `"run"`, `{"refuse": <code>}`, or
+  `{"refuse_output": <code>}` (the call ran, and the layer refused its
+  output, §5.18.10). A call with neither `approve` nor `reject` is
+  undecided.
 - An event is `{"boundary": true}` (an execution boundary) or
   `{"expire": "checkpoint"}` / `{"expire": "decision"}` (the layer's
   checkpoint maximum age, or a decision's expiry, passes).

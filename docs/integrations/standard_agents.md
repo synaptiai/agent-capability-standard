@@ -651,8 +651,9 @@ The result the model sees is the output's I-JSON text with nothing around it,
 which [§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results) requires of every capability
 output carried as a string. `encodeCapabilityOutput` from
 [`@synaptiai/acs-core`](../../packages/acs-core/README.md) writes it, and
-refuses (R402) an output that lacks a required field or holds a value I-JSON
-does not allow, such as an integer beyond 2^53. `decodeCapabilityOutput`
+refuses (R402) an output that lacks a required field, has an
+`evidence_anchors` that is not an array or a required `confidence` outside 0
+to 1, or holds a value I-JSON does not allow, such as an integer beyond 2^53. `decodeCapabilityOutput`
 reads such a text back.
 
 Each call, refused ones too, becomes an entry in a trace kept in the thread's
@@ -812,12 +813,13 @@ runtime's order, and `serially` within a realm). It lists its host gaps, the
 rows of the table above that rest on SA behaviour the text does not state,
 and no check of §5.18.10 it does not apply: it applies the destination
 policies in force to every `send` tool (`configureLayer`, §4.4.2) and the
-secret checks of `persist` and `audit`, and redacts every trace entry it
-writes (§6.7).
+secret checks of `persist` and `audit`, redacts every trace entry it
+writes (§6.7), and checks every grounded tool's output against its
+capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 23
+the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 28
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). The one fixture it skips needs a call of an unbound
@@ -1078,8 +1080,8 @@ Three things a consumer of such a package cannot yet do:
   effects, endpoints and required parent hooks, and says nothing about its
   tools.
 - **Claim conformance for the agent.** The safety-layer class of Standard
-  1.2.0, which the binding meets except the checks its statement lists as not
-  applied ([Conformance](#conformance-class-sl)), covers its tools' calls.
+  1.2.0, which the binding claims ([Conformance](#conformance-class-sl)),
+  covers its tools' calls.
   Nothing in either standard says what it means for an agent, or a runtime,
   to be grounded.
 - **Rely on a version pair.** The specification is 0.2.0; the types package

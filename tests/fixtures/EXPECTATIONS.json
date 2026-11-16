@@ -1319,6 +1319,41 @@
     ],
     "note": "A 1.2 feature (the audit input require_record) in a workflow that targets 1.1 (Standard v1.2 \u00a711.5)"
   },
+  "warn_version_feature_1_2_grounding": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "versioning",
+    "expected_warning_codes": [
+      "W616"
+    ],
+    "expected_locations": [
+      {
+        "code": "W616",
+        "path": "/grounded_in_1_1/workflow_extensions/requires/0"
+      },
+      {
+        "code": "W616",
+        "path": "/grounded_in_1_1/steps/1/failure_modes/0/on_error"
+      }
+    ],
+    "note": "Two 1.2 features (the extension grounding@1 with its field grounding, and F505 in a failure mode's on_error) in a workflow that targets 1.1: one W616 each, at its first use (Standard v1.2 \u00a75.20, \u00a711.5)"
+  },
+  "warn_version_feature_1_2_trust_classes": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "versioning",
+    "expected_warning_codes": [
+      "W604",
+      "W616"
+    ],
+    "expected_locations": [
+      {
+        "code": "W616",
+        "path": "/trust_classes_in_1_1/steps/2/approval/approver/accept_trust_classes"
+      }
+    ],
+    "note": "The approver member accept_trust_classes, new in 1.2, in a workflow that targets 1.1: W616 at its step, and W604 as in 1.1 (Standard v1.2 \u00a75.17, \u00a711.5)"
+  },
   "pass_checked_rollback": {
     "should_pass": true,
     "level": "L2",

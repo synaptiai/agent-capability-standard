@@ -5,9 +5,11 @@
  * sub-prompt's or a model's reply, the string a host turns into the output
  * of an executor's capability call), it travels as the I-JSON text (RFC
  * 7493) of the output object, with nothing before or after it. A consumer
- * parses the text and checks that it is an object with every field the
- * capability's output contract requires; a producer checks the I-JSON limits
- * before it sends. Either failure is R402 EXECUTION_FAILED.
+ * parses the text and checks that it is I-JSON and an object with every
+ * field the capability's output contract requires, an `evidence_anchors`
+ * array where present, and a `confidence` from 0 to 1 where the contract
+ * requires one; a producer checks the same before it sends. Either failure
+ * is R402 EXECUTION_FAILED.
  *
  * The Python package's `encode_capability_output` and
  * `decode_capability_output` (`grounded_agency.capabilities.output`) apply

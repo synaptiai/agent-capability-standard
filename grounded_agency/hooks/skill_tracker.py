@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ..capabilities.mapper import ToolCapabilityMapper
@@ -50,14 +51,16 @@ def create_checkpoint_recorder(
     checkpoint_tracker: CheckpointTracker,
     mapper: ToolCapabilityMapper | None = None,
     expiry_minutes: int | float | None = None,
+    *,
+    refuses_output: Callable[[str, Any, Any], bool] | None = None,
 ) -> HookCallback:
     """
     Create a PostToolUse hook that records the checkpoint a successful
     state-saving call took.
 
     Register it for every tool (no matcher). For a call whose mapping's
-    capabilities include ``checkpoint`` and whose response is not an error,
-    a checkpoint is created in the tracker with ``metadata["source"]`` the
+    capabilities include ``checkpoint``, whose response is not an error and
+    whose output ``refuses_output`` does not refuse, a checkpoint is created in the tracker with ``metadata["source"]`` the
     tool. For ``git stash create``, ``metadata["commit"]`` is the commit it
     printed, or ``"HEAD"`` when it printed nothing (a clean tree, whose
     restore point is ``HEAD``), and ``metadata["untracked_not_captured"]``
@@ -70,6 +73,11 @@ def create_checkpoint_recorder(
             when omitted
         expiry_minutes: The checkpoints' maximum age (at most 30); the
             tracker's default when omitted
+        refuses_output: Whether the safety layer refuses the call's output
+            (``tool_name``, ``tool_input``, ``tool_response``): a call whose
+            output is refused has failed and takes no checkpoint (section
+            5.18.6). The adapter passes its PostToolUse output check, which
+            runs beside this hook on the same result.
 
     Returns:
         Async hook callback function
@@ -92,6 +100,10 @@ def create_checkpoint_recorder(
                 return {}
             tool_response = input_data.get("tool_response")
             if _is_error(tool_response):
+                return {}
+            if refuses_output is not None and refuses_output(
+                tool_name, tool_input, tool_response
+            ):
                 return {}
 
             metadata: dict[str, Any] = {"source": tool_name}

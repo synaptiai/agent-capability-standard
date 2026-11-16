@@ -17,10 +17,8 @@ The hooks apply the rules of
 [STANDARD 1.2.0 §5.18](../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)
 where Claude Code lets them, and do not claim the safety-layer class SL
 ([SECURITY.md §5.5](../spec/SECURITY.md#55-hooks-and-the-safety-layer-class)
-says why). The Standard Agents binding claims it; the Python SDK adapter
-meets it except the §5.18.10 check its conformance statement
-(`tests/conformance/calls/statements/`) lists as not applied, and claims it
-once that is applied.
+says why). The Python SDK adapter and the Standard Agents binding claim it
+(their conformance statements are in `tests/conformance/calls/statements/`).
 
 ## How Hooks Work
 

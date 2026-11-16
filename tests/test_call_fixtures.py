@@ -5,13 +5,24 @@ The runner plays Claude Code's part for a tool in allowed_tools: the
 PreToolUse hook; for an "ask", the wrapped can_use_tool callback with a host
 callback that allows only an approved call (one with `approve` and no
 `reject`); then, for a call that runs, PostToolUse, or PostToolUseFailure
-when it `fails`. A boundary is the Stop hook; an expired checkpoint moves the
-adapter's clock past its maximum age. Fixtures whose `needs` the adapter's
-conformance statement lacks are skipped with the reason.
+when it `fails`. A bound tool with a capability is served as
+create_grounded_mcp_server serves it: it runs only on the layer's decision,
+and returns what its output contract requires, or what the call `returns`,
+as the JSON text of its one content item (section 5.18.9), which the layer
+checks (section 5.18.10). A boundary is the Stop hook; an expired checkpoint
+moves the adapter's clock past its maximum age. Fixtures whose `needs` the
+adapter's conformance statement lacks are skipped with the reason.
+
+Each fixture is played twice. Route ``served``: as above. Route ``host``:
+every tool is a tool of another MCP server (``mcp__ext__<tool>``), bound by
+its record and not served by the adapter, so its result reaches the layer
+only as Claude Code passes it to PostToolUse (the content items), where the
+layer checks it and replaces a refused result (``updatedMCPToolOutput``).
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from pathlib import Path
@@ -23,11 +34,13 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     PermissionResultAllow,
     PermissionResultDeny,
+    SdkMcpTool,
     ToolPermissionContext,
 )
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.errors import Severity
+from grounded_agency.mcp import _guarded, create_grounded_mcp_server
 from tests.conftest import FakeClock
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -65,19 +78,135 @@ def test_the_statement_matches_the_adapter() -> None:
     assert statement["approval"]["max_approvers"] == 1
     assert statement["approval"]["roles"] is False
     assert statement["approval"]["expires"] is None
+    # Every check of section 5.18.10 is applied (class SL): the output
+    # contract by default, and turning it off is outside the class.
+    assert "not_applied" not in statement
+    assert GroundedAgentConfig().check_outputs is True
+    # Each setting that turns a check off is named outside the class: with
+    # require_layer=False a served tool runs without the layer's decision.
+    assert (
+        inspect.signature(create_grounded_mcp_server)
+        .parameters["require_layer"]
+        .default
+        is True
+    )
+    (outside,) = [g for g in statement["host_gaps"] if "outside class SL" in g]
+    for setting in (
+        "strict_mode=False",
+        "approval='off'",
+        "check_outputs=False",
+        "create_grounded_mcp_server(require_layer=False)",
+    ):
+        assert setting in outside
+    # The calls whose results carry no capability output are named apart
+    # from the host gaps (section 10.4): they get a decision, but no output
+    # check applies to them. Only Claude Code's own tools: an MCP tool bound
+    # to a capability is checked, served or not (route "host" below).
+    (without,) = statement["calls_without_output"]
+    assert "Claude Code's own tools" in without
+    assert "other MCP servers" not in without
+    assert "PostToolUse hook checks the result of any other" in without
+    assert not any("Claude Code's own tools" in gap for gap in statement["host_gaps"])
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 23
+    assert len(CASES) == 28
+
+
+def _output(capability: str, adapter: GroundedAgentAdapter, n: int) -> dict[str, Any]:
+    """The output a capability's contract requires, with plain values."""
+    node = adapter.registry.get_capability(capability)
+    assert node is not None
+    output: dict[str, Any] = {}
+    for field in node.output_schema.get("required") or []:
+        output[field] = {"evidence_anchors": [], "confidence": 1}.get(
+            field, f"cp-{n}" if field == "checkpoint_id" else True
+        )
+    return output
+
+
+# A step that states no `returns`: its tool returns what the contract
+# requires. A step's `returns` may be null, which is an output to refuse.
+_NO_RETURNS: Any = object()
+
+
+ROUTES = ("served", "host")
+_SERVER = "mcp__ext__"
+
+
+def _on_another_server(fixture: dict[str, Any]) -> dict[str, Any]:
+    """The fixture with every tool a tool of another MCP server: each
+    binding's `tool` and `invokes`, and each call, prefixed."""
+
+    def step(item: dict[str, Any]) -> dict[str, Any]:
+        if "call" not in item:
+            return item
+        moved = {**item, "call": _SERVER + item["call"]}
+        if "nested" in item:
+            moved["nested"] = [step(n) for n in item["nested"]]
+        return moved
+
+    bindings = []
+    for record in fixture["bindings"]:
+        moved = {**record, "tool": _SERVER + record["tool"]}
+        if "invokes" in record:
+            moved["invokes"] = [_SERVER + n for n in record["invokes"]]
+        bindings.append(moved)
+    return {
+        **fixture,
+        "bindings": bindings,
+        "sequence": [step(s) for s in fixture["sequence"]],
+    }
 
 
 class _Runner:
-    def __init__(self, adapter: GroundedAgentAdapter, clock: FakeClock) -> None:
+    def __init__(
+        self,
+        adapter: GroundedAgentAdapter,
+        clock: FakeClock,
+        bindings: list[dict[str, Any]],
+        route: str = "served",
+    ) -> None:
         self.adapter = adapter
         self.clock = clock
+        self.route = route
         self.approved: dict[str, bool] = {}
         self.options = adapter.wrap_options(ClaudeAgentOptions(can_use_tool=self._host))
         self.n = 0
+        # What the current call of a bound tool returns, when its step
+        # states `returns` (null included); else the contract's output.
+        self.returns: Any = _NO_RETURNS
+        self.tools = {
+            b["tool"]: self._tool(b["capability"])
+            for b in bindings
+            if b.get("capability") and not b.get("control")
+        }
+        self.served = (
+            {
+                name: _guarded(
+                    SdkMcpTool(
+                        name=name, description=name, input_schema={}, handler=handler
+                    ),
+                    name,
+                    adapter,
+                    SdkMcpTool,
+                )
+                for name, handler in self.tools.items()
+            }
+            if route == "served"
+            else {}
+        )
+
+    def _tool(self, capability: str) -> Any:
+        async def handler(args: dict[str, Any]) -> dict[str, Any]:
+            value = (
+                _output(capability, self.adapter, self.n)
+                if self.returns is _NO_RETURNS
+                else self.returns
+            )
+            return {"content": [{"type": "text", "text": json.dumps(value)}]}
+
+        return handler
 
     async def _host(self, tool: str, args: dict[str, Any], context: Any) -> Any:
         if self.approved.get(context.tool_use_id):
@@ -119,8 +248,31 @@ class _Runner:
             await self._fire(
                 "PostToolUseFailure", {**data, "error": "the tool failed"}, call_id
             )
-        else:
-            await self._fire("PostToolUse", {**data, "tool_response": {}}, call_id)
+            return "run"
+        response: Any = {}
+        self.returns = step["returns"] if "returns" in step else _NO_RETURNS
+        if step["call"] in self.served:
+            tool = self.served[step["call"]]
+            response = await tool.handler(data["tool_input"])
+        elif step["call"] in self.tools:
+            # Another server's tool: Claude Code passes its content items.
+            response = (await self.tools[step["call"]](data["tool_input"]))["content"]
+        posted = await self._fire(
+            "PostToolUse", {**data, "tool_response": response}, call_id
+        )
+        replaced = [
+            r["hookSpecificOutput"]["updatedMCPToolOutput"]
+            for r in posted
+            if "updatedMCPToolOutput" in r.get("hookSpecificOutput", {})
+        ]
+        if isinstance(response, dict) and response.get("is_error"):
+            # The call ran; the layer refused its output (section 5.18.10).
+            assert replaced == []
+            return "output " + _code(response["content"][0]["text"])
+        if replaced:
+            # The same, at PostToolUse: the session reads the refusal.
+            ((item,),) = replaced
+            return "output " + _code(item["text"])
         return "run"
 
     async def boundary(self) -> None:
@@ -134,9 +286,14 @@ def _code(text: str) -> str:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("route", ROUTES)
 @pytest.mark.parametrize("path", CASES, ids=[p.stem for p in CASES])
-async def test_call_fixture(path: Path, ontology_path: str, tmp_path: Path) -> None:
+async def test_call_fixture(
+    path: Path, route: str, ontology_path: str, tmp_path: Path
+) -> None:
     fixture: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    if route == "host":
+        fixture = _on_another_server(fixture)
     statement = _statement()
     missing = set(fixture.get("needs", [])) - set(statement["features"])
     if missing:
@@ -154,7 +311,7 @@ async def test_call_fixture(path: Path, ontology_path: str, tmp_path: Path) -> N
     )
     diagnostics = adapter.mapper.load_bindings(fixture["bindings"])
     assert [d for d in diagnostics if d.severity is Severity.ERROR] == []
-    runner = _Runner(adapter, clock)
+    runner = _Runner(adapter, clock, fixture["bindings"], route)
 
     for index, step in enumerate(fixture["sequence"]):
         if "boundary" in step:
@@ -165,8 +322,13 @@ async def test_call_fixture(path: Path, ontology_path: str, tmp_path: Path) -> N
             clock.advance(minutes=adapter.config.expiry_minutes, seconds=1)
             continue
         outcome = await runner.call(step)
+        expect = step["expect"]
         expected = (
-            step["expect"] if step["expect"] == "run" else step["expect"]["refuse"]
+            expect
+            if expect == "run"
+            else expect["refuse"]
+            if "refuse" in expect
+            else "output " + expect["refuse_output"]
         )
         assert outcome == expected, (
             f"step {index} ({step['call']}): {outcome} != {expected}"

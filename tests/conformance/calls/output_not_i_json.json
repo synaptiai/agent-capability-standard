@@ -1,0 +1,86 @@
+{
+  "description": "An output holding an integer beyond 2^53, which has no exact I-JSON form, is refused with R402.",
+  "ontology": "2.2.0",
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    },
+    {
+      "tool": "find",
+      "ontology": "2.2.0",
+      "capability": "search"
+    }
+  ],
+  "sequence": [
+    {
+      "call": "find",
+      "returns": {
+        "results": [
+          9007199254740993
+        ],
+        "evidence_anchors": [],
+        "confidence": 1
+      },
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "find",
+      "returns": {
+        "results": [
+          9007199254740992
+        ],
+        "evidence_anchors": [],
+        "confidence": 1
+      },
+      "expect": "run"
+    }
+  ]
+}

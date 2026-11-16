@@ -621,8 +621,9 @@ async def test_an_output_rule_reports_each_tool_whose_results_it_cannot_check(
         ).read_text("utf-8")
     )
     assert any(
-        "applied profiles' grounding policies" in gap and "minimum confidence" in gap
-        for gap in statement["host_gaps"]
+        "applied profiles' grounding policies" in calls
+        and "minimum confidence" in calls
+        for calls in statement["calls_without_output"]
     )
 
 

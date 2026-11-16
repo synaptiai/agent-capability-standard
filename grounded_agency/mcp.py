@@ -146,6 +146,22 @@ def create_grounded_mcp_server(
     ``require_layer=False`` restores the earlier behaviour and is outside
     class SL.
 
+    A tool with a capability returns that capability's output (sections
+    5.18.9, 5.18.10) as the I-JSON text of the output object, its one text
+    content item: the SDK's server delivers a result's ``content`` and
+    ``is_error`` to the session, not its ``structuredContent``, so the text
+    is what the session reads and what is checked. A result that carries
+    none, or one that lacks a field the capability's output contract
+    requires, fails the call that ran with ``R402 EXECUTION_FAILED``
+    (unless the adapter's ``check_outputs`` is off, outside class SL); then
+    the adapter's grounding policies (F505) and the profiles' minimum
+    confidence (F504) apply to the output. With ``require_layer`` the tool
+    checks its own result; without it, the PostToolUse hook of options
+    wrapped by :meth:`GroundedAgentAdapter.wrap_options` checks it, as it
+    checks the result of a bound tool of any other MCP server. A result
+    whose ``is_error`` is ``True`` is an error and is passed on; any other
+    value is checked.
+
     Args:
         name: MCP server name.
         version: MCP server version string.
@@ -162,7 +178,9 @@ def create_grounded_mcp_server(
             does not define (V101 UNKNOWN_CAPABILITY), a member of the wrong
             type (S303), an ``invokes`` name that does not resolve (V107) or
             forms a cycle (V105). The message lists every error; no server is
-            created.
+            created. Also, with ``require_layer``, R407 for a tool that is
+            not control-only and has no callable ``handler``, which cannot be
+            guarded; nothing is registered.
 
     Example::
 
@@ -170,7 +188,8 @@ def create_grounded_mcp_server(
 
         @tool("search_docs", "Search documentation.", {"query": str})
         async def search_docs(args):
-            return {"content": [{"type": "text", "text": "results..."}]}
+            output = {"results": [...], "evidence_anchors": [...], "confidence": 0.9}
+            return {"content": [{"type": "text", "text": json.dumps(output)}]}
 
         search_docs.metadata = {"capability": "search"}
 
@@ -207,6 +226,15 @@ def create_grounded_mcp_server(
             unbound.append(full_name)
         else:
             records.append(record)
+        control = record is not None and record.get("control") is True
+        if require_layer and not control and not callable(getattr(t, "handler", None)):
+            raise ValueError(
+                f"R407 SAFETY_CHECK_FAILED: MCP tool '{full_name}' has no "
+                f"callable handler, so it cannot be guarded: a call that "
+                f"reached it would run without the safety layer's decision "
+                f"and its output unchecked (STANDARD 1.2.0 sections 5.18.8, "
+                f"5.18.10); pass tools made with @tool"
+            )
 
     from .capabilities.bindings import load_bindings
 
@@ -244,22 +272,18 @@ def create_grounded_mcp_server(
                 # A control-only tool is never refused (section 5.18.3): no
                 # check applies, so there is no decision to wait for.
                 served.append(t)
-            elif isinstance(t, SdkMcpTool):
-                served.append(_guarded(t, full_name, adapter, SdkMcpTool))
             else:
-                logger.warning(
-                    "MCP tool %r is not an SdkMcpTool and cannot be guarded; a "
-                    "call that reaches it without the safety layer's decision "
-                    "will run",
-                    t,
-                )
-                served.append(t)
+                # Any tool the SDK's server can run (an SdkMcpTool, or an
+                # object with its members) is served guarded.
+                served.append(_guarded(t, full_name, adapter, SdkMcpTool))
     return create_sdk_mcp_server(name=name, version=version, tools=served)
 
 
 def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any) -> Any:
     """``tool`` with a handler that refuses (R407) a call the adapter's
-    layer did not allow."""
+    layer did not allow, and checks the result of a call that ran
+    (:meth:`GroundedAgentAdapter.check_call_result`: the output contract,
+    R402; grounding, F505; a minimum confidence, F504)."""
     handler = tool.handler
     adapter._register_grounded_tool(full_name)
 
@@ -281,7 +305,7 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
                 "is_error": True,
             }
         result: dict[str, Any] = await handler(args)
-        refusal = _grounding_refusal(adapter, full_name, args, result, call)
+        refusal = adapter.check_call_result(full_name, args, result, call)
         if refusal is not None:
             return {"content": [{"type": "text", "text": refusal}], "is_error": True}
         return result
@@ -291,7 +315,7 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
         description=tool.description,
         input_schema=tool.input_schema,
         handler=guarded,
-        annotations=tool.annotations,
+        annotations=getattr(tool, "annotations", None),
     )
     metadata = getattr(tool, "metadata", None)
     if metadata is not None:
@@ -300,53 +324,6 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
         except AttributeError:
             pass
     return wrapped
-
-
-def _grounding_refusal(
-    adapter: GroundedAgentAdapter,
-    full_name: str,
-    args: Any,
-    result: Any,
-    call: str | None = None,
-) -> str | None:
-    """The F505 refusal of a call's output under the adapter's grounding
-    policies (STANDARD v1.2 section 5.20), or its F504 under a minimum
-    confidence, or None. The output is the result's ``structuredContent``
-    when it is an object, else the capability output its text carries
-    (section 5.18.9); an error result is no output and is passed on. ``call`` is the call's id (the decision it used), so
-    the failure is recorded against the call that ran. The rules are the
-    adapter's: its configuration's grounding policies and those of the
-    domain profiles it applies, and their minimum confidence (section
-    5.21.3)."""
-    if not adapter._checks_call_outputs or not isinstance(result, dict):
-        return None
-    if result.get("is_error"):
-        return None
-    output: Any = result.get("structuredContent")
-    if not isinstance(output, dict):
-        output = None
-        texts = [
-            c.get("text")
-            for c in result.get("content") or []
-            if isinstance(c, dict) and c.get("type") == "text"
-        ]
-        mapping = adapter.mapper.map_tool(
-            full_name, args if isinstance(args, dict) else {}
-        )
-        capability = getattr(mapping, "capability_id", None)
-        if len(texts) == 1 and isinstance(texts[0], str) and capability:
-            from .capabilities.output import (
-                CapabilityOutputError,
-                decode_capability_output,
-            )
-
-            try:
-                output = decode_capability_output(
-                    capability, texts[0], adapter.registry
-                )
-            except CapabilityOutputError:
-                output = None
-    return adapter.check_call_output(full_name, args, output, call)
 
 
 def _get_tool_name(tool: Any) -> str:

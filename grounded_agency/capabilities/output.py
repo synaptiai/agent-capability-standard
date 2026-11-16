@@ -5,12 +5,17 @@ Where a host carries a capability output as a string (a tool's result, a
 sub-prompt's or a model's reply, the string a host turns into the output of
 an executor's capability call), it travels as the I-JSON text (RFC 7493) of
 the output object, with nothing before or after it. A consumer parses the
-text and checks that it is an object with every field the capability's
-output contract requires; a producer checks the I-JSON limits before it
-sends. Either failure is R402 EXECUTION_FAILED.
+text and checks that it is I-JSON and an object with every field the
+capability's output contract requires, an ``evidence_anchors`` array where
+present, and a ``confidence`` from 0 to 1 where the contract requires one;
+a producer checks the same before it sends. Either failure is R402
+EXECUTION_FAILED.
 
 :func:`encode_capability_output` is the producer's side and
-:func:`decode_capability_output` the consumer's. The TypeScript package's
+:func:`decode_capability_output` the consumer's; :func:`tool_result_output`
+reads the output a tool result of the Claude Agent SDK's in-process MCP
+server carries (the safety layer's output-contract check, section 5.18.10).
+The TypeScript package's
 ``encodeCapabilityOutput`` and ``decodeCapabilityOutput``
 (``packages/acs-core/src/output.ts``) apply the same rules; both pass the
 shared vectors, ``tests/conformance/output/vectors.json``. The I-JSON limits
@@ -35,6 +40,7 @@ __all__ = [
     "check_i_json",
     "decode_capability_output",
     "encode_capability_output",
+    "tool_result_output",
 ]
 
 # I-JSON limits, as the reference executor applies them (core/src/exec):
@@ -223,3 +229,48 @@ def decode_capability_output(
     except (ValueError, RecursionError) as e:
         _fail(capability, f"is not the JSON text of one object and nothing else: {e}")
     return _check_contract(capability, value, registry)
+
+
+def tool_result_output(
+    capability: str,
+    result: Any,
+    registry: CapabilityRegistry | None = None,
+) -> dict[str, Any]:
+    """The capability output a tool result of the Claude Agent SDK's
+    in-process MCP server carries (sections 5.18.9, 5.18.10): the I-JSON
+    text of the output object as its one content item, of type ``text``,
+    decoded by :func:`decode_capability_output`.
+
+    That server delivers a result's ``content`` and ``is_error`` to the
+    session and drops every other member, so the host carries the output
+    as a string: the text is what the session reads, and what is checked. A
+    ``structuredContent`` member never reaches the session and is not read.
+
+    Raises:
+        CapabilityOutputError: R402 when the result carries no capability
+            output that satisfies the contract: a result that is not a
+            mapping, content that is not exactly one text item, or a text
+            that is not the I-JSON text of an output that satisfies the
+            contract.
+    """
+    if not isinstance(result, dict):
+        _fail(capability, f"arrived as a {type(result).__name__}, not a tool result")
+    content = result.get("content")
+    items = content if isinstance(content, list) else []
+    if (
+        len(items) != 1
+        or not isinstance(items[0], dict)
+        or items[0].get("type") != "text"
+    ):
+        dropped = (
+            "; its structuredContent is not delivered to the session"
+            if result.get("structuredContent") is not None
+            else ""
+        )
+        _fail(
+            capability,
+            f"is not in the result: it carries {len(items)} content item(s), "
+            f"not the JSON text of the output object as its one text "
+            f"item{dropped}",
+        )
+    return decode_capability_output(capability, items[0].get("text"), registry)
