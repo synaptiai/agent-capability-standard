@@ -1031,3 +1031,22 @@ merged into `round3/a`. For phase 4 and any later stream:
   run of the Standard page is now §5.14's, between `deferral-replay` and
   `resume-replay`: 1800px at 1440 (S2b's text, unchanged by this merge).
   Any text added there needs a figure.
+
+## 2026-11-16 — FINISH (class SL for both layers)
+
+- **The adapter's output-contract row is applied.** A tool that
+  `create_grounded_mcp_server` serves with a capability returns its
+  capability output (`structuredContent`, or the I-JSON text of the object
+  as its one text item); `GroundedAgentAdapter.check_call_result` fails the
+  call that ran with R402 otherwise, before grounding (F505) and the
+  minimum confidence (F504). `GroundedAgentConfig.check_outputs=False` is
+  outside class SL. Neither statement has `not_applied`; every text says
+  both layers claim class SL (§10.4).
+- **Departure: §5.18.10 gained a paragraph.** The output-contract row
+  applies to the results a layer receives as capability outputs; a covered
+  call whose result its host returns in another form (Claude Code's own
+  tools, other MCP servers' tools) carries none, and the statement names
+  those calls, as §5.21.4 already said for the profiles' output rules.
+- **Call fixture format:** a call may give `returns` (its tool's output)
+  and expect `{"refuse_output": "R402"}` (the call ran; its output was
+  refused). 26 call fixtures.
