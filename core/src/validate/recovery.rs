@@ -95,21 +95,21 @@ impl<'p> Injected<'p> {
 /// scope, except that the targeter (which may have failed) and the steps
 /// running concurrently with it may not have produced their output; and
 /// the handler's own output is never visible to other steps.
-pub(crate) struct HandlerView {
+pub(crate) struct HandlerView<'c> {
     absent: Vec<String>,
-    store: Option<(String, Option<Value>, bool)>,
+    store: Option<(String, Option<&'c Value>, bool)>,
 }
 
-impl HandlerView {
+impl<'c> HandlerView<'c> {
     pub(crate) fn enter<'s>(
-        scope: &mut Scope,
+        scope: &mut Scope<'c>,
         maybe_absent: impl Iterator<Item = &'s str>,
         own_store: Option<&str>,
-    ) -> HandlerView {
+    ) -> HandlerView<'c> {
         let store = own_store.map(|s| {
             (
                 s.to_string(),
-                scope.stores.get(s).cloned(),
+                scope.stores.get(s).copied(),
                 scope.maybe_absent.contains(s),
             )
         });
@@ -120,7 +120,7 @@ impl HandlerView {
         HandlerView { absent, store }
     }
 
-    pub(crate) fn leave(self, scope: &mut Scope) {
+    pub(crate) fn leave(self, scope: &mut Scope<'c>) {
         for s in &self.absent {
             scope.maybe_absent.remove(s);
         }
