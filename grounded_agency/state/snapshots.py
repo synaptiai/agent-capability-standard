@@ -11,7 +11,8 @@ What a rollback never reaches (§4.4.1, "What a rollback does not restore"):
 the record of what happened and the host's own records. The store never
 captures, overwrites or removes
 
-- the plugin's ``.claude/`` directory (its audit log and checkpoint marker),
+- the plugin's ``.claude/`` directory (its audit log and checkpoint marker)
+  and ``.audit/`` (the audit logs its skills write),
 - its own ``store_dir``,
 - every path registered with :meth:`FileSnapshotStore.protect` (the
   checkpoint tracker's state and archive, the idempotency log, the memory
@@ -29,6 +30,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 import threading
@@ -38,9 +40,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-# The plugin's audit log and checkpoint marker: never within a checkpoint's
-# reach, whatever the caller excludes.
-ALWAYS_EXCLUDED: tuple[str, ...] = (".claude/**",)
+# The plugin's audit log and checkpoint marker (``.claude/``) and the audit
+# logs its skills write (``.audit/``): never within a checkpoint's reach,
+# whatever the caller excludes.
+NEVER_DIRS: tuple[str, ...] = (".claude", ".audit")
+ALWAYS_EXCLUDED: tuple[str, ...] = tuple(f"{d}/**" for d in NEVER_DIRS)
 
 # File names that usually hold secrets (§6.7): a snapshot does not copy
 # them unless the caller replaces ``exclude``. Informative defaults.
@@ -197,6 +201,16 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, p) for p in patterns)
 
 
+def _subsumes(pattern: str, glob: str) -> bool:
+    """Whether every path ``glob`` matches is sure to match ``pattern``: the
+    same pattern, or a ``<literal>*`` pattern (``fnmatch``'s ``*`` crosses
+    ``/``) whose literal ``glob`` starts with."""
+    if pattern == glob:
+        return True
+    head = pattern[:-1]
+    return pattern.endswith("*") and not _GLOB.search(head) and glob.startswith(head)
+
+
 class FileSnapshotStore:
     """Content-addressed file copies for checkpoints (§4.4.1).
 
@@ -270,7 +284,7 @@ class FileSnapshotStore:
 
     def _never(self, rel: str) -> bool:
         """Whether ``rel`` is never within a checkpoint's reach."""
-        if _matches(rel, ALWAYS_EXCLUDED) or rel == ".claude":
+        if _matches(rel, ALWAYS_EXCLUDED) or rel in NEVER_DIRS:
             return True
         return any(
             p == "" or rel == p or rel.startswith(p + "/") for p in self._protected
@@ -301,6 +315,47 @@ class FileSnapshotStore:
     def _object_path(self, sha: str) -> Path:
         return self._store / "objects" / sha
 
+    def _item(self, item: str) -> tuple[str, bool]:
+        """A scope item as a root-relative POSIX path or pattern, and
+        whether it lies outside the root (where nothing can be captured).
+        ``./`` and an absolute path under the root are made relative; an
+        empty item or ``.`` is the whole root (``*``)."""
+        s = str(item)
+        if os.path.isabs(s):
+            path = Path(os.path.normpath(s))
+            if not _GLOB.search(s) and path.name:
+                # Resolve the directories it is in, not a link it names.
+                path = Path(os.path.realpath(path.parent)) / path.name
+            try:
+                s = path.relative_to(self._root).as_posix()
+            except ValueError:
+                return s, True
+        while s.startswith("./"):
+            s = s[2:]
+        if not _GLOB.search(s):
+            s = posixpath.normpath(s) if s else "."
+            if s == ".." or s.startswith("../"):
+                return s, True
+        if s in ("", "."):
+            return "*", False
+        return s.rstrip("/") or "*", False
+
+    def _expand(self, items: Sequence[str]) -> tuple[list[str], list[str]]:
+        """The patterns a scope's items name (a path names a file, or a
+        directory and everything under it, so ``src``, ``src/`` and
+        ``./src`` each add ``src/*``), and the items outside the root."""
+        patterns: list[str] = []
+        outside: list[str] = []
+        for item in items:
+            s, out = self._item(item)
+            if out:
+                outside.append(str(item))
+                continue
+            for p in (s, f"{s}/*") if s != "*" else (s,):
+                if p not in patterns:
+                    patterns.append(p)
+        return patterns, outside
+
     @staticmethod
     def _covers_dir(rel: str, scope: Sequence[str]) -> bool:
         """Whether a scope pattern could name something under ``rel``."""
@@ -312,14 +367,17 @@ class FileSnapshotStore:
         )
 
     def capture(self, checkpoint_id: str, scope: Sequence[str]) -> Capture:
-        """Copy every regular file under the root that a ``scope`` pattern
-        matches. Files ``exclude`` names, files over ``max_file_bytes`` and
-        links are listed in ``excluded``, as is each never-within-reach
-        directory the scope covers (once, as ``<dir>/``)."""
+        """Copy every regular file under the root that a ``scope`` item
+        names: a root-relative ``fnmatch`` pattern, or a path naming a file
+        or a directory (everything under it). Files ``exclude`` names, files
+        over ``max_file_bytes`` and links are listed in ``excluded``, as is
+        each never-within-reach directory the scope covers (once, as
+        ``<dir>/``) and each item outside the root. A path the scope names
+        that does not exist is captured as absent: a restore removes it."""
         self._check_id(checkpoint_id)
-        patterns = [str(s) for s in scope] or ["*"]
+        patterns, outside = self._expand([str(s) for s in scope] or ["*"])
         files: dict[str, dict[str, Any]] = {}
-        excluded: list[str] = []
+        excluded: list[str] = list(outside)
         with self._lock:
             for dirpath, dirnames, filenames in os.walk(self._root, followlinks=False):
                 here = Path(dirpath)
@@ -420,10 +478,13 @@ class FileSnapshotStore:
         self, checkpoint_id: str, scope: Sequence[str] | None = None
     ) -> Restore:
         """Return what the checkpoint captured, within ``scope`` (all of it
-        when None), to its captured state: rewrite files that changed or
-        went missing, remove files created since in the captured scope.
-        An item ``scope`` names that the checkpoint did not capture is
-        ``not_captured``; content that is gone is ``discarded``."""
+        when None; items as for :meth:`capture`), to its captured state:
+        rewrite files that changed or went missing, remove files created
+        since in the captured scope. An item ``scope`` names that the
+        checkpoint did not capture is ``not_captured`` (a pattern that names
+        no captured file included, unless the checkpoint's own scope covers
+        all it names, so its absence was captured); content that is gone is
+        ``discarded``."""
         self._check_id(checkpoint_id)
         with self._lock:
             manifest = self.manifest(checkpoint_id)
@@ -450,30 +511,44 @@ class FileSnapshotStore:
                 rel == e or (e.endswith("/") and rel.startswith(e)) for e in listed
             )
 
-        def in_scope(rel: str) -> bool:
-            return scope is None or _matches(rel, scope)
+        wanted: list[str] | None = None
+        if scope is not None:
+            wanted, outside = self._expand(scope)
+            unrestored.extend({"item": o, "reason": "not_captured"} for o in outside)
 
-        # Items the rollback names that the checkpoint never captured.
+        def in_scope(rel: str) -> bool:
+            return wanted is None or _matches(rel, wanted)
+
+        # Items the rollback names that the checkpoint never captured: one
+        # in its `excluded` or never within reach, or one that names no
+        # captured file and that the checkpoint's scope does not cover (a
+        # path it covered that did not exist was captured as absent).
         for named in scope or []:
-            hits = [p for p in files if fnmatch.fnmatchcase(p, named)]
+            norm, out = self._item(named)
+            if out:
+                continue
+            names, _ = self._expand([norm])
+            hits = [p for p in files if _matches(p, names)]
             excluded_hit = any(
-                fnmatch.fnmatchcase(e.rstrip("/"), named) or e == named for e in listed
-            ) or was_excluded(named)
-            literal = not _GLOB.search(named)
+                _matches(e.rstrip("/"), names) or e == named for e in listed
+            ) or was_excluded(norm)
+            covered = (
+                _matches(norm, patterns)
+                if not _GLOB.search(norm)
+                else any(_subsumes(p, norm) for p in patterns)
+            )
             if (
-                self._never(named)
+                self._never(norm)
                 or (excluded_hit and not hits)
-                or (literal and not hits and not _matches(named, patterns))
+                or (not hits and not covered)
             ):
                 unrestored.append({"item": named, "reason": "not_captured"})
 
-        expected: list[tuple[str, str]] = []
         for rel in sorted(files):
             if not in_scope(rel) or self._never(rel):
                 continue
             entry = files[rel]
             sha = str(entry["sha256"])
-            expected.append((rel, sha))
             path = self._root / rel
             if not self._inside_root(path.parent):
                 unrestored.append(
@@ -555,7 +630,7 @@ class FileSnapshotStore:
                         {"item": rel, "reason": "failed", "detail": str(e)}
                     )
 
-        verification = self._verify(expected)
+        verification = self._verify(files, str(manifest.get("digest") or ""))
         return Restore(
             restored=not unrestored,
             unrestored=unrestored,
@@ -563,11 +638,13 @@ class FileSnapshotStore:
             verification=verification,
         )
 
-    def _verify(self, expected: list[tuple[str, str]]) -> dict[str, Any]:
-        """The digest of the restored content, computed as the capture's
-        was, and whether it matches."""
+    def _verify(self, files: dict[str, dict[str, Any]], digest: str) -> dict[str, Any]:
+        """The digest of what the checkpoint captured, as it is after the
+        restore, computed as the capture's was, and whether it matches the
+        checkpoint's ``digest`` (§4.4.1): over every captured file, so a
+        restore of part of it matches only when the rest is unchanged too."""
         now: list[tuple[str, str]] = []
-        for rel, _ in expected:
+        for rel in files:
             try:
                 data = _read_regular(self._root / rel, self._max_file_bytes)
             except OSError:
@@ -575,8 +652,11 @@ class FileSnapshotStore:
             now.append(
                 (rel, hashlib.sha256(data).hexdigest() if data is not None else "")
             )
-        digest = _digest(now)
-        return {"digest": digest, "match": digest == _digest(expected)}
+        expected = digest or _digest(
+            (rel, str(e["sha256"])) for rel, e in files.items()
+        )
+        current = _digest(now)
+        return {"digest": current, "match": current == expected}
 
     # ------------------------------------------------------------------
     # Retention

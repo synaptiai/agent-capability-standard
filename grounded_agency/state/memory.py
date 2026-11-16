@@ -19,6 +19,7 @@ restart (:meth:`MemoryStore.statement` says which).
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
@@ -27,7 +28,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,10 @@ SCOPES: tuple[str, ...] = ("run", "session", "user", "project", "global")
 
 _MAX_INT = 2**53
 _MAX_FILE_BYTES = 256 * 1024 * 1024
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+# The last instant a date-time states, 9999-12-31T23:59:59.999Z, in
+# milliseconds since the Unix epoch: no entry ends later (§4.5).
+MAX_EXPIRES_MS = 253_402_300_799_999
 
 
 class MemoryError(Exception):  # noqa: A001 - exported as MemoryStoreError
@@ -65,8 +70,9 @@ class MemoryContext:
 
 
 def _iso(ms: int) -> str:
+    # Exact: integer milliseconds, no float rounding at the range's ends.
     return (
-        datetime.fromtimestamp(ms / 1000, UTC)
+        (_EPOCH + timedelta(milliseconds=ms))
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z")
     )
@@ -193,9 +199,11 @@ class MemoryStore:
         return scope, instance
 
     def persist(self, inputs: Mapping[str, Any], ctx: MemoryContext) -> dict[str, Any]:
-        """Store ``inputs["data"]`` under ``inputs["key"]`` (generated when
-        absent) in the scope; the ``persist`` capability's output. Raises
-        :class:`MemoryError` and stores nothing on a refusal."""
+        """Store a copy of ``inputs["data"]`` under ``inputs["key"]``
+        (generated when absent) in the scope; the ``persist`` capability's
+        output. Raises :class:`MemoryError` and stores nothing on a
+        refusal, a ``ttl`` that would end the entry after
+        9999-12-31T23:59:59.999Z included (``unsupported_ttl``)."""
         data = inputs.get("data")
         key = inputs.get("key")
         if key is not None and not isinstance(key, str):
@@ -238,6 +246,13 @@ class MemoryStore:
                 f"{self._max_value_bytes} bytes per value (STANDARD §4.5)",
             )
         now = self._clock()
+        expires_at = now + ttl_ms if ttl_ms is not None else None
+        if expires_at is not None and expires_at > MAX_EXPIRES_MS:
+            raise MemoryError(
+                "unsupported_ttl",
+                f"ttl {ttl!r} would end the entry after 9999-12-31T23:59:59.999Z, "
+                "the last instant a date-time states (STANDARD §4.5)",
+            )
         with self._lock:
             self._drop_expired(now)
             entry_key = (scope, instance, key if key is not None else uuid.uuid4().hex)
@@ -249,9 +264,11 @@ class MemoryStore:
                     "over_capacity",
                     f"this host keeps at most {self._max_entries} entries (STANDARD §4.5)",
                 )
-            entry: dict[str, Any] = {"data": data, "stored_at": now}
-            if ttl_ms is not None:
-                entry["expires_at"] = now + ttl_ms
+            # A copy: what the caller does with its value later does not
+            # change what a recall returns (§4.5).
+            entry: dict[str, Any] = {"data": copy.deepcopy(data), "stored_at": now}
+            if expires_at is not None:
+                entry["expires_at"] = expires_at
             self._entries[entry_key] = entry
             self._save()
         out: dict[str, Any] = {
@@ -264,8 +281,8 @@ class MemoryStore:
                 {"ref": f"memory:{scope}:{entry_key[2]}", "kind": "record"}
             ],
         }
-        if ttl_ms is not None:
-            out["expires_at"] = _iso(now + ttl_ms)
+        if expires_at is not None:
+            out["expires_at"] = _iso(expires_at)
         return out
 
     def recall(self, inputs: Mapping[str, Any], ctx: MemoryContext) -> dict[str, Any]:
@@ -289,7 +306,8 @@ class MemoryStore:
                 "evidence_anchors": [],
             }
         out: dict[str, Any] = {
-            "data": entry["data"],
+            # A copy: a change to it does not change the entry.
+            "data": copy.deepcopy(entry["data"]),
             "found": True,
             "scope": scope,
             "stored_at": _iso(entry["stored_at"]),

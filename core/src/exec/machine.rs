@@ -2858,7 +2858,7 @@ impl<'a> Machine<'a> {
     pub(crate) fn submit(
         &mut self,
         id: u64,
-        response: Response,
+        mut response: Response,
         now: u64,
     ) -> Result<(), SubmitError> {
         if self.st.finished.is_some() {
@@ -2912,10 +2912,10 @@ impl<'a> Machine<'a> {
         }
         if let Response::RolledBack {
             not_covered: Some(items),
-        } = &response
+        } = &mut response
         {
             super::ijson(&Value::Array(items.clone())).map_err(SubmitError::Malformed)?;
-            super::not_covered_ok(items).map_err(SubmitError::Malformed)?;
+            *items = super::not_covered_kept(items).map_err(SubmitError::Malformed)?;
         }
         let frame_wf = &self.program.workflows[&self.frame_ref().workflow];
         let identity_declared = frame_wf.extension("identity@1");

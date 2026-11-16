@@ -170,7 +170,9 @@ asked for. The destination is `args.destination` unless the tool says
 where with its `destination` option (`destination: (args) => args.to`); a
 `send` tool defined without the option obeys the policy all the same.
 Without `configureLayer`, no policy is in force. A tool's `profiles` add
-their `allowed_destinations` for that tool.
+their `allowed_destinations` for that tool and, given to a composite, for
+the sends its code invokes at any depth (each nested call the binding
+attributes to it, §5.18.4).
 
 `memoryTools()` gives a `persist` and a `recall` tool on the thread's
 key-value store (§4.5): scope `session` (the thread), an envelope with the

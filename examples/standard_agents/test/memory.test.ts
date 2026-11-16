@@ -103,6 +103,20 @@ describe('secret_in_data', () => {
   });
 });
 
+describe('unsupported_ttl', () => {
+  it('refuses a ttl that ends the entry after the last date-time, and stores nothing', async () => {
+    const t = memoryThread();
+    for (const ttl of ['P100000000D', 'P3000000D']) {
+      const refused = persistEntry(t.state, { key: 'k', data: 1, ttl }, 1);
+      await expect(refused).rejects.toMatchObject({ reason: 'unsupported_ttl' });
+    }
+    expect([...t.values.keys()].filter((k) => k.startsWith('acs:memory:'))).toEqual([]);
+    expect(await recallEntry(t.state, { key: 'k' }, 2)).toMatchObject({ found: false });
+    expect(await persistEntry(t.state, { key: 'k', data: 2, ttl: 'P1D' }, 3)).toMatchObject({ stored: true });
+    expect(await recallEntry(t.state, { key: 'k' }, 4)).toMatchObject({ found: true, data: 2 });
+  });
+});
+
 describe('memoryTools', () => {
   it('persists and recalls through grounded tools', async () => {
     const now = { t: 1_000 };

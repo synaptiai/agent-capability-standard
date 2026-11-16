@@ -632,15 +632,20 @@ host = Host(
 
 - **Checkpoints** ([§4.4.1](../../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)).
   `FileSnapshotStore` copies the files under its root that a checkpoint's
-  scope names (by SHA-256, with a manifest and a digest; directories 0700,
-  copies 0600), excludes secret-bearing file names by default, and never
-  captures, overwrites or removes `.claude/`, its own store, the tracker's
-  state and marker, or any path registered with `Host(protected_paths=...)`
-  or `Host.protect` (the memory and key files are registered for you): a
-  rollback changes the world back, not the record of it. A `rollback`
-  step's output reports `restored`, `unrestored` (`not_captured` for an
-  item its `scope` names that the checkpoint did not capture),
-  `changes_reverted` and `verification`; the executor's `Rollback` gets
+  scope names (root-relative patterns, or paths: a directory names
+  everything under it; by SHA-256, with a manifest and a digest;
+  directories 0700, copies 0600), excludes secret-bearing file names by
+  default, and never captures, overwrites or removes `.claude/` or
+  `.audit/` (the plugin's audit logs), its own store, the tracker's state
+  and marker, or any path registered with `Host(protected_paths=...)` or
+  `Host.protect` (the memory and key files are registered for you, and the
+  runner registers its `evidence_store` file): a rollback changes the world
+  back, not the record of it. A `rollback` step's output reports
+  `restored`, `unrestored` (`not_captured` for an item its `scope` names
+  that the checkpoint did not capture, a pattern that names no captured
+  file included), `changes_reverted` and `verification` (over everything
+  the checkpoint captured, so a partial rollback matches only when the
+  rest is unchanged); the executor's `Rollback` gets
   `RolledBack` only on a full restore, with this run's transmissions as
   `not_covered` (a send whose outcome is unknown among them, with `detail`
   `outcome unknown`), and F503 otherwise.
@@ -649,9 +654,13 @@ host = Host(
   nested run shares; `session` is the host's `session_id`; `user` and
   `project` the host's), with `ttl`, limits and the statement a host makes
   (`statement()`); data or a key holding a credential is refused
-  (`secret_in_data`). The runner ends a run's `run` scope when the run
-  ends, unless it ended `deferred`. It passes
-  `tests/conformance/memory/store.json`.
+  (`secret_in_data`), and a value is stored and recalled as a copy. A
+  `persist` step with no `key` gets one derived from the pass's
+  `idempotency_key`, so a retry or a re-delivery replaces its entry. The
+  runner ends a run's `run` scope when the run ends, unless it ended
+  `deferred`, in the host's memory and in `WorkflowRunner(memory=...)`:
+  pass the store there, so that `cancel` without a host ends a deferred
+  run's entries too. It passes `tests/conformance/memory/store.json`.
 - **Sends** ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
   Call `self.send_once(action, effect)` from your `send` implementation:
   with an `IdempotencyLog`, an attempt whose key already transmitted gets

@@ -427,12 +427,14 @@ output reports the outcome:
 | `changes_reverted` | What the rollback undid: each `item`, with the `operation` it undid (`create`, `modify`, `delete` or `other`) |
 | `verification` | The `digest` of the restored content, computed as the checkpoint's was, and whether it `match`es the checkpoint's `digest` |
 
-A host MUST NOT report `restored: true` for a rollback it did not complete,
-and SHOULD list in `unrestored` and `not_covered` what it knows of: a host
-that performed `send` steps of the run after the checkpoint lists each
-transmission (§4.4.2), and only the run's own. An item holds no secret
-(§6.7). An `x-` reason is the letters `x-`, then a lowercase letter or
-digit, then at most 61 lowercase letters, digits, `_`, `.` or `-`.
+`verification` is computed over all the checkpoint captured, whatever part
+the rollback restored. A host MUST NOT report `restored: true` for a
+rollback it did not complete, and SHOULD list in `unrestored` and
+`not_covered` what it knows of: a host that performed `send` steps of the
+run after the checkpoint lists each transmission (§4.4.2), and only the
+run's own. An item holds no secret (§6.7). An `x-` reason is the letters
+`x-`, then a lowercase letter or digit, then at most 61 lowercase letters,
+digits, `_`, `.` or `-`.
 
 **What a rollback does not restore.** The record of what happened is never
 within a rollback's reach: the run's stores, trace, action records and
@@ -544,10 +546,11 @@ for approval or uses a checkpoint: a `destination` that is not a string, or
 that a policy in force does not allow, fails the step with F504 and reason
 `destination_not_allowed` (an executor refusal, not retried, §5.2). A safety
 layer applies the policies in force for it to every `send` call, before
-approval and the checkpoint (§5.18.10). A host whose own policy refuses a
-send answers an `Error` with reason `destination_not_allowed`. With no
-policy in force, the behaviour of 1.1 is kept: the destination is the
-host's to check.
+approval and the checkpoint, and refuses a call it cannot tell the
+destination of, a call of an unbound tool included (§5.18.10). A host
+whose own policy refuses a send answers an `Error` with reason
+`destination_not_allowed`. With no policy in force, the behaviour of 1.1
+is kept: the destination is the host's to check.
 
 A destination policy is checked where the data leaves the run. A host SHOULD
 also confine what a send can reach below the agent, with credentials scoped
@@ -616,9 +619,11 @@ reason `secret_in_data`, and its message does not repeat the secret.
 **Expiry.** `ttl` is a duration (§5.10.1) longer than zero. The entry ends
 `ttl` after its `stored_at`, which the output reports as `expires_at`; from
 then on a `recall` does not find it. A literal `ttl` outside the duration
-grammar, or of zero, is W614. A host given a `ttl` it cannot parse, or that
-cannot end entries, does not store: it answers an `Error` with reason
-`unsupported_ttl` (R402). Without `ttl`, an entry lasts as long as its scope.
+grammar, or of zero, is W614. A host given a `ttl` it cannot parse, or
+that would end the entry after 9999-12-31T23:59:59.999Z (the last instant
+a date-time states), or that cannot end entries, does not store: it
+answers an `Error` with reason `unsupported_ttl` (R402).
+Without `ttl`, an entry lasts as long as its scope.
 
 **`recall`.** `found` is `true` when a live entry has the key in the scope;
 `data` is then its data, and `stored_at` (and `expires_at`, when it has one)
@@ -2669,7 +2674,7 @@ model) MAY add a refusal; it never satisfies or replaces a required check.
 | `persist` | Its data holds no secret the layer recognises (§6.7) | F504 |
 | `audit` | It appends records and changes no other state (§4.4) | — |
 | `audit` | The record it appends holds no secret the layer recognises (§6.7) | F504 |
-| `send` | Its destination is one every destination policy in force allows (§4.4.2), checked before approval and the checkpoint; a layer that cannot tell a call's destination under a policy refuses it | F504 |
+| `send` | Its destination is one every destination policy in force allows (§4.4.2), checked before approval and the checkpoint; under a policy, a layer refuses a call whose destination it cannot tell, and a call of an unbound tool (§5.18.2), which may send anywhere | F504 |
 | `transform` | Where its output is recorded or stored, a secret it read is not carried into the record: it is redacted (§6.7) | — |
 | every capability | Its output satisfies the output contract (§5.18.9) | R402 |
 | every capability | Records and evidence the layer writes carry no secret: it redacts them (§6.7) | — |
@@ -2777,7 +2782,8 @@ A `RolledBack` whose `not_covered` is not a list of objects, each with a
 string `item` and a `reason` that is `transmitted`, `delegated`,
 `outside_scope` or an `x-` reason (§4.4.1), is refused as malformed: an item
 the checkpoint covered and the host did not restore makes the answer an
-`Error`.
+`Error`. An item's other members, and a `detail` that is not a string, are
+ignored.
 
 An `Error` carries a `code` and a `message`, and may carry a `reason`
 (§5.19.7). Neither holds a secret (§6.7): both reach the run's diagnostics,

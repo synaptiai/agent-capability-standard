@@ -1019,16 +1019,18 @@ class GroundedClient:
 a checkpoint also keeps a copy of the files its scope names, and
 `adapter.checkpoint_tracker.restore_checkpoint(checkpoint_id)` puts them
 back, used or not (STANDARD 1.2.0 §4.4.1); it never captures `.claude/`,
-the tracker's state or the audit log. A subagent's calls share the
-adapter's scope, so one checkpoint authorises one change by either (§5.15.4).
+`.audit/`, the tracker's state, the audit log or the evidence store's
+file. A subagent's calls share the adapter's scope, so one checkpoint
+authorises one change by either (§5.15.4).
 
 **Destination policies.** `GroundedAgentConfig(allowed_destinations=[...])`
 and the profiles' `allowed_destinations` are destination policies (§4.4.2):
 a `send` call whose destination, read at its binding's `destination`
 pointer, one does not allow, or whose binding names none, is refused with
-F504 before approval. So is a call of a composite whose `invokes` reach a
-binding that performs `send`: the adapter does not see a tool's nested
-calls, so it cannot tell where they go (§5.18.4).
+F504 before approval. So is a call of an unbound tool, which the adapter
+cannot tell sends or not (§5.18.2), and a call of a composite whose
+`invokes` reach a binding that performs `send`: the adapter does not see a
+tool's nested calls, so it cannot tell where they go (§5.18.4).
 
 ```python
 class GroundedAgentAdapter:

@@ -31,6 +31,12 @@ export const MEMORY_SCOPE = 'session';
 /** The default limit on a value, in bytes. */
 export const MAX_VALUE_BYTES = 1_000_000;
 
+/**
+ * The last instant a date-time states, 9999-12-31T23:59:59.999Z, in
+ * milliseconds since the Unix epoch: no entry ends later (§4.5).
+ */
+export const MAX_EXPIRES_MS = 253_402_300_799_999;
+
 /** A refused operation: a §5.19.7 reason and a message with no secret in it. */
 export class MemoryRefusal extends Error {
   constructor(
@@ -137,8 +143,17 @@ export async function persistEntry(
       `the value is ${size} bytes; this store keeps at most ${limit} bytes per value (STANDARD 1.2.0 §4.5)`,
     );
   }
+  // The end is checked before anything is written: a refused write changes
+  // nothing (§4.5).
+  const expiresAt = ttl !== null ? now + ttl : null;
+  if (expiresAt !== null && expiresAt > MAX_EXPIRES_MS) {
+    throw new MemoryRefusal(
+      'unsupported_ttl',
+      `ttl ${JSON.stringify(input['ttl'])} would end the entry after 9999-12-31T23:59:59.999Z, the last instant a date-time states (STANDARD 1.2.0 §4.5)`,
+    );
+  }
   const key = typeof given === 'string' ? given : generatedKey();
-  const envelope: Envelope = { v: 1, data, stored_at: now, ...(ttl !== null ? { expires_at: now + ttl } : {}) };
+  const envelope: Envelope = { v: 1, data, stored_at: now, ...(expiresAt !== null ? { expires_at: expiresAt } : {}) };
   await store.setValue(storeKey(options.prefix ?? 'acs:memory:', key), envelope);
   return {
     stored: true,

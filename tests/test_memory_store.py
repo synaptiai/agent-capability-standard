@@ -202,3 +202,35 @@ def test_entry_count_limit() -> None:
         store.persist({"key": "b", "data": 1}, ctx)
     assert refused.value.reason == "over_capacity"
     assert "1 entries" in refused.value.message
+
+
+def test_a_stored_value_is_a_copy() -> None:
+    """A recall returns the value stored (§4.5): what the caller later does
+    with the value it persisted, or with a recall's data, changes nothing."""
+    store = MemoryStore()
+    ctx = MemoryContext(session="s")
+    data: dict[str, Any] = {"a": [1]}
+    store.persist({"key": "k", "data": data}, ctx)
+    data["a"].append(2)
+    first = store.recall({"key": "k"}, ctx)["data"]
+    assert first == {"a": [1]}
+    first["a"].append(3)
+    assert store.recall({"key": "k"}, ctx)["data"] == {"a": [1]}
+
+
+@pytest.mark.parametrize("on_file", [False, True], ids=["memory", "file"])
+def test_an_unrepresentable_ttl_stores_nothing(on_file: bool, tmp_path: Path) -> None:
+    """A ttl that would end the entry after the last instant a date-time
+    states is refused before anything is written (§4.5): no entry, and the
+    key can still be recalled and written."""
+    path = tmp_path / "memory.json" if on_file else None
+    store = MemoryStore(path)
+    ctx = MemoryContext(session="s")
+    with pytest.raises(MemoryError) as refused:
+        store.persist({"key": "k", "data": 1, "ttl": "P3000000D"}, ctx)
+    assert refused.value.reason == "unsupported_ttl"
+    assert store.recall({"key": "k"}, ctx)["found"] is False
+    if path is not None:
+        assert not path.exists()
+    assert store.persist({"key": "k", "data": 2, "ttl": "P1D"}, ctx)["stored"]
+    assert store.recall({"key": "k"}, ctx)["data"] == 2

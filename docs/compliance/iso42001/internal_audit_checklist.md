@@ -221,7 +221,7 @@ flowchart LR
 |---|-------|---------|----------|-------|
 | 8.3.1 | Is the risk treatment plan implemented? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Hooks active, profiles configured, approvals flowing | |
 | 8.3.2 | Are structural controls functioning? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | Test: attempt Write without checkpoint (must be blocked) | Critical test |
-| 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | That the deployment applies its profile (Standard 1.2.0 §5.21: the reference executor, the validator, the Python adapter or the Standard Agents binding given it), which enforces `block_autonomous`, the other thresholds, the grounding policy and the confidence threshold, and that no rule it relies on is one the implementation refuses (a destination policy) | |
+| 8.3.3 | Are domain profile controls applied correctly? | [ ] C [ ] OFI [ ] Minor [ ] Major [ ] N/A | That the deployment applies its profile (Standard 1.2.0 §5.21: the reference executor, the validator, the Python adapter or the Standard Agents binding given it), which enforces `block_autonomous`, the other thresholds, the grounding policy, the confidence threshold and the destination policy (`allowed_destinations`: a `send` it does not allow fails F504 before approval) | |
 
 ```mermaid
 ---

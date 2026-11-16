@@ -7,11 +7,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Json } from '@synaptiai/acs-core';
 import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
+import { decideApproval, requestApproval } from '../src/acs/approval.js';
 import { groundedTool } from '../src/acs/grounded.js';
 import { configureLayer, destinationPolicies, resetLayer } from '../src/acs/layer.js';
 import { effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
 import { bindingProfiles, type ProfileCore } from '../src/acs/profiles.js';
-import { memoryThread } from './memory_thread.js';
+import { memoryThread, user, type MemoryThread } from './memory_thread.js';
 
 const HOOKS = [['https://hooks.example.com/*']];
 const NO_RULES: ProfilePolicy = { minimum_confidence: null, grounding: [], destinations: [], trust_weights: {} };
@@ -84,6 +85,63 @@ describe('configureLayer', () => {
       const result = await sendTool([], { profiles }).execute(memoryThread().state, { destination: 'https://x.example/' });
       expect(refusedF504(result)).toBe(true);
     }
+  });
+  it("applies a composite's profiles' allowed_destinations to the sends it invokes, at every depth (§5.21.3, §5.18.4)", async () => {
+    const profiles = bindingProfiles(profileCore([['https://ok.example/*']]), [{ domain: 'd' }], { onWarning: () => {} });
+    const args = z.object({}).passthrough();
+    const sent: string[] = [];
+    const nested: ToolResult[] = [];
+    const notify = sendTool(sent);
+    const composite = (name: string, invoked: string, tool: unknown, extra: Record<string, unknown> = {}) =>
+      groundedTool({
+        name,
+        capability: 'invoke',
+        invokes: { [invoked]: tool } as never,
+        description: name,
+        args,
+        ...extra,
+        execute: async (state, a) => {
+          const to = (a as { to: string }).to;
+          const result = await state.invokeTool(invoked, invoked === 'send_report' ? { destination: to } : { to });
+          if (invoked === 'send_report') nested.push(result);
+          return { result: true, evidence_anchors: [] };
+        },
+      });
+    // The profiles are given to the outer composite alone.
+    const batch = composite('batch', 'send_report', notify, { profiles });
+    const inner = composite('inner', 'send_report', notify);
+    const outer = composite('outer', 'inner', inner, { profiles });
+    const t = memoryThread();
+    for (const [name, tool] of Object.entries({ send_report: notify, batch, inner, outer })) t.tools.set(name, tool);
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'save',
+      args,
+      execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+    });
+    const approve = async (th: MemoryThread, action: string, a: Record<string, unknown>) => {
+      const request = await requestApproval(th.state, [{ action, capability: 'invoke', args: a as never }], {}, Date.now());
+      await decideApproval(th.state, user('alice'), request.digest, 'approved', Date.now());
+    };
+    for (const name of ['batch', 'outer']) {
+      for (const [to, ok] of [['https://evil.example/x', false], ['https://ok.example/x', true]] as const) {
+        nested.length = 0;
+        await save.execute(t.state, {});
+        await approve(t, name, { to });
+        expect((await t.tools.get(name)!.execute(t.state, { to })).status).toBe('success');
+        expect(nested).toHaveLength(1);
+        if (ok) {
+          expect(nested[0]!.status).toBe('success');
+        } else {
+          expect(refusedF504(nested[0]!)).toBe(true);
+        }
+      }
+    }
+    expect(sent).toEqual(['https://ok.example/x', 'https://ok.example/x']);
+    // The policy reaches only the calls the composite makes: the send
+    // called on its own, with no profiles, is not under it.
+    expect(refusedF504(await notify.execute(t.state, { destination: 'https://evil.example/x' }))).toBe(false);
   });
   it('throws on an invalid pattern, keeping the earlier configuration', () => {
     configureLayer({ destinations: HOOKS });

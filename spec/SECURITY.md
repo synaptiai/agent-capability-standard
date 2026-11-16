@@ -247,7 +247,11 @@ destination it chose.
 - A destination policy, from the host or an applied profile's
   `allowed_destinations`, fails a `send` step whose destination it does not
   allow with F504, before anyone is asked and before a checkpoint is used;
-  safety layers refuse such calls the same way. Its suffix form names host
+  safety layers refuse such calls the same way, and, while a policy is in
+  force, every call that may send where they cannot tell: a send whose
+  destination they cannot read, a call of an unbound tool, and (a layer
+  that does not see nested calls) a composite that invokes a send. Its
+  suffix form names host
   or address suffixes only (`https://evil.net/?.example.com` does not end in
   `*.example.com` in its sense), and a prefix that starts an authority must
   finish it (`https://hooks.example.com:*` is invalid), so no pattern lets a

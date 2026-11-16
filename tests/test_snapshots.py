@@ -155,6 +155,73 @@ def test_not_captured(root: Path) -> None:
     assert r.unrestored == [{"item": ".env", "reason": "not_captured"}]
 
 
+def test_a_pattern_that_names_nothing_captured_is_not_captured(
+    root: Path,
+) -> None:
+    """A rollback scope pattern that names no captured file, and that the
+    checkpoint's scope does not cover, is not_captured, as a path is: the
+    rollback cannot report restored for content it never had (§4.4.1)."""
+    write(root, "README.md", "r0")
+    s = store(root)
+    s.capture("cp1", ["*.txt"])
+    write(root, "README.md", "r1")
+    r = s.restore("cp1", ["*.md"])
+    assert not r.restored
+    assert r.unrestored == [{"item": "*.md", "reason": "not_captured"}]
+    assert (root / "README.md").read_text() == "r1"
+    # A pattern the checkpoint's own scope covers had its absence captured:
+    # files created since that it names are removed, and it is restored.
+    s.capture("cp2", ["docs/*"])
+    write(root, "docs/new.md", "n")
+    r = s.restore("cp2", ["docs/*.md"])
+    assert r.restored and r.unrestored == []
+    assert not (root / "docs/new.md").exists()
+    s.capture("cp3", ["*.md"])
+    write(root, "NEW.md", "n")
+    assert s.restore("cp3", ["*.md"]).restored
+
+
+def test_a_directory_path_names_everything_under_it(root: Path) -> None:
+    """A scope item that names a directory (`src`, `src/`, `./src`) names
+    everything under it, in the checkpoint and in the rollback (§4.4.1)."""
+    for i, item in enumerate(["src", "src/", "./src", str(root / "src")]):
+        s = store(root)
+        cap = s.capture(f"cp{i}", [item])
+        assert cap.captured == ["src/b.py", "src/c.py"], item
+        write(root, "src/b.py", "b1")
+        write(root, "src/new.py", "n")
+        r = s.restore(f"cp{i}", [item])
+        assert r.restored and r.unrestored == [], item
+        assert (root / "src/b.py").read_text() == "b0"
+        assert not (root / "src/new.py").exists()
+    # An item outside the root cannot be captured: it is listed in
+    # `excluded`, and a rollback that names it reports it not_captured.
+    s = store(root)
+    cap = s.capture("out", ["../elsewhere", "a.txt"])
+    assert cap.captured == ["a.txt"] and cap.excluded == ["../elsewhere"]
+    r = s.restore("out", ["../elsewhere"])
+    assert r.unrestored == [{"item": "../elsewhere", "reason": "not_captured"}]
+
+
+def test_verification_compares_with_the_checkpoints_digest(root: Path) -> None:
+    """`verification.digest` is over everything the checkpoint captured,
+    as the checkpoint's was, so it is comparable with it (§4.4.1): a
+    restore of part of it matches only when the rest is unchanged."""
+    s = store(root)
+    cap = s.capture("cp1", ["*"])
+    write(root, "src/b.py", "b1")
+    r = s.restore("cp1", ["src/b.py"])
+    assert r.restored
+    assert r.verification == {"digest": cap.digest, "match": True}
+    write(root, "a.txt", "a1")
+    write(root, "src/b.py", "b1")
+    r = s.restore("cp1", ["src/b.py"])
+    assert r.restored and r.verification["match"] is False
+    assert r.verification["digest"] != cap.digest
+    r = s.restore("cp1")
+    assert r.verification == {"digest": cap.digest, "match": True}
+
+
 def test_a_file_created_since_in_a_pattern_scope_is_removed(root: Path) -> None:
     s = store(root)
     s.capture("cp1", ["*.txt"])
@@ -194,6 +261,7 @@ def test_never_within_reach(tmp_path: Path) -> None:
     root = tmp_path / "work"
     write(root, "app.cfg", "v0")
     write(root, ".claude/audit.log", "line1\n")
+    write(root, ".audit/send-operations.log", "line1\n")
     snapshots = FileSnapshotStore(root, root / ".snapshots", exclude=())
     tracker = CheckpointTracker(
         checkpoint_dir=root / ".checkpoints",
@@ -218,6 +286,7 @@ def test_never_within_reach(tmp_path: Path) -> None:
     output = tracker.checkpoint_output(checkpoint_id)
     assert output["captured"] == ["app.cfg"]
     assert output["excluded"] == [
+        ".audit/",
         ".claude/",
         ".snapshots/",
         "runs/",
@@ -232,6 +301,8 @@ def test_never_within_reach(tmp_path: Path) -> None:
     # Change everything, and create a file next to each.
     write(root, "app.cfg", "v1")
     write(root, ".claude/audit.log", "line1\nline2\n")
+    write(root, ".audit/send-operations.log", "line1\nline2\n")
+    write(root, ".audit/rollback-operations.log", "line1\n")
     tracker.consume_checkpoint()
     tracker.end_validity("the turn ended")
     memory.persist({"key": "k", "data": 2}, MemoryContext(session="s"))
@@ -252,6 +323,8 @@ def test_never_within_reach(tmp_path: Path) -> None:
     shutil.copytree(root, copies, ignore=shutil.ignore_patterns(".snapshots"))
     host_records = [
         ".claude/audit.log",
+        ".audit/send-operations.log",
+        ".audit/rollback-operations.log",
         ".checkpoints/tracker_state.json",
         "state/memory.json",
         "state/keys.jsonl",
@@ -264,7 +337,7 @@ def test_never_within_reach(tmp_path: Path) -> None:
         assert filecmp.cmp(root / rel, copies / rel, shallow=False), rel
     # Directories protected whole keep everything, new files included; an
     # ordinary file created since next to the protected files is removed.
-    for d in (".claude", ".checkpoints", "runs"):
+    for d in (".claude", ".audit", ".checkpoints", "runs"):
         assert sorted(p.name for p in (root / d).iterdir()) == sorted(
             p.name for p in (copies / d).iterdir()
         )

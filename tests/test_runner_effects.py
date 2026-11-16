@@ -274,6 +274,57 @@ def test_a_rollback_leaves_the_hosts_records(tmp_path: Path) -> None:
     assert (root / "runs" / "r1.json").read_text() == "{}"
 
 
+def test_a_rollback_leaves_the_runners_evidence(tmp_path: Path) -> None:
+    """The runner's evidence store, kept in a file under the snapshot
+    root, is the record of what happened (§4.4.1): the rollback step and
+    the executor's rollback leave it as it is, and later records reach it."""
+    from grounded_agency.state.jsonl_evidence_store import JsonlEvidenceStore
+
+    class Grounded(Files):
+        def invoke_capability(self, action: dict[str, Any]) -> dict[str, Any]:
+            response = super().invoke_capability(action)
+            if action["capability"] == "mutate":
+                response["value"]["evidence_anchors"] = [
+                    {"ref": "file:app.cfg", "kind": "file"}
+                ]
+            return response
+
+    root = tmp_path / "work"
+    root.mkdir()
+    (root / "app.cfg").write_text("v0")
+    tracker = CheckpointTracker(
+        checkpoint_dir=tmp_path / ".checkpoints",
+        snapshots=FileSnapshotStore(root, tmp_path / "snapshots"),
+    )
+    host = Grounded(root, tracker, memory=MemoryStore())
+    evidence = JsonlEvidenceStore(root / "evidence.jsonl")
+    catalog = tmp_path / "catalog.yaml"
+    catalog.write_text(CATALOG)
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    runner = WorkflowRunner(engine, evidence_store=evidence)
+    result = runner.run("change_and_restore", {}, host, run_id="r1")
+    assert result.ok, result
+    assert (root / "app.cfg").read_text() == "v0"
+    rb = result.outputs["rb"]
+    assert rb["changes_reverted"] == [{"item": "app.cfg", "operation": "modify"}]
+    assert "evidence.jsonl" in result.outputs["cp"]["excluded"]
+    kept = len(evidence)
+    assert kept >= 1
+    lines = (root / "evidence.jsonl").read_text().splitlines()
+    assert len(lines) == kept
+    checkpoint = host.create_checkpoint({"step": 0, "frame": ["w"]})["checkpoint_id"]
+    from grounded_agency.state.evidence_store import EvidenceAnchor
+
+    evidence.add_anchor(EvidenceAnchor.from_tool_output("Read", "t", {"path": "x"}))
+    assert host.rollback({"checkpoint_id": checkpoint, "run_id": "r1"})["kind"] == (
+        "RolledBack"
+    )
+    evidence.add_anchor(EvidenceAnchor.from_tool_output("Read", "u", {"path": "x"}))
+    lines = (root / "evidence.jsonl").read_text().splitlines()
+    assert len(lines) == len(evidence) == kept + 2
+
+
 @pytest.mark.parametrize("how", ["host", "profile"])
 def test_destination_policies_reach_the_run(
     runner: WorkflowRunner, tmp_path: Path, how: str
@@ -352,6 +403,73 @@ def test_a_deferred_end_keeps_the_run_scope(
     assert not host.memory.recall(
         {"key": "k", "scope": "run"}, MemoryContext(run="r9")
     )["found"]
+
+
+def test_a_cancel_without_a_host_ends_the_run_scope(tmp_path: Path) -> None:
+    """A deferred run's ``run`` entries last until it is resumed and ends,
+    or is cancelled (§4.5): the runner ends them in its own ``memory``, so a
+    cancel with no host at hand ends them too."""
+    from grounded_agency.state.memory import MemoryContext
+
+    memory = MemoryStore()
+    catalog = tmp_path / "catalog.yaml"
+    catalog.write_text(CATALOG)
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(catalog)
+    runner = WorkflowRunner(engine, memory=memory)
+    run = runner.start("send_report", {"to": "ops"}, run_id="r9")
+    memory.persist({"key": "k", "data": 1, "scope": "run"}, MemoryContext(run="r9"))
+    result = runner.cancel(run, "no longer needed", now_ms=1)
+    assert result.cancelled
+    assert not memory.recall({"key": "k", "scope": "run"}, MemoryContext(run="r9"))[
+        "found"
+    ]
+
+
+def test_a_persist_without_a_key_is_idempotent_under_its_pass(tmp_path: Path) -> None:
+    """A persist with no key gets one derived from the pass's idempotency
+    key (§4.4.2, §5.19.4): a retry or a re-delivery of the pass replaces its
+    entry and leaves no orphan; another pass gets another key."""
+    memory = MemoryStore()
+    _, host = files_host(tmp_path, memory=memory)
+    action = {
+        "capability": "persist",
+        "run_id": "r1",
+        "id": 4,
+        "step": 0,
+        "frame": ["w"],
+        "idempotency_key": "r1:4",
+        "inputs": {"data": {"n": 1}, "scope": "run"},
+    }
+    first = host.invoke_capability(action)["value"]["key"]
+    again = host.invoke_capability({**action, "id": 5})["value"]["key"]
+    assert first == again
+    other = host.invoke_capability({**action, "idempotency_key": "r1:6"})
+    assert other["value"]["key"] != first
+    assert memory.end_scope("run", "r1") == 2
+    # A key the step gives is kept.
+    named = {**action, "inputs": {"key": "k", "data": 1, "scope": "run"}}
+    assert host.invoke_capability(named)["value"]["key"] == "k"
+
+
+def test_an_unrepresentable_ttl_is_an_error_with_its_reason(tmp_path: Path) -> None:
+    memory = MemoryStore()
+    _, host = files_host(tmp_path, memory=memory)
+    answer = host.invoke_capability(
+        {
+            "capability": "persist",
+            "run_id": "r1",
+            "step": 0,
+            "frame": ["w"],
+            "inputs": {"key": "k", "data": 1, "ttl": "P3000000D"},
+        }
+    )
+    assert (answer["kind"], answer["code"], answer["reason"]) == (
+        "Error",
+        "R402",
+        "unsupported_ttl",
+    )
+    assert memory.end_scope("session", host.session_id) == 0
 
 
 def test_a_memory_refusal_is_an_error_with_its_reason(tmp_path: Path) -> None:
@@ -454,3 +572,51 @@ def test_a_flat_list_of_patterns_is_a_type_error(
     assert runner.start(
         "send_report", {"to": "ops"}, destinations=[["ops@example.com"]]
     )
+
+
+def test_unknown_members_of_a_not_covered_item_are_ignored() -> None:
+    """§5.19.1: an item's members the protocol does not define, and a
+    `detail` that is not a string, are ignored, not refused (a host may send
+    members a later version defines); the trace keeps `item`, `reason` and a
+    string `detail`."""
+    from grounded_agency import _core
+
+    run = _core.Run.start(
+        _core.Validator(ONTOLOGY, ROOT),
+        ROLLBACK_ON_FAIL,
+        "w",
+        header=None,
+        run_id="r",
+        now_ms=0,
+    )
+    a = run.next()
+    run.submit(
+        a["id"],
+        {"kind": "Output", "value": {"checkpoint_id": "cp1", "evidence_anchors": []}},
+        0,
+    )
+    a = run.next()
+    run.submit(
+        a["id"],
+        {
+            "kind": "Output",
+            "value": {"passed": False, "evidence_anchors": [], "confidence": 0.9},
+        },
+        0,
+    )
+    rollback = run.next()
+    sent = [
+        {
+            "item": "send to ops (r:3)",
+            "reason": "transmitted",
+            "since": "2026-11-16T00:00:00Z",
+        },
+        {"item": "task t1", "reason": "delegated", "detail": 5},
+    ]
+    run.submit(rollback["id"], {"kind": "RolledBack", "not_covered": sent}, 0)
+    assert run.next()["kind"] == "Failed"
+    traced = next(t for t in run.trace() if t["kind"] == "rolled_back")
+    assert traced["detail"]["not_covered"] == [
+        {"item": "send to ops (r:3)", "reason": "transmitted"},
+        {"item": "task t1", "reason": "delegated"},
+    ]

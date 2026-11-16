@@ -416,15 +416,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `configureLayer({destinations})` give the host's own; an invalid
     pattern is refused, and a `WorkflowRunner` policy given as a string
     rather than a list of patterns raises `TypeError`. While a policy is in
-    force, `GroundedAgentAdapter` also refuses (F504) a composite whose
+    force, `GroundedAgentAdapter` also refuses (F504) a call of an unbound
+    tool, which it cannot tell sends or not, and of a composite whose
     `invokes` reach a binding that performs `send`: it does not see nested
-    calls, so it cannot tell where they go.
+    calls, so it cannot tell where they go. In the Standard Agents binding,
+    the `allowed_destinations` of profiles given to a composite reach the
+    sends its code invokes, at any depth.
   - A `persist` or `recall` step of a workflow that targets 1.2 and binds
     `scope` fails R402 (`unsupported_scope`) unless the output echoes the
     scope. Steps that do not bind it, and those of a 1.0 or 1.1 workflow
     (where `scope` is W616 and passed on), are unchanged.
   - `RolledBack` may carry `not_covered`, which the executor validates (a
-    malformed one, `null` included, is refused), traces and records.
+    malformed one, `null` included, is refused), traces and records. An
+    item's members other than `item`, `reason` and a string `detail` are
+    ignored, not refused.
   - Validator: W624 (a 1.2 `rollback` step whose `restored` nothing
     checks), W625 (a 1.2 `send` approval whose `shows` hides its
     destination), W626 (an unknown literal memory scope), W614 for a
@@ -435,7 +440,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     whose `IdempotencyLog` is in memory (give it a path); a rollback by
     `Host` lists a send whose outcome is unknown as transmitted
     (`detail: "outcome unknown"`); with a
-    `MemoryStore`, a run's `run` scope ends with the run. `Host.__init__`
+    `MemoryStore`, a run's `run` scope ends with the run, in the host's
+    store and in `WorkflowRunner(memory=...)`'s (so `cancel` without a host
+    ends it too). `MemoryStore` stores and returns copies of values, and
+    refuses (`unsupported_ttl`, nothing stored) a `ttl` that would end an
+    entry after 9999-12-31T23:59:59.999Z, as the binding's `memoryTools`
+    do; `Host` gives a `persist` with no `key` one derived from the pass's
+    `idempotency_key`. `FileSnapshotStore` reads a scope item that names a
+    directory (`src`, `src/`, `./src`, an absolute path under the root) as
+    everything under it, lists an item outside the root in `excluded`,
+    never captures or restores `.audit/`, reports a rollback pattern that
+    names nothing captured as `not_captured` unless the checkpoint's scope
+    covers it, and computes `verification` over everything the checkpoint
+    captured; `GroundedAgentAdapter` and `WorkflowRunner` keep a file
+    evidence store out of every checkpoint. `Host.__init__`
     takes keyword-only `memory`, `idempotency`, `session_id`, `user`,
     `project` and `protected_paths`; a subclass that calls
     `super().__init__(tracker)` is unaffected.

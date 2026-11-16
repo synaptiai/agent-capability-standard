@@ -2412,9 +2412,10 @@ findings:
     `allowed_destinations` (§5.21.3); the executor fails a disallowed `send` with F504
     (`destination_not_allowed`) before approval or a checkpoint; safety layers refuse such calls
     (§5.18.10), the Python adapter (`GroundedAgentConfig.allowed_destinations`, a binding''s
-    `destination` pointer; a composite whose `invokes` reach a `send` binding is refused, since it does
-    not see nested calls) and the Standard Agents binding (`configureLayer`, which every `send` tool
-    obeys), so neither conformance statement lists the row; W625 reports a 1.2 `send` whose approval
+    `destination` pointer; an unbound tool and a composite whose `invokes` reach a `send` binding are
+    refused, since it cannot tell whether or where they send) and the Standard Agents binding
+    (`configureLayer`, which every `send` tool obeys; a composite''s profiles reach the sends it
+    invokes), so neither conformance statement lists the row; W625 reports a 1.2 `send` whose approval
     hides its destination; §12.5 documents Guarded Send; the send skill cites the policy. One grammar in
     core/src/destination.rs (Python through `_core`) and one in packages/acs-core/src/destinations.ts.
     Tests: core/tests/effects.rs, tests/test_destinations.py, tests/test_adapter_effects.py,

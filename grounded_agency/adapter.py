@@ -689,11 +689,6 @@ class GroundedAgentAdapter:
             max_age_minutes=self.config.expiry_minutes,
             snapshots=self.config.snapshots,
         )
-        if self.config.snapshots is not None:
-            # The audit log is never within a rollback's reach (section
-            # 4.4.1): the plugin's .claude/ always is out of it; this covers
-            # a log the configuration moved elsewhere.
-            self.config.snapshots.protect(self.config.audit_log_path)
         # The layer's redactor (STANDARD v1.2 §6.7): what it recognises as a
         # secret, the host's own values included. Its records, refusals and
         # evidence are redacted with it, and persist and audit calls whose
@@ -706,6 +701,17 @@ class GroundedAgentAdapter:
             if self.config.evidence_store is not None
             else EvidenceStore(redactor=self.redactor)
         )
+        if self.config.snapshots is not None:
+            # The record of what happened is never within a rollback's
+            # reach (section 4.4.1): the plugin's .claude/ and .audit/
+            # always are out of it; this covers an audit log the
+            # configuration moved elsewhere and an evidence store kept in a
+            # file (a restore would rewind it and swap the file under the
+            # store's open descriptor, losing every later record).
+            self.config.snapshots.protect(self.config.audit_log_path)
+            evidence_path = getattr(self.evidence_store, "path", None)
+            if isinstance(evidence_path, (str, os.PathLike)):
+                self.config.snapshots.protect(os.fspath(evidence_path))
         self._register_secrets()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
         # The layer's records (STANDARD 1.2.0 section 5.18.8). History
@@ -789,14 +795,26 @@ class GroundedAgentAdapter:
         """The F504 refusal of a call of a tool that performs ``send`` whose
         destination a destination policy in force does not allow, or whose
         destination this layer cannot tell (section 4.4.2, 5.18.10): read
-        at the binding's ``destination`` pointer. A composite that invokes,
-        transitively, a binding that performs ``send`` is refused too: this
-        layer does not see a tool's nested calls (section 5.18.4), so it
-        cannot tell where they send. None for any other call, and when no
-        policy is in force. The destination is not repeated: it is in the
-        call's input (section 6.7)."""
+        at the binding's ``destination`` pointer. A call of an unbound tool
+        is refused too: this layer cannot tell whether or where it sends
+        (section 5.18.2). So is a composite that invokes, transitively, a
+        binding that performs ``send``: this layer does not see a tool's
+        nested calls (section 5.18.4), so it cannot tell where they send.
+        None for any other call, and when no policy is in force. The
+        destination is not repeated: it is in the call's input (section
+        6.7)."""
         if not self._destinations:
             return None
+        if mapping is UNCLASSIFIED_TOOL:
+            return self._refuse(
+                ErrorCode.CONSTRAINT_VIOLATED,
+                mapping,
+                tool,
+                call,
+                f"{tool} has no binding, so this layer cannot tell whether or "
+                f"where it sends, and no destination policy in force can allow "
+                f"it (STANDARD 1.2.0 §4.4.2, §5.18.2)",
+            )
         if "send" in mapping.capabilities:
             refusal = self._direct_destination_refusal(mapping, tool, call, args)
             if refusal is not None:

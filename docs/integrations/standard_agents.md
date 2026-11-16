@@ -462,7 +462,8 @@ host's). A call whose destination no policy allows, or is not a string, is
 refused with F504 before any approval is asked for. The destination is
 `args.destination` unless the tool's `destination` option says where
 (`destination: (args) => args.to`); a tool's own `profiles` add their
-policies. `memoryTools()` gives a `persist` and a `recall` tool on the
+policies, and a composite's reach the sends its code invokes, at any depth.
+`memoryTools()` gives a `persist` and a `recall` tool on the
 thread's store (scope `session`), which pass the session cases of
 `tests/conformance/memory/store.json`. Its entries survive a restart of the
 host (the runtime MUST keep thread values across process restarts and
@@ -743,7 +744,10 @@ A grounded tool takes four more options:
   gave. Their grounding policies join `grounding`; and an output below
   their `minimum_confidence` fails with F504 (`reason_code`), after the
   grounding check. Their `allowed_destinations` join the layer's
-  destination policies for the tool's `send` calls (§4.4.2). A profile with
+  destination policies for the tool's `send` calls (§4.4.2) and, given to a
+  composite, for every send its code invokes, at any depth: a nested call
+  the binding attributes to the composite (§5.18.4) is checked against the
+  policies of the profiles of each composite enclosing it. A profile with
   an error throws; each warning (a misspelled member is W604, and ignored) goes
   to `onWarning`, `console.warn` by default, and stays in `warnings`. The
   profiles are part of every record's `config_sha256`.

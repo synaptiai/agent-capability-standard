@@ -566,12 +566,52 @@ fn rolled_back_not_covered_traced() {
 }
 
 #[test]
+fn rolled_back_ignores_members_it_does_not_define() {
+    // A member §5.19.1 does not define, and a `detail` that is not a string,
+    // are ignored, not refused: a host may send members a later version
+    // defines. The executor keeps `item`, `reason` and a string `detail`.
+    let (_, mut run) = verified(RecordMode::Actions);
+    let sent = json!([
+        {"item": "send to ops (r:3)", "reason": "transmitted", "since": "2026-11-16T00:00:00Z"},
+        {"item": "task t1", "reason": "delegated", "detail": 5},
+        {"item": "x", "reason": "x-vendor", "detail": "d", "extra": {"a": 1}}
+    ]);
+    let end = answer(
+        &mut run,
+        Response::RolledBack {
+            not_covered: Some(sent.as_array().unwrap().clone()),
+        },
+    );
+    assert_eq!(end["kind"], "Failed");
+    let kept = json!([
+        {"item": "send to ops (r:3)", "reason": "transmitted"},
+        {"item": "task t1", "reason": "delegated"},
+        {"item": "x", "reason": "x-vendor", "detail": "d"}
+    ]);
+    let traced = run
+        .trace()
+        .iter()
+        .find(|t| t["kind"] == "rolled_back")
+        .cloned()
+        .unwrap();
+    assert_eq!(traced["detail"]["not_covered"], kept);
+    let record = end["action_records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["capability"] == "rollback")
+        .cloned()
+        .unwrap();
+    assert_eq!(record["details"]["not_covered"], kept);
+}
+
+#[test]
 fn rolled_back_bad_reason_refused() {
     for bad in [
         json!({"item": "cfg", "reason": "failed"}),
         json!({"item": 1, "reason": "transmitted"}),
-        json!({"item": "a", "reason": "transmitted", "extra": 1}),
-        json!({"item": "a", "reason": "transmitted", "detail": 2}),
+        json!({"reason": "transmitted"}),
+        json!({"item": "a"}),
         json!("a"),
     ] {
         let (_, mut run) = verified(RecordMode::Approvals);

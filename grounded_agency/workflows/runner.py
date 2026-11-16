@@ -269,6 +269,13 @@ class Host:
                 user=self.user,
                 project=self.project,
             )
+            key = action.get("idempotency_key")
+            if capability == "persist" and inputs.get("key") is None and key:
+                # The key a persist without one is given is the same for
+                # every attempt and delivery of the pass (§4.4.2, §5.19.4),
+                # so a retry or a re-delivery replaces its entry and leaves
+                # no orphan under another key.
+                inputs = {**inputs, "key": _persist_key(str(key))}
             try:
                 operation = memory.persist if capability == "persist" else memory.recall
                 return {"kind": "Output", "value": operation(inputs, ctx)}
@@ -516,6 +523,7 @@ class WorkflowRunner:
         event_seen: Callable[[str, int], MutableSet[str]] | None = None,
         evidence_store: EvidenceStoreProtocol | None = None,
         redactor: Redactor | None = None,
+        memory: MemoryStore | None = None,
     ) -> None:
         """
         Args:
@@ -577,9 +585,18 @@ class WorkflowRunner:
                 nothing. Items that are not evidence anchors are skipped
                 (and logged). A store that raises never stops the run: the
                 failure is logged and counted (``record_capture_failure``).
+                A store kept in a file (its ``path``) is protected in the
+                snapshot store of each host the runner drives a run with
+                (:meth:`Host.protect`): no rollback reaches evidence
+                (§4.4.1).
             redactor: Applied to the ``Error`` messages the runner builds
                 from a host's exceptions and to the message of every
                 ``Error`` it submits (§6.7). The default patterns when None.
+            memory: The memory store whose ``run`` scope instance the
+                runner ends when a run ends (§4.5), whether or not a host
+                is at hand, as when :meth:`cancel` is called without one.
+                The ``run`` scope also ends in the memory of the host the
+                run ends with. Pass the store your hosts persist to.
         """
         self._engine = engine
         self._profiles = AppliedProfiles(
@@ -597,6 +614,7 @@ class WorkflowRunner:
         self._event_gates: dict[tuple[str, int], EventGate] = {}
         self._evidence_store = evidence_store
         self._redactor: Redactor = redactor or DEFAULT_REDACTOR
+        self._memory = memory
 
     def catalog(self) -> dict[str, Any]:
         """The catalog the engine holds, as the executor sees it."""
@@ -973,6 +991,7 @@ class WorkflowRunner:
         _check_key(key)
         if save is not None:
             _check_durable(host)
+        self._protect_records(host)
         now = host.now_ms()
         _check_ms(now)
         before = run.next()
@@ -1075,8 +1094,10 @@ class WorkflowRunner:
         ended ``deferred`` can be cancelled too. With ``save``, the
         cancelled state (``run.snapshot(key)``) is saved first (§5.19.4);
         else save it yourself. With ``host``, the action it was performing
-        is then withdrawn (:meth:`Host.withdraw`). The result is archived as
-        any end.
+        is then withdrawn (:meth:`Host.withdraw`). The run's ``run`` memory
+        scope ends (§4.5) in the runner's ``memory`` and in ``host``'s: a
+        deferred run cancelled with neither keeps its entries. The result
+        is archived as any end.
 
         Raises:
             ValueError: the run ended otherwise than ``deferred``.
@@ -1097,18 +1118,28 @@ class WorkflowRunner:
             host.withdraw(before, "cancelled")
         return self._ended(run, run.next(), host)
 
+    def _protect_records(self, host: Host) -> None:
+        """Keep the runner's evidence store, when it is a file, out of the
+        host's checkpoints (§4.4.1): evidence is the record of what
+        happened, which no rollback reaches. A restore would otherwise
+        rewind it and swap the file under the store's open descriptor."""
+        path = getattr(self._evidence_store, "path", None)
+        protect = getattr(host, "protect", None)
+        if isinstance(path, (str, os.PathLike)) and callable(protect):
+            protect(os.fspath(path))
+
     def _ended(
         self, run: _core.Run, action: Action, host: Host | None = None
     ) -> RunResult:
         """The result of an ended run, handed to the archive (§5.19.8). The
-        run's ``run`` memory scope ends with it, unless it ended
-        ``deferred``, whose entries last until it is resumed and ends, or is
-        cancelled (§4.5)."""
-        memory = getattr(host, "memory", None)
-        if memory is not None and not (
-            action["kind"] == "Completed" and action.get("outcome") == "deferred"
-        ):
-            memory.end_scope("run", run.run_id)
+        run's ``run`` memory scope ends with it, in the runner's memory and
+        the host's, unless it ended ``deferred``, whose entries last until
+        it is resumed and ends, or is cancelled (§4.5)."""
+        if not (action["kind"] == "Completed" and action.get("outcome") == "deferred"):
+            stores = [self._memory, getattr(host, "memory", None)]
+            for i, memory in enumerate(stores):
+                if memory is not None and all(memory is not s for s in stores[:i]):
+                    memory.end_scope("run", run.run_id)
         result = self._result(run, action)
         if self._archive is not None:
             try:
@@ -1286,6 +1317,13 @@ class WorkflowRunner:
             checkpoint_id=action.get("checkpoint_id"),
             run_record=run.run_record(),
         )
+
+
+def _persist_key(idempotency_key: str) -> str:
+    """The key :meth:`Host.invoke_capability` gives a ``persist`` without
+    one: a name-based UUID of the pass's idempotency key, the same for every
+    attempt and delivery of the pass."""
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"acs:persist:{idempotency_key}").hex
 
 
 def _check_durable(host: Host) -> None:

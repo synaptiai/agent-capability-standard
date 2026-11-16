@@ -471,6 +471,58 @@
       ]
     },
     {
+      "name": "ttl_unrepresentable",
+      "scopes": [
+        "session"
+      ],
+      "why": "expires_at is a date-time, whose last instant is 9999-12-31T23:59:59.999Z: a ttl that ends an entry later is refused, and nothing is stored (a refused write changes nothing); one that ends it at that instant is stored",
+      "ops": [
+        {
+          "at": 1,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session",
+            "ttl": "P100000000D"
+          },
+          "error": "unsupported_ttl"
+        },
+        {
+          "at": 253402214399999,
+          "persist": {
+            "key": "last",
+            "data": 3,
+            "scope": "session",
+            "ttl": "P1D"
+          },
+          "expect": {
+            "stored": true,
+            "expires_at": "9999-12-31T23:59:59.999Z"
+          }
+        },
+        {
+          "at": 253402214400000,
+          "persist": {
+            "key": "k",
+            "data": 2,
+            "scope": "session",
+            "ttl": "P1D"
+          },
+          "error": "unsupported_ttl"
+        },
+        {
+          "at": 253402214400000,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    },
+    {
       "name": "ijson_round_trip",
       "scopes": [
         "session"

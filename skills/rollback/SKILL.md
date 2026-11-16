@@ -95,7 +95,7 @@ hooks:
 
 Execute **rollback** to return what a checkpoint captured to the state it had when the checkpoint was taken, whoever changed it since (STANDARD v1.2 §4.4.1). This is the recovery mechanism in the CAVR (Checkpoint-Act-Verify-Rollback) pattern, used when mutations fail or produce undesired outcomes.
 
-A rollback changes the world back, not the account of it: the record of what happened (the audit log, `.claude/`, the host's checkpoint and approval state, the trace, the transcript) is never rolled back. It reaches only what its checkpoint captured: a transmission a `send` made since is reported as `not_covered` (`transmitted`), as is a delegate's change outside the checkpoint (`delegated`).
+A rollback changes the world back, not the account of it: the record of what happened (the audit logs, `.claude/` and `.audit/`, the host's checkpoint and approval state, the trace, the transcript) is never rolled back. It reaches only what its checkpoint captured: a transmission a `send` made since is reported as `not_covered` (`transmitted`), as is a delegate's change outside the checkpoint (`delegated`).
 
 **Success criteria:**
 - Everything the rollback concerns is back in its checkpointed state, and `restored` says so
@@ -120,14 +120,14 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - An expired or used checkpoint can still be restored while its content is kept: validity limits what a checkpoint authorises, not what it restores (STANDARD 1.2.0 §4.4.1, §5.2.2)
    - If its content is gone, report `restored: false` with `{item: "*", reason: discarded}`
 
-2) **Read what changed** (read-only): `git diff --name-status <sha> -- <paths>` (tracked changes, for `changes_reverted`) and `git ls-files --others --exclude-standard -- <paths>`; files **created since** are the untracked ones not in the checkpoint's `excluded`
+2) **Read what changed** (read-only): `git diff --name-status <sha> -- <paths>` (tracked changes, for `changes_reverted`) and `git ls-files --others --exclude-standard -- <paths>`; files **created since** are the untracked ones not in the checkpoint's `excluded` and not under `.claude/` or `.audit/` (the audit logs, never rolled back)
 
 3) **Restore by mechanism**. The git form is one line, a gated `mutate` (a fresh checkpoint and an approval: it overwrites the current state):
    - `restore_kind: stash`: `git restore --source=<sha> --worktree -- <paths> && git restore --source=<sha>^2 --staged -- <paths>`; `restore_kind: head`: `git restore --source=<sha> --staged --worktree -- <paths>`
    - Then, only when files were created since, `&& rm -f -- <created paths>`; never `git clean` with an empty path list
    - `git stash apply <sha>` aborts once a file it touches changed since the checkpoint; a bare `git stash pop` or `apply` is refused (F503)
    - `file_copy`: copy each file back from the manifest, and remove the files created in scope since
-   - Never touch `.claude/`, the audit log or the host's state
+   - Never touch `.claude/`, `.audit/` (the audit logs) or the host's state
 
 4) **Verify** (read-only): `git diff --quiet <sha> -- <paths>` and the untracked list again, for `verification`
 
@@ -154,7 +154,7 @@ changes_reverted:
     operation: create | modify | delete | other  # what was undone
     summary: string
 verification:
-  digest: string  # digest of the restored content, computed as the checkpoint's was
+  digest: string  # digest of the restored content, computed as the checkpoint's was (over all it captured)
   match: boolean  # whether it matches the checkpoint's digest
 previous_state:  # state before rollback
   summary: string
@@ -300,7 +300,7 @@ Apply the following verification patterns:
 - CRITICAL: Never report `restored: true` for a rollback that did not complete
 - Clean up the files created in scope since the checkpoint
 - An expired or used checkpoint can be restored (STANDARD 1.2.0 §5.2.2); the safety layer refuses a restore only when no checkpoint was ever taken (F503)
-- Never roll back the record of what happened: `.claude/`, the audit log, the host's checkpoint and approval state
+- Never roll back the record of what happened: `.claude/`, `.audit/` (the audit logs), the host's checkpoint and approval state
 - A transmission is not undone: report it `transmitted`, and compensate in a step of its own
 - If verification fails, STOP and alert - do not proceed
 

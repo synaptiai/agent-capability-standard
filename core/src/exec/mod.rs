@@ -2107,18 +2107,21 @@ fn fill_idempotency_key(state: &mut State) {
     }
 }
 
-/// Why `items`, a `RolledBack`'s `not_covered`, is malformed, if it is
-/// (§4.4.1, §5.19.1): each an object with a string `item`, a `reason` that
-/// is `transmitted`, `delegated`, `outside_scope` or an `x-` reason, an
-/// optional string `detail`, and nothing else.
-pub(crate) fn not_covered_ok(items: &[Value]) -> Result<(), String> {
+/// `items`, a `RolledBack`'s `not_covered`, as the executor keeps them, or
+/// why the list is malformed (§4.4.1, §5.19.1): each must be an object with
+/// a string `item` and a `reason` that is `transmitted`, `delegated`,
+/// `outside_scope` or an `x-` reason. Each is kept with its `item`, its
+/// `reason` and its `detail` when that is a string: any other member, one a
+/// later version may define included, is ignored.
+pub(crate) fn not_covered_kept(items: &[Value]) -> Result<Vec<Value>, String> {
+    let mut kept = Vec::with_capacity(items.len());
     for (i, item) in items.iter().enumerate() {
         let Some(m) = item.as_object() else {
             return Err(format!("not_covered[{i}] is not an object"));
         };
-        if !m.get("item").is_some_and(Value::is_string) {
+        let Some(name) = m.get("item").filter(|v| v.is_string()) else {
             return Err(format!("not_covered[{i}].item is not a string"));
-        }
+        };
         let reason = m.get("reason").and_then(Value::as_str).unwrap_or_default();
         let x_reason = grounding::vendor(reason) && reason.len() <= 2 + 1 + 61;
         if !(matches!(reason, "transmitted" | "delegated" | "outside_scope") || x_reason) {
@@ -2126,17 +2129,15 @@ pub(crate) fn not_covered_ok(items: &[Value]) -> Result<(), String> {
                 "not_covered[{i}].reason must be transmitted, delegated, outside_scope or an x- reason; a change the checkpoint captured that the host did not restore makes the answer an Error"
             ));
         }
-        if m.get("detail").is_some_and(|d| !d.is_string()) {
-            return Err(format!("not_covered[{i}].detail is not a string"));
+        let mut one = serde_json::Map::new();
+        one.insert("item".into(), name.clone());
+        one.insert("reason".into(), json!(reason));
+        if let Some(detail) = m.get("detail").filter(|d| d.is_string()) {
+            one.insert("detail".into(), detail.clone());
         }
-        if let Some(k) = m
-            .keys()
-            .find(|k| !matches!(k.as_str(), "item" | "reason" | "detail"))
-        {
-            return Err(format!("not_covered[{i}] has an unknown member '{k}'"));
-        }
+        kept.push(Value::Object(one));
     }
-    Ok(())
+    Ok(kept)
 }
 
 /// Why `v` is not an `agent_identity` (`schemas/agent_identity_schema.yaml`),
