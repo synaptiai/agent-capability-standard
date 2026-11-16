@@ -74,10 +74,13 @@ pub fn is_workflow_name(s: &str) -> bool {
 }
 
 /// Split a qualified workflow id (§5.1.1), `<catalog id>/<workflow name>`:
-/// exactly one `/`, a catalog id on its left and an identifier on its right.
+/// a catalog id before the first `/` and a non-empty workflow name after
+/// it. The name is any workflow name (§5.1: an identifier is only a SHOULD,
+/// W620), so a library's `Shared Check` is reached as `acme.lib/Shared
+/// Check`; a name holding `/` names no workflow of a set (S303 there).
 pub fn split_qualified(s: &str) -> Option<(&str, &str)> {
     let (id, name) = s.split_once('/')?;
-    (is_catalog_id(id) && is_identifier(name)).then_some((id, name))
+    (is_catalog_id(id) && !name.is_empty()).then_some((id, name))
 }
 
 /// Semantic Versioning 2.0.0: `MAJOR.MINOR.PATCH`, numeric identifiers
@@ -160,10 +163,21 @@ mod tests {
             split_qualified("acs.reference/world_model_build"),
             Some(("acs.reference", "world_model_build"))
         );
+        // The name is any non-empty workflow name, as §5.1 allows.
+        assert_eq!(
+            split_qualified("acme.lib/Shared Check"),
+            Some(("acme.lib", "Shared Check"))
+        );
+        assert_eq!(
+            split_qualified("acme.lib/shared.check"),
+            Some(("acme.lib", "shared.check"))
+        );
+        assert_eq!(split_qualified("a/9x"), Some(("a", "9x")));
+        assert_eq!(split_qualified("a/b/c"), Some(("a", "b/c")));
         assert_eq!(split_qualified("plain"), None);
-        assert_eq!(split_qualified("a/b/c"), None);
+        assert_eq!(split_qualified("a/"), None);
         assert_eq!(split_qualified("Bad/x"), None);
-        assert_eq!(split_qualified("a/9x"), None);
+        assert_eq!(split_qualified("/x"), None);
     }
 
     #[test]

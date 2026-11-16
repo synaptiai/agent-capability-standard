@@ -66,7 +66,8 @@ the Rust core in `core/`).
   (further catalogs of the fixture's catalog set, under
   `tests/fixtures/catalogs/`), `agents` (agent manifests, under
   `tests/fixtures/agents/`) and `expected_locations` (each a `code` and the
-  `path` it must be reported at, §9.8) (§10.3)
+  `path` it must be reported at, or, for a finding with no `path`, the
+  `catalog`, `workflow` and `field` it must carry, §9.8) (§10.3)
 - Expression fixtures, language-neutral:
   `tests/conformance/expressions/eval.json` (evaluation results and runtime
   errors) and `tests/conformance/expressions/check.json` (static

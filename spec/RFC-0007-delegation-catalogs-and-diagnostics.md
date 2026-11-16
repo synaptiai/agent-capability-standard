@@ -148,7 +148,10 @@ or `:` before the first digit or `-`, the leading ASCII letters, lowercased
 (`acme-large-2` → `acme`, `z3-mini` → `z`). The rule needs no list of
 lines and is pinned by vectors; a literal outside `[a-z][a-z0-9_-]*` is
 W620. An identity (and the world state's copy of it) and `effective` may
-carry the `model_id`, checked against each other under `identity@1`.
+carry the `model_id`, checked against each other under `identity@1` in a
+workflow that targets 1.2. Below 1.2 the identity is schema 1.0.0's, where
+`model_id` is an unknown member, so the executor reads it neither for its
+type nor for agreement, as 1.1 did.
 
 ### 7) Catalog manifests and qualified ids
 A top-level `catalog` mapping without `steps` is the manifest (`id`,
@@ -161,7 +164,9 @@ another loaded catalog that lacks the workflow, or hides it, is V107; every
 other unresolved target, a bare name included, stays W607, so no 1.1 target
 changes code. Cycles, triggers, inputs, waits and unattended propagation work
 across the set. The executor resolves computed targets the same way.
-Workflow names SHOULD be identifiers (W620). A 1.1 consumer resolves names
+Workflow names SHOULD be identifiers (W620), but a qualified id's name is
+whatever follows its first `/`, any workflow name, so an exported workflow
+whose name is not an identifier is still reachable. A 1.1 consumer resolves names
 in one catalog only, so an `invoke` target that is a qualified id and names
 no workflow of its own catalog (whether or not a catalog given has its id,
 so the warning does not depend on the set validated), and a catalog manifest
@@ -207,7 +212,8 @@ triggers are left to the host: they declare no overlap policy.
 Standard 1.2.0 is a MINOR release. No workflow valid under 1.1 becomes
 invalid, and no 1.1 workflow runs differently, unless it opts in:
 
-- by declaring 1.2 (W621, W622, the `read_only` attestation) and, in such a
+- by declaring 1.2 (W621, W622, the `read_only` attestation, an identity's
+  `model_id` typed and compared with `effective.model_id`) and, in such a
   workflow, `agents` (target maxima, V107, no delegation without manifests,
   task checks, executor refusals); `agents` in a workflow that does not
   declare 1.2 is ignored, as a 1.1 consumer ignores it, and reported W616
@@ -240,20 +246,23 @@ that does not fit the agent's declaration, and `effective_flags` raises for
 a delegate step whose target maxima are unknown.
 
 ## Conformance test updates
-- Validator fixtures (`tests/fixtures/`): 36 new fixtures, with agent
+- Validator fixtures (`tests/fixtures/`): 38 new fixtures, with agent
   manifests under `tests/fixtures/agents/` and catalogs of sets under
   `tests/fixtures/catalogs/`; every fixture that uses a 1.2 feature has a
   1.2 header, except the four that pin its W616 under a 1.1 header
   (`agents`, `continues`, a catalog manifest and a qualified `invoke`
   target), and each states its exact
   error and warning sets; expectations gain `catalogs`, `agents` and
-  `expected_locations`, and two existing fixtures pin locations. The Rust,
+  `expected_locations` (a `code` and its `path`, or, for a finding with no
+  `path`, its `catalog`, `workflow` and `field`), and two existing fixtures
+  pin locations. The Rust,
   Python and WebAssembly harnesses pass the catalogs and manifests alike.
-- Runtime fixtures (`tests/conformance/runtime/`): eighteen new runs for
+- Runtime fixtures (`tests/conformance/runtime/`): twenty new runs for
   raised flags, target, unknown-manifest and task refusals, `read_only`
   attestation (not retried; 1.2 without `agents`; 1.1 unchanged),
   `continues` (fresh, null, its own `task_id`, a stale result not matched;
-  1.1 unchanged), catalog sets, `model_id` consistency, exact family
+  1.1 unchanged), catalog sets (a qualified id whose name is not an
+  identifier included), `model_id` consistency (1.1 unchanged), exact family
   comparison, and target maxima with an applied profile
   (`agents_maxima_with_profile_person`,
   `agents_read_only_maxima_with_profile_checkpoint`); the format gains

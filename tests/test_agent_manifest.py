@@ -87,10 +87,33 @@ def test_check_refuses_what_the_core_refuses(registry: CapabilityRegistry) -> No
         (_manifest("a", ["x", "x"]), "twice"),
         (_manifest("a", [], flags={}), "unknown member"),
         (_manifest("a", [], task=[]), "'task'"),
+        (_manifest("a", [], task=None), "'task' must be a mapping"),
         (_manifest("a", [], task={"t": 1}), "task input 't': must be a mapping"),
     ]:
         with pytest.raises(ValueError, match=why):
             check_agent_manifest(bad, registry)
+
+
+@pytest.mark.parametrize("task", [None, [], "any"])
+def test_a_task_that_is_not_a_mapping_is_refused_as_the_core_refuses(
+    registry: CapabilityRegistry, task: Any
+) -> None:
+    """``task`` present means a mapping (``agent_manifest_schema.yaml``):
+    a null one does not read as "accepts any task" in the SDK while the
+    core refuses the manifest at start (§5.15.1)."""
+    from grounded_agency import _core
+
+    bad = _manifest("a", ["retrieve"], task=task)
+    why = "'task' must be a mapping of task inputs"
+    with pytest.raises(ValueError, match=why):
+        check_agent_manifest(bad, registry)
+    with pytest.raises(ValueError, match=why):
+        AgentRegistry(registry).register_manifest(bad)
+    with pytest.raises(ValueError, match=why):
+        _core.Validator(ONTOLOGY, ROOT).validate(
+            {"w": {"goal": "g", "risk": "low", "spec_version": "1.2", "steps": []}},
+            agents=[bad],
+        )
 
 
 BAD_TASK_INPUTS = [

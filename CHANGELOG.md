@@ -374,11 +374,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   does not attest `effective.read_only` fails the step (R402), not retried.
   A delegation that binds `continues` and attests a fresh context, or
   returns the `task_id` it continues, fails (R402). An attested identity's
-  `model_id` must equal `effective.model_id` (R402).
-- Executor (every Standard version): an identity's `model_id` is a string,
-  as `agent_identity_schema.yaml` 1.1.0 says; an identity whose `model_id`
-  is not is malformed, so it refuses the run's start as the actor identity
-  and fails what reports it, like an identity with a non-string `role`.
+  `model_id` must equal `effective.model_id` (R402). An identity's
+  `model_id` is a string, as `agent_identity_schema.yaml` 1.1.0 says: an
+  identity whose `model_id` is not is malformed, so it refuses the run's
+  start as the actor identity and fails what reports it, like an identity
+  with a non-string `role`. Below 1.2 the executor reads no identity's
+  `model_id`, as 1.1 did not (schema 1.0.0 does not define it).
 - Validator, workflows that target 1.0 or 1.1: the workflow field `agents`
   and the `delegate` input `continues` are W616 where 1.1 reported W604
   (with no version, W605 alone); the executor still ignores `agents` and
@@ -669,20 +670,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `AgentDescriptor.from_manifest`, `.manifest()`, `.maxima()`,
     `AgentRegistry.register_manifest`.
   - TypeScript package: `manifestMaxima`, `joinMaxima`, `checkTask`,
+    `workflowTarget`, `agentsApply`,
     `modelFamily`, `isModelFamily`, `selectImplementation`,
     `UnsupportedDomainError`, `isDomainId`, `issuePath`; `CoreContext`'s
     `validate`, `start` and `restore` take `catalogs` and `agents`
     (`SetArgs`). Binding:
-    `deriveAgentManifest` (follows `invokes`, with `invoked` for helper
-    tools the prompts do not offer; refuses unannotated tools, invoked tools
-    not given, declared flags stricter than a tool's capabilities and missing
-    subagent manifests), `taskRefusal`, `declaredAgents`, `lintDelegationTargets`;
-    `AgentIdentity.model_id`.
-  - Conformance: 36 workflow fixtures with `catalogs`, `agents` and
-    `expected_locations`; 18 runtime fixtures (two of them,
-    `agents_maxima_with_profile_person` and
+    `deriveAgentManifest` (loads each `acs` annotation as a binding record,
+    as the layer does, and follows `invokes`, with `invoked` for helper
+    tools the prompts do not offer; refuses unannotated tools, annotations
+    that do not load, invoked tools not given, declared flags stricter than
+    a tool's capabilities and missing subagent manifests), `taskRefusal`,
+    `declaredAgents` and `lintDelegationTargets` (both take the catalog's
+    version header; `agents` has effect only in a workflow that targets
+    1.2); `AgentIdentity.model_id`.
+  - Conformance: 38 workflow fixtures with `catalogs`, `agents` and
+    `expected_locations` (a `code` and its `path`, or for a finding with no
+    `path` its `catalog`, `workflow` and `field`); 20 runtime fixtures (two
+    of them, `agents_maxima_with_profile_person` and
     `agents_read_only_maxima_with_profile_checkpoint`, with a profile
-    applied; `delegate_continues_v11_unchecked` pins 1.1); normative vectors
+    applied; `delegate_continues_v11_unchecked` and
+    `delegate_identity_model_id_v11_unchecked` pin 1.1); normative vectors
     `tests/conformance/domains/match.json`, `agents/maxima.json`,
     `families/derive.json` and `inquiry/answers.json`.
 - Approval digest vectors of kind `tool_call` for a call's shown values.

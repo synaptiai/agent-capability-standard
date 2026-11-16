@@ -37,6 +37,23 @@ def question_key(question: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _json_equal(a: Any, b: Any) -> bool:
+    """Equality of two JSON values: a boolean never equals a number (in
+    Python ``True == 1``), numbers compare by value, and lists and objects
+    member by member."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if isinstance(a, int | float) and isinstance(b, int | float):
+        return a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(
+            _json_equal(x, y) for x, y in zip(a, b, strict=True)
+        )
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return a.keys() == b.keys() and all(_json_equal(a[k], b[k]) for k in a)
+    return type(a) is type(b) and a == b
+
+
 def _has_type(question: Mapping[str, Any], value: Any) -> bool:
     kind = question.get("answer_type")
     if kind == "text":
@@ -47,7 +64,9 @@ def _has_type(question: Mapping[str, Any], value: Any) -> bool:
         return isinstance(value, int | float) and not isinstance(value, bool)
     if kind == "choice":
         options = question.get("options")
-        return isinstance(options, list) and value in options
+        return isinstance(options, list) and any(
+            _json_equal(option, value) for option in options
+        )
     return True
 
 
@@ -60,7 +79,10 @@ def match_answers(
     Raises:
         AnswerError: When a host must not deliver ``item`` (§5.13.1).
     """
-    if item.get("inquiry_id") != inquiry_output.get("inquiry_id"):
+    inquiry_id = inquiry_output.get("inquiry_id")
+    if not isinstance(inquiry_id, str) or item.get("inquiry_id") != inquiry_id:
+        # Answers correlate on the inquiry's id (§5.13.1): an inquiry with
+        # none has no answers to deliver.
         raise AnswerError(
             "other_inquiry",
             f"the item answers inquiry {item.get('inquiry_id')!r}, "

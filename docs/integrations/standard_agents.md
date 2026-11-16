@@ -983,12 +983,15 @@ perform, what the tools they invoke perform (a composite's `invokes`,
 §5.18.4), and what its subagents may: `deriveAgentManifest`
 (`examples/standard_agents/src/acs/agents.ts`) builds an agent's manifest
 from the `acs` annotations of those tools, following `invokes` transitively,
-and from its subagents' manifests. Pass the helper tools a composite invokes
+and from its subagents' manifests. It loads the annotations as binding
+records, as the layer does, and reads the capabilities from what loads.
+Pass the helper tools a composite invokes
 but the prompts do not offer as `invoked`. A manifest has no member for
 flags: its maxima are its capabilities'. So `deriveAgentManifest` throws
-`ManifestDerivationError` when an offered or invoked tool other than a
-control-only one has no annotation (`unannotated`), a tool invokes one it is
-not given (`unresolvedInvokes`), a tool's declared `flags` are stricter than
+`ManifestDerivationError` when an offered or invoked tool has no annotation
+(`unannotated`), an annotation does not load, which the layer would treat
+as an unbound `mutate` at high risk (`malformed`, with its diagnostics), a
+tool invokes one it is not given (`unresolvedInvokes`), a tool's declared `flags` are stricter than
 its capabilities' ontology flags (`raisedFlags`), or a subagent's manifest is
 missing (`missingChildren`): each would leave out what the agent can do and
 lower the delegate step's flags. Annotate every tool with its binding record,
@@ -996,9 +999,12 @@ bind a tool whose flags exceed its capability's by the capability that has
 them, and give every invoked tool before declaring `agents`. More of the
 mapping:
 
-- A workflow's `agents` are the parent's declared relationships:
-  `lintDelegationTargets` reports a listed agent with no relationship as
-  V107 at `agents[i]`, with its `path` (§9.8).
+- In a workflow that targets 1.2, its `agents` are the parent's declared
+  relationships: `lintDelegationTargets` reports a listed agent with no
+  relationship as V107 at `agents[i]`, with its `path` (§9.8). Below 1.2,
+  or with no version, `agents` has no effect: `declaredAgents` returns
+  `null` and the lint reports nothing. Both take the catalog's version
+  header (`null` for none), as §11.5 requires of a binding.
 - A manifest's `task` is the subagent's declared arguments:
   `subagent_arguments_required` is the host side of a task refusal
   (`taskRefusal`, the package's `checkTask`).

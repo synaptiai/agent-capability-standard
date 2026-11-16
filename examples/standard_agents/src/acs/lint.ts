@@ -13,7 +13,7 @@
  * `checkBindings`, which the Python loader mirrors.
  */
 import type { AgentDefinition } from '@standardagents/spec';
-import { annotationRecord, checkBindings, type BindingDiagnostic } from '@synaptiai/acs-core';
+import { agentsApply, annotationRecord, checkBindings, type BindingDiagnostic } from '@synaptiai/acs-core';
 import { ANNOTATION_KEY, statedName } from './grounded.js';
 import type { CapabilityId } from './ontology.js';
 
@@ -189,13 +189,18 @@ function pointerToken(token: string): string {
  * agent that runs it (STANDARD 1.2.0 §5.15.2): Standard Agents composes
  * agents statically, so each agent the workflow's `agents` lists must be a
  * subagent the parent has a relationship to. A listed agent with none is
- * V107 at `agents[i]`, with its `path` (§9.8).
+ * V107 at `agents[i]`, with its `path` (§9.8). `header` is the catalog
+ * file's version header (`null` for none, §11.5): in a workflow that
+ * targets 1.0 or 1.1, or declares no version, `agents` has no effect and
+ * nothing is checked.
  */
 export function lintDelegationTargets(
   workflowName: string,
   workflow: Record<string, unknown>,
+  header: string | null,
   relationships: Iterable<string>,
 ): LintDiagnostic[] {
+  if (!agentsApply(workflow, header)) return [];
   const listed = workflow['agents'];
   if (!Array.isArray(listed)) return [];
   const known = new Set(relationships);

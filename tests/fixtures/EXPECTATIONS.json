@@ -1185,6 +1185,27 @@
       }
     ]
   },
+  "fail_qualified_invoke_names": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "V107"
+    ],
+    "expected_warning_codes": [
+      "W620"
+    ],
+    "catalogs": [
+      "catalogs/names_lib.workflow_catalog.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "V107",
+        "path": "/check/steps/2/workflow_id"
+      }
+    ],
+    "note": "Qualified ids whose workflow names are not identifiers resolve; a missing one is V107 (Standard v1.2 \u00a75.1.1)"
+  },
   "pass_qualified_invoke_unloaded_warn": {
     "should_pass": true,
     "level": "L1",
@@ -1215,6 +1236,26 @@
     "catalogs": [
       "catalogs/cycle_lib.workflow_catalog.yaml"
     ]
+  },
+  "fail_library_header_version": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "V109"
+    ],
+    "catalogs": [
+      "catalogs/future_lib.workflow_catalog.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "V109",
+        "catalog": "acs.fixtures.future",
+        "workflow": "shared",
+        "field": "# Standard version"
+      }
+    ],
+    "note": "A library's header declares an unsupported version: V109 names the library and its workflow's own name, with no path (Standard v1.2 \u00a79.8, \u00a711.5)"
   },
   "pass_catalog_manifest": {
     "should_pass": true,

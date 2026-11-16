@@ -904,7 +904,9 @@ with its `header`) and `agents` (agent manifests); the harnesses (Rust,
 Python and the TypeScript package's WebAssembly replay) start and restore
 the run with them. Validator fixtures may give the same keys in
 `tests/fixtures/EXPECTATIONS.json`, and `expected_locations`: each a `code`
-and the `path` (§9.8) it must be reported at.
+and the `path` (§9.8) it must be reported at, or, for a finding with no
+`path` (one about a version header), the `catalog`, `workflow` and `field`
+it must carry.
 
 The runtime fixtures are normative for an executor of class EX
 ([STANDARD §10.5](../../spec/STANDARD-v1.2.0.md#105-executor-conformance)),

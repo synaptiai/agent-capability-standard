@@ -989,31 +989,48 @@ fn submit_refuses_a_malformed_or_contradictory_identity() {
 #[test]
 fn start_refuses_a_malformed_actor_identity() {
     let ctx = ctx();
+    let mut v12 = one_step();
+    v12["w"]["spec_version"] = serde_json::json!("1.2");
+    let start = |catalog: &Value, identity: &Value| {
+        let options = StartOptions {
+            actor_identity: Some(identity.clone()),
+            ..opts()
+        };
+        Run::start(&ctx, catalog, "w", topic(), options)
+    };
     for bad in [
         serde_json::json!({"kind": "agent"}),
         serde_json::json!({"principal": "a", "kind": "agent", "role": 1}),
-        // agent_identity_schema.yaml types model_id as a string.
+    ] {
+        for catalog in [one_step(), v12.clone()] {
+            assert!(
+                matches!(
+                    start(&catalog, &bad),
+                    Err(acs_core::exec::StartError::Identity(_))
+                ),
+                "{bad}"
+            );
+        }
+    }
+    // agent_identity_schema.yaml 1.1.0 (Standard 1.2) types model_id as a
+    // string; 1.0.0 (Standard 1.1) does not define it, so a 1.1 run allows
+    // any value, as it did.
+    for odd in [
         serde_json::json!({"principal": "a", "kind": "agent", "model_id": 5}),
         serde_json::json!({"principal": "a", "kind": "agent", "model_id": {"x": 1}}),
     ] {
-        let options = StartOptions {
-            actor_identity: Some(bad.clone()),
-            ..opts()
-        };
         assert!(
             matches!(
-                Run::start(&ctx, &one_step(), "w", topic(), options),
+                start(&v12, &odd),
                 Err(acs_core::exec::StartError::Identity(_))
             ),
-            "{bad}"
+            "{odd}"
         );
+        assert!(start(&one_step(), &odd).is_ok(), "{odd}");
     }
     let good = serde_json::json!({"principal": "a", "kind": "agent", "model_id": "acme-large-2"});
-    let options = StartOptions {
-        actor_identity: Some(good),
-        ..opts()
-    };
-    assert!(Run::start(&ctx, &one_step(), "w", topic(), options).is_ok());
+    assert!(start(&v12, &good).is_ok());
+    assert!(start(&one_step(), &good).is_ok());
 }
 
 #[test]

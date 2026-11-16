@@ -83,3 +83,32 @@ export function checkTask(
       .map(([n]) => n),
   };
 }
+
+/** `MAJOR.MINOR[.PATCH]`, each part ASCII digits (§11.5). */
+function parseVersion(v: string): [number, number] | null {
+  const parts = v.split('.');
+  if (parts.length < 2 || parts.length > 3 || !parts.every((p) => /^[0-9]+$/.test(p))) return null;
+  return [Number(parts[0]), Number(parts[1])];
+}
+
+/**
+ * The Standard version a workflow targets (§11.5): its `spec_version` when
+ * that is a string `MAJOR.MINOR[.PATCH]`, else the catalog file's header
+ * (`# Standard version: ...`, which the host read with the catalog and
+ * passes, `null` for none) when that parses, else `null`.
+ */
+export function workflowTarget(workflow: Record<string, unknown>, header: string | null): [number, number] | null {
+  const own = workflow['spec_version'];
+  const declared = typeof own === 'string' ? parseVersion(own) : null;
+  return declared ?? (header === null ? null : parseVersion(header));
+}
+
+/**
+ * Whether a workflow's `agents` has effect (§5.15.2): it targets 1.2 or
+ * later. In a workflow that targets 1.0 or 1.1, or declares no version,
+ * `agents` has no effect (W616, or W605), as for a 1.1 consumer.
+ */
+export function agentsApply(workflow: Record<string, unknown>, header: string | null): boolean {
+  const target = workflowTarget(workflow, header);
+  return target !== null && (target[0] > 1 || (target[0] === 1 && target[1] >= 2));
+}

@@ -194,8 +194,16 @@ fn every_validator_fixture_gives_its_expected_codes() {
             .into_iter()
             .flatten()
         {
+            // The code, and every other member the expectation gives: its
+            // `path`, or for a finding with no `path` its `catalog`,
+            // `workflow` and `field`.
+            let members = loc.as_object().unwrap();
             let found = report["diagnostics"].as_array().unwrap().iter().any(|d| {
-                d["code"] == loc["code"] && d["location"].get("path") == Some(&loc["path"])
+                d["code"] == loc["code"]
+                    && members
+                        .iter()
+                        .filter(|(k, _)| *k != "code")
+                        .all(|(k, v)| d["location"].get(k) == Some(v))
             });
             assert!(found, "{name}: {loc} not located");
         }

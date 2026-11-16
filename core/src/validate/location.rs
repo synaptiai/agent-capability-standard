@@ -11,18 +11,18 @@ use crate::catalogs::Namespace;
 pub(crate) const HEADER_FIELD: &str = "# Standard version";
 
 /// Finish a report's locations: a finding in another catalog of the set
-/// gets `catalog` and its workflow's own name; every finding about a
-/// catalog document gets `path`. A finding about another document (one
-/// with `profile` or `tool`) or about the version header gets no `path`.
+/// gets `catalog` and its workflow's own name, also one about that
+/// catalog's version header; every other finding about a catalog document
+/// gets `path`. A finding about another document (one with `profile` or
+/// `tool`) is left as it is, and one about the version header gets no
+/// `path`: the header is a comment, outside the document.
 pub(crate) fn finish(ns: &Namespace<'_>, report: &mut Report) {
     for d in &mut report.diagnostics {
         let loc = &d.location;
-        if loc.contains_key("profile")
-            || loc.contains_key("tool")
-            || loc.get("field").and_then(Value::as_str) == Some(HEADER_FIELD)
-        {
+        if loc.contains_key("profile") || loc.contains_key("tool") {
             continue;
         }
+        let header = loc.get("field").and_then(Value::as_str) == Some(HEADER_FIELD);
         let mut workflow: Option<String> = None;
         if let Some(key) = loc.get("workflow").and_then(Value::as_str) {
             let c = ns.catalog_of(key);
@@ -36,6 +36,9 @@ pub(crate) fn finish(ns: &Namespace<'_>, report: &mut Report) {
                     .insert("workflow".to_string(), Value::String(name.clone()));
             }
             workflow = Some(name);
+        }
+        if header {
+            continue;
         }
         let step = d.location.get("step").and_then(Value::as_u64);
         let tokens = d.field_tokens();
@@ -128,5 +131,41 @@ mod tests {
         assert_eq!(paths[..3], [None, None, None]);
         assert_eq!(paths[3], Some(&json!("/w")));
         assert_eq!(report.diagnostics[0].location["field"], "trust_weights.x");
+    }
+
+    #[test]
+    fn a_header_finding_in_another_catalog_names_that_catalog() {
+        // §9.8: `workflow` is the name in its own catalog and `catalog` is
+        // set, for a finding about the other catalog's header too.
+        let primary = json!({"w": {"steps": []}});
+        let lib = json!({"catalog": {"id": "acme.lib", "version": "1.0.0"},
+                         "shared": {"steps": []}});
+        let others = [(&lib, Some("9.9.0"))];
+        let set = CatalogSet {
+            primary: &primary,
+            header: Some("1.2.0"),
+            others: &others,
+        };
+        let ns = Namespace::build(set).unwrap();
+        let mut report = Report::default();
+        report.push(
+            Diagnostic::new(Code::UnsupportedSpecVersion, "h")
+                .at("workflow", "acme.lib/shared")
+                .at("field", HEADER_FIELD),
+        );
+        report.push(
+            Diagnostic::new(Code::UnsupportedSpecVersion, "h")
+                .at("workflow", "w")
+                .at("field", HEADER_FIELD),
+        );
+        finish(&ns, &mut report);
+        let lib_loc = &report.diagnostics[0].location;
+        assert_eq!(lib_loc["workflow"], "shared");
+        assert_eq!(lib_loc["catalog"], "acme.lib");
+        assert_eq!(lib_loc.get("path"), None);
+        let own = &report.diagnostics[1].location;
+        assert_eq!(own["workflow"], "w");
+        assert_eq!(own.get("catalog"), None);
+        assert_eq!(own.get("path"), None);
     }
 }

@@ -1,0 +1,34 @@
+# Standard version: 1.2.0
+# A library catalog for the S3 fixtures (STANDARD v1.2 §5.1.1) whose
+# exported workflows have names that are not identifiers: valid, with W620
+# (§5.1), and reachable by qualified id like any other.
+catalog:
+  id: acs.fixtures.names
+  version: 1.0.0
+  exports: [Shared Check, shared.check]
+Shared Check:
+  goal: Retrieve a record for a check.
+  risk: low
+  triggers:
+  - kind: invoke
+  workflow_extensions:
+    requires: [triggers@1]
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: record_out
+    input_bindings:
+      target: records
+shared.check:
+  goal: Retrieve another record for a check.
+  risk: low
+  triggers:
+  - kind: invoke
+  workflow_extensions:
+    requires: [triggers@1]
+  steps:
+  - capability: retrieve
+    purpose: Read the other record.
+    store_as: other_out
+    input_bindings:
+      target: other_records

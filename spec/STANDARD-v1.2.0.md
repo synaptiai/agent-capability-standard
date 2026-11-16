@@ -477,7 +477,8 @@ host finds the catalogs of a set is outside this standard. In a catalog
 validated or run with others, a workflow name containing `/` is S303.
 
 **Qualified ids.** A *qualified workflow id* is a catalog id, `/` and a
-workflow name (`acs.reference/world_model_build`). An `invoke` target
+workflow name (`acs.reference/world_model_build`): the name is all that
+follows the first `/`, any workflow name (§5.1). An `invoke` target
 (§5.12) resolves to:
 
 1. the workflow of that name in the invoking workflow's own catalog;
@@ -1884,7 +1885,9 @@ An **agent identity** (`schemas/agent_identity_schema.yaml#/agent_identity`)
 says who a party is, as the host authenticated it: its `principal` (§5.15),
 its `kind` (`agent`, `human` or `service`), and optionally its `role`,
 `model_family` (§5.15), `model_id` (the provider's identifier of the model it
-ran on), `owner` (the principal it acts for), `authenticated_by` (how
+ran on; new in 1.2, so in a run of a workflow that targets an earlier
+version it is an unknown field, which the executor does not read),
+`owner` (the principal it acts for), `authenticated_by` (how
 the host authenticated it: `session_id`, `chat_user_id`, `code_host_login`,
 `directory_id`, `api_key`, `signed_token`, or an `x-` vendor value) and
 `trust_class` (`owner`, `decision_person`, `system_of_record`,
@@ -1928,9 +1931,9 @@ to: the executor reads the always-ask classes from it.
 **Delegation.** A delegation's host may attest who took it:
 `effective.identity`, an `agent_identity`. Read only with `identity@1`
 declared, it MUST be one (else R402, and the delegation fails as any
-step does), and its `model_family`, `model_id` and `role`, where given, MUST
-equal `effective.model_family`, `effective.model_id` and `effective.role`
-(else R402). A waiting
+step does), and its `model_family` and `role`, where given, MUST equal
+`effective.model_family` and `effective.role`, and in a workflow that
+targets 1.2 its `model_id` MUST equal `effective.model_id` (else R402). A waiting
 `delegate` (§5.13) then keeps only results whose principal is that
 identity's: any other is dropped and counted (reason `delegate_identity`),
 and the wait goes on; the wait's `AwaitEvent` names the principal as
@@ -3789,7 +3792,8 @@ expectations MAY list `expected_warning_codes`, likewise exact; absent or
 empty, the fixture MUST produce no warnings. They MAY name `catalogs` and
 `agents`, the other catalog files of the fixture's set (§5.1.1) and agent
 manifest files (§5.15.1) to validate it with, and `expected_locations`, each
-a `code` and the `path` (§9.8) it MUST be reported at. Expression fixtures
+a `code` and the `path` (§9.8) it MUST be reported at, or, for a finding
+with no `path`, the `catalog`, `workflow` and `field` it MUST carry. Expression fixtures
 (`tests/conformance/expressions/eval.json` and `check.json`) are
 language-neutral; the reference suite also runs them against cel-go to
 check §5.8.2's CEL compatibility. Runtime fixtures

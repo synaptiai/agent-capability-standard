@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkTask, joinMaxima, manifestMaxima, type Maxima } from '../src/agents.js';
+import { agentsApply, checkTask, joinMaxima, manifestMaxima, type Maxima, workflowTarget } from '../src/agents.js';
 import { selectImplementation, UnsupportedDomainError, isDomainId } from '../src/domains.js';
 import { isModelFamily, modelFamily } from '../src/families.js';
 import { issuePath } from '../src/issues.js';
@@ -25,6 +25,30 @@ describe('agent maxima (STANDARD v1.2.0 §5.15.1)', () => {
     const task = { table: { type: 'string', required: true }, rows: { type: 'array' } };
     expect(checkTask({ task }, { rows: [], colour: 'x' })).toEqual({ undeclared: ['colour'], missing: ['table'] });
     expect(checkTask({}, { anything: 1 })).toEqual({ undeclared: [], missing: [] });
+  });
+});
+
+describe('the version a workflow targets (STANDARD v1.2.0 §11.5, §5.15.2)', () => {
+  // [spec_version, header, target, agents apply]
+  const cases: [unknown, string | null, [number, number] | null, boolean][] = [
+    ['1.2', null, [1, 2], true],
+    ['1.2.0', '1.1.0', [1, 2], true],
+    ['1.1', '1.2.0', [1, 1], false],
+    [undefined, '1.2.0', [1, 2], true],
+    [undefined, '1.1.0', [1, 1], false],
+    [undefined, null, null, false],
+    ['1.10', null, [1, 10], true],
+    ['2.0', null, [2, 0], true],
+    // A spec_version that is not a string, or does not parse, gives way to
+    // the header, as in the core.
+    [1.2, '1.1.0', [1, 1], false],
+    ['1.2.0.1', '1.2.0', [1, 2], true],
+    ['v1.2', null, null, false],
+  ];
+  it.each(cases)('spec_version %j, header %j', (spec, header, target, apply) => {
+    const workflow: Record<string, unknown> = spec === undefined ? {} : { spec_version: spec };
+    expect(workflowTarget(workflow, header)).toEqual(target);
+    expect(agentsApply(workflow, header)).toBe(apply);
   });
 });
 

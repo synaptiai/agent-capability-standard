@@ -1,0 +1,21 @@
+# Standard version: 9.9.0
+# A library catalog for the S3 fixtures (STANDARD v1.2 §5.1.1, §9.8) whose
+# header declares a version no validator of this Standard supports (V109):
+# the finding names this catalog and its workflow's own name.
+catalog:
+  id: acs.fixtures.future
+  version: 1.0.0
+  exports: [shared]
+shared:
+  goal: Retrieve a record.
+  risk: low
+  triggers:
+  - kind: invoke
+  workflow_extensions:
+    requires: [triggers@1]
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: record_out
+    input_bindings:
+      target: records

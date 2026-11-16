@@ -461,8 +461,10 @@ findings:
     `tests/test_validators.py::test_every_fixture_diagnostic_has_an_exact_path`,
     `core/tests/delegation_catalogs.rs` (`colliding_keys_get_exact_paths`,
     `columns_count_code_points`), the fixtures'' `expected_locations`; a finding inside a step,
-    W616 for a step member included, carries `step` and `capability` (the same test checks it on
-    every fixture).'
+    W616 for a step member included, carries `step` and `capability`, and a finding in another
+    catalog of the set, one about its version header included, carries `catalog` and the
+    workflow''s own name (the same test checks both on every fixture; fixture
+    `fail_library_header_version`).'
   concerns:
   - packaging-conformance-governance
   related:
@@ -810,11 +812,12 @@ findings:
   resolution: 'Standard 1.2.0 §5.15 (Model families), §5.16 and §5.17: families compare exactly
     everywhere, are written `[a-z][a-z0-9_-]*` (W620 for a literal outside it), and a host derives
     one from the model identifier by one rule; `agent_identity` 1.1.0, the world state''s
-    `AgentIdentity` and `delegate.effective` carry `model_id`, checked against the identity (R402).
+    `AgentIdentity` and `delegate.effective` carry `model_id`, typed and checked against the
+    identity (R402) in a workflow that targets 1.2; a 1.1 run reads no `model_id`, as before.
     Code: `core/src/names.rs` (`model_family`), `grounded_agency/coordination/families.py`,
     `packages/acs-core/src/families.ts`; vectors `tests/conformance/families/derive.json` (fictional
     identifiers); fixtures `pass_model_family_warn`, runtime `quorum_family_exact`,
-    `delegate_identity_model_id_mismatch`.'
+    `delegate_identity_model_id_mismatch`, `delegate_identity_model_id_v11_unchecked`.'
   concerns:
   - models-context-memory-security
 - id: ACS-18
@@ -1344,8 +1347,9 @@ findings:
     and an unknown capability is V101 where it is used. Code:
     `core/src/agents.rs`, `grounded_agency/coordination/manifest.py` and
     `AgentDescriptor.from_manifest`/`manifest`/`maxima`, `packages/acs-core/src/agents.ts`, and the
-    binding''s `deriveAgentManifest`, which follows `invokes` and refuses to derive from unannotated
-    or ungiven invoked tools and from declared flags its capabilities do not carry; vectors
+    binding''s `deriveAgentManifest`, which loads each `acs` annotation as a binding record, as the
+    layer does, follows `invokes`, and refuses to derive from unannotated, unloadable or ungiven
+    invoked tools and from declared flags its capabilities do not carry; vectors
     `tests/conformance/agents/maxima.json`; fixture `fail_agents_unknown_capability`.'
   concerns:
   - multi-agent
@@ -2113,7 +2117,8 @@ findings:
     applies only in a workflow that targets 1.2, so an older consumer refuses a workflow that relies
     on it (V109); below 1.2 it is ignored, as by a 1.1 consumer, and W616 (§11.5). A literal target
     not listed is V107, a computed one is refused by the executor (R402), a listed agent a static
-    host does not provide is V107 at `agents[i]` (the binding''s `lintDelegationTargets`), and W622
+    host does not provide is V107 at `agents[i]` (the binding''s `lintDelegationTargets`, which, like
+    `declaredAgents`, takes the catalog header and ignores `agents` below 1.2), and W622
     reports a computed target without `agents`. Code: `core/src/validate/delegation.rs`
     (`check_agents_field`, `check_targets`), `core/src/exec/machine.rs`; fixtures
     `pass_agents_v11_warn`, `pass_agents_declared`, `fail_agents_undeclared_target`,
@@ -2227,15 +2232,16 @@ findings:
     under `catalog` (`id`, `version`, `ontology`, `exports`), catalog sets, qualified ids `<catalog
     id>/<name>` for `invoke`, only exported workflows reachable from outside, bare names resolved in
     the invoker''s own catalog, V107 for a qualified id of a loaded catalog that lacks or hides the
-    workflow, W607 otherwise; workflow names SHOULD be identifiers (W620); a qualified target and a
-    manifest are 1.2 features (W616, §11.5). Code: `core/src/catalogs.rs` (`Resolver`,
+    workflow, W607 otherwise; workflow names SHOULD be identifiers (W620), and a qualified id''s
+    name is any workflow name, so an exported one that is not an identifier is reachable; a
+    qualified target and a manifest are 1.2 features (W616, §11.5). Code: `core/src/catalogs.rs` (`Resolver`,
     `Namespace`), `core/src/validate/catalog.rs`, `core/src/validate/invoke.rs`, `Run::start_set`,
     `WorkflowEngine.load_library`, `--with-catalog`, the WebAssembly `catalogs` member; fixtures
     `pass_qualified_invoke`, `pass_qualified_invoke_v11_warn`, `fail_qualified_invoke_hidden`,
     `fail_qualified_cycle`, `fail_catalog_manifest*`, `pass_catalog_manifest_v11_warn`,
-    `pass_names_warn`; runtime `invoke_qualified_library`,
-    `invoke_computed_not_exported`. Migrating the duplicated example to a qualified invoke waits
-    until the reference catalog carries a manifest.'
+    `pass_names_warn`, `fail_qualified_invoke_names`; runtime `invoke_qualified_library`,
+    `invoke_computed_not_exported`, `invoke_qualified_non_identifier_name`. Migrating the
+    duplicated example to a qualified invoke waits until the reference catalog carries a manifest.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-50
@@ -2265,7 +2271,9 @@ findings:
   resolution: 'Standard 1.2.0 §5.13.1 (Answers to an Inquiry): ontology 2.2.0 adds
     `inquire.inquiry_id`, question `id` and `answer_type`, and `receive` items'' `inquiry_id` and
     `answers`; a host gives every question an id, keys and types answers, and never delivers an
-    answer to an unasked question, of the wrong type, or twice; a wait correlates on `inquiry_id`.
+    answer to an unasked question, of the wrong type (a choice compared as a JSON value, so a
+    boolean never matches a number), or twice, nor one without the inquiry''s string `inquiry_id`;
+    a wait correlates on `inquiry_id`.
     Code: `grounded_agency/coordination/inquiry.py` (`match_answers`), the SDK orchestrator''s
     `inquire` output now meets its contract; vectors `tests/conformance/inquiry/answers.json`;
     fixture `pass_inquiry_correlate`.'

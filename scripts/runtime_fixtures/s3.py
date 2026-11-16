@@ -56,6 +56,22 @@ LIB = {
 }
 LIB_SET = [{"catalog": LIB, "header": V12}]
 
+# A library whose exported workflow's name is not an identifier (W620 there,
+# and reachable by qualified id all the same).
+NAMES_LIB = {
+    "catalog": {
+        "id": "acs.fixtures.names",
+        "version": "1.0.0",
+        "exports": ["Shared Check"],
+    },
+    "Shared Check": {
+        "goal": "g",
+        "risk": "low",
+        "steps": [st("retrieve", "lib_record", input_bindings={"target": "library"})],
+    },
+}
+NAMES_SET = [{"catalog": NAMES_LIB, "header": V12}]
+
 
 def v12(steps, **kw):
     """A workflow that targets 1.2."""
@@ -453,6 +469,46 @@ def _continues(add):
         ["step_failed", "run_failed"],
         header=V12,
     )
+    add(
+        "delegate_identity_model_id_v11_unchecked",
+        "In a 1.1 workflow, model_id is not an agent_identity member (schema "
+        "1.0.0 allows extra members), so the executor reads it neither for its "
+        "type nor against effective.model_id, as 1.1 did: both delegations "
+        "complete (§5.17's model_id applies from 1.2).",
+        {
+            "w": wf(
+                [
+                    delegate("ra", "x", task={"q": "d"}),
+                    delegate("rb", "y", task={"q": "d"}),
+                ],
+                requires=["delegation@1", "identity@1"],
+                risk="low",
+            )
+        },
+        [
+            {
+                "expect": inv("delegate", step=0),
+                "respond": accepted(
+                    "t1",
+                    model_id="acme-large-2",
+                    identity={
+                        "principal": "agent:x",
+                        "kind": "agent",
+                        "model_id": "acme-small-1",
+                    },
+                ),
+            },
+            {
+                "expect": inv("delegate", step=1),
+                "respond": accepted(
+                    "t2",
+                    identity={"principal": "agent:y", "kind": "agent", "model_id": 7},
+                ),
+            },
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        header=V11,
+    )
 
 
 def _catalogs(add):
@@ -521,6 +577,39 @@ def _catalogs(add):
         inputs={"target": "acs.fixtures.lib/inner"},
         header=V12,
         catalogs=LIB_SET,
+    )
+    add(
+        "invoke_qualified_non_identifier_name",
+        "A qualified id's name is any workflow name, not only an identifier: "
+        "another catalog's exported 'Shared Check' runs as a nested run when "
+        "invoked as acs.fixtures.names/Shared Check (§5.1, §5.1.1).",
+        {
+            "w": v12(
+                [
+                    st(
+                        "invoke",
+                        "checked",
+                        workflow_id="acs.fixtures.names/Shared Check",
+                        input_bindings={"workflow": "acs.fixtures.names/Shared Check"},
+                    )
+                ],
+                risk="low",
+            )
+        },
+        [
+            {
+                "expect": inv(
+                    "retrieve",
+                    step=0,
+                    frame=["w", "acs.fixtures.names/Shared Check"],
+                ),
+                "respond": out(data={}, confidence=1),
+            }
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["invoke_started"],
+        header=V12,
+        catalogs=NAMES_SET,
     )
 
 

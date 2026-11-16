@@ -955,3 +955,26 @@ into `round3/b`); what S5 needs:
   `names::split_qualified` accepts and that names no workflow of the
   caller's catalog (`Resolver::is_qualified`, which replaced
   `resolves_qualified`).
+
+## After S3 review round 2
+
+- **`identity_error(v, v12)` and `delegate_identity_error(delegation,
+  v12)`** (`core/src/exec/mod.rs`) take whether the workflow the identity is
+  reported to targets 1.2: an identity's `model_id` is typed, and compared
+  with `effective.model_id`, only then (`agent_identity` 1.0.0, which 1.1
+  uses, does not define it). **S5** and any later caller: pass the
+  workflow's `targets_1_2` (the root's for the actor identity; the frame's
+  for an event, approver or delegation identity). Runtime fixture
+  `delegate_identity_model_id_v11_unchecked`.
+- **A qualified id's name is any non-empty workflow name** after the first
+  `/` (`names::split_qualified`), as §5.1.1 says.
+- **`expected_locations`** entries (`tests/fixtures/EXPECTATIONS.json`) may
+  give, for a finding with no `path` (one about a version header), the
+  `catalog`, `workflow` and `field` it must carry instead of a `path`: every
+  member an entry gives must equal the diagnostic location's. The three
+  harnesses match that way.
+- **Header findings in another catalog of a set** carry `catalog` and the
+  workflow's own name (`location::finish`), like every other finding there.
+- **TypeScript package**: `workflowTarget(workflow, header)` and
+  `agentsApply(workflow, header)` (`src/agents.ts`); the binding's
+  `declaredAgents` and `lintDelegationTargets` take the header.

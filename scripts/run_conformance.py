@@ -15,6 +15,7 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 VAL = ROOT / "tools" / "validate_workflows.py"
@@ -73,20 +74,32 @@ def _read_emitted_codes(suggestions: Path, key: str) -> set[str]:
     return {d["code"] for d in data.get(key, []) if d.get("code")}
 
 
-def _read_locations(suggestions: Path) -> set[tuple[str, str]]:
-    """The ``(code, path)`` of every diagnostic of a run that has a
-    ``location.path`` (STANDARD v1.2 §9.8)."""
+def _read_locations(suggestions: Path) -> list[tuple[str, dict[str, Any]]]:
+    """The ``(code, location)`` of every diagnostic of a run (STANDARD v1.2
+    §9.8)."""
     try:
         data = json.loads(suggestions.read_text(encoding="utf-8"))
     except OSError, json.JSONDecodeError:
-        return set()
-    found = set()
+        return []
+    found = []
     for key in ("structured_errors", "structured_warnings"):
         for d in data.get(key, []):
-            path = d.get("location", {}).get("path")
-            if d.get("code") and path is not None:
-                found.add((d["code"], path))
+            if d.get("code"):
+                found.append((d["code"], d.get("location", {})))
     return found
+
+
+def _located(
+    expected: dict[str, Any], located: list[tuple[str, dict[str, Any]]]
+) -> bool:
+    """Whether a diagnostic has the expected ``code`` and every other member
+    the expectation gives (its ``path``, or for a finding with no ``path``
+    its ``catalog``, ``workflow`` and ``field``) in its location."""
+    members = {k: v for k, v in expected.items() if k != "code"}
+    return any(
+        code == expected["code"] and all(loc.get(k) == v for k, v in members.items())
+        for code, loc in located
+    )
 
 
 def main() -> None:
@@ -149,11 +162,8 @@ def main() -> None:
                 # Each expected location must be among the diagnostics.
                 located = _read_locations(suggestions)
                 for loc in meta.get("expected_locations", []):
-                    if (loc["code"], loc["path"]) not in located:
-                        missing_msgs.append(
-                            f"expected {loc['code']} at {loc['path']!r}, "
-                            f"located {sorted(located)}"
-                        )
+                    if not _located(loc, located):
+                        missing_msgs.append(f"expected {loc!r}, located {located}")
                 if missing_msgs:
                     failed += 1
                     print(f"FAIL: {name} " + "; ".join(missing_msgs))

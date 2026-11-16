@@ -92,8 +92,10 @@ def check_agent_manifest(
     for c in caps:
         if _CAPABILITY.fullmatch(c) is None:
             raise fail(f"'{c}' is not a capability id")
-    task = manifest.get("task")
-    if task is not None:
+    if "task" in manifest:
+        # Present means a mapping, as the schema and the core say: a null
+        # `task` is refused, not read as "accepts any task".
+        task = manifest["task"]
         if not isinstance(task, Mapping):
             raise fail("'task' must be a mapping of task inputs")
         for name, spec in task.items():

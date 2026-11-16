@@ -10,12 +10,16 @@
  * derived from the tools' `acs` annotations (their binding records,
  * §5.18.1). A manifest has no member for flags, so its maxima are those of
  * its capabilities. A manifest derived from part of what the agent can call,
- * or from tools whose declared flags exceed their capabilities', would
- * understate its maxima and fail open, so derivation refuses then.
+ * from annotations the layer does not load (it treats such a tool as an
+ * unbound `mutate` at high risk), or from tools whose declared flags exceed
+ * their capabilities', would understate its maxima and fail open, so
+ * derivation refuses then.
  */
 import {
   type AgentManifest,
+  agentsApply,
   annotationRecord,
+  checkBindings,
   checkTask,
   type DeclaredFlags,
   joinFlags,
@@ -50,9 +54,20 @@ export class ManifestDerivationError extends Error {
     readonly unresolvedInvokes: string[] = [],
     /** Tools whose declared `flags` are stricter than their capabilities' ontology flags. */
     readonly raisedFlags: string[] = [],
+    /**
+     * Tools whose annotation does not load as a binding record (§5.18.1),
+     * with why: a layer treats such a tool as an unbound `mutate` at high
+     * risk (§5.18.2), so no manifest can say less of it.
+     */
+    readonly malformed: { tool: string; problems: string[] }[] = [],
   ) {
     const parts: string[] = [];
     if (unannotated.length > 0) parts.push(`tools without an acs annotation: ${unannotated.join(', ')}`);
+    if (malformed.length > 0) {
+      parts.push(
+        `tools whose acs annotation does not load: ${malformed.map((m) => `${m.tool} (${m.problems.join('; ')})`).join(', ')}`,
+      );
+    }
     if (missingChildren.length > 0) parts.push(`subagents without a manifest: ${missingChildren.join(', ')}`);
     if (unresolvedInvokes.length > 0) parts.push(`invoked tools not given: ${unresolvedInvokes.join(', ')}`);
     if (raisedFlags.length > 0) {
@@ -86,31 +101,35 @@ function raises(own: SafetyFlags, declared: unknown): boolean {
 }
 
 /**
- * The manifest of `agent`: the capabilities of the tools it offers (each
- * binding record's `capability` and `additional_capabilities`) and of the
- * tools those invoke, transitively (`invokes`, resolved in `tools`, then
+ * The manifest of `agent`: the capabilities of the tools it offers and of
+ * the tools those invoke, transitively (`invokes`, resolved in `tools`, then
  * `invoked`), plus `delegate` and every subagent's capabilities when it has
- * subagents (`children` by name). Throws `ManifestDerivationError` when a
- * tool other than a control-only one (`control: true`) has no annotation, a
- * tool invokes one that is not given, a tool's declared `flags` are stricter
- * than the ontology flags of its own capabilities, or a subagent has no
- * entry in `children`. The effective flags an annotation copies are ignored,
- * as a layer ignores them (§5.18.1).
+ * subagents (`children` by name). Each tool's `acs` annotation is loaded as
+ * a binding record (`checkBindings`, as the layer loads it), and the
+ * capabilities and `invokes` are read from what loads; a control-only tool
+ * (`control: true`) performs none. Throws `ManifestDerivationError` when a
+ * tool has no annotation, an annotation does not load (the layer would
+ * treat the tool as an unbound `mutate` at high risk), a tool invokes one
+ * that is not given, a tool's declared `flags` are stricter than the
+ * ontology flags of its own capabilities, or a subagent has no entry in
+ * `children`. The effective flags an annotation copies are ignored, as a
+ * layer ignores them (§5.18.1).
  */
 export function deriveAgentManifest(
   agent: DerivableAgent,
   children: Record<string, AgentManifest> = {},
 ): AgentManifest {
-  const capabilities = new Set<string>();
-  const unannotated: string[] = [];
-  const unresolved = new Set<string>();
-  const raised: string[] = [];
   const lookup = (name: string) =>
     Object.hasOwn(agent.tools, name)
       ? agent.tools[name]
       : agent.invoked !== undefined && Object.hasOwn(agent.invoked, name)
         ? agent.invoked[name]
         : undefined;
+  // Every tool the agent can reach, through the names each annotation's
+  // `invokes` lists, with the record it carries.
+  const records = new Map<string, Record<string, unknown>>();
+  const unannotated: string[] = [];
+  const unresolved = new Set<string>();
   const queue = Object.keys(agent.tools);
   const seen = new Set(queue);
   for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
@@ -119,30 +138,39 @@ export function deriveAgentManifest(
       unannotated.push(name);
       continue;
     }
-    if (record['control'] === true) continue;
-    if (typeof record['capability'] !== 'string') {
-      unannotated.push(name);
-      continue;
-    }
-    const own = [record['capability']];
-    if (Array.isArray(record['additional_capabilities'])) {
-      for (const c of record['additional_capabilities']) if (typeof c === 'string') own.push(c);
-    }
-    for (const c of own) capabilities.add(c);
-    // A capability the ontology lacks leaves the maxima unknown (V101 where
-    // the manifest is used): nothing to compare the flags with.
-    const maxima = manifestMaxima({ capabilities: own });
-    if (maxima !== null && raises(maxima, record['flags'])) raised.push(name);
-    if (Array.isArray(record['invokes'])) {
-      for (const invoked of record['invokes']) {
-        if (typeof invoked !== 'string') continue;
-        if (lookup(invoked) === undefined) unresolved.add(invoked);
-        else if (!seen.has(invoked)) {
-          seen.add(invoked);
-          queue.push(invoked);
-        }
+    records.set(name, record);
+    if (!Array.isArray(record['invokes'])) continue;
+    for (const invoked of record['invokes']) {
+      if (typeof invoked !== 'string') continue;
+      if (lookup(invoked) === undefined) unresolved.add(invoked);
+      else if (!seen.has(invoked)) {
+        seen.add(invoked);
+        queue.push(invoked);
       }
     }
+  }
+  // Load them as one set, so that a composite's `invokes` resolve.
+  const { effective, diagnostics } = checkBindings([...records.values()]);
+  const capabilities = new Set<string>();
+  const malformed: { tool: string; problems: string[] }[] = [];
+  const raised: string[] = [];
+  for (const [name, record] of records) {
+    const loaded = effective[name];
+    if (loaded === undefined) {
+      // Not loaded only because what it invokes did not load (V107): that
+      // tool is reported, as unannotated, not given or malformed.
+      const problems = diagnostics
+        .filter((d) => d.severity === 'error' && d.location.tool === name && d.code !== 'V107')
+        .map((d) => `${d.code} ${d.message}`);
+      if (problems.length > 0) malformed.push({ tool: name, problems });
+      continue;
+    }
+    for (const c of loaded.capabilities) capabilities.add(c);
+    if (loaded.control) continue;
+    // A capability the ontology lacks leaves the maxima unknown (V101 where
+    // the manifest is used): nothing to compare the flags with.
+    const maxima = manifestMaxima({ capabilities: loaded.capabilities });
+    if (maxima !== null && raises(maxima, record['flags'])) raised.push(name);
   }
   const missingChildren: string[] = [];
   for (const child of agent.subagents ?? []) {
@@ -154,13 +182,20 @@ export function deriveAgentManifest(
     capabilities.add('delegate');
     for (const c of manifest.capabilities) capabilities.add(c);
   }
-  if (unannotated.length > 0 || missingChildren.length > 0 || unresolved.size > 0 || raised.length > 0) {
+  if (
+    unannotated.length > 0 ||
+    malformed.length > 0 ||
+    missingChildren.length > 0 ||
+    unresolved.size > 0 ||
+    raised.length > 0
+  ) {
     throw new ManifestDerivationError(
       agent.name,
       unannotated.sort(),
       missingChildren.sort(),
       [...unresolved].sort(),
       raised.sort(),
+      malformed.sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0)),
     );
   }
   return {
@@ -184,8 +219,15 @@ export function taskRefusal(manifest: AgentManifest, task: Record<string, unknow
   return `'${manifest.agent}' ${parts.join('; ')}`;
 }
 
-/** A workflow's declared agents (§5.15.2): its `agents`, when a list of strings. */
-export function declaredAgents(workflow: Record<string, unknown>): string[] | null {
+/**
+ * A workflow's declared agents (§5.15.2): its `agents`, when a list of
+ * strings and the workflow targets 1.2 or later; `header` is the catalog
+ * file's version header (`null` for none), which the host passes as §11.5
+ * requires. In a workflow that targets 1.0 or 1.1, or declares no version,
+ * `agents` has no effect, so this is `null` there.
+ */
+export function declaredAgents(workflow: Record<string, unknown>, header: string | null): string[] | null {
+  if (!agentsApply(workflow, header)) return null;
   const agents = workflow['agents'];
   return Array.isArray(agents) && agents.every((a) => typeof a === 'string') ? (agents as string[]) : null;
 }

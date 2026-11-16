@@ -1482,6 +1482,12 @@ def test_every_fixture_diagnostic_has_an_exact_path() -> None:
         report = validator.validate_file(path, **fixture_set(fixtures, meta))
         for d in report["diagnostics"]:
             loc = d["location"]
+            # A finding about a workflow names it in its own catalog: the
+            # primary's, or the one `catalog` names (§9.8), header findings
+            # included.
+            if "workflow" in loc and "profile" not in loc and "tool" not in loc:
+                assert loc.get("catalog") in docs, (name, d)
+                assert loc["workflow"] in docs[loc.get("catalog")], (name, d)
             if (
                 loc.get("field") == "# Standard version"
                 or "profile" in loc

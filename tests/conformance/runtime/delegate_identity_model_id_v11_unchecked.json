@@ -1,0 +1,97 @@
+{
+  "description": "In a 1.1 workflow, model_id is not an agent_identity member (schema 1.0.0 allows extra members), so the executor reads it neither for its type nor against effective.model_id, as 1.1 did: both delegations complete (\u00a75.17's model_id applies from 1.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ra",
+          "input_bindings": {
+            "agent": "x",
+            "task": {
+              "q": "d"
+            }
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "agent": "y",
+            "task": {
+              "q": "d"
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1",
+          "identity@1"
+        ]
+      }
+    }
+  },
+  "header": "1.1.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {
+            "model_id": "acme-large-2",
+            "identity": {
+              "principal": "agent:x",
+              "kind": "agent",
+              "model_id": "acme-small-1"
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "effective": {
+            "identity": {
+              "principal": "agent:y",
+              "kind": "agent",
+              "model_id": 7
+            }
+          },
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": []
+}

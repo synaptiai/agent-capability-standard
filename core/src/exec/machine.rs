@@ -2085,7 +2085,7 @@ impl<'a> Machine<'a> {
         if step.capability == "delegate"
             && self.frame_ref().cur.delegated.is_none()
             && wf.extension("identity@1")
-            && let Some(e) = super::delegate_identity_error(&value)
+            && let Some(e) = super::delegate_identity_error(&value, wf.targets_1_2)
         {
             return self.exec_error("R402", e);
         }
@@ -2813,8 +2813,9 @@ impl<'a> Machine<'a> {
         for v in values {
             super::ijson(v).map_err(SubmitError::Malformed)?;
         }
-        let identity_declared =
-            self.program.workflows[&self.frame_ref().workflow].extension("identity@1");
+        let frame_wf = &self.program.workflows[&self.frame_ref().workflow];
+        let identity_declared = frame_wf.extension("identity@1");
+        let v12 = frame_wf.targets_1_2;
         if let (
             true,
             Response::Event {
@@ -2825,7 +2826,7 @@ impl<'a> Machine<'a> {
         ) = (identity_declared, &response)
         {
             super::ijson(identity).map_err(SubmitError::Malformed)?;
-            if let Some(e) = super::identity_error(identity) {
+            if let Some(e) = super::identity_error(identity, v12) {
                 return Err(SubmitError::Malformed(e));
             }
             if principal
@@ -2847,7 +2848,7 @@ impl<'a> Machine<'a> {
         ) = (identity_declared, &response)
             && !list.is_null()
         {
-            approver_identities_error(approvers, list).map_or(Ok(()), |e| {
+            approver_identities_error(approvers, list, v12).map_or(Ok(()), |e| {
                 Err(SubmitError::Malformed(format!("approver_identities: {e}")))
             })?;
         }
@@ -3356,8 +3357,8 @@ fn reopen(program: &Program, f: &mut Frame, invalidated: &[String]) {
 /// What is wrong with a decision's `approver_identities` (§5.17), if
 /// anything: a list of `agent_identity`, one per principal (an identical
 /// repeat is one), whose principals are exactly `approvers` when that is
-/// not empty.
-fn approver_identities_error(approvers: &[String], list: &Value) -> Option<String> {
+/// not empty. `v12`: the workflow targets 1.2 or later ([`super::identity_error`]).
+fn approver_identities_error(approvers: &[String], list: &Value, v12: bool) -> Option<String> {
     let Some(items) = list.as_array() else {
         return Some("must be a list".into());
     };
@@ -3366,7 +3367,7 @@ fn approver_identities_error(approvers: &[String], list: &Value) -> Option<Strin
         if let Err(e) = super::ijson(id) {
             return Some(format!("[{i}]: {e}"));
         }
-        if let Some(e) = super::identity_error(id) {
+        if let Some(e) = super::identity_error(id, v12) {
             return Some(format!("[{i}]: {e}"));
         }
         let p = id["principal"].as_str().unwrap_or_default();

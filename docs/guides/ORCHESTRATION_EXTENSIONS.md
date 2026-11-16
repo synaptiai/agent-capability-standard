@@ -592,8 +592,9 @@ The rule needs no list of model lines, so two hosts that know one model id
 attest one family. `tests/conformance/families/derive.json` pins it, and
 `grounded_agency.coordination.families.model_family` and the TypeScript
 package's `modelFamily` implement it. A host may attest the exact model as
-`effective.model_id` too; an attested identity's `model_id` must then match
-(R402).
+`effective.model_id` too; in a workflow that targets 1.2 an attested
+identity's `model_id` must then match (R402). A 1.1 workflow's runs read no
+`model_id`, as before.
 
 ### Declaring the agents you delegate to (1.2)
 

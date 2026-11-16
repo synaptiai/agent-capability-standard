@@ -32,8 +32,12 @@ interface Expectation {
   catalogs?: string[];
   /** Agent manifests, relative to tests/fixtures/. */
   agents?: string[];
-  /** Diagnostics the report must locate at a `path` (section 9.8). */
-  expected_locations?: { code: string; path: string }[];
+  /**
+   * Diagnostics the report must locate (section 9.8): a `code` and its
+   * `path`, or, for a finding with no `path`, its `catalog`, `workflow`
+   * and `field`.
+   */
+  expected_locations?: ({ code: string } & Record<string, string>)[];
 }
 
 function setFile(path: string): string {
@@ -60,8 +64,14 @@ describe('validator fixtures through the core', () => {
       expect(errors.length === 0).toBe(meta.should_pass);
       if (errors.length) expect(errors).toEqual([...(meta.expected_error_codes ?? [])].sort());
       expect(codes('warning')).toEqual([...(meta.expected_warning_codes ?? [])].sort());
-      const located = report.diagnostics.map((d) => `${d.code} ${String(d.location.path)}`);
-      for (const { code, path } of meta.expected_locations ?? []) expect(located).toContain(`${code} ${path}`);
+      for (const { code, ...members } of meta.expected_locations ?? []) {
+        const found = report.diagnostics.some(
+          (d) =>
+            d.code === code &&
+            Object.entries(members).every(([k, v]) => (d.location as Record<string, unknown>)[k] === v),
+        );
+        expect(found, `${code} ${JSON.stringify(members)}`).toBe(true);
+      }
     });
   }
 });
