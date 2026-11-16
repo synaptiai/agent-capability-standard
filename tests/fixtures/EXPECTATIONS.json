@@ -826,5 +826,60 @@
       "W616"
     ],
     "note": "A 1.2 feature (the audit input require_record) in a workflow that targets 1.1 (Standard v1.2 \u00a711.5)"
+  },
+  "pass_checked_rollback": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "safety",
+    "note": "A rollback whose restored an after-gate reads (Standard v1.2 \u00a74.4.1, \u00a712.5 Checked Rollback): no W624"
+  },
+  "warn_unchecked_rollback": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "safety",
+    "expected_warning_codes": [
+      "W624"
+    ],
+    "note": "A 1.2 rollback whose restored no condition, gate or failure-mode when reads (Standard v1.2 \u00a74.4.1)"
+  },
+  "pass_unchecked_rollback_v11": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "safety",
+    "note": "The same unchecked rollback in a 1.1 workflow: W624 applies only to workflows that target 1.2 (Standard v1.2 \u00a74.4.1)"
+  },
+  "warn_destination_not_shown": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "safety",
+    "expected_warning_codes": [
+      "W625"
+    ],
+    "note": "A 1.2 send whose approval.shows leaves out its referenced destination (Standard v1.2 \u00a74.4.2)"
+  },
+  "pass_destination_shown": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "safety",
+    "note": "A shown root covers its members, and a literal destination needs no shows entry (Standard v1.2 \u00a74.4.2)"
+  },
+  "warn_memory_inputs": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W626",
+      "W614"
+    ],
+    "note": "A memory scope that is none of the defined ones nor an x- name (W626) and a ttl outside the duration grammar (W614) (Standard v1.2 \u00a74.5)"
+  },
+  "warn_persist_timestamp": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W603"
+    ],
+    "note": "A reference to persist's deprecated timestamp; stored_at is the same instant (Standard v1.2 \u00a74.5)"
   }
 }

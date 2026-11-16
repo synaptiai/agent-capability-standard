@@ -688,7 +688,7 @@ members of its `detail`.
 | `checkpoint_created` | A checkpoint is recorded: the host answered `CreateCheckpoint`, or a `checkpoint` step completed | `checkpoint_id` |
 | `checkpoint_consumed` | A step that requires a checkpoint uses the latest valid one | `checkpoint_id` |
 | `checkpoints_invalidated` | A completed wait or delay, or a resumption, ends the validity of earlier checkpoints | `checkpoint_ids` |
-| `rolled_back` | The host answered a `Rollback` that a gate or a failure mode asked for | none |
+| `rolled_back` | The host answered a `Rollback` that a gate or a failure mode asked for (`RolledBack`: everything the checkpoint captured is restored) | `not_covered`, when the host listed changes the checkpoint never covered (STANDARD §4.4.1) |
 | `event_dropped` | A wait receives an event that does not match; recorded once per reason for each wait | `reason` |
 | `event_received` | A wait receives its matching event; `dropped` counts the dropped events by reason | `event_type`, `dropped` |
 | `delegated` | A waiting `delegate` has delegated and now waits for the result; `principal` is present when the host attested who took the delegation (`identity@1`) | `task_id`, `principal` |

@@ -869,10 +869,18 @@ fn snapshot_v1_restores() {
         assert!(snap.state.contains("\"version\":1"), "{name}");
         let run = Run::restore(&ctx(), &case["catalog"], &snap, None)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        // The action is the one recorded then, with the run's id.
+        // The action is the one recorded then, with the run's id and, for
+        // a pending InvokeCapability, the key `<run_id>:<id>` (§5.19.4).
         let mut expected = case["next"].clone();
         let actual = serde_json::to_value(run.next()).unwrap();
         expected["run_id"] = actual["run_id"].clone();
+        if expected["kind"] == "InvokeCapability" {
+            expected["idempotency_key"] = json!(format!(
+                "{}:{}",
+                actual["run_id"].as_str().unwrap(),
+                expected["id"]
+            ));
+        }
         assert_eq!(actual, expected, "{name}");
         assert!(!actual["run_id"].as_str().unwrap().is_empty(), "{name}");
         // Saved again, it is version 2.

@@ -288,10 +288,6 @@ pub(crate) fn legacy_timeout(
 
 /// Whether a duration checked by [`literal_duration`] may be zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "the 1.2 workstreams' literal-duration checks use both (FOUNDATION F1.12)"
-)]
 pub(crate) enum Positive {
     /// Zero is a W614 too: the duration must be longer than zero.
     Required,

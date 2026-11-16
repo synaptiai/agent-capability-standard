@@ -1,0 +1,121 @@
+{
+  "description": "A waiting delegate whose delegate went silent (R406) delegates again: the new delegation names the one it replaces and has a key of its own, built from its own id (\u00a74.4.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "timeout": "2h",
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          },
+          "input_bindings": {
+            "task": {
+              "review": "c1"
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "review.done",
+            "liveness": {
+              "mode": "push",
+              "interval": "10m",
+              "failure_threshold": 3
+            }
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 1,
+        "idempotency_key": "run-1:1"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "correlate": {
+          "task_id": "t1"
+        }
+      },
+      "respond": {
+        "kind": "LivenessLost"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 2,
+        "replaces": "t1",
+        "idempotency_key": "run-1:3"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "correlate": {
+          "task_id": "t2"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2"
+        },
+        "principal": "a"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "delegated",
+    "retry",
+    "event_received"
+  ]
+}

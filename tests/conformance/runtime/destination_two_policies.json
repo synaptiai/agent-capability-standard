@@ -1,0 +1,69 @@
+{
+  "description": "Two policies in force: a send must be allowed by each, so a destination only the wider one allows is refused (\u00a74.4.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "report_state"
+          }
+        },
+        {
+          "capability": "send",
+          "purpose": "send step",
+          "store_as": "s",
+          "input_bindings": {
+            "destination": "https://a.example/y",
+            "payload": {
+              "report": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F504",
+    "step": 1,
+    "reason": "destination_not_allowed"
+  },
+  "trace_kinds": [
+    "step_failed"
+  ],
+  "destinations": [
+    [
+      "https://a.example/*"
+    ],
+    [
+      "https://a.example/x/*"
+    ]
+  ]
+}

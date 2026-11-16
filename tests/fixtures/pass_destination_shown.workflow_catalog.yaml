@@ -1,0 +1,60 @@
+# Standard version: 1.2.0
+# Sends whose approval shows their destination (STANDARD v1.2 §4.4.2): one
+# shows the whole request, which holds the destination; the other sends to
+# a literal destination, which is part of the workflow. No W625.
+deliver_report:
+  goal: Deliver a report where the request says, then notify the team.
+  risk: high
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [approval@1]
+  inputs:
+    request:
+      type: object
+      required: true
+    draft:
+      type: object
+      required: true
+  steps:
+  - capability: checkpoint
+    purpose: Save a restore point for the agent's own state.
+    store_as: checkpoint_out
+    input_bindings:
+      scope: report_state
+  - capability: constrain
+    purpose: Check the destination against the allowed destinations.
+    store_as: policy_out
+    input_bindings:
+      target: "${request.url: string}"
+      constraints:
+      - allowed_destinations: ["https://hooks.example.com/*"]
+  - capability: send
+    purpose: Deliver the report.
+    store_as: send_out
+    input_bindings:
+      destination: "${request.url: string}"
+      payload: "${draft.body: string}"
+    approval:
+      approver: {kind: human, role: ops}
+      shows: ["${request}", "${draft.body}"]
+  - capability: checkpoint
+    purpose: Save a restore point before the notice.
+    store_as: notice_checkpoint
+    input_bindings:
+      scope: report_state
+  - capability: constrain
+    purpose: Check the notice against the policy.
+    store_as: notice_policy
+    input_bindings:
+      target: https://hooks.example.com/reports
+      constraints:
+      - allowed_destinations: ["https://hooks.example.com/*"]
+  - capability: send
+    purpose: Notify the team.
+    store_as: notice_out
+    input_bindings:
+      destination: https://hooks.example.com/reports
+      payload: "${draft.body: string}"
+    approval:
+      approver: {kind: human, role: ops}
+      shows: ["${draft.body}"]

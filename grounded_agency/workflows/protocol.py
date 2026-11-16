@@ -30,8 +30,8 @@ class InvokeCapabilityAction(_Head):
     inputs: dict[str, Any]
     deadline: int | None
     attempt: int
+    idempotency_key: str
     replaces: NotRequired[Any]
-    idempotency_key: NotRequired[str]
 
 
 class CreateCheckpointAction(_Head):

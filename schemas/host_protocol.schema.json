@@ -79,7 +79,7 @@
     },
     "InvokeCapability": {
       "allOf": [{ "$ref": "#/$defs/head" }],
-      "required": ["step", "capability", "store_as", "domain", "inputs", "deadline", "attempt"],
+      "required": ["step", "capability", "store_as", "domain", "inputs", "deadline", "attempt", "idempotency_key"],
       "properties": {
         "kind": { "const": "InvokeCapability" },
         "step": { "$ref": "#/$defs/step" },

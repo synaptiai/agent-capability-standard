@@ -851,23 +851,6 @@ impl Policy {
             .collect()
     }
 
-    /// The first rule of these profiles that this implementation does not
-    /// put in force yet, if any: an executor refuses to start or restore a
-    /// run under it rather than run as if the rule were absent (§5.21.4).
-    /// The destination check (§4.4.2) reads [`Policy::destinations`]; this
-    /// line goes when it is wired to them. (The grounding check reads
-    /// [`Policy::grounding`].)
-    pub fn unenforced(&self) -> Option<&'static str> {
-        if self
-            .profiles
-            .iter()
-            .any(|p| p.allowed_destinations.is_some())
-        {
-            return Some("a profile's destination policy (allowed_destinations, §4.4.2)");
-        }
-        None
-    }
-
     /// The trust weight overrides (§8.3): the lowest any profile gives each
     /// key.
     pub fn trust_weights(&self) -> BTreeMap<String, f64> {

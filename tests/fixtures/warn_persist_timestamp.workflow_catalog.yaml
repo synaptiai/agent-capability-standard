@@ -1,0 +1,28 @@
+# Standard version: 1.1.0
+# A reference to persist's timestamp, deprecated for stored_at (STANDARD
+# v1.2 §4.5): W603. The reference to stored_at is not.
+remember_and_record:
+  goal: Store a finding and record when.
+  risk: low
+  spec_version: "1.1"
+  steps:
+  - capability: persist
+    purpose: Store the finding.
+    store_as: p
+    input_bindings:
+      data: {finding: the cache is stale}
+      key: findings
+  - capability: audit
+    purpose: Record when it was stored, by the deprecated name.
+    store_as: old_audit
+    input_bindings:
+      event:
+        what: stored
+        at: ${p.timestamp}
+  - capability: audit
+    purpose: Record when it was stored.
+    store_as: new_audit
+    input_bindings:
+      event:
+        what: stored
+        at: ${p.stored_at}

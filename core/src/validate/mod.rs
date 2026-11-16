@@ -8,6 +8,7 @@
 mod approval;
 mod bindings;
 mod delegation;
+mod effects;
 mod exprs;
 mod extensions;
 mod grounding;
@@ -759,6 +760,13 @@ impl WorkflowCheck<'_> {
             let (flags, person) = (effective.flags, effective.person);
             semantics::unknown_inputs(&loc, step, node, self.report);
             semantics::missing_inputs(&loc, step, node, self.report);
+            // Memory, sends (§4.5, §4.4.2).
+            if matches!(cap, "persist" | "recall") {
+                effects::memory_inputs(&loc, step, self.report);
+            }
+            if cap == "send" && target.is_some_and(|t| t >= (1, 2)) {
+                effects::destination_shown(&loc, step, &declared, self.report);
+            }
             // A handler step runs only on escalation, after the step that
             // escalated (which may have failed before producing output),
             // and ends the run: it is outside the normal sequence, and its
@@ -977,6 +985,11 @@ impl WorkflowCheck<'_> {
         }
         semantics::check_edges(self.ctx, self.name, &placed, &handlers, self.report);
         wait::spans_checkpoint(self.name, &placed, &handlers, self.report);
+        // Checkpoints and memory (§4.4.1, §4.5).
+        if target.is_some_and(|t| t >= (1, 2)) {
+            effects::unchecked_rollbacks(self.name, steps, self.report);
+        }
+        effects::persist_timestamp_refs(self.name, steps, self.report);
         invocations
     }
 

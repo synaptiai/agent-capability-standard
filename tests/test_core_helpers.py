@@ -160,7 +160,6 @@ def test_start_validates_with_the_header(validator: _core.Validator) -> None:
 @pytest.mark.parametrize(
     "option",
     [
-        {"destinations": [["ops"]]},
         {"catalogs": [{"x": {}}]},
         {"agents": [{"agent": "a"}]},
     ],
@@ -172,6 +171,34 @@ def test_start_refuses_options_not_implemented_yet(
     with pytest.raises(ValueError, match="does not implement"):
         _core.Run.start(
             validator, CATALOG, "w", header=None, run_id="r", now_ms=0, **option
+        )
+
+
+def test_destination_policies_are_implemented(validator: _core.Validator) -> None:
+    """Destination policies (STANDARD v1.2 §4.4.2) start a run, its state
+    keeps them across a snapshot, and one with an invalid pattern is
+    refused."""
+    run = _core.Run.start(
+        validator,
+        CATALOG,
+        "w",
+        header=None,
+        run_id="r",
+        now_ms=0,
+        destinations=[["ops"]],
+    )
+    snap = run.snapshot()
+    assert json.loads(snap["state"])["destinations"] == [["ops"]]
+    assert _core.Run.restore(validator, CATALOG, snap).snapshot() == snap
+    with pytest.raises(ValueError, match="destination policy: policy 0, pattern 0"):
+        _core.Run.start(
+            validator,
+            CATALOG,
+            "w",
+            header=None,
+            run_id="r",
+            now_ms=0,
+            destinations=[["https://hooks.example.com:*"]],
         )
 
 

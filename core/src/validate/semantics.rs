@@ -914,6 +914,24 @@ pub(crate) const FEATURES: &[Feature] = &[
             })
         },
     },
+    // S5 (§4.5): a memory step's `scope`, which the executor itself checks
+    // against the output (an earlier consumer would store elsewhere).
+    Feature {
+        since: (1, 2),
+        name: "the persist and recall input 'scope'",
+        first_use: |wf| {
+            objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
+                (matches!(
+                    step.get("capability").and_then(Value::as_str),
+                    Some("persist" | "recall")
+                ) && step
+                    .get("input_bindings")
+                    .and_then(|b| b.get("scope"))
+                    .is_some())
+                .then(|| format!("steps[{i}].input_bindings.scope"))
+            })
+        },
+    },
 ];
 
 /// The field `steps[i].approval.approver.<key>` of the first step whose

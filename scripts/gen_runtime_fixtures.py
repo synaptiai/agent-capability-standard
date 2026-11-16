@@ -6687,6 +6687,7 @@ RECORD = {
     "reason_code": "5.19.7",
     "code": "6.4",
     "checkpoint_id": "6.4",
+    "idempotency_key": "4.4.2",
     "details": "6.4",
     "recorded_by": "6.4",
     "anchors": "6.5",
