@@ -368,6 +368,17 @@ flowchart TB
   rb -.->|restores| cp
 ```
 
+### Does a rollback undo a message I sent?
+
+No. The checkpoint before a `send` restores the agent's own state, not the
+transmission: once delivered, data cannot be recalled, and a rollback lists
+the send as `not_covered`, `transmitted`
+([STANDARD §4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)). A send
+is made safe before it happens: a `constrain` step, an approval that shows
+the destination and the payload, a destination policy, and at most one
+transmission per approval (every retry carries the same idempotency key).
+To correct a send, send again in a step of its own.
+
 ---
 
 ## Implementation

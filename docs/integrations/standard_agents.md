@@ -31,9 +31,8 @@ was checked and what was not.
   is a working reference: a tool is classified by an ontology capability, and
   the capability's rules are enforced inside the tool. The example compiles
   against the published SA types and its rules are tested. The binding is a
-  safety layer under Standard 1.2.0 §5.18 and meets its conformance class,
-  SL, except the §5.18.10 checks its statement lists as not applied
-  ([Conformance](#conformance-class-sl)).
+  safety layer under Standard 1.2.0 §5.18 and claims its conformance class,
+  SL ([Conformance](#conformance-class-sl)).
 - **Enforcement is cooperative, not imposed.** SA has no hook that can refuse
   a tool call before it runs, so a safety rule holds only for tools written
   with the binding. A tool written without it is not covered, and no hook
@@ -149,7 +148,7 @@ requirement of the other.
 | `rollback`: restore a checkpoint | No restore or undo. The one statement on the subject concerns a handler that throws: "Nothing is rolled back." ([Handlers §5](https://standardagentspec.org/0.2.0/specification/handlers#5-error-semantics)) | ACS only | A grounded `rollback` tool restores what the checkpoint tool saved |
 | A checkpoint record that authorises one later step | A durable, per-thread key-value store ([Runtime, Durable Key-Value Store](https://standardagentspec.org/0.2.0/infrastructure/runtime#14-durable-key-value-store)) | Fits | The record lives in the store; a later call reads it |
 | A wait invalidates earlier checkpoints (W608) | `execution.flowId`, the "Unique execution ID" | Fits | A checkpoint counts only in the execution that took it |
-| `persist`, `recall` | `setValue`, `getValue`; user-scope values in the Draft Users page | Partial | Thread scope maps directly. The ontology gives `persist` and `recall` no scope; the `recall` skill names `session`, `project` and `global` |
+| `persist`, `recall` | `setValue`, `getValue`; user-scope values in the Draft Users page | Partial | The thread is the `session` memory scope ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)); the binding's `memoryTools` store `{v, data, stored_at, expires_at}` envelopes there and refuse any other scope (`unsupported_scope`) and data holding a credential (`secret_in_data`) |
 | World state: `state`, `transition`, the world state schema ([§6.3](../../spec/STANDARD-v1.1.0.md#63-world-state-requirements)) | Nothing comparable: a thread holds messages, files and values | ACS only | A world model is data a grounded agent keeps in the thread |
 | Run snapshot and restore (canonical JSON, SHA-256, optional HMAC) | Messages and tool results persisted before the runtime advances | Fits | Different things: SA persists the conversation, ACS the position in a workflow |
 
@@ -452,6 +451,21 @@ steps of one workflow, and a thread has no fixed list of steps to order.
 runs a thread's tool calls one at a time, so within a thread the conflict
 cannot arise.
 
+### Sends and memory
+
+Every grounded `send` tool obeys the destination policies the layer puts in
+force ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)):
+`configureLayer({destinations, profilePolicy})` in the module that defines
+the agent's tools (`profilePolicy` is the core's
+`CoreContext.profilePolicy(profiles)`, whose `allowed_destinations` join the
+host's). A call whose destination no policy allows, or is not a string, is
+refused with F504 before any approval is asked for. The destination is
+`args.destination` unless the tool's `destination` option says where
+(`destination: (args) => args.to`); a tool's own `profiles` add their
+policies. `memoryTools()` gives a `persist` and a `recall` tool on the
+thread's store (scope `session`), which pass the session cases of
+`tests/conformance/memory/store.json`.
+
 ### Checkpoints
 
 A checkpoint is a `checkpoint` tool like any other grounded tool: its code
@@ -722,9 +736,9 @@ A grounded tool takes four more options:
   nested call that needs a person is not covered by an approval no person
   gave. Their grounding policies join `grounding`; and an output below
   their `minimum_confidence` fails with F504 (`reason_code`), after the
-  grounding check. A profile with an error throws, and so does one that
-  sets `allowed_destinations`, a destination policy this binding does not
-  check yet; each warning (a misspelled member is W604, and ignored) goes
+  grounding check. Their `allowed_destinations` join the layer's
+  destination policies for the tool's `send` calls (§4.4.2). A profile with
+  an error throws; each warning (a misspelled member is W604, and ignored) goes
   to `onWarning`, `console.warn` by default, and stays in `warnings`. The
   profiles are part of every record's `config_sha256`.
 
@@ -774,10 +788,9 @@ in a Standard Agents runtime.
 
 ### Conformance (class SL)
 
-The binding meets the safety-layer conformance class of
-[Standard 1.2.0 §10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)
-except the §5.18.10 checks its statement lists as not applied, and claims
-the class once those are applied. Its statement,
+The binding claims the safety-layer conformance class of
+[Standard 1.2.0 §10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance).
+Its statement,
 [`standard_agents_binding.json`](../../tests/conformance/calls/statements/standard_agents_binding.json),
 says what it covers (calls of tools defined with `groundedTool` or
 `controlTool`) and what it cannot see (tools defined with plain `defineTool`,
@@ -786,10 +799,11 @@ endpoints), its scope (one thread) and boundaries (a new execution), a
 checkpoint's maximum age (ten minutes), how it obtains approval (recorded
 through the endpoint) and how it keeps a check and its use atomic (the
 runtime's order, and `serially` within a realm). It lists its host gaps, the
-rows of the table above that rest on SA behaviour the text does not state, and
-the checks of §5.18.10 it does not apply yet: the destination policy of
-`send`. It applies the secret checks of `persist` and `audit` and redacts
-every trace entry it writes (§6.7).
+rows of the table above that rest on SA behaviour the text does not state,
+and no check of §5.18.10 it does not apply: it applies the destination
+policies in force to every `send` tool (`configureLayer`, §4.4.2) and the
+secret checks of `persist` and `audit`, and redacts every trace entry it
+writes (§6.7).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
@@ -877,7 +891,10 @@ things follow.
 - **Each agent grounds its own tools.** A parent's checkpoint does not cover
   what a child changes, and a parent's approval does not reach a child's
   tools. A child that mutates takes its own checkpoints and asks for its own
-  approvals, in its own thread.
+  approvals, in its own thread: the per-thread rule is the tool-calling
+  case of Standard 1.2.0
+  [§5.15.4](../../spec/STANDARD-v1.2.0.md#5154-checkpoints-across-a-delegation),
+  a delegate's checkpoint in the scope where its change is checked.
 - **A parent cannot see what a child may do.** Nothing in a child's definition
   that a parent can read says whether it mutates. `subagent_create` is
   injected by the runtime and has no `execute` to wrap. A parent that wants to
@@ -1129,8 +1146,9 @@ requires for normative changes.
   item.
 - **What crosses a delegation.** A delegate's effects are outside its
   delegator's checkpoints, and the ontology gives `delegate` no checkpoint or
-  approval flag whatever the target may do. The Standard should say so, and
-  an agent manifest would let a validator derive a `delegate` step's flags
+  approval flag whatever the target may do. Standard 1.2.0 §5.15.4 now says
+  so (a rollback reaches only what its checkpoint captured), and an agent
+  manifest would let a validator derive a `delegate` step's flags
   from its target. Until then a workflow author raises the step's flags
   ([How a delegate step maps to a host](#how-a-delegate-step-maps-to-a-host)).
 - **The host protocol as a published schema**, with a conformance class for

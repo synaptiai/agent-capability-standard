@@ -502,6 +502,19 @@ reports what it actually used as `effective`:
 How a host keeps a delegate read-only is up to it (a read-only token, a
 sandbox); `effective.read_only` says whether it did.
 
+**Checkpoints across a delegation**
+([§5.15.4](../../spec/STANDARD-v1.2.0.md#5154-checkpoints-across-a-delegation)).
+A delegate is another party: your run's checkpoints never authorise what it
+changes, and before each change it needs a checkpoint of its own, valid
+where that change is checked (in a safety layer that orders its calls with
+yours, one taken in that shared scope that no other change has used). Your
+host can attest that as `effective.checkpointed`. A rollback to your
+checkpoint restores what it captured, whoever changed it (a subagent in the
+same working tree included), and nothing else: a delegate's change
+elsewhere is reported as `not_covered`, `delegated`. To leave no change a
+rollback cannot reach, bind `read_only: true`, or undo the delegate's
+changes in a step of their own.
+
 `receive` and `synchronize` take `accept_from`, a list of principals:
 items from anyone else are dropped (and counted), and each kept item
 carries the host-authenticated `sender`.

@@ -405,7 +405,7 @@ cancelled runs included; every host keeps it with the run's records
 ## Safety Concepts
 
 ### Checkpoint
-A saved state that enables rollback. A checkpoint step is required before any capability with `requires_checkpoint` or an incoming `requires` edge from `checkpoint` — `mutate`, `send` and `rollback`. Not every mutation needs one: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint.
+A copy, kept by the host, of the state within its scope, from which that state can be restored ([STANDARD §4.4.1](../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)). A host reports what it captured, what it left out (`excluded`) and a `digest`; it never captures the record of what happened (the audit log, the host's checkpoint state). Validity limits what a checkpoint authorises; retention limits what it can restore. A checkpoint step is required before any capability with `requires_checkpoint` or an incoming `requires` edge from `checkpoint` — `mutate`, `send` and `rollback`. Not every mutation needs one: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint.
 
 **Why it matters:** Checkpoints are your safety net. When step 7 fails after steps 1-6 modified state, a checkpoint lets you restore to a known-good state in seconds instead of hours of manual cleanup.
 
@@ -427,7 +427,7 @@ flowchart LR
 ```
 
 ### Rollback
-Reverting to a previous checkpoint. Rollback is triggered when:
+Returning what a checkpoint captured to the state it had then, whoever changed it since ([STANDARD §4.4.1](../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)). It never changes the record of what happened, and cannot recall a transmission or reach a delegate's change elsewhere (it lists those as `not_covered`). `restored` is true only when everything the rollback concerns is back; a rollback step completes either way, so a workflow checks it. Rollback is triggered when:
 - Verification fails
 - Unexpected side effects are detected
 - Gates block execution
@@ -447,6 +447,15 @@ flowchart LR
   g[A gate blocks] --> rb
   rb -->|reverts to| cp[Previous checkpoint]
 ```
+
+### Idempotency Key
+What every attempt of one pass of a step carries (`<run_id>:<n>`), so that a host performs its effect, such as a transmission, at most once: a retry carries the same key, a loop that runs the step again a new one ([STANDARD §4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)).
+
+### Destination Policy
+A list of patterns a `send`'s destination must match: an exact destination, a prefix ending in a delimiter (`https://hooks.example.com/*`), or a host or address suffix (`*@example.com`). The host's policies and each applied profile's `allowed_destinations` are in force together; a send they do not allow fails with F504 before approval ([STANDARD §4.4.2](../spec/STANDARD-v1.2.0.md#442-transmissions)).
+
+### Memory Scope
+Who can read an entry `persist` stored, and how long it lasts: `run`, `session`, `user`, `project`, `global` or an `x-` name ([STANDARD §4.5](../spec/STANDARD-v1.2.0.md#45-memory)).
 
 ### Mutation
 A change to external state (files, databases, APIs). Steps inherit `mutation`, `requires_checkpoint`, `requires_approval` and `risk` from the ontology; a step that declares a weaker value is ignored with warning W602 (`audit` alone is `mutation_overridable` and may declare `mutation: false`). Mutating steps:

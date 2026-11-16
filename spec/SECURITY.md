@@ -18,6 +18,8 @@ Any `mutate`, `send` or `rollback` step MUST be preceded by a `checkpoint` step.
   every host keeps every run's run record ([§5.19.8](STANDARD-v1.2.0.md#5198-the-runs-record)),
   and the plugin's hook logs every tool call it can, reporting any it cannot
 
+A checkpoint restores state, not effects ([STANDARD v1.2 §4.4.1](STANDARD-v1.2.0.md#441-checkpoints-and-rollback)): a rollback returns what its checkpoint captured, and cannot recall a transmission (reported `transmitted`) or reach a delegate's change elsewhere (`delegated`). A checkpoint never captures the host's audit log, its checkpoint state or its idempotency keys, so a rollback can neither erase the record nor bring back a used checkpoint nor let a send go twice.
+
 ### 1.2 Actions Are Ordered
 
 The action capabilities (`execute`, `mutate`, `send`) are constrained by ontology edges:
@@ -236,6 +238,28 @@ flowchart TB
   rec -->|exhausted| r404[R404 error]
 ```
 
+#### 2.2.9 Exfiltration through `send`
+
+**Scenario**: A model, steered by injected content, sends data to a
+destination it chose.
+
+**Mitigations** ([STANDARD v1.2 §4.4.2](STANDARD-v1.2.0.md#442-transmissions)):
+- A destination policy, from the host or an applied profile's
+  `allowed_destinations`, fails a `send` step whose destination it does not
+  allow with F504, before anyone is asked and before a checkpoint is used;
+  safety layers refuse such calls the same way. Its suffix form names host
+  or address suffixes only (`https://evil.net/?.example.com` does not end in
+  `*.example.com` in its sense), and a prefix that starts an authority must
+  finish it (`https://hooks.example.com:*` is invalid), so no pattern lets a
+  URL reach another host
+- Credentials scoped to the allowed origins (a token only those services
+  accept, an egress allow-list) make a send the check misses fail too
+- The approval shows the destination (W625 reports a 1.2 `send` whose
+  `shows` hides it)
+- At most one transmission per approval: every attempt of a pass carries
+  one idempotency key, and a host never transmits twice under it. Keys are
+  unique only while `run_id`s are: a host keeps them unique
+
 ---
 
 ## 3. Security-Critical Capabilities
@@ -283,6 +307,7 @@ Implementations SHOULD:
 - Run a safety layer that fails closed (STANDARD 1.2.0 §5.18.8)
 - Validate outputs against schemas
 - Redact secrets before writing evidence or records (STANDARD 1.2.0 §6.7)
+- Keep memory entries within their scope: a `recall` in another session, for another principal or another project does not find them (STANDARD 1.2.0 §4.5)
 - Know the durability of the evidence and audit stores, and export what
   must outlive the session when it is written (STANDARD 1.2.0 §6.3, §6.6)
 
@@ -423,7 +448,7 @@ The plugin's hooks apply the rules of STANDARD 1.2.0 §5.18 where Claude Code le
 - Only five tools are routed to the pre-tool-use hook (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`); every other tool, MCP tools included, is not checked.
 - The main agent and its subagents share one marker.
 
-The Python SDK adapter (`grounded_agency.GroundedAgentAdapter`) and the Standard Agents binding (`examples/standard_agents/`) implement §5.18 and meet §10.4 except the §5.18.10 rows their conformance statements list as not applied (the secret checks and redaction of §6.7, the destination policy of §4.4.2 and, for the adapter, the output contract of a tool's result); they claim class SL once those are applied. Their conformance statements are `tests/conformance/calls/statements/grounded_agency_adapter.json` and `tests/conformance/calls/statements/standard_agents_binding.json`, and they pass the binding and call-sequence fixtures their statements' features cover ([CONFORMANCE.md](CONFORMANCE.md#safety-layer-conformance-class-sl)).
+The Python SDK adapter (`grounded_agency.GroundedAgentAdapter`) and the Standard Agents binding (`examples/standard_agents/`) implement §5.18. The binding claims class SL; the adapter meets §10.4 except the §5.18.10 row its conformance statement lists as not applied (the output contract of a tool's result), and claims class SL once it is applied. Both apply the secret checks and redaction of §6.7 and the destination policies of §4.4.2. Their conformance statements are `tests/conformance/calls/statements/grounded_agency_adapter.json` and `tests/conformance/calls/statements/standard_agents_binding.json`, and they pass the binding and call-sequence fixtures their statements' features cover ([CONFORMANCE.md](CONFORMANCE.md#safety-layer-conformance-class-sl)).
 
 ---
 
