@@ -23,8 +23,5 @@
     "Other code that calls a listed tool with exactly the arguments of a pending invocation, at the same moment, can take that invocation's one covered call",
     "The thread's key-value store is writable by any code in the thread",
     "The runtime parses a call's arguments with JSON.parse before the tool sees them: an integer literal beyond ±2^53 reaches the binding rounded, and it checks and digests the rounded value, which is also what the tool runs with"
-  ],
-  "not_applied": [
-    "§5.18.10 send row (F504): no destination policy (§4.4.2) is applied, and a binding's destination member is loaded but not read; a send call is decided by the other checks alone"
   ]
 }
