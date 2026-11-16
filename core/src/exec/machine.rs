@@ -2257,8 +2257,11 @@ impl<'a> Machine<'a> {
             return self.set_stage(Stage::Execute);
         }
         // `require_record` (§6.4): an audit step that did not write its
-        // record fails, retried as any R402.
+        // record fails, retried as any R402. Below 1.2, `require_record` is
+        // an input the executor passes on and does not read, as 1.1 did
+        // (W616).
         if step.capability == "audit"
+            && self.program.workflows[&self.frame_ref().workflow].targets_1_2
             && self.frame_ref().cur.inputs.get("require_record") == Some(&Value::Bool(true))
             && value.get("recorded") != Some(&Value::Bool(true))
         {

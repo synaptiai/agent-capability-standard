@@ -401,6 +401,9 @@ host's `decision_id`.
 An `audit` step that binds `require_record: true` fails (R402, reason
 `not_recorded`) when its output's `recorded` is not `true`, and retries
 apply; without it the step completes and a later gate may read `recorded`.
+The executor reads `require_record` only in a workflow that targets 1.2 or
+later: below 1.2 it passes the input on, as 1.1 did, and the validator
+reports W616.
 
 Every run also has a **run record**
 ([§5.19.8](../../spec/STANDARD-v1.2.0.md#5198-the-runs-record)), an
@@ -537,7 +540,7 @@ its `wake_at`.
 
 ```python
 with lock(run_key):
-    run = runner.restore(load(run_key), key=KEY)
+    run = runner.restore(load(run_key), key=KEY, actor_identity=actor)
     turn = runner.advance(run, host, save=lambda s: store(run_key, s), key=KEY)
     log.extend(run.take_trace())                # events carry seq: a repeat shows
     if turn.result is None:
@@ -548,6 +551,10 @@ with lock(run_key):
     elif turn.wake_at is not None:
         set_timer(run_key, turn.wake_at)
 ```
+
+`actor` is the identity the run was started for: a restore that names it
+refuses the run of any other principal, so a turn cannot continue a run for
+someone else (§5.17). Leave it out only for a run started without one.
 
 Treat an inbound message, an approval decision and a timer alike: each is a
 reason to run a turn. An ended run's `turn.result.action_records` are the
@@ -579,12 +586,12 @@ wake-up time or the next poll.
 A snapshot holds a fixed part (about 0.5 kB), each stored step's output and
 the inputs it ran with, the action records (about 0.3 kB each, 0.6 kB with an
 approval), the trace (about 0.15 kB an event, three to six a step) and the
-pending action. Measured at the end of each of the 260 runtime fixtures, a
-snapshot is 1.2 kB to 35 kB (median 2.9 kB), of which the trace is about
-42%; the terminal action no longer stores copies of the records and outputs
-(in 1.1 that copy was a median 13%, up to 26%, of a finished run's state).
-With the trace and settled records taken out, the same states are 1.0 kB to
-12 kB (median 1.5 kB). For a store with a size cap, take the trace every turn,
+pending action. Measured at the end of each of the 351 runtime fixtures, a
+snapshot is 1.2 kB to 35 kB (median 2.8 kB), of which the trace is about
+42% (47% of all their bytes together); the terminal action no longer stores
+copies of the records and outputs (in 1.1 that copy was a median 13%, up to
+26%, of a finished run's state). With the trace and settled records taken
+out, the same states are 1.0 kB to 12 kB (median 1.5 kB). For a store with a size cap, take the trace every turn,
 take the records into your audit store, and keep large values out of stores
 by passing references to them.
 

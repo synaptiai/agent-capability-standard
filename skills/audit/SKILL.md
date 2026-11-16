@@ -107,7 +107,7 @@ Execute **audit** to create a structured record of actions taken, tools invoked,
 | `event` | Yes | object | Event to record |
 | `context` | No | object | Event context |
 | `retention` | No | string | How long the record is to be kept in the store it is written to: a duration (STANDARD v1.2 §5.10.1, e.g. `2555d` or `P30D`); absent, the store's own policy applies (§6.3). A literal outside the grammar is W614 |
-| `require_record` | No | boolean | The step fails (R402, reason `not_recorded`) unless the record was written (STANDARD v1.2 §6.4) |
+| `require_record` | No | boolean | The step fails (R402, reason `not_recorded`) unless the record was written, in a workflow that targets 1.2 or later (STANDARD v1.2 §6.4) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 

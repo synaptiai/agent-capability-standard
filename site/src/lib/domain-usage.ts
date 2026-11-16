@@ -32,7 +32,7 @@ export interface UsageExample {
   domain: string | null;
   inputs: string[];
   outputs: string[];
-  /** Evidence anchor types in the example's output, once each, in order. */
+  /** The kinds of the evidence anchors in the example's output (§6.5), once each, in order. */
   anchors: string[];
 }
 
@@ -85,7 +85,7 @@ export function capabilityUsage(readmeText: string, where: string): UsageExample
     }
     const output = isObj(spec.output) ? spec.output : {};
     const anchors = Array.isArray(output.evidence_anchors)
-      ? [...new Set(output.evidence_anchors.filter(isObj).map((a) => String(a.type ?? '')).filter(Boolean))]
+      ? [...new Set(output.evidence_anchors.filter(isObj).map((a) => String(a.kind ?? '')).filter(Boolean))]
       : [];
     out.push({
       heading,
@@ -100,9 +100,9 @@ export function capabilityUsage(readmeText: string, where: string): UsageExample
 }
 
 export interface UsageCheck {
-  /** The profile's required anchor types, each with whether the example carries it. */
+  /** The profile's required anchor kinds, each with whether the example carries it. */
   required: { type: string; present: boolean }[];
-  /** Anchor types the example carries that the profile does not require. */
+  /** Anchor kinds the example carries that the profile does not require. */
   other: string[];
   /** Whether the profile's require_grounding lists the capability. */
   mustCite: boolean;
@@ -128,8 +128,8 @@ export function usageCaption(u: UsageExample, c: UsageCheck, key: string): strin
   const missing = c.required.filter((r) => !r.present).map((r) => r.type);
   const anchors =
     c.required.length === 0
-      ? `the ${key} profile requires no anchor types`
-      : `its evidence anchors include ${have} of the ${c.required.length} anchor types the ${key} profile requires${missing.length > 0 ? ` (not ${andList(missing)})` : ''}`;
+      ? `the ${key} profile requires no anchor kinds`
+      : `its evidence anchors include ${have} of the ${c.required.length} anchor kinds the ${key} profile requires${missing.length > 0 ? ` (not ${andList(missing)})` : ''}`;
   const cite = `the profile ${c.mustCite ? 'requires' : 'does not require'} ${u.capability} to cite evidence`;
   return `${io}; ${anchors}; ${cite}.`;
 }

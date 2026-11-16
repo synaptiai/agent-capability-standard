@@ -536,6 +536,7 @@ export function conformanceSuite(text: string, where: string): SuitePart[] {
   const runtime = trackedIn(RUNTIME_FIXTURE_DIR, '.json').length;
   return [
     { label: 'Positive fixtures (pass_)', count: count('pass_'), dir: 'tests/fixtures' },
+    { label: 'Positive fixtures with warnings (warn_)', count: count('warn_'), dir: 'tests/fixtures' },
     { label: 'Negative fixtures (fail_)', count: count('fail_'), dir: 'tests/fixtures' },
     { label: 'Patch fixtures (patch_)', count: count('patch_'), dir: 'tests/fixtures' },
     { label: 'Expression cases', count: exprCases, dir: 'tests/conformance/expressions' },

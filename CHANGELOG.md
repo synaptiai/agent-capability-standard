@@ -102,21 +102,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `adapter.wrap_options()` cannot run them. Pass `require_layer=False`
     for the earlier behaviour (outside class SL). A control-only tool
     (`control: true`) is served as it is: it is never refused.
-  - Tool binding records: a record with a member that has no I-JSON form
-    (an `x-` member holding an integer beyond 2^53, a lone surrogate or an
-    object that is not JSON) is S303 and not loaded, and its tool stays
-    unbound. A float that canonical JSON writes as an integer beyond ±2^53
-    (1.8e16) has no I-JSON form either: in a record it is S303, and in the
-    arguments of a call that requires approval F502, as in the TypeScript
-    package (`grounded_agency.capabilities.bindings.i_json_problem`).
-    `approval.min_approvers` written as `1.0` loads; `approval.role: null`
-    is S303, and `approval.expires` longer than 2^53 - 1 ms is S303. A
-    diagnostic's `location.field` is the member's path with keys joined by
-    a dot (`approval.min_approvers`, `flags.risk`); W602 names
-    `flags.<flag>`.
-  - `adapter.recorded_by["config_sha256"]` also digests the rate limits
-    (`config.rate_limit`), which decide F504 refusals, so its value differs
-    from one computed without them.
 - Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
   Claude Code's JSON payload and needs `jq`; anything else is blocked with
   R407, as is a failure of the hook. The checkpoint marker is used up by the
@@ -160,28 +145,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `MAX_APPROVERS` (1000). A grounded tool's `recorded_by.config_sha256`
   digests `{annotation, settings: {checkpoint_max_age_ms}}`, not the
   annotation alone.
-- TypeScript package: `decodeCapabilityOutput` accepts a number written in
-  exponent form (1.8e16, 1e300), which it used to refuse, and checks integer
-  literals in the text itself; `encodeCapabilityOutput` accepts a value it
-  writes in exponent form (1e21 and above) and refuses one it would write as
-  an integer literal beyond ±2^53 (1.8e16). A tool binding record's
-  `location.field` follows the Python loader's dotted paths. `iJsonProblem`
-  refuses a `bigint`, and the new `parseJsonExact` reads JSON text with an
-  integer literal beyond ±2^53 as a `bigint` instead of rounding it (JSON.parse
-  reads 9007199254740993 as 2^53): read text that is then checked as I-JSON
-  with it.
-- Conformance statement schema: `approval.expires` is a duration or null;
-  the new `not_applied` lists the §5.18.10 checks a layer does not apply,
-  and a layer that lists any does not conform to class SL until it applies
-  them; the new `calls_without_output` names the covered calls whose
-  results carry no capability output, to which no output check applies
-  (§10.4). Both reference layers list nothing in `not_applied` and claim
-  class SL: the Python SDK adapter checks the output contract of the
-  results it receives as capability outputs, those of every MCP tool bound
-  to a capability, in the form the session reads them (R402), and its
-  statement names the calls whose results come in other forms (Claude
-  Code's own tools) in `calls_without_output`; the Standard Agents binding
-  checks every grounded tool's output.
 - **Breaking (plugin):** two composed skills take their directory names
   (Agent Skills requires `name` to equal the directory): the slash commands
   `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
@@ -204,8 +167,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `requires_checkpoint`. A profile's grounding policy (`require_grounding`,
   every shipped profile's) and its `minimum_confidence` are applied: an
   output they cover that is not grounded fails with F505, one not confident
-  enough with F504, in runs, in the adapter (on the outputs of the tools
-  `create_grounded_mcp_server` serves) and in the binding. A member without
+  enough with F504, in runs, in the adapter (on the outputs of every MCP
+  tool bound to a capability, served or not) and in the binding. A member without
   an exact JSON form (an integer beyond 2^53) is S303. An unknown top-level
   profile member stays a warning (W604) and is now reported with the member
   meant: logged at WARNING by the Python layers, and passed by the
@@ -219,8 +182,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Python SDK: `grounded_agency.trust.decay_factor` counts an age below zero
   as zero (it raised `ValueError`), and `TrustModel` reads its field
   authorities from `field_authority.fields`, refusing a malformed entry or
-  an unknown tie-breaker. `_core.Run.start(profiles=...)` and
-  `Validator.validate(profiles=...)` apply profiles (they were refused);
+  an unknown tie-breaker. `_core.Run.start` and
+  `Validator.validate` take `profiles`, which they apply;
   `GroundedAgentConfig(profiles=...)` needs `approval="ask"`.
 - An ontology whose capability contract keeps a `$ref` that names nothing,
   is cyclic or nests deeper than 12 is refused when it is loaded (it was
@@ -407,8 +370,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `agents` whose target manifests were not added. The orchestrator's
   `inquire` output gives questions as objects with `id`, `parameter` and
   `answer_type`, `inquiry_id`, and `ambiguity_analysis` as an object (it
-  gave strings, against the contract). `_core.Run.start`/`restore` accept
-  `catalogs` and `agents` (they were refused as not implemented).
+  gave strings, against the contract). `_core.Run.start` and `restore` take
+  `catalogs` and `agents`.
 - Standard Agents binding: `LintDiagnostic.code` gains `V107` and
   `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
 - Checkpoints, rollbacks, sends and memory (Standard 1.2.0 §4.4.1, §4.4.2,
@@ -522,9 +485,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `take_records`, `taken_heads` (SHA-256 chain heads over what was taken)
     and `run_record`; record mode `actions` (`StartOptions.records`,
     `records="actions"`), with a record for every step that runs, every
-    failure-mode checkpoint and every rollback; an `audit` step that binds
-    `require_record: true` fails R402, reason `not_recorded`, when it did not
-    record. Python: `_core.Run` gains the same operations, `_core.next_fire`;
+    failure-mode checkpoint and every rollback; an `audit` step of a
+    workflow that targets 1.2 or later that binds `require_record: true`
+    fails R402, reason `not_recorded`, when it did not record (a 1.1
+    workflow passes the input on, as before). Python: `_core.Run` gains the same operations, `_core.next_fire`;
     `WorkflowRunner.advance`, `cancel`, `archive=`, `save=`/`key=` (on
     `run`, `drive`, `advance`, `resume` and `cancel`), `run_ids=` and
     `event_seen=` (host stores for used `run_id`s and seen `event_id`s),
@@ -664,7 +628,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
 - Safety-layer conformance fixtures: 33 binding fixtures in
-  `tests/conformance/bindings/` and 28 call-sequence fixtures in
+  `tests/conformance/bindings/` and 30 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
   two reference layers, generated by `scripts/gen_call_fixtures.py`
   (`--check` in CI). The Python SDK adapter and the Standard Agents binding
@@ -850,8 +814,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Domain profiles in every reference layer (§5.21.3): a profile's grounding
   policy is checked by the executor's grounding check (§5.20) and by
   `GroundedAgentAdapter.check_call_output`, which also applies the
-  profiles' minimum confidence (`_core.check_confidence`) to the outputs of
-  the tools `create_grounded_mcp_server` serves, with or without
+  profiles' minimum confidence (`_core.check_confidence`) to the output of
+  every MCP tool bound to a capability, served or not, with or without
   `config.grounding`; an exported call record carries `reason_code` and
   `person_required` (a failed call's record too). A composite tool takes
   the flags a profile raises for each binding it `invokes`, and its person
@@ -904,6 +868,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - TypeScript package: `destinations.ts` (`checkPattern`, `allowed`, ...)
   and `duration.ts` (`parseDurationMs`). Standard Agents binding:
   `configureLayer`, a `send` tool's `destination` option, `memoryTools`.
+- Python SDK tool binding records (`grounded_agency.capabilities.bindings`,
+  Standard 1.2.0 §5.18.1): a record with a member that has no I-JSON form
+  (an `x-` member holding an integer beyond 2^53, a lone surrogate or an
+  object that is not JSON) is S303 and not loaded, and its tool stays
+  unbound. A float that canonical JSON writes as an integer beyond ±2^53
+  (1.8e16) has no I-JSON form either: in a record it is S303, and in the
+  arguments of a call that requires approval F502, as in the TypeScript
+  package (`i_json_problem`). `approval.min_approvers` written as `1.0`
+  loads; `approval.role: null` is S303, and `approval.expires` longer than
+  2^53 - 1 ms is S303. A diagnostic's `location.field` is the member's path
+  with keys joined by a dot (`approval.min_approvers`, `flags.risk`); W602
+  names `flags.<flag>`. `adapter.recorded_by["config_sha256"]` digests the
+  rate limits (`config.rate_limit`), which decide F504 refusals, with the
+  bindings and settings.
+- TypeScript package (`packages/acs-core`): `decodeCapabilityOutput` accepts
+  a number written in exponent form (1.8e16, 1e300) and checks integer
+  literals in the text itself; `encodeCapabilityOutput` accepts a value it
+  writes in exponent form (1e21 and above) and refuses one it would write as
+  an integer literal beyond ±2^53 (1.8e16). A tool binding record's
+  `location.field` follows the Python loader's dotted paths. `iJsonProblem`
+  refuses a `bigint`, and `parseJsonExact` reads JSON text with an integer
+  literal beyond ±2^53 as a `bigint` instead of rounding it (JSON.parse
+  reads 9007199254740993 as 2^53): read text that is then checked as I-JSON
+  with it.
+- Conformance statement schema
+  (`tests/conformance/calls/schema/statement.schema.json`, §10.4):
+  `approval.expires` is a duration or null; `not_applied` lists the
+  §5.18.10 checks a layer does not apply, and a layer that lists any does
+  not conform to class SL until it applies them; `calls_without_output`
+  names the covered calls whose results carry no capability output, to
+  which no output check applies. Both reference layers list nothing in
+  `not_applied` and claim class SL: the Python SDK adapter checks the
+  output contract of the results it receives as capability outputs, those
+  of every MCP tool bound to a capability, in the form the session reads
+  them (R402), and its statement names the calls whose results come in
+  other forms (Claude Code's own tools) in `calls_without_output`; the
+  Standard Agents binding checks every grounded tool's output.
 
 ### Changed
 - The shipped domain profiles are version 2.0.0, cite Standard 1.2.0 and

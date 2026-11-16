@@ -265,8 +265,11 @@ findings:
     checkpoint policy, the person, grounding through S4''s check in every frame, minimum confidence, waited
     delegations included), exposed to Python (`AppliedProfiles`, `WorkflowRunner(profiles=)`,
     `GroundedAgentConfig(profiles=)` for flags, the person, a composite taking the raised flags and person of
-    the bindings it invokes, grounding and minimum confidence on the outputs of the tools it serves and a
-    report for the rest, `_core.check_confidence`), to TypeScript through the WebAssembly
+    the bindings it invokes, grounding and minimum confidence on the output of every MCP tool bound to a
+    capability (a tool it serves checks its own result, the PostToolUse hook another server''s; Claude
+    Code''s own tools carry no capability output and get a one-time warning), `_core.check_confidence`),
+    each call raised for every capability it performs at its effective risk (§5.21.3, the `calls` vectors
+    of effective.json), to TypeScript through the WebAssembly
     core, and in the Standard Agents binding (`groundedTool({profiles})` at the call''s effective risk with
     its `invokes`, a composite listing a binding a profile requires a person for asked of a person,
     `bindingProfiles` reporting loading warnings). Normative vectors
@@ -814,7 +817,8 @@ findings:
   status: fixed
   resolution: 'Standard 1.2.0 §5.15 (Model families), §5.16 and §5.17: families compare exactly
     everywhere, are written `[a-z][a-z0-9_-]*` (W620 for a literal outside it), and a host derives
-    one from the model identifier by one rule; `agent_identity` 1.1.0, the world state''s
+    one from the model identifier by one rule (a `name:tag` identifier gives the name);
+    `agent_identity` 1.1.0, the world state''s
     `AgentIdentity` and `delegate.effective` carry `model_id`, typed and checked against the
     identity (R402) in a workflow that targets 1.2; a 1.1 run reads no `model_id`, as before.
     Code: `core/src/names.rs` (`model_family`), `grounded_agency/coordination/families.py`,
@@ -2056,7 +2060,8 @@ findings:
     Re-read docs/integrations/standard_agents.md at commit 4bc1dd2: lines 10-13 pin the versions.'
   status: fixed
   resolution: '`schemas/interop/standard_agents_mapping.yaml` pins SA 0.2.0, its commit, `@standardagents/spec`
-    0.45.10, Standard 1.1.0, ontology 2.1.0 and the `acs` annotation key with its schema. It records twelve
+    0.45.10, Standard 1.2.0, ontology 2.2.0 (1.1.0 and 2.1.0 when it was fixed) and the `acs` annotation
+    key with its schema. It records twelve
     capability rulings, three anchor `ref` forms, the timestamp units and the identity field map, each
     with the mapping rows it rests on. Review changed `subagent_message` from `is` to `carrier`, because
     tools-contracts#cls-07 leaves its classification by reserved name open, and tightened four notes.
@@ -2760,7 +2765,7 @@ findings:
     fixtures that name an approval kind: 11, of which 8 name `approval_requested`.'
   status: fixed
   resolution: docs/guides/RUNNING_WORKFLOWS.md has a new informative section, 'The trace'. It lists the
-    six fields of a trace event and the 34 kinds the reference executor records, with each kind's detail
+    six fields of a trace event and the kinds the reference executor records (39 in 1.2.0), with each kind's detail
     members. It says these are executor trace kinds, not §5.13 event types, and that relaying them is
     left to the host. tests/test_trace_kinds_doc.py compares the list with the kinds core/src/exec passes
     to trace(), with the runtime fixtures' trace_kinds, and with the events and detail members the fixtures'

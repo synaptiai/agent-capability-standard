@@ -282,7 +282,8 @@ destination it chose.
 
 | Capability | Required Before | Security Rationale |
 |------------|-----------------|-------------------|
-| `mutate`, `send` | `checkpoint` (required); `constrain` (recommended); `plan` (if present) | Recovery possible, no blind execution |
+| `mutate` | `checkpoint` (required); `constrain` (recommended); `plan` (if present) | Recovery possible, no blind execution |
+| `send` | `checkpoint` (required); `constrain` (recommended) | Recovery possible for what the sender holds, policy checked before transmitting |
 | `rollback` | `checkpoint` (required) | Must have state to restore |
 | `execute` | `constrain` (recommended); `plan` (if present) | Policy checked before running |
 | `verify` | `execute`, `mutate`, `send` (if present) | Checks results after the fact |

@@ -54,7 +54,9 @@ the Rust core in `core/`).
 - Validator CLI
 
 ## Test suite requirements
-- Positive fixtures: valid workflows (`tests/fixtures/pass_*`)
+- Positive fixtures: valid workflows (`tests/fixtures/pass_*`), and valid
+  workflows that must give the warnings their expectation lists
+  (`tests/fixtures/warn_*`)
 - Negative fixtures: invalid references, type mismatches, ambiguous nodes,
   edge and version violations, and malformed or undeclared extensions
   (`tests/fixtures/fail_*`)
@@ -236,8 +238,8 @@ Standard version it implements, the extensions it implements, how its
 binding names the run operations, and whether it restores states saved by
 its earlier versions.
 
-Coverage gaps: no conformance fixture yet exercises V103, S301, S302, W607
-or W612; the reference implementation's unit tests cover them. F505 is
+Coverage gaps: no conformance fixture yet exercises V103, S301, S302 or
+W612; the reference implementation's unit tests cover them. F505 is
 checked under a grounding policy (STANDARD-v1.2.0 §5.20) and covered by the
 grounding vectors (`tests/conformance/grounding/check.json`, normative) and
 the runtime fixtures whose names start with `grounding_`.
@@ -255,15 +257,18 @@ normative for the class:
   layer computes. Schema: `tests/conformance/bindings/schema/fixture.schema.json`.
   Nine of them check offered tools and host actions (§5.18.2, a SHOULD) and
   need the `offered_tools` feature.
-- **Call-sequence fixtures**, `tests/conformance/calls/*.json` (28): one
-  layer scope with bindings, then calls and events (a boundary, an expired
+- **Call-sequence fixtures**, `tests/conformance/calls/*.json` (30): one
+  layer scope with bindings, optionally a destination policy in force, then
+  calls and events (a boundary, an expired
   checkpoint or decision), each call with the outcome a conforming layer
   gives it, `run`, a refusal code, or the code of a refused output (a call
   that ran and `returns` an output that breaks its capability's output
   contract, R402, §5.18.10). Schema:
   `tests/conformance/calls/schema/fixture.schema.json`. A fixture's `needs`
   names a feature a layer may lack: `unbound_calls`, `nested_calls`,
-  `recorded_approval`.
+  `recorded_approval`; its `without`, a feature a layer must lack to play
+  it (`composite_send_unseen_under_policy` is for a layer that does not see
+  nested calls).
 - **Conformance statements**, `tests/conformance/calls/statements/*.json`,
   following `tests/conformance/calls/schema/statement.schema.json`: what a
   layer covers and cannot see, its scope and boundaries, its checkpoint
@@ -307,7 +312,8 @@ compare the diagnostics, as code and tool pairs in any order, and the
 effective flags of the records that loaded; play each call fixture's
 `sequence` in one scope, recording decisions before a call that has
 `approve` or `reject`, and compare each call's outcome. Skip a fixture whose
-`needs` your statement lacks, and say so in the statement. What no fixture
+`needs` your statement lacks, and say so in the statement, and one whose
+`without` your statement lists. What no fixture
 can test (that a prompt shows what runs, that the layer sees every call it
 claims to cover, and its host gaps) is stated there instead.
 

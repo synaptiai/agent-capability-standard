@@ -825,10 +825,18 @@ fn reused_queued_record_names_only_its_pass_checkpoint() {
 
 #[test]
 fn require_record_fails_an_audit_step_that_did_not_record() {
-    let catalog = wf(
+    let mut catalog = wf(
         json!([{"capability": "audit", "purpose": "log it", "store_as": "a",
         "input_bindings": {"event": {"what": "x"}, "require_record": true}}]),
     );
+    // §6.4 applies from 1.2: a 1.1 workflow passes the input on, as 1.1 did.
+    let mut run = start(&catalog, RecordMode::Approvals);
+    answer(&mut run, output(json!({"recorded": false})), 0);
+    assert_eq!(
+        serde_json::to_value(run.next()).unwrap()["outcome"],
+        "completed"
+    );
+    catalog["w"]["spec_version"] = json!("1.2");
     let mut run = start(&catalog, RecordMode::Approvals);
     answer(&mut run, output(json!({"recorded": false})), 0);
     let end = end(&run);

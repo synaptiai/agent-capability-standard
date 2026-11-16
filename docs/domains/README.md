@@ -88,8 +88,8 @@ Choose this if you're building agents for:
 
 **Key profile settings:**
 - High trust for calibrated cameras (0.93-0.95)
-- Checkpoints before all image modifications and generation
-- Evidence requires image references and bounding boxes
+- Checkpoints before every `mutate` and `persist` (writing an image or a result out) and before any medium- or high-risk step
+- `detect`, `classify`, `predict`, `generate` and `transform` must cite evidence (`file`, `sensor` and other kinds; a bounding box goes in the anchor's `ref`)
 
 ### Audio
 
@@ -101,8 +101,8 @@ Choose this if you're building agents for:
 
 **Key profile settings:**
 - High trust for studio recordings (0.93-0.95)
-- Checkpoints before speaker identification
-- Evidence requires time segments and signal quality metrics
+- Checkpoints before every `mutate` and `persist` (writing a transcript or synthesized audio out) and before any high-risk step; none before speaker identification
+- `detect`, `classify`, `predict`, `generate` and `transform` must cite evidence (`file`, `sensor` and other kinds; a time segment goes in the anchor's `ref`)
 
 ### Multi-modal
 
@@ -114,8 +114,8 @@ Choose this if you're building agents for:
 
 **Key profile settings:**
 - Trust decreases with each generation step
-- Checkpoints before all modality conversions
-- Evidence requires source/target modality identification and alignment scores
+- Checkpoints before every `persist` (writing converted content out) and before any medium- or high-risk step
+- `detect`, `classify`, `predict`, `plan`, `generate` and `transform` must cite evidence, one anchor per contributing modality
 
 ## Profile Schema
 

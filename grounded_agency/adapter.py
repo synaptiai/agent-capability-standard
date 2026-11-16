@@ -293,9 +293,12 @@ class GroundedAgentConfig:
             (``evidence_policy.require_grounding``, with
             ``required_anchor_types`` as kinds) join ``grounding``, and
             their ``minimum_confidence`` fails an output below it with F504:
-            both apply to the outputs this layer sees, those of the tools
-            ``create_grounded_mcp_server`` serves (a warning is logged once
-            for any other tool they would cover). Their
+            both apply to the output of every MCP tool bound to a
+            capability (a tool ``create_grounded_mcp_server`` serves checks
+            its own result, and the PostToolUse hook checks another
+            server's); Claude Code's own tools return no capability output,
+            and a warning is logged once for each such tool they would
+            cover. Their
             ``allowed_destinations`` are destination policies in force
             beside ``allowed_destinations`` (section 4.4.2). A profile with
             an error refuses the configuration
@@ -777,10 +780,10 @@ class GroundedAgentAdapter:
         # of its output, section 5.20): the post-call hooks do not record
         # it again.
         self._outcome_recorded: set[str] = set()
-        # The tools create_grounded_mcp_server serves: the only calls whose
-        # output this layer sees, so the only ones a grounding policy can
-        # check (section 5.20). Tools a policy would check but cannot,
-        # warned about once each.
+        # The tools create_grounded_mcp_server serves, which check their own
+        # output (section 5.20); the PostToolUse hook checks other servers'
+        # bound MCP tools. Tools a policy would check but whose results carry
+        # no capability output (Claude Code's own), warned about once each.
         self._grounded_tools: set[str] = set()
         self._ungrounded_warned: set[str] = set()
         self.call_records: deque[dict[str, Any]] = deque(

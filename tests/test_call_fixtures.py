@@ -110,7 +110,7 @@ def test_the_statement_matches_the_adapter() -> None:
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 28
+    assert len(CASES) == 30
 
 
 def _output(capability: str, adapter: GroundedAgentAdapter, n: int) -> dict[str, Any]:
@@ -301,11 +301,16 @@ async def test_call_fixture(
             f"the adapter's conformance statement lacks {sorted(missing)}: "
             f"{statement['does_not_cover'] if 'nested_calls' in missing else 'approval is by prompt'}"
         )
+    present = set(fixture.get("without", [])) & set(statement["features"])
+    if present:
+        pytest.skip(f"the fixture is for a layer without {sorted(present)}")
 
     clock = FakeClock()
     adapter = GroundedAgentAdapter(
         GroundedAgentConfig(
-            ontology_path=ontology_path, checkpoint_dir=str(tmp_path / ".cp")
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            allowed_destinations=fixture.get("destination_policy"),
         ),
         clock=clock,
     )

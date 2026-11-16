@@ -378,12 +378,29 @@ export const EVAL_SOURCE = 'tests/conformance/expressions/eval.json';
 export const CHECK_SOURCE = 'tests/conformance/expressions/check.json';
 export const RUNTIME_DIR = 'tests/conformance/runtime';
 export const CONTRIB_DIR = 'tests/conformance/contrib';
+export const BINDINGS_DIR = 'tests/conformance/bindings';
+export const CALLS_DIR = 'tests/conformance/calls';
+
+/** A call of a call-sequence fixture, with the calls nested in it. */
+interface FixtureCall {
+  expect?: unknown;
+  nested?: FixtureCall[];
+}
+
+/** The refusal codes a call and the calls nested in it expect. */
+function callCodes(call: FixtureCall): unknown[] {
+  const expect = call.expect as { refuse?: unknown; refuse_output?: unknown } | undefined;
+  const own = typeof expect === 'object' && expect !== null ? [expect.refuse, expect.refuse_output] : [];
+  return [...own, ...(call.nested ?? []).flatMap(callCodes)];
+}
 
 /**
  * The parts of the conformance suite that spec/CONFORMANCE.md names, and the
  * codes each expects: a validator fixture's expected error and warning
- * codes, an evaluation case's error, a check case's diagnostics, and the code
- * and cause a runtime or contributed fixture's run ends with.
+ * codes, an evaluation case's error, a check case's diagnostics, the code
+ * and cause a runtime or contributed fixture's run ends with, a binding
+ * fixture's expected error and warning codes, and the refusal codes of a
+ * call-sequence fixture's calls.
  */
 export function conformanceSuite(): SuitePart[] {
   type Exp = { should_pass?: boolean; expected_error_codes?: unknown[]; expected_warning_codes?: unknown[] };
@@ -400,6 +417,13 @@ export function conformanceSuite(): SuitePart[] {
   const cases = (source: string) => (JSON.parse(readRepoFile(source)) as { cases: { expect: unknown }[] }).cases;
   const evalCases = cases(EVAL_SOURCE);
   const checkCases = cases(CHECK_SOURCE);
+  // The fixtures are the files in the directory itself; schema/ and
+  // statements/ hold their format and the layers' statements.
+  const fixtures = (dir: string, label: string, codesOf: (f: unknown) => unknown[]): SuitePart => {
+    const files = trackedIn(dir, '.json');
+    const codes = files.flatMap((f) => codesIn(codesOf(JSON.parse(readRepoFile(f)))));
+    return { label, count: files.length, unit: 'fixtures', codes: new Set(codes) };
+  };
   const runs = (dir: string, label: string): SuitePart => {
     // The fixtures are the files in the directory itself; schema/ holds their format.
     const files = trackedIn(dir, '.json');
@@ -421,6 +445,13 @@ export function conformanceSuite(): SuitePart[] {
     { label: 'Expression check cases', count: checkCases.length, unit: 'cases', codes: new Set(checkCases.flatMap((c) => (Array.isArray(c.expect) ? codesIn(c.expect) : []))) },
     runs(RUNTIME_DIR, 'Runtime fixtures'),
     runs(CONTRIB_DIR, 'Contributed fixtures'),
+    fixtures(BINDINGS_DIR, 'Binding fixtures', (f) => {
+      const expect = (f as { expect?: { errors?: { code?: unknown }[]; warnings?: { code?: unknown }[] } }).expect ?? {};
+      return [...(expect.errors ?? []), ...(expect.warnings ?? [])].map((d) => d.code);
+    }),
+    fixtures(CALLS_DIR, 'Call-sequence fixtures', (f) =>
+      ((f as { sequence?: FixtureCall[] }).sequence ?? []).flatMap(callCodes),
+    ),
   ];
 }
 

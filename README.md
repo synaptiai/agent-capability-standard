@@ -241,7 +241,7 @@ Example profiles of trust weights, risk thresholds and checkpoint rules for spec
 ### Canonical Schemas
 
 - **Capability Ontology** — 36 atomic capabilities with I/O contracts ([ontology](schemas/capability_ontology.yaml))
-- **Workflow DSL** — Typed bindings, gates, failure modes and recovery loops (no reference workflow uses a loop; see [STANDARD §5.12](spec/STANDARD-v1.1.0.md#512-recovery-and-escalation))
+- **Workflow DSL** — Typed bindings, gates, failure modes and recovery loops (no reference workflow uses a loop; see [STANDARD §5.12](spec/STANDARD-v1.2.0.md#512-recovery-and-escalation))
 - **World State** — Observations with provenance and uncertainty
 - **Trust Model** — Authority ranking with time decay
 

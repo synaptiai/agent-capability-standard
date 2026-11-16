@@ -239,21 +239,19 @@ This means: `classify` is a specialized form of `detect` that assigns categories
 
 ### L1 Validation (Basic)
 
-Validators at L1 conformance MUST, in time linear in the number of steps:
+Validators at L1 conformance MUST, and SHOULD in time linear in the number
+of steps (STANDARD §4.3):
 - Check `requires` edges (V102)
 - Check `precedes` edges (V102)
 - Check `conflicts_with` edges within parallel groups (F504)
 - Warn when a `soft_requires` group is unmet (W601)
 
-### L2 Validation (Schema)
+### L2 and L3 Validation
 
-No additional edge checks.
-
-### L3 Validation (Contracts)
-
-Validators at L3 conformance MUST additionally:
-- Verify `specializes` relationships maintain contract compatibility
-- Check `alternative_to` capabilities have compatible I/O schemas
+No additional edge checks: `enables`, `alternative_to` and `specializes`
+have no rule (STANDARD §4.3). That a specialization keeps its parent's
+contract, or that alternatives have compatible inputs and outputs, is a
+matter for the ontology's authors, which no validator checks.
 
 ---
 
@@ -368,12 +366,14 @@ Rolling back after a failed mutation, in sequence, is allowed.
 
 ## Versioning
 
-Edge types follow semantic versioning:
-- Adding new edge types: MINOR version bump
-- Changing edge type semantics: MAJOR version bump, except clarifications
-  of under-specified semantics, which a MINOR release states as errata (as
-  1.1.0 does for `precedes`, `conflicts_with` and `soft_requires`)
-- Adding edges of existing types: PATCH version bump
+[STANDARD §11.6](STANDARD-v1.2.0.md#116-ontology-versions) classifies
+ontology changes, edges included: adding or removing a `requires`,
+`precedes` or `conflicts_with` edge is MAJOR, adding or removing a
+`soft_requires`, `enables`, `alternative_to` or `specializes` edge is MINOR,
+and removing or renaming an edge type is MAJOR. Changing an edge type's
+semantics is MAJOR, except a clarification of under-specified semantics,
+which a MINOR release states as errata (as 1.1.0 does for `precedes`,
+`conflicts_with` and `soft_requires`).
 
 ---
 

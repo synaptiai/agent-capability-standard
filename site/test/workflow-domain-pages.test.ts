@@ -58,15 +58,16 @@ describe('workflow family map (F-WI2)', () => {
 });
 
 describe('domain guide figures', () => {
-  it('reads the anchor types of each audio "Capability Usage" example from its fence', () => {
+  it('reads the anchor kinds of each audio "Capability Usage" example from its fence', () => {
     const text = repoText('docs/domains/audio/README.md');
     const usage = capabilityUsage(text, 'test');
     const section = text.slice(text.indexOf('## Capability Usage'), text.indexOf('## Available Workflows'));
     const fences = [...section.matchAll(/```yaml\n([\s\S]*?)```/g)].map((m) => m[1]!);
     expect(usage.map((u) => u.capability)).toEqual(fences.map((f) => /^([a-z_]+):/.exec(f)![1]));
     usage.forEach((u, i) => {
-      const types = [...new Set([...fences[i]!.matchAll(/- type: ([a-z_]+)/g)].map((m) => m[1]!))];
-      expect(u.anchors, u.heading).toEqual(types);
+      const kinds = [...new Set([...fences[i]!.matchAll(/- kind: ([a-z_]+)/g)].map((m) => m[1]!))];
+      expect(kinds.length, u.heading).toBeGreaterThan(0);
+      expect(u.anchors, u.heading).toEqual(kinds);
     });
   });
 

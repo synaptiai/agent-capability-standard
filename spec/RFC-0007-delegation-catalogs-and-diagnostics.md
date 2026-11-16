@@ -144,8 +144,10 @@ as 1.1 did, so none of these rules applies there.
 ### 6) Model families: exact, lowercase, derived by one rule
 Families compare by exact code-point equality everywhere. A host derives a
 family from the model's identifier: after the last `/`, after the last `.`
-or `:` before the first digit or `-`, the leading ASCII letters, lowercased
-(`acme-large-2` → `acme`, `z3-mini` → `z`). The rule needs no list of
+or `:` followed by a letter before the first digit or `-` (when there is
+neither, only a `.`: a `:` then starts a tag), the leading ASCII letters,
+lowercased (`acme-large-2` → `acme`, `acme:latest` → `acme`, `z3-mini` →
+`z`). The rule needs no list of
 lines and is pinned by vectors; a literal outside `[a-z][a-z0-9_-]*` is
 W620. An identity (and the world state's copy of it) and `effective` may
 carry the `model_id`, checked against each other under `identity@1` in a
@@ -358,4 +360,5 @@ a delegate step whose target maxima are unknown.
    never run as one that declares no version.
 8. Should the model family rule be revisited when a provider names a line
    whose identifiers do not start with its name (none of the lines in the
-   vectors does)?
+   vectors does), or for a tag that starts with a letter and holds a digit
+   (`acme:v1.6` gives `v`, as `vendor:acme-2` gives `acme`)?

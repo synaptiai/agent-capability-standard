@@ -14,6 +14,17 @@
       "items": { "enum": ["unbound_calls", "nested_calls", "recorded_approval"] },
       "uniqueItems": true
     },
+    "without": {
+      "description": "Features the layer's conformance statement must not list: the fixture pins what a layer without them does (a layer that does not see nested calls, for one). A layer whose statement lists one does not play the fixture.",
+      "type": "array",
+      "items": { "enum": ["unbound_calls", "nested_calls", "recorded_approval"] },
+      "uniqueItems": true
+    },
+    "destination_policy": {
+      "description": "A destination policy in force in the scope (section 4.4.2): the patterns a send's destination must match, which a binding's `destination` pointer locates in the call's arguments. An empty list allows no send. Absent, no policy is in force.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "bindings": {
       "type": "array",
       "items": { "$ref": "../../../../schemas/interop/tool_binding.schema.json" }

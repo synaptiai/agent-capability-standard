@@ -1,5 +1,5 @@
 {
-  "description": "Model family vectors (Agent Capability Standard 1.2.0, section 5.15). Normative. A host that attests a model family derives it from the identifier of the model the delegate ran on: (1) keep the part of the identifier after its last '/'; (2) of that, keep the part after the last '.' or ':' that comes before its first ASCII digit or '-' (any '.' or ':', if it has neither); (3) the family is the leading run of ASCII letters of the rest, lowercased. An identifier that does not start with a letter there gives no family (null). The identifiers are fictional; the rule needs no list of model lines.",
+  "description": "Model family vectors (Agent Capability Standard 1.2.0, section 5.15). Normative. A host that attests a model family derives it from the identifier of the model the delegate ran on: (1) keep the part of the identifier after its last '/'; (2) of that, keep the part after the last '.' or ':' that is followed by an ASCII letter and comes before its first ASCII digit or '-'; if it has neither, after the last '.' followed by a letter (a ':' there starts a tag, as in 'acme:latest'); (3) the family is the leading run of ASCII letters of the rest, lowercased. An identifier that does not start with a letter there gives no family (null). The identifiers are fictional; the rule needs no list of model lines.",
   "cases": [
     {"model_id": "acme-large-2", "family": "acme"},
     {"model_id": "acme-large-2-20260101", "family": "acme"},
@@ -20,7 +20,18 @@
     {"model_id": "mistrala-large-latest", "family": "mistrala"},
     {"model_id": "vendor.nimbus-pro-v1:0", "family": "nimbus"},
     {"model_id": "Quill/Quill2.5-72B-Instruct", "family": "quill"},
+    {"model_id": "acme:latest", "family": "acme"},
+    {"model_id": "acme:7b", "family": "acme"},
+    {"model_id": "acme:8x7b", "family": "acme"},
+    {"model_id": "acme:instruct", "family": "acme"},
+    {"model_id": "acme3:latest", "family": "acme"},
+    {"model_id": "acme-coder:6.7b", "family": "acme"},
+    {"model_id": "vendor/acme:latest", "family": "acme"},
+    {"model_id": "vendor.acme:latest", "family": "acme"},
+    {"model_id": "us.acme:7b", "family": "acme"},
+    {"model_id": "vendor:acme-large-2", "family": "acme"},
     {"model_id": "3d-model", "family": null},
+    {"model_id": "acme.7", "family": "acme"},
     {"model_id": "", "family": null}
   ]
 }

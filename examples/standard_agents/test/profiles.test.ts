@@ -9,11 +9,12 @@ import { z } from 'zod';
 import type { Json } from '@synaptiai/acs-core';
 import type { CoreContext, Diagnostic, ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { decideApproval } from '../src/acs/approval.js';
-import { groundedTool } from '../src/acs/grounded.js';
+import { acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { effectiveFlags, type CapabilityId, type DeclaredFlags, type Risk } from '../src/acs/ontology.js';
 import { bindingProfiles, confidenceFailure, type ProfileCore } from '../src/acs/profiles.js';
 import { actionRecord, readTrace } from '../src/acs/records.js';
 import { memoryThread, user, type MemoryThread } from './memory_thread.js';
+import effective from '../../../tests/conformance/profiles/effective.json' with { type: 'json' };
 
 const NO_RULES: ProfilePolicy = { minimum_confidence: null, grounding: [], destinations: [], trust_weights: {} };
 
@@ -363,4 +364,74 @@ describe('a composite under domain profiles (§5.18.4, §5.21.3)', () => {
     expect(entry).toMatchObject({ status: 'refused', code: 'F502', person_required: true });
     expect(entry.covered_by).toBeUndefined();
   });
+});
+
+/**
+ * A core computing the members the call vectors use as the core does
+ * (§5.21.3), for one capability at the risk declared: the thresholds,
+ * `block_autonomous` and `checkpoint_policy`.
+ */
+const RULES: ProfileCore = {
+  checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+  profileFlags(profiles: Json[], capability: CapabilityId, declared?: DeclaredFlags): ProfileFlags {
+    const { flags } = effectiveFlags(capability, declared);
+    const r = RANK[flags.risk];
+    let approval = flags.requires_approval;
+    let checkpoint = flags.requires_checkpoint;
+    let person = false;
+    for (const p of profiles as {
+      risk_thresholds?: { auto_approve?: string; require_review?: string; require_human?: string; block_autonomous?: string[] };
+      checkpoint_policy?: Record<string, string>;
+    }[]) {
+      const t = p.risk_thresholds ?? {};
+      const at = (level?: string) => (level === undefined || level === 'none' ? undefined : RANK[level as Risk]);
+      const auto = t.auto_approve === undefined ? undefined : (at(t.auto_approve) ?? -1);
+      const review = at(t.require_review);
+      const human = at(t.require_human);
+      const blocked = (t.block_autonomous ?? []).includes(capability);
+      if ((auto !== undefined && r > auto) || (review !== undefined && r >= review)) approval = true;
+      if ((human !== undefined && r >= human) || blocked) [approval, person] = [true, true];
+      const value = p.checkpoint_policy?.[capability] ?? p.checkpoint_policy?.['*'];
+      if (
+        capability !== 'checkpoint' &&
+        (value === 'always' || (value === 'high_risk' && r >= 2) || (value === 'medium_risk' && r >= 1))
+      ) {
+        checkpoint = true;
+      }
+    }
+    return { ...flags, requires_checkpoint: checkpoint, requires_approval: approval, person };
+  },
+  profilePolicy: () => NO_RULES,
+};
+
+describe('the call vectors (tests/conformance/profiles/effective.json, §5.21.3)', () => {
+  // Each applied profile raises for every capability the call performs, at
+  // the call's effective risk: `additional_capabilities` do not escape it.
+  for (const v of effective.calls) {
+    it(v.name, async () => {
+      const binding = v.binding as { capability: CapabilityId; additional_capabilities?: CapabilityId[] };
+      const tool = groundedTool({
+        name: 'tool',
+        capability: binding.capability,
+        ...(binding.additional_capabilities !== undefined
+          ? { additional_capabilities: binding.additional_capabilities }
+          : {}),
+        description: 'A tool of the vector.',
+        args: z.object({}),
+        profiles: bindingProfiles(RULES, v.profiles as Json[]),
+        execute: async () => ({}) as never,
+      });
+      const annotation = acsAnnotation(tool)!;
+      const t = memoryThread();
+      await tool.execute(t.state, {});
+      const entry = (await readTrace(t.state)).at(-1)!;
+      expect({
+        risk: annotation.risk,
+        mutation: annotation.mutation,
+        requires_checkpoint: annotation.requires_checkpoint,
+        requires_approval: annotation.requires_approval,
+        person: entry.person_required === true,
+      }).toEqual(v.expect);
+    });
+  }
 });

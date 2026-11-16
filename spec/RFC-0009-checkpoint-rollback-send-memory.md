@@ -207,8 +207,9 @@ destination to its `send` step's `approval.shows`.
 ## Alternatives considered
 
 - **`restored: false` as F503**, always or for `spec_version: "1.2"`:
-  rejected (1.1 runs would change; the executor cannot rely on a header; F503
-  is not matchable by `on_error`). **A `require_restored` input**: rejected
+  rejected (1.1 runs would change; F503 is not matchable by `on_error`;
+  when this was decided, the executor could not rely on a header, which
+  RFC-0010 §5a has the start operation pass). **A `require_restored` input**: rejected
   as unnecessary; a gate is the existing mechanism, and W624 makes the
   omission visible.
 - **One `unrestored` list with mixed reasons**: rejected; two lists keep
@@ -224,8 +225,9 @@ destination to its `send` step's `approval.shows`.
   rule: false for a subagent in the same working tree; stated instead in
   terms of what the checkpoint captured. **Requiring
   `effective.checkpointed`**: deferred.
-- **Scope as a closed enum**: cannot admit `x-` names; the dialect has no
-  `pattern`. **Renaming `timestamp`**: breaking; aliased and deprecated.
+- **Scope as a closed enum**: cannot admit `x-` names. An enum with a
+  `pattern` for them, which the dialect allows (STANDARD §4.1.2), would be
+  the only `pattern` keyword in the ontology's contracts. **Renaming `timestamp`**: breaking; aliased and deprecated.
 - **Profiles as the only source of a destination policy**: a host without a
   profile needs one too. **Glob patterns**: `*` anywhere lets
   `https://*.example.com/*` match another host. **Unrestricted suffix and

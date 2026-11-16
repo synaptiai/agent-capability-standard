@@ -86,7 +86,7 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Evidence store** | Where an implementation keeps evidence records, with a stated durability (§6.6) |
 | **Secret** | A value that grants access or proves identity, or that the host classifies as secret (§6.7) |
 | **Diagnostic** | An error or warning reported by a validator or executor (§9) |
-| **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and the ontology (§5.2.1) |
+| **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and its baseline (the ontology's flags, or a delegation's target maxima, §5.15.2), with the raises of any applied profile (§5.21.3) (§5.2.1); for a call, §5.18.1 |
 | **Executor** | What runs a workflow step by step, with no input or output of its own (§5.19) |
 | **Host** | What performs the actions an executor asks for and gives it the time (§5.19) |
 | **Run** | One execution of a workflow, from its start to its terminal action (§5.19) |
@@ -1184,7 +1184,7 @@ waiting or approval semantics.
 | `approval@1` | step `approval` and `after_deferral` (§5.14) |
 | `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role`, `.read_only` and `receive`/`synchronize`/`delegate` `accept_from` (§5.15) |
 | `quorum@1` | step `quorum` (§5.16) |
-| `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes`; approver identities on approval decisions; in a workflow that targets 1.2, `approval.approver` `sender_check` and `accept_trust_classes` (§5.14, §5.17) |
+| `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes`; approver identities on approval decisions; in a workflow that targets 1.2 or later, `approval.approver` `sender_check` and `accept_trust_classes` (§5.14, §5.17) |
 | `grounding@1` | workflow `grounding`; the check of host outputs (§5.20) |
 
 The workflow field `agents` (§5.15.2) and the `delegate` input `continues`
@@ -1234,8 +1234,12 @@ An `invoke` step whose target declares triggers but none of kind `invoke`
 is V107. A step whose effective `requires_approval` is true, in a workflow
 with an unattended trigger, with no `approval.when_unattended` and no
 `standing_mandate` approver is W606: an unattended run fails there (F502).
-(With a mandate and no `when_unattended`, an `unavailable` answer still
-fails it, and so does an item from an always-ask trust class, §5.17.)
+So is one with a mandate and no `when_unattended` that the mandate cannot
+cover: a step that uses an always-ask item (§5.17), or that an applied
+profile requires a person for (§5.21.3), is not asked of its mandate in an
+unattended run. (With a mandate and no `when_unattended`, an `unavailable`
+answer still fails it, and so does an item from an always-ask trust class,
+§5.17.)
 
 #### 5.10.1 Durations
 
@@ -1554,7 +1558,7 @@ approval:
 
 | Field | Description |
 |-------|-------------|
-| `approver` | Required (S304). `kind` (required): `human` or `standing_mandate`; `role`; `min_approvers` (integer ≥ 1, default 1); `mandate_ref`, required for and only for a standing mandate (S304 / S303); in a workflow that targets 1.2, with `identity@1`, `sender_check` and `accept_trust_classes` (§5.17) |
+| `approver` | Required (S304). `kind` (required): `human` or `standing_mandate`; `role`; `min_approvers` (integer ≥ 1, default 1); `mandate_ref`, required for and only for a standing mandate (S304 / S303); in a workflow that targets 1.2 or later, with `identity@1`, `sender_check` and `accept_trust_classes` (§5.17) |
 | `mode` | Where the approver is asked: `in_session` (default) or `out_of_band` (see **Modes**) |
 | `shows` | References whose values the approvers see (each a `${...}` reference, else S303); absent, the step's resolved inputs (see **Shown values and digest**) |
 | `binds_to` | `digest` (default): the decision binds to the shown values |
@@ -1657,7 +1661,9 @@ lapses: an `expired` record, and F502.
 
 **Attendance.** A `standing_mandate` approver needs no one present, so it is
 asked in an unattended run too (except for a step that uses an always-ask
-item, §5.17); `when_unattended` applies only when it answers `unavailable`. A
+item, §5.17, or that an applied profile requires a person for, §5.21.3,
+which is not asked and follows `when_unattended`); otherwise
+`when_unattended` applies only when it answers `unavailable`. A
 `human` approver is not asked in an unattended run, whatever the mode, and
 `when_unattended` applies at once. In an attended run, `unavailable` is a
 refusal (F502). The plans:
@@ -1870,15 +1876,19 @@ A host that attests a family, as `effective.model_family` or in an identity,
 MUST derive it from the identifier of the model the delegate ran on:
 
 1. keep the part of the identifier after its last `/`;
-2. of that, keep the part after the last `.` or `:` that comes before its
-   first ASCII digit or `-` (any `.` or `:`, if it has neither);
+2. of that, keep the part after the last `.` or `:` that is followed by an
+   ASCII letter and comes before its first ASCII digit or `-`; if it has
+   neither, after the last `.` followed by a letter (a `:` there starts a
+   tag, as in `acme:latest`);
 3. the family is the leading run of ASCII letters (`A`–`Z`, `a`–`z`) of the
    rest, lowercased. An identifier that does not start with a letter there
    gives no family, and the host attests none.
 
-So `acme-large-2`, `us.acme.acme-large-2-20260101-v1:0` and
-`ft:acme-mini-1:org::abc` give `acme`, `z3-mini` gives `z`, and
-`Zephyr/Zephyr-3.1-8B-Instruct` gives `zephyr`. The vectors of
+So `acme-large-2`, `us.acme.acme-large-2-20260101-v1:0`,
+`ft:acme-mini-1:org::abc`, `acme:latest` and `acme:7b` give `acme`,
+`z3-mini` gives `z`, and `Zephyr/Zephyr-3.1-8B-Instruct` gives `zephyr`. A
+tag that starts with a letter and holds a digit or `-` cannot be told from a
+model after a provider's prefix (`vendor:acme-2`), so `acme:v1.6` gives `v`. The vectors of
 `tests/conformance/families/derive.json` state the rule's results (§10.3). A
 host MAY also attest the identifier as `effective.model_id`.
 
@@ -2190,7 +2200,7 @@ type (§5.4), and a list holding anything but values of the vocabulary is
 S303; a reference
 that resolves to anything else (null, say) fails the step (R402), so a
 check is never silently off. A workflow that does not declare `identity@1`
-ignores any identity a host reports. In a workflow that targets 1.2, the approver of an approval accepts two of
+ignores any identity a host reports. In a workflow that targets 1.2 or later, the approver of an approval accepts two of
 them as fields, `sender_check` and `accept_trust_classes` (see
 **Approvers**).
 
@@ -2218,7 +2228,7 @@ to: the executor reads the always-ask classes from it.
 declared, it MUST be one (else R402, and the delegation fails as any
 step does), and its `model_family` and `role`, where given, MUST equal
 `effective.model_family` and `effective.role`, and in a workflow that
-targets 1.2 its `model_id` MUST equal `effective.model_id` (else R402). A waiting
+targets 1.2 or later its `model_id` MUST equal `effective.model_id` (else R402). A waiting
 `delegate` (§5.13) then keeps only results whose principal is that
 identity's: any other is dropped and counted (reason `delegate_identity`),
 and the wait goes on; the wait's `AwaitEvent` names the principal as
@@ -2258,9 +2268,9 @@ it meets the request:
 - for a `human` approver, including one asked in place of a standing mandate
   (§5.14.1, and **Always ask** above), its `kind` is `human`;
 - when the request names a `role`, its `role` equals it;
-- in a workflow that targets 1.2, when the approver declares `sender_check`,
+- in a workflow that targets 1.2 or later, when the approver declares `sender_check`,
   its `authenticated_by` is listed there;
-- in a workflow that targets 1.2, when the approver declares
+- in a workflow that targets 1.2 or later, when the approver declares
   `accept_trust_classes`, its `trust_class` is listed there.
 
 The action record lists the approvers that counted: their principals in
@@ -2269,7 +2279,7 @@ when the decision is refused, its `reason` names the others and why they did
 not count. A layer that approves tool calls (§5.18.7) and can attest its
 approvers records them the same way.
 
-In a workflow that targets 1.2 (§11.5), `approval.approver` may declare
+In a workflow that targets 1.2 or later (§11.5), `approval.approver` may declare
 `sender_check` and `accept_trust_classes`: each a non-empty list of values
 from the vocabularies above (else S303), with `identity@1` declared (else
 V106). They make attested identities required: a decision without
@@ -2333,14 +2343,14 @@ A **tool binding** is a record (`schemas/interop/tool_binding.schema.json`):
 | `tool` | string | Yes | The name the host offers the tool under |
 | `ontology` | string | Yes | The ontology version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
 | `standard` | string | No | The Standard version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
-| `capability` | string | No | The capability the tool performs; required unless `control` is true |
+| `capability` | string | No | The capability the tool performs; required unless `control` is present |
 | `domain` | string | No | The capability's domain parameter: a domain id (§5.2.4) |
 | `flags` | object | No | Declared safety flags: `risk`, `mutation`, `requires_checkpoint`, `requires_approval` (§5.2.1) |
 | `additional_capabilities` | array | No | Other capabilities the same call performs (§5.18.3) |
 | `classifier` | string | No | Names the classifier a layer applies to each call (§5.18.3) |
 | `invokes` | array | No | Names of the bindings the tool may call while it runs (§5.18.4) |
 | `approval` | object | No | `min_approvers` (integer ≥ 1, default 1), `role` (a non-empty string), `expires` (a duration, §5.10.1, of at most 2^53 − 1 ms) for calls that require approval (§5.18.7) |
-| `control` | boolean | No | `true`: the tool only signals the host (§5.18.3) |
+| `control` | `true` | No | The tool only signals the host (§5.18.3). When present it is `true`: `false` is S303, and the record is not loaded |
 | `destination` | string | No | For a tool that performs `send`: an RFC 6901 pointer to the argument that holds the destination, which a layer checks against the destination policies in force (§4.4.2) |
 
 Members whose name starts with `x-` are vendor data. A **carrier** is a
@@ -2475,6 +2485,12 @@ those of each binding listed (§5.18.1).
   write storage or reach the network directly, so the flags it takes from
   `invokes` are a lower bound: declare `flags` or `additional_capabilities`
   for what it does itself.
+- A layer that does not see a composite's nested calls cannot tell where a
+  nested `send` goes. While a destination policy is in force (§4.4.2), it
+  refuses with F504 a call of a composite whose `invokes` reach, directly or
+  through another composite, a binding that performs `send`, before
+  approval and the checkpoint (§5.18.10). A layer that sees them checks
+  each nested `send`'s destination as a call of its own.
 
 #### 5.18.5 Scope, Order and Concurrency
 
@@ -2607,7 +2623,8 @@ decision; otherwise it is refused with F502.
   unbound tool) and, where the host gives calls an identifier, `call`; it
   holds no `workflow` or `step`. Where the channel to the model or the host
   carries only text, the text opens with the code and the name:
-  `F501 CHECKPOINT_REQUIRED: ...`. The codes a layer refuses a call with:
+  `F501 CHECKPOINT_REQUIRED: ...`. The codes a layer refuses a call with,
+  before it runs:
 
 | Code | The call is refused because |
 |------|-----------------------------|
@@ -2615,8 +2632,17 @@ decision; otherwise it is refused with F502.
 | F502 | It requires approval and has no valid decision (§5.18.7) |
 | F503 | It is a call of `rollback` and no checkpoint was taken in the scope (§5.18.6) |
 | V102 | A prerequisite other than `checkpoint` has not run in the scope (§5.18.5) |
-| F504 | A host's own policy refuses it, such as a rate limit or a destination policy (§5.18.10), or a composite made it to a binding it does not list (§5.18.4) |
+| F504 | A host's own policy refuses it, such as a rate limit; a destination policy does not allow it, or the layer cannot tell where it sends (§4.4.2, §5.18.4, §5.18.10); a composite made it to a binding it does not list (§5.18.4); or the data of a `persist` or `audit` call holds a secret the layer recognises (§6.7, §5.18.10) |
 | R407 | The layer cannot complete a check or write the call's record (below) |
+
+And the codes a layer refuses the output of a call that ran with (the call
+has failed, §5.18.10):
+
+| Code | The output is refused because |
+|------|-------------------------------|
+| R402 | It does not satisfy the capability's output contract (§5.18.9, §5.18.10) |
+| F505 | It fails a grounding policy in force (§5.20) |
+| F504 | Its `confidence` is below the minimum an applied profile sets, or, while a minimum applies, is not a number from 0 to 1 (§5.21.3) |
 - **Records.** A layer records each call it allows or refuses: the tool,
   its capability, the digest of its shown value (§5.18.7) when it requires
   approval, the decision and its approvers, the checkpoint it used, any
@@ -2676,7 +2702,7 @@ model) MAY add a refusal; it never satisfies or replaces a required check.
 | `persist` | Its data holds no secret the layer recognises (§6.7) | F504 |
 | `audit` | It appends records and changes no other state (§4.4) | — |
 | `audit` | The record it appends holds no secret the layer recognises (§6.7) | F504 |
-| `send` | Its destination is one every destination policy in force allows (§4.4.2), checked before approval and the checkpoint; under a policy, a layer refuses a call whose destination it cannot tell, and a call of an unbound tool (§5.18.2), which may send anywhere | F504 |
+| `send` | Its destination is one every destination policy in force allows (§4.4.2), checked before approval and the checkpoint; under a policy, a layer refuses a call whose destination it cannot tell, a call of an unbound tool (§5.18.2), which may send anywhere, and, when it does not see a composite's nested calls, a call of a composite whose `invokes` reach a binding that performs `send` (§5.18.4) | F504 |
 | `transform` | Where its output is recorded or stored, a secret it read is not carried into the record: it is redacted (§6.7) | — |
 | every capability | Its output satisfies the output contract (§5.18.9) | R402 |
 | every capability | Records and evidence the layer writes carry no secret: it redacts them (§6.7) | — |
@@ -2784,7 +2810,7 @@ the executor runs itself, whose outputs it composes:
 | a wait on `receive` (§5.13) | `data`: a one-item list, the event with `sender` and `sender_identity` added when the host gave them (§5.17); `source`: the event's `source.kind`, and `timestamp`: its `timestamp` (each null when the event lacks it); `evidence_anchors`: the event's `anchors` (`[]` when the event has no such member) |
 | a wait on `synchronize` | `synchronized: true`; `agreed_state`: the event's `canonical` (`{}` when absent); `participants`: the step's `agents`; `evidence_anchors` as above; `sender` and `sender_identity` when given |
 | a waiting `delegate` | the delegation's `Output`, with the matching event (as in `data` above) as `result` |
-| an `invoke` of a catalog workflow (§5.12) | `result`: the nested run's stores, as `outputs` above; `steps_executed`: the `store_as` names of its steps whose output is current, in step order; `evidence_anchors: []` |
+| an `invoke` of a catalog workflow (§5.12) | `result`: the nested run's stores, as `outputs` above; `steps_executed`: the `store_as` names of its steps whose output is current, in step order; `evidence_anchors`: `[]`, or, in a workflow that declares `grounding@1`, the anchors of the outputs the nested run stored (§5.20) |
 | a quorum (§5.16) | `compliant`; `tally`; `violations`: in verdict order, `{reviewer_id, ignored}` for each verdict not counted, `{reviewer_id, note}` for a counted verdict whose `scope` is neither `full` nor `delta`, then `{quorum}` for each requirement not met, where `ignored`, `note` and `quorum` are text; `evidence_anchors: []`. `tally.voters` lists the counted reviewers sorted |
 
 A response answers the pending action, named by its `id`. A response for
@@ -2802,9 +2828,9 @@ the checkpoint covered and the host did not restore makes the answer an
 `Error`. An item's other members, and a `detail` that is not a string, are
 ignored.
 
-An `Error` carries a `code` and a `message`, and may carry a `reason`
-(§5.19.7). Neither holds a secret (§6.7): both reach the run's diagnostics,
-trace and records. To `InvokeCapability`, an `Error` with code R401 keeps it and any
+An `Error` carries its `kind` and a `code`, and may carry a `message`
+(default empty) and a `reason` (§5.19.7). Neither the message nor the reason
+holds a secret (§6.7): both reach the run's diagnostics, trace and records. To `InvokeCapability`, an `Error` with code R401 keeps it and any
 other code is R402; to `AwaitEvent`, R401 and R406 keep theirs and any other
 is R402.
 
@@ -3186,9 +3212,10 @@ A profile has effect only where it is **applied**:
 - A safety layer (§5.18) applies the profiles its configuration names to
   every call it covers.
 - A validator MAY be given profiles. It then validates each workflow with the
-  effective flags of §5.21.3, so that F501, W606 and W608 see what a run under
-  those profiles would; nothing else changes. Without profiles it validates as
-  if none were applied.
+  effective flags of §5.21.3, so that every rule that reads effective flags
+  (F501, W606, W608 and W621) sees what a run under those profiles would;
+  nothing else changes. Without profiles it validates as if none were
+  applied.
 
 A workflow does not select a profile. Its `profile` field (§5.1) records the
 profile it was written for and applies nothing; a host MAY use it to choose
@@ -3247,12 +3274,14 @@ its zero-based position among the profiles given, when it has no valid
 
 #### 5.21.3 Effect on Steps and Calls
 
-For a step, or a call classified by §5.18.3, let C be its capability and R
-its effective risk (§5.2.1, before profiles). A threshold covers a set of
-risk levels: `auto_approve: L` covers L and the levels below it,
-`require_review: L` and `require_human: L` cover L and the levels above it,
-and `none` covers no level (`low` < `medium` < `high`). Each applied profile
-raises:
+For a step, let C be its capability. For a call classified by §5.18.3,
+each capability the call performs is a C in turn: its `capability` and each
+entry of `additional_capabilities` (§5.18.1). Let R be the step's or the
+call's effective risk (§5.2.1, §5.18.1, before profiles), one level for every
+C of a call. A threshold covers a set of risk levels: `auto_approve: L`
+covers L and the levels below it, `require_review: L` and `require_human: L`
+cover L and the levels above it, and `none` covers no level (`low` <
+`medium` < `high`). Each applied profile raises, for each C, at R:
 
 | Member | Raises | Code |
 |--------|--------|------|
@@ -3265,7 +3294,7 @@ raises:
 An absent member raises nothing. The raised flags are effective flags
 (§5.2.1): a step whose `requires_checkpoint` a profile raised needs a
 `checkpoint` running before it (F501) and uses a valid checkpoint before it
-runs (§4.4.1); one whose `requires_approval` a profile raised is asked for
+runs (§5.2.2); one whose `requires_approval` a profile raised is asked for
 approval (§5.14), fails without a valid decision (F502), and counts as a
 step that acts in §5.14's deferral rules.
 A `checkpoint` step is never given `requires_checkpoint` by a profile: it
@@ -3454,7 +3483,9 @@ rollback`), `executed`, `failed` (F501, F503) or `cancelled`. The default
 mode, `approvals`, writes only the first kind. An executor MUST offer both
 modes. Each record an executor writes carries `run_id`, `frame`, `step` and
 `capability`; as `intent`, the step's `purpose`; as `timestamp`, the run's
-clock when the record was first written; `checkpoint_id`, when the action
+clock when the record was first written, or, for a queued record that a
+resumption decides or supersedes, the time of that decision (§5.14.1 item
+6); `checkpoint_id`, when the action
 used, took or restored a checkpoint; `code` (§9) and, where the failure had
 one, `reason_code` (§5.19.7), when the action failed or was refused or
 cancelled; and, in its `approval`, the `decision_id` of the decision. A
@@ -3480,10 +3511,13 @@ record or a canonical event is kept as given, but under `details.event`: it
 is what the step reported, not a record the implementation vouches for, and
 it cannot claim another writer, an actor, an approval or a place in a
 chain. The step's output `record` is the record written, and `recorded`
-says whether it was written. A step that binds `require_record: true` fails
-with R402, reason `not_recorded`, unless its output's `recorded` is `true`.
-Without it the step completes when the record was not written, and a later
-gate or failure mode may read `recorded`.
+says whether it was written. In a workflow that targets 1.2 or later, a
+step that binds `require_record: true` fails with R402, reason
+`not_recorded`, unless its output's `recorded` is `true`; in one that
+targets an earlier version, `require_record` is an input the executor passes
+on and does not read, as 1.1 did (W616, §11.5). Without it the step
+completes when the record was not written, and a later gate or failure mode
+may read `recorded`.
 
 **Required and best-effort capture.** The records this Standard requires are
 required: an executor keeps its records in the run's state (§5.19.4), a host
@@ -3541,7 +3575,8 @@ of this vocabulary.
 with a scheme its producer documents (for instance `file:src/app.py#L10-L20`
 or `tool:Read:toolu_01`). The scheme `acs:` is reserved: `acs:` followed by
 a reference body as §5.3 writes it without `${` and `}` (for instance
-`acs:search_out.results[0]`), with no index above 2^53 − 1 (I-JSON), names
+`acs:search_out.results[0]`), with no index above 2^53 − 1 (the integer
+bound RFC 7493 §2.2 recommends, one below §5.14's), names
 a workflow value, the one a binding with that body would resolve to in the
 run, and its kind MUST be `record`.
 Outside a workflow, `acs:<argument>` names an argument of the call (§5.20).
@@ -3673,7 +3708,7 @@ digest of it.
 
 Data a `persist` step or call would store that holds a secret the host
 recognises is refused, not redacted, since memory is read back as fact:
-a tool-calling host refuses the call with F504 (§5.18.8); a host answering
+a tool-calling host refuses the call with F504 (§5.18.10); a host answering
 a step returns an `Error` with reason `secret_in_data` (§5.19.7), and the
 step fails with R402.
 
@@ -3895,7 +3930,7 @@ a prefix that names the implementation (`sa-binding.unclassified`).
 | V103 | INVALID_STEP | Step is not a mapping, or its `capability` is missing or not a string |
 | V104 | DUPLICATE_STORE_AS | Same store_as used by multiple steps |
 | V105 | CIRCULAR_DEPENDENCY | Workflow contains circular dependencies, including `invoke` cycles across the catalogs of a set (§5.1.1), or tool bindings' `invokes` form a cycle (§5.18.4) |
-| V106 | UNSUPPORTED_EXTENSION | `workflow_extensions.requires` lists an unknown or unsupported extension, or an extension field is used without its declaration; in a workflow that targets 1.2, also `grounding` without `grounding@1` (§5.20) and an approver's `sender_check` or `accept_trust_classes` without `identity@1` (§5.17) |
+| V106 | UNSUPPORTED_EXTENSION | `workflow_extensions.requires` lists an unknown or unsupported extension, or an extension field is used without its declaration; in a workflow that targets 1.2 or later, also `grounding` without `grounding@1` (§5.20) and an approver's `sender_check` or `accept_trust_classes` without `identity@1` (§5.17) |
 | V107 | UNRESOLVED_TARGET | A `goto_step`, `on_exhausted`, `reviewers`, `forbidden_inputs` or `delivers_to` name does not resolve, or names the wrong kind of step or input; an `invoke` of a workflow whose `triggers` include no `invoke`; a handler's failure mode that loops or escalates (§5.10–§5.12, §5.16); a manifest `exports` entry that names no workflow of its catalog, or an invoke target that is a qualified id of the invoking catalog or of another catalog of the set where that catalog does not have the workflow or (another catalog) does not export it (§5.1.1); a literal `delegate` `agent` that the workflow's `agents` does not list, or a listed agent that a host composing agents statically does not provide (§5.15.2); a tool binding's `invokes` name that no binding of the set has (§5.18.4). Every other invoke target that resolves to nothing, a bare name included, is W607 |
 | V108 | INVALID_EXPRESSION | Expression syntax error or limit exceeded |
 | V109 | UNSUPPORTED_SPEC_VERSION | The declared standard version is not supported; or a document's cited `standard` is not supported, or its cited `ontology` has another major than the implementation's (§11.5, §11.6): a domain profile, a tool binding record (§5.18.1), a catalog manifest (§5.1.1), an interoperability mapping. (An agent manifest that does is refused when loaded, §5.15.1.) |
@@ -3942,7 +3977,7 @@ a prefix that names the implementation (`sa-binding.unclassified`).
 | F501 | CHECKPOINT_REQUIRED | A step or call that requires a checkpoint has no valid one, or one could not be taken (§5.2.2, §5.18.6) |
 | F502 | APPROVAL_REQUIRED | A step or call that requires approval has no valid decision (§5.14, §5.18.7) |
 | F503 | ROLLBACK_FAILED | Could not restore a checkpoint: the host failed the executor's `Rollback`, or there was no checkpoint to restore (§4.4.1, §5.2.2, §5.18.6) |
-| F504 | CONSTRAINT_VIOLATED | Policy constraint violated: conflicting capabilities in one parallel group; a `send` destination that a destination policy in force does not allow (§4.4.2); a composite's call to a binding it does not list (§5.18.4); a safety layer's own policy, such as a rate limit (§5.18.8); a `persist` or `audit` write that holds a secret the layer recognises (§5.18.10, §6.7); an output whose confidence is below an applied profile's minimum, or not a number from 0 to 1 while a minimum applies (§5.21.3) |
+| F504 | CONSTRAINT_VIOLATED | Policy constraint violated, including: conflicting capabilities in one parallel group; a quorum requirement that is not met (§5.16); a `send` destination that a destination policy in force does not allow, or that a safety layer cannot tell (§4.4.2, §5.18.4); a composite's call to a binding it does not list (§5.18.4); a safety layer's own policy, such as a rate limit (§5.18.8); a `persist` or `audit` write that holds a secret the layer recognises (§5.18.10, §6.7); an output whose confidence is below an applied profile's minimum, or not a number from 0 to 1 while a minimum applies (§5.21.3) |
 | F505 | PROVENANCE_MISSING | Under a grounding policy, a host's output that is neither grounded nor marked inferred, that cites evidence its producer did not have, or whose citation of a workflow value is not of kind `record` (§3.1, §5.20) |
 | F506 | GATED_CONTROL_ACTION | A host action taken whenever a tool is called, whatever the result, is tied to a tool that is not control-only and is unbound, has a prerequisite, or requires a checkpoint or approval (§5.18.3) |
 
@@ -4219,7 +4254,8 @@ check them skips those fixtures and says so in its statement.
 
 **Call-sequence fixtures.** Each fixture is one scope with a person
 present. Its `bindings` are records under its `ontology`; a tool not listed
-is unbound. A bound tool succeeds and returns what its output contract
+is unbound. Its optional `destination_policy` is a destination policy in
+force in the scope (§4.4.2). A bound tool succeeds and returns what its output contract
 requires, or what the call `returns`; a call of a tool classified
 `checkpoint` that runs, and whose output is not refused, takes a
 checkpoint. Its `sequence` is a list of
@@ -4246,6 +4282,10 @@ from the call, from several approvers), and, for binding fixtures,
 `offered_tools` (it checks the tools a host offers, §5.18.2). A layer that
 lacks one says so in its statement and skips those fixtures; no expectation
 depends on the order in which a layer checks approval and the checkpoint.
+`without` names features a layer must not have to run the fixture: it pins
+what a layer without them does, as a layer that does not see nested calls
+refuses a composite that invokes a send under a destination policy
+(§5.18.4).
 A runner gives the layer a fixture's values as its JSON text writes them:
 an integer literal beyond 2^53 is not rounded on the way.
 
@@ -4375,7 +4415,7 @@ This standard follows Semantic Versioning 2.0.0:
 **A breaking change in 1.1.0.** Ontology 2.1.0 widens `transform.output`
 from `object` to `object|array`, so a transform can return a list of
 records. By the table this is breaking, and it is the one field type change
-to an existing capability contract in this version: a reference to the
+to an existing capability contract in 1.1.0: a reference to the
 output is now a union, so one without an annotation is B204 (§5.4), in a
 1.0 workflow too. Annotate it with the type the workflow expects
 (`${t.output: object}`).
@@ -4415,7 +4455,7 @@ uses the feature gets W616:
 | New in | Features |
 |--------|----------|
 | 1.1 | `workflow_extensions.requires` (and so every extension; the advisory `supports_*` flags are 1.0), gate `phase`, gate `action: end`, the `in` operator, failure-mode `when` and `on_error` |
-| 1.2 | approver `sender_check` and `accept_trust_classes` (§5.14, §5.17); the workflow field `agents` (§5.15.2) and the `delegate` input `continues` (§5.15.3); an `invoke` target that is a qualified id and names no workflow of the invoker's catalog, whether or not a catalog given has its id (§5.1.1), and a catalog manifest (§5.1.1, reported at the manifest when the file's header targets an earlier version); the extension `grounding@1` and the workflow field `grounding` (§5.20); F505 in a failure mode's `on_error` (§5.12); the `audit` input `require_record` (§6.4); the `persist` and `recall` input `scope` (§4.5) |
+| 1.2 | approver `sender_check` and `accept_trust_classes` (§5.14, §5.17); the workflow field `agents` (§5.15.2) and the `delegate` input `continues` (§5.15.3); an `invoke` target that is a qualified id and names no workflow of the invoker's catalog, whether or not a catalog given has its id (§5.1.1), and a catalog manifest (§5.1.1, reported at the manifest when the file's header targets an earlier version); the extension `grounding@1`, with its workflow field `grounding` (the field without the extension is an unknown field, W604, §5.20); F505 in a failure mode's `on_error` (§5.12); the `audit` input `require_record` (§6.4); the `persist` and `recall` input `scope` (§4.5) |
 
 | Code | A workflow or catalog is reported when |
 |------|----------------------------------------|
@@ -4425,6 +4465,14 @@ uses the feature gets W616:
 | W616 | It targets an earlier version than a feature it uses (the table above): once per feature, at its first use |
 
 Declaring the version a feature is new in, or a later one, clears its W616.
+An executor of this Standard applies a 1.2 feature only to a workflow that
+targets 1.2 or later; to one that targets an earlier version it passes the
+feature on unread or ignores it, as 1.1 did, except where the workflow or
+its host asks for it. A declared extension's check applies whatever the
+target (`grounding@1`, with its field `grounding` and F505 in `on_error`),
+since the declaration asks for it; and a qualified `invoke` target resolves
+to a workflow of another catalog only when the host gives that catalog
+(§5.1.1, §5.19.2).
 A feature is new in a version when a consumer of the version before would
 refuse a workflow that uses it or run it differently: a workflow or step
 field, a field value, an extension, or an input the executor reads. An input
@@ -4649,7 +4697,7 @@ Safety flags are omitted below: they inherit from the ontology (§5.2.1).
 A fragment of Safe Mutation above (declaring `recovery@1`): `verify` rolls
 back and re-plans, and `plan_out` reads the evidence the loop injects.
 `goto_step` names that pattern's `plan_out` step. Before the first loop
-`${_recovery}` is absent, so the plan sees null `context` (§5.11).
+`${_recovery}` is absent, so the plan sees null `context` (§5.12).
 
 ```yaml
 - capability: plan
@@ -4928,7 +4976,7 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   queued actions of a run that did not end `deferred` are never carried out
 - With `identity@1`, approver identities on a decision
   (`approver_identities`), approvers counted by principal and checked against
-  the requested kind and role, and, in a workflow that targets 1.2, the
+  the requested kind and role, and, in a workflow that targets 1.2 or later, the
   approver fields `sender_check` and `accept_trust_classes` (§5.17)
 - A run keeps its actor while it continues: a restore for another actor is
   refused, a handoff cancels the run unless it ended `deferred`, and
@@ -5034,7 +5082,7 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   executor or the layer check host outputs: `acs:` citations covered by a
   bound reference, the host's `evidence_seen`, `attested`, legacy items
   that do not count. F505, reserved since 1.0, is raised and can fire a
-  failure mode. Opt-in. In a workflow that targets 1.2, `grounding` without
+  failure mode. Opt-in. In a workflow that targets 1.2 or later, `grounding` without
   `grounding@1` is V106; in a 1.0 or 1.1 workflow it stays W604. With
   `grounding@1`, an `invoke` step carries its nested run's anchors
 - Common output fields (§4.1.1): `confidence`, `inference_method` and

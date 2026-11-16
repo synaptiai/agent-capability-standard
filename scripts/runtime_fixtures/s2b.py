@@ -891,6 +891,33 @@ def _records(add):
         {"kind": "Completed", "outcome": "completed"},
     )
     add(
+        "audit_require_record_v11_unchecked",
+        "In a 1.1 workflow, require_record is an input the executor passes on,"
+        " as 1.1 did: an audit step that binds it completes on an output whose"
+        " recorded is false (§6.4 applies from 1.2; W616).",
+        {
+            "w": wf(
+                [
+                    st(
+                        "audit",
+                        "a",
+                        input_bindings={
+                            "event": {"what": "deploy"},
+                            "require_record": True,
+                        },
+                    )
+                ]
+            )
+        },
+        [
+            {
+                "expect": inv("audit", inputs={"require_record": True}),
+                "respond": out(recorded=False),
+            }
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+    )
+    add(
         "audit_recorded_false_completes",
         "Without require_record an audit step that did not record completes, as in "
         "1.1 (§6.4).",

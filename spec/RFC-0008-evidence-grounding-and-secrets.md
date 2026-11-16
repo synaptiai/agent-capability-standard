@@ -19,8 +19,8 @@ This RFC records the decisions Standard 1.2.0 makes on findings ACS-06,
 ACS-21, ACS-22, ACS-23, ACS-40, ACS-51, ACS-53 and ACS-58 of the
 [Standard Agents mapping](../docs/research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml).
 It takes over decision 8 of [RFC-0005](RFC-0005-tool-calling-hosts.md)
-(one anchor item, one kind vocabulary), withdrawn there, and answers its
-open question 5. It is Accepted by the maintainer's instruction that every
+(one anchor item, one kind vocabulary), withdrawn there, and answers the
+RFC-0005 draft's open question 5 (ACS-Q05, on evidence anchors). It is Accepted by the maintainer's instruction that every
 remaining finding is implemented in 1.2.0; the text is in
 [STANDARD-v1.2.0](STANDARD-v1.2.0.md) §3.1, §4.1.1, §5.20, §6.5, §6.6 and
 §6.7.
@@ -100,7 +100,7 @@ canonical JSON for a JSON value) optional. Kinds: the event schema's seven,
 `record` (the agent system's own records and workflow values), and vendor
 kinds `x-…`. `ref` is opaque except the reserved `acs:` scheme.
 
-### 2) Output items are anchors; other forms are deprecated, not refused (ACS-06, RFC-0005 OQ5)
+### 2) Output items are anchors; other forms are deprecated, not refused (ACS-06, ACS-Q05)
 
 All 36 outputs' `evidence_anchors` items are `anyOf [Anchor, string,
 object]`. The anchor is the form. A bare string, and an object that is not
@@ -284,9 +284,10 @@ memory, while redacting a word of prose in evidence costs little.
   1.1 producer's free value a contract violation without opting in. A
   SHOULD, enforced under a policy.
 - **Opt in by `spec_version: "1.2"`.** Which capabilities to check is a
-  deployment's choice, not a property of a catalog's target version; the
-  executor does not see a header-declared version. Rejected for an
-  extension.
+  deployment's choice, not a property of a catalog's target version.
+  Rejected for an extension. (When this was decided, the executor did not
+  see a header-declared version either; RFC-0010 §5a has the start
+  operation pass it.)
 - **Profile-only opt-in.** The Standard does not yet say how a profile is
   applied; a workflow extension and a host option do not wait for it.
 - **Root-only availability of `acs:` citations.** A step that binds one

@@ -104,7 +104,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'capability-checks', level: 4, section: '5.18.10 ', at: codeTable('Capability Check Code') },
   { key: 'protocol-actions', level: 4, section: '5.19.1 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Action The host Responses' } },
   { key: 'protocol-replay', level: 4, section: '5.19.1 ', at: after('list', 2, "outputs: the root workflow's stores at t") },
-  { key: 'response-replay', level: 4, section: '5.19.1 ', at: after('paragraph', 6, 'An Error carries a code and a message, a') },
+  { key: 'response-replay', level: 4, section: '5.19.1 ', at: after('paragraph', 6, 'An Error carries its kind and a code, an') },
   { key: 'wake-replay', level: 4, section: '5.19.3 ', at: after('list', 0, 'A Sleep ends at a tick whose time is at ') },
   { key: 'cancel-replay', level: 4, section: '5.19.5 ', at: after('paragraph', 0, 'A host MAY cancel a run that has not end') },
   { key: 'reason-replay', level: 4, section: '5.19.7 ', at: after('paragraph', 0, 'An Error response MAY carry a reason, a ') },

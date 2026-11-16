@@ -56,13 +56,13 @@ The profile does not list `generate`: the ontology rates it low risk, and the pr
 
 ### Checkpoint Policy
 
-Multi-modal workflows require checkpoints before any action that:
-- Converts content between modalities
-- Generates new content in any modality
-- Makes cross-modal alignment decisions
-- Processes large batch transformations
+The profile requires a checkpoint before each step or call that:
+- Writes converted or generated content out (`persist`)
+- Carries medium or high risk, such as a large batch transformation
 
-The profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
+Converting or generating content in memory (`transform`, `generate`) and
+comparing modalities need none until the result is written out. The
+profile states it as checkpoint rules on capabilities ([§5.21.3](../../../spec/STANDARD-v1.2.0.md#5213-effect-on-steps-and-calls); a `checkpoint` step is exempt):
 
 ```yaml
 checkpoint_policy:
@@ -77,7 +77,12 @@ checkpoint_policy:
 
 ## Capability Usage
 
-The 36 atomic capabilities apply to multi-modal work through domain parameterization:
+The 36 atomic capabilities apply to multi-modal work through domain
+parameterization. Each output's `evidence_anchors` are evidence anchors
+(Standard 1.2.0 §6.5): a `kind`, which the profile's `required_anchor_types`
+count, and a `ref` in the forms of the [modality guide](../../guides/MODALITY_HANDLING.md#41-evidence-anchor-types-by-modality),
+one anchor per contributing modality; an `acs:` ref names a value the step
+was given, such as its text (§5.20). Scores stay out of the anchors.
 
 ### Detection (Cross-modal)
 
@@ -92,12 +97,10 @@ detect:
     alignment_score: 0.87
     misaligned_elements: []
     evidence_anchors:
-      - type: source_modality
-        ref: "image: s3://dataset/scene_042.jpg"
-      - type: target_modality
-        ref: "text: A red car parked..."
-      - type: alignment_score
-        value: 0.87
+      - kind: file
+        ref: "image:s3://dataset/scene_042.jpg:full_frame"
+      - kind: record
+        ref: "acs:text"
 ```
 
 ### Transformation (Image-to-Text)
@@ -112,15 +115,10 @@ transform:
     detail_level: "detailed"
   output:
     caption: "A manufacturing floor with three conveyor belts..."
+    confidence: 0.84
     evidence_anchors:
-      - type: source_modality
-        ref: "image: camera://scene/frame-1042.jpg"
-      - type: target_modality
-        ref: "text caption"
-      - type: confidence_score
-        value: 0.84
-      - type: modality_hash
-        source: "sha256:abc..."
+      - kind: sensor
+        ref: "image:camera://scene/frame-1042.jpg:full_frame"
 ```
 
 ### Transformation (Text-to-Image)
@@ -138,12 +136,8 @@ transform:
   output:
     image_ref: "generated://diagram-uuid-789.png"
     evidence_anchors:
-      - type: source_modality
-        ref: "text prompt"
-      - type: target_modality
-        ref: "generated image"
-      - type: modality_hash
-        value: "sha256:def..."
+      - kind: record
+        ref: "acs:source"
 ```
 
 ### Classification (Visual Question Answering)
@@ -160,12 +154,10 @@ classify:
     explanation: "The line chart shows consistent upward movement..."
     confidence: 0.91
     evidence_anchors:
-      - type: source_modality
-        ref: "image: s3://dataset/chart_017.png"
-      - type: source_modality
-        ref: "text question"
-      - type: confidence_score
-        value: 0.91
+      - kind: file
+        ref: "image:s3://dataset/chart_017.png:full_frame"
+      - kind: record
+        ref: "acs:question"
 ```
 
 ## Available Workflows

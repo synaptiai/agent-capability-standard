@@ -653,8 +653,8 @@ Every step should have:
 | Understand all 36 capabilities | [Capability Ontology](../schemas/capability_ontology.yaml) |
 | See production workflows | [Workflow Catalog](../schemas/workflow_catalog.yaml) |
 | Work with images, audio, and video | [Modality Handling Guide](guides/MODALITY_HANDLING.md) |
-| Read the full spec | [STANDARD-v1.1.0.md](../spec/STANDARD-v1.1.0.md) |
-| Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.1.0.md#9-diagnostic-model) |
+| Read the full spec | [STANDARD-v1.2.0.md](../spec/STANDARD-v1.2.0.md) |
+| Understand error codes | [STANDARD Section 9](../spec/STANDARD-v1.2.0.md#9-diagnostic-model) |
 
 ---
 
