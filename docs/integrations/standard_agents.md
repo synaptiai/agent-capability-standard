@@ -651,8 +651,9 @@ The result the model sees is the output's I-JSON text with nothing around it,
 which [§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results) requires of every capability
 output carried as a string. `encodeCapabilityOutput` from
 [`@synaptiai/acs-core`](../../packages/acs-core/README.md) writes it, and
-refuses (R402) an output that lacks a required field or holds a value I-JSON
-does not allow, such as an integer beyond 2^53. `decodeCapabilityOutput`
+refuses (R402) an output that lacks a required field, has an
+`evidence_anchors` that is not an array or a required `confidence` outside 0
+to 1, or holds a value I-JSON does not allow, such as an integer beyond 2^53. `decodeCapabilityOutput`
 reads such a text back.
 
 Each call, refused ones too, becomes an entry in a trace kept in the thread's
@@ -818,7 +819,7 @@ capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 26
+the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 27
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). The one fixture it skips needs a call of an unbound

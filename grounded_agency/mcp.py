@@ -147,9 +147,11 @@ def create_grounded_mcp_server(
     class SL.
 
     A tool with a capability returns that capability's output (sections
-    5.18.9, 5.18.10): as ``structuredContent``, or as the I-JSON text of the
-    output object, its one text content item. With ``require_layer``, a
-    result that carries none, or one that lacks a field the capability's
+    5.18.9, 5.18.10) as the I-JSON text of the output object, its one text
+    content item: the SDK's server delivers a result's ``content`` and
+    ``is_error`` to the session, not its ``structuredContent``, so the text
+    is what the session reads and what is checked. With ``require_layer``,
+    a result that carries none, or one that lacks a field the capability's
     output contract requires, fails the call that ran with ``R402
     EXECUTION_FAILED`` (unless the adapter's ``check_outputs`` is off,
     outside class SL); then the adapter's grounding policies (F505) and the

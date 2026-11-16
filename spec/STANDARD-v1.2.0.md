@@ -2647,8 +2647,11 @@ the output of an executor's capability call.
 
 Where a host carries a capability output as a string, it travels as the
 I-JSON text (RFC 7493) of the output object, with nothing before or after
-it. A consumer parses the text and checks that it is an object with every
-field the capability's output contract requires; otherwise the output is
+it. A consumer parses the text and checks the output: it is I-JSON (no
+member name twice in one object, no integer beyond ±2^53, §5.14), it is an
+object with every field the capability's output contract requires, its
+`evidence_anchors`, where present, is an array, and a `confidence` the
+contract requires is a number from 0 to 1 (§4.1.1); otherwise the output is
 refused with R402. A host that answers an executor's capability call from
 such a string decodes it by this rule before it answers; a string that
 fails is the step's failure (R402). A producer checks the I-JSON limits of
@@ -2680,10 +2683,14 @@ model) MAY add a refusal; it never satisfies or replaces a required check.
 
 The output-contract row applies to each covered call's result that the
 layer receives as a capability output: validated structure, or text as
-§5.18.9 says. A result its host returns in another form, such as a host
-tool's file text or command output, carries no capability output to check;
-the layer's conformance statement names those calls (§10.4), as §5.21.4
-says for the output rules of profiles.
+§5.18.9 says, checked as §5.18.9's consumer checks the output. The layer
+checks the output in the form its host delivers the result: a member its
+host drops before the model or the caller reads the result, such as
+structure beside a text the host passes on alone, is not the output. A
+result its host returns in another form, such as a host tool's file text or
+command output, carries no capability output to check; the layer's
+conformance statement names those calls (§10.4), as §5.21.4 says for the
+output rules of profiles.
 
 A host-specific mechanism, such as a hook declared in a skill's
 frontmatter, is one implementation of these checks. A host that loads a
@@ -3916,7 +3923,7 @@ a prefix that names the implementation (`sa-binding.unclassified`).
 | Code | Name | Description |
 |------|------|-------------|
 | R401 | EXECUTION_TIMEOUT | Step exceeded timeout, or a wait lapsed |
-| R402 | EXECUTION_FAILED | Step execution failed; an `Error` may say why (`reason`, §5.19.7); a capability output on a text-only channel is not I-JSON, not an object, or lacks a required field (§5.18.9) |
+| R402 | EXECUTION_FAILED | Step execution failed; an `Error` may say why (`reason`, §5.19.7); a capability output on a text-only channel is not I-JSON, not an object, or fails its output contract (§5.18.9) |
 | R403 | GATE_BLOCKED | A gate stopped the run, or a condition was false with `skip_if_false: false` |
 | R404 | RECOVERY_EXHAUSTED | Max recovery loops exceeded |
 | R405 | EXPRESSION_ERROR | An expression failed to evaluate (§5.8.2) |
@@ -4188,8 +4195,10 @@ prompt, its decision expiry, the most approvers it can obtain for one call,
 and whether it can verify an approver's role; how it makes a check and its
 use atomic (a lock or reservation, or its host's order); the fixture
 features it supports; its host gaps, the cases in which its host can run
-a covered call without the layer's decision; and any check of §5.18.10 it
-does not apply, which a conforming layer has none of. The statements of the
+a covered call without the layer's decision; the covered calls whose
+results carry no capability output, to which no output check applies
+(§5.18.10, §5.21.4); and any check of §5.18.10 it does not apply, which a
+conforming layer has none of. The statements of the
 reference layers follow `tests/conformance/calls/schema/statement.schema.json`.
 
 **Binding fixtures.** Each fixture holds an `ontology` version, `records`,
@@ -4214,9 +4223,10 @@ calls and events:
 - A call names `call` (the tool), `args` (default `{}`), optionally
   `approve` or `reject` (who decided on it beforehand: on its shown value
   §5.18.7, or at the prompt), `fails` (its tool reports an error after it
-  started), `returns` (its tool's output, which the layer receives as its
-  host carries a capability output), `nested` (calls the tool makes while it
-  runs), and `expect`: `"run"`, `{"refuse": <code>}`, or
+  started), `returns` (its tool's output, any JSON value, null included,
+  which the layer receives as its host carries a capability output),
+  `nested` (calls the tool makes while it runs, each with its own members),
+  and `expect`: `"run"`, `{"refuse": <code>}`, or
   `{"refuse_output": <code>}` (the call ran, and the layer refused its
   output, §5.18.10). A call with neither `approve` nor `reject` is
   undecided.

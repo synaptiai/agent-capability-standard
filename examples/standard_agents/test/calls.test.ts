@@ -123,7 +123,10 @@ class Runner {
           execute: async (state: ThreadState, _args, call) => {
             const script = this.scripts.get(name);
             for (const nested of script?.nested ?? []) {
-              this.nestedOutcomes.set(nested, outcome(await state.invokeTool(nested.call, nested.args ?? {})));
+              // A nested call runs under its own step: its `returns`,
+              // `fails` and `nested`, not those of an earlier call.
+              const result = await this.scripted(nested, () => state.invokeTool(nested.call, nested.args ?? {}));
+              this.nestedOutcomes.set(nested, outcome(result));
             }
             if (script?.fails) throw new Error(`${name} failed`);
             if (script !== undefined && 'returns' in script) return script.returns as never;
@@ -164,11 +167,22 @@ class Runner {
     }
   }
 
+  /** Run `body` with `step` as what the current call of its tool does. */
+  async scripted<T>(step: Call, body: () => Promise<T>): Promise<T> {
+    const earlier = this.scripts.get(step.call);
+    this.scripts.set(step.call, step);
+    try {
+      return await body();
+    } finally {
+      if (earlier === undefined) this.scripts.delete(step.call);
+      else this.scripts.set(step.call, earlier);
+    }
+  }
+
   async call(step: Call): Promise<string> {
     await this.decide(step);
-    this.scripts.set(step.call, step);
     const tool = this.t.tools.get(step.call)!;
-    return outcome(await tool.execute(this.t.state, step.args ?? {}));
+    return outcome(await this.scripted(step, () => tool.execute(this.t.state, step.args ?? {})));
   }
 }
 
@@ -211,7 +225,7 @@ describe("the binding's conformance statement", () => {
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(26);
+    expect(CASES).toHaveLength(27);
   });
 
   it.for(CASES)('%s', async ([_name, fixture], { skip }) => {

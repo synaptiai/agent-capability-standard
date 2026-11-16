@@ -39,11 +39,12 @@ findings:
     leaves `soft_requires` a warning at most and `precedes` and `conflicts_with` unenforced and
     unreported, with reasons, and makes check-and-use atomic. §5.18.8 makes a layer fail closed (R407).
     §10.4 adds the safety-layer class SL, which requires §5.18.5–§5.18.10 and whose statement names the
-    calls a layer covers and any §5.18.10 check it does not apply; both reference layers apply every
+    calls a layer covers, those whose results carry no capability output (`calls_without_output`) and
+    any §5.18.10 check it does not apply; both reference layers apply every
     row (the secret checks and redaction of §6.7, the destination policies of §4.4.2, and the output
     contract of each result they receive as a capability output, which in the Python adapter is a
     result of a tool create_grounded_mcp_server serves, R402) and claim the class. Fixtures:
-    tests/conformance/bindings/ (33) and tests/conformance/calls/ (26, three of them on refused
+    tests/conformance/bindings/ (33) and tests/conformance/calls/ (27, four of them on refused
     outputs), from scripts/gen_call_fixtures.py, with the statements in
     tests/conformance/calls/statements/; the Python adapter runs them in tests/test_binding_fixtures.py
     and tests/test_call_fixtures.py, the Standard Agents binding in
@@ -1005,7 +1006,8 @@ findings:
     `core/src/exec/machine.rs`, `validate/grounding.rs` (V106 in a 1.2 target, W604 otherwise, S303,
     S304, V101), `grounded_agency/grounding.py`, the SDK adapter''s `GroundedAgentConfig.grounding`
     (applied to the outputs of the MCP tools `create_grounded_mcp_server` serves; Claude Code''s own
-    tools return none, a host gap its statement names), the binding''s `grounding` option, and `record`
+    tools return none, calls its statement names in `calls_without_output`), the binding''s `grounding`
+    option, and `record`
     anchors on the reference producers'' action outputs (the SDK''s checkpoint and coordination step
     outputs, `tests/test_coordination.py`); pinned by `tests/conformance/grounding/check.json`
     (normative, run in Rust, Python and TypeScript), the `grounding_*` runtime fixtures and the workflow
@@ -1192,9 +1194,11 @@ findings:
     of features (core `semantics::FEATURES`) and makes the catalog header an explicit start member; each 1.2
     feature''s row of that table lands with the workstream that adds the feature: S2a''s approver fields,
     S2b''s `require_record`, S4''s `grounding@1` and F505, S3''s `agents` and `continues` (with the qualified
-    `invoke` target and the catalog manifest, reported where the catalog set is known) and S5''s memory
-    `scope`, each pinned by a validator fixture (warn_version_feature_1_2, warn_version_feature_1_2_grounding,
-    warn_version_feature_1_2_trust_classes and the *_v11_warn fixtures); and the header fixtures
+    `invoke` target, which the invoke check reports from the names of the invoker''s catalog, and the
+    catalog manifest, which the manifest check reports from the file''s header) and S5''s memory `scope`,
+    each pinned by a validator fixture (warn_version_feature_1_2, warn_version_feature_1_2_grounding,
+    warn_version_feature_1_2_trust_classes, pass_approver_identity_1_1_warn and the *_v11_warn fixtures);
+    and the header fixtures
     header_1_2_sender_check_needs_identities and header_null_sender_check_not_read pin the header in the
     executor. The consumers implement the citation rule through one core function
     (`_core.check_cited_versions`): the profile loader and the OASF adapter (`grounded_agency.versions`,
@@ -1945,14 +1949,16 @@ findings:
     and 579 describe the binding''s encoding.'
   status: fixed
   resolution: 'Standard 1.2.0 §5.18.9: a capability output carried as a string is the I-JSON text of the
-    output object, nothing around it, with every required field, else R402; it binds every producer and
+    output object, nothing around it, with every required field, an evidence_anchors array where present
+    and a required confidence from 0 to 1, else R402; it binds every producer and
     consumer, a host answering an executor''s capability call included.
     grounded_agency/capabilities/output.py (`encode_capability_output`, `decode_capability_output`) and
     packages/acs-core/src/output.ts (`encodeCapabilityOutput`, `decodeCapabilityOutput`); `groundedTool`
     returns the encoded text, and the Python adapter checks the result of each tool
-    `create_grounded_mcp_server` serves by the same rule (`tool_result_output`: its structuredContent, or
-    the text of its one text item; `GroundedAgentAdapter.check_call_result`, R402, the output-contract row
-    of §5.18.10; call fixtures output_breaks_contract, output_not_i_json and refused_output_uses_checkpoint).
+    `create_grounded_mcp_server` serves by the same rule (`tool_result_output`: the text of its one text
+    item, which is what the SDK''s server delivers to the session; `GroundedAgentAdapter.check_call_result`,
+    R402, the output-contract row of §5.18.10; call fixtures output_breaks_contract, output_not_i_json,
+    nested_output_breaks_contract and refused_output_uses_checkpoint).
     docs/guides/RUNNING_WORKFLOWS.md and docs/integrations/standard_agents.md
     tell a host to decode before it answers. The I-JSON limits apply to the text, so the two codecs
     agree: both pass tests/conformance/output/vectors.json. Tests: tests/test_capability_output.py,

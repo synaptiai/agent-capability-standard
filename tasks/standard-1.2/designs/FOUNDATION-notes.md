@@ -1036,8 +1036,10 @@ merged into `round3/a`. For phase 4 and any later stream:
 
 - **The adapter's output-contract row is applied.** A tool that
   `create_grounded_mcp_server` serves with a capability returns its
-  capability output (`structuredContent`, or the I-JSON text of the object
-  as its one text item); `GroundedAgentAdapter.check_call_result` fails the
+  capability output as the I-JSON text of the object, its one text item
+  (review round 1: the SDK's server drops `structuredContent`, so the text
+  the session reads is what is checked; `structuredContent` is not read);
+  `GroundedAgentAdapter.check_call_result` fails the
   call that ran with R402 otherwise, before grounding (F505) and the
   minimum confidence (F504). `GroundedAgentConfig.check_outputs=False` is
   outside class SL. Neither statement has `not_applied`; every text says
@@ -1047,6 +1049,12 @@ merged into `round3/a`. For phase 4 and any later stream:
   call whose result its host returns in another form (Claude Code's own
   tools, other MCP servers' tools) carries none, and the statement names
   those calls, as §5.21.4 already said for the profiles' output rules.
-- **Call fixture format:** a call may give `returns` (its tool's output)
-  and expect `{"refuse_output": "R402"}` (the call ran; its output was
-  refused). 26 call fixtures.
+- **Call fixture format:** a call may give `returns` (its tool's output,
+  null included) and expect `{"refuse_output": "R402"}` (the call ran; its
+  output was refused). 27 call fixtures.
+- **Departure (review round 1): §10.4 and the statement schema** gain
+  `calls_without_output`, the covered calls whose results carry no
+  capability output (§5.18.10, §5.21.4), apart from the host gaps; §5.18.9
+  states every check a consumer makes (I-JSON, required fields, an
+  `evidence_anchors` array, a required `confidence` from 0 to 1), and
+  §5.18.10 says a layer checks the output in the form its host delivers.

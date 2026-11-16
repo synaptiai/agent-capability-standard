@@ -379,6 +379,10 @@ def refuse_output(code: str) -> dict[str, str]:
     return {"refuse_output": code}
 
 
+# A call that states no `returns` (null is a value a call may return).
+_NO_RETURNS: Any = object()
+
+
 def call(
     tool: str,
     expect: Any,
@@ -387,7 +391,7 @@ def call(
     approve: list[str] | None = None,
     reject: list[str] | None = None,
     fails: bool = False,
-    returns: Any = None,
+    returns: Any = _NO_RETURNS,
     nested: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     step: dict[str, Any] = {"call": tool}
@@ -399,7 +403,7 @@ def call(
         step["reject"] = reject
     if fails:
         step["fails"] = True
-    if returns is not None:
+    if returns is not _NO_RETURNS:
         step["returns"] = returns
     if nested is not None:
         step["nested"] = nested
@@ -657,10 +661,16 @@ FIND = [rec("find", "search")]
 FOUND = {"results": [], "evidence_anchors": [], "confidence": 1}
 calls(
     "output_breaks_contract",
-    "An output that is not an object, or lacks a field its capability's output contract requires, is refused with R402.",
+    "An output that is not an object (a string, null), lacks a field its capability's output contract requires, has evidence_anchors that are not an array, or a required confidence outside 0 to 1 is refused with R402 (section 5.18.9).",
     [
         call("find", refuse_output("R402"), returns="found"),
+        call("find", refuse_output("R402"), returns=None),
         call("find", refuse_output("R402"), returns={"results": []}),
+        call(
+            "find",
+            refuse_output("R402"),
+            returns={"results": [], "evidence_anchors": "file:a", "confidence": 1},
+        ),
         call(
             "find",
             refuse_output("R402"),
@@ -670,6 +680,21 @@ calls(
         call("find", RUN),
     ],
     extra=FIND,
+)
+calls(
+    "nested_output_breaks_contract",
+    "A nested call's output is checked as its own: what the nested call returns, not what an earlier call of the same tool returned.",
+    [
+        call(
+            "gather",
+            RUN,
+            nested=[call("find", refuse_output("R402"), returns="found")],
+        ),
+        call("find", refuse_output("R402"), returns={"results": []}),
+        call("gather", RUN, nested=[call("find", RUN)]),
+    ],
+    needs=["nested_calls"],
+    extra=[*FIND, rec("gather", "invoke", invokes=["find"])],
 )
 calls(
     "output_not_i_json",

@@ -283,7 +283,8 @@ affected.
   header); each workstream adds its features' rows to the table W616 reads,
   and every 1.2 feature has a validator fixture that uses it under 1.1
   (`warn_version_feature_1_2_grounding`,
-  `warn_version_feature_1_2_trust_classes` and the `*_v11_warn` fixtures).
+  `warn_version_feature_1_2_trust_classes`,
+  `pass_approver_identity_1_1_warn` and the `*_v11_warn` fixtures).
 - The TypeScript package replays the validator, runtime and expression
   fixtures and the profile vectors through the WebAssembly core; its
   interface takes only I-JSON requests, so the profile vector whose member

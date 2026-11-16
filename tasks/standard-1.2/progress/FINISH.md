@@ -22,6 +22,7 @@ Branch `round3/a`, worktree `/home/user/acs-a`.
 - [x] 5. Findings: every ACS finding fully implemented is `fixed` with an
   accurate resolution
 - [x] Full F6 set green (including check-axe over the whole site), commit
+- [x] Review round 1: eleven issues verified and fixed, full F6 set, commit
 
 ## 1. Class SL: the adapter's output-contract row
 
@@ -34,7 +35,8 @@ rounds).
 from the tools `create_grounded_mcp_server` serves with a capability (with
 `require_layer`, the default): their result carries it as
 `structuredContent` (validated structure) or as the I-JSON text of the
-output object, its one text content item.
+output object, its one text content item. (Review round 1 below: the SDK's
+server drops `structuredContent`, so only the text is the output.)
 
 - `grounded_agency/capabilities/output.py`: `check_capability_output`
   (contract check of validated structure: an object, every required field,
@@ -104,8 +106,8 @@ and `accept_trust_classes` (S2a), the `audit` input `require_record` (S2b),
 `grounding@1` with `grounding` and F505 in `on_error` (S4), the workflow
 field `agents` and the `delegate` input `continues` (S3), the `persist` and
 `recall` input `scope` (S5); S3's qualified `invoke` target and catalog
-manifest are reported by `invoke.rs` and `catalog.rs`, which need the
-catalog set. The schema diff since `main` adds no other workflow field. Two
+manifest are reported by `invoke.rs` (from the names of the invoker's
+catalog) and `catalog.rs` (from the file's header). The schema diff since `main` adds no other workflow field. Two
 1.2 features had no validator fixture; added:
 `warn_version_feature_1_2_grounding` (W616 at
 `workflow_extensions/requires/0` and at the F505 `on_error`, with a 1.2
@@ -178,3 +180,123 @@ All green:
 A note on the harnesses: `expected_warning_codes` lists distinct codes (the
 WebAssembly harness compares sets), so `warn_version_feature_1_2_grounding`
 lists W616 once and pins its two findings with `expected_locations`.
+
+## Review round 1
+
+Eleven issues, numbered here in the order given; 1 and 7, and 4 and 11,
+are the same defect reported twice. Each verified real, fixed at its root,
+with a test that fails on the code before the fix.
+
+1. and 7. **R402 on `structuredContent`, which the SDK drops (medium;
+   high).** Real: `claude_agent_sdk.create_sdk_mcp_server`
+   (0.2.182 here) builds the `CallToolResult` from `content` and
+   `is_error` only, so the session read the unchecked text. Reproduced
+   with the reviewers' scripts (prose beside grounded structure passed
+   R402, F505 and F504). Fix: `tool_result_output` reads the output only
+   from the one text item, the form this host delivers; a result that
+   carries its output only as `structuredContent` is R402, with a message
+   that says the structure is not delivered. `check_capability_output`,
+   which nothing used once structure is not read, is removed.
+   `check_call_result` applies grounding and the minimum confidence to the
+   same text output. Tests (`tests/test_mcp_integration.py`): the R402
+   cases moved to text, plus structure-only and prose-beside-structure
+   cases; the passing cases are text, text beside structure, and text
+   beside `structuredContent: None`; `test_the_session_receives_the_output_that_was_checked`
+   runs the guarded tool through the SDK's own `run_tool` (captured from
+   `build_tool_server`) and checks that the delivered result has no
+   `structuredContent`, that grounded structure beside prose is R402, and
+   that a passing result delivers the checked text. The old test case
+   "Structured content is the output whatever the text says" now expects
+   R402. Texts: the `mcp.py` docstring, `GroundedAgentConfig.check_outputs`,
+   the statement (now under `calls_without_output`, item 3), the SDK guide
+   (output-contract paragraph, grounding paragraph, Conformance), the
+   CHANGELOG Upgrading and Added entries, CONFORMANCE.md, SECURITY.md,
+   RFC-0005 9.1, ACS-41, FOUNDATION-notes. §5.18.10 gains the general rule:
+   a layer checks the output in the form its host delivers the result; a
+   member the host drops is not the output.
+2. **§5.18.9 does not state the confidence check the normative fixture
+   requires (low).** Real. §5.18.9's consumer sentence now lists every
+   check: I-JSON (no member twice, no integer beyond ±2^53, §5.14), an
+   object with every required field, `evidence_anchors` an array where
+   present, a required `confidence` a number from 0 to 1 (§4.1.1); §5.18.10
+   says validated structure is checked the same way; the R402 row in §9
+   says "fails its output contract". `output_breaks_contract`'s description
+   names each case, and it gains a step for an `evidence_anchors` that is
+   not an array (R402) and one for `returns: null` (item 4). The codecs'
+   module comments and the Standard Agents guide list the same checks.
+3. **§5.18.10 points at a §10.4 statement member that does not exist; the
+   adapter used `host_gaps` (low).** Real. §10.4's list gains "the covered
+   calls whose results carry no capability output, to which no output check
+   applies (§5.18.10, §5.21.4)"; `statement.schema.json` gains the optional
+   `calls_without_output` (and `host_gaps` gets its §10.4 description). The
+   adapter's statement moves the entry there; `tests/test_call_fixtures.py`
+   checks it is there and not among the host gaps, and
+   `tests/test_profiles.py` reads it there. CONFORMANCE.md, RFC-0005, the
+   SDK guide, ACS-01 and the grounding finding name the member.
+4. and 11. **`returns: null` (low).** Real: the Python runner read
+   `step.get("returns")` and treated null as absent; the generator dropped
+   `returns=None`. Fix: a sentinel in both (`_NO_RETURNS`), presence decides.
+   `output_breaks_contract` now has a `returns: null` step (R402), which the
+   old Python runner fails; the schema says null is a value and a present
+   member replaces the contract's output.
+5. **W616 fixture names and the catalog-set wording (low).** Real. RFC-0010,
+   the CHANGELOG and ACS-25 now name `pass_approver_identity_1_1_warn`
+   beside the `*_v11_warn` fixtures; ACS-25 and section 2 above say the
+   qualified target is reported from the names of the invoker's catalog
+   (`Resolver::is_qualified`) and the manifest from the file header
+   (`catalog::check_manifest`), as the comment in `semantics.rs` already
+   said.
+6. **Two leftover texts (low).** Real. The SDK guide's opening now says the
+   adapter claims class SL; CONFORMANCE.md's exact-integer note names
+   `output_not_i_json`.
+8. **`check_outputs=False` did not restore the earlier reading (low).**
+   Real: a contract failure set the output to None, so a grounded partial
+   `structuredContent` became F505. Fix: with `check_outputs` off,
+   `_unchecked_output` reads as `_grounding_refusal` did at the base (a
+   `structuredContent` object as it is, else the one text item decoded,
+   else None), and a result that is not a mapping is passed on, as before.
+   Test: `test_check_outputs_off_reads_outputs_as_before` (four cases; three
+   failed before the fix).
+9. **`structuredContent: null` made a valid text R402 (low).** Real; fixed
+   by item 1 (structure is not read) and, with `check_outputs` off, by
+   item 8 (a non-object is ignored). Tests: the passing case with
+   `structuredContent: None`, and the second case of item 8's test.
+10. **The TypeScript runner ignored a nested call's `returns`/`fails` and
+   reused a stale top-level script (low).** Real. Fix: `Runner.scripted`
+   sets a call's script for the time it runs (top-level and nested) and
+   restores the previous one after. New fixture
+   `nested_output_breaks_contract` (needs `nested_calls`): a nested call's
+   own `returns` is refused, and a nested call after a top-level call of
+   the same tool with `returns` runs; the old runner fails it. 27 call
+   fixtures (counts updated in CONFORMANCE.md, RFC-0005, the CHANGELOG, the
+   Standard Agents guide, ACS-01, both runners' count tests).
+
+### Checks (F6) after review round 1
+
+All green on the final tree:
+
+- Python: every `tools/validate_*.py` of CLAUDE.md (benchmark deps
+  included), `validate_workflows.py --strict`, every domain catalog and
+  example `--strict`; every generator with `--check` (`sync_skill_schemas`
+  107, `gen_runtime_fixtures` 350, `gen_call_fixtures` 33 + 27,
+  `gen_trigger_vectors`, `gen_standard_agents_binding`,
+  `gen_capability_json_schemas`); ruff check and format (CI's list); mypy;
+  `pytest tests/` (4280 passed, 8 skipped); `pytest benchmarks/tests/` (69)
+  and `benchmarks/runner.py --report`; `scripts/run_conformance.py`.
+- Rust (`core/`, 1.99.1; no Rust changed): fmt; clippy plain, `python`,
+  `wasm`; `cargo test --locked`; `--features wasm --test wasm` (12); MSRV
+  `cargo +1.88.0 check --locked --all-targets --features python`; the CEL
+  differential (155 cases, 92 expressions, 0 failures).
+- TypeScript: `packages/acs-core` `build:wasm`, build, check, test (1784);
+  the binding check and test (183, 1 skipped).
+- Site: `npm run check`, `npm test` (1169), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` (0 enforced runs over 1800px), and
+  `scripts/check-axe.mjs` over the pages this round changed (`/spec/`,
+  `/spec/1.2.0/`, `/spec/conformance/`, `/spec/security/`, `/rfcs/0005/`,
+  `/rfcs/0010/`, `/guides/claude-agent-sdk/`, `/guides/standard-agents/`,
+  `/community/release-notes/`: 36 runs, no violations).
+
+The site counts the call fixtures from the git index (`trackedIn`): a new
+fixture is counted once it is added, so `npm test` and the build run after
+`git add`.
+

@@ -79,10 +79,16 @@ def test_the_statement_matches_the_adapter() -> None:
         "check_outputs=False" in gap and "outside class SL" in gap
         for gap in statement["host_gaps"]
     )
+    # The calls whose results carry no capability output are named apart
+    # from the host gaps (section 10.4): they get a decision, but no output
+    # check applies to them.
+    (without,) = statement["calls_without_output"]
+    assert "Claude Code's own tools" in without
+    assert not any("Claude Code's own tools" in gap for gap in statement["host_gaps"])
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 26
+    assert len(CASES) == 27
 
 
 def _output(capability: str, adapter: GroundedAgentAdapter, n: int) -> dict[str, Any]:
@@ -97,6 +103,11 @@ def _output(capability: str, adapter: GroundedAgentAdapter, n: int) -> dict[str,
     return output
 
 
+# A step that states no `returns`: its tool returns what the contract
+# requires. A step's `returns` may be null, which is an output to refuse.
+_NO_RETURNS: Any = object()
+
+
 class _Runner:
     def __init__(
         self,
@@ -109,8 +120,9 @@ class _Runner:
         self.approved: dict[str, bool] = {}
         self.options = adapter.wrap_options(ClaudeAgentOptions(can_use_tool=self._host))
         self.n = 0
-        # What the current call of a served tool returns.
-        self.returns: Any = None
+        # What the current call of a served tool returns, when its step
+        # states `returns` (null included); else the contract's output.
+        self.returns: Any = _NO_RETURNS
         self.served = {
             b["tool"]: _guarded(
                 SdkMcpTool(
@@ -131,7 +143,7 @@ class _Runner:
         async def handler(args: dict[str, Any]) -> dict[str, Any]:
             value = (
                 _output(capability, self.adapter, self.n)
-                if self.returns is None
+                if self.returns is _NO_RETURNS
                 else self.returns
             )
             return {"content": [{"type": "text", "text": json.dumps(value)}]}
@@ -181,7 +193,7 @@ class _Runner:
             return "run"
         response: dict[str, Any] = {}
         if step["call"] in self.served:
-            self.returns = step.get("returns")
+            self.returns = step["returns"] if "returns" in step else _NO_RETURNS
             tool = self.served[step["call"]]
             response = await tool.handler(data["tool_input"])
         await self._fire("PostToolUse", {**data, "tool_response": response}, call_id)

@@ -1,0 +1,105 @@
+{
+  "description": "A nested call's output is checked as its own: what the nested call returns, not what an earlier call of the same tool returned.",
+  "ontology": "2.2.0",
+  "needs": [
+    "nested_calls"
+  ],
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    },
+    {
+      "tool": "find",
+      "ontology": "2.2.0",
+      "capability": "search"
+    },
+    {
+      "tool": "gather",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "find"
+      ]
+    }
+  ],
+  "sequence": [
+    {
+      "call": "gather",
+      "nested": [
+        {
+          "call": "find",
+          "returns": "found",
+          "expect": {
+            "refuse_output": "R402"
+          }
+        }
+      ],
+      "expect": "run"
+    },
+    {
+      "call": "find",
+      "returns": {
+        "results": []
+      },
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "gather",
+      "nested": [
+        {
+          "call": "find",
+          "expect": "run"
+        }
+      ],
+      "expect": "run"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "description": "An output that is not an object, or lacks a field its capability's output contract requires, is refused with R402.",
+  "description": "An output that is not an object (a string, null), lacks a field its capability's output contract requires, has evidence_anchors that are not an array, or a required confidence outside 0 to 1 is refused with R402 (section 5.18.9).",
   "ontology": "2.2.0",
   "bindings": [
     {
@@ -67,8 +67,26 @@
     },
     {
       "call": "find",
+      "returns": null,
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "find",
       "returns": {
         "results": []
+      },
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "find",
+      "returns": {
+        "results": [],
+        "evidence_anchors": "file:a",
+        "confidence": 1
       },
       "expect": {
         "refuse_output": "R402"

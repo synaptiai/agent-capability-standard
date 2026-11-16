@@ -305,15 +305,18 @@ class GroundedAgentConfig:
         check_outputs: Whether the result of a call of a tool that
             ``create_grounded_mcp_server`` serves with a capability must carry
             that capability's output and satisfy its output contract
-            (STANDARD 1.2.0 sections 5.18.9 and 5.18.10): its
-            ``structuredContent``, or the I-JSON text of the output object as
-            its one text content item, with every field the contract
-            requires. A result that does not is the failure of the call that
-            ran, R402, recorded against the call. On (default). ``False``
-            passes such results on unchecked, as before 1.2.0 (outside class
-            SL). Claude Code's own tools and the tools of other MCP servers
-            return results in their own forms, which carry no capability
-            output, and are never checked.
+            (STANDARD 1.2.0 sections 5.18.9 and 5.18.10): the I-JSON text of
+            the output object as its one text content item, with every field
+            the contract requires. The SDK's server delivers only a result's
+            content (and ``is_error``) to the session, so the text is the
+            output; a ``structuredContent`` member is not delivered and is
+            not read. A result that does not carry the output is the failure
+            of the call that ran, R402, recorded against the call. On
+            (default). ``False`` passes such results on unchecked and reads
+            the output for the grounding policies and a minimum confidence as
+            before 1.2.0 (outside class SL). Claude Code's own tools and the
+            tools of other MCP servers return results in their own forms,
+            which carry no capability output, and are never checked.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -988,42 +991,71 @@ class GroundedAgentAdapter:
         executor's order.
 
         1. With ``config.check_outputs``, the result must carry the
-           capability's output (:func:`~grounded_agency.capabilities.output.tool_result_output`:
-           its ``structuredContent``, or the I-JSON text of the output object
-           as its one text item) and satisfy the capability's output
-           contract; otherwise R402.
+           capability's output as the session reads it
+           (:func:`~grounded_agency.capabilities.output.tool_result_output`:
+           the I-JSON text of the output object as its one text item; the
+           SDK's server does not deliver ``structuredContent``) and satisfy
+           the capability's output contract; otherwise R402.
         2. Then :meth:`check_call_output`: the grounding policies (F505) and
-           the profiles' minimum confidence (F504).
+           the profiles' minimum confidence (F504), on that output.
 
         An error result (``is_error``) carries no output and is passed on: the
         call failed, and the post-call hooks record it. A tool with no
-        capability (unbound) has no output contract. Returns the refusal's
+        capability (unbound) has no output contract. With ``check_outputs``
+        off (outside class SL) step 1 is skipped and step 2 reads the output
+        as before 1.2.0 (:meth:`_unchecked_output`). Returns the refusal's
         text form, recorded against ``call`` as the failure of the call that
         ran (decision ``failed``), or None."""
         if isinstance(result, dict) and result.get("is_error"):
             return None
-        if not self.config.check_outputs and not self._checks_call_outputs:
-            return None
+        if not self.config.check_outputs:
+            if not self._checks_call_outputs or not isinstance(result, dict):
+                return None
+            return self.check_call_output(
+                tool, args, self._unchecked_output(tool, args, result), call
+            )
         mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
         capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
         if not capability:
             return None
         from .capabilities.output import CapabilityOutputError, tool_result_output
 
-        output: Any
         try:
             output = tool_result_output(capability, result, self.registry)
         except CapabilityOutputError as e:
-            if self.config.check_outputs:
-                return self._fail_call(
-                    ErrorCode.EXECUTION_FAILED,
-                    mapping,
-                    tool,
-                    call,
-                    f"{tool}'s result: {e.error.message} (section 5.18.9)",
-                )
-            output = None
+            return self._fail_call(
+                ErrorCode.EXECUTION_FAILED,
+                mapping,
+                tool,
+                call,
+                f"{tool}'s result: {e.error.message} (section 5.18.9)",
+            )
         return self.check_call_output(tool, args, output, call)
+
+    def _unchecked_output(
+        self, tool: str, args: Any, result: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """The output of a result read as before 1.2.0, with
+        ``check_outputs`` off: a ``structuredContent`` object as it is, else
+        the capability output its one text item carries, else None."""
+        structured = result.get("structuredContent")
+        if isinstance(structured, dict):
+            return structured
+        texts = [
+            c.get("text")
+            for c in result.get("content") or []
+            if isinstance(c, dict) and c.get("type") == "text"
+        ]
+        mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+        capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
+        if len(texts) != 1 or not isinstance(texts[0], str) or not capability:
+            return None
+        from .capabilities.output import CapabilityOutputError, decode_capability_output
+
+        try:
+            return decode_capability_output(capability, texts[0], self.registry)
+        except CapabilityOutputError:
+            return None
 
     def _fail_call(
         self,

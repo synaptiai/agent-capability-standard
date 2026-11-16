@@ -473,10 +473,30 @@ class TestGroundedServerGuard:
                 {"content": [{"type": "text", "text": 'Here: {"results": []}'}]},
                 "is not the JSON text of one object",
             ),
-            # Structured content without the contract's required fields.
-            ({"structuredContent": {"results": []}}, "is missing evidence_anchors"),
-            # Structured content that is not an object.
-            ({"structuredContent": ["a"]}, "is not a JSON object"),
+            # An object without the contract's required fields.
+            (
+                {"content": [{"type": "text", "text": '{"results": []}'}]},
+                "is missing evidence_anchors",
+            ),
+            # JSON that is not an object.
+            ({"content": [{"type": "text", "text": '["a"]'}]}, "is not a JSON object"),
+            # The output as structured content only: the SDK's server
+            # delivers the content, not structuredContent, so the session
+            # would read nothing (section 5.18.9).
+            (
+                {"content": [], "structuredContent": FOUND},
+                "its structuredContent is not delivered to the session",
+            ),
+            ({"structuredContent": FOUND}, "carries 0 content item(s)"),
+            # Prose beside a valid structured output: the session reads the
+            # prose, so the prose is checked.
+            (
+                {
+                    "content": [{"type": "text", "text": "3 results"}],
+                    "structuredContent": FOUND,
+                },
+                "is not the JSON text of one object",
+            ),
             # Two content items: not one output object.
             (
                 {
@@ -490,22 +510,26 @@ class TestGroundedServerGuard:
             # An integer no I-JSON reader holds exactly.
             (
                 {
-                    "structuredContent": {
-                        "results": [9007199254740993],
-                        "evidence_anchors": [],
-                        "confidence": 1,
-                    }
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": '{"results": [9007199254740993], '
+                            '"evidence_anchors": [], "confidence": 1}',
+                        }
+                    ]
                 },
                 "outside ±2^53",
             ),
             # A confidence outside 0 to 1.
             (
                 {
-                    "structuredContent": {
-                        "results": [],
-                        "evidence_anchors": [],
-                        "confidence": 2,
-                    }
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": '{"results": [], "evidence_anchors": [], '
+                            '"confidence": 2}',
+                        }
+                    ]
                 },
                 "confidence is not a number from 0 to 1",
             ),
@@ -520,7 +544,7 @@ class TestGroundedServerGuard:
     ) -> None:
         """The output-contract row of section 5.18.10: the result of a call
         of a served tool with a capability carries that capability's output
-        (its structured content, or the I-JSON text of the object as its one
+        as the session reads it (the I-JSON text of the object as its one
         text item, section 5.18.9) with every field the contract requires;
         otherwise the call that ran fails with R402, recorded against it once
         (the post-call hook does not record it again)."""
@@ -554,12 +578,18 @@ class TestGroundedServerGuard:
     @pytest.mark.parametrize(
         "result",
         [
-            {"structuredContent": FOUND},
             {"content": [{"type": "text", "text": json.dumps(FOUND)}]},
-            # Structured content is the output whatever the text says.
+            # The text as MCP tools return it beside their structured
+            # content: the text is checked, the structure is not delivered.
             {
-                "content": [{"type": "text", "text": "3 results"}],
+                "content": [{"type": "text", "text": json.dumps(FOUND)}],
                 "structuredContent": FOUND,
+            },
+            # A forwarded result (mcp.types.CallToolResult.model_dump()) has
+            # structuredContent None: no structure at all.
+            {
+                "content": [{"type": "text", "text": json.dumps(FOUND)}],
+                "structuredContent": None,
             },
         ],
     )
@@ -644,6 +674,159 @@ class TestGroundedServerGuard:
         assert await served["find"].handler({"q": "x"}) == prose  # type: ignore[attr-defined]
         assert list(adapter.diagnostics) == []
         assert adapter.recorded_by["config_sha256"] != on.recorded_by["config_sha256"]
+
+    @pytest.mark.parametrize(
+        ("result", "fails"),
+        [
+            # A structured output that misses ``results`` but is grounded:
+            # before 1.2.0 the adapter took the object as it was.
+            (
+                {
+                    "content": [{"type": "text", "text": "x"}],
+                    "structuredContent": {
+                        "evidence_anchors": [{"ref": "file:a", "kind": "file"}],
+                        "confidence": 1,
+                    },
+                },
+                False,
+            ),
+            # structuredContent None: the text is read.
+            (
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "results": [],
+                                    "evidence_anchors": [
+                                        {"ref": "file:a", "kind": "file"}
+                                    ],
+                                    "confidence": 1,
+                                }
+                            ),
+                        }
+                    ],
+                    "structuredContent": None,
+                },
+                False,
+            ),
+            # Prose holds no output: the grounding policy refuses it.
+            ({"content": [{"type": "text", "text": "found"}]}, True),
+            # A result that is not a mapping was passed on.
+            ("found", False),
+        ],
+    )
+    def test_check_outputs_off_reads_outputs_as_before(
+        self,
+        ontology_path: str,
+        tmp_path: Path,
+        result: object,
+        fails: bool,
+    ) -> None:
+        """With ``check_outputs=False`` the grounding policies read a
+        result's output as before 1.2.0: a ``structuredContent`` object as
+        it is, else the output its one text item carries."""
+        from grounded_agency import GroundingPolicy
+
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+                check_outputs=False,
+                grounding=GroundingPolicy(require={"search"}),
+            )
+        )
+        adapter.mapper.register_mcp_tool("mcp__srv__find", capability_id="search")
+        refusal = adapter.check_call_result("mcp__srv__find", {}, result, "c1")
+        if fails:
+            assert refusal is not None and refusal.startswith("F505 ")
+        else:
+            assert refusal is None
+            assert list(adapter.diagnostics) == []
+
+    @staticmethod
+    def _run_tool(
+        adapter: GroundedAgentAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+        result: dict[str, object],
+    ) -> object:
+        """The SDK's own ``run_tool`` for a server whose ``find`` (search)
+        returns ``result``: what the session receives for a call."""
+        import claude_agent_sdk
+        from claude_agent_sdk import tool
+
+        from grounded_agency.mcp import create_grounded_mcp_server
+
+        @tool("find", "Searches.", {"q": str})
+        async def find(args: dict[str, object]) -> dict[str, object]:
+            return result
+
+        find.metadata = {"capability": "search"}  # type: ignore[attr-defined]
+        build = claude_agent_sdk.build_tool_server
+        captured: dict[str, object] = {}
+
+        def capture(name: str, version: str, tools: object, run_tool: object) -> object:
+            captured["run_tool"] = run_tool
+            return build(name, version, tools, run_tool)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(claude_agent_sdk, "build_tool_server", capture)
+        create_grounded_mcp_server(
+            name="srv", version="1.0.0", tools=[find], adapter=adapter
+        )
+        return captured["run_tool"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prose", [True, False])
+    async def test_the_session_receives_the_output_that_was_checked(
+        self,
+        ontology_path: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        prose: bool,
+    ) -> None:
+        """Through the SDK's server: it delivers a result's content and
+        ``is_error``, not its ``structuredContent``, so the adapter checks the
+        text. A grounded structured output beside prose is R402, not passed
+        on as grounded prose; the output's own text passes, and is what the
+        session receives."""
+        from grounded_agency import GroundingPolicy
+
+        grounded = {
+            "results": [],
+            "evidence_anchors": [{"ref": "file:README.md", "kind": "file"}],
+            "confidence": 1,
+        }
+        text = "The capital of Mars is Olympus" if prose else json.dumps(grounded)
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+                grounding=GroundingPolicy(require={"search"}),
+            )
+        )
+        run_tool = self._run_tool(
+            adapter,
+            monkeypatch,
+            {
+                "content": [{"type": "text", "text": text}],
+                "structuredContent": grounded,
+            },
+        )
+        assert await self._pre(adapter, "mcp__srv__find", {"q": "x"}) == {}
+        delivered = (await run_tool("find", {"q": "x"})).model_dump(  # type: ignore[operator]
+            by_alias=True, exclude_none=True
+        )
+        # The host's form: no structured content reaches the session.
+        assert "structuredContent" not in delivered
+        if prose:
+            assert delivered["isError"] is True
+            assert delivered["content"][0]["text"].startswith("R402 ")
+            assert [d.code_str for d in adapter.diagnostics] == ["R402"]
+        else:
+            assert delivered["isError"] is False
+            assert delivered["content"] == [{"type": "text", "text": text}]
+            assert list(adapter.diagnostics) == []
 
 
 # =============================================================================
