@@ -1,0 +1,31 @@
+# Standard version: 1.1.0
+# A workflow that targets 1.1 but uses a feature new in 1.2 is W616 (STANDARD
+# v1.2 §11.5): the audit input require_record, which a 1.1 executor does not
+# read (§6.4). Declaring 1.2 clears it.
+record_the_release:
+  goal: Record a release, failing the run if the record is not written.
+  risk: low
+  steps:
+  - capability: audit
+    purpose: Record the release.
+    store_as: release_audit
+    input_bindings:
+      event:
+        event_type: release.published
+        version: 1.2.0
+      retention: P365D
+      require_record: true
+pinned_to_1_2:
+  goal: The same feature under a workflow that declares 1.2.
+  risk: low
+  spec_version: "1.2"
+  steps:
+  - capability: audit
+    purpose: Record the release.
+    store_as: release_audit
+    input_bindings:
+      event:
+        event_type: release.published
+        version: 1.2.0
+      retention: P365D
+      require_record: true

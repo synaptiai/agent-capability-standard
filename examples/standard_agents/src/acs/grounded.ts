@@ -73,6 +73,7 @@ import {
   type Json,
 } from '@synaptiai/acs-core';
 import { notifyEvidence } from './evidence.js';
+import { confidenceFailure, unappliedRule, type BindingProfiles } from './profiles.js';
 import {
   CAPABILITIES,
   ONTOLOGY_VERSION,
@@ -211,6 +212,19 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * to 1.
    */
   grounding?: GroundingPolicy | readonly GroundingPolicy[];
+  /**
+   * Domain profiles (STANDARD 1.2.0 §5.21) this layer applies to the tool's
+   * calls, as the core computed them (`bindingProfiles`): they raise the
+   * flags of each of the tool's capabilities; a call they require a person
+   * for counts only approvals the deployment attests as a person's
+   * (`approver_identity.kind: human`), and its trace entries carry
+   * `person_required`; their grounding policies join `grounding`; and an
+   * output below their minimum confidence, or whose `confidence` is not a
+   * number from 0 to 1, fails with F504 (the call has run). A profile that
+   * sets `allowed_destinations`, which this binding does not check yet,
+   * throws here.
+   */
+  profiles?: BindingProfiles;
   /**
    * What the call's producer had (`evidence_seen`, §5.20): only what this
    * call received (`refsIn(args)`) and what the tool's own code read during
@@ -446,6 +460,25 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   const invokeNames = Object.keys(invokes);
   let flags = own.flags;
   for (const [invoked, tool] of Object.entries(invokes)) flags = joinFlags(flags, invokedFlags(invoked, tool));
+  // Domain profiles (§5.21.3): each capability's flags as they raise them,
+  // and whether they require a person for the call.
+  const profiles = options.profiles;
+  let person = false;
+  if (profiles !== undefined) {
+    const problem = unappliedRule(profiles.policy);
+    if (problem !== null) throw new Error(`groundedTool '${name}': ${problem}`);
+    for (const c of capabilities) {
+      const raised = profiles.flags(c, options.flags);
+      flags = joinFlags(flags, {
+        risk: raised.risk,
+        mutation: raised.mutation,
+        requires_checkpoint: raised.requires_checkpoint,
+        requires_approval: raised.requires_approval,
+      });
+      person ||= raised.person;
+    }
+  }
+  const minimumConfidence = profiles?.policy.minimum_confidence ?? null;
   const policy = options.approval ?? {};
   const problems = policyProblems(policy);
   if (problems.length > 0) {
@@ -460,9 +493,15 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   const now = options.now ?? (() => Date.now());
   const prerequisites = prerequisitesOf(capabilities);
   // Grounding policies, checked once (§5.20): an unknown id throws here.
-  const policies = (options.grounding === undefined ? [] : groundingPolicies(options.grounding)).filter((p) =>
-    p.require.includes(capability),
-  );
+  // The applied profiles' grounding policies join the tool's own (§5.21.3).
+  const fromProfiles: GroundingPolicy[] = (profiles?.policy.grounding ?? []).map((g) => ({
+    require: g.require as CapabilityId[],
+    ...(g.kinds !== null ? { kinds: g.kinds } : {}),
+  }));
+  const policies = [
+    ...(options.grounding === undefined ? [] : groundingPolicies(options.grounding)),
+    ...(fromProfiles.length > 0 ? groundingPolicies(fromProfiles) : []),
+  ].filter((p) => p.require.includes(capability));
   const secretsOf = async (state: ThreadState): Promise<readonly string[]> => {
     const given = options.secrets;
     return typeof given === 'function' ? await given(state) : (given ?? []);
@@ -494,7 +533,13 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
 
   // What decides this tool's calls (§5.18.8): its binding record and the
   // checkpoint maximum age, which the annotation does not state.
-  const configuration = { annotation, settings: { checkpoint_max_age_ms: maxAge } };
+  const configuration = {
+    annotation,
+    settings: {
+      checkpoint_max_age_ms: maxAge,
+      ...(profiles !== undefined ? { profiles: profiles.documents } : {}),
+    },
+  };
   let layer: Promise<RecordedBy> | undefined;
   const recordedBy = (): Promise<RecordedBy> =>
     (layer ??= digestOf(configuration as unknown as Json).then((config_sha256) => ({
@@ -513,7 +558,14 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     const flow = flowOf(state);
     const step = stepOf(state);
     const position = { ...(flow !== null ? { flow_id: flow } : {}), ...(step !== null ? { step } : {}) };
-    const identity = { action: name, capability, ...(domain !== undefined ? { domain } : {}), ...position };
+    const identity = {
+      action: name,
+      capability,
+      ...(domain !== undefined ? { domain } : {}),
+      ...position,
+      // An applied profile requires a person for the call (§5.21.3).
+      ...(person ? { person_required: true as const } : {}),
+    };
     // What is known of the call so far, for the record if a write fails.
     const used: Pick<TraceEntry, 'args_digest' | 'approval' | 'checkpoint_id' | 'covered_by'> = {};
     let layerRecord: RecordedBy | undefined;
@@ -606,14 +658,22 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         const shown: Json[] = [{ action: name, capability, args: argsJson }];
         approvedAt = now();
         request = await requestApproval(state, shown, policy, approvedAt);
-        const standing = approvalState(request, approvedAt);
+        let standing = approvalState(request, approvedAt);
+        // A person must decide (§5.21.3): only approvals the deployment
+        // attests as a person's count.
+        if (standing === 'approved' && person) {
+          const people = countedDecisions(request, approvedAt).filter((d) => d.approver_identity?.kind === 'human');
+          if (new Set(people.map((d) => d.approver)).size < request.min_approvers) standing = 'pending';
+        }
         if (standing !== 'approved') {
           return await refuse(
             refusal(
               'F502',
               name,
               capability,
-              `This call needs approval and the request is ${standing}.`,
+              person
+                ? `This call needs a person's approval (an applied domain profile requires one, STANDARD 1.2.0 §5.21.3: only approvals the deployment attests as a person's count), and the request is ${standing}.`
+                : `This call needs approval and the request is ${standing}.`,
               'Tell the person what you intend to do and wait for them to decide; then call the tool again with the same arguments.',
               { digest: request.digest, round: approvalRound(request), shown, state: standing },
             ),
@@ -682,7 +742,10 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         // the request approved, as principals, with their identities when
         // every one of those decisions recorded one. One decision per
         // approver, so identities never disagree for one principal.
-        const counted = countedDecisions(request, approvedAt);
+        // Under a person requirement, a person's approvals only (§5.21.3).
+        const counted = countedDecisions(request, approvedAt).filter(
+          (d) => !person || d.approver_identity?.kind === 'human',
+        );
         approvers = [...new Set(counted.map((d) => principalOf(d.approver)))];
         const identities = new Map<string, AgentIdentity>();
         for (const d of counted) {
@@ -863,6 +926,32 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         }
         return result;
       }
+    }
+
+    // The applied profiles' minimum confidence (§5.21.3), after grounding.
+    const low = minimumConfidence === null ? null : confidenceFailure(output, minimumConfidence);
+    if (low !== null) {
+      const result = refusal(
+        'F504',
+        name,
+        capability,
+        `The output of ${name} fails a domain profile: ${low.message}.`,
+        'Return an output whose confidence, a number from 0 to 1, meets the minimum of the applied profiles.',
+      );
+      try {
+        await serially(state.threadId, () =>
+          completeTrace(
+            state,
+            started,
+            { at: now(), status: 'failed', code: 'F504', reason_code: low.reason, error: result.error ?? 'F504' },
+            secrets,
+          ),
+        );
+      } catch (recordFailure) {
+        const why = recordFailure instanceof Error ? recordFailure.message : String(recordFailure);
+        return refusal('R407', name, capability, `The call's outcome could not be recorded: ${why}.`, 'It ran.');
+      }
+      return result;
     }
 
     const anchors = output['evidence_anchors'];

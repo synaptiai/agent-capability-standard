@@ -758,3 +758,49 @@ def test_a_profile_without_an_exact_json_form_is_refused_everywhere(
         validator, catalog, "w", {}, header=None, run_id="r", now_ms=0, profiles=[exact]
     )
     assert run.snapshot()["state"].count("9007199254740992") == 1
+
+
+HEADER_CATALOG = """\
+# Standard version: {version}
+# No workflow declares spec_version: the header gives the target (STANDARD
+# v1.2 §11.5).
+w:
+  goal: Change a setting once a person whose identity is checked approves.
+  risk: high
+  workflow_extensions:
+    requires: [identity@1, approval@1]
+  steps:
+  - capability: checkpoint
+    purpose: Save the state.
+    store_as: cp
+    input_bindings: {{scope: repo}}
+  - capability: constrain
+    purpose: Check the policy.
+    store_as: policy
+    input_bindings: {{target: config, constraints: [policy]}}
+  - capability: mutate
+    purpose: Change the setting.
+    store_as: m
+    input_bindings: {{target: config, operation: {{set: 1}}}}
+    approval:
+      approver: {{kind: human, sender_check: [directory_id]}}
+"""
+
+
+@pytest.mark.parametrize(
+    ("version", "end"), [("1.2.0", (None, "F502")), ("1.1.0", ("completed", None))]
+)
+def test_the_runner_runs_a_catalog_file_under_its_header(
+    tmp_path: Path, version: str, end: tuple[str | None, str | None]
+) -> None:
+    """A catalog file whose only declaration is its header targets that
+    version in the executor as in the validator: under 1.2.0 the approver's
+    sender_check requires attested identities, and a decision without them
+    counts no approver (F502, §5.17); under 1.1.0 sender_check is not read
+    and the decision counts."""
+    path = tmp_path / "catalog.yaml"
+    path.write_text(HEADER_CATALOG.format(version=version))
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(path)
+    result = WorkflowRunner(engine).run("w", None, FakeHost(Clock()))
+    assert (result.outcome, result.code) == end, result

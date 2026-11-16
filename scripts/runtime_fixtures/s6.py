@@ -664,3 +664,62 @@ def register(add):
         ["step_failed"],
         profiles=[GROUNDED_CONFIDENT],
     )
+
+    # The catalog header's version, which the start operation takes (§11.5,
+    # §5.19.2), decides a catalog's target when no workflow declares one: the
+    # same catalog runs under 1.2's approver rules with a 1.2.0 header and
+    # under 1.1's without one.
+    header_catalog = {
+        "w": {
+            "goal": "g",
+            "risk": "high",
+            "workflow_extensions": {"requires": ["identity@1", "approval@1"]},
+            "steps": [
+                CP,
+                POLICY,
+                mutate(
+                    approval={
+                        "approver": {"kind": "human", "sender_check": ["directory_id"]}
+                    }
+                ),
+            ],
+        }
+    }
+    header_script = [
+        {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
+        {"expect": inv("constrain"), "respond": out(compliant=True)},
+        {"expect": {"kind": "RequestApproval", "step": 2}, "respond": approve("d1")},
+    ]
+    add(
+        "header_1_2_sender_check_needs_identities",
+        "A catalog with no spec_version and a '# Standard version: 1.2.0' header"
+        " targets 1.2 by its header alone: the approver's sender_check makes attested"
+        " identities required, and a decision without them counts no approvers"
+        " (F502, §5.17, §11.5).",
+        header_catalog,
+        header_script,
+        {
+            "kind": "Failed",
+            "code": "F502",
+            "action_records": [{"status": "rejected", "approval": {"approvers": []}}],
+        },
+        ["approval_decided"],
+        header="1.2.0",
+    )
+    add(
+        "header_null_sender_check_not_read",
+        "The same catalog with no header targets no version: sender_check is not"
+        " read (W604 at validation, as in 1.1), and the decision counts alice: the"
+        " header, not the catalog, made the difference (§11.5).",
+        header_catalog,
+        header_script
+        + [{"expect": inv("mutate", step=2), "respond": out(success=True)}],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {"status": "executed", "approval": {"approvers": ["alice"]}}
+            ],
+        },
+        ["approval_decided"],
+    )

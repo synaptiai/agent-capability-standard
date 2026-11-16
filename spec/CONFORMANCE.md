@@ -173,7 +173,7 @@ the other start members, all passed to start with `run_id` `"run-1"`. Its
 
 | Entry | What the harness does |
 |-------|-----------------------|
-| `{"expect": A, "respond": R, "at": T}` | The pending action must match `A`; then `R`, when given, is submitted at `T` (`"{{digest}}"` and `"{{digest_upper}}"` stand for the action's digest) |
+| `{"expect": A, "respond": R, "at": T}` | The pending action must match `A` and hold none of the members `absent` lists (paths joined by `.`); then `R`, when given, is submitted at `T` (`"{{digest}}"` and `"{{digest_upper}}"` stand for the action's digest) |
 | `{"tick": T, "changed": C}` | The time `T` is given; when `changed` is there, the tick must change the run exactly when `C` |
 | `{"wake_at": W}` | The run's wake-up time must be `W` (null: none) |
 | `{"cancel": {"reason": S, "at": T}}` | The run is cancelled |

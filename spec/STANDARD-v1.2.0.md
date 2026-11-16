@@ -1148,9 +1148,10 @@ declares `approval@1` or not, is asked as if it declared
 `approval: {approver: {kind: human}}`: a person (one approver, no role), in
 session, shown its resolved inputs, with no expiry and no recheck, and with
 `when_unattended: fail` (W606, F502). A member that an `approval` field leaves
-out takes the default the table gives. Two steps are asked of a person even
-when their approver is a standing mandate: a step marked always-ask (§5.17)
-and a queued step that an attended resumption re-enters (§5.14.1).
+out takes the default the table gives. Three steps are asked of a person even
+when their approver is a standing mandate: a step marked always-ask (§5.17),
+a step an applied domain profile requires a person for (§5.21), and a queued
+step that an attended resumption re-enters (§5.14.1).
 
 **Modes.** The mode tells the host where to ask:
 
@@ -2786,7 +2787,10 @@ modes. Each record an executor writes carries `run_id`, `frame`, `step` and
 clock when the record was first written; `checkpoint_id`, when the action
 used, took or restored a checkpoint; `code` (§9) and, where the failure had
 one, `reason_code` (§5.19.7), when the action failed or was refused or
-cancelled; and, in its `approval`, the `decision_id` of the decision.
+cancelled; and, in its `approval`, the `decision_id` of the decision. A
+record of a step that an applied domain profile requires a person for
+carries `person_required: true` (§5.21.3); `always_ask: true` says only
+that the action used an item from an always-ask trust class (§5.17).
 
 **The `audit` capability.** An `audit` step records its `event`. The
 implementation performing the step writes an action record of its own:
@@ -3568,9 +3572,10 @@ headers (`catalogs`), agent manifests (`agents`), destination policies
 `script`, the `end` and, optionally, the `run_record`. The
 run starts with `run_id` `"run-1"`. Each script entry is one of:
 
-- `{"expect": A, "respond": R, "at": T}`: the pending action matches `A`;
-  then `R`, when given, is submitted for it at time `T` (default: the
-  latest time used). In `R`, the string `"{{digest}}"` stands for the
+- `{"expect": A, "respond": R, "at": T}`: the pending action matches `A`,
+  and holds none of the members the entry's `absent` lists (each a path of
+  member names joined by `.`); then `R`, when given, is submitted for it at
+  time `T` (default: the latest time used). In `R`, the string `"{{digest}}"` stands for the
   pending action's `digest`, and `"{{digest_upper}}"` for the same in
   uppercase;
 - `{"tick": T, "changed": C}`: the time `T` is given with no response; when

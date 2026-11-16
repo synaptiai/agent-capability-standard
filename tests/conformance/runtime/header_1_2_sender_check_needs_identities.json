@@ -1,0 +1,118 @@
+{
+  "description": "A catalog with no spec_version and a '# Standard version: 1.2.0' header targets 1.2 by its header alone: the approver's sender_check makes attested identities required, and a decision without them counts no approvers (F502, \u00a75.17, \u00a711.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "workflow_extensions": {
+        "requires": [
+          "identity@1",
+          "approval@1"
+        ]
+      },
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          },
+          "approval": {
+            "approver": {
+              "kind": "human",
+              "sender_check": [
+                "directory_id"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F502",
+    "action_records": [
+      {
+        "status": "rejected",
+        "approval": {
+          "approvers": []
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "approval_decided"
+  ]
+}

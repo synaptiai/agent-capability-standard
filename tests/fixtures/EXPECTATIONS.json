@@ -817,5 +817,14 @@
     "expected_warning_codes": [
       "W614"
     ]
+  },
+  "warn_version_feature_1_2": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "versioning",
+    "expected_warning_codes": [
+      "W616"
+    ],
+    "note": "A 1.2 feature (the audit input require_record) in a workflow that targets 1.1 (Standard v1.2 \u00a711.5)"
   }
 }
