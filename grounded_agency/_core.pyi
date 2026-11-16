@@ -3,6 +3,7 @@
 Keep in sync with the ``#[pyfunction]``/``#[pyclass]`` items in that file.
 """
 
+from collections.abc import Sequence
 from os import PathLike
 from typing import Any, final
 
@@ -24,7 +25,19 @@ def validate_catalog(
     catalog_path: str | PathLike[str],
     ontology_path: str | PathLike[str],
     schema_root: str | PathLike[str],
-) -> dict[str, Any]: ...
+    *,
+    catalogs: Sequence[Any] | None = None,
+    agents: Sequence[Any] | None = None,
+) -> dict[str, Any]:
+    """``catalogs``: the other catalogs of the catalog set (§5.1.1), each a
+    path, a mapping or a ``(mapping, header)`` pair; ``agents``: agent
+    manifests (§5.15.1), each a path or a mapping. A refused set or manifest
+    raises ``ValueError``."""
+
+def model_family(model_id: str) -> str | None:
+    """The model family a host derives from a model identifier (§5.15), or
+    None when the rule gives none."""
+
 def canonical_json(value: Any) -> str:
     """The canonical JSON (RFC 8785) of an I-JSON value; ``ValueError``
     outside I-JSON. Any digest of a value is the SHA-256 of this text."""
@@ -77,8 +90,21 @@ class Validator:
     def __new__(
         cls, ontology_path: str | PathLike[str], schema_root: str | PathLike[str]
     ) -> Validator: ...
-    def validate_file(self, path: str | PathLike[str]) -> dict[str, Any]: ...
-    def validate(self, catalog: Any, header: str | None = None) -> dict[str, Any]: ...
+    def validate_file(
+        self,
+        path: str | PathLike[str],
+        *,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
+    ) -> dict[str, Any]: ...
+    def validate(
+        self,
+        catalog: Any,
+        header: str | None = None,
+        *,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
+    ) -> dict[str, Any]: ...
     def contracts(self) -> dict[str, dict[str, Any]]:
         """Every capability's ``{"input": ..., "output": ...}`` contracts with
         each ``$ref`` resolved, in ontology order."""
@@ -103,8 +129,8 @@ class Run:
         profiles: list[dict[str, Any]] | None = None,
         grounding: list[dict[str, Any]] | None = None,
         destinations: list[list[str]] | None = None,
-        catalogs: list[Any] | None = None,
-        agents: list[Any] | None = None,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
     ) -> Run:
         """``header`` is required: the version the catalog's header declares,
         or None for a catalog without one (§11.5). ``records`` is the record
@@ -112,9 +138,10 @@ class Run:
         grounding policies ``{require, kinds?, attested?}`` the host applies
         to the run and its nested runs (§5.20): a malformed policy, or one
         that requires a capability the ontology does not define (V101), is
-        a ``ValueError``. ``profiles``, ``destinations``, ``catalogs`` and
-        ``agents`` are refused (``ValueError``) until the 1.2 workstreams
-        implement them."""
+        a ``ValueError``. ``catalogs`` and ``agents`` are the other catalogs of
+        the catalog set (§5.1.1) and agent manifests (§5.15.1), as for
+        ``validate_catalog``. ``profiles`` and ``destinations`` are refused
+        (``ValueError``) until the 1.2 workstreams implement them."""
 
     @staticmethod
     def restore(
@@ -124,12 +151,13 @@ class Run:
         key: bytes | None = None,
         *,
         actor_identity: dict[str, Any] | None = None,
-        catalogs: list[Any] | None = None,
-        agents: list[Any] | None = None,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
     ) -> Run:
         """With ``actor_identity``, the actor the host continues the run
         for: another principal than the run's, or any actor for a run started
-        without one, is refused (``ValueError``; §5.17)."""
+        without one, is refused (``ValueError``; §5.17). ``catalogs`` and
+        ``agents`` must be the ones the run started with."""
 
     def resume(
         self,

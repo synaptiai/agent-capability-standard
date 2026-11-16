@@ -4,6 +4,8 @@
 //! — `tools/validate_workflows.py` and the `grounded_agency` Python package —
 //! runs one implementation. See `tasks/design-114.md`.
 
+pub mod agents;
+pub mod catalogs;
 pub mod cron;
 pub mod destination;
 pub mod diag;
@@ -11,6 +13,7 @@ pub mod duration;
 pub mod exec;
 pub mod expr;
 pub mod grounding;
+pub mod names;
 pub mod ontology;
 pub mod profile;
 pub mod refs;

@@ -10,6 +10,7 @@ use super::{
     Outcome, Pending, Purpose, Queued, RecordMode, Replacement, Response, ResumeOptions, Stage,
     State, StepError, StepState, SubmitError, Terminal, check_inputs,
 };
+use crate::catalogs::Resolved;
 use crate::duration;
 use crate::expr::ast::RefAt;
 use crate::expr::eval::{self, Bindings};
@@ -971,7 +972,68 @@ impl<'a> Machine<'a> {
             return self.step_error("R402", format!("the step's resolved inputs: {e}"));
         }
         self.frame().cur.inputs = inputs;
+        // A delegation the executor refuses is refused here, once its inputs
+        // are resolved and before it is put to an approver or uses a
+        // checkpoint (§5.15.2).
+        if step.capability == "delegate"
+            && let Err(e) = self.delegate_target_error(step)
+        {
+            return self.step_error("R402", e);
+        }
         self.set_stage(Stage::Approval)
+    }
+
+    /// Why the executor refuses a delegation in a workflow that declares
+    /// `agents` (§5.15.2): its resolved agent is not listed, its target
+    /// maxima are unknown, or its task does not fit the agent's manifest.
+    fn delegate_target_error(&self, step: &Step) -> Result<(), String> {
+        let wf = &self.program.workflows[&self.frame_ref().workflow];
+        let Some(listed) = &wf.agents else {
+            return Ok(());
+        };
+        let inputs = &self.frame_ref().cur.inputs;
+        let agent = match inputs.get("agent") {
+            Some(Value::String(a)) if listed.iter().any(|l| l == a) => a,
+            Some(Value::String(a)) => {
+                return Err(format!("agent '{a}' is not one of the workflow's agents"));
+            }
+            other => {
+                return Err(format!(
+                    "the delegation names no agent of the workflow's agents (agent is {})",
+                    other.map_or_else(|| "missing".to_string(), Value::to_string)
+                ));
+            }
+        };
+        if let Some(why) = &step.unbounded {
+            return Err(format!(
+                "the target maxima of this delegation are unknown: {why}; a workflow that declares agents delegates only to agents whose manifests the host gives"
+            ));
+        }
+        let Some(decl) = self.program.agents.get(agent).and_then(|m| m.task.as_ref()) else {
+            return Ok(());
+        };
+        let given: Vec<String> = match inputs.get("task") {
+            Some(Value::Object(t)) => t.keys().cloned().collect(),
+            None | Some(Value::Null) => Vec::new(),
+            Some(other) => {
+                return Err(format!(
+                    "the task for '{agent}' must be a mapping of its task inputs, found {}",
+                    crate::yaml::kind_of(other)
+                ));
+            }
+        };
+        let (undeclared, missing) = crate::agents::check_task(decl, &given);
+        if let Some(name) = undeclared.first() {
+            return Err(format!(
+                "'{agent}' has no task input '{name}'; the executor refuses undeclared inputs"
+            ));
+        }
+        if let Some(name) = missing.first() {
+            return Err(format!(
+                "'{agent}' needs task input '{name}', which the task does not give"
+            ));
+        }
+        Ok(())
     }
 
     /// Evaluate a gate; an evaluation error fires it (fail-safe).
@@ -1870,7 +1932,32 @@ impl<'a> Machine<'a> {
             // meet the same refusal without the host ever being asked.
             return self.step_error("R402", "the invoke step names no workflow");
         };
-        let Some(child) = self.program.workflows.get(&target) else {
+        // The target resolves over the catalog set as the validator
+        // resolves it (§5.1.1); a computed one is checked here.
+        let key = match self
+            .program
+            .resolver
+            .resolve(&self.frame_ref().workflow, &target)
+        {
+            Resolved::Key(k) => k,
+            Resolved::Unresolved => {
+                return self
+                    .step_error("R402", format!("workflow '{target}' is not in the catalog"));
+            }
+            Resolved::NotExported { catalog, name } => {
+                return self.step_error(
+                    "R402",
+                    format!("catalog '{catalog}' does not export workflow '{name}'"),
+                );
+            }
+            Resolved::Missing { catalog, name } => {
+                return self.step_error(
+                    "R402",
+                    format!("catalog '{catalog}' has no workflow '{name}'"),
+                );
+            }
+        };
+        let Some(child) = self.program.workflows.get(&key) else {
             return self.step_error("R402", format!("workflow '{target}' is not in the catalog"));
         };
         if self.st.frames.len() >= MAX_FRAMES {
@@ -1887,11 +1974,11 @@ impl<'a> Machine<'a> {
         if let Err(e) = check_inputs(child, &child_inputs) {
             return self.step_error("R402", e);
         }
-        self.trace_step("invoke_started", json!({"workflow": target}));
+        self.trace_step("invoke_started", json!({"workflow": key}));
         // Its nested run starts: so has the step (§5.19.5).
         self.frame().cur.started = true;
         self.undefer_nested();
-        let mut frame = Frame::new(&target, child_inputs);
+        let mut frame = Frame::new(&key, child_inputs);
         frame.marked = self.always_ask();
         self.st.frames.push(frame);
         Flow::Continue
@@ -1986,6 +2073,40 @@ impl<'a> Machine<'a> {
             && let Some(e) = super::delegate_identity_error(&value)
         {
             return self.exec_error("R402", e);
+        }
+        if step.capability == "delegate" && self.frame_ref().cur.delegated.is_none() {
+            let inputs = &self.frame_ref().cur.inputs;
+            let effective = value.get("effective");
+            let attests = |k: &str| effective.and_then(|e| e.get(k)) == Some(&Value::Bool(true));
+            // A continued delegation (§5.15.3) never has a fresh context,
+            // and returns a task_id of its own.
+            if let Some(Value::String(continues)) = inputs.get("continues") {
+                if attests("fresh_context") {
+                    return self.exec_error(
+                        "R402",
+                        "a continued delegation cannot have a fresh context, but the host attests fresh_context: true",
+                    );
+                }
+                if value.get("task_id").and_then(Value::as_str) == Some(continues.as_str()) {
+                    return self.exec_error(
+                        "R402",
+                        "a continued delegation returned the task_id it continues; every delegation call returns its own (§5.15.3)",
+                    );
+                }
+            }
+            // A 1.2 delegation that relied on read_only (§5.15.2) fails when
+            // its host does not attest it; not retried: the delegate has
+            // already run.
+            if wf.targets_1_2
+                && value.get("accepted") == Some(&Value::Bool(true))
+                && inputs.get("read_only") == Some(&Value::Bool(true))
+                && !attests("read_only")
+            {
+                return self.step_error(
+                    "R402",
+                    "the host did not attest read_only, which this step's flags rely on; not retried: the delegate has already run",
+                );
+            }
         }
         if step.capability == "delegate"
             && self.frame_ref().cur.delegated.is_none()

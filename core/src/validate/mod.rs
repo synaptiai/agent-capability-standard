@@ -7,13 +7,16 @@
 
 mod approval;
 mod bindings;
+mod catalog;
 mod delegation;
 mod exprs;
 mod extensions;
 mod grounding;
 mod groups;
 pub(crate) mod identity;
+mod inputs;
 mod invoke;
+mod location;
 mod quorum;
 mod recovery;
 pub(crate) mod semantics;
@@ -30,7 +33,10 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::diag::{Code, Diagnostic};
+use crate::agents::{self, Agents, Target};
+use crate::catalogs::{self, CatalogSet, Namespace};
+use crate::diag::{Code, Diagnostic, Seg};
+use crate::names;
 use crate::ontology::{Ontology, Risk};
 use crate::profile::Policy;
 use crate::refs;
@@ -215,6 +221,17 @@ impl Report {
         self.diagnostics.push(d);
     }
 
+    /// Give the diagnostics pushed since `before` that have no segments the
+    /// pointer tokens of their `field`, which holds a key the document
+    /// chose (§9.8).
+    pub(crate) fn stamp_since(&mut self, before: usize, tokens: &[String]) {
+        for d in &mut self.diagnostics[before..] {
+            if d.segments.is_none() && d.location.contains_key("field") {
+                d.segments = Some(tokens.to_vec());
+            }
+        }
+    }
+
     pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
         self.diagnostics.iter().filter(|d| d.is_error())
     }
@@ -271,24 +288,20 @@ pub struct Options {
 impl Options {
     /// The first member this validator does not implement yet, if any is
     /// given: refused rather than ignored, so nothing is validated as if a
-    /// profile, manifest or catalog it was given were absent. Each
-    /// workstream removes its line when it implements the member.
+    /// profile it was given were absent. Each workstream removes its line
+    /// when it implements the member.
     pub(crate) fn unimplemented(&self) -> Option<&'static str> {
         if !self.profiles.is_empty() {
             return Some("profiles (§5.21)");
-        }
-        if !self.agents.is_empty() {
-            return Some("agent manifests (§5.15.1)");
-        }
-        if !self.catalogs.is_empty() {
-            return Some("catalog sets (§5.1.1)");
         }
         None
     }
 }
 
-/// Validate a catalog with `options`. `Err` when the options cannot be used
-/// (a member this validator does not implement yet).
+/// Validate a catalog with `options`: its header, the other catalogs of its
+/// catalog set (§5.1.1) and agent manifests (§5.15.1). `Err` when the
+/// options cannot be used: a set or a manifest that is refused, or a member
+/// this validator does not implement yet.
 pub fn validate_with(
     ctx: &Context,
     catalog: &Value,
@@ -299,31 +312,47 @@ pub fn validate_with(
             "this validator does not implement {what} yet"
         )));
     }
-    Ok(validate_catalog_policy(
-        ctx,
-        catalog,
-        options.header.as_deref(),
-        &Policy::default(),
-    ))
+    let agents = Agents::load(&options.agents, &ctx.ontology).map_err(LoadError::Invalid)?;
+    let others: Vec<catalogs::Member<'_>> = options
+        .catalogs
+        .iter()
+        .map(|(doc, header)| (doc, header.as_deref()))
+        .collect();
+    let set = CatalogSet {
+        primary: catalog,
+        header: options.header.as_deref(),
+        others: &others,
+    };
+    validate_set(ctx, set, &agents, &Policy::default())
 }
 
 /// Validate a parsed catalog: a mapping of workflow name to workflow.
 /// `header` is the version from the file's `# Standard version:` comment.
 pub fn validate_catalog(ctx: &Context, catalog: &Value, header: Option<&str>) -> Report {
-    validate_catalog_policy(ctx, catalog, header, &Policy::default())
+    // A single catalog is never refused: only another catalog of a set can be.
+    validate_set(
+        ctx,
+        CatalogSet::single(catalog, header),
+        &Agents::default(),
+        &Policy::default(),
+    )
+    .unwrap_or_default()
 }
 
-/// [`validate_catalog`] with the applied profiles' `policy` (§5.21).
-fn validate_catalog_policy(
+/// Validate a catalog set (§5.1.1): every workflow of every catalog, with
+/// the agent manifests `agents` (§5.15.1) and the applied profiles'
+/// `policy` (§5.21). `Err` when the set is refused (another catalog
+/// without a manifest id, two catalogs with one id).
+pub fn validate_set(
     ctx: &Context,
-    catalog: &Value,
-    header: Option<&str>,
+    set: CatalogSet<'_>,
+    agents: &Agents,
     policy: &Policy,
-) -> Report {
+) -> Result<Report, LoadError> {
     let mut report = Report::default();
-    let workflows = match catalog {
-        Value::Object(m) => m,
-        Value::Null => return report,
+    match set.primary {
+        Value::Object(_) => {}
+        Value::Null if set.others.is_empty() => return Ok(report),
         other => {
             report.push(Diagnostic::new(
                 Code::SchemaValidationFailed,
@@ -332,27 +361,61 @@ fn validate_catalog_policy(
                     yaml::kind_of(other)
                 ),
             ));
-            return report;
+            if set.others.is_empty() {
+                let ns = Namespace::build(set).map_err(LoadError::Invalid)?;
+                location::finish(&ns, &mut report);
+                return Ok(report);
+            }
         }
-    };
-    let invoked_unattended = approval::invoked_unattended(workflows);
-    let waiting = wait::workflows_that_wait(workflows);
+    }
+    let ns = Namespace::build(set).map_err(LoadError::Invalid)?;
+    for c in 0..ns.len() {
+        catalog::check_manifest(ctx, &ns, c, &mut report);
+    }
+    let invoked_unattended = approval::invoked_unattended(&ns);
+    let waiting = wait::workflows_that_wait(&ns);
+    let exercised = semantics::exercised(&ns);
     let mut schema_budget = schema::MAX_EXPANDED_NODES;
     let mut invocations = Vec::new();
-    for (name, wf) in workflows {
-        // `x-` keys are reserved for vendor data and never validated.
-        if name.starts_with("x-") {
-            continue;
+    for (key, wf) in ns.iter() {
+        let name = ns.name_of(key);
+        if !names::is_workflow_name(name) {
+            let why = if name == "catalog" {
+                "'catalog' is reserved for the catalog's manifest (§5.1.1)".to_string()
+            } else {
+                "a workflow name SHOULD be an identifier [A-Za-z_][A-Za-z0-9_-]*".to_string()
+            };
+            report.push(
+                Diagnostic::new(
+                    Code::NoncanonicalName,
+                    format!("workflow name '{name}' is not canonical: {why}"),
+                )
+                .at("workflow", key),
+            );
+        }
+        if ns.is_set() && name.contains('/') {
+            report.push(
+                Diagnostic::new(
+                    Code::SchemaValidationFailed,
+                    format!(
+                        "workflow name '{name}' contains '/', which a catalog validated with others reserves for qualified ids (§5.1.1)"
+                    ),
+                )
+                .at("workflow", key),
+            );
         }
         match wf {
             Value::Object(wf) => invocations.extend(
                 WorkflowCheck {
                     ctx,
-                    name,
+                    name: key,
                     wf,
-                    header,
+                    header: ns.header_of(key),
                     policy,
-                    invoked_unattended: invoked_unattended.contains(name.as_str()),
+                    ns: &ns,
+                    agents,
+                    exercised: &exercised,
+                    invoked_unattended: invoked_unattended.contains(key),
                     waiting: &waiting,
                     schema_budget: &mut schema_budget,
                     report: &mut report,
@@ -367,34 +430,31 @@ fn validate_catalog_policy(
                         yaml::kind_of(other)
                     ),
                 )
-                .at("workflow", name.as_str()),
+                .at("workflow", key),
             ),
         }
     }
-    invoke::check(workflows, &invocations, &mut report);
-    // Report in catalog order: by workflow, then step, catalog- and
-    // workflow-level diagnostics first; the sort is stable, so each step's
-    // diagnostics keep the order they were found in.
-    let position: HashMap<&str, usize> = workflows
-        .keys()
-        .enumerate()
-        .map(|(i, k)| (k.as_str(), i))
-        .collect();
+    invoke::check(&ns, &invocations, &mut report);
+    // Report in catalog order: by catalog, then workflow, then step,
+    // catalog- and workflow-level diagnostics first; the sort is stable, so
+    // each step's diagnostics keep the order they were found in.
     report.diagnostics.sort_by_key(|d| {
-        let workflow = d
-            .location
-            .get("workflow")
-            .and_then(Value::as_str)
-            .and_then(|w| position.get(w))
-            .map_or(0, |i| i + 1);
+        let workflow = d.location.get("workflow").and_then(Value::as_str);
+        let catalog = match (workflow, d.location.get("catalog").and_then(Value::as_str)) {
+            (Some(w), _) => ns.catalog_of(w),
+            (None, Some(id)) => ns.index_of_id(id).unwrap_or(0),
+            (None, None) => 0,
+        };
+        let position = workflow.and_then(|w| ns.position(w)).map_or(0, |i| i + 1);
         let step = d
             .location
             .get("step")
             .and_then(Value::as_u64)
             .map_or(0, |s| s + 1);
-        (workflow, step)
+        (catalog, position, step)
     });
-    report
+    location::finish(&ns, &mut report);
+    Ok(report)
 }
 
 /// Names and schemas visible to a binding: earlier steps' outputs and the
@@ -502,6 +562,13 @@ struct WorkflowCheck<'a> {
     header: Option<&'a str>,
     /// The applied profiles (§5.21): they raise steps' flags.
     policy: &'a Policy,
+    /// The catalog set's workflows (§5.1.1): invoke targets resolve here.
+    ns: &'a Namespace<'a>,
+    /// The agent manifests given (§5.15.1).
+    agents: &'a Agents,
+    /// The capabilities the workflow exercises, with those of the workflows
+    /// it invokes (§4.3, W623).
+    exercised: &'a HashMap<String, semantics::Exercised>,
     /// A workflow that an unattended run can invoke runs unattended too.
     invoked_unattended: bool,
     /// The catalog's workflows that can wait, directly or through ones they
@@ -548,6 +615,19 @@ impl WorkflowCheck<'_> {
         }
         let declared = extensions::Declared::read(self.wf, &at_wf, self.report);
         extensions::triggers(self.ctx, self.wf, &declared, &at_wf, self.report);
+        delegation::check_agents_field(self.wf, target, &at_wf, self.report);
+        semantics::concurrent_conflicts(
+            self.ctx,
+            self.wf,
+            self.name,
+            self.ns,
+            self.exercised,
+            &at_wf,
+            self.report,
+        );
+        // The agents the workflow's delegate steps may delegate to (§5.15.2).
+        let delegable = agents::declared(self.wf, target);
+        let targets_1_2 = target.is_some_and(|t| t >= (1, 2));
         grounding::check(self.ctx, self.wf, &declared, target, &at_wf, self.report);
         let (inputs, maybe_absent) = self.resolve_inputs();
         let mut state = Scope {
@@ -657,10 +737,17 @@ impl WorkflowCheck<'_> {
                 );
                 continue;
             };
-            semantics::flag_downgrades(&loc, step, node, self.report);
-            // The step's effective flags (§5.2.1), raised by the applied
-            // profiles (§5.21.3).
-            let flags = semantics::effective(node, step, None, self.policy).flags;
+            // A delegate step's target maxima (§5.15.2): the ontology values
+            // it starts from are the stricter of the node's and these.
+            let target_maxima = if cap == "delegate" {
+                agents::target_maxima(self.agents, &self.ctx.ontology, delegable.as_deref(), step)
+            } else {
+                Target::Free
+            };
+            semantics::flag_downgrades(&loc, step, node, target_maxima.maxima(), self.report);
+            // The step's effective flags (§5.2.1), raised by the delegation
+            // targets' maxima (§5.15.2) and the applied profiles (§5.21.3).
+            let flags = semantics::effective(node, step, target_maxima.maxima(), self.policy).flags;
             semantics::unknown_inputs(&loc, step, node, self.report);
             semantics::missing_inputs(&loc, step, node, self.report);
             // A handler step runs only on escalation, after the step that
@@ -670,7 +757,13 @@ impl WorkflowCheck<'_> {
             let delays = wait::delay(step, &declared).is_some();
             // An invoke waits when the workflow it runs can (W608).
             let nested = cap == "invoke"
-                && invoke::target(step).is_some_and(|(t, _)| self.waiting.contains(t));
+                && invoke::target(step).is_some_and(|(t, _)| {
+                    self.ns
+                        .resolver
+                        .resolve(self.name, t)
+                        .key()
+                        .is_some_and(|k| self.waiting.contains(k))
+                });
             let here = semantics::Placed {
                 index: i,
                 capability: cap,
@@ -752,7 +845,7 @@ impl WorkflowCheck<'_> {
             }
             for g in gates.iter().filter(|g| g.phase == exprs::Phase::Before) {
                 if let Some(when) = &g.when {
-                    exprs::check_parsed(when, scope, &loc, &g.field, self.report);
+                    exprs::check_parsed(when, g.src, scope, &loc, &g.field, self.report);
                 }
             }
             checker.consumer_check(step, &contracts.input, scope, self.report);
@@ -768,6 +861,18 @@ impl WorkflowCheck<'_> {
             wait::check_delay(&loc, step, &declared, self.report);
             approval::check_after_deferral(&loc, step, &declared, self.report);
             delegation::check(&loc, step, &declared, self.report);
+            if cap == "delegate" {
+                delegation::check_targets(
+                    &loc,
+                    step,
+                    delegable.as_deref(),
+                    self.agents,
+                    &target_maxima,
+                    flags.requires_approval,
+                    targets_1_2,
+                    self.report,
+                );
+            }
             identity::check(&loc, step, &declared, self.report);
             quorum::check(
                 &loc,
@@ -782,16 +887,20 @@ impl WorkflowCheck<'_> {
             // Whether an `approval` block applies does not depend on the
             // profiles applied; whether an unattended run must plan for the
             // step (W606) does.
+            // Nor on the manifests given: on a delegate step of a workflow
+            // that declares `agents`, the block applies whenever the target
+            // maxima raise `requires_approval` (§5.15.2).
             let allows_approval = semantics::effective(node, step, None, &Policy::default())
                 .flags
-                .requires_approval;
+                .requires_approval
+                || (cap == "delegate" && delegable.is_some());
             let requires_approval = flags.requires_approval;
             approval::check(
                 &loc,
                 step,
                 allows_approval,
                 &declared,
-                semantics::target(self.wf, self.header).is_some_and(|t| t >= (1, 2)),
+                targets_1_2,
                 &checker,
                 scope,
                 self.report,
@@ -838,7 +947,7 @@ impl WorkflowCheck<'_> {
             }
             for g in gates.iter().filter(|g| g.phase == exprs::Phase::After) {
                 if let Some(when) = &g.when {
-                    exprs::check_parsed(when, scope, &loc, &g.field, self.report);
+                    exprs::check_parsed(when, g.src, scope, &loc, &g.field, self.report);
                 }
             }
             if let Some(Value::Array(fms)) = step.get("failure_modes") {
@@ -994,6 +1103,24 @@ impl WorkflowCheck<'_> {
                     .at("field", key),
                 );
             }
+        }
+        // A step's domain is a domain id (§5.2.4); another form is passed to
+        // the host unchanged, but warned about.
+        if let Some(Value::String(domain)) = step.get("domain")
+            && !names::is_domain_id(domain)
+        {
+            let mut d = loc
+                .diag(
+                    Code::NoncanonicalName,
+                    format!(
+                        "domain '{domain}' is not a domain id: lowercase segments [a-z0-9][a-z0-9_]* joined by '.' (§5.2.4); it is passed to the host unchanged"
+                    ),
+                )
+                .at("field", "domain");
+            if let Some(hint) = names::canonical_domain_hint(domain) {
+                d = d.suggest(format!("write it '{hint}'"));
+            }
+            self.report.push(d);
         }
         // The executor reads retry.backoff as one of three strategies:
         // anything else would silently mean no backoff. Null means none.
@@ -1174,7 +1301,7 @@ impl WorkflowCheck<'_> {
                     Code::SchemaValidationFailed,
                     format!("input '{key}' is reserved for injected recovery context"),
                 );
-                self.report.push(d.at("field", field));
+                self.report.push(d.at_field_key("inputs", key));
                 continue;
             }
             let schema = match spec {
@@ -1184,7 +1311,7 @@ impl WorkflowCheck<'_> {
                         Err(e) => {
                             let d = self
                                 .wdiag(Code::InvalidRef, format!("{field} cannot be used: {e}"));
-                            self.report.push(d.at("field", field));
+                            self.report.push(d.at_field_key("inputs", key));
                             empty_object()
                         }
                     },
@@ -1196,7 +1323,11 @@ impl WorkflowCheck<'_> {
                                     Code::InvalidRef,
                                     format!("{field} ref {r} cannot be used: {e}"),
                                 );
-                                self.report.push(d.at("field", format!("{field}.ref")));
+                                self.report.push(d.at_field(&[
+                                    Seg::Key("inputs"),
+                                    Seg::Key(key),
+                                    Seg::Key("ref"),
+                                ]));
                                 empty_object()
                             }
                             _ => {
@@ -1204,7 +1335,11 @@ impl WorkflowCheck<'_> {
                                     Code::InvalidRef,
                                     format!("{field} ref could not be resolved: {r}"),
                                 );
-                                self.report.push(d.at("field", format!("{field}.ref")));
+                                self.report.push(d.at_field(&[
+                                    Seg::Key("inputs"),
+                                    Seg::Key(key),
+                                    Seg::Key("ref"),
+                                ]));
                                 empty_object()
                             }
                         }
@@ -1217,7 +1352,11 @@ impl WorkflowCheck<'_> {
                                 yaml::kind_of(other)
                             ),
                         );
-                        self.report.push(d.at("field", format!("{field}.ref")));
+                        self.report.push(d.at_field(&[
+                            Seg::Key("inputs"),
+                            Seg::Key(key),
+                            Seg::Key("ref"),
+                        ]));
                         empty_object()
                     }
                 },
@@ -1229,7 +1368,7 @@ impl WorkflowCheck<'_> {
                             yaml::kind_of(other)
                         ),
                     );
-                    self.report.push(d.at("field", field));
+                    self.report.push(d.at_field_key("inputs", key));
                     empty_object()
                 }
             };

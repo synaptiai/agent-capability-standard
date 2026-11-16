@@ -162,8 +162,6 @@ def test_start_validates_with_the_header(validator: _core.Validator) -> None:
     [
         {"profiles": [{"domain": "d"}]},
         {"destinations": [["ops"]]},
-        {"catalogs": [{"x": {}}]},
-        {"agents": [{"agent": "a"}]},
     ],
     ids=lambda o: next(iter(o)),
 )
@@ -174,6 +172,49 @@ def test_start_refuses_options_not_implemented_yet(
         _core.Run.start(
             validator, CATALOG, "w", header=None, run_id="r", now_ms=0, **option
         )
+
+
+@pytest.mark.parametrize(
+    ("option", "why"),
+    [
+        ({"catalogs": [{"x": {}}]}, "no manifest"),
+        (
+            {
+                "catalogs": [
+                    {"catalog": {"id": "a.b", "version": "1.0.0"}},
+                    {"catalog": {"id": "a.b", "version": "2.0.0"}},
+                ]
+            },
+            "two catalogs",
+        ),
+        ({"agents": [{"agent": "a"}]}, "no 'standard'"),
+        (
+            {
+                "agents": [
+                    {
+                        "agent": "a",
+                        "standard": "1.2",
+                        "ontology": "3.0",
+                        "capabilities": [],
+                    }
+                ]
+            },
+            "V109",
+        ),
+    ],
+    ids=["set-without-manifest", "duplicate-id", "manifest-shape", "manifest-ontology"],
+)
+def test_start_refuses_a_refused_set_or_manifest(
+    validator: _core.Validator, option: dict[str, Any], why: str
+) -> None:
+    """Catalog sets (STANDARD v1.2 §5.1.1) and agent manifests (§5.15.1)
+    are implemented: one that cannot be used is refused, not ignored."""
+    with pytest.raises(ValueError, match=why):
+        _core.Run.start(
+            validator, CATALOG, "w", header=None, run_id="r", now_ms=0, **option
+        )
+    with pytest.raises(ValueError, match=why):
+        validator.validate(CATALOG, **option)
 
 
 def test_grounding_policies_are_implemented(validator: _core.Validator) -> None:

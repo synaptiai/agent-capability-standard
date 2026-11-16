@@ -1,11 +1,12 @@
 //! Ontology edges, safety flags, unknown fields and spec versions
 //! (design-114 §4–§5).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
 use super::{Context, Report, StepLoc};
+use crate::catalogs::Namespace;
 use crate::diag::{Code, Diagnostic};
 use crate::expr::ast::{CmpOp, Expr};
 use crate::ontology::{Capability, EdgeType, Risk};
@@ -24,6 +25,7 @@ pub(crate) const WORKFLOW_KEYS: &[&str] = &[
     "workflow_extensions",
     "triggers",
     "grounding",
+    "agents",
     "domain",
     "profile",
     "risk_propagation",
@@ -162,7 +164,7 @@ pub(crate) fn unknown_fields(
         if let Some(k) = closest(key, known) {
             d = d.suggest(format!("did you mean '{k}'?"));
         }
-        report.push(at(d).at("field", path));
+        report.push(at(d).at_field_key(field, key));
     }
 }
 
@@ -202,7 +204,7 @@ pub(crate) fn unknown_inputs(
             Some(k) => d.suggest(format!("did you mean '{k}'?")),
             None => d.suggest(format!("its inputs are: {}", known.join(", "))),
         };
-        report.push(d.at("field", format!("input_bindings.{key}")));
+        report.push(d.at_field_key("input_bindings", key));
     }
 }
 
@@ -248,7 +250,7 @@ pub(crate) fn missing_inputs(
                         cap.id
                     ),
                 )
-                .at("field", format!("input_bindings.{key}")),
+                .at_field_key("input_bindings", key),
             );
         }
     }
@@ -349,50 +351,225 @@ pub(crate) fn effective(
     }
 }
 
-/// W602: a step declares a safety flag less safe than the ontology. The
-/// declaration has no effect — the ontology value applies — but it misleads.
+/// W602: a step declares a safety flag less safe than the ontology, or, for
+/// a delegate step of a workflow that declares `agents`, than its target
+/// maxima (§5.15.2). The declaration has no effect — the stricter value
+/// applies — but it misleads.
 pub(crate) fn flag_downgrades(
     loc: &StepLoc<'_>,
     step: &Map<String, Value>,
     cap: &Capability,
+    maxima: Option<Flags>,
     report: &mut Report,
 ) {
+    let maxima = maxima.unwrap_or(Flags::NONE);
     let declared_false = |k: &str| step.get(k) == Some(&Value::Bool(false));
-    let mut downgrade = |flag: &str, consequence: &str| {
-        report.push(
-            loc.diag(
-                Code::SafetyFlagDowngrade,
-                format!(
-                    "ontology declares {flag}=true but step downgrades to {flag}=false; the ontology value applies ({consequence})"
-                ),
+    let mut downgrade = |flag: &str, from_ontology: bool, consequence: &str| {
+        let message = if from_ontology {
+            format!(
+                "ontology declares {flag}=true but step downgrades to {flag}=false; the ontology value applies ({consequence})"
             )
-            .at("field", flag),
+        } else {
+            format!(
+                "the target agents' manifests declare {flag}=true but step downgrades to {flag}=false; the manifests' value applies ({consequence})"
+            )
+        };
+        report.push(
+            loc.diag(Code::SafetyFlagDowngrade, message)
+                .at("field", flag),
         );
     };
-    if cap.mutation && !cap.mutation_overridable && declared_false("mutation") {
-        downgrade("mutation", "the step is treated as a mutation");
+    if declared_false("mutation") {
+        if cap.mutation && !cap.mutation_overridable {
+            downgrade("mutation", true, "the step is treated as a mutation");
+        } else if maxima.mutation {
+            downgrade("mutation", false, "the step is treated as a mutation");
+        }
     }
-    if cap.requires_checkpoint && declared_false("requires_checkpoint") {
-        downgrade("requires_checkpoint", "F501 if no checkpoint precedes it");
+    if declared_false("requires_checkpoint")
+        && (cap.requires_checkpoint || maxima.requires_checkpoint)
+    {
+        downgrade(
+            "requires_checkpoint",
+            cap.requires_checkpoint,
+            "F501 if no checkpoint precedes it",
+        );
     }
-    if cap.requires_approval && declared_false("requires_approval") {
-        downgrade("requires_approval", "F502 if it is not approved");
+    if declared_false("requires_approval") && (cap.requires_approval || maxima.requires_approval) {
+        downgrade(
+            "requires_approval",
+            cap.requires_approval,
+            "F502 if it is not approved",
+        );
     }
+    let floor = cap.risk.max(maxima.risk);
     if let Some(declared) = step
         .get("risk")
         .and_then(Value::as_str)
         .and_then(Risk::parse)
-        && declared < cap.risk
+        && declared < floor
     {
-        let message = format!(
-            "ontology declares risk={} but step declares risk={}; the ontology value applies",
-            cap.risk.as_str(),
-            declared.as_str()
-        );
+        let message = if cap.risk >= maxima.risk {
+            format!(
+                "ontology declares risk={} but step declares risk={}; the ontology value applies",
+                cap.risk.as_str(),
+                declared.as_str()
+            )
+        } else {
+            format!(
+                "the target agents' manifests declare risk={} but step declares risk={}; the manifests' value applies",
+                maxima.risk.as_str(),
+                declared.as_str()
+            )
+        };
         report.push(
             loc.diag(Code::SafetyFlagDowngrade, message)
                 .at("field", "risk"),
         );
+    }
+}
+
+/// What a workflow exercises (§4.3): the capabilities of its own steps
+/// (handlers included) and `rollback` for a gate's or failure mode's
+/// `action: rollback` (`own`); the workflows it invokes by a target that
+/// resolves, in step order (`invokes`); and `own` with what those exercise,
+/// transitively (`total`).
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Exercised {
+    pub own: BTreeSet<String>,
+    pub invokes: Vec<String>,
+    pub total: BTreeSet<String>,
+}
+
+/// [`Exercised`] for every workflow of the catalog set, by namespace key.
+/// The fixpoint over invoke targets terminates on cycles (V105).
+pub(crate) fn exercised(ns: &Namespace<'_>) -> HashMap<String, Exercised> {
+    let mut out: HashMap<String, Exercised> = HashMap::new();
+    for (key, wf) in ns.iter() {
+        let mut e = Exercised::default();
+        let steps = wf
+            .get("steps")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object);
+        for step in steps {
+            if let Some(cap) = step.get("capability").and_then(Value::as_str) {
+                e.own.insert(cap.to_string());
+                if cap == "invoke"
+                    && let Some((t, _)) = super::invoke::target(step)
+                    && let Some(k) = ns.resolver.resolve(key, t).key()
+                    && !e.invokes.iter().any(|i| i == k)
+                {
+                    e.invokes.push(k.to_string());
+                }
+            }
+            let rolls_back = ["gates", "failure_modes"].iter().any(|list| {
+                step.get(*list)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .any(|g| g.get("action").and_then(Value::as_str) == Some("rollback"))
+            });
+            if rolls_back {
+                e.own.insert("rollback".to_string());
+            }
+        }
+        e.total = e.own.clone();
+        out.insert(key.to_string(), e);
+    }
+    // Each round adds at least one capability to some workflow or stops.
+    loop {
+        let mut changed = false;
+        let keys: Vec<String> = out.keys().cloned().collect();
+        for key in keys {
+            let mut add: BTreeSet<String> = BTreeSet::new();
+            for t in &out[&key].invokes {
+                if let Some(te) = out.get(t) {
+                    add.extend(te.total.iter().cloned());
+                }
+            }
+            let e = out.get_mut(&key).expect("key from the map");
+            for c in add {
+                changed |= e.total.insert(c);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    out
+}
+
+/// W623 (§4.3): a workflow with a schedule trigger whose `overlap` is
+/// `allow_all` exercises both capabilities of a `conflicts_with` pair, so
+/// one run's step can run while the other's runs in another. Event triggers
+/// declare no overlap policy and are not considered. Once per pair, at the
+/// first such trigger.
+pub(crate) fn concurrent_conflicts(
+    ctx: &Context,
+    wf: &Map<String, Value>,
+    key: &str,
+    ns: &Namespace<'_>,
+    exercised: &HashMap<String, Exercised>,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    let Some(Value::Array(triggers)) = wf.get("triggers") else {
+        return;
+    };
+    let Some(i) = triggers.iter().position(|t| {
+        t.get("kind").and_then(Value::as_str) == Some("schedule")
+            && t.get("schedule")
+                .and_then(|s| s.get("overlap"))
+                .and_then(Value::as_str)
+                == Some("allow_all")
+    }) else {
+        return;
+    };
+    let Some(mine) = exercised.get(key) else {
+        return;
+    };
+    let mut pairs: Vec<(&str, &str)> = ctx
+        .ontology
+        .edges
+        .iter()
+        .filter(|e| e.kind == EdgeType::ConflictsWith)
+        .map(|e| {
+            let (a, b) = (e.from.as_str(), e.to.as_str());
+            if a <= b { (a, b) } else { (b, a) }
+        })
+        .collect();
+    pairs.sort_unstable();
+    pairs.dedup();
+    // The first invoked workflow, in step order, a capability comes from.
+    let via = |cap: &str| -> Option<&str> {
+        if mine.own.contains(cap) {
+            return None;
+        }
+        mine.invokes
+            .iter()
+            .find(|t| exercised.get(*t).is_some_and(|e| e.total.contains(cap)))
+            .map(|t| ns.name_of(t))
+    };
+    for (a, b) in pairs {
+        if !(mine.total.contains(a) && mine.total.contains(b)) {
+            continue;
+        }
+        let name = |c: &str| match via(c) {
+            Some(w) => format!("'{c}' (through invoked workflow '{w}')"),
+            None => format!("'{c}'"),
+        };
+        let d = Diagnostic::new(
+            Code::ConcurrentRunConflict,
+            format!(
+                "runs may overlap: {} in one can run while {} runs in another, and conflicts_with does not reach across runs (§4.3)",
+                name(a),
+                name(b)
+            ),
+        )
+        .suggest("use overlap 'skip' or 'buffer_one', or have the host serialise them");
+        report.push(at(d).at("field", format!("triggers[{i}].schedule.overlap")));
     }
 }
 
@@ -911,6 +1088,24 @@ pub(crate) const FEATURES: &[Feature] = &[
                     _ => false,
                 };
                 fires.then_some("on_error")
+            })
+        },
+    },
+    // S3 (§5.15.3): a delegate step's `continues`. (A qualified invoke
+    // target resolved in another catalog and a catalog manifest are 1.2
+    // features too; they need the catalog set, so `invoke::check` and
+    // `catalog::check_manifest` report them.)
+    Feature {
+        since: (1, 2),
+        name: "the delegate input 'continues'",
+        first_use: |wf| {
+            objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
+                (step.get("capability").and_then(Value::as_str) == Some("delegate")
+                    && step
+                        .get("input_bindings")
+                        .and_then(Value::as_object)
+                        .is_some_and(|b| b.contains_key("continues")))
+                .then(|| format!("steps[{i}].input_bindings.continues"))
             })
         },
     },

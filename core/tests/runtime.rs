@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use acs_core::exec::canonical::canonical;
 use acs_core::exec::{
-    Attendance, RecordMode, Response, ResumeOptions, Run, StartOptions, read_json,
+    Attendance, RecordMode, Response, ResumeOptions, Run, SetOptions, StartOptions, read_json,
 };
 use acs_core::validate::Context;
 use serde_json::{Map, Value};
@@ -76,13 +76,6 @@ fn fixture_options(name: &str, f: &Value, now: u64) -> StartOptions {
             })
             .unwrap_or_default()
     };
-    // Catalog sets and agent manifests are start members of workstream S3.
-    for key in ["catalogs", "agents"] {
-        assert!(
-            f.get(key).is_none(),
-            "{name}: this harness does not pass '{key}' yet"
-        );
-    }
     StartOptions {
         attendance,
         run_id: "run-1".into(),
@@ -103,6 +96,39 @@ fn fixture_options(name: &str, f: &Value, now: u64) -> StartOptions {
             })
             .unwrap_or_default(),
     }
+}
+
+/// The other catalogs of a fixture's catalog set, each with its header
+/// (`[{catalog, header}]`, §5.1.1), and its agent manifests (§5.15.1).
+fn fixture_set(name: &str, f: &Value) -> SetOptions {
+    let catalogs = f
+        .get("catalogs")
+        .map(|v| {
+            v.as_array()
+                .unwrap_or_else(|| panic!("{name}: catalogs is not a list"))
+                .iter()
+                .map(|c| {
+                    let header = match c.get("header") {
+                        Some(Value::String(h)) => Some(h.clone()),
+                        Some(Value::Null) => None,
+                        other => panic!(
+                            "{name}: a catalog of the set states its header, found {other:?}"
+                        ),
+                    };
+                    (c["catalog"].clone(), header)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let agents = f
+        .get("agents")
+        .map(|v| {
+            v.as_array()
+                .cloned()
+                .unwrap_or_else(|| panic!("{name}: agents is not a list"))
+        })
+        .unwrap_or_default();
+    SetOptions { catalogs, agents }
 }
 
 /// How a fixture is replayed (§10.5): as scripted, with the run's state
@@ -142,9 +168,11 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
     let catalog = &f["catalog"];
     let inputs: Map<String, Value> = f["inputs"].as_object().cloned().unwrap_or_default();
     let mut now = f["start"].as_u64().unwrap_or(0);
-    let mut run = Run::start(
+    let set = fixture_set(name, f);
+    let mut run = Run::start_set(
         ctx,
         catalog,
+        &set,
         f["workflow"].as_str().unwrap(),
         inputs,
         fixture_options(name, f, now),
@@ -158,7 +186,7 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
             Replay::Plain => {}
             Replay::Restore => {
                 let snap = run.snapshot(Some(b"key"));
-                run = Run::restore(ctx, catalog, &snap, Some(b"key"))
+                run = Run::restore_set(ctx, catalog, &set, &snap, Some(b"key"), Default::default())
                     .unwrap_or_else(|e| panic!("{name}: restore before {i}: {e}"));
             }
             Replay::Drain => {
@@ -215,7 +243,7 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
                 now = at;
             }
             let snap = run.snapshot(Some(b"key"));
-            run = Run::restore(ctx, catalog, &snap, Some(b"key"))
+            run = Run::restore_set(ctx, catalog, &set, &snap, Some(b"key"), Default::default())
                 .unwrap_or_else(|e| panic!("{name}: restore at {i}: {e}"));
             let attendance = match resume.get("attendance").and_then(Value::as_str) {
                 Some("unattended") => Attendance::Unattended,
@@ -262,8 +290,9 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
         // The final state vouches for everything taken: its heads are the
         // fold, and a keyed snapshot of it restores.
         let snap = run.snapshot(Some(b"key"));
-        let restored = Run::restore(ctx, catalog, &snap, Some(b"key"))
-            .unwrap_or_else(|e| panic!("{name}: restore after draining: {e}"));
+        let restored =
+            Run::restore_set(ctx, catalog, &set, &snap, Some(b"key"), Default::default())
+                .unwrap_or_else(|e| panic!("{name}: restore after draining: {e}"));
         assert_eq!(restored.taken_heads().0, fold(&taken_records), "{name}");
         assert_eq!(restored.taken_heads().1, fold(&taken_trace), "{name}");
     }

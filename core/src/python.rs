@@ -238,17 +238,35 @@ fn load_catalog(
 /// "suggestions": [...]}`; raises if the ontology or catalog cannot be
 /// loaded: FileNotFoundError and the other OSError subclasses for the
 /// filesystem, as `load_yaml` does, ValueError otherwise.
+///
+/// `catalogs` are the other catalogs of its catalog set (STANDARD v1.2
+/// §5.1.1) and `agents` agent manifests (§5.15.1): paths or mappings. A set
+/// or manifest that is refused raises ValueError.
 #[pyfunction]
+#[pyo3(signature = (catalog_path, ontology_path, schema_root, *, catalogs = None, agents = None))]
 fn validate_catalog(
     py: Python<'_>,
     catalog_path: PathBuf,
     ontology_path: PathBuf,
     schema_root: PathBuf,
+    catalogs: Option<&Bound<'_, PyAny>>,
+    agents: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    if catalogs.is_none_or(|c| c.is_none()) && agents.is_none_or(|a| a.is_none()) {
+        let report = py
+            .detach(|| {
+                let ctx = Context::load(&ontology_path, &schema_root)?;
+                validate::validate_catalog_file(&ctx, &catalog_path)
+            })
+            .map_err(load_err)?;
+        return report_to_py(py, &report);
+    }
+    let (catalog, header) = load_file_with_header(&catalog_path)?;
+    let opts = options(header, catalogs, agents)?;
     let report = py
         .detach(|| {
             let ctx = Context::load(&ontology_path, &schema_root)?;
-            validate::validate_catalog_file(&ctx, &catalog_path)
+            validate::validate_with(&ctx, &catalog, &opts)
         })
         .map_err(load_err)?;
     report_to_py(py, &report)
@@ -276,11 +294,29 @@ impl Validator {
     }
 
     /// Validate a catalog file; same result as `validate_catalog`.
-    fn validate_file(&self, py: Python<'_>, path: PathBuf) -> PyResult<Py<PyAny>> {
+    #[pyo3(signature = (path, *, catalogs = None, agents = None))]
+    fn validate_file(
+        &self,
+        py: Python<'_>,
+        path: PathBuf,
+        catalogs: Option<&Bound<'_, PyAny>>,
+        agents: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        if catalogs.is_none_or(|c| c.is_none()) && agents.is_none_or(|a| a.is_none()) {
+            let report = py
+                .detach(|| {
+                    self.ctx.schemas.clear_cache();
+                    validate::validate_catalog_file(&self.ctx, &path)
+                })
+                .map_err(load_err)?;
+            return report_to_py(py, &report);
+        }
+        let (catalog, header) = load_file_with_header(&path)?;
+        let opts = options(header, catalogs, agents)?;
         let report = py
             .detach(|| {
                 self.ctx.schemas.clear_cache();
-                validate::validate_catalog_file(&self.ctx, &path)
+                validate::validate_with(&self.ctx, &catalog, &opts)
             })
             .map_err(load_err)?;
         report_to_py(py, &report)
@@ -294,18 +330,24 @@ impl Validator {
 
     /// Validate an in-memory catalog (a mapping of workflow name to
     /// workflow). `header` stands in for a file's `# Standard version:`.
-    #[pyo3(signature = (catalog, header = None))]
+    /// `catalogs` and `agents` as for `validate_catalog`.
+    #[pyo3(signature = (catalog, header = None, *, catalogs = None, agents = None))]
     fn validate(
         &self,
         py: Python<'_>,
         catalog: &Bound<'_, PyAny>,
         header: Option<String>,
+        catalogs: Option<&Bound<'_, PyAny>>,
+        agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let catalog = catalog_from_py(catalog)?;
-        let report = py.detach(|| {
-            self.ctx.schemas.clear_cache();
-            validate::validate_catalog(&self.ctx, &catalog, header.as_deref())
-        });
+        let opts = options(header, catalogs, agents)?;
+        let report = py
+            .detach(|| {
+                self.ctx.schemas.clear_cache();
+                validate::validate_with(&self.ctx, &catalog, &opts)
+            })
+            .map_err(load_err)?;
         report_to_py(py, &report)
     }
 }
@@ -329,26 +371,78 @@ fn start_err(py: Python<'_>, e: StartError) -> PyErr {
     }
 }
 
-/// Catalog sets (§5.1.1) and agent manifests (§5.15.1) are start members of
-/// workstream S3; until it implements them, giving one is refused rather
-/// than ignored.
-fn unimplemented_sets(
-    catalogs: Option<&Bound<'_, PyAny>>,
-    agents: Option<&Bound<'_, PyAny>>,
-) -> PyResult<()> {
-    for (name, value) in [
-        ("catalog sets (catalogs)", catalogs),
-        ("agent manifests (agents)", agents),
-    ] {
-        if let Some(v) = value
-            && (!v.is_none() && v.len().map_or(true, |n| n > 0))
-        {
-            return Err(PyValueError::new_err(format!(
-                "this executor does not implement {name} yet"
-            )));
+/// The path an argument names, when it is a `str` or `os.PathLike`.
+fn path_of(obj: &Bound<'_, PyAny>) -> Option<PathBuf> {
+    if obj.cast::<PyString>().is_ok() || obj.hasattr("__fspath__").unwrap_or(false) {
+        obj.extract::<PathBuf>().ok()
+    } else {
+        None
+    }
+}
+
+/// A YAML file and its header's version, read under the catalog limit.
+fn load_file_with_header(path: &std::path::Path) -> PyResult<(Value, Option<String>)> {
+    let text = yaml::read_guarded(path, yaml::ONTOLOGY_MAX_BYTES).map_err(yaml_err)?;
+    let doc = yaml::load_str(&text).map_err(yaml_err)?;
+    Ok((doc, validate::header_version(&text)))
+}
+
+/// The other catalogs of a catalog set (§5.1.1): each a path (its header
+/// read from the file), a mapping (no header), or a `(mapping, header)`
+/// pair. None or an empty sequence gives none.
+fn catalogs_from_py(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<(Value, Option<String>)>> {
+    let Some(obj) = obj.filter(|o| !o.is_none()) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for item in obj.try_iter()? {
+        let item = item?;
+        if let Some(path) = path_of(&item) {
+            out.push(load_file_with_header(&path)?);
+        } else if let Ok(pair) = item.cast::<PyTuple>() {
+            if pair.len() != 2 {
+                return Err(PyTypeError::new_err(
+                    "a catalog of the set is a mapping, a path, or a (mapping, header) pair",
+                ));
+            }
+            let header: Option<String> = pair.get_item(1)?.extract()?;
+            out.push((catalog_from_py(&pair.get_item(0)?)?, header));
+        } else {
+            out.push((catalog_from_py(&item)?, None));
         }
     }
-    Ok(())
+    Ok(out)
+}
+
+/// Agent manifests (§5.15.1): each a mapping or a path to a manifest file.
+/// None or an empty sequence gives none.
+fn agents_from_py(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<Value>> {
+    let Some(obj) = obj.filter(|o| !o.is_none()) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for item in obj.try_iter()? {
+        let item = item?;
+        match path_of(&item) {
+            Some(path) => out.push(load_file_with_header(&path)?.0),
+            None => out.push(from_py(&item)?),
+        }
+    }
+    Ok(out)
+}
+
+/// The validator options for a catalog with these set members.
+fn options(
+    header: Option<String>,
+    catalogs: Option<&Bound<'_, PyAny>>,
+    agents: Option<&Bound<'_, PyAny>>,
+) -> PyResult<validate::Options> {
+    Ok(validate::Options {
+        header,
+        catalogs: catalogs_from_py(catalogs)?,
+        agents: agents_from_py(agents)?,
+        ..validate::Options::default()
+    })
 }
 
 /// Grounding policies (§5.20) from a list of dicts `{require, kinds?,
@@ -398,7 +492,9 @@ impl PyRun {
     /// catalog does not validate (with the error diagnostics as the second
     /// argument), the inputs do not match the workflow's, `actor_identity`
     /// is not an `agent_identity` (§5.17), or an option is malformed or not
-    /// implemented yet.
+    /// implemented yet. `catalogs` are the other catalogs of the catalog's
+    /// set (§5.1.1) and `agents` agent manifests (§5.15.1), as for
+    /// `validate_catalog`; a refused set or manifest raises ValueError.
     ///
     /// `header` is required: the version the catalog's `# Standard
     /// version:` header declares, or None for a catalog without one
@@ -424,7 +520,10 @@ impl PyRun {
         catalogs: Option<&Bound<'_, PyAny>>,
         agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        unimplemented_sets(catalogs, agents)?;
+        let set = exec::SetOptions {
+            catalogs: catalogs_from_py(catalogs)?,
+            agents: agents_from_py(agents)?,
+        };
         let catalog = catalog_from_py(catalog)?;
         let actor_identity = actor_identity.map(from_py).transpose()?;
         let inputs = match inputs.map(from_py).transpose()? {
@@ -477,7 +576,7 @@ impl PyRun {
         let run = py
             .detach(|| {
                 ctx.schemas.clear_cache();
-                exec::Run::start(ctx, &catalog, &workflow, inputs, options)
+                exec::Run::start_set(ctx, &catalog, &set, &workflow, inputs, options)
             })
             .map_err(|e| start_err(py, e))?;
         Ok(PyRun { run })
@@ -489,6 +588,7 @@ impl PyRun {
     /// state). With `actor_identity`, the actor the host continues the run
     /// for: a principal other than the run's is refused (ValueError), as is
     /// any actor for a run started without one (STANDARD v1.2 §5.17).
+    /// `catalogs` and `agents` must be the ones the run started with.
     #[staticmethod]
     #[pyo3(signature = (validator, catalog, snapshot, key = None, *, actor_identity = None, catalogs = None, agents = None))]
     #[allow(clippy::too_many_arguments)]
@@ -502,7 +602,10 @@ impl PyRun {
         catalogs: Option<&Bound<'_, PyAny>>,
         agents: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
-        unimplemented_sets(catalogs, agents)?;
+        let set = exec::SetOptions {
+            catalogs: catalogs_from_py(catalogs)?,
+            agents: agents_from_py(agents)?,
+        };
         let catalog = catalog_from_py(catalog)?;
         let snapshot: exec::Snapshot = serde_json::from_value(from_py(snapshot)?)
             .map_err(|e| PyValueError::new_err(format!("malformed snapshot: {e}")))?;
@@ -511,7 +614,9 @@ impl PyRun {
         };
         let ctx = &validator.ctx;
         let run = py
-            .detach(|| exec::Run::restore_with(ctx, &catalog, &snapshot, key.as_deref(), options))
+            .detach(|| {
+                exec::Run::restore_set(ctx, &catalog, &set, &snapshot, key.as_deref(), options)
+            })
             .map_err(|e| match e {
                 RestoreError::Start(s) => start_err(py, s),
                 other => PyValueError::new_err(other.to_string()),
@@ -723,6 +828,13 @@ fn check_cited_versions(
 
 /// A duration of the §5.10.1 grammar in whole milliseconds, rounded up (so
 /// only a zero duration is 0). ValueError when it is not a duration.
+/// The model family a host derives from a model identifier (STANDARD v1.2
+/// §5.15), or None when the rule gives none.
+#[pyfunction]
+fn model_family(model_id: &str) -> Option<String> {
+    crate::names::model_family(model_id)
+}
+
 #[pyfunction]
 fn duration_ms(text: &str) -> PyResult<u64> {
     let d = duration::parse(text).map_err(PyValueError::new_err)?;
@@ -822,6 +934,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(approval_digest, m)?)?;
     m.add_function(wrap_pyfunction!(check_cited_versions, m)?)?;
     m.add_function(wrap_pyfunction!(duration_ms, m)?)?;
+    m.add_function(wrap_pyfunction!(model_family, m)?)?;
     m.add_function(wrap_pyfunction!(check_destination_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(destination_allowed, m)?)?;
     m.add_function(wrap_pyfunction!(next_fire, m)?)?;

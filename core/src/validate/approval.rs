@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use super::bindings::{Checker, Mode};
 use super::extensions::{Declared, count, duration_field, enum_field, s303, s304, string_field};
 use super::{Report, Scope, StepLoc, semantics, wait};
+use crate::catalogs::Namespace;
 use crate::diag::{Code, Diagnostic};
 use crate::yaml;
 
@@ -355,24 +356,25 @@ pub(crate) fn has_unattended_trigger(wf: &Map<String, Value>, declared: &Declare
 /// The workflows an unattended run can reach through `invoke` steps (an
 /// invoked workflow runs with its invoker's attendance, §5.10), starting
 /// from those with an unattended trigger. Only literal targets are followed.
-pub(crate) fn invoked_unattended(workflows: &Map<String, Value>) -> HashSet<&str> {
+pub(crate) fn invoked_unattended<'n>(ns: &'n Namespace<'_>) -> HashSet<&'n str> {
     // Declarations are read again only to decide this: their diagnostics
     // come from each workflow's own check.
     let starts = |wf: &Map<String, Value>| {
         let declared = Declared::read(wf, &|d| d, &mut Report::default());
         has_unattended_trigger(wf, &declared)
     };
-    let mut queue: Vec<&str> = workflows
+    // `x-` entries are vendor data: never validated, never run (the
+    // namespace leaves them out).
+    let mut queue: Vec<&str> = ns
         .iter()
-        // `x-` entries are vendor data: never validated, never run.
-        .filter(|(n, w)| !n.starts_with("x-") && w.as_object().is_some_and(starts))
-        .map(|(n, _)| n.as_str())
+        .filter(|(_, w)| w.as_object().is_some_and(starts))
+        .map(|(k, _)| k)
         .collect();
     let mut seen: HashSet<&str> = queue.iter().copied().collect();
     let mut reached = HashSet::new();
-    while let Some(name) = queue.pop() {
-        let steps = workflows
-            .get(name)
+    while let Some(key) = queue.pop() {
+        let steps = ns
+            .get(key)
             .and_then(|w| w.get("steps"))
             .and_then(Value::as_array);
         for step in steps.into_iter().flatten().filter_map(Value::as_object) {
@@ -382,10 +384,12 @@ pub(crate) fn invoked_unattended(workflows: &Map<String, Value>) -> HashSet<&str
             let Some((target, _)) = super::invoke::target(step) else {
                 continue;
             };
-            if let Some((key, _)) = workflows.get_key_value(target) {
-                reached.insert(key.as_str());
-                if seen.insert(key.as_str()) {
-                    queue.push(key.as_str());
+            if let Some(k) = ns.resolver.resolve(key, target).key()
+                && let Some(k) = ns.get_key(k)
+            {
+                reached.insert(k);
+                if seen.insert(k) {
+                    queue.push(k);
                 }
             }
         }

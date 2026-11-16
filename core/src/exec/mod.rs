@@ -236,6 +236,17 @@ pub struct StartOptions {
     pub destinations: Vec<Vec<String>>,
 }
 
+/// What a run is given besides its catalog: the other catalogs of its
+/// catalog set, each with its header's version (§5.1.1), and the agent
+/// manifests of the agents it may delegate to (§5.15.1). A snapshot restores
+/// only against the same set and manifests (the digest covers them when
+/// given).
+#[derive(Debug, Clone, Default)]
+pub struct SetOptions {
+    pub catalogs: Vec<(Value, Option<String>)>,
+    pub agents: Vec<Value>,
+}
+
 impl StartOptions {
     /// The first member this executor does not implement yet, if one is
     /// given: refused rather than ignored, so that no run goes ahead as if a
@@ -1105,6 +1116,28 @@ impl Run {
         inputs: Map<String, Value>,
         options: StartOptions,
     ) -> Result<Run, StartError> {
+        Self::start_set(
+            ctx,
+            catalog,
+            &SetOptions::default(),
+            workflow,
+            inputs,
+            options,
+        )
+    }
+
+    /// [`Run::start`] with the other catalogs of the catalog's set and agent
+    /// manifests (`set`): `workflow` is one of the primary catalog's. A set
+    /// or a manifest that is refused refuses the start
+    /// (`StartError::Program`).
+    pub fn start_set(
+        ctx: &Context,
+        catalog: &Value,
+        set: &SetOptions,
+        workflow: &str,
+        inputs: Map<String, Value>,
+        options: StartOptions,
+    ) -> Result<Run, StartError> {
         if let Some(what) = options.unimplemented() {
             return Err(StartError::Unsupported(what.to_string()));
         }
@@ -1120,6 +1153,7 @@ impl Run {
         let program = Self::prepare(
             ctx,
             catalog,
+            set,
             workflow,
             options.header.as_deref(),
             &options.profiles,
@@ -1170,17 +1204,40 @@ impl Run {
     fn prepare(
         ctx: &Context,
         catalog: &Value,
+        set: &SetOptions,
         workflow: &str,
         header: Option<&str>,
         profiles: &[Value],
     ) -> Result<Program, StartError> {
-        let options = validate::Options {
-            header: header.map(str::to_string),
+        if let Some(what) = (validate::Options {
             profiles: profiles.to_vec(),
             ..validate::Options::default()
+        })
+        .unimplemented()
+        {
+            return Err(StartError::Unsupported(format!(
+                "this validator does not implement {what} yet"
+            )));
+        }
+        let agents =
+            crate::agents::Agents::load(&set.agents, &ctx.ontology).map_err(StartError::Program)?;
+        let others: Vec<crate::catalogs::Member<'_>> = set
+            .catalogs
+            .iter()
+            .map(|(doc, h)| (doc, h.as_deref()))
+            .collect();
+        let catalog_set = crate::catalogs::CatalogSet {
+            primary: catalog,
+            header,
+            others: &others,
         };
-        let report = validate::validate_with(ctx, catalog, &options)
-            .map_err(|e| StartError::Unsupported(e.to_string()))?;
+        let report = validate::validate_set(
+            ctx,
+            catalog_set,
+            &agents,
+            &crate::profile::Policy::default(),
+        )
+        .map_err(|e| StartError::Program(e.to_string()))?;
         let errors: Vec<Diagnostic> = report
             .diagnostics
             .into_iter()
@@ -1189,7 +1246,7 @@ impl Run {
         if !errors.is_empty() {
             return Err(StartError::Invalid(errors));
         }
-        Program::build(ctx, catalog, workflow, header).map_err(StartError::Program)
+        Program::build_set(ctx, catalog_set, &agents, workflow).map_err(StartError::Program)
     }
 
     fn machine(&mut self) -> Machine<'_> {
@@ -1440,6 +1497,19 @@ impl Run {
         key: Option<&[u8]>,
         options: RestoreOptions,
     ) -> Result<Run, RestoreError> {
+        Self::restore_set(ctx, catalog, &SetOptions::default(), snapshot, key, options)
+    }
+
+    /// [`Run::restore_with`] for a run started with [`Run::start_set`]:
+    /// `set` must be the catalogs and manifests it started with.
+    pub fn restore_set(
+        ctx: &Context,
+        catalog: &Value,
+        set: &SetOptions,
+        snapshot: &Snapshot,
+        key: Option<&[u8]>,
+        options: RestoreOptions,
+    ) -> Result<Run, RestoreError> {
         if let Some(actor) = &options.actor_identity {
             ijson(actor).map_err(RestoreError::Actor)?;
             if let Some(e) = identity_error(actor) {
@@ -1509,6 +1579,7 @@ impl Run {
         let program = Self::prepare(
             ctx,
             catalog,
+            set,
             &state.root,
             state.header.as_deref(),
             &state.profiles,
@@ -1938,15 +2009,15 @@ impl Frame {
 
 /// What is wrong with a delegation's attested identity
 /// (`effective.identity`, `identity@1`, §5.17), if anything: it must be an
-/// `agent_identity`, and its `model_family` and `role` must agree with the
-/// ones `effective` attests beside it.
+/// `agent_identity`, and its `model_family`, `model_id` and `role` must
+/// agree with the ones `effective` attests beside it.
 pub(crate) fn delegate_identity_error(delegation: &Value) -> Option<String> {
     let effective = delegation.get("effective")?;
     let identity = effective.get("identity").filter(|v| !v.is_null())?;
     if let Some(e) = identity_error(identity) {
         return Some(format!("effective.identity: {e}"));
     }
-    for key in ["model_family", "role"] {
+    for key in ["model_family", "model_id", "role"] {
         if let (Some(a), Some(b)) = (identity.get(key), effective.get(key))
             && a != b
         {

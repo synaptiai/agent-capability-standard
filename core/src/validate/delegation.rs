@@ -5,8 +5,12 @@
 use serde_json::{Map, Value};
 
 use super::extensions::Declared;
+use super::inputs::check_names;
+use super::semantics::closest;
 use super::{Report, StepLoc};
-use crate::diag::Code;
+use crate::agents::{self, Agents, Target};
+use crate::diag::{Code, Diagnostic};
+use crate::{names, yaml};
 
 /// Capability inputs that belong to `delegation@1`.
 const INPUTS: &[(&str, &[&str])] = &[
@@ -34,6 +38,40 @@ pub(crate) fn check(
     let Some(Value::Object(bindings)) = step.get("input_bindings") else {
         return;
     };
+    if loc.capability == "delegate" {
+        // A continued delegation keeps what its delegate did before
+        // (§5.15.3), so it never has a fresh context.
+        if bindings.contains_key("continues")
+            && bindings.get("fresh_context") == Some(&Value::Bool(true))
+        {
+            report.push(
+                loc.diag(
+                    Code::SchemaValidationFailed,
+                    "a continued delegation never has a fresh context: 'continues' and fresh_context: true contradict each other; drop one of them",
+                )
+                .at("field", "input_bindings.continues"),
+            );
+        }
+        // A literal model family is lowercase (§5.15).
+        if let Some(Value::String(f)) = bindings.get("model_family")
+            && !f.contains("${")
+            && !names::is_model_family(f)
+        {
+            let mut d = loc
+                .diag(
+                    Code::NoncanonicalName,
+                    format!(
+                        "model family '{f}' is not canonical: [a-z][a-z0-9_-]*, compared exactly (§5.15)"
+                    ),
+                )
+                .at("field", "input_bindings.model_family");
+            let lower = f.to_ascii_lowercase();
+            if names::is_model_family(&lower) {
+                d = d.suggest(format!("write it '{lower}'"));
+            }
+            report.push(d);
+        }
+    }
     let Some((_, keys)) = INPUTS.iter().find(|(cap, _)| *cap == loc.capability) else {
         return;
     };
@@ -41,7 +79,7 @@ pub(crate) fn check(
         declared.require(
             "delegation@1",
             &format!("input '{key}' of '{}'", loc.capability),
-            |d| loc.locate(d).at("field", format!("input_bindings.{key}")),
+            |d| loc.locate(d).at_field_key("input_bindings", key),
             report,
         );
     }
@@ -80,9 +118,182 @@ pub(crate) fn check(
                         "'{key}' filters the result a delegate waits for, but this step has no 'wait'"
                     ),
                 )
-                .at("field", format!("input_bindings.{key}")),
+                .at_field_key("input_bindings", key),
             );
         }
+    }
+}
+
+/// The workflow field `agents` (§5.15.2): allowed only in a workflow that
+/// targets 1.2 or later, and then a non-empty list of distinct non-empty
+/// strings (S303 otherwise).
+pub(crate) fn check_agents_field(
+    wf: &Map<String, Value>,
+    target: Option<(u64, u64)>,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    let Some(v) = wf.get("agents") else {
+        return;
+    };
+    let s303 = |field: String, message: String| {
+        at(Diagnostic::new(Code::SchemaValidationFailed, message)).at("field", field)
+    };
+    if target.is_none_or(|t| t < (1, 2)) {
+        report.push(
+            s303(
+                "agents".into(),
+                "'agents' needs a workflow that targets 1.2 or later (§5.15.2): an older consumer would ignore it and delegate without the flags it raises".into(),
+            )
+            .suggest("declare spec_version \"1.2\" so that an older consumer refuses the workflow instead of ignoring it"),
+        );
+        return;
+    }
+    let Value::Array(items) = v else {
+        report.push(s303(
+            "agents".into(),
+            format!(
+                "'agents' must be a list of agent names, found {}",
+                yaml::kind_of(v)
+            ),
+        ));
+        return;
+    };
+    if items.is_empty() {
+        report.push(s303(
+            "agents".into(),
+            "'agents' declares no agent; leave it out".into(),
+        ));
+        return;
+    }
+    let mut seen: Vec<&str> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        match item.as_str() {
+            Some(a) if !a.is_empty() => {
+                if seen.contains(&a) {
+                    report.push(s303(
+                        format!("agents[{i}]"),
+                        format!("'agents' lists '{a}' twice"),
+                    ));
+                } else {
+                    seen.push(a);
+                }
+            }
+            _ => report.push(s303(
+                format!("agents[{i}]"),
+                "an 'agents' entry must be a non-empty agent name".into(),
+            )),
+        }
+    }
+}
+
+/// A `delegate` step against the agents its workflow declares and the
+/// manifests given (§5.15.2): V107 for a literal agent not listed, V101 for
+/// a manifest capability the ontology lacks, S303/S304 for a literal task
+/// against a literal agent's declaration; in a workflow that targets 1.2 or
+/// later, W621 for unknown target maxima and W622 for a computed agent
+/// without `agents`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn check_targets(
+    loc: &StepLoc<'_>,
+    step: &Map<String, Value>,
+    declared: Option<&[&str]>,
+    agents: &Agents,
+    target: &Target,
+    requires_approval: bool,
+    targets_1_2: bool,
+    report: &mut Report,
+) {
+    let literal = agents::literal_agent(step);
+    if let Some(listed) = declared {
+        if let Some(a) = literal
+            && !listed.contains(&a)
+        {
+            let mut d = loc
+                .diag(
+                    Code::UnresolvedTarget,
+                    format!("agent '{a}' is not one of the workflow's agents"),
+                )
+                .at("field", "input_bindings.agent");
+            if let Some(k) = closest(a, listed) {
+                d = d.suggest(format!("did you mean '{k}'?"));
+            }
+            report.push(d);
+        }
+        if let Target::Unknown { unknown, .. } = target {
+            for (agent, id) in unknown {
+                report.push(
+                    loc.diag(
+                        Code::UnknownCapability,
+                        format!(
+                            "the manifest of '{agent}' lists '{id}', which the ontology does not define; the target maxima of this delegation are unknown (§11.6)"
+                        ),
+                    )
+                    .at("field", "input_bindings.agent"),
+                );
+            }
+        }
+        if let Some(a) = literal
+            && let Some(decl) = agents.get(a).and_then(|m| m.task.as_ref())
+            && let Some(Value::Object(task)) =
+                step.get("input_bindings").and_then(|b| b.get("task"))
+        {
+            let given: Vec<String> = task.keys().cloned().collect();
+            check_names(
+                decl,
+                &given,
+                |name| {
+                    loc.diag(
+                        Code::SchemaValidationFailed,
+                        format!(
+                            "'{a}' has no task input '{name}'; the executor refuses undeclared inputs (R402)"
+                        ),
+                    )
+                    .at_field_key("input_bindings.task", name)
+                },
+                |name| {
+                    loc.diag(
+                        Code::MissingRequiredField,
+                        format!("'{a}' needs task input '{name}', which the task does not give"),
+                    )
+                    .at("field", "input_bindings.task")
+                },
+                report,
+            );
+        }
+    }
+    if !targets_1_2 {
+        return;
+    }
+    let unbounded = match (declared, target) {
+        (Some(_), Target::Unknown { .. }) => target.why_unknown().map(|why| {
+            format!("{why}; the executor will not delegate without the target agents' manifests")
+        }),
+        (None, _) if !agents::binds_read_only(step) && !requires_approval => Some(
+            "the target's maxima are unknown, so the delegate may act on the world with no checkpoint or approval".to_string(),
+        ),
+        _ => None,
+    };
+    if let Some(why) = unbounded {
+        report.push(
+            loc.diag(Code::UnboundedDelegation, format!("unbounded delegation: {why}"))
+                .at("field", "input_bindings.agent")
+                .suggest(if declared.is_some() {
+                    "give the validator the manifests of the agents the step may delegate to"
+                } else {
+                    "declare the workflow's agents and give their manifests, bind read_only: true, or require approval"
+                }),
+        );
+    }
+    if declared.is_none() && literal.is_none() {
+        report.push(
+            loc.diag(
+                Code::UndeclaredDelegate,
+                "the delegation target is computed and the workflow declares no 'agents': a host that composes agents statically cannot check it before the run",
+            )
+            .at("field", "input_bindings.agent")
+            .suggest("declare the agents the workflow may delegate to in 'agents'"),
+        );
     }
 }
 
