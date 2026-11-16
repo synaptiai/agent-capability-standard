@@ -248,7 +248,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   more members (`ahead`, and `parked` for a nested run that ended deferred);
   a state with deferrals that an earlier version saved still restores, but
   cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
-  new one. The state of a run that never deferred is unchanged.
+  new one. The state of a run that never deferred holds neither.
 - Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
   version 2. The terminal action is derived from the state rather than
   stored with copies of the records and outputs, every action carries
@@ -260,6 +260,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   compares whole actions or records must allow them. `_core.Run.next()`
   returns a fresh dict each time, `Run.tick` returns whether it changed the
   run, and `Run::next` in Rust returns an owned `Action`.
+- Reference executor, starting a run (Standard 1.2.0 §11.5): the catalog's
+  version header is a start member every caller states. `_core.Run.start`
+  takes a required keyword-only `header`, the version the catalog's
+  `# Standard version:` header declares or `None` for a catalog without
+  one; a call without it raises `TypeError`. In Rust, `StartOptions` gains
+  `header`, `records`, `profiles`, `grounding` and `destinations`, which
+  every construction names. `WorkflowRunner` states the header itself.
 - `WorkflowRunner`: `run` and `start` take `attendance=None` (the trigger's
   attendance, else attended, as before) and refuse a caller-given `run_id`
   the runner has already started (`RunStartError`): a `run_id` must be
