@@ -94,9 +94,11 @@ describe('exempt runs and scope', () => {
       'appendix-c-changes-from-100:c',
       'appendix-d-changes-from-110:c',
       // Not in the spec's table: added at integration, read from
-      // STANDARD-v1.2.0.md (§9.8 and §11.7 are reference tables).
+      // STANDARD-v1.2.0.md (§9.8 and §11.7 are reference tables), and in
+      // review (§1.1, a reference list as §13.1 is).
       '98-diagnostic-format:c',
       '117-artifacts-of-this-version:c',
+      '11-normative-references:c',
     ]);
     expect(rows('/start/overview/')).toEqual([
       'why-this-matters:a',

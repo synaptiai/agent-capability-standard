@@ -20,6 +20,7 @@ export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
   'recovery-replay': 'recovery_loop_exhausted',
   'wait-replay': 'wait_liveness_lost',
   'approval-unattended-replay': 'approval_out_of_band_unattended',
+  'recheck-replay': 'recheck_reask',
   'deferral-replay': 'deferral_defers_effects',
   'resume-replay': 'resume_reruns_read_ahead',
   'resume-skip-replay': 'resume_skipped_supersedes',
@@ -245,6 +246,7 @@ export const ANSWER_WORDS: Readonly<Record<string, string>> = {
   LivenessLost: 'the source stopped answering',
   Decision: 'an approver decided',
   Checkpoint: 'took a checkpoint',
+  Current: 'the source was read again',
   Error: 'reported an error',
 };
 

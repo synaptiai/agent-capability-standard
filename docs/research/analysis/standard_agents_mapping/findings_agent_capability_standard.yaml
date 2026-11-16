@@ -2816,8 +2816,10 @@ findings:
     ''How a delegate step maps to a host''. A waiting delegate is a result the host waits for. A plain
     delegate is a non-blocking child. A cap refusal is accepted false or an Error response. A plain delegate''s
     refusal fails nothing unless the workflow tests accepted. The subsection also covers create-or-continue
-    and retries under maxInstances. For ACS-04 it gives the workaround: raise requires_approval or requires_checkpoint
-    on the step, with a YAML example that the validator accepts.'
+    and retries under maxInstances. For ACS-04 it shows Standard 1.2.0''s workflow field `agents`, with a
+    YAML example that the validator accepts given the target''s agent manifest (without it, W621), and states
+    1.1''s workaround in prose: a workflow that does not declare `agents` raises requires_checkpoint and
+    requires_approval on the step by hand, as the reference catalog''s multi_agent_orchestration does.'
   concerns:
   - multi-agent
 - id: ACS-62
@@ -3004,6 +3006,12 @@ questions:
   depends: The item type a binding emits and validates, the `ref` scheme it uses for host artefacts, and
     whether a capability output with no anchors is accepted or refused.
   finding: ACS-06
+  answer: 'An evidence anchor of §6.5: an object with `ref` and `kind` (the event schema''s kinds,
+    `record` for the agent system''s own records and workflow values, or a vendor kind `x-...`) and an
+    optional `digest`; `ref` is opaque except the reserved `acs:` scheme, so a host artefact such as
+    `message:<id>` is a `ref` under a fitting kind. A bare string or another object is a deprecated legacy
+    form, accepted and never counted toward a grounding policy until 2.0. An empty list grounds nothing:
+    the output must then be marked inferred (§3.1, §5.20; RFC-0008 decisions 1 to 3).'
 - id: ACS-Q06
   question: Is a domain profile normative? If so, do `auto_approve`, `require_review`, `require_human`
     and `block_autonomous` change effective `requires_approval` and §5.14, and what do the keys of `checkpoint_policy`
@@ -3016,6 +3024,12 @@ questions:
   depends: Whether a host reads a profile at all and, if it does, which steps it sends to a person, which
     capabilities it refuses to run unattended and where it takes checkpoints.
   finding: ACS-05
+  answer: 'Normative where applied: a host gives profiles to a run, a safety layer to its calls, and a
+    validator may be given them; a workflow''s `profile` field applies nothing (§5.21.1). Each threshold
+    covers a set of risk levels and raises the effective `requires_approval`, so §5.14 asks for approval;
+    `require_human` and `block_autonomous` also require a person (§5.21.3). `checkpoint_policy` keys are
+    capability ids or `*`, its values `always`, `high_risk`, `medium_risk` or `never`; `critical` is
+    deprecated and read as `none` (W603, §5.21.2; RFC-0010 decision 1).'
 - id: ACS-Q07
   question: 'Which capability classifies each of: a write to a remote system through an API (`mutate`
     or `send`); a write to the host''s own durable store (`persist` or `mutate`); a message to an existing
@@ -3056,6 +3070,11 @@ questions:
   depends: Whether a parent's rollback must reach into a child's state, and whether a child agent needs
     a checkpoint tool of its own before it may mutate.
   finding: ACS-18
+  answer: 'A delegate takes its own: a run''s checkpoints never authorise a delegate''s changes, except in
+    a safety layer''s shared scope, where one checkpoint authorises one change by either agent. A rollback
+    restores what its checkpoint captured, whoever changed it, and reaches nothing else (a change elsewhere
+    is reported `delegated`); all-or-nothing needs `read_only: true` or an explicit undo step (§5.15.4,
+    §4.4.1; RFC-0009 decision 7).'
 - id: ACS-Q10
   question: 'How does a host establish `attendance` for a model-driven thread that no trigger started:
     is a run attended when a person can answer, or only when one is present in the session at the moment
@@ -3078,6 +3097,9 @@ questions:
   depends: Whether a host redacts before it stores an event, which §6.2 as written rules out, or stores
     the payload as received, which can put credentials into evidence and audit records.
   finding: ACS-23
+  answer: 'Yes: `raw` is the original unmodified except that each secret is replaced by the redaction
+    marker, a documented-loss transform (§3.2), and the event MAY list where in `redactions`; a secret
+    never enters evidence, events or records (§6.2, §6.7; RFC-0008 decision 9).'
 - id: ACS-Q12
   question: What does a host answer for the pending action when its own execution is stopped, terminated
     or deleted, and does a run ended that way attempt a rollback to the latest checkpoint?
@@ -3088,6 +3110,10 @@ questions:
   depends: Whether a stopped thread answers `Error` and lets retries and failure modes run, leaves the
     run unanswered, or ends it with a recorded cause; and whether what the run changed so far is restored.
   finding: ACS-32
+  answer: 'The host cancels the run (§5.19.5): it ends at once with `Failed` R408, the pending action is
+    withdrawn, and no retry, failure mode, recovery, handler or rollback runs. Approved and planned records
+    become `cancelled`. The executor does not roll back; the terminal action names the latest checkpoint
+    (`checkpoint_id`), which the host may restore itself (RFC-0006 decision B4).'
 - id: ACS-Q13
   question: Must an executor run the members of a `parallel_group` concurrently, or does running them
     in list order, as the reference executor does, conform? Which values of `join` are defined, and what
@@ -3100,6 +3126,11 @@ questions:
   depends: Whether an executor needs concurrent dispatch and a join rule, and whether a host that maps
     group members to separate agents may start them one after another.
   finding: ACS-15
+  answer: 'List order conforms: a group''s members are unordered, and an executor may run them in any
+    order or concurrently; one with a single pending action runs them in list order. A group is complete
+    when every member has finished. `join` has one defined value, `all_complete`; another is W618 and
+    ignored. A recovery that escalates or ends the run abandons unfinished members, and a loop continues
+    from its target (§5.2.3; RFC-0006 decision B8).'
 - id: ACS-Q14
   question: 'Are the strings in a decision''s `approvers` meant to be principals (§5.15), so that `min_approvers`
     counts distinct authenticated parties, or free names, as in the guide''s example `"approvers": ["alice"]`?'
@@ -3111,6 +3142,11 @@ questions:
   depends: 'Whether a host records the authenticated caller''s identifier or a display name, and so whether
     one person under two names can satisfy `min_approvers: 2`.'
   finding: ACS-12
+  answer: 'Without identities, `min_approvers` counts the distinct strings of `approvers`, and the host
+    vouches for them. With `identity@1` a decision may carry `approver_identities`, `approvers` must then
+    list exactly their principals, and approvers are counted by principal, each identity checked against
+    the requested kind and role; in a workflow that targets 1.2 or later, `sender_check` and
+    `accept_trust_classes` make attested identities required (§5.14, §5.17; RFC-0006 decision A4).'
 - id: ACS-Q15
   question: Is `acs` the final annotation key on a Standard Agents tool, or will it be replaced by a name
     the project controls, such as an npm package name or a domain name?

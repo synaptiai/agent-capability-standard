@@ -85,6 +85,9 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
   // reference tables with nothing to draw (category c), as Appendix B is.
   { page: CURRENT_STANDARD, anchor: '98-diagnostic-format', category: 'c', run: '§9.8 Diagnostic Format (format fence and location keys)' },
   { page: CURRENT_STANDARD, anchor: '117-artifacts-of-this-version', category: 'c', run: '§11.7 Artifacts of This Version (file register)' },
+  // Added in review: §1.1 is the list of normative references, each with
+  // the sections that rely on it, the same kind of list as §13.1 (c).
+  { page: CURRENT_STANDARD, anchor: '11-normative-references', category: 'c', run: '§1.1 Normative References (reference list)' },
   // A 1.2.0 Candidate section that is a heading awaiting its text is listed
   // with `unwritten: true` (tasks/standard-1.2/designs/FOUNDATION.md D2)
   // until it is written: test/runs.test.ts fails while one has text. Every

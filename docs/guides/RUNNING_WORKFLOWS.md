@@ -586,12 +586,12 @@ wake-up time or the next poll.
 A snapshot holds a fixed part (about 0.5 kB), each stored step's output and
 the inputs it ran with, the action records (about 0.3 kB each, 0.6 kB with an
 approval), the trace (about 0.15 kB an event, three to six a step) and the
-pending action. Measured at the end of each of the 353 runtime fixtures, a
-snapshot is 1.2 kB to 35 kB (median 2.8 kB), of which the trace is about
+pending action. Measured at the end of each of the 361 runtime fixtures, a
+snapshot is 1.2 kB to 35 kB (median 2.7 kB), of which the trace is about
 42% (47% of all their bytes together); the terminal action no longer stores
 copies of the records and outputs (in 1.1 that copy was a median 13%, up to
 26%, of a finished run's state). With the trace and settled records taken
-out, the same states are 1.0 kB to 12 kB (median 1.5 kB). For a store with a size cap, take the trace every turn,
+out, the same states are 1.0 kB to 12 kB (median 1.4 kB). For a store with a size cap, take the trace every turn,
 take the records into your audit store, and keep large values out of stores
 by passing references to them.
 
@@ -921,9 +921,10 @@ resumption is attended, even where its approver is a standing mandate, and
 the request names its queued action in `queued_action_id`; the `planned`
 record of that action is updated in place, under the same `action_id`, so
 the queue entry you hold closes on it. A request asked again after a
-recheck, or in a retry of the step, names the same action, and its decision
-lands on the same record; once the action is carried out, a loop back to
-the step asks for a new one. A record the resumption decides or supersedes
+recheck, or when a recovery loop runs the step again before it goes on,
+names the same action, and its decision lands on the same record (a retry
+of the step does not ask again); once the action is carried out, a loop
+back to the step asks for a new one. A record the resumption decides or supersedes
 takes the time and the actor of then. A recovery loop during the resumption
 runs again only the steps from its target to the step that looped, and the
 resumption then goes on: a step that ran ahead, such as an
@@ -1024,5 +1025,6 @@ it declares no `shows`, and the `shown` values), and a `tool_call` vector the
 approval of a tool call; each gives the canonical JSON (RFC 8785) of `shown`
 and the `digest`. The file is described under
 [Test suite requirements](../../spec/CONFORMANCE.md#test-suite-requirements),
-and the trust vectors beside it (`tests/conformance/trust/`) under
-[Informative vectors](../../spec/CONFORMANCE.md#informative-vectors).
+and the trust vectors beside it (`tests/conformance/trust/`), also
+normative, under
+[Normative vectors of Standard 1.2.0](../../spec/CONFORMANCE.md#normative-vectors-of-standard-120-103).

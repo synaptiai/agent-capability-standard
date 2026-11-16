@@ -24,7 +24,7 @@ A checkpoint restores state, not effects ([STANDARD v1.2 §4.4.1](STANDARD-v1.2.
 
 The action capabilities (`execute`, `mutate`, `send`) are constrained by ontology edges:
 - `checkpoint` (hard requirement, `requires`): State must be saved before `mutate` or `send`
-- `constrain` (soft requirement, `soft_requires`): A policy check should run first; without one the validator warns (W601)
+- `constrain` (soft requirement, `soft_requires`, and ordering, `precedes`): A policy check should run before `execute`, `mutate` and `send`; without one the validator warns (W601), and when a workflow has one, it must come before them and before `generate` (V102)
 - `plan` (ordering, `precedes`): When a workflow has a plan, it must come before `execute` and `mutate`
 - `verify` (ordering, `precedes`): A verification must come after the action it checks
 
@@ -40,12 +40,13 @@ flowchart LR
 
 ```mermaid
 ---
-title: The ordering edges around an action
+title: The ordering (precedes) edges around an action
 ---
 flowchart LR
-  accDescr: A plan, when present, comes before execute and mutate, and verify comes after the action it checks; both are precedes edges.
-  plan -->|precedes| execute & mutate
-  execute & mutate & send -->|precedes| verify
+  accDescr: A plan, when present, comes before execute and mutate; a constrain, when present, comes before execute, mutate, send and generate; and verify comes after the action it checks. All are precedes edges.
+  plan --> execute & mutate
+  constrain --> execute & mutate & send & generate
+  execute & mutate & send --> verify
 ```
 
 ### 1.3 Claims Must Be Grounded
@@ -284,10 +285,11 @@ destination it chose.
 
 | Capability | Required Before | Security Rationale |
 |------------|-----------------|-------------------|
-| `mutate` | `checkpoint` (required); `constrain` (recommended); `plan` (if present) | Recovery possible, no blind execution |
-| `send` | `checkpoint` (required); `constrain` (recommended) | Recovery possible for what the sender holds, policy checked before transmitting |
+| `mutate` | `checkpoint` (required); `constrain` (recommended, and before it when present); `plan` (if present) | Recovery possible, no blind execution |
+| `send` | `checkpoint` (required); `constrain` (recommended, and before it when present) | Recovery possible for what the sender holds, policy checked before transmitting |
 | `rollback` | `checkpoint` (required) | Must have state to restore |
-| `execute` | `constrain` (recommended); `plan` (if present) | Policy checked before running |
+| `execute` | `constrain` (recommended, and before it when present); `plan` (if present) | Policy checked before running |
+| `generate` | `constrain` (if present) | Policy checked before content is produced |
 | `verify` | `execute`, `mutate`, `send` (if present) | Checks results after the fact |
 
 ---

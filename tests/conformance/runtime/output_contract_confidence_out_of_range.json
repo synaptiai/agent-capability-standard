@@ -1,0 +1,49 @@
+{
+  "description": "In a 1.2 workflow, a confidence the contract requires that is outside 0 to 1 breaks the contract: R402 (\u00a75.19.1, \u00a74.1.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "search",
+          "purpose": "search step",
+          "store_as": "s",
+          "input_bindings": {
+            "query": "q"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "search"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "results": [],
+          "confidence": 2,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed"
+  ]
+}

@@ -545,10 +545,14 @@ def recheck(name, description, on_change, script_tail, end, trace=()):
             {"expect": inv("plan"), "respond": out(steps=[1], confidence=1)},
             {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
             {"expect": inv("constrain"), "respond": out(compliant=True)},
-            {"expect": {"kind": "RequestApproval"}, "respond": approve("d1")},
+            {
+                "expect": {"kind": "RequestApproval", "step": 3},
+                "respond": approve("d1"),
+            },
             {
                 "expect": {
                     "kind": "RecheckSource",
+                    "step": 3,
                     "source": "${p.steps}",
                     "compare": "digest",
                 },
@@ -569,6 +573,7 @@ recheck(
         {
             "expect": {
                 "kind": "RequestApproval",
+                "step": 3,
                 "shown": [
                     {"target": "config", "operation": {"set": 1}},
                     {"recheck": {"previous": [1], "current": [2]}},
@@ -577,7 +582,7 @@ recheck(
             "respond": approve("d2"),
         },
         {
-            "expect": {"kind": "RecheckSource"},
+            "expect": {"kind": "RecheckSource", "step": 3},
             "respond": {"kind": "Current", "value": [2]},
         },
         {"expect": inv("mutate"), "respond": out(success=True)},
@@ -6556,6 +6561,144 @@ orchestrator(
     {"kind": "Completed", "outcome": "completed"},
     ["step_skipped", "run_finished"],
     inputs={"report": {"kind": "digest"}},
+)
+
+
+# ---------------------------------------------------------------------------
+# The output contract (§5.19.1): in a workflow that targets 1.2 or later, an
+# Output's value is checked as §5.18.9's consumer checks an output, as a
+# safety layer checks a call's (§5.18.10); below 1.2, only the required
+# fields, as in 1.1.
+# ---------------------------------------------------------------------------
+def searching(spec_version="1.2", retry=None, **kw):
+    """A workflow `w` of one `search` step `s`, targeting `spec_version`."""
+    extra = {"retry": retry} if retry else {}
+    return {
+        "w": wf(
+            [st("search", "s", input_bindings={"query": "q"}, **extra)],
+            spec_version=spec_version,
+            **kw,
+        )
+    }
+
+
+def found_by_search(**v):
+    return out(**{"results": [], **v})
+
+
+add(
+    "output_contract_anchors_not_an_array",
+    "In a 1.2 workflow, an Output whose evidence_anchors is not an array breaks the contract: R402 (§5.19.1, §5.18.9).",
+    searching(),
+    [
+        {
+            "expect": inv("search"),
+            "respond": found_by_search(evidence_anchors="file:a", confidence=0.5),
+        }
+    ],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_confidence_out_of_range",
+    "In a 1.2 workflow, a confidence the contract requires that is outside 0 to 1 breaks the contract: R402 (§5.19.1, §4.1.1).",
+    searching(),
+    [{"expect": inv("search"), "respond": found_by_search(confidence=2)}],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_confidence_not_a_number",
+    "In a 1.2 workflow, a required confidence that is a boolean is not a number: R402 (§5.19.1).",
+    searching(),
+    [{"expect": inv("search"), "respond": found_by_search(confidence=True)}],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_v11_unchecked",
+    "In a 1.1 workflow, only the required fields are checked, as in 1.1: an Output whose evidence_anchors is a string and whose confidence is 2 completes the step (§5.19.1, §11.5).",
+    searching("1.1"),
+    [
+        {
+            "expect": inv("search"),
+            "respond": found_by_search(evidence_anchors="file:a", confidence=2),
+        }
+    ],
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "outputs": {
+            "s": {"results": [], "evidence_anchors": "file:a", "confidence": 2}
+        },
+    },
+)
+
+add(
+    "output_contract_retried",
+    "An Output that breaks the contract is R402, retried as any R402: the second attempt's output passes (§5.19.1, §5.2).",
+    searching(retry={"max": 1, "backoff": "none"}),
+    [
+        {
+            "expect": inv("search", attempt=1),
+            "respond": found_by_search(confidence=1.5),
+        },
+        {
+            "expect": inv("search", attempt=2),
+            "respond": found_by_search(confidence=0.5),
+        },
+    ],
+    {"kind": "Completed", "outcome": "completed"},
+    ["retry"],
+)
+
+add(
+    "output_contract_before_grounding",
+    "Under a grounding policy in a 1.2 workflow, an evidence_anchors that is not an array fails the contract check first: R402, not F505 (§5.19.1, §5.20).",
+    searching(
+        requires=["grounding@1"],
+        grounding={"require": ["search"]},
+    ),
+    [
+        {
+            "expect": inv("search"),
+            "respond": found_by_search(evidence_anchors="file:a", confidence=0.5),
+        }
+    ],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+)
+
+add(
+    "output_contract_before_minimum_confidence",
+    "Under a profile's minimum confidence in a 1.2 workflow, a required confidence that is not a number from 0 to 1 fails the contract check first: R402, not F504 invalid_confidence (§5.19.1, §5.21.3).",
+    searching(),
+    [{"expect": inv("search"), "respond": found_by_search(confidence="0.95")}],
+    {"kind": "Failed", "code": "R402", "step": 0},
+    ["step_failed"],
+    profiles=[
+        {
+            "domain": "confident",
+            "version": "1.0.0",
+            "evidence_policy": {"minimum_confidence": 0.9},
+        }
+    ],
+)
+
+add(
+    "output_contract_unrequired_confidence",
+    "In a 1.2 workflow, a confidence the contract does not require is not checked by the contract (audit's): the step completes; a minimum confidence would check it (F504, §5.21.3).",
+    {
+        "w": wf(
+            [st("audit", "a", input_bindings={"event": {"what": "deploy"}})],
+            spec_version="1.2",
+        )
+    },
+    [{"expect": inv("audit"), "respond": out(recorded=True, confidence=5)}],
+    {"kind": "Completed", "outcome": "completed"},
 )
 
 

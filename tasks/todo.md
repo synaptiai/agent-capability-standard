@@ -130,10 +130,12 @@ fixed, then merged in order; a finishing step gave the Python adapter the
 output-contract row so that both reference layers claim class SL. All 64 ACS
 findings are `fixed`, each resolution naming what implements it (the counts
 in `index.yaml`, the integration guide and the CHANGELOG say so). Phase 4
-reviewed the whole change by area: 59 issues (34 in the Standard text,
-findings, site and documents; 2 in the Rust core; 20 in the SDK, hooks and
-skills, 19 of them distinct and real; 3 in the TypeScript package), all
-fixed with a test where code changed (`progress/PHASE4.md`). Phase 5 merged
+reviewed the whole change by area: 59 issues in round 1 (34 in the
+Standard text, findings, site and documents; 2 in the Rust core; 20 in the
+SDK, hooks and skills, 19 of them distinct and 18 real, one, the `header`
+keyword, already documented; 3 in the TypeScript package): every real one
+fixed, with a test where code changed, and the other recorded with its
+evidence (`progress/PHASE4.md`). Phase 5 merged
 the streams' CHANGELOG entries into one [Unreleased] entry (an intro,
 Upgrading grouped by component and naming every behaviour change, then
 Added, Changed and Fixed; checked mechanically that no entry's text was

@@ -661,3 +661,220 @@ table) gains a test that fails on the old README.
   `scripts/check-axe.mjs` over the three pages this round changed
   (/guides/typescript-package/, /community/release-notes/,
   /guides/examples/standard-agents/): no violations, no sideways scroll.
+
+## Round 2 — standard-text, findings, docs-site, other
+
+Nineteen issues: ten in the Standard text, two in the findings file, one in
+the docs site, six in other documents. Each was verified first. All
+nineteen were real and are fixed; one claim within issue 12 (RFC-0006's
+"ten `approver_*` fixtures") was right as written and is clarified, not
+changed. Where code or a fixture changed, the test that would have caught
+the issue is named; each was mutation-checked (the old code restored, the
+test fails).
+
+### Standard text
+
+1. **Recheck behaviour pinned by EX fixtures but never stated (high).**
+   Real: §5.14 listed `compare` and `on_change` only, while
+   `recheck_stop`, `recheck_replan`, `recheck_version`, `recheck_reask` and
+   `resume_recheck_reask` pin what `machine.rs` `rechecked` does (the same
+   code as on origin/main, apart from the record's 1.2 `code`). Fix: a
+   **Recheck** paragraph in §5.14: after a valid approval and before the
+   checkpoint is used the executor issues `RecheckSource` and compares the
+   value read with the source's baseline (its value at the request, null
+   when unresolved; after a re-ask, what that recheck read); `digest`
+   compares the RFC 8785 digests, `version` the `version` members as `==`
+   does, absent or not an object counting as null; on a change the record
+   becomes `expired` and `reask` asks again with item 3's shown values (a
+   new record, except a queued step a resumption continues, §5.14.1 items
+   5 and 6), `replan` ends the run and every run it is nested in
+   `Completed` `replan_required`, `stop` gives the record F502 and fails the
+   step F502 (failure modes apply); an `Error` is F502. §5.2.2 lists the
+   recheck among what can stop a step before it uses its checkpoint, the
+   §5.14 record paragraph names the `expired` record, Appendix D.2 gains a
+   clarification row and spec/CHANGELOG.md names it. No code changed; the
+   five fixtures are the tests. The recheck fixtures' approval and recheck
+   requests now also pin `step` (3), so the site can draw `recheck_reask`
+   (below).
+2. **Executor and safety layer checked one output differently (medium).**
+   Real, reproduced: a 1.2 `search` step answered
+   `{"results":[],"evidence_anchors":"file:a","confidence":2}` completed.
+   Fix (the reviewer's preferred one): in a workflow that targets 1.2 or
+   later the executor checks an `Output` as §5.18.9's consumer checks an
+   output, as a layer does: an `evidence_anchors` that is not an array, or
+   a required `confidence` that is not a number from 0 to 1 (a boolean is
+   not), is R402 (retried as any R402), before grounding (F505) and a
+   minimum confidence (F504); a 1.0 or 1.1 workflow is checked for its
+   required fields only, as before (`core/src/exec/machine.rs`,
+   `contract_value_problem`). Text: §5.19.1's `InvokeCapability` row,
+   §5.20 (the check comes after the contract; item 1's F505 for a value
+   that is not a list then applies only below 1.2), §5.21.3 (so
+   `invalid_confidence` applies in 1.2 only to a confidence the contract
+   does not require), §5.18.10 (the order), §11.6's parenthesis, Appendix
+   D.3 and the CHANGELOG. Tests: eight runtime fixtures
+   (`output_contract_anchors_not_an_array`, `_confidence_out_of_range`,
+   `_confidence_not_a_number`, `_v11_unchecked`, `_retried`,
+   `_before_grounding`, `_before_minimum_confidence`,
+   `_unrequired_confidence`), played by Rust, Python and TypeScript
+   (WebAssembly). Mutation checks: with the check off, the first fails;
+   with it applied to every target, `_v11_unchecked` fails. No earlier
+   fixture changed its outcome (361 played).
+3. **§5.2.1 and §5.14 against §5.21.1 on `approval` under profiles
+   (medium).** Real, reproduced (`--profile` with `block_autonomous:
+   [retrieve]` still gives S303, as §5.21.1 says). Fix: §5.14 reads "the
+   step's effective `requires_approval` before profiles (§5.2.1, §5.21.1)";
+   §5.2.1's sentence excepts whether a step may carry `approval`.
+4. **§9.1 omitted V102 for offered tools (low).** Real
+   (`offered_missing_checkpoint` expects V102). §9.1 lists "V101, V102 (an
+   offered tool that requires a capability no offered tool can perform,
+   §5.18.2), V105, V107 and V109–V111".
+5. **A binding's `domain` was never checked as a domain id (low).** Real
+   (`"Image Object!"` loaded in both layers). Chosen: S303, as §5.18.1
+   already said (tool bindings are new in 1.2, so no workflow relies on
+   the looser form; a step's stays W620). Fix: the `domain` pattern in
+   `tool_binding.schema.json` and, through `gen_standard_agents_binding.py`,
+   the annotation schema; both loaders check it
+   (`grounded_agency/capabilities/bindings.py`, imported lazily as the
+   module's `_core` is, since `grounded_agency.workflows` imports the
+   capabilities package; `packages/acs-core/src/binding.ts` with
+   `isDomainId`); §5.18.1's row says so. Tests: binding fixtures
+   `domain_not_a_domain_id` (S303, not loaded) and `domain_id_loads`
+   (`image.object`), 35 binding fixtures; each loader with the old code
+   fails the first.
+6. **§2 and W602 misstated a delegate step's baseline (low).** Real
+   (reproduced W602 for `risk: low` on a read-only delegation). Both now
+   say "the ontology's flags, raised for a `delegate` step of a workflow
+   with `agents` by its target maxima (§5.15.2)", and §5.15.2's W602
+   sentence names both values.
+7. **§5.14.1 item 5 spoke of a retry asking again (low).** Real: a retry
+   does not ask (§5.13), reproduced (a re-entered queued `mutate` with
+   `retry: {max: 1}` that fails once: one `RequestApproval`, then attempts
+   1 and 2). Item 5 now says "after a recheck too, and when a recovery
+   loop runs it again before it goes on (items 6, 7). (A retry does not ask
+   again, §5.13.)"; the descriptions of `resume_retry_keeps_queue` and
+   `resume_deferred_handler_loop` (both use a recovery loop), RFC-0006 A5,
+   A7 and its rejected alternative, and the running-workflows guide follow.
+8. **Cross-references and protocol tables (low).** Real, each: §4.5's
+   `run` row cites §5.12; §10.5's list adds §5.11–§5.18, §5.19.3,
+   §5.19.5, §5.19.7, §5.19.8, §6.5 and §9 (checked against
+   `NORMATIVE_MEMBERS`); §5.19.1's `InvokeCapability` row names
+   `store_as`; §5.19.7's `unsupported_ttl` row adds a ttl past
+   9999-12-31T23:59:59.999Z.
+9. **Normative references incomplete (low).** Real. §1.1 and §13.1 add RFC
+   2104 (HMAC-SHA-256), RFC 3339, FIPS 180-4 (SHA-256) and JSON Lines,
+   and give RFC 6901, 7493 and 8785 every section that relies on them
+   (found by a scan of the text).
+10. **Appendix D named the new §2 terms only in D.1 and D.7 (low).** Real:
+    27 terms are new since 1.1. D.3, D.4, D.5 and D.6 each gain a "The
+    terms ... (§2)" bullet with the 18 the reviewer listed.
+
+### Findings
+
+15. **Seven answered questions had no `answer`; the field was
+    undocumented (low).** Real. ACS-Q05, Q06, Q09, Q11, Q12, Q13 and Q14
+    now carry an answer with the section and the RFC decision (Q10 and Q15
+    stay open); `index.yaml` gains `question_fields`, and
+    `tests/test_standard_agents_mapping.py` checks every question's fields
+    against it, `depends`, and that only this standard's questions are
+    answered, each citing a section.
+16. **ACS-61's resolution described a YAML example the guide no longer
+    has (low).** Real (the subsection's only YAML is the 1.2 `agents`
+    example, W621 without the deployer's manifest, reproduced). The
+    resolution now says so and that 1.1's raised-flags workaround is
+    prose.
+
+### Docs site
+
+12. **Stale status, version and counts (low).** Real, except one count:
+    the running-workflows guide points at "Normative vectors of Standard
+    1.2.0"; EDGE_TYPES.md is Version 1.2.0, dated as the Standard
+    (2026-11-15); RFC-0005 says 35 binding and 30 call-sequence fixtures.
+    RFC-0006's "ten `approver_*` fixtures" were the ten it added
+    (`approver_unavailable_attended` is on origin/main, from 1.1); it now
+    says "ten new ... (the eleventh ... is 1.1's)".
+
+The site's checks found three more things, fixed here:
+
+- The figure-gap sweep (CI's headless shell 1248) failed two runs of
+  /spec/1.2.0/ after the text above. The run from the page top crossed the
+  longer §1.1, a reference list as §13 is: `runs.ts` exempts §1.1
+  (category c, as §13, §9.8 and §11.7), with `test/runs.test.ts`. The
+  §5.14 run between "An approval no one is asked for" and "What a
+  deferral reaches" was 2303px: the first figure moves after the
+  paragraph on modes in an unattended run (which it illustrates), and a
+  new figure, "A changed source, asked again" (`recheck-replay`, from
+  `recheck_reask`), follows the recheck list; the runs are now 976, 1724
+  and 426px. The deferral figure's slot follows its list (index 4), and
+  the replay words read a `Current` answer as "the source was read
+  again".
+- /guides/claude-agent-sdk/ failed the sweep on HEAD too (1800.x px,
+  identical HTML before and after this round): round 1 measured it at
+  1772px, and nothing changed since, so the two measurements disagree by
+  a line. Two sentences of its Unbound Tools and `git stash` paragraphs
+  are tightened: 1744px.
+- SECURITY.md's ordering diagram, with `constrain` added, was 742px wide:
+  the edge labels go, the title says the edges are `precedes`.
+
+### Other
+
+11. **CONFORMANCE.md and SECURITY.md diverged from the Standard (low).**
+    Real (reproduced V102 for checkpoint, mutate, constrain). CONFORMANCE's
+    L1 list gains unique `store_as`, catalog manifests and catalog-set
+    `invoke`, agent manifests, and locations with `path`; SECURITY §1.2
+    (text and diagram) and §3.2 state `constrain`'s `precedes` edges
+    (V102 when present after), `generate` included.
+13. **The integration guide said the layers refuse a destination
+    profile (medium).** Real, reproduced (the adapter constructs with
+    `allowed_destinations` and applies it). It now says they apply
+    destination policies (`allowed_destinations`, §4.4.2); a search found
+    no other copy of the old sentence.
+14. **Upgrading omitted Fixed behaviour changes and overstated one
+    (medium).** Real, against v2.0.0 (its `adapter.py` replaced
+    `can_use_tool` and its evidence store kept `tool_input`;
+    `register_mcp_tool('mcp__x__y', 'no_such_capability')` now raises
+    V101). Upgrading gains `wrap_options()` chaining (Fixed),
+    `register_mcp_tool` (Fixed) and anchors that no longer keep a tool's
+    input (Fixed); the PreToolUse bullet says strict mode, with the
+    non-strict behaviour and the rate check's R407 in either mode.
+17. **CHANGELOG's S2b fixture count (low).** Real (`s2b.py` registers 45).
+    Now 45; the binding fixture count is 35, and the executor entry names
+    the eight `output_contract_*` fixtures.
+18. **todo.md's Phase 4 summary (low).** Real. It now says 19 distinct,
+    18 real, the `header` keyword already documented, and that every real
+    issue was fixed and the other recorded with its evidence.
+19. **WORKFLOW_ROADMAP.md showed `plan-invalidation` (low).** Real. Now
+    `plan_invalidation`; new `tests/test_workflow_roadmap.py` compares the
+    roadmap's count, names, goals, risks and steps (domains in brackets,
+    `invoke` targets in parentheses) with the catalog, and fails on the old
+    text.
+
+The running-workflows guide's snapshot figures are re-measured over the 361
+fixtures as round 1 did: 1.2 to 35 kB, median 2.7 kB (2.8 without the eight
+new one-step fixtures), trace 42% mean and 47% of all bytes; after taking,
+1.0 to 12 kB, median 1.4 kB.
+
+### Checks after round 2 (standard-text, findings, docs-site, other)
+
+- Python: every `tools/validate_*.py`, `validate_workflows.py --strict`,
+  every domain catalog and example `--strict`; the generators' `--check`
+  (`sync_skill_schemas` 107, `gen_runtime_fixtures` 361,
+  `gen_call_fixtures` 35 and 30, `gen_trigger_vectors`,
+  `gen_standard_agents_binding`, `gen_capability_json_schemas`); ruff
+  check and format (CI's list); mypy; `pytest tests/` (4510 passed, 18
+  skipped); `benchmarks/tests/` (69); `scripts/run_conformance.py`.
+- Rust (`core/`, 1.99.1; extension rebuilt): fmt; clippy plain, `python`
+  and `wasm`; `cargo test --locked` (the timing test included);
+  `--features wasm --test wasm` (13); MSRV `cargo +1.88.0 check --locked
+  --all-targets --features python`. No expression changed, so the CEL
+  differential was not rerun.
+- TypeScript: `packages/acs-core` `build:wasm`, build, check, test (1843);
+  the binding check and test (191, 2 skipped).
+- Site: `npm run check`, `npm test` (1173), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` with CI's headless shell (0 enforced runs over
+  1800px; /spec/1.2.0/'s longest 1795px, the SDK guide's 1793px, both
+  unchanged by this round) and `scripts/check-axe.mjs` over the twelve
+  pages this round changed (/spec/1.2.0/, /spec/security/,
+  /spec/conformance/, /spec/edge-types/, /spec/changelog/, /rfcs/0005/,
+  /rfcs/0006/, /guides/running-workflows/, /guides/standard-agents/,
+  /guides/claude-agent-sdk/, /community/release-notes/,
+  /workflows/roadmap/): no violations, no sideways scroll.

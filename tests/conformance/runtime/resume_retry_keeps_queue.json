@@ -1,5 +1,5 @@
 {
-  "description": "A retry of a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (\u00a75.14.1).",
+  "description": "A recovery loop back to a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (\u00a75.14.1).",
   "catalog": {
     "w": {
       "goal": "g",

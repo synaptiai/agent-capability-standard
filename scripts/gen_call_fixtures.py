@@ -227,6 +227,18 @@ binding(
     errors=[diag("S303", "done")],
 )
 binding(
+    "domain_not_a_domain_id",
+    "A domain that is not a domain id (section 5.2.4) is S303, and the record is not loaded: a step's would be W620, but tool bindings are new in 1.2.",
+    [rec("look", "detect", domain="Image Object!")],
+    errors=[diag("S303", "look")],
+)
+binding(
+    "domain_id_loads",
+    "A domain id of several segments, such as image.object, is a valid domain: the record loads.",
+    [rec("look", "detect", domain="image.object")],
+    effective={"look": LOW},
+)
+binding(
     "missing_ontology",
     "A record with no ontology is S304, and is not loaded.",
     [{"tool": "x", "capability": "observe"}],

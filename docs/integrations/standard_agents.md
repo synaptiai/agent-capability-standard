@@ -1161,9 +1161,9 @@ workflow valid under 1.1.0 validates and runs as before.
   a host or safety layer applies them, and §5.21 says what each rule changes:
   the reference executor, the Python adapter and this binding (a grounded
   tool's `profiles`) apply their flags, person requirements, grounding
-  policies and minimum confidence, and refuse a profile whose destination
-  policy they do not check yet (no shipped profile sets one); the validator
-  given a profile reports the flags it raises. The executor's trace kinds
+  policies, minimum confidence and destination policies
+  (`allowed_destinations`, §4.4.2; no shipped profile sets one); the
+  validator given a profile reports the flags it raises. The executor's trace kinds
   are listed and tested.
 
 ### Accepted in Standard 1.2.0

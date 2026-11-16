@@ -51,9 +51,9 @@ This changelog tracks changes to the **Agent Capability Standard specification**
   1.0 and 1.1 workflows too: checkpoint use for steps (§5.2.2), the default
   approval request and the digest input (§5.14), parallel groups and `join`
   at run time (§5.2.3), tick boundaries, retry backoff and the members the
-  executor computes (§5.19), contract schemas as a dialect (§4.1.2), entity
-  ids (§7.1), the trust score and conflict resolution (§8), and version
-  declaration (§11.5).
+  executor computes (§5.19), an approval's `recheck` (§5.14), contract
+  schemas as a dialect (§4.1.2), entity ids (§7.1), the trust score and
+  conflict resolution (§8), and version declaration (§11.5).
 
 ### Unchanged
 - **[RFC-0002](RFC-0002-agent-reliability-profile.md)** stays a Draft.

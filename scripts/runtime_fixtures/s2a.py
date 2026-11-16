@@ -896,7 +896,7 @@ def _resumption(add):
     )
     add(
         "resume_deferred_handler_loop",
-        "A retry of a re-entered queued step during a resumption runs that step again and then goes on with the resumption: the second request names the same queued action, the record is updated in place again, the step that escalated in the first run is not run again, and the deferred handler still runs last, with the escalation's cause (§5.14.1).",
+        "A recovery loop back to a re-entered queued step during a resumption runs that step again and then goes on with the resumption: the second request names the same queued action, the record is updated in place again, the step that escalated in the first run is not run again, and the deferred handler still runs last, with the escalation's cause (§5.14.1).",
         escalating(handler_first=True, loop_on_mutate=True),
         CHECKPOINTED
         + [
@@ -1209,9 +1209,9 @@ def _resumption(add):
         attendance="unattended",
     )
 
-    # A queued step keeps its queued action until it goes on: a retry and a
-    # re-ask after a recheck continue it, and a retry runs only that step
-    # again.
+    # A queued step keeps its queued action until it goes on: a recovery
+    # loop that runs it again and a re-ask after a recheck continue it, and
+    # the loop runs only that step again.
     retried = mutate(
         approval=DEFER,
         failure_modes=[
@@ -1231,7 +1231,7 @@ def _resumption(add):
     )
     add(
         "resume_retry_keeps_queue",
-        "A retry of a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (§5.14.1).",
+        "A recovery loop back to a re-entered queued step runs that step again and nothing after it: the second request names the same queued action and is put to a person, the record is updated in place again, and the step that declares after_deferral: run, which ran in the first run, does not delegate again (§5.14.1).",
         {"w": wf([CP, POLICY, retried, paging_task], requires=["approval@1"])},
         CHECKPOINTED
         + [

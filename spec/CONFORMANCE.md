@@ -9,8 +9,14 @@ this page summarises them.
   - validates capability existence
   - enforces `requires`, `precedes` and `conflicts_with`; warns on unmet
     `soft_requires`
+  - checks that `store_as` names are unique
   - resolves effective safety flags; warns on downgrades
   - reports unknown fields and the declared standard version
+  - checks catalog manifests and resolves `invoke` targets over the catalog
+    set it is given
+  - given agent manifests, raises the flags of `delegate` steps and checks
+    their targets and tasks in workflows that declare `agents`
+  - reports diagnostic locations with their `path`
 
 - **L2 Type Conformance**
   - resolves `$ref` schemas

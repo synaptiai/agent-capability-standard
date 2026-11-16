@@ -2154,6 +2154,20 @@ impl<'a> Machine<'a> {
                 format!("{detail}, which the '{capability}' contract requires"),
             );
         }
+        // In a workflow that targets 1.2 or later, the output is checked as
+        // §5.18.9's consumer checks one (§5.19.1), as a safety layer checks
+        // a call's (§5.18.10): before grounding (F505) and a minimum
+        // confidence (F504). Retried as any R402. Below 1.2, only the
+        // required fields, as 1.1 did.
+        if self.program.workflows[&self.frame_ref().workflow].targets_1_2
+            && let Some(detail) = contract_value_problem(&value, &step.required_outputs)
+        {
+            let capability = step.capability.clone();
+            return self.exec_error(
+                "R402",
+                format!("the output's {detail}, which the '{capability}' contract does not allow"),
+            );
+        }
         // A memory step that bound a scope gets that scope or fails (§4.5):
         // a host that does not know the input would store or look up
         // elsewhere without saying so. Retried as any R402. Below 1.2,
@@ -3356,6 +3370,34 @@ impl<'a> Machine<'a> {
             last["reason_code"] = json!(t);
         }
     }
+}
+
+/// What §5.18.9's consumer checks refuse in an output object that has every
+/// field its contract requires (`required`): an `evidence_anchors` that is
+/// present and not an array, or a `confidence` the contract requires that
+/// is not a number from 0 to 1 (a boolean is not a number). `None` when
+/// the output passes.
+fn contract_value_problem(output: &Value, required: &[String]) -> Option<String> {
+    let anchors = output.get("evidence_anchors");
+    if anchors.is_some_and(|a| !a.is_array()) {
+        return Some("'evidence_anchors' is not an array".to_string());
+    }
+    if required.iter().any(|r| r == "confidence") {
+        let c = output.get("confidence");
+        if !c
+            .and_then(Value::as_f64)
+            .is_some_and(|x| (0.0..=1.0).contains(&x))
+        {
+            let shown: String = c
+                .map(Value::to_string)
+                .unwrap_or_default()
+                .chars()
+                .take(64)
+                .collect();
+            return Some(format!("'confidence' {shown} is not a number from 0 to 1"));
+        }
+    }
+    None
 }
 
 /// The evidence anchors of the outputs a nested run stored, in the order of

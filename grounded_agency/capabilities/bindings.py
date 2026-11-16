@@ -276,11 +276,24 @@ def parse_record(
         if not isinstance(value, str) or not value:
             wrong("capability", f"'capability' must be a capability id, not {value!r}")
 
-    for member in ("domain", "classifier"):
-        if member in record:
-            value = record[member]
-            if not isinstance(value, str) or not value:
-                wrong(member, f"'{member}' must be a non-empty string")
+    if "domain" in record:
+        # Imported here: grounded_agency.workflows imports this package.
+        from ..workflows.domains import is_domain_id
+
+        value = record["domain"]
+        # A domain id (§5.18.1, §5.2.4). Unlike a step's (W620), a binding's
+        # of another form is S303: tool bindings are new in 1.2.
+        if not isinstance(value, str) or not is_domain_id(value):
+            wrong(
+                "domain",
+                "'domain' must be a domain id (segments [a-z0-9][a-z0-9_]* "
+                f"joined by '.'), not {value!r}",
+            )
+
+    if "classifier" in record:
+        value = record["classifier"]
+        if not isinstance(value, str) or not value:
+            wrong("classifier", "'classifier' must be a non-empty string")
 
     flags: dict[str, Any] = {}
     if "flags" in record:

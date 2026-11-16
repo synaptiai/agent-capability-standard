@@ -1,0 +1,22 @@
+{
+  "description": "A domain that is not a domain id (section 5.2.4) is S303, and the record is not loaded: a step's would be W620, but tool bindings are new in 1.2.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "look",
+      "ontology": "2.2.0",
+      "capability": "detect",
+      "domain": "Image Object!"
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "look"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}
