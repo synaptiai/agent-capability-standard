@@ -120,6 +120,43 @@ def test_a_symlinked_parent_fails_and_nothing_is_written_outside(
     assert list(outside.iterdir()) == []
 
 
+@pytest.mark.parametrize("object_kept", [True, False])
+def test_a_symlinked_parent_over_matching_files_fails_and_changes_nothing(
+    root: Path, tmp_path: Path, object_kept: bool
+) -> None:
+    """The directory check before the content lookup is the only guard
+    when the file the link reaches has the captured content: the restore
+    would then only set its mode, through the link, outside the root. With
+    the captured object gone it is the same failure, not ``discarded``."""
+    import hashlib
+    import shutil
+
+    for name in ("b.py", "c.py"):
+        os.chmod(root / "src" / name, 0o644)
+    s = store(root)
+    s.capture("cp1", ["*"])
+    outside = tmp_path / "outside"
+    write(outside, "b.py", "b0", mode=0o600)
+    write(outside, "c.py", "c0", mode=0o600)
+    if not object_kept:
+        sha = hashlib.sha256(b"b0").hexdigest()
+        objects = [p for p in (root.parent / "store").rglob("*") if sha in p.name]
+        assert objects
+        for obj in objects:
+            obj.unlink()
+    shutil.rmtree(root / "src")
+    os.symlink(outside, root / "src")
+    r = s.restore("cp1")
+    assert not r.restored
+    failed = {u["item"]: u for u in r.unrestored if u["reason"] == "failed"}
+    assert set(failed) == {"src/b.py", "src/c.py"}
+    assert all("resolves outside the root" in u["detail"] for u in failed.values())
+    assert not [u for u in r.unrestored if u["reason"] == "discarded"]
+    for name, text in (("b.py", "b0"), ("c.py", "c0")):
+        assert stat.S_IMODE((outside / name).stat().st_mode) == 0o600
+        assert (outside / name).read_text() == text
+
+
 def test_discarded_content(root: Path) -> None:
     s = store(root)
     s.capture("cp1", ["*"])
@@ -249,9 +286,16 @@ def test_private_modes(root: Path) -> None:
     assert stat.S_IMODE((root / "secret.cfg").stat().st_mode) == 0o600
 
 
-def test_ids_cannot_name_paths(root: Path) -> None:
+@pytest.mark.parametrize(
+    "checkpoint_id", ["../x", "cp/1", "cp 1", "cp1\n", "", "x" * 129]
+)
+def test_ids_cannot_name_paths(root: Path, checkpoint_id: str) -> None:
+    """An id outside the grammar is refused before it names a file: a final
+    newline included, which a `$` anchor lets through."""
+    s = store(root)
     with pytest.raises(ValueError):
-        store(root).capture("../x", ["*"])
+        s.capture(checkpoint_id, ["*"])
+    assert not list((root.parent / "store").rglob("*.json"))
 
 
 def test_never_within_reach(tmp_path: Path) -> None:

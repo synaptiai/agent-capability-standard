@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import filecmp
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ import pytest
 
 from grounded_agency.grounding import GroundingPolicy
 from grounded_agency.state.checkpoint_tracker import CheckpointTracker
-from grounded_agency.state.memory import MemoryStore
+from grounded_agency.state.memory import MemoryContext, MemoryStore
 from grounded_agency.state.snapshots import FileSnapshotStore
 from grounded_agency.workflows import Host, WorkflowEngine, WorkflowRunner
 from grounded_agency.workflows.idempotency import IdempotencyLog
@@ -174,9 +175,56 @@ def test_checkpoint_rollback_persist_and_recall_steps(
     rb = result.outputs["rb"]
     assert rb["restored"] is True and rb["verification"]["match"] is True
     assert rb["changes_reverted"] == [{"item": "app.cfg", "operation": "modify"}]
-    # The run scope ended with the run (§4.5).
+    # The persist after the checkpoint is still there: no checkpoint
+    # captures the memory store, so the rollback lists it (§4.4.1).
+    assert rb["not_covered"] == [
+        {"item": "memory run:change", "reason": "outside_scope"}
+    ]
+    # The run scope ended with the run (§4.5), and the host forgot its persists.
     assert host.memory is not None
     assert host.memory.end_scope("run", "r1") == 0
+    assert host._persisted_since(0, "r1") == []
+
+
+def test_the_executors_rollback_lists_this_runs_persists(tmp_path: Path) -> None:
+    """A persist the run made after the checkpoint is a change no rollback
+    restores (the memory file is kept out of every checkpoint): it is
+    listed once, as outside_scope; a persist before the checkpoint, and
+    another run's, are not."""
+    root, host = files_host(tmp_path, memory=MemoryStore(tmp_path / "memory.json"))
+
+    def persist(run_id: str, key: str) -> None:
+        answer = host.invoke_capability(
+            {
+                "run_id": run_id,
+                "step": 1,
+                "frame": ["w"],
+                "capability": "persist",
+                "inputs": {"key": key, "data": {"n": 1}, "scope": "session"},
+            }
+        )
+        assert answer["kind"] == "Output", answer
+
+    persist("r1", "before")
+    time.sleep(0.002)
+    checkpoint = host.create_checkpoint({"step": 0, "frame": ["w"]})["checkpoint_id"]
+    persist("r1", "after")
+    persist("r1", "after")
+    persist("r2", "other")
+    (root / "app.cfg").write_text("v1")
+    answer = host.rollback({"checkpoint_id": checkpoint, "run_id": "r1"})
+    assert answer["kind"] == "RolledBack"
+    assert (root / "app.cfg").read_text() == "v0"
+    assert answer["not_covered"] == [
+        {"item": "memory session:after", "reason": "outside_scope"}
+    ]
+    # The entry itself is untouched by the rollback.
+    assert host.memory is not None
+    recalled = host.memory.recall(
+        {"key": "after", "scope": "session"},
+        MemoryContext(run="r1", session=host.session_id),
+    )
+    assert recalled["found"] is True
 
 
 def test_the_executors_rollback_lists_this_runs_transmissions(tmp_path: Path) -> None:

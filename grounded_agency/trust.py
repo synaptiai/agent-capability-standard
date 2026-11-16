@@ -71,7 +71,7 @@ is a source key."""
 
 # `decay_model.half_life` is an ISO 8601 duration of whole days; the
 # canonical-schema validator accepts no other form.
-_ISO_DAYS = re.compile(r"P(\d+)D")
+_ISO_DAYS = re.compile(r"P([0-9]+)D")
 
 
 def _is_number(value: Any) -> bool:

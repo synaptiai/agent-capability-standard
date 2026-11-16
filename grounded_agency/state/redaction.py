@@ -19,16 +19,19 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
 - an assignment to a credential name (``password``, ``passwd``, ``pwd``,
   ``secret``, ``token``, ``api_key``, ``access_key``, ``client_secret``,
   ``private_key``, alone or at the end of a longer name such as
-  ``DB_PASSWORD`` or ``access_token``) with ``=`` or ``:``, of 4 or more
-  characters, in assignments, query strings and JSON text;
+  ``DB_PASSWORD``, ``PGPASSWORD`` or ``access_token``) with ``=`` or ``:``,
+  of 4 or more characters, in assignments, query strings and JSON text;
 - PEM ``PRIVATE KEY`` blocks (the body);
 - AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys and JWTs.
 
-In a JSON value, a string member whose name ends in a credential name (as
-above, in any case and after any prefix: ``accessToken``, ``dbPassword``,
+In a JSON value, a member whose name ends in a credential name (as above,
+in any case and after any prefix: ``accessToken``, ``dbPassword``,
 ``x-api-key``) or in ``authorization`` or ``cookie`` (the structured form of
 the ``Authorization``, ``Proxy-Authorization``, ``Cookie`` and
-``Set-Cookie`` headers) is redacted whole. A member name is redacted as any
+``Set-Cookie`` headers) is a secret member: its value is redacted whole
+when it is a string of 4 or more characters or a number, and when it is a
+list or an object, each such string and number in it is (a header's list
+of values, a ``{"value": ...}`` wrapper). Booleans and null are kept. A member name is redacted as any
 string is: a name that holds a secret is replaced by its redacted text, and
 a name that would then repeat one already in its object gets `` (2)``,
 `` (3)``, ... so that no member is lost. The assignment rule is
@@ -47,8 +50,12 @@ is a placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``,
 8 or more token characters mixing letters and digits, and an assignment to a
 credential name whose value is quoted with no whitespace and 8 or more
 characters, or unquoted, 12 or more characters, mixing letters and digits.
-The plugin's ``hooks/secret_scan.sh`` applies the same rule, and
-``tests/conformance/secrets/credentials.json`` pins it for the three.
+The plugin's ``hooks/secret_scan.sh`` applies the same rule to text, and
+``tests/conformance/secrets/credentials.json`` pins it for the three. In
+JSON data, which is not prose, it also recognises what redaction does in a
+secret member (above), unless the string is a placeholder: data holding a
+secret the host recognises is refused (§6.7), so ``{"password": "correct
+horse battery staple"}`` is refused as it would be redacted.
 """
 
 from __future__ import annotations
@@ -117,9 +124,10 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         rf"\b[A-Za-z][A-Za-z0-9+.-]*://[^{_NOT_WS}/:@]+:(?P<secret>[^{_NOT_WS}/@]+)@",
         re.ASCII,
     ),
-    # Assignments to a credential name, in code, query strings and JSON text.
+    # Assignments to a credential name, alone or at the end of a longer name
+    # (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text.
     re.compile(
-        rf"(?<![A-Za-z0-9])(?:{_NAMES})[\"']?{_WS}*[=:]{_WS}*[\"']?"
+        rf"(?:{_NAMES})[\"']?{_WS}*[=:]{_WS}*[\"']?"
         rf"(?P<secret>[^{_NOT_WS}\"'&,;]{{4,}})",
         re.ASCII | re.IGNORECASE,
     ),
@@ -211,6 +219,30 @@ _SECRET_MEMBER = re.compile(
 )
 
 
+def _secret_scalar(value: Any) -> bool:
+    """Whether a value in a secret member is redacted: a string of 4 or more
+    characters other than the marker, or a number (not a boolean)."""
+    if isinstance(value, str):
+        return len(value) >= MIN_SECRET_LENGTH and value != MARKER
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _secret_member_value(value: Any, secret: bool = False) -> bool:
+    """Whether JSON data holds, in a secret member, a value redaction
+    replaces that is not a placeholder (``holds_credential``'s rule for
+    data)."""
+    if secret and _secret_scalar(value):
+        return not (isinstance(value, str) and _PLACEHOLDER.fullmatch(value))
+    if isinstance(value, dict):
+        return any(
+            _secret_member_value(v, secret or bool(_SECRET_MEMBER.fullmatch(str(k))))
+            for k, v in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(_secret_member_value(v, secret) for v in value)
+    return False
+
+
 def _pointer_token(key: str) -> str:
     """One JSON Pointer reference token (RFC 6901)."""
     return key.replace("~", "~0").replace("/", "~1")
@@ -277,6 +309,9 @@ class Redactor:
             return True
         if isinstance(value, str):
             return False
+        # Data, not prose: what redaction replaces in a secret member.
+        if _secret_member_value(value):
+            return True
         # A member whose name is a credential name: its JSON text is an
         # assignment.
         try:
@@ -300,7 +335,11 @@ class Redactor:
             return anchor
         return dataclasses.replace(anchor, ref=ref, excerpt=excerpt, metadata=metadata)
 
-    def _walk(self, value: Any, pointer: str, pointers: list[str]) -> Any:
+    def _walk(
+        self, value: Any, pointer: str, pointers: list[str], secret: bool = False
+    ) -> Any:
+        """``secret``: ``value`` is within a secret member, whose strings and
+        numbers are redacted whole."""
         if isinstance(value, str):
             text, changed = self.redact_text(value)
             if changed:
@@ -320,22 +359,24 @@ class Redactor:
                 here = f"{pointer}/{_pointer_token(name)}"
                 if renamed:
                     pointers.append(here)
-                if (
-                    isinstance(v, str)
-                    and len(v) >= MIN_SECRET_LENGTH
-                    and v != MARKER
-                    and _SECRET_MEMBER.fullmatch(str(k))
-                ):
+                member_secret = secret or bool(_SECRET_MEMBER.fullmatch(str(k)))
+                if member_secret and _secret_scalar(v):
                     out[name] = MARKER
                     if not renamed:
                         pointers.append(here)
                 else:
-                    out[name] = self._walk(v, here, pointers)
+                    out[name] = self._walk(v, here, pointers, member_secret)
             return out
         if isinstance(value, (list, tuple)):
-            return [
-                self._walk(v, f"{pointer}/{i}", pointers) for i, v in enumerate(value)
-            ]
+            items = []
+            for i, v in enumerate(value):
+                here = f"{pointer}/{i}"
+                if secret and _secret_scalar(v):
+                    items.append(MARKER)
+                    pointers.append(here)
+                else:
+                    items.append(self._walk(v, here, pointers, secret))
+            return items
         return value
 
 

@@ -190,7 +190,7 @@ A tool registered with no capability is unbound too, and is reported as W617 (`U
 
 Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability. A command whose effect the mapper does not know gets Bash's worst case, `mutate` and `send` (`execute` and `send` for an interpreter): it may transmit anywhere, so a destination policy refuses it (below).
 
-The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line gets the worst case when it redirects output to anything but `/dev/null`, opens a subshell or a here-document, has an unbalanced quote, or expands what the mapper cannot see: a `$` outside single quotes, a brace expansion, backticks, `eval` or `source`. An allow-listed command is read-only only with the arguments it reads with: `sort`, `uniq`, `date`, `hostname` and `file` take a listed set of options and operands (`sort -o` or `--compress-program`, `uniq IN OUT`, `date -s`, `hostname NAME`, `file -C` and any abbreviation of a writing option, `sort --o=x`, write); `find -delete` or `-exec`, `git ... --output` (or an abbreviation), `git branch NAME`, `git remote set-url` and `less -o` write; and an unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`, `hostname`, `file`, `git`, `less` or `more` command may become an option (quote a pattern: `git log -- '*.py'`). `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
+The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line gets the worst case when it redirects output to anything but `/dev/null` (or input from `/dev/tcp/`), opens a subshell or a here-document, has an unbalanced quote, or expands what the mapper cannot see: a `$` outside single quotes, a brace expansion, backticks, `eval` or `source`. An allow-listed command is read-only only with the arguments it reads with: `sort`, `uniq`, `date`, `hostname` and `file` take a listed set of options and operands (`sort -o` or `--compress-program`, `uniq IN OUT`, `date -s`, `hostname NAME`, `file -C` and any abbreviation of a writing option, `sort --o=x`, write); `find -delete` or `-exec`, `git ... --output` (or an abbreviation), `git branch NAME`, `git remote` other than `-v` or `get-url`, and `less -o` write or ask another host, as do `pip list`, `pip show` and `npm list` with an option off their lists; and an unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`, `hostname`, `file`, `git`, `less` or `more` command may become an option (quote a pattern: `git log -- '*.py'`). `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
 
 **`git stash`**, only when the line is exactly one simple command with no option that writes: `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, and `git stash pop <commit>` and `git stash apply <commit>` are `rollback` when `<commit>` is the full id of a commit a checkpoint of this adapter's scope recorded (the commit `git stash create` printed, kept as the checkpoint's `metadata["commit"]`). git applies any merge commit as if it were a stash, so any other revision, an abbreviated id, an option, a bare `pop` or `apply` (which read `refs/stash`, where `git stash create` writes nothing), any other form (`store`, `push`, `drop`, none) and `git -C dir stash ...` are a gated mutation.
 
@@ -206,6 +206,7 @@ The command line is read with the shell's quoting rules and split into simple co
 | `rm`, `mv`, `chmod`, `git stash push` | mutate | high | Yes | Yes |
 | `curl -X POST`, `ssh` | send | high | Yes | Yes |
 | `git push`, `npm publish`, `docker push`, `kubectl apply` | mutate, send | high | Yes | Yes |
+| Asking another host: `npm view`, `kubectl get`, `git remote show`, `pip list --outdated`, `npm list --registry=…`, `cat < /dev/tcp/…` | mutate, send | high | Yes | Yes |
 | `python -c`, `node -e`, `python script.py` | execute, send | high | Yes | Yes |
 | any other command (`sed`, `awk`, `env`, `curl URL`, `gh`, `make`) | mutate, send | high | Yes | Yes |
 
@@ -683,8 +684,10 @@ own secrets with `GroundedAgentConfig(secret_values=(...))`: they reach the
 store's and the coordination audit log's redactor, and never
 `recorded_by`. The adapter also redacts its call records and refusals, and
 refuses a `persist` or `audit` call whose data holds a credential-shaped
-value (F504, §5.18.10): memory is read back as fact, so it is refused, not
-redacted.
+value, or a value in a member named for a credential (`password`,
+`accessToken`, `Authorization`) that redaction would replace, unless it is a
+placeholder such as `${DB_PASSWORD}` (F504, §5.18.10): memory is read back
+as fact, so it is refused, not redacted.
 
 ### Grounding Policies
 

@@ -143,7 +143,13 @@ _OPERATOR_CHARS = frozenset("();<>|&")
 
 # Commands that only read, unless given an option that writes (_writes).
 # Not here, because they run another command or can write a file whatever
-# their options: env, xargs, sed, awk, tee and the interpreters.
+# their options: env, xargs, sed, awk, tee and the interpreters. Nor commands
+# that reach another host whatever their options, which a destination policy
+# must see (STANDARD 1.2.0 section 5.18.3): `npm view` (a registry, which a
+# project's .npmrc or --registry names) and `kubectl get|describe|logs` (a
+# server, which --server or --kubeconfig names, and a kubeconfig's `exec`
+# runs a command). `git remote`, `pip list`, `pip show` and `npm list` read
+# local state only with the arguments _writes allows.
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "ls",
@@ -187,15 +193,11 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "git branch",
         "git remote",
         "npm list",
-        "npm view",
         "pip list",
         "pip show",
         "docker ps",
         "docker images",
         "docker logs",
-        "kubectl get",
-        "kubectl describe",
-        "kubectl logs",
     }
 )
 
@@ -219,7 +221,10 @@ _GIT_STASH_CLASSES: dict[str, str] = {
 }
 # A commit id as `git stash create` prints it (SHA-1 or SHA-256). A full id
 # names an object, never a ref, so no branch or tag can stand in for it.
-_COMMIT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_COMMIT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+# Bash opens a connection for an input redirection from one of these paths
+# (`cat < /dev/tcp/host/80`): a request to another host.
+_NETWORK_PATHS = ("/dev/tcp/", "/dev/udp/")
 
 # find actions that delete, run a command or write a file.
 _FIND_WRITES: frozenset[str] = frozenset(
@@ -353,6 +358,37 @@ _ARGUMENT_WRITERS: frozenset[str] = frozenset(
 # are masked: bash replaces it with words this reading never sees.
 _BRACE_EXPANSION = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
 
+# The options with which these subcommands read local state only. Any other
+# option (an index, a registry, a proxy, a configuration file) can make them
+# ask another host, and takes the worst case: `pip list --outdated` and pip's
+# own version check ask the configured index, and npm's update check asks
+# the registry. pip and npm take any unambiguous prefix of a long option.
+_SUBCOMMAND_OPTIONS: dict[tuple[str, str], _Options] = {
+    ("pip", "list"): _Options(
+        flags="levq",
+        long=frozenset(
+            "local user editable exclude-editable include-editable not-required "
+            "verbose quiet disable-pip-version-check no-color isolated".split()
+        ),
+        long_with_arg=frozenset({"format", "exclude", "path"}),
+    ),
+    ("pip", "show"): _Options(
+        flags="fvq",
+        long=frozenset(
+            "files verbose quiet disable-pip-version-check no-color isolated".split()
+        ),
+    ),
+    ("npm", "list"): _Options(
+        flags="alpg",
+        with_arg="w",
+        long=frozenset(
+            "all json long parseable global link package-lock-only unicode "
+            "workspaces include-workspace-root".split()
+        ),
+        long_with_arg=frozenset({"depth", "omit", "include", "workspace"}),
+    ),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class _Command:
@@ -443,6 +479,9 @@ def _simple_commands(command: str) -> list[_Command] | None:
         if token in _SEPARATORS:
             commands.append(_Command([]))
         elif token == "<":
+            target = tokens[i + 1] if i + 1 < len(tokens) else ""
+            if target.startswith(_NETWORK_PATHS):
+                return None  # a connection to another host, not a file
             i += 1  # reads a file: skip its name
         elif token in _OUTPUT_REDIRECTS:
             target = tokens[i + 1] if i + 1 < len(tokens) else ""
@@ -537,9 +576,12 @@ def _writes(words: list[str], globbed: bool = False) -> bool:
         if sub == "branch":
             return not all(a in _GIT_BRANCH_LISTING for a in rest)
         if sub == "remote":
-            return not (
-                rest in ([], ["-v"], ["--verbose"]) or rest[0] in ("show", "get-url")
-            )
+            # `git remote show NAME|URL` asks that remote: a request to
+            # another host. `get-url` only reads the configuration.
+            return not (rest in ([], ["-v"], ["--verbose"]) or rest[0] == "get-url")
+    if name in ("pip", "npm") and args:
+        options = _SUBCOMMAND_OPTIONS.get((name, args[0]))
+        return options is None or _option_writes(args[1:], options)
     return False
 
 
@@ -1333,7 +1375,7 @@ class ToolCapabilityMapper:
         """Whether `git stash pop|apply <commit>` (``words``) names, as its
         only argument, the full id of a commit the layer recorded as a
         checkpoint. A lookup that fails is a no."""
-        if len(words) != 4 or not _COMMIT_ID.match(words[3]):
+        if len(words) != 4 or not _COMMIT_ID.fullmatch(words[3]):
             return False
         recorded = self.is_checkpoint_commit
         if recorded is None:

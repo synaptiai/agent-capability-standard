@@ -36,15 +36,20 @@ hooks:
         - type: command
           command: |
             # Block a request to localhost or a loopback, private, link-local or
-            # unspecified address (a host-specific destination rule, STANDARD 1.2.0
-            # §5.18.10, F504). Claude Code passes the tool call as JSON on stdin;
-            # exit 2 blocks the call and the reason on stderr is shown to Claude. A
-            # call that cannot be read is blocked (R407).
+            # unspecified address written as its host (a host-specific destination
+            # rule, STANDARD 1.2.0 §5.18.10, F504), and a request whose destination
+            # this check cannot read: one whose text the shell expands or escapes,
+            # or whose connection an option or a proxy setting redirects. A name
+            # that resolves to an internal address, and a redirect a server answers
+            # with, are not checked here. Claude Code passes the tool call as JSON
+            # on stdin; exit 2 blocks the call and the reason on stderr is shown to
+            # Claude. A call that cannot be read is blocked (R407).
             CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             printf '%s\n' "$CMD" | grep -qiE "(curl|wget|http)" || exit 0
-            # IPv4 in dotted-decimal form: localhost, 0/8, 127/8 (loopback), 10/8,
-            # 172.16/12, 192.168/16 and 169.254/16 (link-local, cloud metadata).
-            ADDR='(localhost|0(\.[0-9]+){3}|127(\.[0-9]+){3}|10(\.[0-9]+){3}|192\.168(\.[0-9]+){2}|172\.(1[6-9]|2[0-9]|3[01])(\.[0-9]+){2}|169\.254(\.[0-9]+){2})'
+            # IPv4 in dotted-decimal form: 0/8, 127/8 (loopback), 10/8, 172.16/12,
+            # 192.168/16 and 169.254/16 (link-local, cloud metadata); also as the
+            # first labels of a name (127.0.0.1.nip.io resolves to 127.0.0.1).
+            ADDR4='(0(\.[0-9]+){3}|127(\.[0-9]+){3}|10(\.[0-9]+){3}|192\.168(\.[0-9]+){2}|172\.(1[6-9]|2[0-9]|3[01])(\.[0-9]+){2}|169\.254(\.[0-9]+){2})(\.[a-z0-9-]+)*'
             # IPv6 literals: ::1, ::, ::ffff:<IPv4> (mapped), fc00::/7 (unique
             # local), fe80::/10 (link-local).
             ADDR6='\[(::|0*:|f[cd][0-9a-f]*:|fe[89ab][0-9a-f]*:)[^]]*\]'
@@ -52,14 +57,34 @@ hooks:
             # parts (127.1, 2130706433), or a part in hex (0x7f) or octal (0177).
             NUMERIC='((0x[0-9a-f]*|[0-9]+)\.){0,2}(0x[0-9a-f]*|[0-9]+)|([0-9a-fx.]*\.)?(0x[0-9a-f]*|0[0-9]+)(\.[0-9a-fx]*)*'
             # The address must stand where a host does: after a URL scheme, a user@,
-            # a space or a quote, and before a port, a path, a query or the end.
-            # Host names are case-insensitive, so the match is too.
-            AFTER="([:/?#[:space:]\"']|\$)"
-            if printf '%s\n' "$CMD" | grep -qiE "(^|[[:space:]\"']|://|@)(${ADDR}|${ADDR6})${AFTER}" \
+            # a space or a quote, and before a port, a path, a query or the end; a
+            # host may end in the root's dot (localhost., 127.0.0.1.). Host names
+            # are case-insensitive, so the match is too.
+            AFTER="\.?([:/?#[:space:]\"']|\$)"
+            if printf '%s\n' "$CMD" | grep -qiE "(^|[[:space:]\"']|://|@)(localhost|${ADDR4}|${ADDR6})${AFTER}" \
               || printf '%s\n' "$CMD" | grep -qiE "(://|@)(${NUMERIC})${AFTER}"; then
-              echo "F504 CONSTRAINT_VIOLATED: the send skill does not send to localhost or a loopback, private, link-local or unspecified address, in any form (internal network access)" >&2
+              echo "F504 CONSTRAINT_VIOLATED: the send skill does not send to localhost or a loopback, private, link-local or unspecified address written as the host (internal network access)" >&2
               exit 2
             fi
+            # Options and settings that send the request elsewhere than its URL's
+            # host: curl's --resolve, --connect-to, a Unix socket, a proxy (-x in any
+            # short option cluster), a DNS server, options read from a file (-K);
+            # wget's -e/--execute (wgetrc commands, a proxy among them) and URLs read
+            # from a file (-i); a *_proxy variable set on the line.
+            if printf '%s\n' "$CMD" | grep -qiE -- "(^|[[:space:]\"'])(--resolve|--connect-to|--unix-socket|--abstract-unix-socket|--proxy[a-z0-9-]*|--preproxy|--socks[a-z0-9-]*|--doh-url|--dns-servers|--config|--execute|--input-file)([=[:space:]\"']|\$)" \
+              || { printf '%s\n' "$CMD" | grep -qi curl && printf '%s\n' "$CMD" | grep -qE -- "(^|[[:space:]\"'])-[A-Za-z0-9]*[xK]"; } \
+              || { printf '%s\n' "$CMD" | grep -qi wget && printf '%s\n' "$CMD" | grep -qE -- "(^|[[:space:]\"'])-[A-Za-z0-9]*[ei]"; } \
+              || printf '%s\n' "$CMD" | grep -qiE -- "(^|[[:space:]\"';&|])[a-z_]*proxy="; then
+              echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose connection an option or a proxy setting redirects (--resolve, --connect-to, a socket, a proxy, a DNS server, options or URLs read from a file): the address it reaches is not the one this check reads" >&2
+              exit 2
+            fi
+            # Text the shell expands or escapes can be any host or option
+            case "$CMD" in
+              *'$'* | *'`'* | *'\'* | *'<('* | *'>('*)
+                echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose text the shell expands or escapes (\$, a backtick, \\, <( or >()): the host it reaches is not the one this check reads. Write the command on one line with literal values; curl reads a credential header from a file with -H @file" >&2
+                exit 2
+                ;;
+            esac
             exit 0
 ---
 

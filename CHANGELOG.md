@@ -129,7 +129,11 @@ here and marked so.
   - `Skill` is always `invoke`, so `Skill(checkpoint)` takes no checkpoint:
     the call that saves the state does. `create_checkpoint_recorder`
     (`create_skill_tracker` stays as an alias) records one when a call
-    classified `checkpoint`, such as `git stash create`, succeeds.
+    classified `checkpoint`, such as `git stash create`, succeeds. It takes
+    none for a `git stash create` run in the background, one whose output
+    is neither a commit id nor empty, or one that printed nothing while the
+    tracked files or the index of the repository it ran in (the call's
+    `cwd`) differ from `HEAD`: `HEAD` would not restore that change.
   - Bash: `git stash create` is `checkpoint`, `git stash list|show` only
     read, and a line of several commands takes the strictest flags and every
     prerequisite of all of them. `git stash pop|apply <commit>` is `rollback`
@@ -151,6 +155,16 @@ here and marked so.
     option outside the listed read-only set or an abbreviation of one that
     writes (`sort --o=x`, `git diff --outp=x`), or `date` with an operand
     other than `+FORMAT`.
+  - Bash: commands that ask another host are no longer read-only: `npm
+    view`, `kubectl get`, `describe` and `logs` (a registry or a cluster
+    that the configuration or an option names; a kubeconfig's `exec` runs a
+    command), `git remote show`, and `pip list`, `pip show` or `npm list`
+    with an option outside a listed set (an index, a registry, a proxy,
+    `--outdated`); nor is a line with an input redirection from `/dev/tcp/`
+    or `/dev/udp/`. Each gets Bash's worst case, `mutate` and `send`: it
+    needs a checkpoint and approval, and a destination policy refuses it
+    (F504). `git remote`, `git remote -v` and `git remote get-url` stay
+    read-only.
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
@@ -166,9 +180,17 @@ here and marked so.
 - Python SDK, tool calls: a `persist` call (`TodoWrite`, a tool bound to
   `persist`) or an `audit` call whose data holds a credential-shaped value
   (a key or token format, a credential assignment, a URL's userinfo
-  password, an `Authorization` header's value) is refused with F504
-  (Standard 1.2.0 §5.18.10, §6.7), also when the host's permission flow
-  changes the call's arguments.
+  password, an `Authorization` header's value), or, in JSON data, a value
+  in a member named for a credential (`password`, `accessToken`,
+  `Authorization`, ...) that redaction replaces and that is not a
+  placeholder (`{"password": "correct horse battery staple"}`), is refused
+  with F504 (Standard 1.2.0 §5.18.10, §6.7), also when the host's
+  permission flow changes the call's arguments. The TypeScript package's
+  `holdsCredential` and the memory stores apply the same rule. Redaction
+  replaces, in such a member, a number and every string and number of a
+  list or an object (a header's list of values), and an assignment to a
+  longer name ending in a credential name with no separator
+  (`PGPASSWORD=...`).
 - Python SDK, the output contract of a tool's result (Standard 1.2.0
   §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
   `create_grounded_mcp_server` serves or one of another server bound with
@@ -278,6 +300,9 @@ here and marked so.
   `GroundedAgentConfig(profiles=...)` needs `approval="ask"`.
 - Python SDK: `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s
   (Changed), so `str()` of a member is its value.
+- Python SDK (Fixed): an evidence metadata key with a final newline is
+  refused like any other key outside `[a-zA-Z_][a-zA-Z0-9_]*`, and a trust
+  model's `half_life` written with digits other than ASCII ones is refused.
 
 **Across components (validator, executor, Python SDK, binding).**
 
@@ -352,7 +377,9 @@ here and marked so.
   - Python SDK: `WorkflowRunner.run/advance/drive(save=...)` refuses a host
     whose `IdempotencyLog` is in memory (give it a path); a rollback by
     `Host` lists a send whose outcome is unknown as transmitted
-    (`detail: "outcome unknown"`); with a
+    (`detail: "outcome unknown"`), and each entry the run's `persist` steps
+    wrote since the checkpoint as `outside_scope` (`memory <scope>:<key>`),
+    since no checkpoint captures the memory store; with a
     `MemoryStore`, a run's `run` scope ends with the run, in the host's
     store and in `WorkflowRunner(memory=...)`'s (so `cancel` without a host
     ends it too). `MemoryStore` stores and returns copies of values, and
@@ -489,7 +516,13 @@ here and marked so.
   reads a Bash command's words as bash does (quotes removed), so a quoted or
   abbreviated option that writes (`"--output=x"`, `--outp`, `file --compi`)
   and a `git` or `file` command with an unquoted `*`, `?` or `[` need a
-  marker. The audit, checkpoint, persist, rollback, send and transform
+  marker. A Bash line over 4096 bytes is not read (a gated `mutate`), so
+  the reading never runs past Claude Code's hook time limit, and the hooks
+  read a command as bytes whatever the locale. `posttooluse_take_checkpoint.sh`
+  writes no marker for a call run in the background or in another
+  repository than the project's (the payload's `cwd`), for output that is
+  neither a commit id nor empty, or for empty output while the project's
+  tracked files or index differ from `HEAD`. The audit, checkpoint, persist, rollback, send and transform
   skills no longer append their own lines to `.audit/*-operations.log`: the
   plugin's log hook records every call in `.claude/audit.log`, as action
   records, and reports a line it cannot write. The send skill's command hook also refuses the
@@ -523,6 +556,21 @@ here and marked so.
   `.claude/audit/records.jsonl` that holds one (F504); both hooks' refusals
   now open with the Standard's
   code and name (`F504 CONSTRAINT_VIOLATED:`, `R407 SAFETY_CHECK_FAILED:`).
+  The `persist` skill's hooks now see `Write` and `MultiEdit` as well as
+  `Edit` (each `edits[].new_string` is scanned), and check the file a
+  path reaches with symbolic links followed (a link they cannot follow is
+  refused), under `/private/etc` and `~/.claude` too. The `audit` skill
+  appends a record only as `printf '%s\n' '<json>' >> <the records file>`,
+  one JSON object on one line, scanned with its JSON escapes resolved; it
+  refuses any other command naming the file with `$` (but in
+  `${CLAUDE_PROJECT_DIR:-.}`), a backtick, `\`, `<` or `>`, which could
+  build a record when the command runs. The `send` skill's hook refuses,
+  in a `curl`, `wget` or `http` command, text the shell expands or escapes
+  (`$`, a backtick, `\`, `<(`, `>(`) and an option or setting that
+  redirects the connection (`--resolve`, `--connect-to`, a Unix socket, a
+  proxy or `*_proxy=` variable, `--doh-url`, curl's `-K`, wget's `-e` and
+  `-i`), and reads `localhost.` and `127.0.0.1.nip.io` as internal; put a
+  credential header in a file (`curl -H @file`).
 - Skills: the `send`, `rollback`, `checkpoint`, `persist` and `transform`
   skills' prompt hooks no longer judge approval, checkpoints, rate limits or
   expiry (Changed), and the persist, rollback and send skills' command hooks

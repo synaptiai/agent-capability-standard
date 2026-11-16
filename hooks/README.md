@@ -147,8 +147,9 @@ table equal to it):
 - `Bash`: a command with any of `` ; & | < > $ ` ( ) { } \ `` or a line
   break may be more than one command or expand something, so it is `mutate`.
   Otherwise it is read as one simple command, its words split and dequoted
-  as bash does (`"--output=x"` is `--output=x`; an unbalanced quote is
-  `mutate`): an option that writes is `mutate` (for `git`, `--output` or an
+  as bash does (`"--output=x"` is `--output=x`; an unbalanced quote, or a
+  line over 4096 bytes, is `mutate`, so the reading takes bounded time and
+  never runs into the hook's time limit): an option that writes is `mutate` (for `git`, `--output` or an
   abbreviation of it such as `--outp`; for `file`, `-C` or `-p` in any short
   option, or `--compile` or `--preserve-date` or an abbreviation such as
   `--compi`), and so is a `git` or `file` command with a word holding an
@@ -197,6 +198,11 @@ Then:
 The marker is written by `posttooluse_take_checkpoint.sh` after a `git stash
 create` that succeeded (the call that saves the state takes the checkpoint,
 §5.18.6), and by `CheckpointTracker(marker_dir=".claude")` in the Python SDK.
+The hook writes none for a call run in the background (its output is not
+yet the command's), for one whose `cwd` is in another repository than the
+project's, or for output that is neither a commit id nor empty; empty
+output (nothing to save) gives `HEAD` as the restore point only when the
+project's tracked files and index are `HEAD`'s.
 Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds when that is an integer from 1
 to 1800, else 1800 (the Standard caps a checkpoint's maximum age at 30
 minutes). Before it writes the marker, the hook enters the commit in

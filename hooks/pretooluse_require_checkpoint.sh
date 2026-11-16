@@ -24,7 +24,8 @@
 #     be more than one simple command or expand something: mutate. Otherwise
 #     its words are read as bash reads them, as exactly one simple command
 #     (split_words: '...' and "..." quote, and the quotes are removed, so
-#     "--output=x" is --output=x; an unbalanced quote is mutate):
+#     "--output=x" is --output=x; an unbalanced quote, or a line over 4096
+#     bytes, is mutate):
 #       - an option that writes: for git, --output or any abbreviation of it
 #         (--out, --outp, ...); for file, -C in any short option cluster, -p,
 #         or --compile or --preserve-date or any abbreviation of them
@@ -71,6 +72,9 @@
 # SEC-001: Prevents stale checkpoint.ok bypass
 # SEC-006: Uses CLAUDE_PROJECT_DIR for absolute path resolution
 set -euo pipefail
+# Read the command as bytes, alike in every locale: a multibyte locale makes
+# each character read in split_words several times slower.
+export LC_ALL=C
 
 block() {
   echo "$1" >&2
@@ -108,12 +112,16 @@ GIT_STASH_CLASSES=(create=checkpoint list=observe show=observe pop=rollback appl
 # nothing in it expands but a pathname pattern) into WORDS, as bash splits
 # and dequotes it: '...' and "..." quote literally, and unquoted blanks
 # separate words. GLOBBED is 1 when a word holds an unquoted *, ? or [,
-# which bash replaces with file names. Fails on an unbalanced quote.
+# which bash replaces with file names. Fails on an unbalanced quote, and on
+# a line over 4096 bytes: each character read costs time that grows with the
+# line, so a long one could hold the hook past Claude Code's 60-second limit,
+# after which the call runs unchecked.
 # posttooluse_take_checkpoint.sh holds the same function; a test keeps them so.
 split_words() {
   local line="$1" ch quote="" word="" inword=0 i
   WORDS=()
   GLOBBED=0
+  if [ "${#line}" -gt 4096 ]; then return 1; fi
   for ((i = 0; i < ${#line}; i++)); do
     ch="${line:i:1}"
     if [ -n "$quote" ]; then

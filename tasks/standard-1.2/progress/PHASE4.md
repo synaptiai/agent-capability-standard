@@ -1053,3 +1053,276 @@ already covers; the run is 1795px again.
   the pages this round changed (/spec/1.2.0/, /spec/, /spec/changelog/,
   /rfcs/0006/, /guides/running-workflows/, /community/release-notes/): no
   violations, no sideways scroll.
+
+## Round 2 — python-sdk, hooks-skills
+
+Twelve issues: 7 in python-sdk, 5 in hooks-skills. All twelve were real;
+issue 9 was a missing test only (the guard is right), so it gains the test
+and no code change. Two neighbours of the reported defects were found while
+verifying and are fixed with them: the SDK's checkpoint recorder had the
+take hook's clean-marker defect (item 8), and `pip list`, `pip show` and
+`npm list` share the classifier's index and registry hole (item 2). Each
+code fix has a test that fails on the code before it (checked by restoring
+the committed file and running the test), named below.
+
+The items are by area; the reviewers' issue numbers are, item = issue: 1 =
+1, 2 = 3, 3 = 8, 4 = 9, 5 = 10, 6 = 11, 7 = 12, 8 = 2, 9 = 4, 10 = 5,
+11 = 6, 12 = 7.
+
+### python-sdk
+
+1. **The Host's rollback never listed what `persist` wrote since the
+   checkpoint (low).** Real, reproduced with `change_and_restore` and a
+   `MemoryStore`: the rollback output had no `not_covered`, while the run
+   scope's `change` entry, written after the checkpoint, stayed. Root
+   cause: `_restore` built `not_covered` from the run's transmissions only,
+   though `Host.__init__` keeps the memory file out of every checkpoint.
+   Fix (`runner.py`): the Host records each `persist` it performs, per run
+   (`_note_persist`: the time, and the scope and key of the output), and
+   `_restore` adds `_persisted_since(since, run_id)`, each entry once, as
+   `{"item": "memory <scope>:<key>", "reason": "outside_scope"}` with the
+   key redacted (§6.7); the executor's `Rollback` (`Host.rollback`) goes
+   through `_restore` too. Only the run's own persists are listed, as
+   §4.4.1 asks for transmissions: a query of the store by time was not
+   taken, since entries do not record their writer and it would list other
+   sessions' writes. The runner drops a run's list when the run ends,
+   where it ends the run's `run` scope (not for a `deferred` end), so the
+   list is bounded. Tests (`tests/test_runner_effects.py`):
+   `test_checkpoint_rollback_persist_and_recall_steps` now asserts the item
+   and that the list is gone after the run, and
+   `test_the_executors_rollback_lists_this_runs_persists` (a persist before
+   the checkpoint, the same key twice after it, another run's; the entry is
+   still recalled); both failed before. RUNNING_WORKFLOWS and the CHANGELOG
+   say it.
+2. **SDK Bash classifier: commands that reach another host or run code were
+   `observe` (high).** Real, reproduced: `git remote show <url>`, `npm view
+   … --registry=<url>`, `cat < /dev/tcp/…` and `kubectl get … --server=…`
+   were `observe` (no checkpoint, no approval, no destination check), and
+   `kubectl get pods --kubeconfig ./ci/kubeconfig.yaml` `observe`/low.
+   Root cause: `_READ_ONLY_COMMANDS` held commands that ask a registry or a
+   cluster whatever their options (`npm view`, `kubectl get|describe|logs`;
+   a project's `.npmrc` names the registry, and a kubeconfig's `exec` runs
+   a command), `_writes` let `git remote show` (which asks the remote)
+   through, and `_simple_commands` skipped the target of `<` unread. The
+   same hole, found while verifying: `pip list` (an index-group command:
+   `--outdated` and pip's version check ask the configured index), `pip
+   show` and `npm list` (npm's update check asks the registry) with an
+   index, registry or proxy option. Fix (`mapper.py`): `npm view` and the
+   three `kubectl` entries are off the list; `git remote` is read-only only
+   bare, with `-v`/`--verbose` or as `get-url`; `pip list`, `pip show` and
+   `npm list` are read-only only with options from `_SUBCOMMAND_OPTIONS`
+   (prefix rules as getopt's: any other option, an abbreviation such as
+   `npm list --reg` included, writes); an input redirection from
+   `/dev/tcp/` or `/dev/udp/` makes the line the worst case. Each now has
+   `mutate` and `send`: gated, and refused (F504) under a destination
+   policy. Tests (`tests/test_bash_classification.py`):
+   `test_a_command_that_reaches_another_host_gets_the_worst_case` (19),
+   `test_local_forms_of_those_commands_stay_read_only` (11) and
+   `test_a_destination_policy_refuses_them` (the reviewer's four, through
+   the adapter with `approval="ask"` and `allowed_destinations`: F504); 23
+   failed before. The plugin hook's read-only list never held these (its
+   subset test is unchanged). The SDK guide and CHANGELOG Upgrading say it.
+   `analysis/05-api-reference.md` is not changed: an internal snapshot the
+   site excludes, which already lists commands earlier rounds removed.
+3. **Redaction and the persist refusal disagreed on credential members
+   (low).** Real, reproduced: `holds_credential` was false for
+   `{"password": "correct horse battery staple"}`, `{"credentials":
+   {"password": "Summer2026 Rocks"}}` and `{"Authorization": "Basic
+   dXNlcjpwYXNz"}`, which `redact` replaces; `redact` left a list, an
+   object or a number under a credential member, and `export
+   PGPASSWORD=hunter2secret`, unchanged (the last one `holds_credential`
+   refused: a refusal wider than redaction). Fix, Python
+   (`state/redaction.py`) and TypeScript (`packages/acs-core/src/redact.ts`)
+   alike: a member whose name `_SECRET_MEMBER` matches is a secret member,
+   whose value is replaced when it is a string of 4 or more characters or
+   a number, and whose list or object value has each such string and
+   number replaced (booleans and null kept); the assignment pattern no
+   longer needs a non-alphanumeric before the credential name, so
+   `PGPASSWORD=` is redacted as the refusal reads it; `holds_credential`
+   also refuses JSON data in which the member rule replaces a value that is
+   not a placeholder (`_PLACEHOLDER`: `${DB_PASSWORD}`, `<token>`, `****`).
+   Prose stays as it was: the rule reads JSON members, not text, so
+   `token: rotate monthly` passes and the shell scan's text vectors are
+   unchanged. Vectors: `tests/conformance/secrets/redact.json` +6 and
+   `credentials.json` +7 (the reviewer's cases, a list, a number, a
+   placeholder and flags kept); 10 failed in each language before. The
+   module docs, SECURITY.md §1.5, the SDK guide and the CHANGELOG say it.
+4. **Snapshot restore: the first symlinked-parent check was untested
+   (medium).** Real: with the check at `snapshots.py` changed to `if False
+   and ...`, the snapshot, runner and adapter suites passed. The guard is
+   right; the test was missing. Test (`tests/test_snapshots.py`):
+   `test_a_symlinked_parent_over_matching_files_fails_and_changes_nothing`,
+   with the captured object kept and with it removed: the files the link
+   reaches have the captured content and mode 0600 against the captured
+   0644; each item is `failed` with "resolves outside the root" (not
+   `discarded`), `restored` is false, and the outside files keep their mode
+   and content. Both variants fail with the guard disabled.
+5. **`AppliedProfiles.refuse_unapplied` kept three unreachable rules
+   (low).** Real: the only caller (`adapter.py`) passes `("checkpoints",)`.
+   Fix (`profiles.py`): `_RULES` holds the checkpoint rule only, `_sets`
+   loses the other branches, and the message drops "yet"; the docstring
+   says every applier applies the other rules. The method is new on this
+   branch, so no Upgrading entry. Tests (`tests/test_profiles.py`):
+   `test_only_the_checkpoint_rule_can_go_unapplied` (three names, KeyError)
+   and `test_strict_mode_off_refuses_a_raised_checkpoint` (no " yet"); 5
+   failed before.
+6. **`parse_record` accepted version strings TypeScript refuses (low).**
+   Real, reproduced: `"2.2.0\n"`, fullwidth and Arabic-Indic digits for
+   `ontology`, and `"1.2\n"` for `standard`, passed step 1. `load_bindings`
+   refused all four (S303) through `check_cited_versions` before and after,
+   so a binding fixture would not tell the two apart; a unit case does.
+   Fix (`bindings.py`): `_VERSION` is `[0-9]+\.[0-9]+(\.[0-9]+)?` with
+   `fullmatch`, and `_POINTER` uses `fullmatch` (no change in what it
+   accepts). Test: `TestParseRecord::test_a_version_is_ascii_digits_and_nothing_after`
+   (4), all failed before.
+7. **`FileSnapshotStore` accepted a checkpoint id with a final newline
+   (low).** Real, reproduced (`capture('cp1\n', ...)` wrote a manifest
+   named with the newline). Fix: `_ID` with `fullmatch`; the same
+   `.match`-with-`$` reading is fixed in `mapper._COMMIT_ID` and
+   `skill_tracker._COMMIT` (both `fullmatch`), and a sweep of the package
+   found two more of the class, fixed: `evidence_store._VALID_KEY_PATTERN`
+   (SEC-008's metadata key check let `tool_name\n` through; in 1.1.0 too,
+   so a CHANGELOG Fixed line) and `trust._ISO_DAYS` (`\d` read `P١٠D` as
+   ten days). Tests: `test_ids_cannot_name_paths` (six ids, `cp1\n`
+   included, and no manifest written), `test_rejects_a_final_newline`,
+   `test_half_life_days_refuses_other_forms` (+2); each failed before.
+
+### hooks-skills
+
+8. **The checkpoint hooks' word splitter was quadratic: a long command ran
+   past the 60 s limit and then ran unchecked (high).** Real, measured on
+   this tree with `rm -rf` and one long word: 4, 10 and 20 KB took 0.08,
+   0.33 and 1.06 s in the C locale and 0.27, 1.53 and 5.62 s under
+   `C.UTF-8`. Root cause: `split_words` reads `${line:i:1}`, whose cost
+   grows with the line. Fix (both checkpoint hooks, the shared function
+   kept equal): `split_words` fails on a line over 4096 bytes (the
+   pre-tool-use hook then classifies it `mutate`, the take hook writes no
+   marker), and both hooks `export LC_ALL=C`, so a command is read as
+   bytes whatever the locale. The per-character reader stays, bounded: a
+   `read -ra` split would not dequote. After: a 100 KB line is refused
+   (F501) in 0.035 s under `C.UTF-8`, and a 4 KB line of 2,040 words is
+   read in 0.11 s. Tests: `TestShellHookSection518::test_a_line_over_4096_bytes_needs_the_marker`
+   (one 100 KB word, and 4.2 KB of words, under `C.UTF-8`, within 10 s),
+   `test_a_line_of_4096_bytes_is_still_read`, and in
+   `tests/test_hook_checkpoint_lifecycle.py`
+   `test_a_long_line_is_read_in_bounded_time_and_writes_no_marker`; the
+   three long-line tests failed before (the hook ran past the test's
+   timeout). hooks/README, SECURITY.md §5.1 and the CHANGELOG say it.
+9. **The take hook wrote a "clean, restore to HEAD" marker over a dirty
+   tree (medium).** Real: any stdout that is not a commit id (a background
+   call's empty output included) wrote `commit: "HEAD"` unchecked. Fix
+   (`posttooluse_take_checkpoint.sh`): no marker for a call with
+   `run_in_background`; when the payload carries `cwd`, it must be in the
+   project's repository (the same `git rev-parse --show-toplevel`; a
+   subdirectory is fine); empty output writes the clean marker only if
+   `git diff --quiet HEAD --` and `git diff --cached --quiet HEAD --` hold
+   in the project; other output writes none. The SDK's
+   `create_checkpoint_recorder` had the same defect and takes the same
+   rules (the call's `cwd`, no separate project there). Tests: in the
+   lifecycle file `test_empty_output_over_a_changed_tree_writes_no_marker`
+   (worktree, index), `test_empty_output_outside_a_repository_writes_no_marker`,
+   `test_a_call_run_in_the_background_writes_no_marker` (two),
+   `test_a_stash_of_another_repository_writes_no_marker` (two; the same
+   call from a subdirectory of the project writes it) and
+   `test_output_that_is_not_a_commit_writes_no_marker`: 9 failed before.
+   The clean-tree tests now run in a clean repository (they ran in a
+   directory that is no repository, which the old hook accepted). SDK:
+   `TestHooks::test_checkpoint_recorder_takes_no_unverified_checkpoint`
+   (six; failed before), and `test_checkpoint_recorder_hook`'s clean case
+   runs in a clean repository with the call's `cwd`. hooks/README,
+   SECURITY.md §5.2 and the CHANGELOG (plugin and SDK) say it.
+10. **The persist skill's hooks ran on `Edit` only; the path checks missed
+    links (medium).** Real: Claude Code matches a plain matcher exactly.
+    Fix (`skills/persist/SKILL.md`): matcher `Edit|Write|MultiEdit` (prompt
+    and command hooks), each `edits[].new_string` scanned; the target is
+    resolved in POSIX sh (the deepest existing directory through `cd -P`,
+    a final link followed with `readlink`, at most 8; a link it cannot
+    follow is refused F504), and every check reads the path as written and
+    the file it reaches; `/private/etc` and `~/.claude` (and the home's
+    physical path) are refused too. Tests (`tests/test_skill_hooks.py`,
+    each under sh and bash): `test_the_hooks_see_every_tool_that_writes_content`,
+    `test_blocks_macos_etc_and_claude_settings`,
+    `test_follows_symbolic_links_to_the_file_written` (a linked directory
+    to `~/.ssh`, a relative link out, a linked file, two links in a row),
+    `test_blocks_a_link_it_cannot_follow`, `test_allows_a_link_inside_the_project`
+    and `test_blocks_a_credential_a_write_or_multiedit_carries`; with the
+    old body under the new matcher 16 failed, and the matcher test failed
+    for Write and MultiEdit. SECURITY.md §5.4 writes the matcher
+    `Edit\|Write\|MultiEdit` (GFM's escape in a table cell), and
+    `test_security_md_maps_every_hook` splits a row at unescaped pipes only.
+11. **The audit skill's hook read only the literal command, so a record
+    built at run time passed (medium).** Real, reproduced (the three probes
+    exit 0), and a fourth: a JSON escape (`ghp_…`) inside a literal
+    record passes a scan of the command's text. The reviewer's blanket rule
+    would refuse the skill's own append, which holds `$` (in
+    `${CLAUDE_PROJECT_DIR:-.}`) and `\n`. Fix (`skills/audit/SKILL.md`):
+    any command naming `records.jsonl` is read (was `audit/records.jsonl`,
+    so `cd .claude/audit && … >> records.jsonl` passed). The one append
+    form, `printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`
+    (or the relative path) on one line, is parsed: `<json>` must be exactly
+    one JSON object (`jq -s`), and is scanned as written and decoded (its
+    `tojson` and each string). Any other command naming the file may not
+    hold `$` (but in `${CLAUDE_PROJECT_DIR:-.}`), a backtick, `\`, `<` or
+    `>`. A helper script was not taken: the plugin cannot rely on the
+    Python package, and the hook would still have to refuse other writers.
+    What remains is stated in SECURITY.md: a command that copies a file in
+    with no redirect (`cp`, `tee` from a pipe) is not read here; the
+    pre-tool-use hook gates it as a `mutate` a person approves. The skill's
+    Safety Constraints say to compute the HMAC and a moved-aside file's
+    time first and write them literally. Tests: `test_blocks_a_record_built_when_the_command_runs`
+    (7), `test_reads_the_record_with_its_json_escapes_resolved`,
+    `test_blocks_a_record_that_is_not_one_object` (3),
+    `test_allows_the_skills_own_example_line` and three more allowed forms
+    (`tail … | jq`, `mv` aside, an escaped quote); 22 failed before.
+12. **The send skill's internal-address block was easy to bypass (medium).**
+    Real, reproduced: every probe exited 0, and with curl 8.5.0 here
+    `--resolve example.com:18777:127.0.0.1`, `--connect-to
+    example.com:80:127.0.0.1:18778` and `http://$(printf local)host:18777/`
+    each reached a 127.0.0.1 listener (200). Fix (`skills/send/SKILL.md`):
+    in a `curl`, `wget` or `http` command, an option or setting that
+    redirects the connection is refused (`--resolve`, `--connect-to`,
+    `--unix-socket`, `--abstract-unix-socket`, `--proxy*`, `--preproxy`,
+    `--socks*`, `--doh-url`, `--dns-servers`, `--config`, `--execute`,
+    `--input-file`, curl's `-x` and `-K` and wget's `-e` and `-i` in any
+    short cluster, a `*_proxy=` variable), and so is text the shell expands
+    or escapes (`$`, a backtick, `\`, `<(`, `>(`); a host may end in the
+    root's dot (`localhost.`, `127.0.0.1.`), and an internal dotted address
+    starting a name (`127.0.0.1.nip.io`) counts as it. The message no
+    longer says "in any form": a name that resolves inward and a redirect a
+    server answers with (`-L`) are not checked, as the hook's comment and
+    SECURITY.md say. Short options are read per tool (`-i` is curl's
+    `--include`), so `curl -i` and `tar -xzf http-lib.tgz` pass; a
+    credential header goes in a file (`curl -H @file`). Tests:
+    `test_blocks_internal_destination` (+4), `test_blocks_a_redirected_connection`
+    (11), `test_blocks_text_the_shell_expands_or_escapes` (6),
+    `test_allows_other_commands` (+5); 42 failed before (21 commands, two
+    shells).
+
+### Checks after round 2 (python-sdk, hooks-skills)
+
+- Python: ruff check and format (CI's lists); mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; the generators' `--check`
+  (`sync_skill_schemas` 107, `gen_runtime_fixtures` 368,
+  `gen_call_fixtures` 35 and 30, `gen_trigger_vectors`,
+  `gen_standard_agents_binding`, `gen_capability_json_schemas`);
+  `pytest tests/` (4707 passed, 18 skipped; the hook, skill and doc tests
+  rerun after the last text edits, 675); `benchmarks/tests/` (69);
+  `scripts/run_conformance.py`. The reviewers' probes rerun against this
+  tree: the checkpoint hook refuses a 100 KB line in 0.035 s under
+  `C.UTF-8`; every send, audit and persist probe exits 2; the classifier
+  probes are `mutate` and `send`, and F504 under the policy.
+- Rust (`core/`, 1.99.1): `cargo test --locked` (no Rust source changed).
+- TypeScript: `packages/acs-core` build, check, test (1877: the 13 new
+  secrets vectors); the binding check and test (191, 2 skipped).
+- Site: `npm run check`, `npm test` (1173), `npm run build` (check-dist),
+  and with CI's headless shell `scripts/check-runs.mjs` and
+  `scripts/check-axe.mjs` over the eight pages this round changed
+  (/guides/hooks/, /spec/security/, /guides/claude-agent-sdk/,
+  /guides/running-workflows/, /community/release-notes/ and the persist,
+  audit and send capability pages): no enforced run over 1800px, no axe
+  violations, no sideways scroll. The first sweep measured the SDK
+  guide's Bash section at 1885px and the audit page's procedure at 2138px:
+  the classifier's new cases moved into the section's table (a figure), and
+  the audit hook's rules from step 6 to the skill's Safety Constraints;
+  now 1798px and 1745px.

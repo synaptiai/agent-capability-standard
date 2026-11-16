@@ -130,6 +130,8 @@ class Host:
         self.checkpoint_tracker = checkpoint_tracker
         self.memory = memory
         self.idempotency = idempotency
+        # Each run's persists this host performed: (at ms, scope, key).
+        self._persisted: dict[str, list[tuple[int, str, str]]] = {}
         self.session_id = session_id or uuid.uuid4().hex
         self.user = user
         self.project = project
@@ -184,11 +186,45 @@ class Host:
             out.append(reported)
         return out
 
+    def _note_persist(self, run_id: str, output: Mapping[str, Any]) -> None:
+        """Remember a persist this host performed for the run: the memory
+        store is out of every checkpoint's reach, so a rollback lists what
+        it wrote since (§4.4.1)."""
+        scope, key = output.get("scope"), output.get("key")
+        if not isinstance(scope, str) or not isinstance(key, str):
+            return
+        persisted = getattr(self, "_persisted", None)
+        if persisted is None:
+            persisted = self._persisted = {}
+        persisted.setdefault(run_id, []).append(
+            (time.time_ns() // 1_000_000, scope, key)
+        )
+
+    def _persisted_since(self, since_ms: int, run_id: str) -> list[dict[str, str]]:
+        """This run's persists since ``since_ms``, each entry once: what a
+        rollback lists as ``not_covered`` (``outside_scope``, §4.4.1), since
+        no checkpoint captures the memory store and no rollback restores
+        it. Keys are redacted (§6.7)."""
+        seen: set[tuple[str, str]] = set()
+        out = []
+        for at, scope, key in getattr(self, "_persisted", {}).get(run_id, ()):
+            if at < since_ms or (scope, key) in seen:
+                continue
+            seen.add((scope, key))
+            item = f"memory {scope}:{DEFAULT_REDACTOR.redact_text(key)[0]}"
+            out.append({"item": item, "reason": "outside_scope"})
+        return out
+
+    def _forget_run(self, run_id: str) -> None:
+        """The run ended: its persists are no longer listed."""
+        getattr(self, "_persisted", {}).pop(run_id, None)
+
     def _restore(
         self, checkpoint_id: str, scope: Sequence[str] | None, run_id: str
     ) -> tuple[Any, list[dict[str, str]]] | None:
         """Restore a checkpoint with the tracker's snapshot store: the
-        restore and the run's transmissions since the checkpoint, or None
+        restore and what the run changed since the checkpoint that no
+        checkpoint covers (its transmissions and its persists), or None
         when the tracker never took it."""
         tracker = self.checkpoint_tracker
         assert tracker is not None
@@ -197,7 +233,10 @@ class Host:
             return None
         restored = tracker.restore_checkpoint(checkpoint_id, scope)
         since = int(checkpoint.created_at.timestamp() * 1000)
-        return restored, self._transmitted_since(since, run_id)
+        return restored, [
+            *self._transmitted_since(since, run_id),
+            *self._persisted_since(since, run_id),
+        ]
 
     def _snapshots(self) -> bool:
         tracker = getattr(self, "checkpoint_tracker", None)
@@ -278,7 +317,10 @@ class Host:
                 inputs = {**inputs, "key": _persist_key(str(key))}
             try:
                 operation = memory.persist if capability == "persist" else memory.recall
-                return {"kind": "Output", "value": operation(inputs, ctx)}
+                value = operation(inputs, ctx)
+                if capability == "persist":
+                    self._note_persist(str(action["run_id"]), value)
+                return {"kind": "Output", "value": value}
             except MemoryError as e:
                 return {
                     "kind": "Error",
@@ -303,9 +345,9 @@ class Host:
         """Restore ``action["checkpoint_id"]``; return ``{"kind":
         "RolledBack"}`` only when everything the checkpoint captured is
         restored, optionally with ``not_covered`` (changes it never covered,
-        such as this run's transmissions, §4.4.1), or an ``Error`` (the run
-        fails with F503). The default restores with a tracker that keeps
-        content."""
+        such as this run's transmissions and persists, §4.4.1), or an
+        ``Error`` (the run fails with F503). The default restores with a
+        tracker that keeps content."""
         if not self._snapshots():
             raise NotImplementedError("no rollback")
         done = self._restore(action["checkpoint_id"], None, action["run_id"])
@@ -1140,6 +1182,8 @@ class WorkflowRunner:
             for i, memory in enumerate(stores):
                 if memory is not None and all(memory is not s for s in stores[:i]):
                     memory.end_scope("run", run.run_id)
+            if isinstance(host, Host):
+                host._forget_run(run.run_id)
         result = self._result(run, action)
         if self._archive is not None:
             try:

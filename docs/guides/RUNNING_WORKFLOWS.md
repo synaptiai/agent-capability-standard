@@ -655,9 +655,12 @@ host = Host(
   file included), `changes_reverted` and `verification` (over everything
   the checkpoint captured, so a partial rollback matches only when the
   rest is unchanged); the executor's `Rollback` gets
-  `RolledBack` only on a full restore, with this run's transmissions as
-  `not_covered` (a send whose outcome is unknown among them, with `detail`
-  `outcome unknown`), and F503 otherwise.
+  `RolledBack` only on a full restore, and F503 otherwise. Both list in
+  `not_covered` what this run changed since the checkpoint that no
+  rollback restores: its transmissions (`transmitted`; a send whose
+  outcome is unknown among them, with `detail` `outcome unknown`) and the
+  entries its `persist` steps wrote (`outside_scope`, as `memory
+  <scope>:<key>`), since no checkpoint captures the memory store.
 - **Memory** ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
   `MemoryStore` keeps entries by scope (`run` is the `run_id`, which every
   nested run shares; `session` is the host's `session_id`; `user` and

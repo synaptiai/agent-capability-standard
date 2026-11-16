@@ -84,14 +84,14 @@ _NOT_WITH_CONTROL: tuple[str, ...] = (
     "approval",
     "destination",
 )
-_VERSION = re.compile(r"^\d+\.\d+(\.\d+)?$")
+_VERSION = re.compile(r"[0-9]+\.[0-9]+(\.[0-9]+)?")
 # The largest integer magnitude with an exact I-JSON form (section 5.14).
 _INT_LIMIT = 2**53
 # The longest `approval.expires`, in milliseconds: the largest whole number
 # every implementation holds exactly (2^53 - 1, JavaScript's
 # Number.MAX_SAFE_INTEGER), so that the TypeScript loader reads the same.
 _MAX_EXPIRES_MS = 2**53 - 1
-_POINTER = re.compile(r"^(/([^~/]|~[01])*)*$")
+_POINTER = re.compile(r"(/([^~/]|~[01])*)*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,7 +258,7 @@ def parse_record(
                 missing("ontology")
             continue
         value = record[member]
-        if not isinstance(value, str) or not _VERSION.match(value):
+        if not isinstance(value, str) or not _VERSION.fullmatch(value):
             wrong(
                 member,
                 f"'{member}' must be a version MAJOR.MINOR[.PATCH], not {value!r}",
@@ -266,7 +266,7 @@ def parse_record(
 
     if "destination" in record:
         value = record["destination"]
-        if not isinstance(value, str) or not _POINTER.match(value):
+        if not isinstance(value, str) or not _POINTER.fullmatch(value):
             wrong("destination", "'destination' must be an RFC 6901 JSON pointer")
 
     if "capability" in record:

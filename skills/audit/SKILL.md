@@ -17,13 +17,53 @@ hooks:
             # to .claude/audit/records.jsonl holds no credential (§6.7). Claude Code
             # passes the tool call as JSON on stdin, read once here; exit 2 blocks
             # the call and the reason on stderr is shown to Claude. A call that
-            # cannot be read is blocked. Other commands are other hooks' business.
+            # cannot be read is blocked. Commands that do not name the records
+            # file are other hooks' business.
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             case "$CMD" in
-              *audit/records.jsonl*) ;;
+              *records.jsonl*) ;;
               *) exit 0 ;;
             esac
+            # A record is appended in one form only, whose text is the record:
+            #   printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"
+            # (or >> .claude/audit/records.jsonl), on one line, <json> one JSON
+            # object with no single quote. Any other command that names the file
+            # may not build or redirect text: a $ (but in ${CLAUDE_PROJECT_DIR:-.}),
+            # a backtick, a backslash, < or > would let the record's text be
+            # computed when the command runs, where no scan of the command sees it.
+            FORM="printf '%s\n' '"
+            RECORD=""
+            case "$CMD" in
+              "$FORM"*)
+                REST="${CMD#"$FORM"}"
+                RECORD="${REST%%\'*}"
+                case "${REST#*\'}" in
+                  ' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"' | ' >> .claude/audit/records.jsonl') ;;
+                  *) RECORD="" ;;
+                esac
+                ;;
+            esac
+            NL='
+            '
+            case "$RECORD" in *"$NL"*) RECORD="" ;; esac
+            if [ -n "$RECORD" ]; then
+              # The record as a reader decodes it: its JSON text with escapes
+              # resolved (\u0067 is g) and each of its strings
+              DECODED="$(printf '%s' "$RECORD" | jq -rs 'if length == 1 and (.[0] | type) == "object" then .[0] | (tojson, (.. | strings)) else error("not one object") end' 2>/dev/null)" || {
+                echo "F504 CONSTRAINT_VIOLATED: the audit record is not one JSON object; append it as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" >&2
+                exit 2
+              }
+            else
+              LITERAL="$(printf '%s' "$CMD" | sed 's/[$]{CLAUDE_PROJECT_DIR:-[.]}//g')"
+              case "$LITERAL" in
+                *'$'* | *'`'* | *'\'* | *'<'* | *'>'*)
+                  echo "F504 CONSTRAINT_VIOLATED: a command that names the audit records file may not expand, escape or redirect text, so a record built when it runs is never written unchecked; append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)" >&2
+                  exit 2
+                  ;;
+              esac
+              DECODED=""
+            fi
             # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
             # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
             SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
@@ -45,7 +85,7 @@ hooks:
                 sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
             }
             # END secret-scan
-            if secret_in "$CMD"; then
+            if secret_in "$CMD" || secret_in "$DECODED"; then
               echo "F504 CONSTRAINT_VIOLATED: the audit record holds what looks like a credential; cite it by reference or digest (STANDARD 1.2.0 §6.7)" >&2
               exit 2
             fi
@@ -118,7 +158,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 6) **Write the record (append-only)**: Persist the audit record before returning
    - Build one compact JSON line, the output's `record` (Field Definitions): an action record of this skill's own (STANDARD v1.2 §6.4). Redact credentials and PII first, and never copy a member of `event` to the line's top level: an event shaped as a record stays under `details.event`
-   - Append it with Bash as a literal (`printf '%s\n' '<json>' >>`, no intermediate file, so the skill's hook sees it) to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`, after `mkdir -p` of its directory: the project's `.claude/`, which the plugin's hooks use; refuse a symlink, and never rewrite, truncate or reorder lines
+   - Append it with Bash as a literal, exactly `printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` on one line (no intermediate file: the skill's hook reads it there), after `mkdir -p` of its directory, the project's `.claude/`; refuse a symlink, and never rewrite, truncate or reorder lines
    - Do not write to `.claude/audit.log`: the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself: cite earlier lines (the calls being audited) as evidence, not these
    - The plugin's PreToolUse hook treats this append as a `mutate` call, since a `>>` redirect writes a file: it is blocked without a valid checkpoint (F501), uses that checkpoint up, and asks for approval (F502). If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
 
@@ -356,7 +396,8 @@ Apply the following verification patterns:
 - Include failed actions, not just successes
 - Redact sensitive information (credentials, PII) from audit output
 - Store audit records append-only: only ever append to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`; never edit or delete earlier lines, and never write to the hook-maintained `.claude/audit.log`
-- No credential in a record (STANDARD v1.2 §6.7): the skill's PreToolUse command hook blocks an append whose line holds what looks like one (`F504 CONSTRAINT_VIOLATED:`, §5.18.10); rewrite the line to cite the value by reference or digest, then append again
+- No credential in a record (STANDARD v1.2 §6.7): the skill's PreToolUse command hook blocks an append whose line holds what looks like one, read with its JSON escapes resolved (`F504 CONSTRAINT_VIOLATED:`, §5.18.10); rewrite the line to cite the value by reference or digest, then append again
+- A literal record (§5.18.10): the hook reads the record only in step 6's form, one JSON object on one line with no single quote, and refuses (F504) any other command naming the records file that holds `$` (but in `${CLAUDE_PROJECT_DIR:-.}`), a backtick, `\`, `<` or `>`, which could build its text when the command runs. Compute the HMAC, and a moved-aside file's time, in commands of their own, then write them literally
 
 ## Composition Patterns
 

@@ -488,8 +488,20 @@ def test_strict_mode_off_refuses_a_raised_checkpoint(
         with pytest.raises(ProfileError, match="strict_mode=False") as caught:
             adapter(False)
         assert "checkpoint_policy" in str(caught.value)
+        assert " yet" not in str(caught.value)
     else:
         assert adapter(False).profiles
+
+
+@pytest.mark.parametrize("rule", ["grounding", "minimum_confidence", "destinations"])
+def test_only_the_checkpoint_rule_can_go_unapplied(rule: str) -> None:
+    """Every applier applies a profile's grounding, minimum confidence and
+    destinations, so refuse_unapplied knows only the checkpoint rule."""
+    profiles = AppliedProfiles(
+        [{"domain": "d", "version": "1.0.0", "allowed_destinations": ["mailto:*"]}]
+    )
+    with pytest.raises(KeyError):
+        profiles.refuse_unapplied((rule,), "x")
 
 
 @pytest.mark.parametrize(

@@ -87,7 +87,7 @@ DEFAULT_EXCLUDE: tuple[str, ...] = (".git/**", *SECRET_PATHS)
 
 MECHANISM = "file_copy"
 
-_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 _GLOB = re.compile(r"[*?\[]")
 _MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 
@@ -303,7 +303,7 @@ class FileSnapshotStore:
     # ------------------------------------------------------------------
 
     def _check_id(self, checkpoint_id: str) -> None:
-        if not isinstance(checkpoint_id, str) or not _ID.match(checkpoint_id):
+        if not isinstance(checkpoint_id, str) or not _ID.fullmatch(checkpoint_id):
             raise ValueError(
                 f"checkpoint id {checkpoint_id!r} must match {_ID.pattern} "
                 "(a manifest file name)"

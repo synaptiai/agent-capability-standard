@@ -59,6 +59,10 @@ class TestMetadataKeyDenylist:
     def test_rejects_long_key(self) -> None:
         assert _validate_metadata_key("a" * 65) is False
 
+    def test_rejects_a_final_newline(self) -> None:
+        # A `$` anchor would let it through: the whole key must match.
+        assert _validate_metadata_key("tool_name\n") is False
+
     def test_allows_normal_key(self) -> None:
         assert _validate_metadata_key("tool_name") is True
 

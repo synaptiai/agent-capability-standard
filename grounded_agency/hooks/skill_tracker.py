@@ -11,8 +11,12 @@ command it leads to is the call that takes the checkpoint.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
+import shutil
+import subprocess
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +29,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger("grounded_agency.hooks.skill_tracker")
 
 # A commit id as `git stash create` prints it (SHA-1 or SHA-256).
-_COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _tree_is_head(cwd: Any) -> bool:
+    """Whether the tracked files and the index of the repository at ``cwd``
+    (the call's working directory; this process's when it is not given) are
+    ``HEAD``'s: only then does ``HEAD`` restore the state a `git stash create`
+    that printed nothing saw. Any failure answers no."""
+    git = shutil.which("git")
+    if git is None:
+        return False
+    where = cwd if isinstance(cwd, str) and cwd else os.getcwd()
+    for args in (
+        ["diff", "--quiet", "HEAD", "--"],
+        ["diff", "--cached", "--quiet", "HEAD", "--"],
+    ):
+        try:
+            done = subprocess.run(
+                [git, "-C", where, *args],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except OSError, subprocess.SubprocessError:
+            return False
+        if done.returncode != 0:
+            return False
+    return True
 
 
 def _is_error(tool_response: Any) -> bool:
@@ -62,10 +93,15 @@ def create_checkpoint_recorder(
     capabilities include ``checkpoint``, whose response is not an error and
     whose output ``refuses_output`` does not refuse, a checkpoint is created in the tracker with ``metadata["source"]`` the
     tool. For ``git stash create``, ``metadata["commit"]`` is the commit it
-    printed, or ``"HEAD"`` when it printed nothing (a clean tree, whose
-    restore point is ``HEAD``), and ``metadata["untracked_not_captured"]``
-    is true; its scope is ``["*"]``. A bound ``checkpoint`` tool's scope is
-    its input's ``scope``, else its response's, else ``["*"]``.
+    printed, or ``"HEAD"`` when it printed nothing and the tracked files and
+    index of the repository it ran in (the call's ``cwd``) are ``HEAD``'s
+    (a clean tree, whose restore point is ``HEAD``), and
+    ``metadata["untracked_not_captured"]`` is true; its scope is ``["*"]``.
+    It takes none for a call run in the background (its output is not yet
+    the command's), for empty output over a changed tree (``HEAD`` would not
+    restore it), or for output that is neither. A bound ``checkpoint``
+    tool's scope is its input's ``scope``, else its response's, else
+    ``["*"]``.
 
     Args:
         checkpoint_tracker: CheckpointTracker to update
@@ -108,9 +144,19 @@ def create_checkpoint_recorder(
 
             metadata: dict[str, Any] = {"source": tool_name}
             if tool_name == "Bash":
+                if tool_input.get("run_in_background") is True:
+                    return {}
                 printed = _stdout(tool_response)
+                if _COMMIT.fullmatch(printed):
+                    commit = printed
+                elif not printed and await asyncio.to_thread(
+                    _tree_is_head, input_data.get("cwd")
+                ):
+                    commit = "HEAD"
+                else:
+                    return {}
                 metadata["source"] = "git stash create"
-                metadata["commit"] = printed if _COMMIT.match(printed) else "HEAD"
+                metadata["commit"] = commit
                 metadata["untracked_not_captured"] = True
                 scope: Any = ["*"]
             else:
