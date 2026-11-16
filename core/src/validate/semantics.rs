@@ -1,11 +1,12 @@
 //! Ontology edges, safety flags, unknown fields and spec versions
 //! (design-114 §4–§5).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
 use super::{Context, Report, StepLoc};
+use crate::catalogs::Namespace;
 use crate::diag::{Code, Diagnostic};
 use crate::expr::ast::{CmpOp, Expr};
 use crate::ontology::{Capability, EdgeType, Risk};
@@ -24,6 +25,7 @@ pub(crate) const WORKFLOW_KEYS: &[&str] = &[
     "workflow_extensions",
     "triggers",
     "grounding",
+    "agents",
     "domain",
     "profile",
     "risk_propagation",
@@ -162,7 +164,7 @@ pub(crate) fn unknown_fields(
         if let Some(k) = closest(key, known) {
             d = d.suggest(format!("did you mean '{k}'?"));
         }
-        report.push(at(d).at("field", path));
+        report.push(at(d).at_field_key(field, key));
     }
 }
 
@@ -202,7 +204,7 @@ pub(crate) fn unknown_inputs(
             Some(k) => d.suggest(format!("did you mean '{k}'?")),
             None => d.suggest(format!("its inputs are: {}", known.join(", "))),
         };
-        report.push(d.at("field", format!("input_bindings.{key}")));
+        report.push(d.at_field_key("input_bindings", key));
     }
 }
 
@@ -248,7 +250,7 @@ pub(crate) fn missing_inputs(
                         cap.id
                     ),
                 )
-                .at("field", format!("input_bindings.{key}")),
+                .at_field_key("input_bindings", key),
             );
         }
     }
@@ -349,50 +351,225 @@ pub(crate) fn effective(
     }
 }
 
-/// W602: a step declares a safety flag less safe than the ontology. The
-/// declaration has no effect — the ontology value applies — but it misleads.
+/// W602: a step declares a safety flag less safe than the ontology, or, for
+/// a delegate step of a workflow that declares `agents`, than its target
+/// maxima (§5.15.2). The declaration has no effect — the stricter value
+/// applies — but it misleads.
 pub(crate) fn flag_downgrades(
     loc: &StepLoc<'_>,
     step: &Map<String, Value>,
     cap: &Capability,
+    maxima: Option<Flags>,
     report: &mut Report,
 ) {
+    let maxima = maxima.unwrap_or(Flags::NONE);
     let declared_false = |k: &str| step.get(k) == Some(&Value::Bool(false));
-    let mut downgrade = |flag: &str, consequence: &str| {
-        report.push(
-            loc.diag(
-                Code::SafetyFlagDowngrade,
-                format!(
-                    "ontology declares {flag}=true but step downgrades to {flag}=false; the ontology value applies ({consequence})"
-                ),
+    let mut downgrade = |flag: &str, from_ontology: bool, consequence: &str| {
+        let message = if from_ontology {
+            format!(
+                "ontology declares {flag}=true but step downgrades to {flag}=false; the ontology value applies ({consequence})"
             )
-            .at("field", flag),
+        } else {
+            format!(
+                "the target agents' manifests declare {flag}=true but step downgrades to {flag}=false; the manifests' value applies ({consequence})"
+            )
+        };
+        report.push(
+            loc.diag(Code::SafetyFlagDowngrade, message)
+                .at("field", flag),
         );
     };
-    if cap.mutation && !cap.mutation_overridable && declared_false("mutation") {
-        downgrade("mutation", "the step is treated as a mutation");
+    if declared_false("mutation") {
+        if cap.mutation && !cap.mutation_overridable {
+            downgrade("mutation", true, "the step is treated as a mutation");
+        } else if maxima.mutation {
+            downgrade("mutation", false, "the step is treated as a mutation");
+        }
     }
-    if cap.requires_checkpoint && declared_false("requires_checkpoint") {
-        downgrade("requires_checkpoint", "F501 if no checkpoint precedes it");
+    if declared_false("requires_checkpoint")
+        && (cap.requires_checkpoint || maxima.requires_checkpoint)
+    {
+        downgrade(
+            "requires_checkpoint",
+            cap.requires_checkpoint,
+            "F501 if no checkpoint precedes it",
+        );
     }
-    if cap.requires_approval && declared_false("requires_approval") {
-        downgrade("requires_approval", "F502 if it is not approved");
+    if declared_false("requires_approval") && (cap.requires_approval || maxima.requires_approval) {
+        downgrade(
+            "requires_approval",
+            cap.requires_approval,
+            "F502 if it is not approved",
+        );
     }
+    let floor = cap.risk.max(maxima.risk);
     if let Some(declared) = step
         .get("risk")
         .and_then(Value::as_str)
         .and_then(Risk::parse)
-        && declared < cap.risk
+        && declared < floor
     {
-        let message = format!(
-            "ontology declares risk={} but step declares risk={}; the ontology value applies",
-            cap.risk.as_str(),
-            declared.as_str()
-        );
+        let message = if cap.risk >= maxima.risk {
+            format!(
+                "ontology declares risk={} but step declares risk={}; the ontology value applies",
+                cap.risk.as_str(),
+                declared.as_str()
+            )
+        } else {
+            format!(
+                "the target agents' manifests declare risk={} but step declares risk={}; the manifests' value applies",
+                maxima.risk.as_str(),
+                declared.as_str()
+            )
+        };
         report.push(
             loc.diag(Code::SafetyFlagDowngrade, message)
                 .at("field", "risk"),
         );
+    }
+}
+
+/// What a workflow exercises (§4.3): the capabilities of its own steps
+/// (handlers included) and `rollback` for a gate's or failure mode's
+/// `action: rollback` (`own`); the workflows it invokes by a target that
+/// resolves, in step order (`invokes`); and `own` with what those exercise,
+/// transitively (`total`).
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Exercised {
+    pub own: BTreeSet<String>,
+    pub invokes: Vec<String>,
+    pub total: BTreeSet<String>,
+}
+
+/// [`Exercised`] for every workflow of the catalog set, by namespace key.
+/// The fixpoint over invoke targets terminates on cycles (V105).
+pub(crate) fn exercised(ns: &Namespace<'_>) -> HashMap<String, Exercised> {
+    let mut out: HashMap<String, Exercised> = HashMap::new();
+    for (key, wf) in ns.iter() {
+        let mut e = Exercised::default();
+        let steps = wf
+            .get("steps")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object);
+        for step in steps {
+            if let Some(cap) = step.get("capability").and_then(Value::as_str) {
+                e.own.insert(cap.to_string());
+                if cap == "invoke"
+                    && let Some((t, _)) = super::invoke::target(step)
+                    && let Some(k) = ns.resolver.resolve(key, t).key()
+                    && !e.invokes.iter().any(|i| i == k)
+                {
+                    e.invokes.push(k.to_string());
+                }
+            }
+            let rolls_back = ["gates", "failure_modes"].iter().any(|list| {
+                step.get(*list)
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .any(|g| g.get("action").and_then(Value::as_str) == Some("rollback"))
+            });
+            if rolls_back {
+                e.own.insert("rollback".to_string());
+            }
+        }
+        e.total = e.own.clone();
+        out.insert(key.to_string(), e);
+    }
+    // Each round adds at least one capability to some workflow or stops.
+    loop {
+        let mut changed = false;
+        let keys: Vec<String> = out.keys().cloned().collect();
+        for key in keys {
+            let mut add: BTreeSet<String> = BTreeSet::new();
+            for t in &out[&key].invokes {
+                if let Some(te) = out.get(t) {
+                    add.extend(te.total.iter().cloned());
+                }
+            }
+            let e = out.get_mut(&key).expect("key from the map");
+            for c in add {
+                changed |= e.total.insert(c);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    out
+}
+
+/// W623 (§4.3): a workflow with a schedule trigger whose `overlap` is
+/// `allow_all` exercises both capabilities of a `conflicts_with` pair, so
+/// one run's step can run while the other's runs in another. Event triggers
+/// declare no overlap policy and are not considered. Once per pair, at the
+/// first such trigger.
+pub(crate) fn concurrent_conflicts(
+    ctx: &Context,
+    wf: &Map<String, Value>,
+    key: &str,
+    ns: &Namespace<'_>,
+    exercised: &HashMap<String, Exercised>,
+    at: &dyn Fn(Diagnostic) -> Diagnostic,
+    report: &mut Report,
+) {
+    let Some(Value::Array(triggers)) = wf.get("triggers") else {
+        return;
+    };
+    let Some(i) = triggers.iter().position(|t| {
+        t.get("kind").and_then(Value::as_str) == Some("schedule")
+            && t.get("schedule")
+                .and_then(|s| s.get("overlap"))
+                .and_then(Value::as_str)
+                == Some("allow_all")
+    }) else {
+        return;
+    };
+    let Some(mine) = exercised.get(key) else {
+        return;
+    };
+    let mut pairs: Vec<(&str, &str)> = ctx
+        .ontology
+        .edges
+        .iter()
+        .filter(|e| e.kind == EdgeType::ConflictsWith)
+        .map(|e| {
+            let (a, b) = (e.from.as_str(), e.to.as_str());
+            if a <= b { (a, b) } else { (b, a) }
+        })
+        .collect();
+    pairs.sort_unstable();
+    pairs.dedup();
+    // The first invoked workflow, in step order, a capability comes from.
+    let via = |cap: &str| -> Option<&str> {
+        if mine.own.contains(cap) {
+            return None;
+        }
+        mine.invokes
+            .iter()
+            .find(|t| exercised.get(*t).is_some_and(|e| e.total.contains(cap)))
+            .map(|t| ns.name_of(t))
+    };
+    for (a, b) in pairs {
+        if !(mine.total.contains(a) && mine.total.contains(b)) {
+            continue;
+        }
+        let name = |c: &str| match via(c) {
+            Some(w) => format!("'{c}' (through invoked workflow '{w}')"),
+            None => format!("'{c}'"),
+        };
+        let d = Diagnostic::new(
+            Code::ConcurrentRunConflict,
+            format!(
+                "runs may overlap: {} in one can run while {} runs in another, and conflicts_with does not reach across runs (§4.3)",
+                name(a),
+                name(b)
+            ),
+        )
+        .suggest("use overlap 'skip' or 'buffer_one', or have the host serialise them");
+        report.push(at(d).at("field", format!("triggers[{i}].schedule.overlap")));
     }
 }
 
@@ -788,8 +965,32 @@ pub(crate) struct Feature {
     pub since: (u64, u64),
     /// How a message names it.
     pub name: &'static str,
-    /// The field of its first use in a workflow, if the workflow uses it.
-    pub first_use: fn(&Map<String, Value>) -> Option<String>,
+    /// Its first use in a workflow, if the workflow uses it.
+    pub first_use: fn(&Map<String, Value>) -> Option<Use>,
+}
+
+/// Where a feature is first used: a workflow field (`step` none), or a
+/// field of step `step`, relative to it (§9.8).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Use {
+    pub step: Option<usize>,
+    pub field: String,
+}
+
+impl Use {
+    fn workflow(field: impl Into<String>) -> Use {
+        Use {
+            step: None,
+            field: field.into(),
+        }
+    }
+
+    fn step(step: usize, field: impl Into<String>) -> Use {
+        Use {
+            step: Some(step),
+            field: field.into(),
+        }
+    }
 }
 
 /// §11.5's table of features new after 1.0, in the order W616 reports them.
@@ -803,7 +1004,7 @@ pub(crate) const FEATURES: &[Feature] = &[
         name: "'workflow_extensions.requires'",
         first_use: |wf| {
             matches!(wf.get("workflow_extensions"), Some(Value::Object(ext)) if ext.contains_key("requires"))
-                .then(|| "workflow_extensions.requires".to_string())
+                .then(|| Use::workflow("workflow_extensions.requires"))
         },
     },
     Feature {
@@ -826,16 +1027,16 @@ pub(crate) const FEATURES: &[Feature] = &[
         first_use: |wf| {
             for (i, step) in objects(wf.get("steps")) {
                 if uses_in(step.get("condition")) {
-                    return Some(format!("steps[{i}].condition"));
+                    return Some(Use::step(i, "condition"));
                 }
                 for (g, gate) in objects(step.get("gates")) {
                     if uses_in(gate.get("when")) {
-                        return Some(format!("steps[{i}].gates[{g}].when"));
+                        return Some(Use::step(i, format!("gates[{g}].when")));
                     }
                 }
                 for (f, fm) in objects(step.get("failure_modes")) {
                     if uses_in(fm.get("when")) {
-                        return Some(format!("steps[{i}].failure_modes[{f}].when"));
+                        return Some(Use::step(i, format!("failure_modes[{f}].when")));
                     }
                 }
             }
@@ -883,7 +1084,7 @@ pub(crate) const FEATURES: &[Feature] = &[
                         .get("input_bindings")
                         .and_then(|b| b.get("require_record"))
                         .is_some())
-                .then(|| format!("steps[{i}].input_bindings.require_record"))
+                .then(|| Use::step(i, "input_bindings.require_record"))
             })
         },
     },
@@ -897,7 +1098,7 @@ pub(crate) const FEATURES: &[Feature] = &[
                 .and_then(|e| e.get("requires"))
                 .and_then(Value::as_array)
                 .and_then(|r| r.iter().position(|x| x == "grounding@1"))
-                .map(|i| format!("workflow_extensions.requires[{i}]"))
+                .map(|i| Use::workflow(format!("workflow_extensions.requires[{i}]")))
         },
     },
     Feature {
@@ -914,17 +1115,41 @@ pub(crate) const FEATURES: &[Feature] = &[
             })
         },
     },
+    // S3 (§5.15.2, §5.15.3): the workflow field `agents` and a delegate
+    // step's `continues`. (A qualified invoke target and a catalog manifest
+    // are 1.2 features too; `invoke::check` reports the first, which needs
+    // the catalog's names, and `catalog::check_manifest` the second, which
+    // needs the file header.)
+    Feature {
+        since: (1, 2),
+        name: "the workflow field 'agents'",
+        first_use: |wf| wf.contains_key("agents").then(|| Use::workflow("agents")),
+    },
+    Feature {
+        since: (1, 2),
+        name: "the delegate input 'continues'",
+        first_use: |wf| {
+            objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
+                (step.get("capability").and_then(Value::as_str) == Some("delegate")
+                    && step
+                        .get("input_bindings")
+                        .and_then(Value::as_object)
+                        .is_some_and(|b| b.contains_key("continues")))
+                .then(|| Use::step(i, "input_bindings.continues"))
+            })
+        },
+    },
 ];
 
-/// The field `steps[i].approval.approver.<key>` of the first step whose
-/// approval's approver names `key`.
-fn first_approver_field(wf: &Map<String, Value>, key: &str) -> Option<String> {
+/// The field `approval.approver.<key>` of the first step whose approval's
+/// approver names `key`.
+fn first_approver_field(wf: &Map<String, Value>, key: &str) -> Option<Use> {
     objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
         step.get("approval")
             .and_then(|a| a.get("approver"))
             .and_then(Value::as_object)
             .is_some_and(|ap| ap.contains_key(key))
-            .then(|| format!("steps[{i}].approval.approver.{key}"))
+            .then(|| Use::step(i, format!("approval.approver.{key}")))
     })
 }
 
@@ -940,17 +1165,17 @@ fn objects(v: Option<&Value>) -> Vec<(usize, &Map<String, Value>)> {
     }
 }
 
-/// The field `steps[i].<list>[j].<key>` of the first item, in step order,
-/// of a step's `list` (`gates`, `failure_modes`) for which `key` names one.
+/// The field `<list>[j].<key>` of step `i`'s first item, in step order, of
+/// a step's `list` (`gates`, `failure_modes`) for which `key` names one.
 fn first_in_items(
     wf: &Map<String, Value>,
     list: &str,
     key: impl Fn(&Map<String, Value>) -> Option<&'static str>,
-) -> Option<String> {
+) -> Option<Use> {
     objects(wf.get("steps")).into_iter().find_map(|(i, step)| {
         objects(step.get(list))
             .into_iter()
-            .find_map(|(j, item)| key(item).map(|k| format!("steps[{i}].{list}[{j}].{k}")))
+            .find_map(|(j, item)| key(item).map(|k| Use::step(i, format!("{list}[{j}].{k}"))))
     })
 }
 
@@ -974,13 +1199,15 @@ fn uses_in(v: Option<&Value>) -> bool {
 
 /// W616 for a feature new in `since` used at `field` by something that
 /// targets `version` (as declared: `1.0` or `1.0.0`), declared by a
-/// workflow's `spec_version` or, when `by_header`, by the file's header.
-/// Shared by the workflow check and S3's catalog-manifest check.
+/// workflow's `spec_version` or, when `by_header`, by the file's header;
+/// `locate` gives it its workflow and step before `field` (§9.8). Shared by
+/// the workflow check and the qualified invoke target's.
 pub(crate) fn version_feature_diag(
     name: &str,
     since: (u64, u64),
     version: &str,
     by_header: bool,
+    locate: impl FnOnce(Diagnostic) -> Diagnostic,
     field: impl Into<String>,
 ) -> Diagnostic {
     let (since_major, since_minor) = since;
@@ -1002,18 +1229,19 @@ pub(crate) fn version_feature_diag(
             format!("declare spec_version \"{since_major}.{since_minor}\""),
         )
     };
-    Diagnostic::new(
+    locate(Diagnostic::new(
         Code::VersionFeatureMismatch,
         format!(
             "the workflow targets standard {version} by {declared_in}, but {name} is new in {since_major}.{since_minor} and a {target} consumer does not know it"
         ),
-    )
+    ))
     .at("field", field.into())
     .suggest(fix)
 }
 
 /// W616, once per feature at its first use, for each feature of
-/// [`FEATURES`] newer than `target` (§11.5).
+/// [`FEATURES`] newer than `target` (§11.5). A use in a step is located at
+/// the step (§9.8).
 fn newer_features(
     wf: &Map<String, Value>,
     target: (u64, u64),
@@ -1023,15 +1251,34 @@ fn newer_features(
     report: &mut Report,
 ) {
     for feature in FEATURES.iter().filter(|f| f.since > target) {
-        if let Some(field) = (feature.first_use)(wf) {
-            report.push(at(version_feature_diag(
+        if let Some(found) = (feature.first_use)(wf) {
+            report.push(version_feature_diag(
                 feature.name,
                 feature.since,
                 version,
                 by_header,
-                field,
-            )));
+                |d| match found.step {
+                    Some(i) => at_step(at(d), wf, i),
+                    None => at(d),
+                },
+                found.field,
+            ));
         }
+    }
+}
+
+/// Locate a diagnostic at step `i` of `wf`: its index and, when the step
+/// names one, its capability (§9.8).
+pub(crate) fn at_step(d: Diagnostic, wf: &Map<String, Value>, i: usize) -> Diagnostic {
+    let d = d.at("step", i);
+    match wf
+        .get("steps")
+        .and_then(|s| s.get(i))
+        .and_then(|s| s.get("capability"))
+        .and_then(Value::as_str)
+    {
+        Some(cap) => d.at("capability", cap),
+        None => d,
     }
 }
 
@@ -1382,20 +1629,28 @@ mod tests {
             report
                 .diagnostics
                 .iter()
-                .map(|d| d.location["field"].as_str().unwrap().to_string())
+                .map(|d| {
+                    let step = d.location.get("step").map(|s| format!("{s}: "));
+                    format!(
+                        "{}{}",
+                        step.unwrap_or_default(),
+                        d.location["field"].as_str().unwrap()
+                    )
+                })
                 .collect::<Vec<_>>()
         };
+        // A use in a step is located at the step, its field relative to it.
         assert_eq!(
             fields((1, 0), "1.0"),
             [
                 "workflow_extensions.requires",
-                "steps[0].gates[0].phase",
-                "steps[0].condition"
+                "0: gates[0].phase",
+                "0: condition"
             ]
         );
         assert!(fields((1, 1), "1.1").is_empty());
         assert!(fields((1, 2), "1.2.0").is_empty());
-        let d = version_feature_diag("gate 'phase'", (1, 1), "1.0.0", true, "f");
+        let d = version_feature_diag("gate 'phase'", (1, 1), "1.0.0", true, |d| d, "f");
         assert_eq!(
             d.message,
             "the workflow targets standard 1.0.0 by the file's '# Standard version' header, but gate 'phase' is new in 1.1 and a 1.0 consumer does not know it"

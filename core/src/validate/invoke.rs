@@ -1,14 +1,18 @@
 //! Invocations between catalog workflows (STANDARD v1.1 §5.10, §5.12):
 //! unknown targets (W607), invoke cycles (V105), targets whose triggers
-//! do not allow being invoked (V107), and literal inputs the target does
-//! not declare (S303) or that miss a required one (S304).
+//! do not allow being invoked (V107), literal inputs the target does not
+//! declare (S303) or that miss a required one (S304), and a qualified
+//! target in a workflow that targets 1.0 or 1.1 (W616, STANDARD v1.2
+//! §11.5).
 
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-use super::{Report, StepLoc};
+use super::{Report, StepLoc, semantics};
+use crate::catalogs::{Namespace, Resolved};
 use crate::diag::{Code, Diagnostic};
+use crate::names;
 
 /// One invoke step and the workflow it names.
 pub(crate) struct Invocation {
@@ -81,11 +85,10 @@ pub(crate) fn check_target(loc: &StepLoc<'_>, step: &Map<String, Value>, report:
     }
 }
 
-pub(crate) fn check(
-    workflows: &Map<String, Value>,
-    invocations: &[Invocation],
-    report: &mut Report,
-) {
+/// The catalog-level invoke checks over the catalog set (§5.1.1, §5.12):
+/// resolution (W607, V107), the target's triggers (V107), literal inputs
+/// (S303, S304) and cycles (V105), across the catalogs of the set.
+pub(crate) fn check(ns: &Namespace<'_>, invocations: &[Invocation], report: &mut Report) {
     let at = |inv: &Invocation, code: Code, message: String| {
         Diagnostic::new(code, message)
             .at("workflow", inv.workflow.as_str())
@@ -93,21 +96,55 @@ pub(crate) fn check(
             .at("capability", "invoke")
             .at("field", inv.field)
     };
-    let mut edges: HashMap<&str, Vec<&Invocation>> = HashMap::new();
-    let mut resolved: Vec<&Invocation> = Vec::new();
+    let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut resolved: Vec<(&Invocation, &str)> = Vec::new();
+    let mut qualified_reported = HashSet::new();
     for inv in invocations {
-        let Some(target) = workflows
-            .get(&inv.target)
-            .filter(|_| !inv.target.starts_with("x-"))
-        else {
-            report.push(at(
-                inv,
-                Code::UnresolvedWorkflow,
-                format!(
-                    "invokes '{}', which is not in this catalog; it cannot be checked here",
-                    inv.target
-                ),
-            ));
+        if ns.resolver.is_qualified(&inv.workflow, &inv.target)
+            && qualified_reported.insert(inv.workflow.as_str())
+        {
+            qualified_feature(ns, inv, report);
+        }
+        let key = match ns.resolver.resolve(&inv.workflow, &inv.target) {
+            Resolved::Key(k) => k,
+            Resolved::Unresolved => {
+                let message = match names::split_qualified(&inv.target) {
+                    Some((id, _)) => format!(
+                        "invokes '{}': catalog '{id}' is not loaded; it cannot be checked here",
+                        inv.target
+                    ),
+                    None => format!(
+                        "invokes '{}', which is not in this catalog; it cannot be checked here",
+                        inv.target
+                    ),
+                };
+                report.push(at(inv, Code::UnresolvedWorkflow, message));
+                continue;
+            }
+            Resolved::Missing { catalog, name } => {
+                report.push(at(
+                    inv,
+                    Code::UnresolvedTarget,
+                    format!(
+                        "invokes '{}': catalog '{catalog}' has no workflow '{name}'",
+                        inv.target
+                    ),
+                ));
+                continue;
+            }
+            Resolved::NotExported { catalog, name } => {
+                report.push(at(
+                    inv,
+                    Code::UnresolvedTarget,
+                    format!(
+                        "invokes '{}': catalog '{catalog}' does not export '{name}'; only exported workflows can be invoked from another catalog",
+                        inv.target
+                    ),
+                ));
+                continue;
+            }
+        };
+        let (Some(key), Some(target)) = (ns.get_key(&key), ns.get(&key)) else {
             continue;
         };
         if let Some(Value::Array(triggers)) = target.get("triggers") {
@@ -126,8 +163,8 @@ pub(crate) fn check(
             }
         }
         check_input(inv, target, report);
-        edges.entry(inv.workflow.as_str()).or_default().push(inv);
-        resolved.push(inv);
+        edges.entry(inv.workflow.as_str()).or_default().push(key);
+        resolved.push((inv, key));
     }
     // An invocation closes a cycle when its target can reach its caller:
     // it calls itself, or both lie in one strongly connected component.
@@ -135,8 +172,8 @@ pub(crate) fn check(
     // invocation, so a densely connected cycle is not O(edges) reports.
     let component = components(&edges);
     let mut reported = HashSet::new();
-    for inv in resolved {
-        let (caller, target) = (inv.workflow.as_str(), inv.target.as_str());
+    for (inv, target) in resolved {
+        let caller = inv.workflow.as_str();
         if (caller == target || component.get(caller) == component.get(target))
             && reported.insert(caller)
         {
@@ -145,11 +182,51 @@ pub(crate) fn check(
                 Code::CircularDependency,
                 format!(
                     "invoking '{}' forms a cycle back to '{}'; invoked workflows must not invoke their callers",
-                    inv.target, inv.workflow
+                    inv.target,
+                    ns.name_of(caller)
                 ),
             ));
         }
     }
+}
+
+/// W616 at `inv`, the first invoke step of its workflow whose target is a
+/// qualified id (§5.1.1), when the workflow targets a version before 1.2
+/// (§11.5): a 1.1 consumer resolves names in one catalog only. Whether the
+/// target resolves does not matter (W607 or V107 says when it does not), so
+/// the warning does not depend on the catalogs given. Located at the step,
+/// as the other features are; nothing for a workflow that declares no
+/// supported version (W605 or V109 says so).
+fn qualified_feature(ns: &Namespace<'_>, inv: &Invocation, report: &mut Report) {
+    const SINCE: (u64, u64) = (1, 2);
+    let Some(Value::Object(wf)) = ns.get(&inv.workflow) else {
+        return;
+    };
+    let (version, by_header) = match wf.get("spec_version") {
+        Some(Value::String(v)) => (v.as_str(), false),
+        Some(_) => return,
+        None => match ns.header_of(&inv.workflow) {
+            Some(h) => (h, true),
+            None => return,
+        },
+    };
+    let supported = semantics::parse_version(version)
+        .filter(|v| semantics::SUPPORTED_VERSIONS.contains(v) && *v < SINCE);
+    if supported.is_none() {
+        return;
+    }
+    report.push(semantics::version_feature_diag(
+        "an invoke target that is a qualified id",
+        SINCE,
+        version,
+        by_header,
+        |d| {
+            d.at("workflow", inv.workflow.as_str())
+                .at("step", inv.step)
+                .at("capability", "invoke")
+        },
+        inv.field,
+    ));
 }
 
 /// A literal invocation input against the target's declared inputs. The
@@ -169,40 +246,37 @@ fn check_input(inv: &Invocation, target: &Value, report: &mut Report) {
         .get("inputs")
         .and_then(Value::as_object)
         .unwrap_or(&empty);
-    let names: Vec<&str> = declared.keys().map(String::as_str).collect();
-    let at = |code: Code, message: String, field: String| {
+    let at = |code: Code, message: String| {
         Diagnostic::new(code, message)
             .at("workflow", inv.workflow.as_str())
             .at("step", inv.step)
             .at("capability", "invoke")
-            .at("field", field)
     };
-    for name in given.iter().filter(|n| !declared.contains_key(*n)) {
-        let mut d = at(
-            Code::SchemaValidationFailed,
-            format!(
-                "'{}' has no input '{name}'; the executor refuses undeclared inputs (R402)",
-                inv.target
-            ),
-            format!("input_bindings.input.{name}"),
-        );
-        if let Some(k) = super::semantics::closest(name, &names) {
-            d = d.suggest(format!("did you mean '{k}'?"));
-        }
-        report.push(d);
-    }
-    for (name, spec) in declared {
-        if spec.get("required") == Some(&Value::Bool(true)) && !given.contains(name) {
-            report.push(at(
+    super::inputs::check_names(
+        declared,
+        given,
+        |name| {
+            at(
+                Code::SchemaValidationFailed,
+                format!(
+                    "'{}' has no input '{name}'; the executor refuses undeclared inputs (R402)",
+                    inv.target
+                ),
+            )
+            .at_field_key("input_bindings.input", name)
+        },
+        |name| {
+            at(
                 Code::MissingRequiredField,
                 format!(
                     "'{}' needs input '{name}', which input_bindings.input does not give",
                     inv.target
                 ),
-                "input_bindings.input".to_string(),
-            ));
-        }
-    }
+            )
+            .at("field", "input_bindings.input")
+        },
+        report,
+    );
 }
 
 /// Tarjan's algorithm state.
@@ -229,7 +303,7 @@ impl<'a> Tarjan<'a> {
 
 /// The strongly connected components of the invocation graph (Tarjan's
 /// algorithm, iterative, linear): workflow → component number.
-fn components<'a>(edges: &HashMap<&'a str, Vec<&'a Invocation>>) -> HashMap<&'a str, usize> {
+fn components<'a>(edges: &HashMap<&'a str, Vec<&'a str>>) -> HashMap<&'a str, usize> {
     let mut t = Tarjan::default();
     let mut roots: Vec<&str> = edges.keys().copied().collect();
     roots.sort_unstable();
@@ -242,11 +316,10 @@ fn components<'a>(edges: &HashMap<&'a str, Vec<&'a Invocation>>) -> HashMap<&'a 
         t.visit(root, &mut calls);
         while let Some(&(v, next)) = calls.last() {
             let out = edges.get(v).map(Vec::as_slice).unwrap_or_default();
-            if let Some(inv) = out.get(next) {
+            if let Some(&w) = out.get(next) {
                 if let Some(top) = calls.last_mut() {
                     top.1 += 1;
                 }
-                let w = inv.target.as_str();
                 match t.index.get(w) {
                     None => t.visit(w, &mut calls),
                     Some(&wi) if t.on_stack.contains(w) => {
@@ -301,6 +374,39 @@ mod tests {
         let literal = json!({"capability": "invoke", "purpose": "p", "store_as": "i",
                              "input_bindings": {"workflow": "elsewhere"}});
         assert_eq!(codes(json!({"a": wf(json!([literal]))})), ["W607"]);
+    }
+
+    /// A qualified target in a workflow that targets 1.1 is W616 whatever
+    /// the catalogs given (§11.5), located at its step (§9.8); a name of the
+    /// workflow's own catalog, or a legacy name that is not a qualified id,
+    /// is not.
+    #[test]
+    fn a_qualified_target_below_1_2_is_a_version_warning() {
+        use crate::diag::Code;
+        let ctx = super::super::tests::ctx();
+        let report = super::super::validate_catalog(
+            &ctx,
+            &json!({"a": wf(json!([invoke("other.cat/x", "i")]))}),
+            None,
+        );
+        let found: Vec<_> = report.diagnostics.iter().map(|d| d.code.as_str()).collect();
+        assert_eq!(found, ["W616", "W607"]);
+        let d = &report.diagnostics[0];
+        assert_eq!(d.code, Code::VersionFeatureMismatch);
+        assert_eq!(
+            Value::Object(d.location.clone()),
+            json!({"workflow": "a", "step": 0, "capability": "invoke",
+                   "field": "workflow_id", "path": "/a/steps/0/workflow_id"})
+        );
+        // From 1.2, only the unresolved target.
+        let mut v12 = wf(json!([invoke("other.cat/x", "i")]));
+        v12["spec_version"] = json!("1.2");
+        assert_eq!(codes(json!({"a": v12})), ["W607"]);
+        // Not a qualified id: no catalog id before the '/'.
+        assert_eq!(
+            codes(json!({"a": wf(json!([invoke("Other/x", "i")]))})),
+            ["W607"]
+        );
     }
 
     #[test]

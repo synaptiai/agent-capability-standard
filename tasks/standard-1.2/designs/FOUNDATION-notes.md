@@ -883,3 +883,98 @@ Workstreams should run `npm run check:axe` (or at least
 - **WebAssembly `run.start`** answers `{run, warnings}`; `CoreContext.start`
   reports them to `StartArgs.onWarning`. **S3**: keep `warnings` when
   `start_options` gains `catalogs` and `agents`.
+
+## 2026-11-16 — S3 (delegation, catalogs and diagnostics), for the streams after it
+
+S3 is merged after S6 (`round3/S3sync-base`, then the integration branch
+into `round3/b`); what S5 needs:
+
+- **§2 Terms is three tables**: general and run terms (the `host-loop`
+  figure follows it); S6's "Terms of domain profiles, contracts, entities
+  and ordering"; "Terms of tool-calling hosts, catalogs and delegation"
+  (S1's tool-calling rows, then S3's four). S5's rows go in the third
+  table, before S3's four. The site reads §2's run terms from every table.
+- **§5.15 figures**: `family-replay`, `manifest-replay`, `agents-replay`,
+  `read-only-replay` and `continue-replay` draw S3's runtime fixtures;
+  §5.15.4 follows `continue-replay`. A long §5.15.4 needs a figure of its
+  own.
+- **§10.3's last run is close to the limit**: from the digest-vector figure
+  to §10.4's safety-layer figure it is about 1690px at 1440px wide (S3's
+  vector sentence, S4's grounding paragraph, S6's trust and profile
+  paragraph, §10.4's first paragraphs). Text S5 adds there needs a figure or
+  a tighter paragraph; the fixture keys (`catalogs`, `agents`,
+  `expected_locations`) are in §10.3's first paragraph, the runtime ones in
+  §10.5's fixture paragraph.
+- **Validator entry points**: `Options::unimplemented()` is gone.
+  `validate::validate_with` builds the catalog set and loads the agent
+  manifests; `validate_profiled(ctx, set, agents, profiles)` loads the
+  profiles (diagnostics first) and calls `validate_set(ctx, set, agents,
+  &policy)`. `Run::prepare` uses `validate_profiled`, refuses
+  `Policy::unenforced()` (the destination line is S5's to delete) and calls
+  `Program::build_set(ctx, set, agents, root, policy)`.
+- **Effective flags**: `semantics::effective(node, step, target_maxima,
+  policy)` everywhere: a delegate step is the stricter of its target's
+  maxima and the profiles. Diagnostics carrying `profile` or `tool` get no
+  `path` (`validate/location.rs`).
+- **W616**: `FEATURES` holds S3's `continues`; the catalog manifest's W616
+  is in `validate/catalog.rs` and a qualified `invoke` target's in
+  `validate/invoke.rs` (they need the catalog set). S5 appends its
+  `persist`/`recall` `scope` row to `FEATURES`.
+- **Catalog sets everywhere**: runtime fixtures' `catalogs`
+  (`[{catalog, header}]`) and `agents` are passed by the Rust
+  (`core/tests/runtime.rs`), Python (`tests/runtime_replay.py`) and
+  WebAssembly (`packages/acs-core/test/wasm-runtime.test.ts`) harnesses, to
+  start and restore. WebAssembly: `validate` and `run.restore` take
+  `catalogs` and `agents`, `run.start` takes them in `options`; TypeScript
+  `SetArgs` on `CoreContext.validate`, `start`, `restore`.
+  `_core.validate_catalog`/`Validator.validate(_file)` take `profiles`
+  positionally and `catalogs`, `agents` keyword-only.
+
+## After S3 review round 1
+
+- **W616 is located at its step** (§9.8, §11.5). `semantics::Feature`'s
+  `first_use` now returns `Option<Use>`: `Use::workflow(field)` for a
+  workflow field, `Use::step(i, field)` for a member of step `i`, with
+  `field` relative to the step (`input_bindings.scope`, not
+  `steps[0].input_bindings.scope`); `newer_features` adds `step` and the
+  step's `capability`. **S5**: write the `persist`/`recall` `scope` row that
+  way. `tests/test_validators.py::test_every_fixture_diagnostic_has_an_exact_path`
+  now checks, on every fixture, that a finding whose `path` is inside a step
+  carries that `step` and the step's `capability`, and a step-relative
+  `field`.
+- **`agents` below 1.2 is W616, not S303** (a `FEATURES` row, field
+  `agents`), and its shape is checked only from 1.2; `continues`'s S303 and
+  R402 apply only from 1.2 (runtime fixture
+  `delegate_continues_v11_unchecked`). Fixture `fail_agents_without_1_2` is
+  now `pass_agents_v11_warn`. Two sentences outside S3's files still say
+  the S303: `spec/RFC-0010-profiles-trust-versioning-and-dialect.md` ("and
+  S3 the S303 for `agents` before 1.2") and the resolution of S6's finding
+  in `findings_agent_capability_standard.yaml` ("and the S303 for `agents`
+  before 1.2"). Their owner (or phase 4) should say W616 instead.
+- **A qualified `invoke` target is W616 whatever the set**: any target that
+  `names::split_qualified` accepts and that names no workflow of the
+  caller's catalog (`Resolver::is_qualified`, which replaced
+  `resolves_qualified`).
+
+## After S3 review round 2
+
+- **`identity_error(v, v12)` and `delegate_identity_error(delegation,
+  v12)`** (`core/src/exec/mod.rs`) take whether the workflow the identity is
+  reported to targets 1.2: an identity's `model_id` is typed, and compared
+  with `effective.model_id`, only then (`agent_identity` 1.0.0, which 1.1
+  uses, does not define it). **S5** and any later caller: pass the
+  workflow's `targets_1_2` (the root's for the actor identity; the frame's
+  for an event, approver or delegation identity). Runtime fixture
+  `delegate_identity_model_id_v11_unchecked`.
+- **A qualified id's name is any non-empty workflow name** after the first
+  `/` (`names::split_qualified`), as §5.1.1 says.
+- **`expected_locations`** entries (`tests/fixtures/EXPECTATIONS.json`) may
+  give, for a finding with no `path` (one about a version header), the
+  `catalog`, `workflow` and `field` it must carry instead of a `path`: every
+  member an entry gives must equal the diagnostic location's. The three
+  harnesses match that way.
+- **Header findings in another catalog of a set** carry `catalog` and the
+  workflow's own name (`location::finish`), like every other finding there.
+- **TypeScript package**: `workflowTarget(workflow, header)` and
+  `agentsApply(workflow, header)` (`src/agents.ts`); the binding's
+  `declaredAgents` and `lintDelegationTargets` take the header.

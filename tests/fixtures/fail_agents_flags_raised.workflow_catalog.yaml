@@ -1,0 +1,14 @@
+# Standard version: 1.2.0
+# A delegation to an agent that may mutate takes its maxima (STANDARD v1.2
+# §5.15.2): it needs a checkpoint before it (F501).
+write:
+  goal: Have the writer update a table.
+  risk: high
+  agents: [db-writer]
+  steps:
+  - capability: delegate
+    purpose: Ask the writer to update the table.
+    store_as: write_out
+    input_bindings:
+      agent: db-writer
+      task: {table: t}

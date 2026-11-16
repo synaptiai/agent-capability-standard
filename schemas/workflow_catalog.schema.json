@@ -140,7 +140,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 },
-          "description": "The agents this workflow's delegate steps may delegate to (STANDARD v1.2 §5.15.2). Only in a workflow that targets 1.2 or later (S303 otherwise). Declaring it raises delegate steps' flags to the agents' manifests; without a manifest, the executor does not delegate."
+          "description": "The agents this workflow's delegate steps may delegate to (STANDARD v1.2 §5.15.2). It applies only in a workflow that targets 1.2 or later (W616 in an earlier one, which ignores it). Declaring it raises delegate steps' flags to the agents' manifests; without a manifest, the executor does not delegate."
         },
         "grounding": {
           "$ref": "#/$defs/grounding",

@@ -952,17 +952,19 @@ Two Standard Agents behaviours limit what the host may report.
   terminated instance still counts toward `maxInstances`, so a relationship
   whose delegations may be retried or replaced leaves it unset.
 
-**The step's flags do not follow the target.** The ontology gives `delegate`
-`risk: medium` and `mutation: false`, and neither `requires_checkpoint` nor
-`requires_approval`. A `delegate` step therefore validates and runs with no
-checkpoint and no approval, whatever the target agent does. Until the Standard
-relates the step's flags to its target (the change on what crosses a
-delegation, [proposed below](#changes-proposed-to-the-agent-capability-standard)),
-the workflow author raises them on a step whose target can change state: a
-declaration stricter than the ontology "is allowed and takes effect"
-([§5.2.1](../../spec/STANDARD-v1.1.0.md#521-safety-flags)).
+**The step's flags follow the target, when the workflow says so.** The
+ontology gives `delegate` `risk: medium` and no checkpoint or approval flag.
+Standard 1.2.0 lets a workflow that targets 1.2 declare the agents its
+`delegate` steps may delegate to, `agents`
+([§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets)); a
+`delegate` step then takes the maxima of its target's agent manifest
+([§5.15.1](../../spec/STANDARD-v1.2.0.md#5151-agent-manifests)): a delegation
+to an agent that may `mutate` needs a checkpoint before it (F501) and an
+approval, and without the target's manifest the executor does not delegate.
 
 ```yaml
+agents: [deployer]
+steps:
 - capability: checkpoint
   purpose: Save a restore point before handing the change over.
   store_as: checkpoint_out
@@ -970,23 +972,64 @@ declaration stricter than the ontology "is allowed and takes effect"
     scope: service_config
 - capability: delegate
   purpose: Hand the change to the deploy agent.
-  requires_checkpoint: true
-  requires_approval: true
   store_as: delegate_out
   input_bindings:
     task: {apply: rotate_certificate}
     agent: deployer
 ```
 
-With `requires_approval: true` the executor asks for approval before it
-delegates, as the reference catalog's `multi_agent_orchestration` does. With
-`requires_checkpoint: true` the step needs a `checkpoint` step before it
-(F501 without one) and uses that checkpoint up. A target that must change
-nothing is bound `read_only: true` instead; the host attests it in
-`effective.read_only`, and the Standard "does not say how a host enforces
-`read_only`". The raised flags act in the delegating workflow only. Its
-checkpoint covers its own state, not what the child changes, as the first
-point under [Composing grounded agents](#composing-grounded-agents) says.
+In Standard Agents an agent exercises what the tools its prompts offer
+perform, what the tools they invoke perform (a composite's `invokes`,
+§5.18.4), and what its subagents may: `deriveAgentManifest`
+(`examples/standard_agents/src/acs/agents.ts`) builds an agent's manifest
+from the `acs` annotations of those tools, following `invokes` transitively,
+and from its subagents' manifests. It loads the annotations as binding
+records, as the layer does, and reads the capabilities from what loads.
+Pass the helper tools a composite invokes
+but the prompts do not offer as `invoked`. A manifest has no member for
+flags: its maxima are its capabilities'. So `deriveAgentManifest` throws
+`ManifestDerivationError` when an offered or invoked tool has no annotation
+(`unannotated`), an annotation does not load, which the layer would treat
+as an unbound `mutate` at high risk (`malformed`, with its diagnostics), a
+tool invokes one it is not given (`unresolvedInvokes`), a tool's declared `flags` are stricter than
+its capabilities' ontology flags (`raisedFlags`), or a subagent's manifest is
+missing (`missingChildren`): each would leave out what the agent can do and
+lower the delegate step's flags. Annotate every tool with its binding record,
+bind a tool whose flags exceed its capability's by the capability that has
+them, and give every invoked tool before declaring `agents`. More of the
+mapping:
+
+- In a workflow that targets 1.2, its `agents` are the parent's declared
+  relationships: `lintDelegationTargets` reports a listed agent with no
+  relationship as V107 at `agents[i]`, with its `path` (§9.8). Below 1.2,
+  or with no version, `agents` has no effect: `declaredAgents` returns
+  `null` and the lint reports nothing. Both take the catalog's version
+  header (`null` for none), as §11.5 requires of a binding.
+- A manifest's `task` is the subagent's declared arguments:
+  `subagent_arguments_required` is the host side of a task refusal
+  (`taskRefusal`, the package's `checkTask`).
+- A delegation with `read_only: true` that the SA host cannot confine is
+  refused; in a 1.2 workflow, one accepted without `effective.read_only:
+  true` fails the step, not retried.
+- Create-or-continue is `continues`
+  ([§5.15.3](../../spec/STANDARD-v1.2.0.md#5153-continuing-a-delegation)):
+  each call returns its own `task_id` and attests `effective.fresh_context:
+  false`; `continues` that resolves to null creates a new child.
+- The model family is `modelFamily(model)` of the SA model definition's
+  `model` (the package's derivation rule, §5.15), and `effective.model_id` is
+  that model id.
+
+A workflow that does not declare `agents` keeps 1.1's behaviour: the author
+raises a delegate step's flags by hand (`requires_checkpoint: true`,
+`requires_approval: true`), as the reference catalog's
+`multi_agent_orchestration` does, or binds `read_only: true`. The raised
+flags act in the delegating workflow only. Its checkpoint covers its own
+state, not what the child changes, as the first point under
+[Composing grounded agents](#composing-grounded-agents) says.
+
+**Diagnostics.** A diagnostic's `location` projects to a `DefinitionIssue`'s
+`path` by §9.8 (`issuePath` in the package): `workflow`, then
+`.steps[step]`, then `.` and `field` (`review.steps[1].gates[0].when`).
 
 ## Packaging and conformance
 
@@ -1127,12 +1170,10 @@ requires for normative changes.
   safe). This was the roadmap's
   [multi-language SDKs](https://github.com/synaptiai/agent-capability-standard/issues/83)
   item.
-- **What crosses a delegation.** A delegate's effects are outside its
-  delegator's checkpoints, and the ontology gives `delegate` no checkpoint or
-  approval flag whatever the target may do. The Standard should say so, and
-  an agent manifest would let a validator derive a `delegate` step's flags
-  from its target. Until then a workflow author raises the step's flags
-  ([How a delegate step maps to a host](#how-a-delegate-step-maps-to-a-host)).
+- **What crosses a delegation**, for a checkpoint: a delegate's effects are
+  outside its delegator's checkpoints. (A delegation's flags following its
+  target, with agent manifests and `agents`, landed in Standard 1.2.0,
+  [§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets).)
 - **The host protocol as a published schema**, with a conformance class for
   executors: Standard 1.2.0 gives it, as
   [§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol),

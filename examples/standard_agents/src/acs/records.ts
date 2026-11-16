@@ -131,7 +131,10 @@ export interface AgentIdentity {
   principal: string;
   kind: 'agent' | 'human' | 'service';
   role?: string;
+  /** The family of the model it ran on, compared exactly (§5.15); a host derives it with `modelFamily`. */
   model_family?: string;
+  /** The identifier of the model it ran on (§5.17). */
+  model_id?: string;
   owner?: string;
   authenticated_by?: string;
   trust_class?: (typeof TRUST_CLASSES)[number];

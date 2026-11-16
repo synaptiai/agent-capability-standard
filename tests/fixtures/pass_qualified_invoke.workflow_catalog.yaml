@@ -1,0 +1,14 @@
+# Standard version: 1.2.0
+# An invoke of another catalog's exported workflow by qualified id (STANDARD
+# v1.2 §5.1.1), with a literal input it declares.
+check:
+  goal: Check a target with the library.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run the library's check.
+    store_as: checked
+    workflow_id: acs.fixtures.lib/shared_check
+    input_bindings:
+      workflow: acs.fixtures.lib/shared_check
+      input: {target: x}

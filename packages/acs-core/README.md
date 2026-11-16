@@ -78,7 +78,10 @@ const saved = run.snapshot(); // restore with ctx.restore({ catalog, snapshot: s
 
 `header` is required on `validate` and `start`: the version the catalog's
 `# Standard version:` header declares, or `null` for a catalog without one
-(section 11.5). `ctx.checkProfiles`, `profileFlags` and `profilePolicy`
+(section 11.5). `validate`, `start` and `restore` also take the other
+catalogs of the catalog's set (`catalogs`, each `{ catalog, header }`) and
+agent manifests (`agents`) (sections 5.1.1 and 5.15.1); a run is restored
+with the ones it started with. `ctx.checkProfiles`, `profileFlags` and `profilePolicy`
 answer what domain profiles change (section 5.21.3). `start` reports each
 warning of loading its profiles (a misspelled member is W604, and ignored)
 to `onWarning`, `console.warn` by default. The executor checks a profile's

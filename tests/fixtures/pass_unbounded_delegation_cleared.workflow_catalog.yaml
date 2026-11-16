@@ -1,0 +1,23 @@
+# Standard version: 1.2.0
+# W621's remedies (STANDARD v1.2 §5.15.2): a read_only delegation and one
+# that requires approval.
+fan_out:
+  goal: Ask two agents.
+  risk: medium
+  workflow_extensions:
+    requires: [delegation@1]
+  steps:
+  - capability: delegate
+    purpose: Ask agent x to read.
+    store_as: x_out
+    input_bindings:
+      agent: x
+      task: {draft: d}
+      read_only: true
+  - capability: delegate
+    purpose: Ask agent y, with approval.
+    store_as: y_out
+    requires_approval: true
+    input_bindings:
+      agent: y
+      task: {draft: d}

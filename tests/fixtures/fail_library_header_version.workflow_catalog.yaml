@@ -1,0 +1,13 @@
+# Standard version: 1.2.0
+# A catalog validated with a library whose header declares an unsupported
+# version (STANDARD v1.2 §11.5, §9.8): V109, located at the library's
+# workflow by its own name, with the library's id as `catalog`.
+check:
+  goal: Retrieve a record.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: record_out
+    input_bindings:
+      target: records

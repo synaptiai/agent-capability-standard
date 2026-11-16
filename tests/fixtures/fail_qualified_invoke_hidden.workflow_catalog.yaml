@@ -1,0 +1,19 @@
+# Standard version: 1.2.0
+# Qualified ids of a loaded catalog that does not export the workflow, or has
+# no such workflow (STANDARD v1.2 §5.1.1): V107.
+check:
+  goal: Reach into the library.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run the library's inner workflow.
+    store_as: inner_out
+    workflow_id: acs.fixtures.lib/inner
+    input_bindings:
+      workflow: acs.fixtures.lib/inner
+  - capability: invoke
+    purpose: Run a workflow the library does not have.
+    store_as: missing_out
+    workflow_id: acs.fixtures.lib/missing
+    input_bindings:
+      workflow: acs.fixtures.lib/missing

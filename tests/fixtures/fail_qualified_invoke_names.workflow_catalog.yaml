@@ -1,0 +1,26 @@
+# Standard version: 1.2.0
+# Qualified ids whose workflow names are not identifiers (STANDARD v1.2
+# §5.1.1): the name is any workflow name, so the two exported workflows
+# resolve, and a name the loaded catalog does not have is V107, not W607.
+check:
+  goal: Check a target with the library's workflows.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run the library's spaced check.
+    store_as: spaced_out
+    workflow_id: acs.fixtures.names/Shared Check
+    input_bindings:
+      workflow: acs.fixtures.names/Shared Check
+  - capability: invoke
+    purpose: Run the library's dotted check.
+    store_as: dotted_out
+    workflow_id: acs.fixtures.names/shared.check
+    input_bindings:
+      workflow: acs.fixtures.names/shared.check
+  - capability: invoke
+    purpose: Run a workflow the library does not have.
+    store_as: missing_out
+    workflow_id: acs.fixtures.names/missing.name
+    input_bindings:
+      workflow: acs.fixtures.names/missing.name

@@ -131,9 +131,15 @@ class ValidationError:
     message:
         Human-readable description of what went wrong.
     location:
-        Where the error occurred.  Typical keys are ``workflow`` (str),
-        ``step`` (int), and ``field`` (str), but any JSON-serialisable
-        dict is accepted.
+        Where the error occurred, with the keys STANDARD v1.2 §9.8 defines:
+        ``workflow`` (its key in the catalog), ``step`` (zero-based, in list
+        order), ``capability``, ``field`` (relative to the step, else the
+        workflow, else the document the finding is about), ``path`` (an RFC
+        6901 pointer from the catalog root, on every finding about the
+        catalog document), ``catalog`` (the id of another catalog of the
+        set the finding is in), ``profile`` or ``tool`` (a finding about
+        another document, with no ``path``), and the code-specific keys.
+        Any JSON-serialisable dict is accepted.
     suggestion:
         Optional hint on how to fix the problem.
     """

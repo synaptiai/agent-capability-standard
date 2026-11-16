@@ -107,6 +107,8 @@ data:
     metadata: object | null  # Additional message metadata
     sender: string  # Host-authenticated principal that sent the item (with accept_from)
     sender_identity: object  # Sender's identity as the host reported it (identity@1)
+    inquiry_id: string       # For answers to an inquiry: the inquiry they answer
+    answers: array           # For answers to an inquiry: [{question_id, value}]
 parsed_count: integer  # Number of messages/events parsed
 validation:
   schema_ref: string | null  # Schema used for validation
@@ -130,6 +132,8 @@ assumptions: array[string]  # Explicit assumptions
 | Field | Type | Description |
 |-------|------|-------------|
 | `data` | array[object] | Received messages/events, each with its parsed `payload` (and `sender` / `sender_identity` when the host authenticates senders) |
+| `data[].inquiry_id` | string | For answers to an inquiry: the `inquiry_id` of the `inquire` output they answer (Standard v1.2 §5.13.1) |
+| `data[].answers` | array[object] | For answers to an inquiry: one `{question_id, value}` per question answered, keyed by the question's `id` (or its `parameter`) and typed by its `answer_type`; never an unasked question, a wrong type or a question twice |
 | `source` | string | Event source: origin of the data |
 | `timestamp` | string | ISO 8601 date-time of receipt |
 | `received` | object | Transport details: source type, detected format, size, encoding |

@@ -135,9 +135,27 @@ fn every_validator_fixture_gives_its_expected_codes() {
                 yaml::load_file(&root.join(p.as_str().unwrap()), yaml::DEFAULT_MAX_BYTES).unwrap()
             })
             .collect();
+        // The other catalogs of its set and its agent manifests (§10.3).
+        let files = |key: &str| -> Vec<String> {
+            meta.get(key)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|p| std::fs::read_to_string(fixtures.join(p.as_str().unwrap())).unwrap())
+                .collect()
+        };
+        let catalogs: Vec<Value> = files("catalogs")
+            .into_iter()
+            .map(|text| ok(json!({"op": "catalog.parse", "text": text})))
+            .collect();
+        let agents: Vec<Value> = files("agents")
+            .into_iter()
+            .map(|text| ok(json!({"op": "yaml.parse", "text": text})))
+            .collect();
         let report = ok(
             json!({"op": "validate", "context": ctx, "catalog": parsed["catalog"],
-            "header": parsed["header"], "profiles": profiles}),
+            "header": parsed["header"], "profiles": profiles, "catalogs": catalogs,
+            "agents": agents}),
         );
         let codes = |severity: &str| -> BTreeSet<String> {
             report["diagnostics"]
@@ -170,7 +188,81 @@ fn every_validator_fixture_gives_its_expected_codes() {
             expected("expected_warning_codes"),
             "{name}"
         );
+        for loc in meta
+            .get("expected_locations")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            // The code, and every other member the expectation gives: its
+            // `path`, or for a finding with no `path` its `catalog`,
+            // `workflow` and `field`.
+            let members = loc.as_object().unwrap();
+            let found = report["diagnostics"].as_array().unwrap().iter().any(|d| {
+                d["code"] == loc["code"]
+                    && members
+                        .iter()
+                        .filter(|(k, _)| *k != "code")
+                        .all(|(k, v)| d["location"].get(k) == Some(v))
+            });
+            assert!(found, "{name}: {loc} not located");
+        }
     }
+}
+
+#[test]
+fn a_catalog_set_and_agent_manifests_reach_validate_start_and_restore() {
+    let ctx = context();
+    let f: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            root().join("tests/conformance/runtime/invoke_qualified_library.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    // Validated with the library, the qualified target resolves (no W607).
+    let report = ok(
+        json!({"op": "validate", "context": ctx, "catalog": f["catalog"],
+        "header": f["header"], "catalogs": f["catalogs"]}),
+    );
+    assert_eq!(report["diagnostics"], json!([]), "{report}");
+    let mut options = json!({"run_id": "r", "now_ms": f["start"], "attendance": "attended",
+        "header": f["header"]});
+    options["catalogs"] = f["catalogs"].clone();
+    let run = ok(
+        json!({"op": "run.start", "context": ctx, "catalog": f["catalog"],
+        "workflow": f["workflow"], "inputs": f["inputs"], "options": options}),
+    )["run"]
+        .clone();
+    let snapshot = ok(json!({"op": "run.snapshot", "run": run, "key_hex": "00ff"}));
+    // A restore needs the set the run started with.
+    let without = call(
+        json!({"op": "run.restore", "context": ctx, "catalog": f["catalog"],
+        "snapshot": snapshot, "key_hex": "00ff"}),
+    );
+    assert_eq!(without["error"]["kind"], "restore", "{without}");
+    let restored = ok(
+        json!({"op": "run.restore", "context": ctx, "catalog": f["catalog"],
+        "snapshot": snapshot, "key_hex": "00ff", "catalogs": f["catalogs"]}),
+    )["run"]
+        .clone();
+    // The run reaches the library's inner workflow, two catalogs away.
+    let action = ok(json!({"op": "run.next", "run": restored}));
+    assert_eq!(
+        action["frame"], f["script"][0]["expect"]["frame"],
+        "{action}"
+    );
+    // A malformed member of the set is a bad request.
+    let bad = call(
+        json!({"op": "validate", "context": ctx, "catalog": f["catalog"], "header": f["header"],
+        "catalogs": [{"catalog": {}}]}),
+    );
+    assert_eq!(bad["error"]["kind"], "bad_request", "{bad}");
+    let bad = call(
+        json!({"op": "validate", "context": ctx, "catalog": f["catalog"],
+        "header": f["header"], "agents": {}}),
+    );
+    assert_eq!(bad["error"]["kind"], "bad_request", "{bad}");
 }
 
 #[test]

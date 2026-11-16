@@ -25,6 +25,7 @@ from typing import Any
 
 from .. import _core
 from ..capabilities.registry import CapabilityNode, CapabilityRegistry
+from ..coordination import manifest as agent_manifest
 from ..errors import ErrorCode, Severity, ValidationError
 from ..state.checkpoint_tracker import CheckpointTracker
 
@@ -298,8 +299,17 @@ def resolve_safety_flags(
     return flags
 
 
+class UnboundedDelegation(ValueError):  # noqa: N818 - names the §5.15.2 case
+    """A ``delegate`` step of a workflow that declares ``agents`` whose
+    target maxima are unknown (STANDARD v1.2 §5.15.2): a manifest concerned
+    was not given, or lists a capability the ontology does not define. The
+    executor does not delegate there (R402), so the SDK's own checks refuse
+    it too rather than fall back to the ``delegate`` node's flags."""
+
+
 _WORKFLOW_FIELDS = frozenset(
     {
+        "agents",
         "goal",
         "risk",
         "steps",
@@ -337,6 +347,9 @@ class WorkflowDefinition:
     # The standard version targeted: the workflow's own ``spec_version`` or,
     # failing that, its catalog's ``# Standard version:`` header.
     spec_version: str | None = None
+    # The agents its delegate steps may delegate to (STANDARD v1.2 §5.15.2),
+    # when it declares them as a list of strings.
+    agents: list[str] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
     source: dict[str, Any] | None = field(
         default=None, init=False, repr=False, compare=False
@@ -363,6 +376,12 @@ class WorkflowDefinition:
             if isinstance(s, dict) and isinstance(s.get("capability"), str)
         ]
         spec_version = data.get("spec_version")
+        agents = data.get("agents")
+        typed_agents = (
+            list(agents)
+            if isinstance(agents, list) and all(isinstance(a, str) for a in agents)
+            else None
+        )
         workflow = cls(
             name=name,
             goal=data.get("goal", ""),
@@ -376,7 +395,14 @@ class WorkflowDefinition:
             spec_version=(
                 spec_version if isinstance(spec_version, str) else header_version
             ),
-            extra={k: v for k, v in data.items() if k not in _WORKFLOW_FIELDS},
+            agents=typed_agents,
+            # A malformed `agents` stays as written, for the validator.
+            extra={
+                k: v
+                for k, v in data.items()
+                if k not in _WORKFLOW_FIELDS
+                or (k == "agents" and "agents" in data and typed_agents is None)
+            },
         )
         workflow.source = data
         workflow._parsed = copy.deepcopy(workflow.to_dict())
@@ -391,6 +417,8 @@ class WorkflowDefinition:
         }
         if self.spec_version is not None:
             d["spec_version"] = self.spec_version
+        if self.agents is not None:
+            d["agents"] = list(self.agents)
         if self.success:
             d["success"] = self.success
         if self.description:
@@ -427,6 +455,15 @@ class WorkflowDefinition:
     def store_as_names(self) -> set[str]:
         """All store_as variable names defined by steps."""
         return {s.store_as for s in self.steps if s.store_as}
+
+
+def _targets_1_2(workflow: WorkflowDefinition) -> bool:
+    """The workflow targets Standard 1.2 or later (§11.5)."""
+    parts = (workflow.spec_version or "").split(".")
+    try:
+        return (int(parts[0]), int(parts[1])) >= (1, 2)
+    except IndexError, ValueError:
+        return False
 
 
 def _with_version(data: Any, version: str | None) -> Any:
@@ -574,6 +611,13 @@ class WorkflowEngine:
         # tools/validate_workflows.py reports for the same file.
         self._unloadable: dict[str, Any] = {}
         self._validator: _core.Validator | None = None
+        # The loaded catalog's manifest (STANDARD v1.2 §5.1.1) and its
+        # file's header; the other catalogs of its set, each with its header
+        # (load_library); and agent manifests by agent (§5.15.1).
+        self._manifest: dict[str, Any] | None = None
+        self._manifest_header: str | None = None
+        self._libraries: dict[str, tuple[dict[str, Any], str | None]] = {}
+        self._agents: dict[str, dict[str, Any]] = {}
 
     @property
     def registry(self) -> CapabilityRegistry:
@@ -594,11 +638,92 @@ class WorkflowEngine:
     def catalog_data(self) -> dict[str, Any]:
         """The loaded catalog as plain data: what validation checks and the
         executor (:class:`~grounded_agency.workflows.runner.WorkflowRunner`)
-        runs. Entries too malformed to load as workflows are included."""
+        runs. Entries too malformed to load as workflows are included, and so
+        is the catalog's manifest (``catalog``, §5.1.1) when it has one."""
+        manifest = {} if self._manifest is None else {"catalog": self._manifest}
         return {
+            **manifest,
             **self._unloadable,
             **{name: wf.validation_data() for name, wf in self._workflows.items()},
         }
+
+    def catalog_header(self) -> str | None:
+        """The header of the file whose manifest the catalog carries, when
+        it carries one: the Standard version the manifest is read under
+        (§5.1.1, §11.5). None otherwise: each workflow carries its file's
+        header as its ``spec_version``."""
+        return self._manifest_header if self._manifest is not None else None
+
+    def libraries(self) -> list[tuple[dict[str, Any], str | None]]:
+        """The other catalogs of the catalog set (§5.1.1), in load order,
+        each with its header: what validation and the executor are given
+        beside :meth:`catalog_data`."""
+        return list(self._libraries.values())
+
+    def load_library(self, catalog_path: str | Path) -> str:
+        """Load another catalog of the catalog set (STANDARD v1.2 §5.1.1): a
+        catalog whose manifest has an ``id``, so that this catalog's
+        workflows can invoke its exported workflows by qualified id
+        ``<id>/<name>``. Its workflows are validated and run with this
+        catalog's, not added to it.
+
+        Returns:
+            The library's catalog id
+
+        Raises:
+            ValueError: The file is not a catalog with a manifest ``id``, or
+                a catalog of that id is already loaded
+        """
+        data, header = _core.load_catalog(catalog_path)
+        manifest = data.get("catalog") if isinstance(data, dict) else None
+        if (
+            not isinstance(manifest, dict)
+            or "steps" in manifest
+            or not isinstance(manifest.get("id"), str)
+        ):
+            raise ValueError(
+                f"{catalog_path}: a library is a catalog with a manifest 'id' (§5.1.1)"
+            )
+        cid: str = manifest["id"]
+        own = None if self._manifest is None else self._manifest.get("id")
+        if cid in self._libraries or cid == own:
+            raise ValueError(f"{catalog_path}: catalog '{cid}' is already loaded")
+        self._libraries[cid] = (
+            {
+                k: (v if k == "catalog" else _with_version(v, header))
+                for k, v in data.items()
+            },
+            header,
+        )
+        return cid
+
+    def add_agent_manifest(self, manifest: dict[str, Any]) -> None:
+        """Add an agent manifest (STANDARD v1.2 §5.15.1), checked as the core
+        checks it when loaded; a capability the ontology lacks is reported
+        (V101) where it is used.
+
+        Raises:
+            ValueError: The manifest cannot be used, or one for its agent
+                is already added
+        """
+        agent_manifest.check_agent_manifest(manifest, self._registry)
+        agent = manifest["agent"]
+        if agent in self._agents:
+            raise ValueError(f"two agent manifests name the agent '{agent}'")
+        self._agents[agent] = copy.deepcopy(dict(manifest))
+
+    def load_agents(self, path: str | Path) -> int:
+        """Add the agent manifest in ``path``, or every ``*.agent.yaml`` of a
+        directory, in sorted order. Returns how many were added."""
+        p = Path(path)
+        files = sorted(p.glob("*.agent.yaml")) if p.is_dir() else [p]
+        for f in files:
+            self.add_agent_manifest(agent_manifest.load_agent_manifest(f))
+        return len(files)
+
+    def agent_manifests(self) -> list[dict[str, Any]]:
+        """The agent manifests added, in the order added."""
+        return [copy.deepcopy(m) for m in self._agents.values()]
 
     def load_catalog(self, catalog_path: str | Path) -> int:
         """
@@ -631,6 +756,21 @@ class WorkflowEngine:
         count = 0
         for name, wf_data in data.items():
             if name.startswith("x-"):
+                continue
+            # The catalog's manifest is not a workflow (§5.1.1).
+            if (
+                name == "catalog"
+                and isinstance(wf_data, dict)
+                and "steps" not in wf_data
+            ):
+                own = None if self._manifest is None else self._manifest.get("id")
+                if own is not None and wf_data.get("id") != own:
+                    raise ValueError(
+                        f"{catalog_path}: catalog '{wf_data.get('id')}' is another "
+                        f"catalog than '{own}'; load it with load_library"
+                    )
+                self._manifest = dict(wf_data)
+                self._manifest_header = header
                 continue
             if not isinstance(wf_data, dict) or "steps" not in wf_data:
                 logger.warning("Not loading malformed workflow entry: %s", name)
@@ -676,7 +816,9 @@ class WorkflowEngine:
         """List all loaded workflow names."""
         return list(self._workflows.keys())
 
-    def effective_flags(self, step: WorkflowStep) -> dict[str, Any]:
+    def effective_flags(
+        self, step: WorkflowStep, workflow: WorkflowDefinition | None = None
+    ) -> dict[str, Any]:
         """The safety fields ``step`` is treated as: its own values made at
         least as strict as the ontology's. For a step parsed with this
         engine's registry this equals the step's attributes.
@@ -684,11 +826,51 @@ class WorkflowEngine:
         ``mutation: false`` overrides a ``mutation_overridable`` capability
         only when the step declared it (``step.declared``); the attribute's
         default is not a declaration.
+
+        With ``workflow``, a ``delegate`` step of a workflow that targets
+        1.2 and declares ``agents`` is made as strict as its target maxima,
+        from the agent manifests added (STANDARD v1.2 §5.15.2).
+
+        Raises:
+            UnboundedDelegation: The target maxima are unknown (a manifest
+                concerned is missing or lists an unknown capability).
         """
         own = {k: getattr(step, k) for k in SAFETY_KEYS}
         if own["mutation"] is False and step.declared.get("mutation") is not False:
             del own["mutation"]
-        return resolve_safety_flags(own, self._registry.get_capability(step.capability))
+        flags = resolve_safety_flags(
+            own, self._registry.get_capability(step.capability)
+        )
+        if (
+            workflow is None
+            or step.capability != "delegate"
+            or not _targets_1_2(workflow)
+        ):
+            return flags
+        if not workflow.agents:
+            return flags
+        maxima = agent_manifest.target_maxima(
+            workflow.agents, step.input_bindings, self._agents, self._registry
+        )
+        if maxima is None:
+            raise UnboundedDelegation(
+                f"{workflow.name}: the target maxima of the '{step.store_as}' delegation "
+                "are unknown: give the manifests of the agents it may delegate to"
+            )
+        joined = agent_manifest.join_maxima(
+            {
+                k: flags[k]
+                for k in (
+                    "risk",
+                    "mutation",
+                    "requires_checkpoint",
+                    "requires_approval",
+                )
+            },
+            maxima,
+        )
+        assert joined is not None
+        return {**flags, **joined}
 
     # -- Validation ---------------------------------------------------------
 
@@ -699,7 +881,9 @@ class WorkflowEngine:
 
         All loaded workflows are validated together, so references between
         them resolve. With ``workflow_name``, only that workflow's
-        diagnostics are returned.
+        diagnostics are returned: those of the primary catalog's workflow of
+        that name, never a library's (a library's diagnostics carry its
+        ``catalog`` id, STANDARD v1.2 §9.8).
 
         Entries of a loaded catalog that were too malformed to load as
         workflows are validated too.
@@ -709,11 +893,21 @@ class WorkflowEngine:
         """
         if workflow_name is not None and not self._known(workflow_name):
             raise KeyError(f"Workflow not found: {workflow_name}")
-        report = self.core_validator().validate(self.catalog_data())
+        report = self.core_validator().validate(
+            self.catalog_data(),
+            self.catalog_header(),
+            catalogs=self.libraries() or None,
+            agents=self.agent_manifests() or None,
+        )
         diagnostics = [ValidationError.from_core(d) for d in report["diagnostics"]]
         if workflow_name is None:
             return diagnostics
-        return [d for d in diagnostics if d.location.get("workflow") == workflow_name]
+        return [
+            d
+            for d in diagnostics
+            if d.location.get("workflow") == workflow_name
+            and "catalog" not in d.location
+        ]
 
     def _known(self, workflow_name: str) -> bool:
         """Loaded, or held as an entry too malformed to load."""
@@ -802,12 +996,18 @@ class WorkflowEngine:
         objects (the counterpart of :meth:`validate_all`).
 
         Returns:
-            Dict mapping each workflow with errors to its errors
+            Dict mapping each workflow with errors to its errors: a primary
+            workflow by its name, a library's by its qualified id
+            ``<catalog id>/<name>`` (STANDARD v1.2 §5.1.1), so a library
+            workflow's errors are never a primary one's of the same name
         """
         results: dict[str, list[ValidationError]] = {}
         for d in self.validate_report():
             if d.severity is Severity.ERROR:
                 name = str(d.location.get("workflow", ""))
+                if "catalog" in d.location:
+                    catalog = str(d.location["catalog"])
+                    name = f"{catalog}/{name}" if name else catalog
                 results.setdefault(name, []).append(d)
         return results
 
@@ -836,7 +1036,7 @@ class WorkflowEngine:
         # The ontology prevails over the step's own flags: a crafted
         # definition cannot downgrade mutation/requires_checkpoint to bypass
         # checkpoint creation.
-        flags = self.effective_flags(step)
+        flags = self.effective_flags(step, self._workflows.get(workflow_name))
         if not (flags["mutation"] or flags["requires_checkpoint"]):
             return None
 

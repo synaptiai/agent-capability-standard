@@ -88,6 +88,12 @@ const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'cod
 const NEW = [...TAIL, ...Object.keys(T.CODE_TABLE_FIGURES), 'principles', 'sl-fixtures', 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter', 'approver-count', 'host-loop', 'overlap', 'protocol-actions', 'run-records', 'fixture-entries'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
+  'export-replay': "A target another catalog does not export",
+  'family-replay': "Families compared exactly",
+  'manifest-replay': "A delegation whose target has no manifest",
+  'agents-replay': "A delegation that takes its target's flags",
+  'read-only-replay': "A read-only delegation its host does not attest",
+  'continue-replay': "A continuation matched by its own task_id",
   'group-replay': 'A group member that fails',
   'recovery-replay': 'A recovery that runs out',
   'wait-replay': 'A wait that loses its source',

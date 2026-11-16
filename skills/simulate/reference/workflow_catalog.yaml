@@ -107,7 +107,7 @@ monitor_and_replan:
     failure_modes: []
   - capability: detect
     purpose: Detect assumption violations that affect plan validity.
-    domain: plan-invalidation
+    domain: plan_invalidation
     risk: low
     mutation: false
     requires_checkpoint: false

@@ -1,0 +1,15 @@
+# Standard version: 1.2.0
+# A catalog manifest written against another ontology major (STANDARD v1.2
+# §5.1.1): V109.
+catalog:
+  id: acs.fixtures.old
+  version: 1.0.0
+  ontology: "1.0"
+w:
+  goal: Read a record.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}

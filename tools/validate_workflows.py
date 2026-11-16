@@ -23,6 +23,14 @@ Usage:
 - ``python3 tools/validate_workflows.py --catalog path/to/catalog.yaml``
 - ``python3 tools/validate_workflows.py --strict``
 - ``python3 tools/validate_workflows.py --emit-patch``
+- ``python3 tools/validate_workflows.py --catalog main.yaml --with-catalog lib.yaml``
+  (further catalogs of the catalog set, STANDARD v1.2 §5.1.1; repeatable)
+- ``python3 tools/validate_workflows.py --catalog w.yaml --agents agents/``
+  (agent manifests, §5.15.1: a manifest file, or a directory whose
+  ``*.agent.yaml`` files are read in sorted order; repeatable)
+
+A diagnostic about another catalog of the set is shown with
+``[<catalog id>:<workflow>]``.
 """
 
 from __future__ import annotations
@@ -60,8 +68,12 @@ def describe(d: dict[str, Any]) -> str:
     if "profile" in loc:
         field = f" {loc['field']!r}" if loc.get("field") else ""
         where.append(f"profile {loc['profile']}{field}")
-    if "workflow" in loc:
+    if "workflow" in loc and "catalog" in loc:
+        where.append(f"[{loc['catalog']}:{loc['workflow']}]")
+    elif "workflow" in loc:
         where.append(f"[{loc['workflow']}]")
+    elif "catalog" in loc:
+        where.append(f"[{loc['catalog']}]")
     if "step" in loc:
         cap = f" ({loc['capability']})" if "capability" in loc else ""
         where.append(f"step {loc['step']}{cap}")
@@ -126,6 +138,20 @@ def main() -> None:
         help="A domain profile to apply (STANDARD v1.2 §5.21); repeatable.",
     )
     ap.add_argument(
+        "--with-catalog",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Another catalog of the catalog set (STANDARD v1.2 §5.1.1); repeatable.",
+    )
+    ap.add_argument(
+        "--agents",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="An agent manifest file, or a directory of *.agent.yaml files (§5.15.1); repeatable.",
+    )
+    ap.add_argument(
         "--suggestions-out",
         default=None,
         help="Where to write the suggestions JSON (default tools/validator_suggestions.json).",
@@ -136,10 +162,22 @@ def main() -> None:
     )
 
     wf_path = Path(args.catalog) if args.catalog else WF
+    manifests: list[str] = []
+    for a in args.agents:
+        p = Path(a)
+        if p.is_dir():
+            manifests.extend(str(m) for m in sorted(p.glob("*.agent.yaml")))
+        else:
+            manifests.append(str(p))
     try:
         profiles = [_core.load_yaml(str(p)) for p in args.profile]
         report = _core.validate_catalog(
-            str(wf_path), str(ONTO), str(ROOT), profiles=profiles or None
+            str(wf_path),
+            str(ONTO),
+            str(ROOT),
+            profiles=profiles or None,
+            catalogs=[str(c) for c in args.with_catalog] or None,
+            agents=manifests or None,
         )
     except (OSError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)

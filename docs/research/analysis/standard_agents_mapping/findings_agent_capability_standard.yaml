@@ -191,11 +191,20 @@ findings:
     no checkpoint and no approval, validated with no diagnostic, and the first action of its run was `InvokeCapability`
     for `delegate`. Read schemas/capability_ontology.yaml lines 1443-1500, spec/STANDARD-v1.1.0.md lines
     268-284 and 850-861, and schemas/workflow_catalog.yaml lines 1674-1690.'
-  status: partly_fixed
-  resolution: 'docs/integrations/standard_agents.md, ''How a delegate step maps to a host'', gives the
-    workaround a workflow author has today: raise a `delegate` step''s flags when the target agent can
-    mutate. Remaining: deriving a delegate step''s flags from what its target may do needs an agent manifest
-    (ACS-29) and normative text, which needs an RFC.'
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.2 (Delegation Targets), accepted from RFC-0007: in a workflow
+    that targets 1.2 and declares `agents`, a `delegate` step''s ontology baseline is raised to its
+    target maxima, taken from the agent manifests the host gives (ACS-29); literal `read_only: true`
+    takes the read-only maxima. The executor does not delegate when the target maxima are unknown
+    (R402, not retried). A host that cannot enforce `read_only` refuses the delegation, and in a 1.2
+    workflow an accepted delegation whose `read_only` is not attested fails without retry (R402).
+    W621 reports an unbounded delegation in a 1.2 workflow. Code: `core/src/agents.rs`
+    (`target_maxima`), `core/src/validate/delegation.rs` (`check_targets`),
+    `core/src/exec/machine.rs` (`delegate_target_error`, the `output()` checks); fixtures
+    `fail_agents_flags_raised`, `pass_agents_read_only`, `pass_agents_flags_downgrade_warn`,
+    `pass_agents_manifest_missing_warn`, `pass_unbounded_delegation_*`; runtime fixtures
+    `agents_raise_checkpoint_approval`, `agents_manifest_missing`, `agents_read_only_not_attested`,
+    `delegate_read_only_not_attested_v12`, `delegate_read_only_v11_unchecked`.'
   concerns:
   - multi-agent
   related:
@@ -440,9 +449,22 @@ findings:
     field: ''capability''}, {workflow, step: 2, capability, field: ''requires_aproval''} and {workflow,
     step: 2, capability, field: ''gates[0].when'', column: 1}. Read core/src/validate/mod.rs lines 495-515
     and core/src/diag.rs lines 110-132.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §9.8 (Diagnostic Format) defines every `location` key, those of S1,
+    S2b and S6 included: `step` zero-based in list order, `field` relative to the step, else the
+    workflow, else the document; a finding about a profile or a tool names it and has no `path`;
+    `path` is an RFC 6901 pointer from the catalog root, exact also for keys that contain `.` (the
+    reference builds `field` and `path` from the same segments); `catalog` names another catalog of
+    the set; `column` counts code points; §9.1 keeps implementation codes out of the standard form.
+    Code: `core/src/diag.rs` (`at_field`, `at_field_key`), `core/src/validate/location.rs`; the
+    binding''s `issuePath` (`packages/acs-core/src/issues.ts`). Tests:
+    `tests/test_validators.py::test_every_fixture_diagnostic_has_an_exact_path`,
+    `core/tests/delegation_catalogs.rs` (`colliding_keys_get_exact_paths`,
+    `columns_count_code_points`), the fixtures'' `expected_locations`; a finding inside a step,
+    W616 for a step member included, carries `step` and `capability`, and a finding in another
+    catalog of the set, one about its version header included, carries `catalog` and the
+    workflow''s own name (the same test checks both on every fixture; fixture
+    `fail_library_header_version`).'
   concerns:
   - packaging-conformance-governance
   related:
@@ -746,9 +768,15 @@ findings:
     `conflicts_with` edges of schemas/capability_ontology.yaml (rollback and persist, mutate and rollback,
     each in both directions). Probe parallel.py shows the executor issuing the members of a group one
     at a time.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.3 (Scope of `conflicts_with`) and `spec/EDGE_TYPES.md` §5: the rule
+    applies within one workflow and does not reach across runs or agents; the cases are named, a
+    host SHOULD serialise a `rollback` with `mutate` and `persist` on the same state, and W623
+    reports a schedule trigger with `overlap: allow_all` on a workflow that exercises both
+    capabilities of a pair, through invoked workflows and `rollback` actions (event triggers
+    excluded, with the reason). Code: `core/src/validate/semantics.rs` (`exercised`,
+    `concurrent_conflicts`); fixtures `pass_concurrent_conflict_warn`,
+    `pass_concurrent_conflict_invoked_warn`, `pass_concurrent_conflict_action_warn`.'
   concerns:
   - safety-enforcement
 - id: ACS-17
@@ -780,9 +808,16 @@ findings:
     [claude, gpt]`): as scripted the run completed; with the first letter of each attested `model_family`
     capitalised it failed F504, "no counted verdict from model family claude, gpt". Read core/src/exec/quorum.rs
     lines 88-125 and 240-250.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15 (Model families), §5.16 and §5.17: families compare exactly
+    everywhere, are written `[a-z][a-z0-9_-]*` (W620 for a literal outside it), and a host derives
+    one from the model identifier by one rule; `agent_identity` 1.1.0, the world state''s
+    `AgentIdentity` and `delegate.effective` carry `model_id`, typed and checked against the
+    identity (R402) in a workflow that targets 1.2; a 1.1 run reads no `model_id`, as before.
+    Code: `core/src/names.rs` (`model_family`), `grounded_agency/coordination/families.py`,
+    `packages/acs-core/src/families.ts`; vectors `tests/conformance/families/derive.json` (fictional
+    identifiers); fixtures `pass_model_family_warn`, runtime `quorum_family_exact`,
+    `delegate_identity_model_id_mismatch`, `delegate_identity_model_id_v11_unchecked`.'
   concerns:
   - models-context-memory-security
 - id: ACS-18
@@ -1086,9 +1121,14 @@ findings:
     In schemas/interop/oasf_mapping.yaml 27 distinct `domain_hint` values are dotted. Read core/src/validate/mod.rs
     lines 390-399, core/src/exec/machine.rs lines 1296-1310 and grounded_agency/workflows/tracer.py lines
     210-222.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.2.4 (Domain Parameter): a domain id grammar (W620 outside it), a
+    host selection rule (exact, longest prefix at a dot, the domain-less implementation, else R402
+    with reason `unsupported_domain`), and §5.1 states the workflow-level `domain` is descriptive.
+    `schemas/workflow_catalog.yaml`''s `plan-invalidation` is now `plan_invalidation`, with its
+    bundled copies. Code: `core/src/names.rs` (`is_domain_id`),
+    `grounded_agency/workflows/domains.py`, `packages/acs-core/src/domains.ts`; vectors
+    `tests/conformance/domains/match.json`; fixture `pass_domain_grammar_warn`.'
   concerns:
   - tools-contracts
 - id: ACS-25
@@ -1299,9 +1339,18 @@ findings:
     definitions.'
   verified: Read schemas/capability_ontology.yaml lines 1443-1500, grounded_agency/coordination/registry.py
     lines 1-75 and grounded_agency/coordination/delegation.py lines 193-250; listed schemas/ and schemas/interop/.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.1 (Agent Manifests): the supporting schema
+    `schemas/agent_manifest_schema.yaml` 1.0.0 (`agent`, `standard`, `ontology`, `capabilities`,
+    optional `task`); maxima and read-only maxima derived from the ontology; a manifest that cannot
+    be used is refused when loaded (each task input''s members typed as `agent_task_input` says),
+    and an unknown capability is V101 where it is used. Code:
+    `core/src/agents.rs`, `grounded_agency/coordination/manifest.py` and
+    `AgentDescriptor.from_manifest`/`manifest`/`maxima`, `packages/acs-core/src/agents.ts`, and the
+    binding''s `deriveAgentManifest`, which loads each `acs` annotation as a binding record, as the
+    layer does, follows `invokes`, and refuses to derive from unannotated, unloadable or ungiven
+    invoked tools and from declared flags its capabilities do not carry; vectors
+    `tests/conformance/agents/maxima.json`; fixture `fail_agents_unknown_capability`.'
   concerns:
   - multi-agent
 - id: ACS-30
@@ -2063,9 +2112,17 @@ findings:
     the same list under `agents` gave W604; a `delegate` step whose `agent` is `${pool[0]: string}` validated
     with no diagnostic. Read schemas/workflow_catalog.yaml lines 1674-1690 and spec/STANDARD-v1.1.0.md
     lines 222-230.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.2 (Delegation Targets): the workflow field `agents`, which
+    applies only in a workflow that targets 1.2, so an older consumer refuses a workflow that relies
+    on it (V109); below 1.2 it is ignored, as by a 1.1 consumer, and W616 (§11.5). A literal target
+    not listed is V107, a computed one is refused by the executor (R402), a listed agent a static
+    host does not provide is V107 at `agents[i]` (the binding''s `lintDelegationTargets`, which, like
+    `declaredAgents`, takes the catalog header and ignores `agents` below 1.2), and W622
+    reports a computed target without `agents`. Code: `core/src/validate/delegation.rs`
+    (`check_agents_field`, `check_targets`), `core/src/exec/machine.rs`; fixtures
+    `pass_agents_v11_warn`, `pass_agents_declared`, `fail_agents_undeclared_target`,
+    `fail_agents_shape`, `pass_unbounded_delegation_warn`; runtime `agents_computed_unlisted`.'
   concerns:
   - workflow-execution
 - id: ACS-47
@@ -2096,9 +2153,14 @@ findings:
   verified: 'Probe delegate.py: a `delegate` step that binds `x-continues` validated with no diagnostic
     and the key reached the host in the action''s `inputs`; the same key without `x-` gave W604. Read
     spec/STANDARD-v1.1.0.md lines 753-775, 978 and 987-996 and core/src/exec/quorum.rs lines 88-140.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.3 (Continuing a Delegation): the `delegate` input `continues`
+    (ontology 2.2.0); with a literal `fresh_context: true` it is S303, a host that attests a fresh
+    context for a continuation fails the step (R402), null delegates anew, and every call returns
+    its own `task_id` (R402 otherwise), so a waiting delegate''s correlation and `replaces` name one
+    call. Code: `core/src/validate/delegation.rs`, `core/src/exec/machine.rs` (`output()`); fixtures
+    `fail_delegation_continues`, `pass_delegation_continues`, `pass_continues_v11_warn`; runtime
+    `delegate_continues_*`.'
   concerns:
   - multi-agent
 - id: ACS-48
@@ -2165,9 +2227,21 @@ findings:
     1328-1331 ('workflow ... is not in the catalog', R402), core/src/exec/program.rs lines 150-165 and
     core/src/exec/mod.rs lines 575-600 (a run is built from one catalog value), and spec/ROADMAP.md lines
     74-81.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.1.1 (Catalog Manifests and Qualified Names): a catalog manifest
+    under `catalog` (`id`, `version`, `ontology`, `exports`), catalog sets, qualified ids `<catalog
+    id>/<name>` for `invoke`, only exported workflows reachable from outside, bare names resolved in
+    the invoker''s own catalog, V107 for a qualified id of a loaded catalog that lacks or hides the
+    workflow, W607 otherwise; workflow names SHOULD be identifiers (W620), and a qualified id''s
+    name is any workflow name, so an exported one that is not an identifier is reachable; a
+    qualified target and a manifest are 1.2 features (W616, §11.5). Code: `core/src/catalogs.rs` (`Resolver`,
+    `Namespace`), `core/src/validate/catalog.rs`, `core/src/validate/invoke.rs`, `Run::start_set`,
+    `WorkflowEngine.load_library`, `--with-catalog`, the WebAssembly `catalogs` member; fixtures
+    `pass_qualified_invoke`, `pass_qualified_invoke_v11_warn`, `fail_qualified_invoke_hidden`,
+    `fail_qualified_cycle`, `fail_catalog_manifest*`, `pass_catalog_manifest_v11_warn`,
+    `pass_names_warn`, `fail_qualified_invoke_names`; runtime `invoke_qualified_library`,
+    `invoke_computed_not_exported`, `invoke_qualified_non_identifier_name`. Migrating the
+    duplicated example to a qualified invoke waits until the reference catalog carries a manifest.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-50
@@ -2193,9 +2267,16 @@ findings:
   verified: Read schemas/capability_ontology.yaml lines 1645-1704 (`inquire`), the `receive` node's output
     schema and the edge at lines 1849-1852; skills/inquire/SKILL.md lines 98 and 186; Standard Agent Specification
     decisions.md lines 66-96.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.13.1 (Answers to an Inquiry): ontology 2.2.0 adds
+    `inquire.inquiry_id`, question `id` and `answer_type`, and `receive` items'' `inquiry_id` and
+    `answers`; a host gives every question an id, keys and types answers, and never delivers an
+    answer to an unasked question, of the wrong type (a choice compared as a JSON value, so a
+    boolean never matches a number), or twice, nor one without the inquiry''s string `inquiry_id`;
+    a wait correlates on `inquiry_id`.
+    Code: `grounded_agency/coordination/inquiry.py` (`match_answers`), the SDK orchestrator''s
+    `inquire` output now meets its contract; vectors `tests/conformance/inquiry/answers.json`;
+    fixture `pass_inquiry_correlate`.'
   concerns:
   - approval-human
 - id: ACS-51
@@ -2343,9 +2424,16 @@ findings:
   verified: Read schemas/capability_ontology.yaml lines 1448-1459 and spec/STANDARD-v1.1.0.md lines 659-672.
     Probe delegate.py validated a `delegate` step whose literal `task` is an arbitrary nested mapping
     with no diagnostic.
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.2 (Tasks): an agent manifest''s `task` declares task inputs in
+    the form of workflow `inputs`; in a workflow that declares `agents`, a literal task against a
+    literal agent''s declaration is S303/S304 as for `invoke`, and the executor refuses any other
+    before delegating (R402). Code: `core/src/validate/delegation.rs`,
+    `core/src/validate/inputs.rs`, `core/src/exec/machine.rs`, `DelegationProtocol.delegate`, the
+    binding''s `taskRefusal` (Standard Agents'' `subagent_arguments_required`); a manifest whose task
+    input breaks `agent_task_input` (`required: "yes"`) is refused when loaded, in the core and the
+    SDK; fixture `fail_agents_task`; runtime `agents_task_refused`; tests
+    `agents::tests::task_inputs_are_typed`, `tests/test_agent_manifest.py::test_task_inputs_are_typed`.'
   concerns:
   - multi-agent
 - id: ACS-55

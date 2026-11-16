@@ -1,0 +1,160 @@
+{
+  "description": "A continuation's wait matches only its own call's result: the earlier call's result, delivered again, is dropped, and the continuation's result is matched by its own task_id (\u00a75.13, \u00a75.15.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "review_a",
+          "input_bindings": {
+            "agent": "x",
+            "task": {
+              "q": "d"
+            },
+            "read_only": true
+          },
+          "timeout": "2h",
+          "wait": {
+            "event_type": "review.done"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "review_b",
+          "input_bindings": {
+            "agent": "x",
+            "task": {
+              "q": "d"
+            },
+            "read_only": true,
+            "continues": "${review_a.task_id}"
+          },
+          "timeout": "2h",
+          "wait": {
+            "event_type": "review.done"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {
+            "read_only": true
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "correlate": {
+          "task_id": "t1"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1,
+        "inputs": {
+          "continues": "t1"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t2",
+          "effective": {
+            "read_only": true
+          },
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 1,
+        "correlate": {
+          "task_id": "t2"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t1"
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 1,
+        "correlate": {
+          "task_id": "t2"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "review.done",
+          "task_id": "t2"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "review_b": {
+        "task_id": "t2",
+        "result": {
+          "task_id": "t2"
+        }
+      }
+    }
+  },
+  "trace_kinds": [
+    "event_dropped"
+  ]
+}

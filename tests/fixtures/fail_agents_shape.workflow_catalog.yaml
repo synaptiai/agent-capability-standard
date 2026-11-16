@@ -1,0 +1,20 @@
+# Standard version: 1.2.0
+# Malformed agents (STANDARD v1.2 §5.15.2): empty, and a repeated name. S303.
+empty:
+  goal: Read a record.
+  risk: low
+  agents: []
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}
+repeated:
+  goal: Read a record.
+  risk: low
+  agents: [a, a]
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}

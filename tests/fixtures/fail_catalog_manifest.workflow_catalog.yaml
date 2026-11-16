@@ -1,0 +1,15 @@
+# Standard version: 1.2.0
+# A malformed catalog manifest (STANDARD v1.2 §5.1.1): an id that is not a
+# catalog id (S303) and an export that names no workflow (V107).
+catalog:
+  id: Bad Id
+  version: 1.0.0
+  exports: [nope]
+w:
+  goal: Read a record.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}

@@ -1,0 +1,86 @@
+{
+  "description": "A computed invoke target that names another catalog's workflow it does not export is refused before the nested run starts (R402; \u00a75.1.1).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "x",
+          "input_bindings": {
+            "workflow": "${target}"
+          }
+        }
+      ],
+      "inputs": {
+        "target": {
+          "type": "string",
+          "required": true
+        }
+      }
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {
+    "target": "acs.fixtures.lib/inner"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed",
+    "run_failed"
+  ],
+  "catalogs": [
+    {
+      "catalog": {
+        "catalog": {
+          "id": "acs.fixtures.lib",
+          "version": "1.0.0",
+          "exports": [
+            "shared_check"
+          ]
+        },
+        "shared_check": {
+          "goal": "g",
+          "risk": "low",
+          "steps": [
+            {
+              "capability": "invoke",
+              "purpose": "invoke step",
+              "store_as": "inner_out",
+              "workflow_id": "inner",
+              "input_bindings": {
+                "workflow": "inner"
+              }
+            }
+          ]
+        },
+        "inner": {
+          "goal": "g",
+          "risk": "low",
+          "steps": [
+            {
+              "capability": "retrieve",
+              "purpose": "retrieve step",
+              "store_as": "lib_record",
+              "input_bindings": {
+                "target": "library"
+              }
+            }
+          ]
+        }
+      },
+      "header": "1.2.0"
+    }
+  ]
+}

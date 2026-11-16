@@ -62,7 +62,12 @@ the Rust core in `core/`).
 - Expectations in `tests/fixtures/EXPECTATIONS.json`: `should_pass`,
   `expected_error_codes`, and `expected_warning_codes`. The codes a fixture
   emits must equal the listed set exactly; an absent or empty warning list
-  means no warning may be emitted
+  means no warning may be emitted. An expectation may also give `catalogs`
+  (further catalogs of the fixture's catalog set, under
+  `tests/fixtures/catalogs/`), `agents` (agent manifests, under
+  `tests/fixtures/agents/`) and `expected_locations` (each a `code` and the
+  `path` it must be reported at, or, for a finding with no `path`, the
+  `catalog`, `workflow` and `field` it must carry, §9.8) (§10.3)
 - Expression fixtures, language-neutral:
   `tests/conformance/expressions/eval.json` (evaluation results and runtime
   errors) and `tests/conformance/expressions/check.json` (static
@@ -90,7 +95,18 @@ the Rust core in `core/`).
   `cancel_*`, `wake_at_*`, `records_*`, `run_record_*`, `parallel_group_*`,
   `audit_*` and `error_reason_*` ones pin cancellation, the tick boundaries,
   record mode `actions`, run records, parallel groups, `require_record` and
-  error reasons (§5.2.3, §5.19, §6.4).
+  error reasons (§5.2.3, §5.19, §6.4). The `agents_*`, `delegate_*` and
+  `invoke_*` ones added in 1.2 pin delegation targets, `read_only`
+  attestation, continuations and catalog sets (§5.1.1, §5.15.2, §5.15.3);
+  a fixture's `catalogs` and `agents` are given to the run.
+- Domain selection, agent maxima, model family and inquiry answer vectors,
+  normative (§10.3): `tests/conformance/domains/match.json` (the
+  implementation a host selects for a step's domain, §5.2.4),
+  `tests/conformance/agents/maxima.json` (an agent manifest's maxima,
+  read-only maxima and joins, §5.15.1), `tests/conformance/families/derive.json`
+  (the model family a host derives from a model identifier, §5.15) and
+  `tests/conformance/inquiry/answers.json` (the answers a host may deliver
+  for an inquiry, §5.13.1).
 - Trigger vectors, normative (§10.3): `tests/conformance/triggers/`
   (`fire_times.json`, `overlap.json`, `attendance.json`, `events.json`), the
   §5.10.2 fire times, overlap decisions (resumed runs included), the
@@ -153,6 +169,8 @@ Running the suite:
 | Entity id vectors | `pytest tests/test_entities.py` |
 | Grounding vectors | `cargo test --test grounding` (in `core/`), `pytest tests/test_grounding.py`, `npm test` in `packages/acs-core/` |
 | Secret redaction vectors (informative) | `pytest tests/test_redaction.py`, `npm test` in `packages/acs-core/` |
+| Domain, maxima and family vectors | `cargo test --test delegation_catalogs` (in `core/`; maxima and families), `pytest tests/test_domains.py tests/test_agent_manifest.py tests/test_families.py`, `npm test` in `packages/acs-core/` |
+| Inquiry answer vectors | `pytest tests/test_inquiry.py` |
 
 `scripts/run_conformance.py` runs only the workflow fixtures.
 

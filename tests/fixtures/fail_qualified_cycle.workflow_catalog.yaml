@@ -1,0 +1,17 @@
+# Standard version: 1.2.0
+# An invoke cycle across catalogs (STANDARD v1.2 §5.1.1): a invokes the
+# library's b, which invokes a. V105.
+catalog:
+  id: acs.fixtures.main
+  version: 1.0.0
+  exports: [a]
+a:
+  goal: Call the library.
+  risk: low
+  steps:
+  - capability: invoke
+    purpose: Run the library's b.
+    store_as: b_out
+    workflow_id: acs.fixtures.cycle/b
+    input_bindings:
+      workflow: acs.fixtures.cycle/b

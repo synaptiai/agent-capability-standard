@@ -9,6 +9,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::canonical;
+use crate::agents::Agents;
+use crate::catalogs::{CatalogSet, Namespace, Resolver};
 use crate::duration;
 use crate::expr::{self, ast::Expr};
 use crate::profile::Policy;
@@ -91,6 +93,10 @@ pub struct Step {
     /// edges, transitively (as `mutate` before `verify`): after one of them
     /// is deferred, so is this step.
     pub after: Vec<String>,
+    /// For a `delegate` step of a workflow that declares `agents`, why its
+    /// target maxima are unknown: the executor then does not delegate
+    /// (R402, §5.15.2).
+    pub unbounded: Option<String>,
 }
 
 /// Every reference root in `v`, in document order.
@@ -120,6 +126,9 @@ pub struct Workflow {
     /// The workflow's grounding policy (`grounding@1`, §5.20): it applies to
     /// its own steps.
     pub grounding: Option<crate::grounding::Policy>,
+    /// The agents its `delegate` steps may delegate to (§5.15.2), when it
+    /// targets 1.2 or later and declares them.
+    pub agents: Option<Vec<String>>,
 }
 
 impl Workflow {
@@ -129,7 +138,13 @@ impl Workflow {
 }
 
 pub struct Program {
+    /// The catalog set's workflows by namespace key (§5.1.1): a name for
+    /// the primary catalog's, `<catalog id>/<name>` for another's.
     pub workflows: BTreeMap<String, Workflow>,
+    /// Resolves `invoke` targets over the catalog set (§5.1.1).
+    pub resolver: Resolver,
+    /// The agent manifests the run was started with (§5.15.1).
+    pub agents: Agents,
     /// SHA-256 of the canonical JSON of the catalog and the ontology
     /// contracts its steps use: a snapshot is only restored against what it
     /// was taken from.
@@ -180,21 +195,44 @@ impl Program {
         header: Option<&str>,
         policy: Policy,
     ) -> Result<Program, String> {
-        let entries = catalog
-            .as_object()
-            .ok_or_else(|| "the catalog is not a mapping".to_string())?;
+        Self::build_set(
+            ctx,
+            CatalogSet::single(catalog, header),
+            &Agents::default(),
+            root,
+            policy,
+        )
+    }
+
+    /// Prepare every workflow of a catalog set (§5.1.1) with the agent
+    /// manifests `agents` (§5.15.1) and the applied profiles' `policy`
+    /// (§5.21). `root` names a workflow of the primary catalog. The set must
+    /// already have passed validation.
+    pub fn build_set(
+        ctx: &Context,
+        set: CatalogSet<'_>,
+        agents: &Agents,
+        root: &str,
+        policy: Policy,
+    ) -> Result<Program, String> {
+        if !set.primary.is_object() {
+            return Err("the catalog is not a mapping".to_string());
+        }
+        let ns = Namespace::build(set)?;
         let mut workflows = BTreeMap::new();
-        for (name, value) in entries {
+        for (key, value) in ns.iter() {
             let Value::Object(raw) = value else { continue };
-            if name.starts_with("x-") || !raw.contains_key("steps") {
+            if !raw.contains_key("steps") {
                 continue;
             }
-            let mut workflow = Self::workflow(ctx, name, raw, &policy)?;
-            workflow.targets_1_2 =
-                crate::validate::semantics::target(raw, header).is_some_and(|t| t >= (1, 2));
-            workflows.insert(name.clone(), workflow);
+            let target = crate::validate::semantics::target(raw, ns.header_of(key));
+            let declared = crate::agents::declared(raw, target);
+            let mut workflow = Self::workflow(ctx, key, raw, agents, declared.as_deref(), &policy)?;
+            workflow.targets_1_2 = target.is_some_and(|t| t >= (1, 2));
+            workflow.agents = declared.map(|d| d.into_iter().map(str::to_string).collect());
+            workflows.insert(key.to_string(), workflow);
         }
-        if !workflows.contains_key(root) {
+        if !workflows.contains_key(root) || ns.catalog_of(root) != 0 {
             return Err(format!("workflow '{root}' is not in the catalog"));
         }
         // What a restored run depends on: the catalog, and what the ontology
@@ -210,12 +248,28 @@ impl Program {
                 }),
             );
         }
-        let digest = canonical::digest(&serde_json::json!({
-            "catalog": catalog,
+        // The other catalogs and the manifests are covered only when given,
+        // so a single catalog's digest is what it was in 1.1.
+        let mut covered = serde_json::json!({
+            "catalog": set.primary,
             "contracts": contracts,
-        }));
+        });
+        if !set.others.is_empty() {
+            covered["catalogs"] = Value::Array(
+                set.others
+                    .iter()
+                    .map(|(doc, header)| serde_json::json!([doc, header]))
+                    .collect(),
+            );
+        }
+        if !agents.is_empty() {
+            covered["agents"] = agents.digest_value();
+        }
+        let digest = canonical::digest(&covered);
         Ok(Program {
             workflows,
+            resolver: ns.resolver.clone(),
+            agents: agents.clone(),
             digest,
             grounding: policy.grounding(),
             policy,
@@ -226,6 +280,8 @@ impl Program {
         ctx: &Context,
         name: &str,
         raw: &Map<String, Value>,
+        agents: &Agents,
+        delegable: Option<&[&str]>,
         policy: &Policy,
     ) -> Result<Workflow, String> {
         let declared: Vec<String> = raw
@@ -249,7 +305,9 @@ impl Program {
             let Some(step) = value.as_object() else {
                 return Err(format!("{name}: step {index} is not a mapping"));
             };
-            steps.push(Self::step(ctx, name, index, step, list, &declared, policy)?);
+            steps.push(Self::step(
+                ctx, name, index, step, list, &declared, agents, delegable, policy,
+            )?);
         }
         let grounding = declared
             .iter()
@@ -266,9 +324,11 @@ impl Program {
             declared,
             targets_1_2: false,
             grounding,
+            agents: None,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn step(
         ctx: &Context,
         wf: &str,
@@ -276,6 +336,8 @@ impl Program {
         raw: &Map<String, Value>,
         all: &[Value],
         declared: &[String],
+        agents: &Agents,
+        delegable: Option<&[&str]>,
         policy: &Policy,
     ) -> Result<Step, String> {
         let at = |what: &str| format!("{wf}: step {index}: {what}");
@@ -426,10 +488,18 @@ impl Program {
         }
         reads.sort_unstable();
         reads.dedup();
-        // The effective flags (§5.2.1), raised by the applied profiles
-        // (§5.21.3), as the validator computes them. S3 adds the delegation
-        // targets' maxima.
-        let effective = crate::validate::effective(node, raw, None, policy);
+        // A delegate step's target maxima (§5.15.2), as the validator
+        // computes them; unknown ones stop the delegation.
+        let target = if capability == "delegate" {
+            crate::agents::target_maxima(agents, &ctx.ontology, delegable, raw)
+        } else {
+            crate::agents::Target::Free
+        };
+        let unbounded = target.why_unknown();
+        // The effective flags (§5.2.1), as the validator computes them:
+        // raised by the delegation targets' maxima (§5.15.2) and the
+        // applied profiles (§5.21.3).
+        let effective = crate::validate::effective(node, raw, target.maxima(), policy);
         let flags = effective.flags;
         let raised_by = if effective.person {
             policy.labels_raising(&capability, flags.risk)
@@ -464,6 +534,7 @@ impl Program {
             }
         }
         Ok(Step {
+            unbounded,
             reads,
             acts,
             bound: crate::grounding::bound_refs(raw.get("input_bindings").unwrap_or(&Value::Null)),
