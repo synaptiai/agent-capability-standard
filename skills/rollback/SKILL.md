@@ -93,13 +93,14 @@ hooks:
 
 ## Intent
 
-Execute **rollback** to restore system state to a previously created checkpoint. This is the recovery mechanism in the CAVR (Checkpoint-Act-Verify-Rollback) pattern - used when mutations fail or produce undesired outcomes.
+Execute **rollback** to return what a checkpoint captured to the state it had when the checkpoint was taken, whoever changed it since (STANDARD v1.2 §4.4.1). This is the recovery mechanism in the CAVR (Checkpoint-Act-Verify-Rollback) pattern, used when mutations fail or produce undesired outcomes.
+
+A rollback changes the world back, not the account of it: the record of what happened (the audit log, `.claude/`, the host's checkpoint and approval state, the trace, the transcript) is never rolled back. It reaches only what its checkpoint captured: a transmission a `send` made since is reported as `not_covered` (`transmitted`), as is a delegate's change outside the checkpoint (`delegated`).
 
 **Success criteria:**
-- State fully restored to checkpoint state
-- Post-rollback hash matches checkpoint hash
-- No orphaned artifacts remain from failed mutation
-- Audit trail of what was reverted
+- Everything the rollback concerns is back in its checkpointed state, and `restored` says so
+- What could not be restored is listed in `unrestored`, with a reason
+- The restored content's digest matches the checkpoint's (`verification`)
 
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
@@ -109,65 +110,62 @@ Execute **rollback** to restore system state to a previously created checkpoint.
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `checkpoint_id` | Yes | string | ID of checkpoint to restore to |
-| `scope` | No | string | Specific files/keys to rollback (default: all in checkpoint) |
+| `scope` | No | string | Part of what the checkpoint captured to restore, in the host's naming (default: all of it). An item it names that the checkpoint did not capture is `unrestored` (`not_captured`) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
-1) **Validate checkpoint**: Confirm checkpoint exists and is valid
-   - Look up checkpoint by ID in `.checkpoints/` or git stash
-   - Verify checkpoint integrity (hash check)
-   - An expired or used checkpoint can still be restored: validity limits what a checkpoint authorises, not what it restores (STANDARD 1.2.0 §5.2.2)
-   - If checkpoint missing: FAIL immediately with clear error
+1) **Find the checkpoint**: Look it up by ID where the host keeps checkpoint content
+   - An expired or used checkpoint can still be restored while its content is kept: validity limits what a checkpoint authorises, not what it restores (STANDARD 1.2.0 §4.4.1, §5.2.2)
+   - If its content is gone, report `restored: false` with `{item: "*", reason: discarded}`
 
-2) **Capture current state**: Record what will be reverted
-   - List all files/state that differ from checkpoint
-   - Compute hash of current state for audit
-   - Document changes that will be undone
+2) **Read what changed** (read-only). The git form, each a separate call:
+   - `git diff --name-status <sha> -- <paths>`: tracked changes since the checkpoint, for `changes_reverted`
+   - `git ls-files --others --exclude-standard -- <paths>`: untracked files now. Files **created since** are these minus the checkpoint's `excluded` list; untracked files that were in `excluded` were never captured
 
-3) **Execute restoration**: Apply the restore command
-   - For a git checkpoint: `git stash apply <sha>`, with the full commit id the checkpoint recorded; a bare `git stash pop` or `git stash apply`, or any other revision, restores no checkpoint and is refused (F503)
-   - For file_backup: Copy from `.checkpoints/<id>/` to original locations
-   - For state_snapshot: Restore state variables
-   - Handle any conflicts or errors gracefully
+3) **Restore by mechanism**. The git form is one line, a gated `mutate` in the safety layer (it needs a fresh checkpoint and an approval: it overwrites the current state):
+   - `restore_kind: stash`: `git restore --source=<sha> --worktree -- <paths> && git restore --source=<sha>^2 --staged -- <paths>` (the worktree from the stash commit, the index from its index parent; tracked files added since are removed, files deleted since come back)
+   - `restore_kind: head`: `git restore --source=<sha> --staged --worktree -- <paths>`
+   - Then, only when the created-since list is not empty, `&& rm -f -- <created paths>` in the same line. Never `git clean` with an empty path list, which removes every untracked file.
+   - `git stash apply <sha>` (the full commit id a checkpoint recorded) also counts as a rollback, but aborts with "Your local changes would be overwritten" once a file it touches changed since the checkpoint, the usual case for a rollback; a bare `git stash pop` or `git stash apply`, or any other revision, restores no checkpoint and is refused (F503)
+   - `file_copy`: copy each file back from the manifest, and remove the files created in scope since
+   - Leave the record of what happened alone: never overwrite or remove `.claude/`, the audit log or the host's state
 
-4) **Verify restoration**: Confirm state matches checkpoint
-   - Recompute hash of restored state
-   - Compare with checkpoint's pre_mutation_state.hash
-   - Check for orphaned files created during failed mutation
-   - Clean up orphaned artifacts if present
+4) **Verify** (read-only): `git diff --quiet <sha> -- <paths>` and the untracked list again; recompute the digest as the checkpoint computed it, for `verification`
 
-5) **Ground claims**: Attach evidence of successful rollback
-   - Format: `tool:bash:<restore_command>`, comparison output
-   - Include before/after state hashes
+5) **Report**:
+   - `unrestored`: each path the restore failed for (`failed`), each created-since file not removed (`failed`), each item the rollback's `scope` names that the checkpoint did not capture, untracked files in `excluded` included (`not_captured`), content that is gone (`discarded`)
+   - `not_covered`: changes to excluded files no scope named (`outside_scope`); when `HEAD` moved since the checkpoint, `{item: "HEAD", reason: outside_scope, detail: "commits made since are not undone"}`; a transmission made since (`transmitted`)
+   - `restored` is true only if `unrestored` is empty; the step completes either way, so say so, and list what was not restored
 
-6) **Format output**: Return rollback results per contract
+6) **Ground claims**: the rollback's own record, the restore and the verification commands
 
 ## Output Contract
 
 Return a structured object:
 
 ```yaml
-restored: boolean  # Whether state was restored to the checkpoint
-previous_state:  # State before rollback
-  hash: string
-  summary: string
-restored_state:  # State after rollback
-  hash: string
-  summary: string
-restored_to:
-  checkpoint_id: string
-  checkpoint_type: string
-  timestamp: string  # When checkpoint was created
+restored: boolean  # true only if everything the rollback concerns is back; the step completes either way (§4.4.1)
+unrestored:  # what the rollback concerns that is not back; empty exactly when restored is true
+  - item: string
+    reason: failed | conflict | discarded | not_captured | x-...
+    detail: string
+not_covered:  # changes since the checkpoint that it never covered; they do not make restored false
+  - item: string
+    reason: transmitted | delegated | outside_scope | x-...
+    detail: string
 changes_reverted:
-  - file: string
-    operation: string  # What was undone (create, modify, delete)
-    summary: string  # Brief description of change reverted
+  - item: string
+    operation: create | modify | delete | other  # what was undone
+    summary: string
 verification:
-  checkpoint_hash: string  # Expected hash from checkpoint
-  match: boolean  # restored_state.hash == checkpoint_hash
-warnings: array[string]  # Any issues encountered
+  digest: string  # digest of the restored content, computed as the checkpoint's was
+  match: boolean  # whether it matches the checkpoint's digest
+previous_state:  # state before rollback
+  summary: string
+restored_state:  # state after rollback
+  summary: string
 next_actions: array[string]  # Suggested follow-up
 confidence: number  # probability that the state now matches the checkpoint (§4.1.1)
 evidence_anchors: [{ref: "rollback:<checkpoint_id>", kind: record}, {ref: "tool:bash:...", kind: tool}, {ref: "file:...", kind: file}]  # the restore's own record grounds the output (STANDARD v1.2 §3.1)
@@ -178,124 +176,123 @@ assumptions: []
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `restored` | boolean | Whether rollback was successful (workflows gate on `${<step>.restored}`) |
-| `previous_state` | any | State before rollback (hash and summary) |
-| `restored_state` | any | State after rollback (hash and summary) |
-| `restored_to` | object | Checkpoint that was restored to |
-| `changes_reverted` | array | List of changes that were undone |
-| `verification.match` | boolean | Whether restored state matches checkpoint |
-| `warnings` | array | Issues like orphaned files or partial restore |
+| `restored` | boolean | True only if everything the rollback concerns is back (workflows gate on `${<step>.restored}`, §12.5 Checked Rollback) |
+| `unrestored` | array | Items not back, each with `failed`, `conflict`, `discarded`, `not_captured` or an `x-` reason |
+| `not_covered` | array | Changes the checkpoint never covered: `transmitted`, `delegated`, `outside_scope` or an `x-` reason |
+| `changes_reverted` | array | Each `item` and the `operation` undone |
+| `verification` | object | The restored content's `digest`, and whether it `match`es the checkpoint's |
+| `previous_state` | any | State before rollback |
+| `restored_state` | any | State after rollback |
 | `next_actions` | array | What to do next (re-plan, investigate, etc.) |
 | `confidence` | number | Probability, 0.0-1.0, that the state now matches the checkpoint (§4.1.1) |
 | `evidence_anchors` | array of evidence anchors (§6.5) | Proof of restoration |
 | `assumptions` | array | Explicit assumptions made |
 
+An item holds no secret (§6.7): name a file, not its content, and redact a URL's credentials.
+
 ## Examples
 
-### Example 1: Git Stash Rollback After Failed Tests
+### Example 1: Git Rollback After Failed Tests
 
 **Input:**
 ```yaml
 checkpoint_id: "chk_20240115_143022_a7b3c9"
 ```
 
-Reason for the rollback: tests failed after refactoring.
+Reason for the rollback: tests failed after refactoring. The checkpoint's restore point is a stash commit; one file was created since.
 
 **Output:**
 ```yaml
 restored: true
-previous_state:
-  hash: "sha256:deadbeef..."
-  summary: "2 handler files with refactored, failing code"
-restored_state:
-  hash: "sha256:e3b0c442..."
-  summary: "Handlers as of checkpoint"
-restored_to:
-  checkpoint_id: "chk_20240115_143022_a7b3c9"
-  checkpoint_type: git_stash
-  timestamp: "2024-01-15T14:30:22Z"
+unrestored: []
+not_covered: []
 changes_reverted:
-  - file: "src/api/handlers/user.py"
+  - item: "src/api/handlers/user.py"
     operation: modify
     summary: "Reverted refactored get_user() function"
-  - file: "src/api/handlers/auth.py"
+  - item: "src/api/handlers/auth.py"
     operation: modify
     summary: "Reverted auth token validation changes"
+  - item: "src/api/handlers/tokens.py"
+    operation: create
+    summary: "Removed a file the refactoring added"
 verification:
-  checkpoint_hash: "sha256:e3b0c442..."
+  digest: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   match: true
-warnings: []
+previous_state:
+  summary: "3 handler files with refactored, failing code"
+restored_state:
+  summary: "Handlers as of the checkpoint"
 next_actions:
   - "critique: Analyze why refactoring broke tests"
   - "plan: Create new plan with smaller incremental changes"
 confidence: 1.0
 evidence_anchors:
   - {ref: "rollback:chk_20240115_143022_a7b3c9", kind: record}
-  - {ref: "tool:bash:git stash pop stash@{0}", kind: tool}
-  - {ref: "tool:bash:git diff --stat HEAD", kind: tool}
-  - {ref: "tool:bash:sha256sum src/api/handlers/*.py", kind: tool}
+  - {ref: "tool:bash:git diff --name-status 4f1d2c3b5a6978877665544332211009988aabbc -- src/api/handlers", kind: tool}
+  - {ref: "tool:bash:git restore --source=4f1d2c3b5a6978877665544332211009988aabbc --worktree -- src/api/handlers", kind: tool}
+  - {ref: "tool:bash:git diff --quiet 4f1d2c3b5a6978877665544332211009988aabbc -- src/api/handlers", kind: tool}
 assumptions:
-  - "No other changes made to stashed files since checkpoint"
+  - "No commit was made since the checkpoint"
 ```
 
-**Evidence pattern:** Git stash pop output, diff showing restored state, hash verification.
+**Evidence pattern:** the changes read before the restore, the restore line, and the verification diff.
 
 ---
 
-### Example 2: File Backup Rollback with Orphaned Files
+### Example 2: Partial Rollback After a Send
 
 **Input:**
 ```yaml
 checkpoint_id: "chk_20240115_150000_config"
+scope: "config/production.yaml config/secrets.env"
 ```
 
-Reason for the rollback: the config migration caused a service failure.
+Reason for the rollback: the config migration caused a service failure, after a notification was sent.
 
 **Output:**
 ```yaml
-restored: true
-previous_state:
-  hash: "sha256:newconfig..."
-  summary: "Migrated database connection string"
-restored_state:
-  hash: "sha256:abc123..."
-  summary: "Original production config"
-restored_to:
-  checkpoint_id: "chk_20240115_150000_config"
-  checkpoint_type: file_backup
-  timestamp: "2024-01-15T15:00:00Z"
+restored: false
+unrestored:
+  - item: "config/secrets.env"
+    reason: not_captured
+    detail: "excluded from the checkpoint: it holds secrets"
+not_covered:
+  - item: "send to https://hooks.example.com/deploys (run-7:12)"
+    reason: transmitted
 changes_reverted:
-  - file: "config/production.yaml"
+  - item: "config/production.yaml"
     operation: modify
     summary: "Reverted database connection string changes"
 verification:
-  checkpoint_hash: "sha256:abc123..."
+  digest: "sha256:9b74c9897bac770ffc029102a200c5de0b1d5e5d3c1b0e2f4a6c8e0a2b4c6d8e"
   match: true
-warnings:
-  - "Orphaned file detected: config/production.yaml.bak (removed)"
+previous_state:
+  summary: "Migrated database connection string"
+restored_state:
+  summary: "Original production config; secrets.env as it is now"
 next_actions:
-  - "audit: Record failed migration attempt"
-  - "plan: Investigate migration script issue"
-confidence: 0.95
+  - "inquire: secrets.env was never captured; ask how to restore it"
+  - "send: tell the deploy channel the migration was rolled back"
+confidence: 0.9
 evidence_anchors:
   - {ref: "rollback:chk_20240115_150000_config", kind: record}
-  - {ref: "tool:bash:cp .checkpoints/chk_20240115_150000_config/production.yaml config/", kind: tool}
-  - {ref: "tool:bash:rm config/production.yaml.bak", kind: tool}
+  - {ref: "tool:bash:git restore --source=1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d --staged --worktree -- config/production.yaml", kind: tool}
   - {ref: "file:config/production.yaml:1", kind: file}
 assumptions:
-  - "Checkpoint backup file is not corrupted"
+  - "The notification cannot be recalled; a new send corrects it"
 ```
 
 ## Verification
 
 Apply the following verification patterns:
 
-- [ ] **Rollback Verification**: restored_state.hash == checkpoint_hash (CRITICAL)
-- [ ] **State Assertion**: No unexpected files remain after rollback
+- [ ] **Rollback Verification**: `verification.match` is true for what was restored (CRITICAL)
+- [ ] **Report Complete**: `restored` is true exactly when `unrestored` is empty
+- [ ] **State Assertion**: No file created since remains in scope
 - [ ] **Evidence Grounding**: Restore command execution is captured
-- [ ] **Clean Git State**: git status shows no unexpected changes
 
-**Verification tools:** Bash (for restore and hash), Git (for stash operations)
+**Verification tools:** Bash (for restore and hash), Git (for the diff and the restore)
 
 ## Safety Constraints
 
@@ -306,10 +303,11 @@ Apply the following verification patterns:
 
 **Capability-specific rules:**
 - CRITICAL: Never rollback without a checkpoint_id that exists
-- CRITICAL: Always verify state hash matches after restore
-- Clean up orphaned files created by failed mutation
+- CRITICAL: Never report `restored: true` for a rollback that did not complete
+- Clean up the files created in scope since the checkpoint
 - An expired or used checkpoint can be restored (STANDARD 1.2.0 §5.2.2); the safety layer refuses a restore only when no checkpoint was ever taken (F503)
-- Preserve audit trail of what was reverted
+- Never roll back the record of what happened: `.claude/`, the audit log, the host's checkpoint and approval state
+- A transmission is not undone: report it `transmitted`, and compensate in a step of its own
 - If verification fails, STOP and alert - do not proceed
 
 ## Composition Patterns

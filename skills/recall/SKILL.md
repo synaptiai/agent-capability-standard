@@ -11,13 +11,12 @@ agent: explore
 
 ## Intent
 
-Execute **recall** to retrieve relevant prior decisions, rationale, and patterns from memory to maintain consistency and learn from past interactions.
+Execute **recall** to read back what `persist` stored under a key in a memory scope (STANDARD v1.2 §4.5), and, beside it, the prior decisions, rationale and patterns related to it, to keep consistent with past reasoning.
 
 **Success criteria:**
-- Relevant memories are retrieved based on query
-- Prior decisions and their rationale are surfaced
-- Consistency with past reasoning is maintained
-- Retrieved information is grounded with timestamps and context
+- The entry stored under the key in the scope is returned exactly, when a live one exists
+- Related memories are surfaced separately, grounded with their sources and times
+- Nothing is reported found that was not stored under the key
 
 **Compatible schemas:**
 - `schemas/output_schema.yaml`
@@ -26,71 +25,56 @@ Execute **recall** to retrieve relevant prior decisions, rationale, and patterns
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `key` | Yes | string | Storage key |
+| `key` | Yes | string | Storage key, compared by code point |
 | `default` | No | any | Default if not found |
+| `scope` | No | string | The scope to read, as for `persist`: `run`, `session`, `user`, `project`, `global` or an `x-` name; the host's default (`session`) when absent (§4.5) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
 ## Procedure
 
-1) **Parse query intent**: Understand what the `key` asks to recall
-   - Identify if it is about a decision, pattern, fact, or context
-   - Extract key terms for memory search
-   - Determine if exact match or semantic similarity needed
+1) **Resolve the scope** (§4.5): the store of the scope asked for
+   - `session` (the default): this conversation
+   - `user`: what the host keeps for this principal across sessions
+   - `project`: CLAUDE.md, knowledge files, the project's memory file
+   - `global`: every store the host serves
+   - `run`: the run the host started and every run nested in it
+   - A scope this host does not provide: look nothing up, and answer `unsupported_scope`
 
-2) **Scope memory search**: Identify which memory stores to query
-   - `session`: Current conversation context
-   - `project`: CLAUDE.md, knowledge files, local docs
-   - `global`: All accessible memory stores
+2) **Look up the exact key first**: an entry stored under exactly `key` in the scope
+   - An entry whose `expires_at` has passed has ended: it is not found
+   - `found` is true only for a live entry with exactly this key; `data` is then its data, unchanged, with its `stored_at` (and `expires_at`)
 
-3) **Search memory stores**: Query relevant sources
-   - CLAUDE.md for project-level decisions and patterns
-   - Session context for recent interactions
-   - Knowledge files for domain-specific learnings
-   - Use Grep for exact term matches, Read for context
+3) **Search for related memories** (optional): topical matches for the key's terms
+   - CLAUDE.md for project-level decisions and patterns; session context for recent interactions; knowledge files for domain learnings
+   - Use Grep for term matches, Read for context
+   - Rank by relevance, recency and authority (explicit decisions over implicit patterns)
+   - They go in `x-related`, never in `data`: with no exact entry, `found` is false and `data` is the `default` (or null)
 
-4) **Rank by relevance**: Score and filter results
-   - Relevance to query terms
-   - Recency (more recent = higher weight unless historical needed)
-   - Authority (explicit decisions > implicit patterns)
-   - Filter out matches below a similarity threshold
+4) **Extract rationale and check consistency** for what was found
+   - Original decision context, the factors and constraints of the time
+   - Flag contradictions between items, and context that changed since
 
-5) **Extract rationale**: For each recalled item, capture reasoning
-   - Original decision context
-   - Factors that influenced the decision
-   - Constraints or assumptions at the time
-
-6) **Check consistency**: Verify recalled items are internally consistent
-   - Flag contradictions between recalled items
-   - Note if context has changed since original decision
-
-7) **Format output**: Structure results according to output contract
+5) **Format output**: Structure results according to output contract
 
 ## Output Contract
 
 Return a structured object:
 
 ```yaml
-found: boolean  # Whether anything matched the key; when false, data is the `default` input
-stored_at: string | null  # ISO 8601 date-time the top match was recorded
-data:  # Recalled items, best match first
-  - id: string  # Unique identifier for this memory
+found: boolean  # true only when a live entry has exactly the key in the scope (§4.5)
+data: any  # that entry's data, unchanged; otherwise the `default` input (or null)
+scope: string  # The scope used (§4.5)
+stored_at: string | null  # When the entry was stored
+expires_at: string | null  # When the entry ends, for an entry with a ttl
+x-related:  # Topical matches beside the exact key, best first (not the entry)
+  - id: string
     type: decision | pattern | fact | context
-    content: string  # The recalled information
-    rationale: string | null  # Why this decision was made
+    content: string
+    rationale: string | null
     source: string  # Where this was found (CLAUDE.md:42, session, etc.)
-    timestamp: string | null  # When originally recorded
-    relevance_score: number  # 0.0-1.0 match to query
-    context:
-      project: string | null
-      conversation_id: string | null
-      original_query: string | null
-query_interpretation: string  # How the query was understood
-search_scope:
-  stores_searched: array[string]
-  time_range_applied: object | null
-total_matches: integer  # Total before filtering
-returned_matches: integer  # After relevance filtering
+    timestamp: string | null
+    relevance_score: number  # 0.0-1.0 match to the key's terms
 consistency_check:
   consistent: boolean
   contradictions: array[object] | null
@@ -103,12 +87,12 @@ assumptions: array[string]  # Assumptions about memory validity
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `data` | any | The recalled memories (here a list, best match first), or the `default` input when nothing matched |
-| `found` | boolean | Whether anything matched the key |
-| `stored_at` | string | ISO 8601 date-time the top match was originally recorded |
-| `data[].type` | enum | Kind of memory: decision, pattern, fact, or context |
-| `data[].rationale` | string | Explanation for why decision was made |
-| `data[].relevance_score` | number | How well this matches the query |
+| `found` | boolean | Whether a live entry has exactly the key in the scope |
+| `data` | any | The entry's data, or the `default` input when none is found |
+| `scope` | string | The scope used; a step that binds `scope` fails unless this echoes it (R402, `unsupported_scope`) |
+| `stored_at` | string | ISO 8601 date-time the entry was stored |
+| `expires_at` | string | When the entry ends, for an entry with a `ttl` |
+| `x-related` | array | Related memories, best match first; never the entry itself |
 | `consistency_check` | object | Whether recalled items contradict each other |
 | `confidence` | number | Probability, 0.0-1.0, that the returned memories are correct for the query (§4.1.1) |
 | `evidence_anchors` | array of evidence anchors (§6.5) | Sources for recalled items |
@@ -116,120 +100,62 @@ assumptions: array[string]  # Assumptions about memory validity
 
 ## Examples
 
-### Example 1: Recalling a Project Decision
+### Example 1: Recalling a Stored Decision by Its Key
 
 **Input:**
 ```yaml
-key: "error handling approach"
+key: "decision:error-handling"
+scope: project
 ```
 
 **Output:**
 ```yaml
 found: true
-stored_at: "2024-01-10T09:15:00Z"
 data:
-  - id: "decision_err_001"
-    type: decision
-    content: "Use Result<T, Error> pattern for all fallible operations; avoid exceptions"
-    rationale: "Explicit error handling improves debuggability and makes failure paths visible in types"
-    source: "CLAUDE.md:127"
-    timestamp: "2024-01-10T09:15:00Z"
-    relevance_score: 0.95
-    context:
-      project: "api-service"
-      conversation_id: "conv_abc123"
-      original_query: "How should we handle errors in this codebase?"
+  decision: "Use Result<T, Error> for all fallible operations; avoid exceptions"
+  rationale: "Explicit error handling makes failure paths visible in types"
+scope: project
+stored_at: "2024-01-10T09:15:00Z"
+expires_at: null
+x-related:
   - id: "pattern_err_001"
     type: pattern
     content: "Wrap external API errors with domain-specific error types before propagating"
-    rationale: "Prevents leaking implementation details; enables consistent error messages"
+    rationale: "Prevents leaking implementation details"
     source: "CLAUDE.md:134"
     timestamp: "2024-01-10T09:20:00Z"
     relevance_score: 0.88
-    context:
-      project: "api-service"
-      conversation_id: "conv_abc123"
-      original_query: null
-query_interpretation: "Looking for decisions and patterns related to error handling in the codebase"
-search_scope:
-  stores_searched: ["CLAUDE.md", "docs/architecture.md"]
-  time_range_applied: null
-total_matches: 5
-returned_matches: 2
 consistency_check:
   consistent: true
   contradictions: null
-confidence: 0.92
+confidence: 0.95
 evidence_anchors:
-  - {ref: "file:CLAUDE.md:127", kind: file}
+  - {ref: "memory:project:decision:error-handling", kind: record}
   - {ref: "file:CLAUDE.md:134", kind: file}
 assumptions:
   - "CLAUDE.md reflects current project decisions"
-  - "No conflicting decisions recorded elsewhere"
 ```
 
-**Evidence pattern:** Each recalled item traced to specific file:line; rationale extracted from surrounding context.
+**Evidence pattern:** the entry's own record, and each related item traced to a file and line.
 
 ---
 
-### Example 2: Recalling Session Context
-
-**Input:**
-```yaml
-key: "user's preferred output format"
-```
-
-Search session memory only, from 2024-01-16 onward.
-
-**Output:**
-```yaml
-found: true
-stored_at: "2024-01-16T10:30:00Z"
-data:
-  - id: "ctx_fmt_001"
-    type: context
-    content: "User prefers YAML output over JSON for configuration files"
-    rationale: "User stated 'I find YAML more readable' in earlier message"
-    source: "session:message_42"
-    timestamp: "2024-01-16T10:30:00Z"
-    relevance_score: 0.97
-    context:
-      project: null
-      conversation_id: "current_session"
-      original_query: "Can you output this as YAML instead?"
-query_interpretation: "Looking for user preferences about output formatting from current session"
-search_scope:
-  stores_searched: ["session"]
-  time_range_applied:
-    after: "2024-01-16T00:00:00Z"
-    before: null
-total_matches: 1
-returned_matches: 1
-consistency_check:
-  consistent: true
-  contradictions: null
-confidence: 0.97
-evidence_anchors:
-  - {ref: "session:message_42", kind: human_note}
-assumptions:
-  - "User preference still valid within session"
-  - "No subsequent preference change"
-```
-
----
-
-### Example 3: Detecting Contradictory Memories
+### Example 2: No Entry under the Key, Related Memories Found
 
 **Input:**
 ```yaml
 key: "database choice"
+default: null
 ```
 
 **Output:**
 ```yaml
-found: true
-stored_at: "2024-01-05T14:00:00Z"
-data:
+found: false
+data: null
+scope: session
+stored_at: null
+expires_at: null
+x-related:
   - id: "decision_db_001"
     type: decision
     content: "Use PostgreSQL for all persistent storage"
@@ -237,10 +163,6 @@ data:
     source: "CLAUDE.md:45"
     timestamp: "2024-01-05T14:00:00Z"
     relevance_score: 0.94
-    context:
-      project: "backend-service"
-      conversation_id: "conv_xyz789"
-      original_query: "Which database should we use?"
   - id: "decision_db_002"
     type: decision
     content: "Use SQLite for local development and testing"
@@ -248,16 +170,6 @@ data:
     source: "docs/dev-setup.md:23"
     timestamp: "2024-01-12T11:30:00Z"
     relevance_score: 0.85
-    context:
-      project: "backend-service"
-      conversation_id: "conv_def456"
-      original_query: "How to speed up local dev?"
-query_interpretation: "Looking for decisions about database selection"
-search_scope:
-  stores_searched: ["CLAUDE.md", "docs/"]
-  time_range_applied: null
-total_matches: 2
-returned_matches: 2
 consistency_check:
   consistent: false
   contradictions:
@@ -269,17 +181,15 @@ evidence_anchors:
   - {ref: "file:CLAUDE.md:45", kind: file}
   - {ref: "file:docs/dev-setup.md:23", kind: file}
 assumptions:
-  - "Both decisions are currently valid"
-  - "Context difference (prod vs dev) resolves contradiction"
+  - "Context difference (prod vs dev) resolves the contradiction"
 next_actions:
-  - "Clarify if query refers to production or development"
-  - "Document environment-specific database strategy"
+  - "Clarify if the key refers to production or development"
 ```
 
 ## Verification
 
-- [ ] Query intent correctly interpreted
-- [ ] All relevant memory stores searched within scope
+- [ ] The exact key was looked up first, in the scope asked for
+- [ ] `found` is true only for a live entry with exactly the key
 - [ ] relevance_score reflects actual match quality
 - [ ] Contradictions detected and flagged
 - [ ] evidence_anchors provide traceable source references
@@ -297,7 +207,7 @@ next_actions:
 - Do not recall or expose credentials, secrets, or PII from memory
 - Respect memory scope boundaries; do not access global when session requested
 - Flag stale memories (>30 days) with lower confidence
-- Do not fabricate memories; if nothing is found return `found: false` with `data` set to the `default` input (or null)
+- Do not fabricate memories; if no live entry has the key return `found: false` with `data` set to the `default` input (or null), and topical matches only in `x-related`
 
 ## Composition Patterns
 
