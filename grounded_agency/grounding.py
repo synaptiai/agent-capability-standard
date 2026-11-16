@@ -62,6 +62,11 @@ def _strings(value: object, what: str) -> frozenset[str]:
     return frozenset(items)
 
 
+POLICY_KEYS = ("require", "kinds", "attested")
+"""The members of a grounding policy (§5.20); any other but an extension
+member ``x-...`` is refused."""
+
+
 @dataclass(frozen=True, slots=True)
 class GroundingPolicy:
     """A grounding policy (§5.20). ``require`` and ``kinds`` take any
@@ -115,9 +120,21 @@ class GroundingPolicy:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> GroundingPolicy:
-        """A policy from ``{require, kinds?, attested?}``."""
+        """A policy from ``{require, kinds?, attested?}``. A member other
+        than those and extension members ``x-...`` is a ``ValueError``
+        (S303): a misspelt ``kinds`` or ``attested`` would otherwise turn
+        the check off without a word."""
         if not isinstance(data, Mapping):
             raise ValueError("a grounding policy is a mapping")
+        for key in data:
+            if key not in POLICY_KEYS and not (
+                isinstance(key, str) and key.startswith("x-")
+            ):
+                raise ValueError(
+                    f"S303 SCHEMA_VALIDATION_FAILED: grounding policy: {key!r} is "
+                    f"not a member of a grounding policy ({', '.join(POLICY_KEYS)}, "
+                    "or an extension member x-...)"
+                )
         kinds = data.get("kinds")
         return cls(
             require=_strings(data.get("require"), "require"),

@@ -122,6 +122,12 @@ class CoordinationAuditLog:
     kept: a secret never enters an audit record (STANDARD v1.2 §6.7).
     """
 
+    STORE_INFO: types.MappingProxyType[str, str] = types.MappingProxyType(
+        {"name": "grounded_agency.coordination.audit_log", "durability": "memory"}
+    )
+    """The ``store`` an ``audit`` step reports (§6.3): the log is held in
+    memory, bounded by ``max_events``, and keeps no retention of its own."""
+
     def __init__(
         self,
         max_events: int = DEFAULT_MAX_EVENTS,

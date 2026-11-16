@@ -484,8 +484,9 @@ class EvidenceAnchor:
     def from_dict(cls, data: Any) -> EvidenceAnchor:
         """An anchor from its §6.5 JSON form. ``ValueError`` for anything
         that is not an evidence anchor: not a mapping, an empty ``ref``, a
-        kind outside §6.5's vocabulary (a legacy kind included), a malformed
-        ``digest``, a ``timestamp`` or ``excerpt`` that is not a string."""
+        kind outside §6.5's vocabulary (a legacy kind included), a
+        ``digest`` that is present and malformed (``null`` included), a
+        ``timestamp`` or ``excerpt`` that is not a string."""
         if not isinstance(data, Mapping):
             raise ValueError("an evidence anchor is an object (§6.5)")
         ref, kind = data.get("ref"), data.get("kind")
@@ -496,6 +497,13 @@ class EvidenceAnchor:
         for member in ("timestamp", "excerpt"):
             if data.get(member) is not None and not isinstance(data[member], str):
                 raise ValueError(f"an evidence anchor's {member} is a string (§6.5)")
+        # A digest that is present has §6.5's form; ``null`` is not one (the
+        # core and the TypeScript package read it so too).
+        if "digest" in data and not is_digest(data["digest"]):
+            raise ValueError(
+                f"an evidence anchor's digest is 'sha256:' and 64 lowercase hex "
+                f"digits, not {data['digest']!r} (§6.5)"
+            )
         metadata = data.get("metadata")
         return cls(
             ref=ref,
@@ -799,7 +807,10 @@ def _default_redactor() -> Redactor:
 
 def _query_kind(kind: str) -> tuple[str | None, tuple[str, ...] | None]:
     """A kind query: a §6.5 kind reads the kind index; a legacy kind is
-    answered by its ref prefixes, with a ``DeprecationWarning``."""
+    answered by its ref prefixes, and any other (free) kind by the vendor
+    kind an anchor made with it now has (``x-<kind>``), each with a
+    ``DeprecationWarning``: a query by the kind an anchor was made with
+    returns it, as in 1.1."""
     if kind in LEGACY_REF_PREFIXES:
         warnings.warn(
             f"evidence anchor kind {kind!r} is deprecated; the query is answered "
@@ -808,6 +819,15 @@ def _query_kind(kind: str) -> tuple[str | None, tuple[str, ...] | None]:
             stacklevel=3,
         )
         return None, LEGACY_REF_PREFIXES[kind]
+    if isinstance(kind, str) and kind and not is_anchor_kind(kind):
+        vendor = _vendor_kind(kind)
+        warnings.warn(
+            f"evidence anchor kind {kind!r} is deprecated; the query is answered "
+            f"by the vendor kind {vendor!r} (STANDARD v1.2 §6.5)",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return vendor, None
     return kind, None
 
 

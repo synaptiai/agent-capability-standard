@@ -1628,7 +1628,18 @@ class TestExecuteWorkflowStep:
         result = runtime.execute_workflow_step(step, {"event": {"info": "test"}})
         assert result.status == StepStatus.COMPLETED
         assert result.output["recorded"] is True
-        assert result.output["evidence_anchors"] == []
+        # The record it wrote grounds the output (§6.5, "Anchors of actions").
+        assert result.output["evidence_anchors"] == [
+            {
+                "ref": f"audit:{result.output['audit_id']}",
+                "kind": "record",
+                "timestamp": result.output["timestamp"],
+            }
+        ]
+        assert result.output["store"] == {
+            "name": "grounded_agency.coordination.audit_log",
+            "durability": "memory",
+        }
         record = result.output["record"]
         assert record["action_id"] == result.output["audit_id"]
         assert record["capability"] == "audit"
@@ -1957,7 +1968,9 @@ class TestExecuteWorkflowStepInvokeInquire:
         assert result.status == StepStatus.COMPLETED
         assert result.output["workflow"] == "debug_code_change"
         assert len(result.output["evidence_anchors"]) >= 1
-        assert result.output["evidence_anchors"][0].startswith("invoke:")
+        anchor = result.output["evidence_anchors"][0]
+        assert anchor["ref"].startswith("invoke:")
+        assert anchor["kind"] == "record"
 
     def test_invoke_step_no_workflow(
         self,
@@ -1994,6 +2007,76 @@ class TestExecuteWorkflowStepInvokeInquire:
         assert result.status == StepStatus.COMPLETED
         assert result.output["questions"] == []
         assert result.output["confidence"] == 1.0
+
+
+class TestExecuteWorkflowStepGrounding:
+    """Every coordination step's output is grounded in the record of the
+    action it performed (STANDARD v1.2 §3.1, §6.5 "Anchors of actions"): it
+    passes §5.20's check under a policy that requires its capability, and it
+    holds its contract's required members."""
+
+    @staticmethod
+    def _check(
+        runtime: OrchestrationRuntime, capability: str, output: dict[str, object]
+    ) -> None:
+        from grounded_agency import _core
+
+        policy = {"require": [capability], "kinds": ["record"], "attested": False}
+        result = _core.check_grounding(output, policy)
+        assert result["status"] == "grounded", (capability, result)
+        assert result["counted"] >= 1 and result["legacy"] == 0, result
+        node = runtime._capability_registry.get_capability(capability)
+        assert node is not None
+        missing = set(node.output_schema.get("required", [])) - set(output)
+        assert not missing, (capability, missing)
+
+    def test_delegate(self, runtime: OrchestrationRuntime) -> None:
+        runtime.register_agent("worker", {"retrieve"})
+        result = runtime.execute_workflow_step(
+            _make_step("delegate"), {"description": "Test"}
+        )
+        assert result.status == StepStatus.COMPLETED
+        assert result.output["evidence_anchors"][0]["ref"] == (
+            f"delegation:{result.output['task_id']}"
+        )
+        self._check(runtime, "delegate", result.output)
+
+    def test_synchronize(self, runtime: OrchestrationRuntime) -> None:
+        runtime.register_agent("a1", {"retrieve"})
+        runtime.register_agent("a2", {"search"})
+        result = runtime.execute_workflow_step(
+            _make_step("synchronize"), {"state": {"key": "value"}}
+        )
+        assert result.status == StepStatus.COMPLETED
+        assert result.output["synchronized"] is True
+        assert result.output["agreed_state"] == {"key": "value"}
+        assert sorted(result.output["participants"]) == ["a1", "a2"]
+        assert result.output["evidence_anchors"][0]["ref"].startswith("sync:")
+        self._check(runtime, "synchronize", result.output)
+
+    def test_audit(self, capability_registry: CapabilityRegistry) -> None:
+        store = EvidenceStore()
+        runtime = OrchestrationRuntime(capability_registry, evidence_store=store)
+        result = runtime.execute_workflow_step(
+            _make_step("audit"), {"event": {"info": "test"}}
+        )
+        assert result.status == StepStatus.COMPLETED
+        self._check(runtime, "audit", result.output)
+        # The anchor is kept in the runtime's evidence store too.
+        ref = result.output["evidence_anchors"][0]["ref"]
+        assert [a.ref for a in store.get_by_kind("record")] == [ref]
+
+    def test_invoke(self, runtime: OrchestrationRuntime) -> None:
+        result = runtime.execute_workflow_step(
+            _make_step("invoke"), {"workflow": "debug_code_change"}
+        )
+        self._check(runtime, "invoke", result.output)
+
+    def test_inquire(self, runtime: OrchestrationRuntime) -> None:
+        result = runtime.execute_workflow_step(
+            _make_step("inquire"), {"ambiguous_input": "unclear request"}
+        )
+        self._check(runtime, "inquire", result.output)
 
 
 # ---------------------------------------------------------------------------

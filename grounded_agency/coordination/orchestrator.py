@@ -130,7 +130,10 @@ class OrchestrationRuntime:
     ) -> None:
         self._config = config or OrchestrationConfig()
         self._capability_registry = capability_registry
-        self._evidence_store = evidence_store or EvidenceStore()
+        # ``is None``: an empty store is falsy and is still the caller's.
+        self._evidence_store = (
+            evidence_store if evidence_store is not None else EvidenceStore()
+        )
 
         # Create coordination components
         self._audit_log = CoordinationAuditLog(
@@ -266,6 +269,15 @@ class OrchestrationRuntime:
                 status=StepStatus.COMPLETED,
                 output={"recorded": False, "evidence_anchors": []},
             )
+        # The record it wrote grounds the output (STANDARD v1.2 §6.5,
+        # "Anchors of actions"); it is kept in the evidence store too.
+        anchor = EvidenceAnchor(
+            ref=f"audit:{recorded.event_id}",
+            kind="record",
+            timestamp=recorded.timestamp,
+            metadata={"intent": intent},
+        )
+        self._evidence_store.add_anchor(anchor, capability_id="audit")
         return WorkflowStepResult(
             step=step,
             status=StepStatus.COMPLETED,
@@ -273,8 +285,9 @@ class OrchestrationRuntime:
                 "recorded": True,
                 "audit_id": recorded.event_id,
                 "record": recorded.to_action_record(),
+                "store": dict(self._audit_log.STORE_INFO),
                 "timestamp": recorded.timestamp,
-                "evidence_anchors": [],
+                "evidence_anchors": [anchor.to_dict()],
             },
         )
 
@@ -615,10 +628,16 @@ class OrchestrationRuntime:
                         status=StepStatus.FAILED,
                         error="No agents registered for delegation",
                     )
+            # The delegation's record (``delegation:<task_id>``, kind
+            # ``record``) grounds the output (§6.5, "Anchors of actions").
             return WorkflowStepResult(
                 step=step,
                 status=StepStatus.COMPLETED if dr.accepted else StepStatus.FAILED,
-                output={"task_id": dr.task_id, "accepted": dr.accepted},
+                output={
+                    "task_id": dr.task_id,
+                    "accepted": dr.accepted,
+                    "evidence_anchors": [a.to_dict() for a in dr.evidence_anchors],
+                },
                 error=dr.rejection_reason if not dr.accepted else None,
             )
 
@@ -643,10 +662,17 @@ class OrchestrationRuntime:
                 barrier.barrier_id,
                 strategy=self._config.sync_strategy,
             )
+            # The synchronize contract's output, grounded in the barrier's
+            # record (``sync:<barrier_id>``, kind ``record``; §6.5).
             return WorkflowStepResult(
                 step=step,
                 status=(StepStatus.COMPLETED if sr.synchronized else StepStatus.FAILED),
-                output=sr.agreed_state,
+                output={
+                    "synchronized": sr.synchronized,
+                    "agreed_state": sr.agreed_state,
+                    "participants": list(sr.participants),
+                    "evidence_anchors": [a.to_dict() for a in sr.evidence_anchors],
+                },
                 error=sr.conflict_details if not sr.synchronized else None,
             )
 
@@ -678,7 +704,7 @@ class OrchestrationRuntime:
                     "workflow": workflow,
                     "result": {},
                     "steps_executed": [],
-                    "evidence_anchors": [anchor.ref],
+                    "evidence_anchors": [anchor.to_dict()],
                 },
             )
 
@@ -708,7 +734,7 @@ class OrchestrationRuntime:
                 output={
                     "questions": questions,
                     "ambiguity_analysis": ambiguous_input,
-                    "evidence_anchors": [anchor.ref],
+                    "evidence_anchors": [anchor.to_dict()],
                     "confidence": 0.5 if ambiguous_input else 1.0,
                 },
             )

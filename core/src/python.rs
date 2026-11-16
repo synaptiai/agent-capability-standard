@@ -752,8 +752,9 @@ fn destination_allowed(policies: Vec<Vec<String>>, destination: &str) -> bool {
 /// the host's attestation, None when absent (an empty list attests that the
 /// producer saw nothing). Returns `{status: grounded|inferred|refused, code:
 /// None|"F505", message, counted, legacy, unattested}` (the counts are 0 for
-/// a refused output). ValueError for a
-/// malformed policy or a bound reference that is not a reference body.
+/// a refused output). ValueError for a malformed policy (a member other
+/// than `require`, `kinds`, `attested` and `x-...` included) or a bound
+/// reference that is not a reference body.
 #[pyfunction]
 #[pyo3(signature = (output, policy, bound_refs = None, evidence_seen = None))]
 fn check_grounding(
@@ -767,6 +768,9 @@ fn check_grounding(
     let Value::Object(p) = from_py(policy)? else {
         return Err(PyTypeError::new_err("policy must be a dict"));
     };
+    if let Some(e) = grounding::unknown_member(p.keys()) {
+        return Err(PyValueError::new_err(format!("policy: {e}")));
+    }
     let kinds: Option<Vec<String>> = match p.get("kinds") {
         None | Some(Value::Null) => None,
         Some(k) => Some(

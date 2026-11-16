@@ -53,6 +53,22 @@ def test_a_free_kind_becomes_a_vendor_kind() -> None:
     assert a.kind == "x-custom_kind"
 
 
+def test_a_query_by_a_free_kind_returns_what_it_returned() -> None:
+    """An anchor made with a free 1.1 kind now has the vendor kind; a query
+    by the kind it was made with still returns it, with the warning."""
+    store = EvidenceStore()
+    with pytest.warns(DeprecationWarning):
+        store.add_anchor(EvidenceAnchor(ref="obs:1", kind="observation", timestamp="t"))
+    with pytest.warns(DeprecationWarning, match="x-observation"):
+        assert [a.ref for a in store.get_by_kind("observation")] == ["obs:1"]
+    with pytest.warns(DeprecationWarning):
+        assert [r.anchor.ref for r in store.records(kind="observation")] == ["obs:1"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert [a.ref for a in store.get_by_kind("x-observation")] == ["obs:1"]
+        assert store.get_by_kind("file") == []
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -85,6 +101,11 @@ def test_dict_round_trip() -> None:
         {"ref": "a"},
         {"ref": "a", "kind": "tool_output"},
         {"ref": "", "kind": "file"},
+        # A digest that is present has §6.5's form: null is not one, as the
+        # core and the TypeScript package read it (grounding vectors
+        # anchor_null_digest*).
+        {"ref": "a", "kind": "file", "digest": None},
+        {"ref": "a", "kind": "file", "digest": "sha256:ABC"},
     ]:
         with pytest.raises(ValueError):
             EvidenceAnchor.from_dict(bad)
@@ -166,3 +187,30 @@ def test_create_checkpoint_records_its_anchor(tmp_path: Path) -> None:
     checkpoint_id = adapter.create_checkpoint(["*.py"], "before")
     (obj,) = adapter.evidence_store.evidence_anchors_for("checkpoint")  # type: ignore[attr-defined]
     assert obj["ref"] == f"checkpoint:{checkpoint_id}" and obj["kind"] == "record"
+
+
+def test_an_empty_store_the_host_gives_is_the_one_used(tmp_path: Path) -> None:
+    """An empty store is falsy (``len`` 0): the adapter and the coordination
+    runtime still use the store they are given, not a new in-memory one."""
+    from grounded_agency import CapabilityRegistry, OrchestrationRuntime
+    from grounded_agency.state.jsonl_evidence_store import JsonlEvidenceStore
+
+    store = JsonlEvidenceStore(tmp_path / "evidence.jsonl")
+    assert len(store) == 0
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ONTOLOGY,
+            checkpoint_dir=str(tmp_path / "cp"),
+            evidence_store=store,
+        )
+    )
+    assert adapter.evidence_store is store
+    adapter.create_checkpoint(["*.py"], "before")
+    assert len(store) == 1
+    memory = EvidenceStore()
+    runtime = OrchestrationRuntime(CapabilityRegistry(ONTOLOGY), evidence_store=memory)
+    runtime.register_agent("worker", {"retrieve"})
+    runtime.delegation.delegate(
+        description="t", required_capabilities=set(), target_agent_id="worker"
+    )
+    assert len(memory) == 1

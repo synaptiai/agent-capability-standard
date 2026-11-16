@@ -3071,7 +3071,6 @@ impl<'a> Machine<'a> {
     }
 }
 
-/// The checkpoint a pending `Rollback` restores.
 /// The evidence anchors of the outputs a nested run stored, in the order of
 /// its workflow's steps: each `ref` once, and no `acs:` anchor, which names
 /// a value of the nested run (§5.20).
@@ -3102,6 +3101,7 @@ fn nested_anchors(wf: &Workflow, stores: &Map<String, Value>) -> Vec<Value> {
     out
 }
 
+/// The checkpoint a pending `Rollback` restores.
 fn rolled_back(pending: &Pending) -> Option<String> {
     match &pending.action.body {
         Body::Rollback { checkpoint_id, .. } => Some(checkpoint_id.clone()),

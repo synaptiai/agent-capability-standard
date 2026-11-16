@@ -34,10 +34,14 @@ project knowledge (``token: rotate monthly``) would cost much.
 :meth:`Redactor.holds_credential` therefore recognises only
 credential-shaped values: a registered value, the key and token formats
 above (PEM private keys, AWS, GitHub, Slack, ``sk-`` keys, JWTs, a bearer
-token of 20 or more characters), and an assignment to a credential name
-whose value is quoted with no whitespace and 8 or more characters, or
-unquoted, 12 or more characters, mixing letters and digits. The plugin's
-``hooks/secret_scan.sh`` applies the same rule.
+token of 20 or more characters), the password of a URL's userinfo unless it
+is a placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``,
+``****``), an ``Authorization`` or ``Proxy-Authorization`` header's value of
+8 or more token characters mixing letters and digits, and an assignment to a
+credential name whose value is quoted with no whitespace and 8 or more
+characters, or unquoted, 12 or more characters, mixing letters and digits.
+The plugin's ``hooks/secret_scan.sh`` applies the same rule, and
+``tests/conformance/secrets/credentials.json`` pins it for the three.
 """
 
 from __future__ import annotations
@@ -151,6 +155,28 @@ _QUOTED_CREDENTIAL = re.compile(
 _UNQUOTED_VALUE = re.compile(
     rf"{_ASSIGN}(?P<value>[^{_NOT_WS}\"']{{12,}})", re.ASCII | re.IGNORECASE
 )
+# The password of a URL's userinfo (``scheme://user:<value>@``) ...
+_URL_PASSWORD = re.compile(
+    rf"[A-Za-z][A-Za-z0-9+.-]*://[^{_NOT_WS}/:@]+:(?P<value>[^{_NOT_WS}/@]+)@",
+    re.ASCII,
+)
+# ... unless it is a placeholder (``password``, ``<password>``, ``${PW}``,
+# ``****``).
+_PLACEHOLDER = re.compile(
+    r"[$<{*\[].*|password|passwd|pwd|pass|secret|token", re.ASCII | re.IGNORECASE
+)
+# An Authorization or Proxy-Authorization header's value, after its scheme:
+# 8 or more token characters with letters and digits.
+_AUTHORIZATION_VALUE = re.compile(
+    rf"(?:proxy-)?authorization[\"']?{_WS}*[:=]{_WS}*[\"']?"
+    rf"(?:(?:basic|bearer|token|digest|negotiate){_WS}+)?"
+    r"(?P<value>[A-Za-z0-9._~+/=-]{8,})",
+    re.ASCII | re.IGNORECASE,
+)
+
+
+def _letters_and_digits(value: str) -> bool:
+    return bool(re.search(r"[0-9]", value) and re.search(r"[A-Za-z]", value))
 
 
 def _credential_text(text: str) -> bool:
@@ -159,10 +185,15 @@ def _credential_text(text: str) -> bool:
         return True
     if _QUOTED_CREDENTIAL.search(text):
         return True
+    if any(
+        not _PLACEHOLDER.fullmatch(m.group("value"))
+        for m in _URL_PASSWORD.finditer(text)
+    ):
+        return True
     return any(
-        re.search(r"[0-9]", m.group("value"))
-        and re.search(r"[A-Za-z]", m.group("value"))
-        for m in _UNQUOTED_VALUE.finditer(text)
+        _letters_and_digits(m.group("value"))
+        for pattern in (_UNQUOTED_VALUE, _AUTHORIZATION_VALUE)
+        for m in pattern.finditer(text)
     )
 
 

@@ -295,8 +295,10 @@ findings:
     the non-anchor object being deprecated legacy forms, accepted until 2.0 and never counted. An empty
     list grounds nothing (§3.1); `required_anchor_types` lists kinds and is a grounding policy''s
     `kinds` (§5.20). Every repository catalog still validates in strict mode. The Python SDK writes
-    canonical kinds (the legacy names are deprecated aliases whose queries keep their 1.1 results;
-    `tests/test_evidence_anchor.py`), the binding''s `fileAnchor` carries `digest`, and
+    canonical kinds (the legacy names, and free kinds as `x-...`, are deprecated aliases whose queries
+    keep their 1.1 results; `tests/test_evidence_anchor.py`) and §6.5 objects in the outputs it builds
+    (the coordination steps'', `tests/test_coordination.py`); the three languages agree on what is an
+    anchor (`digest: null` is not; grounding vectors); the binding''s `fileAnchor` carries `digest`, and
     `schemas/interop/evidence.schema.json` restates the anchor.'
   concerns:
   - tools-contracts
@@ -928,9 +930,13 @@ findings:
     outputs the executor builds itself, a waiting delegate included, are exempt; an output reporting an
     action is grounded by a `record` anchor. Implemented by `core/src/grounding.rs` (`check`) and
     `core/src/exec/machine.rs`, `validate/grounding.rs` (V106 in a 1.2 target, W604 otherwise, S303,
-    S304, V101), `grounded_agency/grounding.py`, the SDK adapter''s `GroundedAgentConfig.grounding` and
-    the binding''s `grounding` option; pinned by `tests/conformance/grounding/check.json` (normative,
-    run in Rust, Python and TypeScript), the `grounding_*` runtime fixtures and the workflow fixtures.'
+    S304, V101), `grounded_agency/grounding.py`, the SDK adapter''s `GroundedAgentConfig.grounding`
+    (applied to the outputs of the MCP tools `create_grounded_mcp_server` serves; Claude Code''s own
+    tools return none, a host gap its statement names), the binding''s `grounding` option, and `record`
+    anchors on the reference producers'' action outputs (the SDK''s checkpoint and coordination step
+    outputs, `tests/test_coordination.py`); pinned by `tests/conformance/grounding/check.json`
+    (normative, run in Rust, Python and TypeScript), the `grounding_*` runtime fixtures and the workflow
+    fixtures.'
   concerns:
   - evidence-audit-observability
 - id: ACS-22
@@ -1018,9 +1024,11 @@ findings:
     code: the Python `Redactor` in every evidence store, the coordination audit log, the runner''s Error
     messages and the adapter''s records; the evidence collector keeps no digest of a response holding a
     secret; the binding redacts every trace entry and notification; the SDK adapter and the binding
-    refuse persist and audit data holding a credential (F504, §5.18.10), as the plugin''s persist and
-    audit skill hooks do with one shared scan (`hooks/secret_scan.sh`). Tested by
-    `tests/test_redaction.py`, `tests/test_skill_hooks.py` and the binding''s `test/evidence.test.ts`.'
+    refuse persist and audit data holding a credential (F504, §5.18.10), changed arguments included,
+    as the plugin''s persist and audit skill hooks do with one shared scan (`hooks/secret_scan.sh`); the
+    three apply one rule, pinned by `tests/conformance/secrets/credentials.json`. Tested by
+    `tests/test_redaction.py`, `tests/test_skill_hooks.py`, `tests/test_permission_callback.py` and
+    the binding''s `test/evidence.test.ts`.'
   concerns:
   - tools-contracts
   - evidence-audit-observability
@@ -1777,8 +1785,9 @@ findings:
     EvidenceRecorded. Python: `EvidenceStoreProtocol`, the in-memory `EvidenceStore` (frozen kept
     copies, monotonic ids) and a durable `JsonlEvidenceStore` that repairs a torn last line;
     `GroundedAgentConfig.evidence_store` takes any backend; the runner records the evidence of outputs
-    the core kept. The binding exports its thread trace as records (`exportEvidence`, a `session`
-    store). Tested by `tests/test_evidence_store.py` and `tests/test_runner_evidence.py`.'
+    the core kept. The binding''s thread trace is a `session` store (`exportEvidence`, `getEvidence`,
+    `findEvidence`, `exportEvidenceJsonl`). Tested by `tests/test_evidence_store.py`,
+    `tests/test_runner_evidence.py` and the binding''s `test/evidence.test.ts`.'
   concerns:
   - evidence-audit-observability
 - id: ACS-41

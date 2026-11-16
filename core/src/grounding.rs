@@ -91,13 +91,57 @@ pub fn is_anchor(v: &Value) -> bool {
 /// A grounding policy (§5.20): the outputs of the capabilities it
 /// `require`s must be grounded, by anchors of the `kinds` it lists (any
 /// kind when absent), attested by the host when `attested`.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+///
+/// Deserializing one refuses a member other than `require`, `kinds`,
+/// `attested` and extension members `x-...`: a host's misspelt `kinds` or
+/// `attested` would otherwise turn its check off without a word.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Policy {
     pub require: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kinds: Option<Vec<String>>,
     #[serde(default)]
     pub attested: bool,
+}
+
+/// The members of a grounding policy; any other is refused unless it is an
+/// extension member (`x-...`).
+pub const POLICY_KEYS: &[&str] = &["require", "kinds", "attested"];
+
+/// The member of a host's policy that is not one (`'<key>' is not ...`).
+pub fn unknown_member<'a>(keys: impl IntoIterator<Item = &'a String>) -> Option<String> {
+    keys.into_iter()
+        .find(|k| !POLICY_KEYS.contains(&k.as_str()) && !k.starts_with("x-"))
+        .map(|k| {
+            format!(
+                "'{k}' is not a member of a grounding policy ({}, or an extension member x-...)",
+                POLICY_KEYS.join(", ")
+            )
+        })
+}
+
+impl<'de> Deserialize<'de> for Policy {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Repr {
+            require: Vec<String>,
+            #[serde(default)]
+            kinds: Option<Vec<String>>,
+            #[serde(default)]
+            attested: bool,
+            #[serde(flatten)]
+            other: serde_json::Map<String, Value>,
+        }
+        let r = Repr::deserialize(d)?;
+        if let Some(e) = unknown_member(r.other.keys()) {
+            return Err(serde::de::Error::custom(e));
+        }
+        Ok(Policy {
+            require: r.require,
+            kinds: r.kinds,
+            attested: r.attested,
+        })
+    }
 }
 
 impl Policy {
@@ -257,14 +301,33 @@ fn plain(mut r: Ref) -> Ref {
     r
 }
 
+/// The largest index an `acs:` reference or a bound reference a caller
+/// gives may hold: I-JSON's 2^53 - 1 (RFC 7493), the largest a JSON number
+/// carries exactly, so every implementation reads the same reference.
+pub const MAX_INDEX: u64 = (1 << 53) - 1;
+
+/// Whether every index and slice bound of `r` is at most [`MAX_INDEX`].
+fn indices_ok(r: &Ref) -> bool {
+    let ok = |i: usize| i as u64 <= MAX_INDEX;
+    r.path.iter().all(|s| match s {
+        Seg::Field(_) => true,
+        Seg::Index(i) => ok(*i),
+        Seg::Slice(a, b) => a.is_none_or(ok) && b.is_none_or(ok),
+    })
+}
+
 /// Reference bodies a caller gives (`r.items[0:3]`; for a call, its
 /// argument names) as bound references. `Err` names the first that is not
-/// a reference body (§5.3, without `${`, `}` and an annotation).
+/// a reference body (§5.3, without `${`, `}` and an annotation, and no
+/// index above [`MAX_INDEX`]).
 pub fn parse_bound(bodies: &[String]) -> Result<Vec<Ref>, String> {
     bodies
         .iter()
         .enumerate()
         .map(|(i, b)| match crate::refs::parse_ref(b) {
+            Ok(r) if !indices_ok(&r) => Err(format!(
+                "bound_refs[{i}]: '{b}' holds an index above 2^53 - 1 (I-JSON)"
+            )),
             Ok(r) if r.annotation.is_none() && b.trim() == b => Ok(plain(r)),
             Ok(_) => Err(format!(
                 "bound_refs[{i}]: '{b}' is not a reference body (no annotation or spaces)"
@@ -325,10 +388,10 @@ pub fn check(
                 ));
             }
             let cited = match crate::refs::parse_ref(cited) {
-                Ok(c) if c.annotation.is_none() => c,
+                Ok(c) if c.annotation.is_none() && indices_ok(&c) => c,
                 _ => {
                     return Err(format!(
-                        "evidence_anchors[{i}] cites '{r}', whose rest is not a reference body (§5.3, without ${{, }} and a type annotation) (§6.5)"
+                        "evidence_anchors[{i}] cites '{r}', whose rest is not a reference body (§5.3, without ${{, }}, a type annotation and an index above 2^53 - 1) (§6.5)"
                     ));
                 }
             };
@@ -496,6 +559,26 @@ mod tests {
         assert_eq!(v, json!({"require": ["a"], "attested": false}));
         let back: Policy = serde_json::from_value(json!({"require": ["a"]})).unwrap();
         assert_eq!(back, Policy::new(s(&["a"]), None, false).unwrap());
+    }
+
+    #[test]
+    fn a_host_policy_refuses_a_member_it_does_not_define() {
+        // A misspelt `kinds` or `attested` would turn the check off.
+        for (v, key) in [
+            (json!({"require": ["a"], "kind": ["file"]}), "kind"),
+            (json!({"require": ["a"], "atested": true}), "atested"),
+        ] {
+            let e = serde_json::from_value::<Policy>(v).unwrap_err().to_string();
+            assert!(
+                e.contains(&format!("'{key}' is not a member of a grounding policy")),
+                "{e}"
+            );
+        }
+        // An extension member is kept out of the policy, not refused.
+        let p: Policy =
+            serde_json::from_value(json!({"require": ["a"], "attested": true, "x-note": 1}))
+                .unwrap();
+        assert_eq!(p, Policy::new(vec!["a".into()], None, true).unwrap());
     }
 
     #[test]

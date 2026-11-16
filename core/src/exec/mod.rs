@@ -1968,10 +1968,6 @@ pub(crate) fn delegate_principal(delegation: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Why `v` is not an `agent_identity` (`schemas/agent_identity_schema.yaml`),
-/// if it is not: an object with a string `principal`, a `kind`, string
-/// optional fields, and `authenticated_by` and `trust_class` from their
-/// vocabularies. Unknown fields are allowed.
 /// The first grounding policy whose shape is wrong or that requires a
 /// capability the ontology does not define (§5.20): a host's policy is
 /// refused, never applied to nothing. `grounding[i].<why>`.
@@ -1984,6 +1980,10 @@ fn grounding_error(ctx: &Context, policies: &[grounding::Policy]) -> Option<Stri
     })
 }
 
+/// Why `v` is not an `agent_identity` (`schemas/agent_identity_schema.yaml`),
+/// if it is not: an object with a string `principal`, a `kind`, string
+/// optional fields, and `authenticated_by` and `trust_class` from their
+/// vocabularies. Unknown fields are allowed.
 pub(crate) fn identity_error(v: &Value) -> Option<String> {
     use crate::validate::identity::{TRUST_CLASSES, known_mechanism};
     let Value::Object(m) = v else {

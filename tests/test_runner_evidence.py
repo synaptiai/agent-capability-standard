@@ -71,7 +71,13 @@ def test_only_valid_anchors_are_recorded(tmp_path: Path) -> None:
             output(
                 data=1,
                 confidence=1,
-                evidence_anchors=["file:legacy.txt", {"ref": ""}, FILE_A],
+                evidence_anchors=[
+                    "file:legacy.txt",
+                    {"ref": ""},
+                    # Not an anchor for the core: not recorded either.
+                    {"ref": "file:b.txt", "kind": "file", "digest": None},
+                    FILE_A,
+                ],
             )
         ]
     )

@@ -10,7 +10,8 @@
 [RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
 validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); they check §3.1's grounding where a grounding policy applies
-(§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does;
+(§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does
+for the call outputs it sees;
 the Python SDK adapter and the Standard Agents binding implement §5.18 and
 meet §10.4 except the §5.18.10 rows their conformance statements list as not
 applied, and claim class SL once those are applied; `grounded_agency` implements §7.1's entity ids and
@@ -187,7 +188,7 @@ meaning in each:
 | `evidence_anchors` | array of evidence anchors (§6.5) | Required | What the output is based on (§3.1) |
 | `confidence` | number from 0 to 1 | Required where the capability's contract requires it, optional elsewhere | The producer's probability that the output's claim is correct |
 | `inference_method` | string | Optional | How an output not grounded in evidence was reached (§3.1) |
-| `uncertainty` | `Uncertainty` (`event_schema.yaml#/types/Uncertainty`) | Optional | The uncertainty of the output's principal value |
+| `uncertainty` | `Uncertainty` (`event_schema.yaml#/types/Uncertainty`) | Required for `measure`, optional elsewhere | The uncertainty of the output's principal value |
 
 **`confidence`** is a probability, from 0 to 1, that the output's principal
 claim is correct: for `classify`, that its labels are right; for `predict`,
@@ -618,7 +619,7 @@ failure_modes:
 | `condition` | string | Yes | Prose description of the failure |
 | `action` | enum | Yes | `stop`, `rollback`, `request_more_context`, `pause_and_checkpoint`, `escalate` |
 | `when` | string | No | Expression (§5.8), evaluated after the step; it can read the step's own output |
-| `on_error` | code or list | No | Fires on a code the step failed with: R401, R402, R403, R406, F501, F502, F504 (§5.12) |
+| `on_error` | code or list | No | Fires on a code the step failed with: R401, R402, R403, R406, F501, F502, F504, F505 (§5.12) |
 | `recovery` | string or object | No | Prose, or a recovery loop (§5.12) |
 
 A failure mode fires when the step raised a matching `on_error` code or its
@@ -1907,8 +1908,9 @@ decision; otherwise it is refused with F502.
   call again with the new arguments, and refuses it if the new
   classification requires approval (F502: the decision was on other
   arguments) or a checkpoint or prerequisite the call does not already hold
-  (F501, F503 or V102). Otherwise the call runs with the new arguments, and
-  the layer records their digest.
+  (F501, F503 or V102), or if a check of §5.18.10 fails with them (F504).
+  Otherwise the call runs with the new arguments, and the layer records
+  their digest.
 - **No one to ask.** With no one who can decide, the call is refused with
   F502, as under `when_unattended: fail`. Standing mandates, `skip` and
   `defer_to_queue` (§5.14) are not defined for calls.
@@ -2373,7 +2375,9 @@ safety layer to the calls it covers (below). A policy a host applies to a
 run applies to the steps of the run's nested runs (§5.12) as well as its
 own. A host refuses a policy whose `require` names a capability the
 ontology does not define, as a validator does (V101), rather than apply it
-to nothing. A domain profile's `evidence_policy` states one:
+to nothing, and one with a member other than the three and extension
+members `x-...`, which a misspelt `kinds` or `attested` would be. A domain
+profile's `evidence_policy` states one:
 `require_grounding` is its `require` and `required_anchor_types` its
 `kinds`. Each policy that requires a step's capability applies on its own:
 the output must pass every one.
@@ -2673,8 +2677,9 @@ of this vocabulary.
 with a scheme its producer documents (for instance `file:src/app.py#L10-L20`
 or `tool:Read:toolu_01`). The scheme `acs:` is reserved: `acs:` followed by
 a reference body as §5.3 writes it without `${` and `}` (for instance
-`acs:search_out.results[0]`) names a workflow value, the one a binding with
-that body would resolve to in the run, and its kind MUST be `record`.
+`acs:search_out.results[0]`), with no index above 2^53 − 1 (I-JSON), names
+a workflow value, the one a binding with that body would resolve to in the
+run, and its kind MUST be `record`.
 Outside a workflow, `acs:<argument>` names an argument of the call (§5.20).
 
 **Available evidence.** An anchor grounds a claim only if the evidence it

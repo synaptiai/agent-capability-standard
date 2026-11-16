@@ -261,9 +261,11 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
     """``tool`` with a handler that refuses (R407) a call the adapter's
     layer did not allow."""
     handler = tool.handler
+    adapter._register_grounded_tool(full_name)
 
     async def guarded(args: Any) -> dict[str, Any]:
-        if not adapter.take_allowed(full_name, args):
+        allowed, call = adapter._take_allowed(full_name, args)
+        if not allowed:
             logger.warning("%s ran without a safety layer decision; refused", full_name)
             return {
                 "content": [
@@ -279,7 +281,7 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
                 "is_error": True,
             }
         result: dict[str, Any] = await handler(args)
-        refusal = _grounding_refusal(adapter, full_name, args, result)
+        refusal = _grounding_refusal(adapter, full_name, args, result, call)
         if refusal is not None:
             return {"content": [{"type": "text", "text": refusal}], "is_error": True}
         return result
@@ -301,13 +303,18 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
 
 
 def _grounding_refusal(
-    adapter: GroundedAgentAdapter, full_name: str, args: Any, result: Any
+    adapter: GroundedAgentAdapter,
+    full_name: str,
+    args: Any,
+    result: Any,
+    call: str | None = None,
 ) -> str | None:
     """The F505 refusal of a call's output under the adapter's grounding
     policies (STANDARD v1.2 section 5.20), or None. The output is the
     result's ``structuredContent`` when it is an object, else the capability
     output its text carries (section 5.18.9); an error result is no output
-    and is passed on."""
+    and is passed on. ``call`` is the call's id (the decision it used), so
+    the failure is recorded against the call that ran."""
     if not adapter.config.grounding or not isinstance(result, dict):
         return None
     if result.get("is_error"):
@@ -336,7 +343,7 @@ def _grounding_refusal(
                 )
             except CapabilityOutputError:
                 output = None
-    return adapter.check_call_output(full_name, args, output)
+    return adapter.check_call_output(full_name, args, output, call)
 
 
 def _get_tool_name(tool: Any) -> str:

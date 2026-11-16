@@ -11,8 +11,9 @@ use crate::yaml;
 const KEYS: &[&str] = &["require", "kinds", "attested"];
 
 /// Check `grounding`. Without `grounding@1` it is V106 in a workflow that
-/// targets 1.2 or later, and in one that targets an earlier version or
-/// declares none an unknown field (W604), as in 1.1.
+/// targets 1.2 or later; in one that targets an earlier version or declares
+/// none it is an unknown field, which the workflow's unknown-field pass
+/// reports (W604), as in 1.1.
 pub(crate) fn check(
     ctx: &Context,
     wf: &Map<String, Value>,
@@ -31,14 +32,6 @@ pub(crate) fn check(
                 "'grounding'",
                 |d| at(d).at("field", "grounding"),
                 report,
-            );
-        } else {
-            report.push(
-                at(Diagnostic::new(
-                    Code::UnknownField,
-                    "unknown field 'grounding' is ignored; it belongs to extension grounding@1 (§5.20), which this workflow does not declare",
-                ))
-                .at("field", "grounding"),
             );
         }
         return;
@@ -184,8 +177,20 @@ mod tests {
         let g = json!({"require": ["retrieve"]});
         assert_eq!(codes(wf(Some("1.2"), &[], g.clone())), ["V106"]);
         assert_eq!(codes(wf(Some("1.1"), &[], g.clone())), ["W604"]);
-        // No declared version: W605 as ever, and the 1.1 W604.
-        assert_eq!(codes(wf(None, &[], g)), ["W605", "W604"]);
+        // No declared version: the 1.1 W604, from the unknown-field pass and
+        // with its message, then W605, in 1.1's order.
+        assert_eq!(codes(wf(None, &[], g.clone())), ["W604", "W605"]);
+        let report = crate::validate::validate_catalog(
+            &crate::validate::tests::ctx(),
+            &json!({ "w": wf(None, &[], g) }),
+            None,
+        );
+        let w604 = report
+            .diagnostics
+            .iter()
+            .find(|d| d.code == crate::diag::Code::UnknownField)
+            .unwrap();
+        assert_eq!(w604.message, "unknown field 'grounding' is ignored");
     }
 
     #[test]

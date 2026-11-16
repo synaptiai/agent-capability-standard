@@ -249,10 +249,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     accepted with a `DeprecationWarning` (`kind` reads back the new one; a
     former `mutation` keeps its high priority), any other free kind becomes
     a vendor kind `x-...`, and a query by an old name (`get_by_kind("command")`)
-    returns what it returned before, by ref prefix, with the warning.
+    returns what it returned before, by ref prefix, with the warning; a query
+    by a free kind (`get_by_kind("observation")`) is answered by its vendor
+    kind (`x-observation`), with the warning.
     `get_for_capability_output()` warns: use `evidence_anchors_for()`, which
     returns §6.5 objects. An empty `ref` or a malformed `digest` is a
-    `ValueError`.
+    `ValueError`, and `EvidenceAnchor.from_dict` refuses a `digest` of
+    `null` too.
   - A store keeps a frozen copy of each anchor: assigning to an anchor read
     back from a store, or calling `mark_critical()` on it, raises
     `FrozenInstanceError`, and its metadata is read-only. Your own anchor is
@@ -266,17 +269,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - `CoordinationAuditLog.record` redacts `details`; the runner redacts the
     message of every `Error` it submits; the adapter redacts its call
     records and refusal messages.
+  - `GroundedAgentAdapter.create_checkpoint` records the checkpoint's anchor
+    (`checkpoint:<id>`, kind `record`, capability `checkpoint`) in the
+    adapter's evidence store: `len(evidence_store)` and `get_evidence()`
+    count it, and subscribers are notified.
+  - `OrchestrationRuntime.execute_workflow_step` returns the contracts'
+    outputs, grounded in the record of the action (§6.5): `invoke` and
+    `inquire` give `evidence_anchors` as §6.5 objects (were ref strings: read
+    `anchor["ref"]`); `audit` gives `{ref: "audit:<audit_id>", kind:
+    "record"}` and its `store`; `delegate` gains `evidence_anchors`; and
+    `synchronize` gives `{synchronized, agreed_state, participants,
+    evidence_anchors}` instead of the agreed state itself (read
+    `output["agreed_state"]`).
 - Python SDK, tool calls: a `persist` call (`TodoWrite`, a tool bound to
   `persist`) or an `audit` call whose data holds a credential-shaped value
-  is refused with F504 (Standard 1.2.0 §5.18.10, §6.7).
+  (a key or token format, a credential assignment, a URL's userinfo
+  password, an `Authorization` header's value) is refused with F504
+  (Standard 1.2.0 §5.18.10, §6.7), also when the host's permission flow
+  changes the call's arguments.
 - Standard Agents binding: `fileAnchor` returns `{ref, kind: 'file', digest:
   'sha256:...'}` instead of `metadata.sha256`; every trace entry's
   `evidence_anchors` and `error` are stored redacted (default patterns,
   plus the tool's `secrets`), as are the notifications; a `persist` or
-  `audit` tool refuses data that holds a credential (F504).
+  `audit` tool refuses data that holds a credential (F504), a URL's
+  userinfo password and an `Authorization` header's value included.
 - Plugin: the `persist` skill refuses content that holds a credential-shaped
-  value, and the `audit` skill an append to `.claude/audit/records.jsonl`
-  that holds one (F504); both hooks' refusals now open with the Standard's
+  value (a URL's userinfo password and an `Authorization` header's value
+  included), and the `audit` skill an append to
+  `.claude/audit/records.jsonl` that holds one (F504); both hooks' refusals
+  now open with the Standard's
   code and name (`F504 CONSTRAINT_VIOLATED:`, `R407 SAFETY_CHECK_FAILED:`).
 - Validator: an `audit` step's literal `retention` outside the duration
   grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
@@ -477,12 +498,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     Python: `_core.check_grounding`, `Run.trace(since=...)`,
     `Run.trace_seq`, `grounded_agency.grounding` (`GroundingPolicy`,
     `check_grounding_output`), `WorkflowRunner.run(grounding=...)`,
-    `GroundedAgentConfig.grounding`. TypeScript package: `evidence.ts`
-    (`checkGrounding`, `groundingPolicies`, `covers`, `refsIn`) and
-    `holdsCredential`; the binding's `grounding`, `seen` and `secrets`
-    options.
+    `GroundedAgentConfig.grounding` (applied to the outputs of the tools
+    `create_grounded_mcp_server` serves; a refused output's call record is
+    `failed` with F505 and the call id, and a policy that requires the
+    capability of a call whose output the adapter cannot see, such as
+    Claude Code's own tools, is warned about once per tool). TypeScript
+    package: `evidence.ts` (`checkGrounding`, `groundingPolicies`, `covers`,
+    `refsIn`) and `holdsCredential`; the binding's `grounding`, `seen` and
+    `secrets` options. A host policy with a member other than `require`,
+    `kinds`, `attested` and `x-...` is refused in all three languages; an
+    `acs:` reference holds no index above 2^53 - 1.
   - Vectors: `tests/conformance/grounding/check.json` (normative, run in
-    Rust, Python and TypeScript); 23 `grounding_*` runtime fixtures and
+    Rust, Python and TypeScript); `tests/conformance/secrets/credentials.json`
+    (informative: the credential shapes the refusals of `persist` and
+    `audit` data recognise, run in Python, TypeScript and the plugin's shell
+    scan); 23 `grounding_*` runtime fixtures and
     `error_reason_secret_in_data`; seven workflow fixtures.
   - Evidence stores: `EvidenceStoreProtocol`, `EvidenceRecord`, `StoreInfo`,
     a durable `JsonlEvidenceStore` (repairs a torn last line),
@@ -491,6 +521,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `redactor` registers the host's secrets; `GroundedAgentConfig` gains
     `evidence_store` and `secret_values`; `EvidenceAnchor.from_checkpoint`,
     and `create_checkpoint` records it. Binding: `exportEvidence`,
+    `getEvidence`, `findEvidence`, `exportEvidenceJsonl`,
     `EVIDENCE_STORE_INFO`, `checkpointAnchor`.
   - `schemas/interop/evidence.schema.json` is listed in §6.1; the catalog
     schema accepts `grounding@1`.
@@ -561,6 +592,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   second (W602), as STANDARD 5.2.1 requires of a step.
 - Python SDK: evidence anchors stored a tool's input, which can hold
   credentials; they now store it only with `evidence_include_tool_input`.
+- Python SDK: `OrchestrationRuntime(evidence_store=...)` given an empty store
+  (falsy, `len` 0) used a new one instead; it now uses the store it is
+  given.
 - Python SDK: `wrap_options` replaced the host's `can_use_tool` callback; it
   now chains to it.
 - Plugin hooks: the persist, rollback and send skills' command hooks exited 1,

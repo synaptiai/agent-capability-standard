@@ -524,7 +524,18 @@ impl WorkflowCheck<'_> {
         self.check_header();
         let name = self.name;
         let at_wf = |d: Diagnostic| d.at("workflow", name);
-        semantics::unknown_fields(self.wf, semantics::WORKFLOW_KEYS, "", &at_wf, self.report);
+        // `grounding` (grounding@1, §5.20) is a field of a workflow that
+        // targets 1.2 or declares the extension; in any other it is an
+        // unknown field, reported here with the others, as 1.1 reported it.
+        let target = semantics::target(self.wf, self.header);
+        let grounding_field =
+            target.is_some_and(|t| t >= (1, 2)) || extensions::declares(self.wf, "grounding@1");
+        let keys: Vec<&str> = semantics::WORKFLOW_KEYS
+            .iter()
+            .copied()
+            .filter(|k| grounding_field || *k != "grounding")
+            .collect();
+        semantics::unknown_fields(self.wf, &keys, "", &at_wf, self.report);
         semantics::spec_version(self.wf, self.header, &at_wf, self.report);
         if let Some(Value::Object(ext)) = self.wf.get("workflow_extensions") {
             semantics::unknown_fields(
@@ -537,14 +548,7 @@ impl WorkflowCheck<'_> {
         }
         let declared = extensions::Declared::read(self.wf, &at_wf, self.report);
         extensions::triggers(self.ctx, self.wf, &declared, &at_wf, self.report);
-        grounding::check(
-            self.ctx,
-            self.wf,
-            &declared,
-            semantics::target(self.wf, self.header),
-            &at_wf,
-            self.report,
-        );
+        grounding::check(self.ctx, self.wf, &declared, target, &at_wf, self.report);
         let (inputs, maybe_absent) = self.resolve_inputs();
         let mut state = Scope {
             inputs,

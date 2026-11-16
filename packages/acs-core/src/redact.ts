@@ -30,10 +30,14 @@
  * recognises only credential-shaped values, as the Python redactor's
  * `holds_credential` and the plugin's `hooks/secret_scan.sh` do: a
  * registered value, key and token formats (PEM private keys, AWS, GitHub,
- * Slack, `sk-` keys, JWTs, a bearer token of 20 or more characters), and an
- * assignment to a credential name whose value is quoted with no whitespace
- * and 8 or more characters, or unquoted, 12 or more characters, mixing
- * letters and digits; prose such as `token: rotate monthly` passes.
+ * Slack, `sk-` keys, JWTs, a bearer token of 20 or more characters), the
+ * password of a URL's userinfo unless it is a placeholder, an
+ * `Authorization` or `Proxy-Authorization` header's value of 8 or more token
+ * characters mixing letters and digits, and an assignment to a credential
+ * name whose value is quoted with no whitespace and 8 or more characters, or
+ * unquoted, 12 or more characters, mixing letters and digits; prose such as
+ * `token: rotate monthly` passes. `tests/conformance/secrets/credentials.json`
+ * pins the rule for the three.
  */
 import type { Json } from './canonical.js';
 
@@ -187,13 +191,30 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
 const ASSIGN = `(?:${NAMES})["']?${WS}*[:=]${WS}*`;
 const QUOTED_CREDENTIAL = new RegExp(`${ASSIGN}["'][^${NOT_WS}"']{8,}["']`, 'i');
 const UNQUOTED_VALUE = new RegExp(`${ASSIGN}(?<value>[^${NOT_WS}"']{12,})`, 'gi');
+// The password of a URL's userinfo (`scheme://user:<value>@`), unless it is a
+// placeholder (`password`, `<password>`, `${DB_PASSWORD}`, `****`).
+const URL_PASSWORD = new RegExp(`[A-Za-z][A-Za-z0-9+.-]*://[^${NOT_WS}/:@]+:(?<value>[^${NOT_WS}/@]+)@`, 'g');
+const PLACEHOLDER = /^(?:[$<{*[].*|password|passwd|pwd|pass|secret|token)$/i;
+// An Authorization or Proxy-Authorization header's value, after its scheme:
+// 8 or more token characters with letters and digits.
+const AUTHORIZATION_VALUE = new RegExp(
+  `(?:proxy-)?authorization["']?${WS}*[:=]${WS}*["']?` +
+    `(?:(?:basic|bearer|token|digest|negotiate)${WS}+)?(?<value>[A-Za-z0-9._~+/=-]{8,})`,
+  'gi',
+);
+
+const lettersAndDigits = (v: string): boolean => /[0-9]/.test(v) && /[A-Za-z]/.test(v);
 
 function credentialText(text: string): boolean {
   if (CREDENTIAL_SHAPES.some((p) => p.test(text))) return true;
   if (QUOTED_CREDENTIAL.test(text)) return true;
-  for (const m of text.matchAll(UNQUOTED_VALUE)) {
-    const v = m.groups?.['value'] ?? '';
-    if (/[0-9]/.test(v) && /[A-Za-z]/.test(v)) return true;
+  for (const m of text.matchAll(URL_PASSWORD)) {
+    if (!PLACEHOLDER.test(m.groups?.['value'] ?? '')) return true;
+  }
+  for (const pattern of [UNQUOTED_VALUE, AUTHORIZATION_VALUE]) {
+    for (const m of text.matchAll(pattern)) {
+      if (lettersAndDigits(m.groups?.['value'] ?? '')) return true;
+    }
   }
   return false;
 }

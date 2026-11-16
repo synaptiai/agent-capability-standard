@@ -761,3 +761,31 @@ Workstreams should run `npm run check:axe` (or at least
   `run()`/`start()` take `grounding=`. It redacts the message of every
   `Error` it submits (`_redact_error`), and reads what a submit added with
   `run.trace(since=run.trace_seq)` (`_core.Run.trace_seq` is new).
+
+## 2026-11-16 — S4 review round 1, for the streams after it
+
+- **§5.18.7 (S1's text, S5).** The changed-arguments bullet now ends "or if
+  a check of §5.18.10 fails with them (F504)". The SDK adapter's
+  permission callback runs `_secret_refusal` on changed arguments; S5's
+  `send` destination check belongs in the same branch, and the binding's
+  equivalent when it gains one.
+- **Adapter grants carry the call id (S5, S6).** `GroundedAgentAdapter._allowed`
+  maps `(tool, args digest)` to the call ids granted, oldest first;
+  `_allow_token(tool, args, delta, call)` and `_take_allowed(tool, args)`
+  (returns the id used). `take_allowed` keeps its signature. An outcome a
+  guarded tool records itself (`check_call_output`, F505, decision
+  `failed`) is not recorded again by the post-call hooks.
+- **Host grounding policies refuse unknown members** (`require`, `kinds`,
+  `attested`, `x-...`) in Rust (`Policy`'s `Deserialize`,
+  `grounding::unknown_member`), Python and TypeScript. S6's
+  profile-derived policies are built with `Policy::new`, not deserialized,
+  so they are unaffected; `GroundingPolicy.from_dict` is strict, while
+  `from_profile` reading `evidence_policy` is not.
+- **Validator.** `grounding` is in `WORKFLOW_KEYS` only for a workflow that
+  targets 1.2 or declares `grounding@1` (`validate/mod.rs` filters it), so
+  an undeclared 1.1 use gets 1.1's W604 from the unknown-field pass.
+  `extensions::declares(wf, name)` reads a declaration without reporting.
+- **Credential vectors.** `tests/conformance/secrets/credentials.json`
+  pins the refusal rule for Python, TypeScript and `hooks/secret_scan.sh`;
+  a stream that changes the scan re-syncs the skills' copies.
+

@@ -673,16 +673,20 @@ that reports an action is grounded by that action's record (§3.1). A bare
 string or another object is a deprecated legacy form: the default output
 check accepts it, as 1.1's did.
 
-The thread store is deleted with its thread, so as an evidence store
-([§6.6](../../spec/STANDARD-v1.2.0.md#66-evidence-records-and-stores)) it is
-`session` durability, not bounded (`EVIDENCE_STORE_INFO`). Evidence that
-must outlive the thread is exported when it is written: `exportEvidence(state)`
-gives the thread's anchors as `EvidenceRecord`s (`record_id`
-`<threadId>/<seq>/<index>`, the execution as `run_id`, the step, capability,
-tool and call id). When a call completes with evidence anchors, the binding
-emits `acs.evidence_recorded` through `state.emit`, at most once and only to
-connected clients: it is a notification, not the record, and an `emit` that
-is missing or throws never fails the call.
+The thread's trace is its evidence store
+([§6.6](../../spec/STANDARD-v1.2.0.md#66-evidence-records-and-stores)):
+`exportEvidence(state)` gives the thread's anchors as `EvidenceRecord`s
+(`record_id` `<threadId>/<seq>/<index>`, the execution as `run_id`, the
+step, capability, tool and call id), `getEvidence(state, recordId)` one by
+its id, `findEvidence(state, {capability, kind, run_id})` those that match,
+and `exportEvidenceJsonl(state)` the JSON Lines export, each in the order
+they were appended. The store is deleted with its thread, so it is `session`
+durability, not bounded (`EVIDENCE_STORE_INFO`): evidence that must outlive
+the thread is exported when it is written. When a call completes with
+evidence anchors, the binding emits `acs.evidence_recorded` through
+`state.emit`, at most once and only to connected clients: it is a
+notification, not the record, and an `emit` that is missing or throws never
+fails the call.
 
 A grounded tool takes three more options:
 

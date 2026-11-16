@@ -163,42 +163,70 @@ class JsonlEvidenceStore:
         call_id: str | None = None,
     ) -> list[EvidenceRecord]:
         """Write several anchors with one context, one line each; one
-        notification."""
+        notification. The batch is written whole or not at all: every line
+        is serialized before any is written (a value that is not JSON raises
+        ``TypeError`` and writes nothing), and a write that fails is cut
+        back to the end of the last whole record before the error is
+        raised, so no torn line is left for the next record to follow."""
         context = _context(capability, run_id, frame, step, tool, call_id)
         kept = [self.redactor.redact_anchor(a).frozen_copy() for a in anchors]
         out: list[EvidenceRecord] = []
         with self._lock:
             if self._fd < 0:
                 raise ValueError(f"{self.path}: the store is closed")
-            for anchor in kept:
+            lines: list[bytes] = []
+            for i, anchor in enumerate(kept):
                 record = EvidenceRecord(
-                    record_id=f"ev-{self._next}",
+                    record_id=f"ev-{self._next + i}",
                     anchor=anchor,
                     recorded_at=_now(),
                     **context,
                 )
-                line = (
-                    json.dumps(
-                        record.to_dict(),
-                        sort_keys=True,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    + "\n"
-                ).encode("utf-8")
-                written = os.write(self._fd, line)
-                if written != len(line):
-                    raise OSError(
-                        f"{self.path}: short write ({written} of {len(line)} bytes)"
-                    )
-                if self._fsync:
-                    os.fsync(self._fd)
-                self._offsets[record.record_id] = self._size
-                self._size += len(line)
-                self._next += 1
+                lines.append(
+                    (
+                        json.dumps(
+                            record.to_dict(),
+                            sort_keys=True,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    ).encode("utf-8")
+                )
                 out.append(record)
+            self._write_whole(b"".join(lines))
+            offset = self._size
+            for record, line in zip(out, lines, strict=True):
+                self._offsets[record.record_id] = offset
+                offset += len(line)
+            self._size = offset
+            self._next += len(out)
         self._listeners.notify(out)
         return out
+
+    def _write_whole(self, data: bytes) -> None:
+        """Append ``data`` (whole lines) and, with ``fsync``, sync it. A
+        short write is continued; one that makes no progress, or an
+        ``OSError``, truncates the file back to ``self._size`` and raises.
+        Called with the lock held."""
+        view = memoryview(data)
+        try:
+            while view:
+                written = os.write(self._fd, view)
+                if written <= 0:
+                    raise OSError(
+                        f"{self.path}: short write ({len(data) - len(view)} of "
+                        f"{len(data)} bytes)"
+                    )
+                view = view[written:]
+            if self._fsync and data:
+                os.fsync(self._fd)
+        except OSError:
+            try:
+                os.ftruncate(self._fd, self._size)
+            except OSError as e:
+                logger.error("%s: could not cut back a failed write: %s", self.path, e)
+            raise
 
     def add_anchor(
         self, anchor: EvidenceAnchor, capability_id: str | None = None

@@ -79,6 +79,14 @@ hooks:
               printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
               # A quoted value with no whitespace, 8 or more characters
               printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^[:space:]\"']{8,}[\"']" && return 0
+              # The password of a URL's userinfo, unless it is a placeholder
+              printf '%s' "$1" | grep -Eo -- '[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]+:[^[:space:]/@]+@' |
+                sed -E 's#^[^/]*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+              # An Authorization header's value, 8 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization[\"']?[[:space:]]*[:=][[:space:]]*[\"']?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
+                sed -E "s/^[^:=]*[:=][[:space:]]*[\"']?//" |
+                sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+                grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
               # An unquoted value of 12 or more characters with letters and digits
               printf '%s' "$1" | grep -Eio -- "$SECRET_KEY[\"']?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
                 sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
@@ -410,7 +418,7 @@ assumptions:
 - `risk`: low
 
 **Capability-specific rules:**
-- NEVER persist credentials, API keys, or secrets. Code enforces it: the skill's PreToolUse command hook blocks an `Edit` whose content holds what looks like a credential (`F504 CONSTRAINT_VIOLATED:`, STANDARD v1.2 §6.7, §5.18.10). It matches credential shapes (key and token formats, PEM private keys, bearer tokens) and assignments to a credential name (`password`, `token`, `api_key`, ...) whose value is quoted with no whitespace and 8 or more characters, or unquoted, 12 or more characters, mixing letters and digits; prose such as `token: rotate monthly` passes. The scan is `hooks/secret_scan.sh`, copied into the hook
+- NEVER persist credentials, API keys, or secrets. Code enforces it: the skill's PreToolUse command hook blocks an `Edit` whose content holds what looks like a credential (`F504 CONSTRAINT_VIOLATED:`, STANDARD v1.2 §6.7, §5.18.10). It matches credential shapes (key and token formats, PEM private keys, bearer tokens, a URL's userinfo password that is not a placeholder, an `Authorization` header's value mixing letters and digits) and assignments to a credential name (`password`, `token`, `api_key`, ...) whose value is quoted with no whitespace and 8 or more characters, or unquoted, 12 or more characters, mixing letters and digits; prose such as `token: rotate monthly` passes. The scan is `hooks/secret_scan.sh`, copied into the hook
 - NEVER persist PII without explicit user consent
 - Validate content does not contain executable code
 - Preserve existing file structure and formatting

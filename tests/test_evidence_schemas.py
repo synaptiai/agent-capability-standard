@@ -108,6 +108,56 @@ def test_the_principle_matches_the_contracts() -> None:
     assert len(REQUIRE_CONFIDENCE) == 23 and len(NODES) == 36
 
 
+def test_the_common_fields_table_matches_the_contracts() -> None:
+    """§4.1.1's table says where each common field is required: it agrees
+    with the contracts (``uncertainty`` is required by ``measure`` only,
+    ``inference_method`` by none)."""
+    text = (ROOT / "spec" / "STANDARD-v1.2.0.md").read_text(encoding="utf-8")
+    section = text[text.index("#### 4.1.1 ") : text.index("### 4.2 ")]
+    rows = {
+        cells[0].strip("`"): cells[2]
+        for line in section.splitlines()
+        if line.startswith("| `")
+        for cells in [[c.strip() for c in line.strip("|").split("|")]]
+    }
+    required = {
+        name: sorted(
+            c for c, n in NODES.items() if name in n["output_schema"]["required"]
+        )
+        for name in (
+            "evidence_anchors",
+            "confidence",
+            "inference_method",
+            "uncertainty",
+        )
+    }
+    assert len(required["evidence_anchors"]) == 36
+    assert rows["evidence_anchors"] == "Required"
+    assert sorted(required["confidence"]) == sorted(REQUIRE_CONFIDENCE)
+    assert rows["confidence"].startswith("Required where")
+    assert required["inference_method"] == [] and rows["inference_method"] == "Optional"
+    assert required["uncertainty"] == ["measure"]
+    assert rows["uncertainty"] == "Required for `measure`, optional elsewhere"
+
+
+def test_every_on_error_list_in_the_standard_matches_the_schema() -> None:
+    """Each place the Standard lists the codes ``on_error`` fires on (§5.7's
+    table, §5.12) names exactly the catalog schema's fireable codes."""
+    schema = json.loads((ROOT / "schemas" / "workflow_catalog.schema.json").read_text())
+    codes = schema["$defs"]["fireable_code"]["enum"]
+    text = (ROOT / "spec" / "STANDARD-v1.2.0.md").read_text(encoding="utf-8")
+    table_row = re.search(r"^\| `on_error` \|.*$", text, re.MULTILINE)
+    assert table_row is not None
+    section = text[text.index("### 5.12 ") : text.index("### 5.13 ")]
+    listed = re.search(r"code or a list: ((?:[RF]\d{3}, )*[RF]\d{3});", section)
+    assert listed is not None
+    for where, found in (
+        ("§5.7", re.findall(r"[RF]\d{3}", table_row.group(0))),
+        ("§5.12", re.findall(r"[RF]\d{3}", listed.group(1))),
+    ):
+        assert found == codes, (where, found, codes)
+
+
 def test_audit_reports_its_store_and_retention_is_a_duration() -> None:
     audit = NODES["audit"]
     assert set(audit["output_schema"]["properties"]["store"]["properties"]) == {

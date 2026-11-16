@@ -259,6 +259,94 @@ def test_jsonl_skips_and_counts_an_unreadable_line(tmp_path: Path) -> None:
         assert store.append(anchor("file:b")).record_id == "ev-1"
 
 
+def test_jsonl_continues_a_short_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write that takes only part of the bytes is continued: the line is
+    whole, and the next record follows it."""
+    import grounded_agency.state.jsonl_evidence_store as module
+
+    real = os.write
+    calls = {"n": 0}
+
+    def half(fd: int, data: Any) -> int:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real(fd, bytes(data[: len(data) // 2]))
+        return real(fd, data)
+
+    path = tmp_path / "e.jsonl"
+    with JsonlEvidenceStore(path) as store:
+        monkeypatch.setattr(module.os, "write", half)
+        store.append(anchor())
+        monkeypatch.setattr(module.os, "write", real)
+        store.append(anchor("file:b"))
+        assert [r.anchor.ref for r in store.records()] == ["file:a.txt", "file:b"]
+    with JsonlEvidenceStore(path) as again:
+        assert [r.record_id for r in again.records()] == ["ev-0", "ev-1"]
+
+
+@pytest.mark.parametrize("failure", ["no_progress", "raises"])
+def test_jsonl_cuts_back_a_failed_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """A write that fails part-way leaves no torn line: the file is cut back
+    to the last whole record, the error is raised, and the next record is
+    whole, readable now and after a reopen."""
+    import errno
+
+    import grounded_agency.state.jsonl_evidence_store as module
+
+    real = os.write
+    calls = {"n": 0}
+
+    def failing(fd: int, data: Any) -> int:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real(fd, bytes(data[:10]))
+        if failure == "no_progress":
+            return 0
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    path = tmp_path / "e.jsonl"
+    with JsonlEvidenceStore(path) as store:
+        store.append(anchor())
+        size = path.stat().st_size
+        seen: list[list[str]] = []
+        store.subscribe(lambda records: seen.append([r.record_id for r in records]))
+        monkeypatch.setattr(module.os, "write", failing)
+        with pytest.raises(OSError):
+            store.append_many([anchor("file:b"), anchor("file:c")])
+        monkeypatch.setattr(module.os, "write", real)
+        assert path.stat().st_size == size
+        assert seen == []
+        record = store.append(anchor("file:d"))
+        assert record.record_id == "ev-1"
+        assert [r.anchor.ref for r in store.records()] == ["file:a.txt", "file:d"]
+        assert store.get("ev-1") is not None
+    with JsonlEvidenceStore(path) as again:
+        assert [r.anchor.ref for r in again.records()] == ["file:a.txt", "file:d"]
+        assert again.info().to_dict().get("x-unreadable_lines", 0) == 0
+
+
+def test_jsonl_writes_nothing_of_a_batch_that_does_not_serialize(
+    tmp_path: Path,
+) -> None:
+    """Every line of a batch is serialized before any is written: metadata
+    that is not JSON raises and leaves the file as it was."""
+    path = tmp_path / "e.jsonl"
+    bad = EvidenceAnchor(
+        ref="file:b", kind="file", timestamp="t", metadata={"handle": object()}
+    )
+    with JsonlEvidenceStore(path) as store:
+        seen: list[int] = []
+        store.subscribe(lambda records: seen.append(len(records)))
+        with pytest.raises(TypeError):
+            store.append_many([anchor(), bad])
+        assert path.stat().st_size == 0 and seen == []
+        assert store.append(anchor()).record_id == "ev-0"
+
+
 def test_jsonl_refuses_a_symlink(tmp_path: Path) -> None:
     target = tmp_path / "t.jsonl"
     target.write_text("")

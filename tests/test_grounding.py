@@ -125,6 +125,57 @@ def test_policy_round_trip_and_normalisation() -> None:
         as_policies([{"require": ["search"]}])  # type: ignore[list-item]
 
 
+@pytest.mark.parametrize(
+    ("data", "key"),
+    [
+        ({"require": ["retrieve"], "kind": ["file"]}, "kind"),
+        ({"require": ["retrieve"], "atested": True}, "atested"),
+    ],
+)
+def test_a_policy_refuses_a_member_it_does_not_define(
+    data: dict[str, Any], key: str
+) -> None:
+    """A misspelt member would turn a check off: it is refused, in Python
+    and by the core (the runner's and ``_core.Run.start``'s path), as
+    ``groundingPolicies`` refuses it in TypeScript. Extension members
+    ``x-...`` are allowed."""
+    with pytest.raises(ValueError, match=f"S303.*'{key}' is not a member"):
+        GroundingPolicy.from_dict(data)
+    with pytest.raises(ValueError, match=f"'{key}' is not a member"):
+        _core.check_grounding({"evidence_anchors": []}, data)
+    ok = {"require": ["retrieve"], "x-note": "from the audit"}
+    assert GroundingPolicy.from_dict(ok) == GroundingPolicy(require={"retrieve"})
+
+
+def test_core_start_refuses_a_policy_member_it_does_not_define() -> None:
+    validator = _core.Validator(ONTOLOGY, str(ROOT))
+    catalog = {
+        "w": {
+            "goal": "g",
+            "risk": "low",
+            "spec_version": "1.1",
+            "steps": [
+                {
+                    "capability": "retrieve",
+                    "purpose": "p",
+                    "store_as": "r",
+                    "input_bindings": {"target": "t"},
+                }
+            ],
+        }
+    }
+    with pytest.raises(ValueError, match=r"grounding\[0\]: 'atested' is not a member"):
+        _core.Run.start(
+            validator,
+            catalog,
+            "w",
+            header=None,
+            run_id="r",
+            now_ms=0,
+            grounding=[{"require": ["retrieve"], "atested": True}],
+        )
+
+
 def test_policy_from_a_profile() -> None:
     profile = {
         "evidence_policy": {
@@ -236,6 +287,45 @@ def test_adapter_refuses_an_ungrounded_call_output(tmp_path: Path) -> None:
     # requires is not checked.
     assert adapter.check_call_output("Read", args, "plain text") is not None
     assert adapter.check_call_output("Grep", {"pattern": "x"}, "plain text") is None
+
+
+def test_adapter_warns_once_when_a_policy_cannot_check_a_tool(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Claude Code's own tools return no capability output, so a policy that
+    requires their capability checks nothing for their calls: the adapter
+    says so, once per tool, instead of turning the check off silently."""
+    import asyncio
+    import logging
+
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ONTOLOGY,
+            checkpoint_dir=str(tmp_path),
+            approval="off",
+            grounding=GroundingPolicy(require={"retrieve"}),
+        )
+    )
+    hook = adapter._make_pretooluse_safety_hook()
+    call = {"tool_name": "Read", "tool_input": {"file_path": "a.py"}}
+    with caplog.at_level(logging.WARNING, logger="grounded_agency.adapter"):
+        for i in range(2):
+            asyncio.run(hook(call, f"r{i}", None))
+        asyncio.run(
+            hook({"tool_name": "Grep", "tool_input": {"pattern": "x"}}, "g1", None)
+        )
+    warned = [r.getMessage() for r in caplog.records if "5.20" in r.getMessage()]
+    assert len(warned) == 1, warned
+    assert "retrieve" in warned[0] and "Read" in warned[0]
+    # A tool create_grounded_mcp_server serves is checked: no warning.
+    adapter._register_grounded_tool("mcp__srv__fetch")
+    adapter.mapper.register_mcp_tool("mcp__srv__fetch", capability_id="retrieve")
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="grounded_agency.adapter"):
+        asyncio.run(
+            hook({"tool_name": "mcp__srv__fetch", "tool_input": {}}, "f1", None)
+        )
+    assert not [r for r in caplog.records if "5.20" in r.getMessage()]
 
 
 # ---------------------------------------------------------------------------

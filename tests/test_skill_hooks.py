@@ -134,6 +134,11 @@ OPENS = {
 }
 F504 = "F504 CONSTRAINT_VIOLATED: "
 SECRET_SCAN = ROOT / "hooks" / "secret_scan.sh"
+CREDENTIALS = json.loads(
+    (ROOT / "tests" / "conformance" / "secrets" / "credentials.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +256,33 @@ class TestFrontmatterHooks:
         start = command.index("# BEGIN secret-scan")
         end = command.index("# END secret-scan") + len("# END secret-scan")
         assert command[start:end] == source
+
+    @pytest.mark.parametrize("shell", SHELLS)
+    @pytest.mark.parametrize(
+        "vector",
+        [
+            v
+            for v in CREDENTIALS["vectors"]
+            if isinstance(v["input"], str) and not v["secret_values"]
+        ],
+        ids=lambda v: v["name"],
+    )
+    def test_secret_scan_vectors(self, shell: str, vector: dict[str, Any]) -> None:
+        """The scan agrees with the Python and TypeScript refusal rule on
+        tests/conformance/secrets/credentials.json (its text vectors)."""
+        script = SECRET_SCAN.read_text(encoding="utf-8") + (
+            '\nif secret_in "$1"; then echo yes; else echo no; fi\n'
+        )
+        result = subprocess.run(
+            [shell, "-c", script, "scan", vector["input"]],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        expected = "yes" if vector["expect"]["holds"] else "no"
+        assert result.stdout.strip() == expected, vector["name"]
 
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
@@ -458,6 +490,8 @@ class TestPersistCommandHook:
             'password = "hunter22x"',
             "api_key=abc123def456ghi",
             "use ghp_" + "a" * 36 + " for the bot",
+            "DATABASE_URL=postgres://app:s3cretpass@db.internal/app",
+            "curl -H 'Authorization: Basic dXNlcjpwYXNzd29yZA==' https://x",
         ],
     )
     def test_blocks_content_that_holds_a_credential(
@@ -496,6 +530,8 @@ class TestPersistCommandHook:
             "Bearer tokens are short-lived",
             "password: see the vault",
             "the tokenizer lives in src/tokens.py",
+            "DATABASE_URL=postgres://app:${DB_PASSWORD}@db.internal/app",
+            "Authorization: required for the admin API",
         ],
     )
     def test_allows_prose_about_credentials(
@@ -524,6 +560,24 @@ class TestAuditCommandHook:
             'printf \'%s\\n\' \'{"event":"x","token":"ghp_'
             + "b" * 36
             + "\"}' >> .claude/audit/records.jsonl"
+        )
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "cite it by reference or digest", F504)
+
+    @pytest.mark.parametrize(
+        "secret",
+        [
+            '"url":"https://deploy:s3cretpass@git.example.com/r.git"',
+            '"headers":{"Authorization":"Basic dXNlcjpwYXNzd29yZA=="}',
+        ],
+    )
+    def test_blocks_a_record_with_url_or_header_credentials(
+        self, tmp_path: Path, shell: str, secret: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = (
+            'printf \'%s\\n\' \'{"event":"x",' + secret + "}' "
+            ">> .claude/audit/records.jsonl"
         )
         result = run_command(hook, bash_call(command), tmp_path, shell)
         assert_blocked(result, "cite it by reference or digest", F504)

@@ -37,6 +37,16 @@ const EVENT_POINTER: &str = "/event";
 /// Below the event object: where it keeps its source kinds.
 const SOURCE_KINDS_POINTER: &str = "/properties/source/properties/kind/enum";
 
+/// Whether `wf` declares `extension` in `workflow_extensions.requires`,
+/// as [`Declared::read`] would find it, without reporting anything.
+pub(crate) fn declares(wf: &Map<String, Value>, extension: &str) -> bool {
+    wf.get("workflow_extensions")
+        .and_then(Value::as_object)
+        .and_then(|e| e.get("requires"))
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|x| x.as_str() == Some(extension)))
+}
+
 /// The extensions a workflow declares in `workflow_extensions.requires`.
 #[derive(Default)]
 pub(crate) struct Declared {

@@ -397,6 +397,58 @@
       }
     },
     {
+      "name": "anchor_null_digest",
+      "about": "An object whose digest is null is not an evidence anchor: a digest that is present has §6.5's form.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:a.txt",
+            "kind": "file",
+            "digest": null
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "anchor_null_digest_beside_anchor",
+      "about": "An object whose digest is null does not count, and is no reason to refuse the output: it is a legacy item.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "file:a.txt",
+            "kind": "file",
+            "digest": null
+          },
+          {
+            "ref": "file:b.txt",
+            "kind": "file"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 1
+      }
+    },
+    {
       "name": "legacy_object_and_anchor",
       "about": "A legacy object beside an anchor: the anchor counts, the legacy item does not.",
       "output": {
@@ -863,6 +915,56 @@
       },
       "bound_refs": [
         "r"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "refused",
+        "code": "F505"
+      }
+    },
+    {
+      "name": "acs_index_at_ijson_max",
+      "about": "An acs: reference may hold an index up to 2^53 - 1 (I-JSON), which a bound slice covers.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[9007199254740991]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items"
+      ],
+      "evidence_seen": null,
+      "expect": {
+        "status": "grounded",
+        "code": null,
+        "counted": 1,
+        "legacy": 0
+      }
+    },
+    {
+      "name": "acs_index_above_ijson",
+      "about": "An acs: reference whose index is above 2^53 - 1 is not a reference body (I-JSON): every implementation reads it so.",
+      "output": {
+        "evidence_anchors": [
+          {
+            "ref": "acs:r.items[9007199254740993]",
+            "kind": "record"
+          }
+        ]
+      },
+      "policy": {
+        "kinds": null,
+        "attested": false
+      },
+      "bound_refs": [
+        "r.items"
       ],
       "evidence_seen": null,
       "expect": {

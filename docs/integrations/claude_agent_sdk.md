@@ -368,7 +368,7 @@ flowchart TB
 - **Stop**: The end of a turn is an execution boundary. Holds of the stopping session's calls count as used, and every checkpoint the adapter holds stops authorising anything.
 - **SubagentStop**: Holds of the finished subagent's calls count as used; not a boundary.
 
-Every call the layer allows or refuses is recorded in `adapter.call_records` (the tool, its capability, the decision, the digest of its shown value, the approvers, the checkpoint it used, the permission mode), each with `recorded_by`: the layer's name, version and `config_sha256`, a digest of its settings (the rate limits included) and bindings ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)). Each refusal is also a §9.8 diagnostic in `adapter.diagnostics`, whose `location` holds `tool`, `capability` (absent for an unbound tool) and `call`. `adapter.export_action_records(scope)` gives the call records still kept as audit records ([§6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)), with `scope`, the layer scope you name, as their `run_id`: a refusal is `rejected` with its code, a call allowed with no outcome yet `approved` (with `approval.mode: in_session` and the shown digest when the host's prompt approved it), one put to the prompt `planned`, a call that ran `executed` or `failed`; the layer's own members (`decision`, `permission_mode`, `diagnostic`) are kept under `details`.
+Every call the layer allows or refuses is recorded in `adapter.call_records` (the tool, its capability, the decision, the digest of its shown value, the approvers, the checkpoint it used, the permission mode), each with `recorded_by`: the layer's name, version and `config_sha256`, a digest of its settings (the rate limits included) and bindings ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)). Each refusal is also a §9.8 diagnostic in `adapter.diagnostics`, whose `location` holds `tool`, `capability` (absent for an unbound tool) and `call`. `adapter.export_action_records(scope)` gives the call records still kept as audit records ([§6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)), with `scope`, the layer scope you name, as their `run_id`: a refusal is `rejected` with its code, a call allowed with no outcome yet `approved` (with `approval.mode: in_session` and the shown digest when the host's prompt approved it), one put to the prompt `planned`, a call that ran `executed` or `failed` (`failed` with F505 when a grounding policy refused its output); the layer's own members (`decision`, `permission_mode`, `diagnostic`) are kept under `details`.
 
 ### Refusal Reasons
 
@@ -660,18 +660,25 @@ redacted.
 
 ### Grounding Policies
 
-`GroundedAgentConfig(grounding=GroundingPolicy(require={"retrieve"}))` (one
-policy or a tuple) applies §5.20 to the output of each covered call whose
-capability a policy requires: an output that is neither grounded nor marked
-inferred fails with F505. A policy that names a capability the ontology
-does not define is a `ValueError` naming V101. The call's argument names
-are what its `acs:` anchors may cite, and the adapter gives no
-`evidence_seen`: a hook sees the tool call, not the model's request. The
-adapter checks the outputs of the MCP tools `create_grounded_mcp_server`
-serves (their `structuredContent`, else the capability output their text
-carries, §5.18.9); Claude Code's own tools return no capability output.
-`check_grounding_output(output, policy, bound_refs=..., evidence_seen=...)`
-is the check of one output.
+`GroundedAgentConfig(grounding=GroundingPolicy(require={"search"}))` (one
+policy or a tuple), with a `search` tool that `create_grounded_mcp_server`
+serves, applies §5.20 to the output of each call of that tool: an output
+that is neither grounded nor marked inferred fails with F505. A policy that
+names a capability the ontology does not define is a `ValueError` naming
+V101. The call's argument names are what its `acs:` anchors may cite, and
+the adapter gives no `evidence_seen`: a hook sees the tool call, not the
+model's request.
+
+The adapter sees only the outputs of the MCP tools
+`create_grounded_mcp_server` serves (their `structuredContent`, else the
+capability output their text carries, §5.18.9). Claude Code's own tools
+(Read, Grep, WebFetch, ...) and the tools of other MCP servers return no
+capability output, so a policy that requires `retrieve` or `search` checks
+nothing for their calls: the adapter logs a warning once per such tool, and
+its conformance statement lists this among its host gaps. A refused output
+is the failure of the call that ran: its call record is `failed` with F505
+and the call's id. `check_grounding_output(output, policy, bound_refs=...,
+evidence_seen=...)` is the check of one output.
 
 ## Multi-Agent Coordination
 

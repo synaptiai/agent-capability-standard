@@ -214,20 +214,37 @@ def test_collector_omits_the_digest_of_a_secret(content: str, secret: bool) -> N
 # (§5.18.10) and redacts what it records
 # ---------------------------------------------------------------------------
 
-BLOCKED = [
-    "AKIAABCDEFGHIJKLMNOP",
-    "-----BEGIN OPENSSH PRIVATE KEY-----",
-    'password = "hunter22x"',
-    "api_key=abc123def456ghi",
-    "ghp_" + "a" * 36,
+CREDENTIALS = json.loads(
+    (VECTORS.parent / "credentials.json").read_text(encoding="utf-8")
+)
+"""``tests/conformance/secrets/credentials.json``: the refusal rule's
+vectors, which ``packages/acs-core`` and ``hooks/secret_scan.sh``
+(``tests/test_skill_hooks.py``) run too."""
+_TEXT = [
+    v
+    for v in CREDENTIALS["vectors"]
+    if isinstance(v["input"], str) and not v["secret_values"]
 ]
-ALLOWED = [
-    "token: rotate monthly",
-    "secret: never commit it",
-    "Bearer tokens are short-lived",
-    "password: see the vault",
-    "the parser lives in src/tokens.py",
-]
+BLOCKED = [v["input"] for v in _TEXT if v["expect"]["holds"]]
+ALLOWED = [v["input"] for v in _TEXT if not v["expect"]["holds"]]
+
+
+def test_the_credential_vector_file() -> None:
+    assert CREDENTIALS["standard"] == "1.2.0"
+    assert CREDENTIALS["status"] == "informative"
+    names = [v["name"] for v in CREDENTIALS["vectors"]]
+    assert len(names) == len(set(names))
+    assert BLOCKED and ALLOWED
+
+
+@pytest.mark.parametrize("vector", CREDENTIALS["vectors"], ids=lambda v: v["name"])
+def test_holds_credential_vector(vector: dict[str, Any]) -> None:
+    redactor = Redactor(vector["secret_values"])
+    expected = vector["expect"]["holds"]
+    assert redactor.holds_credential(vector["input"]) is expected
+    if isinstance(vector["input"], str):
+        wrapped = {"todos": [{"content": vector["input"]}]}
+        assert redactor.holds_credential(wrapped) is expected
 
 
 @pytest.mark.parametrize("text", BLOCKED)
@@ -244,6 +261,16 @@ def test_holds_credential_lets_prose_pass(text: str) -> None:
 
     assert not holds_credential(text)
     assert not holds_credential({"todos": [{"content": text}]})
+
+
+def test_what_a_refusal_recognises_the_redactor_redacts() -> None:
+    """Every credential the refusal rule recognises in text is a secret the
+    same layer redacts (§6.7), except a PEM key's opening line alone: the
+    redactor replaces a key's body, and the line has none."""
+    for text in BLOCKED:
+        if text.startswith("-----BEGIN"):
+            continue
+        assert holds_secret(text), text
 
 
 def _adapter(tmp_path: Path, **more: Any) -> Any:

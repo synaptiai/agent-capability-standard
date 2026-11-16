@@ -261,7 +261,10 @@ memory, while redacting a word of prose in evidence costs little.
   one, S303, S304, V101, a passing policy) and for W614 on
   `audit.retention`.
 - `tests/conformance/secrets/redact.json`: informative vectors for the
-  reference redactors.
+  reference redactors; `tests/conformance/secrets/credentials.json`:
+  informative vectors for the credential shapes the reference refusals of
+  `persist` and `audit` data recognise (Python, TypeScript and the plugin's
+  shell scan run them).
 - Schema tests: the two canonical `Anchor`s and `Uncertainty`s equal; the
   interop schema agrees with them; every output declares the common fields;
   the 23 outputs that require `confidence` are pinned; skill-local schemas

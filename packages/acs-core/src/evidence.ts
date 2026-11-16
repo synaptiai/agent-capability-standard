@@ -65,8 +65,9 @@ function isObject(v: unknown): v is { [key: string]: unknown } {
 /**
  * Whether `value` is an evidence anchor: an object whose `ref` is a
  * non-empty string, whose `kind` is a §6.5 kind and whose `digest`, when
- * present, has §6.5's form. Anything else in an `evidence_anchors` list is
- * a deprecated legacy form.
+ * present, has §6.5's form (`null` is not; `undefined` is absent, as its
+ * JSON text has no such member). Anything else in an `evidence_anchors`
+ * list is a deprecated legacy form.
  */
 export function isEvidenceAnchor(value: unknown): value is EvidenceAnchor {
   return (
@@ -74,7 +75,7 @@ export function isEvidenceAnchor(value: unknown): value is EvidenceAnchor {
     typeof value['ref'] === 'string' &&
     value['ref'] !== '' &&
     isKind(value['kind']) &&
-    (!('digest' in value) || isDigest(value['digest']))
+    (value['digest'] === undefined || isDigest(value['digest']))
   );
 }
 
@@ -87,6 +88,9 @@ export interface GroundingPolicy {
   /** Count only anchors whose availability is established. */
   attested?: boolean;
 }
+
+/** The members of a grounding policy; any other but an extension member `x-...` is refused. */
+const POLICY_KEYS: readonly string[] = ['require', 'kinds', 'attested'];
 
 function strings(value: unknown, at: string): string[] {
   if (!Array.isArray(value) || value.length === 0 || !value.every((x) => typeof x === 'string')) {
@@ -104,8 +108,9 @@ function strings(value: unknown, at: string): string[] {
  * One policy or a list of them, checked and frozen. Every host-side policy
  * is validated against the ontology (§5.20): an id it does not define
  * throws (V101), as does an empty or repeated `require`, an empty or
- * repeated `kinds`, a kind outside §6.5's vocabulary, and an `attested` that
- * is not a boolean: TypeScript types do not reach a JavaScript caller or a
+ * repeated `kinds`, a kind outside §6.5's vocabulary, an `attested` that
+ * is not a boolean, and a member other than those three and extension
+ * members `x-...`: TypeScript types do not reach a JavaScript caller or a
  * JSON configuration, and a typo must not silently turn a check off.
  */
 export function groundingPolicies(value: GroundingPolicy | readonly GroundingPolicy[]): readonly GroundingPolicy[] {
@@ -113,6 +118,12 @@ export function groundingPolicies(value: GroundingPolicy | readonly GroundingPol
   return Object.freeze(
     list.map((p, i) => {
       if (!isObject(p)) throw new Error(`S303 SCHEMA_VALIDATION_FAILED: grounding[${i}] must be an object`);
+      const other = Object.keys(p).find((k) => !POLICY_KEYS.includes(k) && !k.startsWith('x-'));
+      if (other !== undefined) {
+        throw new Error(
+          `S303 SCHEMA_VALIDATION_FAILED: grounding[${i}]: '${other}' is not a member of a grounding policy (${POLICY_KEYS.join(', ')}, or an extension member x-...)`,
+        );
+      }
       const require = strings(p['require'], `grounding[${i}].require`);
       const unknown = require.findIndex((id) => !isCapability(id));
       if (unknown >= 0) {

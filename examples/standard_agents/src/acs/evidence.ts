@@ -2,7 +2,11 @@
  * Evidence of a Standard Agents thread (STANDARD v1.2.0 §6.5, §6.6).
  *
  * The binding keeps its evidence in the thread's trace (records.ts): each
- * executed call's `evidence_anchors`, redacted (§6.7). The thread store is
+ * executed call's `evidence_anchors`, redacted (§6.7). As an evidence store
+ * (§6.6) the trace appends and never changes an entry; {@link getEvidence}
+ * returns a record by its id, {@link findEvidence} the records whose
+ * capability, anchor kind or run match, and {@link exportEvidenceJsonl} the
+ * records as JSON Lines, each in append order. The thread store is
  * deleted with the thread, so its durability is `session`
  * ({@link EVIDENCE_STORE_INFO}): evidence that must outlive the thread is
  * exported, when it is written, to a durable store ({@link exportEvidence}
@@ -56,6 +60,43 @@ export async function exportEvidence(state: Pick<ThreadState, 'threadId'> & Stor
     });
   }
   return records;
+}
+
+/** The record with `record_id` `id` (§6.6), or null when the thread holds none. */
+export async function getEvidence(
+  state: Pick<ThreadState, 'threadId'> & Store,
+  id: string,
+): Promise<EvidenceRecord | null> {
+  return (await exportEvidence(state)).find((r) => r.record_id === id) ?? null;
+}
+
+/** A filter of {@link findEvidence}: each member given must match. */
+export interface EvidenceFilter {
+  capability?: string;
+  /** The anchor's `kind` (§6.5). */
+  kind?: string;
+  run_id?: string;
+}
+
+/**
+ * The records whose `capability`, `anchor.kind` and `run_id` match each
+ * member of `filter` that is given (§6.6), in the order they were appended.
+ */
+export async function findEvidence(
+  state: Pick<ThreadState, 'threadId'> & Store,
+  filter: EvidenceFilter,
+): Promise<EvidenceRecord[]> {
+  return (await exportEvidence(state)).filter(
+    (r) =>
+      (filter.capability === undefined || r.capability === filter.capability) &&
+      (filter.kind === undefined || r.anchor.kind === filter.kind) &&
+      (filter.run_id === undefined || r.run_id === filter.run_id),
+  );
+}
+
+/** The thread's records as JSON Lines, one `EvidenceRecord` per line, in append order (§6.6). */
+export async function exportEvidenceJsonl(state: Pick<ThreadState, 'threadId'> & Store): Promise<string> {
+  return (await exportEvidence(state)).map((r) => `${JSON.stringify(r)}\n`).join('');
 }
 
 /**

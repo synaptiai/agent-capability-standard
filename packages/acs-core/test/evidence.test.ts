@@ -14,6 +14,9 @@ import { holdsCredential } from '../src/redact.js';
 // The grounding vectors (normative for §5.20), read in place; the Rust core
 // and the Python package are held to the same file.
 import vectors from '../../../tests/conformance/grounding/check.json' with { type: 'json' };
+// The refusal rule's credential vectors (informative), which the Python
+// redactor and hooks/secret_scan.sh run too.
+import credentials from '../../../tests/conformance/secrets/credentials.json' with { type: 'json' };
 
 interface Vector {
   name: string;
@@ -87,6 +90,14 @@ describe('anchors, kinds and methods', () => {
   it('knows the kinds and methods', () => {
     expect(isKind('record') && isKind('x-lab_result')).toBe(true);
     expect(isKind('tool_output') || isKind('File') || isKind('x-')).toBe(false);
+    // A digest member that is undefined is absent (its JSON text has none);
+    // null is present and malformed.
+    const a = { ref: 'file:a', kind: 'file', digest: undefined };
+    expect(isEvidenceAnchor(a)).toBe(true);
+    expect(isEvidenceAnchor({ ref: 'file:a', kind: 'file', digest: null })).toBe(false);
+    const out = { evidence_anchors: [a] };
+    expect(checkGrounding(out, {}).status).toBe('grounded');
+    expect(checkGrounding(JSON.parse(JSON.stringify(out)), {}).status).toBe('grounded');
     expect(isMethod('model_knowledge') && isMethod('x-acme.rules')).toBe(true);
     expect(isMethod('llm-reasoning')).toBe(false);
     expect(isEvidenceAnchor({ ref: 'file:a', kind: 'file', digest: `sha256:${'0'.repeat(64)}` })).toBe(true);
@@ -110,6 +121,8 @@ describe('grounding policies', () => {
     expect(one).toEqual([{ require: ['search'] }]);
     expect(Object.isFrozen(one[0])).toBe(true);
     expect(groundingPolicies([{ require: ['search'], kinds: ['file'], attested: true }])).toHaveLength(1);
+    // An extension member is allowed, and not kept.
+    expect(groundingPolicies({ require: ['search'], 'x-note': 'audit' } as never)).toEqual([{ require: ['search'] }]);
   });
 
   it.each([
@@ -119,33 +132,41 @@ describe('grounding policies', () => {
     [{ require: ['search'], kinds: [] }, /non-empty/],
     [{ require: ['search'], kinds: ['tool_output'] }, /not an evidence anchor kind/],
     [{ require: ['search'], attested: 'yes' }, /boolean/],
+    [{ require: ['retrieve'], kind: ['file'] }, /'kind' is not a member of a grounding policy/],
+    [{ require: ['retrieve'], atested: true }, /^S303 SCHEMA_VALIDATION_FAILED: grounding\[0\]: 'atested'/],
   ])('refuses %j', (policy, message) => {
     expect(() => groundingPolicies(policy as never)).toThrow(message);
   });
 });
 
 describe('credentials a refusal recognises (§6.7)', () => {
-  const blocked = [
-    'AKIAABCDEFGHIJKLMNOP',
-    '-----BEGIN OPENSSH PRIVATE KEY-----',
-    'password = "hunter22x"',
-    'api_key=abc123def456ghi',
-    `ghp_${'a'.repeat(36)}`,
-  ];
-  const allowed = [
-    'token: rotate monthly',
-    'secret: never commit it',
-    'Bearer tokens are short-lived',
-    'password: see the vault',
-    'the parser lives in src/tokens.py',
-  ];
-  it.each(blocked)('blocks %s', (text) => {
-    expect(holdsCredential(text)).toBe(true);
-    expect(holdsCredential({ todos: [{ content: text }] })).toBe(true);
+  interface CredentialVector {
+    name: string;
+    input: Json;
+    secret_values: string[];
+    expect: { holds: boolean };
+  }
+  const all = credentials.vectors as CredentialVector[];
+  const text = all.filter((v) => typeof v.input === 'string' && v.secret_values.length === 0);
+  const blocked = text.filter((v) => v.expect.holds).map((v) => v.input as string);
+  const allowed = text.filter((v) => !v.expect.holds).map((v) => v.input as string);
+  it('has both kinds of vector', () => {
+    expect(blocked.length).toBeGreaterThan(0);
+    expect(allowed.length).toBeGreaterThan(0);
   });
-  it.each(allowed)('lets %s pass', (text) => {
-    expect(holdsCredential(text)).toBe(false);
-    expect(holdsCredential({ todos: [{ content: text }] })).toBe(false);
+  it.each(all.map((v) => [v.name, v] as const))('vector %s', (_name, v) => {
+    expect(holdsCredential(v.input, v.secret_values)).toBe(v.expect.holds);
+    if (typeof v.input === 'string') {
+      expect(holdsCredential({ todos: [{ content: v.input }] }, v.secret_values)).toBe(v.expect.holds);
+    }
+  });
+  it.each(blocked)('blocks %s', (t) => {
+    expect(holdsCredential(t)).toBe(true);
+    expect(holdsCredential({ todos: [{ content: t }] })).toBe(true);
+  });
+  it.each(allowed)('lets %s pass', (t) => {
+    expect(holdsCredential(t)).toBe(false);
+    expect(holdsCredential({ todos: [{ content: t }] })).toBe(false);
   });
   it('reads a member name as an assignment, and registered values', () => {
     expect(holdsCredential({ api_key: 'abc123def456ghi' })).toBe(true);

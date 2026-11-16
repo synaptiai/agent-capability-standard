@@ -11,7 +11,14 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import checkpointConfig from '../agents/tools/checkpoint_config.js';
 import readConfig from '../agents/tools/read_config.js';
-import { EVIDENCE_EVENT, EVIDENCE_STORE_INFO, exportEvidence } from '../src/acs/evidence.js';
+import {
+  EVIDENCE_EVENT,
+  EVIDENCE_STORE_INFO,
+  exportEvidence,
+  exportEvidenceJsonl,
+  findEvidence,
+  getEvidence,
+} from '../src/acs/evidence.js';
 import { groundedTool } from '../src/acs/grounded.js';
 import { readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH, fileAnchor, readSettings } from '../src/example/settings.js';
@@ -223,5 +230,29 @@ describe('the evidence notification and export (§6.6)', () => {
     expect(records.every((r) => isRecord(r))).toBe(true);
     expect(records[0]).toMatchObject({ record_id: 'thread-1/1/0', run_id: 'flow-1', capability: 'retrieve', tool: 'read_config' });
     expect(EVIDENCE_STORE_INFO).toEqual({ durability: 'session', bounded: false });
+  });
+
+  it('returns a record by its id and filters by capability, kind and run, in append order', async () => {
+    const t = memoryThread();
+    t.files.set(SETTINGS_PATH, '{"retries": "3"}');
+    await readConfig.execute(t.state, {});
+    await checkpointConfig.execute(t.state, { label: 'before' });
+    await readConfig.execute(t.state, {});
+    const all = await exportEvidence(t.state);
+    expect(all.length).toBeGreaterThanOrEqual(3);
+    const first = all[0]!;
+    expect(await getEvidence(t.state, first.record_id)).toEqual(first);
+    expect(await getEvidence(t.state, 'thread-1/999/0')).toBeNull();
+    const reads = await findEvidence(t.state, { capability: 'retrieve' });
+    expect(reads.map((r) => r.record_id)).toEqual(all.filter((r) => r.capability === 'retrieve').map((r) => r.record_id));
+    expect(reads).toHaveLength(2);
+    const records = await findEvidence(t.state, { kind: 'record' });
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.every((r) => r.anchor.kind === 'record' && r.capability === 'checkpoint')).toBe(true);
+    expect(await findEvidence(t.state, { run_id: 'flow-1' })).toEqual(all);
+    expect(await findEvidence(t.state, { run_id: 'other', capability: 'retrieve' })).toEqual([]);
+    const lines = (await exportEvidenceJsonl(t.state)).split('\n');
+    expect(lines.at(-1)).toBe('');
+    expect(lines.slice(0, -1).map((l) => JSON.parse(l) as unknown)).toEqual(all);
   });
 });
