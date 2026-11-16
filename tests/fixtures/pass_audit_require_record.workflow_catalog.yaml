@@ -12,5 +12,5 @@ record_the_release:
       event:
         event_type: release.published
         version: 1.2.0
-      retention: P1Y
+      retention: P365D
       require_record: true

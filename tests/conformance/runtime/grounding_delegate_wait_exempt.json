@@ -1,0 +1,94 @@
+{
+  "description": "A delegate step that waits is not checked: its Output is the delegation's acceptance, not its claim, and its result is composed by the executor (\u00a73.1, \u00a75.20).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "d",
+          "timeout": "1h",
+          "input_bindings": {
+            "task": {
+              "review": "x"
+            },
+            "agent": "a"
+          },
+          "wait": {
+            "event_type": "delegation.result"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "wait@1",
+          "grounding@1"
+        ]
+      },
+      "grounding": {
+        "require": [
+          "delegate"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "AwaitEvent",
+        "step": 0,
+        "correlate": {
+          "task_id": "t1"
+        }
+      },
+      "respond": {
+        "kind": "Event",
+        "event": {
+          "event_type": "delegation.result",
+          "task_id": "t1",
+          "verdict": "done"
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "d": {
+        "accepted": true,
+        "task_id": "t1",
+        "result": {
+          "verdict": "done"
+        }
+      }
+    }
+  },
+  "trace_kinds": [
+    "delegated",
+    "event_received"
+  ]
+}

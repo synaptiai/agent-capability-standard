@@ -10,6 +10,7 @@ mod bindings;
 mod delegation;
 mod exprs;
 mod extensions;
+mod grounding;
 mod groups;
 pub(crate) mod identity;
 mod invoke;
@@ -536,6 +537,14 @@ impl WorkflowCheck<'_> {
         }
         let declared = extensions::Declared::read(self.wf, &at_wf, self.report);
         extensions::triggers(self.ctx, self.wf, &declared, &at_wf, self.report);
+        grounding::check(
+            self.ctx,
+            self.wf,
+            &declared,
+            semantics::target(self.wf, self.header),
+            &at_wf,
+            self.report,
+        );
         let (inputs, maybe_absent) = self.resolve_inputs();
         let mut state = Scope {
             inputs,
@@ -631,6 +640,7 @@ impl WorkflowCheck<'_> {
             if !waits {
                 extensions::legacy_timeout(step, &|d| loc.locate(d), self.report);
             }
+            extensions::audit_retention(step, &|d| loc.locate(d), self.report);
             let (Some(node), Some(contracts)) =
                 (self.ctx.ontology.get(cap), self.ctx.contracts.get(cap))
             else {

@@ -227,8 +227,9 @@ pub struct StartOptions {
     /// Domain profiles to apply (§5.21). Workstream S6 applies them; until
     /// then a non-empty list is refused.
     pub profiles: Vec<Value>,
-    /// The host's grounding policies (§5.20). Workstream S4 applies them;
-    /// until then a non-empty list is refused.
+    /// The host's grounding policies (§5.20): each applies to the steps of
+    /// the run and of its nested runs. A policy that requires a capability
+    /// the ontology does not define is refused (`StartError::Grounding`).
     pub grounding: Vec<grounding::Policy>,
     /// The host's destination policies (§4.4.2). Workstream S5 applies them;
     /// until then a non-empty list is refused.
@@ -243,9 +244,6 @@ impl StartOptions {
     fn unimplemented(&self) -> Option<&'static str> {
         if !self.profiles.is_empty() {
             return Some("profiles (§5.21)");
-        }
-        if !self.grounding.is_empty() {
-            return Some("grounding policies (§5.20)");
         }
         if !self.destinations.is_empty() {
             return Some("destination policies (§4.4.2)");
@@ -396,6 +394,11 @@ impl Body {
 pub enum Response {
     Output {
         value: Value,
+        /// The refs of the evidence the host attests the output's producer
+        /// had for this answer (§3.1, §5.20). Absent attests nothing; an
+        /// empty list attests that the producer had none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        evidence_seen: Option<Vec<String>>,
     },
     Error {
         code: String,
@@ -464,6 +467,9 @@ pub enum StartError {
     Unsupported(String),
     /// The catalog header's version is not a version (§11.5).
     Header(String),
+    /// A grounding policy is malformed or requires a capability the
+    /// ontology does not define (§5.20, V101).
+    Grounding(String),
 }
 
 impl fmt::Display for StartError {
@@ -479,6 +485,7 @@ impl fmt::Display for StartError {
             }
             StartError::Inputs(m) | StartError::Program(m) => f.write_str(m),
             StartError::Identity(m) => write!(f, "actor_identity: {m}"),
+            StartError::Grounding(m) => f.write_str(m),
             StartError::Unsupported(m) => write!(f, "this executor does not implement {m} yet"),
             StartError::Header(h) => write!(
                 f,
@@ -1108,6 +1115,8 @@ impl Run {
         {
             return Err(StartError::Header(h.to_string()));
         }
+        grounding_error(ctx, &options.grounding)
+            .map_or(Ok(()), |e| Err(StartError::Grounding(e)))?;
         let program = Self::prepare(
             ctx,
             catalog,
@@ -1486,10 +1495,7 @@ impl Run {
         }
         // Members this executor does not implement yet: it could not have
         // written a state that holds them.
-        if !state.profiles.is_empty()
-            || !state.grounding.is_empty()
-            || !state.destinations.is_empty()
-        {
+        if !state.profiles.is_empty() || !state.destinations.is_empty() {
             return Err(RestoreError::Malformed(
                 "the state holds a start option this executor does not implement".into(),
             ));
@@ -1506,6 +1512,9 @@ impl Run {
             return Err(RestoreError::Catalog);
         }
         check_state(&program, &state).map_err(RestoreError::Malformed)?;
+        if let Some(e) = grounding_error(ctx, &state.grounding) {
+            return Err(RestoreError::Malformed(e));
+        }
         if let Some(mut stored) = stored_terminal {
             stored.run_id = state.run_id.clone();
             if state.terminal_action().as_ref() != Some(&stored) {
@@ -1957,6 +1966,18 @@ pub(crate) fn delegate_principal(delegation: &Value) -> Option<String> {
 /// if it is not: an object with a string `principal`, a `kind`, string
 /// optional fields, and `authenticated_by` and `trust_class` from their
 /// vocabularies. Unknown fields are allowed.
+/// The first grounding policy whose shape is wrong or that requires a
+/// capability the ontology does not define (§5.20): a host's policy is
+/// refused, never applied to nothing. `grounding[i].<why>`.
+fn grounding_error(ctx: &Context, policies: &[grounding::Policy]) -> Option<String> {
+    policies.iter().enumerate().find_map(|(i, p)| {
+        grounding::Policy::new(p.require.clone(), p.kinds.clone(), p.attested)
+            .and_then(|p| p.check_ids(&ctx.ontology))
+            .err()
+            .map(|e| format!("grounding[{i}].{e}"))
+    })
+}
+
 pub(crate) fn identity_error(v: &Value) -> Option<String> {
     use crate::validate::identity::{TRUST_CLASSES, known_mechanism};
     let Value::Object(m) = v else {

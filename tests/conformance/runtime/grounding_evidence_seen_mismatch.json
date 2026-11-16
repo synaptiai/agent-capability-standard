@@ -1,0 +1,71 @@
+{
+  "description": "An Output whose evidence_seen does not list an anchor: its producer did not have that evidence (\u00a73.1), F505.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "grounding@1"
+        ]
+      },
+      "grounding": {
+        "require": [
+          "retrieve"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": {
+            "items": [
+              1,
+              2
+            ]
+          },
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "file:a.txt",
+              "kind": "file"
+            }
+          ]
+        },
+        "evidence_seen": [
+          "file:b.txt"
+        ]
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F505",
+    "step": 0
+  },
+  "trace_kinds": []
+}

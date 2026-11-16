@@ -8,7 +8,7 @@ use pyo3::exceptions::{
 };
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::diag::{Code, Diagnostic, Severity};
 use crate::exec::{self, Attendance, RecordMode, Response, RestoreError, StartError, StartOptions};
@@ -324,6 +324,7 @@ fn start_err(py: Python<'_>, e: StartError) -> PyErr {
         | StartError::Program(_)
         | StartError::Identity(_)
         | StartError::Unsupported(_)
+        | StartError::Grounding(_)
         | StartError::Header(_) => PyValueError::new_err(message),
     }
 }
@@ -587,8 +588,15 @@ impl PyRun {
         self.run.is_finished()
     }
 
-    fn trace(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        to_py(py, &Value::Array(self.run.trace().to_vec()))
+    /// The trace events the run holds; with `since`, those whose `seq` is
+    /// at least `since` (a runner reads what one submit added).
+    #[pyo3(signature = (since = None))]
+    fn trace(&self, py: Python<'_>, since: Option<u64>) -> PyResult<Py<PyAny>> {
+        let events = self.run.trace();
+        let from = since.map_or(0, |s| {
+            events.partition_point(|e| e["seq"].as_u64().is_some_and(|q| q < s))
+        });
+        to_py(py, &Value::Array(events[from..].to_vec()))
     }
 
     fn action_records(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -730,6 +738,66 @@ fn destination_allowed(policies: Vec<Vec<String>>, destination: &str) -> bool {
     destination::allowed(&policies, destination)
 }
 
+/// §5.20's check of one output against a grounding policy (STANDARD
+/// v1.2): `policy` is `{kinds?, attested?}` (a `require` is not needed for
+/// one output); `bound_refs` the reference bodies the step's
+/// `input_bindings` make (for a call, its argument names); `evidence_seen`
+/// the host's attestation, None when absent (an empty list attests that the
+/// producer saw nothing). Returns `{status: grounded|inferred|refused, code:
+/// None|"F505", message, counted, legacy, unattested}` (the counts are 0 for
+/// a refused output). ValueError for a
+/// malformed policy or a bound reference that is not a reference body.
+#[pyfunction]
+#[pyo3(signature = (output, policy, bound_refs = None, evidence_seen = None))]
+fn check_grounding(
+    py: Python<'_>,
+    output: &Bound<'_, PyAny>,
+    policy: &Bound<'_, PyAny>,
+    bound_refs: Option<Vec<String>>,
+    evidence_seen: Option<Vec<String>>,
+) -> PyResult<Py<PyAny>> {
+    let output = from_py(output)?;
+    let Value::Object(p) = from_py(policy)? else {
+        return Err(PyTypeError::new_err("policy must be a dict"));
+    };
+    let kinds: Option<Vec<String>> = match p.get("kinds") {
+        None | Some(Value::Null) => None,
+        Some(k) => Some(
+            serde_json::from_value(k.clone())
+                .map_err(|_| PyValueError::new_err("policy.kinds must be a list of strings"))?,
+        ),
+    };
+    let attested = match p.get("attested") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(PyValueError::new_err("policy.attested must be a boolean")),
+    };
+    // The policy's shape; its `require` does not matter for one output.
+    let policy = grounding::Policy::new(vec!["output".into()], kinds, attested)
+        .map_err(|e| PyValueError::new_err(format!("policy.{e}")))?;
+    let bound =
+        grounding::parse_bound(&bound_refs.unwrap_or_default()).map_err(PyValueError::new_err)?;
+    let result = match grounding::check(&output, &policy, &bound, evidence_seen.as_deref()) {
+        Ok(c) => json!({
+            "status": c.status,
+            "code": null,
+            "message": "",
+            "counted": c.counted,
+            "legacy": c.legacy,
+            "unattested": c.unattested,
+        }),
+        Err(message) => json!({
+            "status": "refused",
+            "code": "F505",
+            "message": message,
+            "counted": 0,
+            "legacy": 0,
+            "unattested": 0,
+        }),
+    };
+    to_py(py, &result)
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -746,6 +814,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_destination_pattern, m)?)?;
     m.add_function(wrap_pyfunction!(destination_allowed, m)?)?;
     m.add_function(wrap_pyfunction!(next_fire, m)?)?;
+    m.add_function(wrap_pyfunction!(check_grounding, m)?)?;
     let spec_versions: Vec<String> = validate::semantics::SUPPORTED_VERSIONS
         .iter()
         .map(|(a, b)| format!("{a}.{b}"))

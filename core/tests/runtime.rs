@@ -548,6 +548,7 @@ fn submit_refuses_responses_that_do_not_answer() {
     );
     let ok = Response::Output {
         value: serde_json::json!({"data": 1, "evidence_anchors": [], "confidence": 1}),
+        evidence_seen: None,
     };
     run.submit(id, ok.clone(), 5).unwrap();
     assert!(run.is_finished());
@@ -634,6 +635,7 @@ fn runs_are_deterministic() {
             id,
             Response::Output {
                 value: serde_json::json!({"data": [1.5, "é"], "evidence_anchors": [], "confidence": 1}),
+                evidence_seen: None,
             },
             42,
         )
@@ -797,6 +799,7 @@ fn values_must_be_ijson() {
     let before = run.snapshot(None);
     let big = Response::Output {
         value: serde_json::json!({"data": 9007199254740993u64, "evidence_anchors": [], "confidence": 1}),
+        evidence_seen: None,
     };
     assert!(matches!(
         run.submit(id, big, 1),
@@ -808,6 +811,7 @@ fn values_must_be_ijson() {
     }
     let deep = Response::Output {
         value: serde_json::json!({"data": deep, "evidence_anchors": [], "confidence": 1}),
+        evidence_seen: None,
     };
     assert!(matches!(
         run.submit(id, deep, 1),
@@ -1009,6 +1013,7 @@ fn resolved_inputs_must_be_ijson_and_states_stay_restorable() {
         id,
         Response::Output {
             value: serde_json::json!({"data": deep, "evidence_anchors": [], "confidence": 1}),
+            evidence_seen: None,
         },
         0,
     )
@@ -1151,12 +1156,6 @@ fn start_refuses_options_not_implemented_yet() {
             ..opts()
         },
         StartOptions {
-            grounding: vec![
-                acs_core::grounding::Policy::new(vec!["search".into()], None, false).unwrap(),
-            ],
-            ..opts()
-        },
-        StartOptions {
             destinations: vec![vec!["ops".into()]],
             ..opts()
         },
@@ -1171,7 +1170,6 @@ fn start_refuses_options_not_implemented_yet() {
     let run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
     for (key, value) in [
         ("profiles", serde_json::json!([{"domain": "d"}])),
-        ("grounding", serde_json::json!([{"require": ["search"]}])),
         ("destinations", serde_json::json!([["ops"]])),
     ] {
         let snap = forged(&run.snapshot(None), |s| s[key] = value.clone());
@@ -1183,6 +1181,74 @@ fn start_refuses_options_not_implemented_yet() {
             "{key}"
         );
     }
+}
+
+#[test]
+fn grounding_policies_at_start_and_restore() {
+    let ctx = ctx();
+    let policy = |ids: &[&str]| {
+        acs_core::grounding::Policy::new(ids.iter().map(|s| s.to_string()).collect(), None, false)
+            .unwrap()
+    };
+    // A policy that requires a capability the ontology lacks is refused, not
+    // applied to nothing (§5.20).
+    let bad = StartOptions {
+        grounding: vec![policy(&["search"]), policy(&["retrieve", "clasify"])],
+        ..opts()
+    };
+    match Run::start(&ctx, &one_step(), "w", topic(), bad) {
+        Err(acs_core::exec::StartError::Grounding(m)) => assert!(
+            m.starts_with("grounding[1].require[1]")
+                && m.contains("V101")
+                && m.contains("'classify'"),
+            "{m}"
+        ),
+        other => panic!("{:?}", other.err()),
+    }
+    // A run started with policies keeps them across a snapshot.
+    let good = StartOptions {
+        grounding: vec![policy(&["search"])],
+        ..opts()
+    };
+    let run = Run::start(&ctx, &one_step(), "w", topic(), good).unwrap();
+    let snap = run.snapshot(None);
+    let state: Value = serde_json::from_str(&snap.state).unwrap();
+    assert_eq!(
+        state["grounding"],
+        serde_json::json!([{"require": ["search"], "attested": false}])
+    );
+    let restored = Run::restore(&ctx, &one_step(), &snap, None).unwrap();
+    assert_eq!(restored.snapshot(None).state, snap.state);
+    // A state whose policy is malformed or names an unknown id is refused.
+    for value in [
+        serde_json::json!([{"require": ["clasify"]}]),
+        serde_json::json!([{"require": []}]),
+    ] {
+        let forged_snap = forged(&snap, |s| s["grounding"] = value.clone());
+        assert!(matches!(
+            Run::restore(&ctx, &one_step(), &forged_snap, None),
+            Err(acs_core::exec::RestoreError::Malformed(_))
+        ));
+    }
+}
+
+#[test]
+fn evidence_seen_absent_and_empty_differ() {
+    let absent: Response =
+        serde_json::from_value(serde_json::json!({"kind": "Output", "value": {}})).unwrap();
+    let empty: Response = serde_json::from_value(
+        serde_json::json!({"kind": "Output", "value": {}, "evidence_seen": []}),
+    )
+    .unwrap();
+    assert_ne!(absent, empty);
+    assert_eq!(
+        serde_json::to_value(&absent).unwrap(),
+        serde_json::json!({"kind": "Output", "value": {}})
+    );
+    assert_eq!(
+        serde_json::to_value(&empty).unwrap()["evidence_seen"],
+        serde_json::json!([])
+    );
 }
 
 /// A run of `one_step()` whose step fails with the host's `reason`, under
@@ -1517,6 +1583,7 @@ fn states_without_resumption_members_restore() {
             id,
             Response::Output {
                 value: serde_json::json!({"data": 1, "evidence_anchors": [], "confidence": 1}),
+                evidence_seen: None,
             },
             1,
         )
@@ -1760,4 +1827,59 @@ fn a_resumed_step_keeps_its_queued_action_in_the_state() {
             "a queued action naming {what} that does not exist was restored"
         );
     }
+}
+
+/// The `grounding` trace events of the S4 fixtures (§5.20): the check is
+/// traced once per checked output, and an unchecked output (a capability no
+/// policy requires, a delegation that waits) has none.
+#[test]
+fn grounding_fixture_traces() {
+    let root = root();
+    let ctx = Context::load(&root.join("schemas/capability_ontology.yaml"), &root).unwrap();
+    let all: std::collections::BTreeMap<String, Value> = fixtures().into_iter().collect();
+    let grounding = |name: &str| -> Vec<Value> {
+        let f = &all[name];
+        play(&ctx, name, f, Replay::Plain)
+            .trace
+            .into_iter()
+            .filter(|t| t["kind"] == "grounding")
+            .map(|t| t["detail"].clone())
+            .collect()
+    };
+    let one = |name: &str| {
+        let events = grounding(name);
+        assert_eq!(events.len(), 1, "{name}: {events:?}");
+        events[0].clone()
+    };
+    let d = one("grounding_grounded_output");
+    assert_eq!(
+        (&d["status"], &d["counted"], &d["policies"]),
+        (
+            &serde_json::json!("grounded"),
+            &serde_json::json!(1),
+            &serde_json::json!(1)
+        )
+    );
+    assert_eq!(one("grounding_inferred_output")["status"], "inferred");
+    assert_eq!(one("grounding_acs_bound")["counted"], 1);
+    assert_eq!(one("grounding_attested_seen")["unattested"], 0);
+    for name in [
+        "grounding_not_required",
+        "grounding_delegate_wait_exempt",
+        "grounding_quorum_exempt",
+        "grounding_invoke_fills_anchors",
+        "grounding_workflow_policy_not_nested",
+    ] {
+        assert!(grounding(name).is_empty(), "{name}");
+    }
+    // The host's policy reaches the nested run: its step fails F505 there.
+    let nested = play(
+        &ctx,
+        "grounding_host_policy_nested",
+        &all["grounding_host_policy_nested"],
+        Replay::Plain,
+    );
+    assert!(nested.trace.iter().any(|t| t["kind"] == "step_failed"
+        && t["frame"] == serde_json::json!(["w", "child"])
+        && t["detail"]["code"] == "F505"));
 }

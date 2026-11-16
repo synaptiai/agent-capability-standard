@@ -1,0 +1,18 @@
+# Standard version: 1.1.0
+# Positive fixture (STANDARD v1.2 §5.20): in a workflow that targets 1.1,
+# 'grounding' without grounding@1 is an unknown field (W604), as in 1.1: no
+# 1.1-valid workflow becomes invalid.
+grounding_key_in_1_1:
+  goal: Carry a grounding key in a 1.1 workflow.
+  risk: low
+  spec_version: "1.1"
+  grounding:
+    require: [retrieve]
+  steps:
+  - capability: retrieve
+    purpose: Read the report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  success:
+  - The report is read

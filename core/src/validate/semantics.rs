@@ -23,6 +23,7 @@ pub(crate) const WORKFLOW_KEYS: &[&str] = &[
     "spec_version",
     "workflow_extensions",
     "triggers",
+    "grounding",
     "domain",
     "profile",
     "risk_propagation",
@@ -883,6 +884,33 @@ pub(crate) const FEATURES: &[Feature] = &[
                         .and_then(|b| b.get("require_record"))
                         .is_some())
                 .then(|| format!("steps[{i}].input_bindings.require_record"))
+            })
+        },
+    },
+    // S4 (§5.20, §5.12): the grounding extension with its field, and F505
+    // as a code a failure mode fires on.
+    Feature {
+        since: (1, 2),
+        name: "extension 'grounding@1' and its field 'grounding'",
+        first_use: |wf| {
+            wf.get("workflow_extensions")
+                .and_then(|e| e.get("requires"))
+                .and_then(Value::as_array)
+                .and_then(|r| r.iter().position(|x| x == "grounding@1"))
+                .map(|i| format!("workflow_extensions.requires[{i}]"))
+        },
+    },
+    Feature {
+        since: (1, 2),
+        name: "F505 in a failure mode's 'on_error'",
+        first_use: |wf| {
+            first_in_items(wf, "failure_modes", |fm| {
+                let fires = match fm.get("on_error") {
+                    Some(Value::String(c)) => c == "F505",
+                    Some(Value::Array(a)) => a.iter().any(|c| c == "F505"),
+                    _ => false,
+                };
+                fires.then_some("on_error")
             })
         },
     },

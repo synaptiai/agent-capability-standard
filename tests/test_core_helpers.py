@@ -161,7 +161,6 @@ def test_start_validates_with_the_header(validator: _core.Validator) -> None:
     "option",
     [
         {"profiles": [{"domain": "d"}]},
-        {"grounding": [{"require": ["retrieve"]}]},
         {"destinations": [["ops"]]},
         {"catalogs": [{"x": {}}]},
         {"agents": [{"agent": "a"}]},
@@ -175,6 +174,25 @@ def test_start_refuses_options_not_implemented_yet(
         _core.Run.start(
             validator, CATALOG, "w", header=None, run_id="r", now_ms=0, **option
         )
+
+
+def test_grounding_policies_are_implemented(validator: _core.Validator) -> None:
+    """Grounding policies (STANDARD v1.2 §5.20) start a run, and its state
+    keeps them across a snapshot."""
+    run = _core.Run.start(
+        validator,
+        CATALOG,
+        "w",
+        header=None,
+        run_id="r",
+        now_ms=0,
+        grounding=[{"require": ["retrieve"], "kinds": ["file"]}],
+    )
+    snap = run.snapshot()
+    assert json.loads(snap["state"])["grounding"] == [
+        {"require": ["retrieve"], "kinds": ["file"], "attested": False}
+    ]
+    assert _core.Run.restore(validator, CATALOG, snap).snapshot() == snap
 
 
 def test_record_mode_actions_is_implemented(validator: _core.Validator) -> None:

@@ -79,7 +79,11 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Binding** | A reference from one step to another step's output |
 | **Gate** | A conditional check that can halt or redirect workflow execution |
 | **Checkpoint** | A saved state that enables rollback |
-| **Grounding** | Anchoring claims to evidence references |
+| **Grounding** | Anchoring a claim to evidence its producer had (§3.1) |
+| **Evidence anchor** | A reference to one piece of evidence: `ref`, `kind` and optional `timestamp`, `excerpt`, `digest` (§6.5) |
+| **Inferred** | Said of an output not grounded in evidence that carries `inference_method` and `confidence` (§3.1, §4.1.1) |
+| **Evidence store** | Where an implementation keeps evidence records, with a stated durability (§6.6) |
+| **Secret** | A value that grants access or proves identity, or that the host classifies as secret (§6.7) |
 | **Diagnostic** | An error or warning reported by a validator or executor (§9) |
 | **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and the ontology (§5.2.1) |
 | **Runs before** | Step A runs before step B when A comes earlier in the step list and is not in B's parallel group (§4.3) |
@@ -102,12 +106,62 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 These principles are non-negotiable. An implementation that violates them is non-conformant.
 
 ### 3.1 Grounded Claims
-Every claim MUST be evidence-backed or explicitly marked as inferred. Ungrounded claims MUST include an `inference_method` and `confidence` score.
+
+Every claim MUST be evidence-backed or explicitly marked as inferred. The
+output of a capability is the claim its step or call makes:
+
+- It is **grounded** when its `evidence_anchors` (§4.1.1) holds an evidence
+  anchor (§6.5) to evidence its producer had.
+- It is **marked inferred** when it carries `inference_method` and
+  `confidence` (§4.1.1). An output that is not grounded MUST be marked
+  inferred; one that is grounded MAY carry an `inference_method` too.
+- An empty `evidence_anchors` grounds nothing. An item that is not an
+  evidence anchor (a bare string or another object, the deprecated forms of
+  §6.5) is its producer's citation but cannot be checked, and grounds
+  nothing under a grounding policy.
+
+An output that reports an action its producer performed (a checkpoint
+taken, a rollback, a mutation, a message sent, a command run, an audit or
+memory record written) is a claim too: it is grounded by an anchor to the
+evidence of that action, which its producer has because it performed it:
+the action's own record, of kind `record` (for instance
+`{ref: "checkpoint:cp-1", kind: record}` or `{ref: "audit:a-17", kind:
+record}`), or what the action read or wrote (the file it changed).
+
+This Standard grounds an output as a whole; it does not say which anchor
+supports which field.
+
+**Available evidence.** An anchor grounds a claim only if the evidence it
+names was available to the claim's producer: obtained while the step or
+call ran (a tool's result, a file it read), received as input (a value the
+step's bindings pass, §5.3, including the anchors inside it), or put in the
+request a model answered. A host MUST NOT return an anchor it knows its
+producer did not have, such as a model's citation of a stored item the host
+did not put in the model's request; a host that assembles a model's context
+for each request SHOULD check each anchor a model cites against that
+request. An anchor that cites a workflow value uses the `acs:` scheme
+(§6.5), which an executor can check; a host attests the availability of
+other evidence with `evidence_seen` (§5.20).
+
+Outputs an executor builds itself (an `invoke` step's, a quorum's, the
+output of a wait, and the output of a `delegate` step that waits, which it
+composes from the delegation's acceptance and the result event; §5.12,
+§5.13, §5.16) are grounded in the run's own records and are not checked;
+nor is that acceptance, which is not the step's claim.
+
+F505 (`PROVENANCE_MISSING`) reports an output that breaks this section.
+Checking is opt-in: a workflow declares a grounding policy (`grounding@1`,
+§5.20), or a host applies one to a run or to the calls it covers. Where no
+policy applies, this section is its producer's obligation, and no
+implementation is required to check it.
 
 ### 3.2 Auditable Transforms
 Every transformation MUST be either:
 - Deterministic (same input produces same output)
 - Documented with explicit loss (what information is discarded)
+
+Redacting a secret (§6.7) is a transform of the second kind: the marker it
+leaves documents the loss.
 
 ### 3.3 Safety by Construction
 - A `checkpoint` MUST run before every `mutate`, `send` and `rollback` (the
@@ -158,7 +212,47 @@ ontology's `edges` array as `{from, to, type, rationale?}`.
 
 #### 4.1.1 Common Output Fields
 
-<!-- owner: S4; text: S4.md part 2.5 -->
+Every capability's output contract declares these fields, with the same
+meaning in each:
+
+| Field | Type | In the contract | Meaning |
+|-------|------|-----------------|---------|
+| `evidence_anchors` | array of evidence anchors (§6.5) | Required | What the output is based on (§3.1) |
+| `confidence` | number from 0 to 1 | Required where the capability's contract requires it, optional elsewhere | The producer's probability that the output's claim is correct |
+| `inference_method` | string | Optional | How an output not grounded in evidence was reached (§3.1) |
+| `uncertainty` | `Uncertainty` (`event_schema.yaml#/types/Uncertainty`) | Optional | The uncertainty of the output's principal value |
+
+**`confidence`** is a probability, from 0 to 1, that the output's principal
+claim is correct: for `classify`, that its labels are right; for `predict`,
+that its prediction holds. A capability's contract MAY say what it is a
+probability of more precisely, as `inquire`'s does (that clarification is
+needed). It is self-reported: this Standard requires no calibration, and a
+host that calibrates the confidences it reports SHOULD document how. It is
+not a trust score; §8.1 uses it as one factor of one. This Standard sets no
+threshold on it: a workflow sets one in a gate or a condition (§5.6, §5.8),
+and a domain profile states one in `minimum_confidence`.
+
+**`inference_method`** says how an output not grounded in evidence was
+reached. A producer SHOULD use one of `model_knowledge` (from what the
+producer already knew, with no evidence consulted), `deduction`,
+`induction`, `abduction`, `analogy`, `statistical` (the estimate of a
+statistical or learned model), `simulation`, `assumption` (taken as given
+without evidence), or a vendor value: `x-` followed by a lower-case letter
+or digit, then lower-case letters, digits, `_`, `.` or `-`. With
+`confidence`, it marks the output inferred (§3.1). The contracts declare it
+as a string; under a grounding policy (§5.20), an output that relies on
+being marked inferred MUST use a value of this vocabulary.
+
+**`uncertainty`**, when present, is an `Uncertainty` describing the output's
+principal value; when an output has both, `uncertainty.confidence` equals
+`confidence`. A `measure` output's `uncertainty` keeps the members `lower`
+and `upper` of 1.1, the bounds of the value, and MAY carry the members of an
+`Uncertainty` beside them; `interval.low` and `interval.high` then equal
+`lower` and `upper`.
+
+The ontology's `meta.principles` say the same: every output carries
+evidence anchors or is marked inferred, and a capability whose output
+contract requires a confidence returns one in every output.
 
 #### 4.1.2 Schema Dialect
 
@@ -273,6 +367,7 @@ A workflow MAY define:
 | `spec_version` | string | Standard version targeted (§11.5) |
 | `workflow_extensions` | object | Extension declarations (§5.9) |
 | `triggers` | array | How runs start (§5.10) |
+| `grounding` | object | Grounding policy (`grounding@1`, §5.20) |
 | `domain`, `profile`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
 
 A missing required field is S304; `goal`, `risk`, `success` or
@@ -677,6 +772,7 @@ waiting or approval semantics.
 | `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role`, `.read_only` and `receive`/`synchronize`/`delegate` `accept_from` (§5.15) |
 | `quorum@1` | step `quorum` (§5.16) |
 | `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes`; approver identities on approval decisions; in a workflow that targets 1.2, `approval.approver` `sender_check` and `accept_trust_classes` (§5.14, §5.17) |
+| `grounding@1` | workflow `grounding`; the check of host outputs (§5.20) |
 
 `failure_modes[].when` and `.on_error` are part of base 1.1, not an
 extension: a consumer that ignores them only loses an optional trigger.
@@ -811,7 +907,7 @@ handler is listed.
 ### 5.12 Recovery and Escalation
 
 A failure mode fires when the step raised a code listed in `on_error` (one
-code or a list: R401, R402, R403, R406, F501, F502, F504; anything else is S303 —
+code or a list: R401, R402, R403, R406, F501, F502, F504, F505; anything else is S303 —
 an expression error, R405, is fail-safe at its site and never fails a step)
 or its
 `when` is true after the step. A structured recovery whose failure mode has
@@ -1964,7 +2060,7 @@ terminal action (`Completed` or `Failed`). Every action carries:
 
 | Action | The host | Responses |
 |--------|----------|-----------|
-| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says), `Error` |
+| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§3.1, §5.20); absent, it attests nothing), `Error` |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `Checkpoint` (`checkpoint_id`), `Error` (the step fails F501) |
 | `Rollback` | restores `checkpoint_id` | `RolledBack`, `Error` (the run ends F503) |
 | `RequestApproval` | asks `approver`, in `mode`, about `shown`, by `expires_at` when it is not null (§5.14) | `Decision` (`decision_id`, `decision`, `approvers`, `digest`) |
@@ -2028,7 +2124,8 @@ defines. Likewise, a host MUST ignore an action member it does not know:
 later versions may add members to actions.
 
 An `Error` carries a `code` and a `message`, and may carry a `reason`
-(§5.19.7). To `InvokeCapability`, an `Error` with code R401 keeps it and any
+(§5.19.7). Neither holds a secret (§6.7): both reach the run's diagnostics,
+trace and records. To `InvokeCapability`, an `Error` with code R401 keeps it and any
 other code is R402; to `AwaitEvent`, R401 and R406 keep theirs and any other
 is R402.
 
@@ -2274,7 +2371,112 @@ keeps its `action_id`. An executor MAY derive the run record for the host.
 
 ### 5.20 Grounding
 
-<!-- owner: S4; text: S4.md part 2.9 -->
+```yaml
+spec_version: "1.2"
+workflow_extensions:
+  requires: [grounding@1]
+grounding:
+  require: [classify, predict, generate]
+  kinds: [file, record, x-lab_result]
+  attested: true
+```
+
+With `grounding@1` declared, a workflow MAY state a **grounding policy** in
+`grounding`:
+
+| Field | Description |
+|-------|-------------|
+| `require` | Required: the capabilities whose outputs are checked, a non-empty list of distinct ontology ids |
+| `kinds` | A non-empty list of distinct anchor kinds (§6.5): only anchors of these kinds count |
+| `attested` | Boolean, default false. When true, an anchor counts only when its availability is established: an `acs:` anchor (checked as below) or one whose `ref` the host lists in `evidence_seen` |
+
+In a workflow that targets 1.2 or later (§11.5), `grounding` without the
+declaration is V106; in one that targets an earlier version or declares
+none, it is an unknown field (W604), as in 1.1. With the declaration, a
+`grounding` that is not a mapping, a `require` or `kinds` that is not a
+non-empty list of distinct strings, a kind outside §6.5's vocabulary and an
+`attested` that is not a boolean are S303; a missing `require` is S304; an
+id in `require` that the ontology does not define is V101; unknown fields
+are W604. A workflow's policy applies to the workflow's own steps, not to
+the steps of a workflow it invokes.
+
+A host MAY also apply grounding policies, of the same three fields, to a
+run, by giving a list of them when it starts the run (§5.19.2), and a
+safety layer to the calls it covers (below). A policy a host applies to a
+run applies to the steps of the run's nested runs (§5.12) as well as its
+own. A host refuses a policy whose `require` names a capability the
+ontology does not define, as a validator does (V101), rather than apply it
+to nothing. A domain profile's `evidence_policy` states one:
+`require_grounding` is its `require` and `required_anchor_types` its
+`kinds`. Each policy that requires a step's capability applies on its own:
+the output must pass every one.
+
+**The check.** When a host answers a step's `InvokeCapability` with an
+`Output` (§5.19.1), and a policy requires the step's capability, the
+executor checks the output after the fields its contract requires (a
+missing one is R402) and before its after-gates. A `delegate` step that
+waits (§5.13) is not checked: its `Output` is the delegation's acceptance,
+not its claim, and its result is an output the executor composes; a policy
+that requires `delegate` covers the delegations that do not wait. The
+`Output` MAY carry `evidence_seen`: a list of the `ref`s of the evidence
+the host attests the output's producer had for this answer (§3.1): what it
+put in the request a model answered, the anchors inside the step's inputs,
+and what the step's tool calls returned. It lists nothing the producer did
+not receive for this answer, such as an item of a stored history that the
+request did not carry. An absent `evidence_seen` attests nothing; an empty
+one attests that the producer had no evidence.
+
+A reference (§5.3) B **covers** a reference C when they have the same root
+and each segment of B's path matches the segment of C at the same
+position: the same field name or the same index, or, where B's segment is
+a slice, an index within it or a slice within it (indices count, for both,
+from the start of the array the path names before the slice). C may go on
+past B's path. For instance, `search_out.results[0:3]` covers
+`search_out.results[1]` and `search_out.results[1].url`, but not
+`search_out.results[7]`, `search_out.total` or `search_out`.
+
+The executor reads `evidence_anchors`:
+
+1. A value that is not a list fails the step: F505.
+2. An item that is an object whose `ref` is a string starting with `acs:`
+   cites a workflow value (§6.5). Its `kind` MUST be `record`, and the rest
+   of its `ref` MUST be a reference body (§5.3, without `${`, `}` and a type
+   annotation) that one of the references in the step's `input_bindings`
+   covers; otherwise the step fails: F505. Its availability is established.
+3. Any other item that is an **evidence anchor** (an object whose `ref` is
+   a non-empty string and whose `kind` is in §6.5's vocabulary, with a
+   `digest`, when present, of §6.5's form): when the `Output` carries
+   `evidence_seen` and does not list its `ref`, the step fails: F505; when
+   it lists it, its availability is established.
+4. Any other item (a bare string, or an object that is not an evidence
+   anchor, the deprecated forms of §6.5) does not count, and is not itself
+   a failure.
+5. An anchor of items 2 and 3 **counts** when its kind is in the policy's
+   `kinds` (when the policy has them) and, under `attested`, its
+   availability is established.
+
+The output passes when at least one anchor counts. Otherwise it MUST be
+marked inferred, with an `inference_method` of §4.1.1's vocabulary and a
+`confidence` from 0 to 1, or the step fails: F505. F505 is not retried
+(§5.2); a failure mode can fire on it (§5.12).
+
+Outputs the executor builds itself are not checked (§3.1). With
+`grounding@1` declared by the workflow a completed `invoke` step belongs
+to, the step's `evidence_anchors` are the anchors of the outputs its nested
+run stored, in the order of its steps, each `ref` once, and without `acs:`
+anchors, which name the nested run's values; without the declaration they
+are empty, as in 1.1.
+
+**Hosts outside a workflow.** A safety layer (§5.18), or any host that runs
+capabilities as calls without a workflow, applies the grounding policies
+its configuration names to the output of each call whose capability one
+requires, as above. An `acs:` anchor names an argument of the call
+(`acs:<argument>`, or a path within it): each argument the call received
+counts as a reference the call binds. A layer that knows what was in the
+request the output answers gives that as `evidence_seen`; a layer that does
+not know the request gives none (absent, not an empty list). It refuses an
+output that fails with F505 (§5.18.8); the call has run, and the refusal is
+what its caller is told.
 
 ### 5.21 Domain Profiles
 
@@ -2323,7 +2525,8 @@ implementation: `review_verdict_schema.yaml` (§5.16),
 Field names in this section are those of the `event` object in
 `event_schema.yaml`. They belong to the **canonical-event namespace**, which is
 distinct from the capability-I/O namespace of §4.1 — a capability's
-`evidence_anchors` output and an event's `anchors` field are different things.
+`evidence_anchors` output and an event's `anchors` field are different
+fields; the items of both are evidence anchors (§6.5).
 
 All canonical events MUST record:
 
@@ -2333,10 +2536,14 @@ All canonical events MUST record:
 | `timestamp` | string | Yes | ISO-8601 time of observation |
 | `source` | object | Yes | Where observed (`kind`, `name`) |
 | `event_type` | string | Yes | Normalized event type |
-| `raw` | any | Yes | Original unmodified data |
+| `raw` | any | Yes | Original data, unmodified except that each secret is replaced (§6.7) |
 | `canonical` | object | Yes | Normalized data |
 | `anchors` | array | Yes | Links to original evidence |
 | `provenance` | object | Yes | Traceability record |
+
+An event MAY also record `redactions`: the JSON pointers (RFC 6901), from
+the event, of the members in which a secret was replaced by `[REDACTED]`
+(§6.7). Without it, a consumer still finds the marker where the loss is.
 
 Projecting a canonical event into `world_state.observations[]` narrows it to
 the `ObservationEvent` type, whose `payload` carries the event's `canonical`
@@ -2364,7 +2571,19 @@ World state snapshots MUST record:
 | `transition_rules` | array | Yes | Rules governing state transitions |
 | `actions` | array | Yes | Action records |
 | `indexes` | object | Yes | Lookup indexes |
-| `retention_policy` | object | No | How long to retain |
+| `retention_policy` | object | No | How long the store that holds them keeps observations, audit logs and snapshots; durations as §5.10.1 |
+
+Retention applies to the store the records are written to (§6.6). A store
+whose durability is `memory` or `session` cannot keep a record beyond its
+process or session, whatever a retention says; a host that must keep
+records longer exports each one, when it writes it, to a `durable` store.
+An `audit` step's `retention` is a duration (§5.10.1) asking how long the
+record it writes is kept; absent, the store's own policy applies, and a
+literal outside the grammar is W614. Its host SHOULD report where the
+record went in the output's `store`: the store's `name`, its `durability`
+and the `retention` it applies. A host whose store does not outlive the
+session MUST NOT report it as `durable`, so a workflow that needs a durable
+record can stop on `${a.store.durability} != 'durable'`.
 
 An action record or a provenance record may carry the identity of who
 acted (`actor_identity`, `agent_identity`; §5.17), and an action record's
@@ -2454,15 +2673,154 @@ MAC.
 
 ### 6.5 Evidence Anchors
 
-<!-- owner: S4; text: S4.md part 2.14 -->
+An **evidence anchor** names one piece of evidence. It is the item of a
+capability output's `evidence_anchors` (§4.1.1), of a canonical event's
+`anchors` (§6.2) and of the `anchors` of world-state records (§6.3): one
+type, `event_schema.yaml#/types/Anchor`, which `world_state_schema.yaml`
+repeats.
+
+| Member | Required | Description |
+|--------|----------|-------------|
+| `ref` | Yes | Where the evidence is: a non-empty string |
+| `kind` | Yes | What kind of evidence it is (below) |
+| `timestamp` | No | ISO-8601 time at which the producer read or observed it |
+| `excerpt` | No | A short quotation of it, as the producer read it; never a secret (§6.7) |
+| `digest` | No | `sha256:` and the 64 lower-case hexadecimal digits of the SHA-256 of its content as the producer read it: the bytes `ref` names or, for a JSON value, its canonical JSON (RFC 8785) in UTF-8 |
+
+Other members MAY appear; a producer's own SHOULD start with `x-`.
+
+**Kinds.** `file`; `url`; `tool` (the result of a tool call); `log`;
+`sensor`; `human_note` (something a person wrote); `api` (a response of a
+service's API); `record` (a record the agent system itself wrote or holds:
+an action or audit record, a checkpoint, a memory item, a workflow value);
+or a vendor kind: `x-` followed by a lower-case letter or digit, then
+lower-case letters, digits, `_`, `.` or `-`. A domain profile's
+`required_anchor_types` and a grounding policy's `kinds` (§5.20) list kinds
+of this vocabulary.
+
+**Refs.** A `ref` is opaque to this Standard: a URI, or `<scheme>:<rest>`
+with a scheme its producer documents (for instance `file:src/app.py#L10-L20`
+or `tool:Read:toolu_01`). The scheme `acs:` is reserved: `acs:` followed by
+a reference body as §5.3 writes it without `${` and `}` (for instance
+`acs:search_out.results[0]`) names a workflow value, the one a binding with
+that body would resolve to in the run, and its kind MUST be `record`.
+Outside a workflow, `acs:<argument>` names an argument of the call (§5.20).
+
+**Anchors of actions.** An output that reports an action its producer
+performed is grounded by an anchor to the action's record, of kind
+`record`, with a ref its producer documents (for instance
+`checkpoint:<checkpoint_id>`, `audit:<audit_id>`, `mutation:<target>`), or
+by an anchor to what the action read or wrote (§3.1).
+
+**The legacy forms.** Before 1.2 an item of `evidence_anchors` was not
+specified: producers wrote bare strings, and objects of their own shape
+(without a `kind`, or with a kind outside this vocabulary, such as
+`tool_output`). Both are still accepted there: a string reads as an anchor
+with that `ref` and no kind, and an object that is not an evidence anchor as
+its producer's own citation. Neither counts toward a grounding policy
+(§5.20), and neither is refused for its shape: no implementation refuses an
+output because of the shape of its `evidence_anchors` items unless a
+grounding policy applies, and under one such an item only does not count.
+Both are deprecated, and the next major version removes them (§11.2). A
+producer SHOULD write evidence anchors. No validator can see an output, so
+this deprecation is announced here rather than by W603. The items of an
+event's or a record's `anchors` are evidence anchors.
 
 ### 6.6 Evidence Records and Stores
 
-<!-- owner: S4; text: S4.md part 2.15 -->
+An **evidence record** is an evidence anchor kept with the context it was
+recorded in: `record_id` (unique within its store), `anchor` and
+`recorded_at` (ISO-8601), and, where they apply, the run's `run_id`,
+`frame` and `step` (§5.19), the `capability`, and a call's `tool` and
+`call_id` (§5.18). `schemas/interop/evidence.schema.json` defines it
+(`EvidenceRecord`).
+
+An **evidence store** keeps evidence records for later reading. This
+Standard requires none. An implementation that offers one:
+
+1. appends records, never changes or reorders a record it has kept, and
+   never gives a record the `record_id` of another, including one it has
+   removed;
+2. returns a record by its `record_id`, and the records whose `capability`,
+   `anchor.kind` or `run_id` match a given value, in the order they were
+   appended;
+3. exports its records as JSON Lines, one `EvidenceRecord` per line, in the
+   order they were appended;
+4. states its **durability**: `memory` (its records are lost when its
+   process ends), `session` (deleted with the session, conversation or
+   thread they belong to) or `durable` (kept until its retention removes
+   them, §6.3); and whether it is **bounded**, that is, removes records
+   before their retention ends to stay within a size. A store that removes
+   records other than by their retention (because it is bounded, or when it
+   is cleared) counts them and reports the count with what it exports
+   (`StoreInfo.removed`).
+
+A host whose evidence must outlive the session SHOULD NOT rely on a
+`memory` or `session` store: it exports each record, when it is written, to
+a `durable` one.
+
+Evidence records are not audit records (§6.4). A run's audit records go to
+whatever implements its `audit` steps and to where the host keeps the
+executor's records (§5.19.4); a host MAY keep evidence records and audit
+records in one store.
+
+**Notification.** When a host stores evidence records, a canonical event
+(§6.2) or audit records (§6.4), it MAY notify its clients with an
+`EvidenceRecorded` payload (`schemas/interop/evidence.schema.json`): `type`
+`acs.evidence_recorded`; what was stored: the evidence records'
+`record_ids`, the canonical event's `event_id`, or the audit records'
+`action_ids`; the `anchors` of what was stored, each as its `ref`, `kind`
+and `digest` (an audit record's own `anchors`, possibly none); and, where
+they apply, `capability`, `run_id`, `frame`, `step`, `tool`, `call_id`, and
+`recorded_at`. A notification is not a record: it MAY be delivered at most
+once, and a client that needs the evidence or the record reads the store.
+It carries no `excerpt` and no secret (§6.7).
 
 ### 6.7 Secrets in Records
 
-<!-- owner: S4; text: S4.md part 2.16 -->
+A **secret** is a value that grants access or proves identity (a password,
+an API key or token, a session cookie, a private or signing key, a
+credential inside a URL or a header), and any value the host or its
+operator classifies as secret. How a host recognises secrets is its own
+choice; it SHOULD at least recognise the credentials it holds itself.
+
+**Where secrets never go.** An implementation MUST NOT write a secret into:
+
+- an evidence anchor, an evidence record or a notification (§6.5, §6.6);
+- a canonical event (§6.2) or a world-state record (§6.3);
+- an audit record (§6.4) or a safety layer's record of a call (§5.18.8);
+- a diagnostic (§9.8), or the `message` or `reason` of an `Error` a host
+  returns (§5.19.1), which reach a run's diagnostics, trace and records;
+- an executor's trace;
+- the data a `persist` step or call stores.
+
+**Redaction.** An implementation that would write a value holding a secret
+into one of these redacts it: it replaces each secret, or the part of a
+string that is one, with the string `[REDACTED]`, or leaves out the member
+or the anchor that holds it. Redaction is a transform with documented loss
+(§3.2): the marker shows where the loss is, and a canonical event MAY list
+the members it changed in `redactions` (§6.2), its `raw` then being the
+original with its secrets replaced. A record MAY hold, in place of a value
+that contains a secret, the SHA-256 digest of the whole value (a tool's
+whole input, say), so that a reader who has the value can confirm it; it
+MUST NOT hold the digest of a secret alone, which guessing can invert. An
+implementation that cannot tell whether such a value is more than the
+secret it holds (a file's whole content, a tool's whole response) keeps no
+digest of it.
+
+Data a `persist` step or call would store that holds a secret the host
+recognises is refused, not redacted, since memory is read back as fact:
+a tool-calling host refuses the call with F504 (§5.18.8); a host answering
+a step returns an `Error` with reason `secret_in_data` (§5.19.7), and the
+step fails with R402.
+
+**Workflows carry no secrets.** A catalog MUST NOT contain a secret. A host
+SHOULD NOT pass one through a run's inputs or a step's output, since a
+run's values are kept in its state and snapshots and reach records through
+bindings: it adds a credential where it is used, to the request a
+capability makes. The values an approval request shows (§5.14) are what the
+approvers decide on; an approval channel MAY display them with secrets
+replaced, saying so, and the digest stays that of the values.
 
 ---
 
@@ -2843,6 +3201,12 @@ digests MUST produce each vector's `canonical` text and `digest` from its
 that vector's `inputs` or `bindings` and its `recheck_read`, that vector's
 `shown` values, and a layer (§5.18) MUST show, for each `tool_call` vector's
 call, that vector's `shown` values.
+
+Grounding vectors (`tests/conformance/grounding/check.json`) state the check
+of §5.20 for one output at a time: an executor that accepts `grounding@1`,
+and a safety layer that applies grounding policies, MUST give the status and
+code each vector expects. The runtime fixtures whose names start with
+`grounding_` script the check inside runs.
 
 ### 10.4 Safety-Layer Conformance
 
@@ -3504,7 +3868,46 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 <!-- owner: S3; entries: S3.md part 2.24 -->
 
 ### D.5 Evidence, grounding and secrets (RFC-0008)
-<!-- owner: S4; entries: S4.md part 2.22 -->
+
+**Clarifications of 1.1 semantics** (apply to 1.0, 1.1 and 1.2 workflows):
+
+| Area | 1.1.0 text | 1.2.0 |
+|------|------------|-------|
+| Grounded and inferred outputs | "Every claim MUST be evidence-backed or explicitly marked as inferred" | An output is grounded by an anchor to evidence its producer had, or marked inferred by `inference_method` and `confidence`; an empty list grounds nothing; an output reporting an action is grounded by a `record` anchor to it (§3.1) |
+| Available evidence | Not stated | An anchor grounds a claim only if its producer had the evidence; a host MUST NOT return an anchor it knows its producer did not have (§3.1) |
+| `confidence` | Undefined; `meta.principles` said every capability returns one | A self-reported probability that the output's claim is correct, with no threshold in the Standard; the principle matches the contracts (§4.1.1) |
+| `raw` of a canonical event | "Original unmodified data" | Unmodified except that each secret is replaced; `redactions` may list where (§6.2, §6.7) |
+| `retention_policy` | "How long to retain" | Applies to the store the records are written to; a session-scoped store cannot keep them longer (§6.3) |
+
+**New in 1.2.0:**
+- Grounding (§3.1, §5.20): the extension `grounding@1` and the policies a
+  host applies to a run (covering its nested runs) or to calls make the
+  executor or the layer check host outputs: `acs:` citations covered by a
+  bound reference, the host's `evidence_seen`, `attested`, legacy items
+  that do not count. F505, reserved since 1.0, is raised and can fire a
+  failure mode. Opt-in. In a workflow that targets 1.2, `grounding` without
+  `grounding@1` is V106; in a 1.0 or 1.1 workflow it stays W604. With
+  `grounding@1`, an `invoke` step carries its nested run's anchors
+- Common output fields (§4.1.1): `confidence`, `inference_method` and
+  `uncertainty` are defined; every output contract declares them (ontology
+  2.2.0); `inference_method` has a vocabulary a producer SHOULD use
+- Evidence anchors (§6.5): one anchor type for outputs, events and records,
+  with `digest`, the kind `record` and vendor kinds; the `acs:` ref scheme;
+  `evidence_anchors` items are anchors, a bare string or another object
+  being the deprecated legacy forms, accepted until 2.0
+- Evidence records and stores (§6.6): what an evidence store keeps and
+  states, and the optional `acs.evidence_recorded` notification for
+  evidence, canonical events and audit records
+  (`schemas/interop/evidence.schema.json`)
+- Secrets (§6.7): secrets never enter evidence, records, diagnostics,
+  traces or persisted memory; redaction and its marker; a `persist` of a
+  secret is refused
+- Retention (§6.3): `audit.retention` is a duration (W614 otherwise);
+  `audit` reports its `store`
+- The `Output` response's `evidence_seen` (§5.19.1); grounding vectors and
+  `grounding_` runtime fixtures (§10.3)
+- `event_schema.yaml` and `world_state_schema.yaml` 1.2.0 share one
+  `Anchor` and one `Uncertainty`; events MAY record `redactions`
 
 ### D.6 Checkpoint, rollback, send and memory (RFC-0009)
 <!-- owner: S5; entries: S5.md part 2.15 -->

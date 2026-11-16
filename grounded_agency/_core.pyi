@@ -54,6 +54,21 @@ def next_fire(schedule: dict[str, Any], after_ms: int) -> int | None:
     ``after_ms``, or None (STANDARD v1.2 §5.10.2). ``ValueError`` when the
     schedule cannot be read."""
 
+def check_grounding(
+    output: Any,
+    policy: dict[str, Any],
+    bound_refs: list[str] | None = None,
+    evidence_seen: list[str] | None = None,
+) -> dict[str, Any]:
+    """STANDARD v1.2 §5.20's check of one output against a grounding policy
+    (``{kinds?, attested?}``; ``require`` is not needed). ``bound_refs`` are
+    the reference bodies the step's ``input_bindings`` make (for a call, its
+    argument names); ``evidence_seen`` None is absent, an empty list attests
+    that nothing was seen. Returns ``{status: grounded|inferred|refused,
+    code: None|"F505", message, counted, legacy, unattested}`` (the counts
+    are 0 for a refused output). ``ValueError`` for a malformed policy or a
+    bound reference that is not a reference body."""
+
 @final
 class Validator:
     """Raises ``FileNotFoundError`` (or another ``OSError``) when the
@@ -93,9 +108,13 @@ class Run:
     ) -> Run:
         """``header`` is required: the version the catalog's header declares,
         or None for a catalog without one (§11.5). ``records`` is the record
-        mode (§6.4): ``approvals`` or ``actions``. ``profiles``,
-        ``grounding``, ``destinations``, ``catalogs`` and ``agents`` are
-        refused (``ValueError``) until the 1.2 workstreams implement them."""
+        mode (§6.4): ``approvals`` or ``actions``. ``grounding`` is a list of
+        grounding policies ``{require, kinds?, attested?}`` the host applies
+        to the run and its nested runs (§5.20): a malformed policy, or one
+        that requires a capability the ontology does not define (V101), is
+        a ``ValueError``. ``profiles``, ``destinations``, ``catalogs`` and
+        ``agents`` are refused (``ValueError``) until the 1.2 workstreams
+        implement them."""
 
     @staticmethod
     def restore(
@@ -147,6 +166,8 @@ class Run:
         """The run's record (§5.19.8), or None while the run goes on."""
     @property
     def finished(self) -> bool: ...
-    def trace(self) -> list[dict[str, Any]]: ...
+    def trace(self, since: int | None = None) -> list[dict[str, Any]]:
+        """The trace events the run holds; with ``since``, those whose
+        ``seq`` is at least ``since``."""
     def action_records(self) -> list[dict[str, Any]]: ...
     def snapshot(self, key: bytes | None = None) -> dict[str, Any]: ...

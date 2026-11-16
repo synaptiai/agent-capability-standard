@@ -26,7 +26,9 @@ const ACTIONS: &[&str] = &[
 /// Runtime codes a failure mode may fire on (§5.7): the codes a step can
 /// fail with. Expression errors (R405) are not among them: they are
 /// fail-safe at their site and never fail the step.
-const ON_ERROR: &[&str] = &["R401", "R402", "R403", "R406", "F501", "F502", "F504"];
+const ON_ERROR: &[&str] = &[
+    "R401", "R402", "R403", "R406", "F501", "F502", "F504", "F505",
+];
 
 /// The most loops one failure mode may take: a loop needs no host call, so
 /// an unbounded one would spin the executor.
@@ -781,6 +783,9 @@ mod tests {
         // Expression errors are fail-safe and never fail a step.
         assert_eq!(fm(json!({"on_error": "R405"})), ["S303"]);
         assert!(fm(json!({"on_error": ["F501", "F504"]})).is_empty());
+        // F505 (§5.20) can fire a failure mode; it is new in 1.2, so this
+        // 1.1 workflow is told so (W616).
+        assert_eq!(fm(json!({"on_error": "F505"})), ["W616"]);
         assert_eq!(
             fm(json!({"when": "true", "recovery": {"goto_step": "p", "max_loops": 1001}})),
             ["S303"]

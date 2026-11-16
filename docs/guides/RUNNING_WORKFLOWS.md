@@ -614,6 +614,7 @@ members of its `detail`.
 | `invoke_started` | An `invoke` step starts a nested run | `workflow` |
 | `invoke_returned` | The nested run is over; `result` is its outcome or its failure code | `workflow`, `result`, `ended` |
 | `quorum` | A `constrain` step with a `quorum` counted the verdicts | `tally` |
+| `grounding` | A host's output passed every grounding policy that requires the step's capability (§5.20), before `step_completed`: `status` is `grounded` or `inferred`; `counted` (the anchors that count), `legacy` (the items that are not evidence anchors) and `unattested` (the anchors whose availability is not established) are those of the last policy checked; `policies` is how many applied. An output that fails one is `step_failed` with F505 | `status`, `counted`, `legacy`, `unattested`, `policies` |
 | `retry` | An attempt failed and the step will be tried again; `attempt` is the attempt that failed, from 1; `reason` and `reason_ignored` as for `step_failed` | `code`, `message`, `attempt`, `backoff_ms`, `reason`, `reason_ignored` |
 | `failure_mode_fired` | A failure mode applies | `failure_mode`, `action` |
 | `loop` | A failure mode loops back; `to` is the index of the step it goes to and `loop` the count for this failure mode, from 1 | `failure_mode`, `to`, `loop` |

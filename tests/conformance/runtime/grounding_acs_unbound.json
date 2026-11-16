@@ -1,0 +1,97 @@
+{
+  "description": "An acs: citation of a value the step does not bind: its producer did not have it (\u00a73.1), F505.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        },
+        {
+          "capability": "transform",
+          "purpose": "transform step",
+          "store_as": "t",
+          "input_bindings": {
+            "input": "${r.data: object}",
+            "target_format": "json"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "grounding@1"
+        ]
+      },
+      "grounding": {
+        "require": [
+          "transform"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": {
+            "items": [
+              1,
+              2
+            ]
+          },
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "file:a.txt",
+              "kind": "file"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "transform",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "output": {},
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "acs:other.data",
+              "kind": "record"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F505",
+    "step": 1
+  },
+  "trace_kinds": []
+}

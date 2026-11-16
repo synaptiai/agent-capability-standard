@@ -75,7 +75,10 @@ fn start(catalog: &Value, records: RecordMode) -> Run {
 fn output(value: Value) -> acs_core::exec::Response {
     let mut v = value;
     v["evidence_anchors"] = json!([]);
-    acs_core::exec::Response::Output { value: v }
+    acs_core::exec::Response::Output {
+        value: v,
+        evidence_seen: None,
+    }
 }
 
 fn error(code: &str) -> acs_core::exec::Response {

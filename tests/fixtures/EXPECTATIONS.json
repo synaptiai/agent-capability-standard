@@ -681,5 +681,59 @@
     "expected_error_codes": [
       "B203"
     ]
+  },
+  "pass_grounding_policy": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
+  "fail_grounding_undeclared": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V106"
+    ]
+  },
+  "pass_grounding_key_in_1_1_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "extensions",
+    "expected_warning_codes": [
+      "W604"
+    ]
+  },
+  "fail_grounding_missing_require": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S304"
+    ]
+  },
+  "fail_grounding_bad_kind": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "S303"
+    ]
+  },
+  "fail_grounding_unknown_capability": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "extensions",
+    "expected_error_codes": [
+      "V101"
+    ]
+  },
+  "pass_audit_retention_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W614"
+    ]
   }
 }

@@ -741,10 +741,20 @@ impl<'a> Machine<'a> {
                     .filter(|s| child.stores.contains_key(*s))
                     .map(|s| json!(s))
                     .collect();
+                // With grounding@1, the invoking workflow's step carries the
+                // anchors of its nested run's stored outputs (§5.20); else
+                // none, as in 1.1.
+                let anchors = if self.program.workflows[&self.frame_ref().workflow]
+                    .extension("grounding@1")
+                {
+                    nested_anchors(&self.program.workflows[&child.workflow], &child.stores)
+                } else {
+                    Vec::new()
+                };
                 self.frame().cur.output = Some(json!({
                     "result": Value::Object(child.stores),
                     "steps_executed": steps,
-                    "evidence_anchors": [],
+                    "evidence_anchors": anchors,
                 }));
                 self.set_stage(Stage::After)
             }
@@ -1939,7 +1949,7 @@ impl<'a> Machine<'a> {
         self.step_error_with(code, message, reason)
     }
 
-    fn output(&mut self, value: Value) -> Flow {
+    fn output(&mut self, value: Value, seen: Option<&[String]>) -> Flow {
         let step = self.step_ref();
         let missing: Vec<&String> = match &value {
             Value::Object(m) => step
@@ -2016,6 +2026,12 @@ impl<'a> Machine<'a> {
                 Reason::of("not_recorded"),
             );
         }
+        // Grounding (§5.20), after the checks of required fields (R402) and
+        // before the after-gates. A delegate that waits returned above: its
+        // acceptance is not its claim.
+        if let Err(message) = self.grounding_check(&value, seen) {
+            return self.step_error("F505", message);
+        }
         if step.capability == "checkpoint" {
             let id = value
                 .get("checkpoint_id")
@@ -2027,6 +2043,40 @@ impl<'a> Machine<'a> {
         }
         self.frame().cur.output = Some(value);
         self.set_stage(Stage::After)
+    }
+
+    /// §5.20's check of a host's output for the current step: under every
+    /// policy that requires its capability (the frame workflow's own, then
+    /// the host's, which apply in every frame), each on its own. With none,
+    /// nothing is checked or traced, as in 1.1. On success the trace gets
+    /// one `grounding` event, from the last policy checked.
+    fn grounding_check(&mut self, output: &Value, seen: Option<&[String]>) -> Result<(), String> {
+        let step = self.step_ref();
+        let wf = &self.program.workflows[&self.frame_ref().workflow];
+        let policies: Vec<&crate::grounding::Policy> = wf
+            .grounding
+            .iter()
+            .chain(&self.st.grounding)
+            .filter(|p| p.requires(&step.capability))
+            .collect();
+        let Some(last) = policies.len().checked_sub(1) else {
+            return Ok(());
+        };
+        let mut detail = Value::Null;
+        for (i, policy) in policies.iter().enumerate() {
+            let checked = crate::grounding::check(output, policy, &step.bound, seen)?;
+            if i == last {
+                detail = json!({
+                    "status": checked.status,
+                    "counted": checked.counted,
+                    "legacy": checked.legacy,
+                    "unattested": checked.unattested,
+                    "policies": policies.len(),
+                });
+            }
+        }
+        self.trace_step("grounding", detail);
+        Ok(())
     }
 
     fn derived_checkpoint_id(&self) -> String {
@@ -2595,7 +2645,7 @@ impl<'a> Machine<'a> {
             });
         }
         let values: Vec<&Value> = match &response {
-            Response::Output { value } | Response::Current { value } => vec![value],
+            Response::Output { value, .. } | Response::Current { value } => vec![value],
             Response::Event { event, .. } => vec![event],
             _ => Vec::new(),
         };
@@ -2653,8 +2703,14 @@ impl<'a> Machine<'a> {
             (Purpose::Capability | Purpose::Event, _) if late => {
                 self.exec_error("R401", "the result arrived after the step's timeout");
             }
-            (Purpose::Capability, Response::Output { value }) => {
-                self.output(value);
+            (
+                Purpose::Capability,
+                Response::Output {
+                    value,
+                    evidence_seen,
+                },
+            ) => {
+                self.output(value, evidence_seen.as_deref());
             }
             (
                 purpose @ (Purpose::Capability | Purpose::Event),
@@ -3016,6 +3072,36 @@ impl<'a> Machine<'a> {
 }
 
 /// The checkpoint a pending `Rollback` restores.
+/// The evidence anchors of the outputs a nested run stored, in the order of
+/// its workflow's steps: each `ref` once, and no `acs:` anchor, which names
+/// a value of the nested run (§5.20).
+fn nested_anchors(wf: &Workflow, stores: &Map<String, Value>) -> Vec<Value> {
+    let mut refs: Vec<&str> = Vec::new();
+    let mut out = Vec::new();
+    let outputs = wf
+        .steps
+        .iter()
+        .filter_map(|s| s.store_as.as_deref())
+        .filter_map(|s| stores.get(s));
+    for output in outputs {
+        let items = output
+            .get("evidence_anchors")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for item in items {
+            let Some(r) = item.get("ref").and_then(Value::as_str) else {
+                continue;
+            };
+            if crate::grounding::is_anchor(item) && !r.starts_with("acs:") && !refs.contains(&r) {
+                refs.push(r);
+                out.push(item.clone());
+            }
+        }
+    }
+    out
+}
+
 fn rolled_back(pending: &Pending) -> Option<String> {
     match &pending.action.body {
         Body::Rollback { checkpoint_id, .. } => Some(checkpoint_id.clone()),
