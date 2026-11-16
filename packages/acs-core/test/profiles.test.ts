@@ -61,9 +61,7 @@ describe('profile effect vectors', () => {
   });
 });
 
-describe('a run under a profile rule no executor check reads yet', () => {
-  // The core refuses to start a run under a profile's destination policy
-  // rather than run as if it were absent (section 5.21.4).
+describe('a run under profiles', () => {
   const catalog = {
     w: {
       goal: 'g',
@@ -72,18 +70,33 @@ describe('a run under a profile rule no executor check reads yet', () => {
       steps: [{ capability: 'retrieve', purpose: 'p', store_as: 'r', input_bindings: { target: 'x' } }],
     },
   };
-  it('is refused at start: allowed_destinations', async () => {
+  it("refuses a send a profile's destination policy does not allow (sections 5.21.3, 4.4.2)", async () => {
     const ctx = await repositoryContext();
-    const profiles = [{ domain: 'd', version: '1.0.0', allowed_destinations: [] }] as Json[];
-    let caught: unknown;
-    try {
-      ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
-    } catch (e) {
-      caught = e;
+    const sending = {
+      w: {
+        goal: 'g',
+        risk: 'high',
+        spec_version: '1.1',
+        steps: [
+          { capability: 'checkpoint', purpose: 'p', store_as: 'cp', input_bindings: { scope: '*' } },
+          {
+            capability: 'send',
+            purpose: 'p',
+            store_as: 's',
+            input_bindings: { destination: 'https://x.example/', payload: 'p' },
+          },
+        ],
+      },
+    };
+    for (const allowed of [[], ['mailto:*']]) {
+      const profiles = [{ domain: 'd', version: '1.0.0', allowed_destinations: allowed }] as Json[];
+      const run = ctx.start({ catalog: sending, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
+      const first = run.next() as unknown as Record<string, Json>;
+      run.submit(first.id as number, { kind: 'Output', value: { checkpoint_id: 'cp1', evidence_anchors: [] } }, 0);
+      const end = run.next() as unknown as Record<string, Json>;
+      expect([end.kind, end.code, end.reason]).toEqual(['Failed', 'F504', 'destination_not_allowed']);
+      run.dispose();
     }
-    expect(caught).toBeInstanceOf(CoreError);
-    expect((caught as CoreError).kind).toBe('start');
-    expect((caught as CoreError).message).toContain('allowed_destinations');
   });
   it("reports each of the profiles' loading warnings at start (section 5.21.4)", async () => {
     const ctx = await repositoryContext();

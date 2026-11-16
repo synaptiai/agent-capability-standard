@@ -6,9 +6,9 @@
  * The binding does not load the core itself (it runs on the plain
  * TypeScript entry): the host computes the profiles once with the core's
  * WebAssembly entry, `@synaptiai/acs-core/wasm`, and passes the result to
- * each `groundedTool` as `profiles` (`bindingProfiles`). The binding checks no
- * send's destination yet, so a profile that sets `allowed_destinations` is
- * refused rather than applied without it (§5.21.4).
+ * each `groundedTool` as `profiles` (`bindingProfiles`). Their
+ * `allowed_destinations` are destination policies a grounded `send` tool
+ * applies beside the layer's (§4.4.2, `configureLayer`).
  */
 import type { Json } from '@synaptiai/acs-core';
 import type { Diagnostic, ProfileFlags, ProfilePolicy, Report } from '@synaptiai/acs-core/wasm';
@@ -47,18 +47,10 @@ function warningText(d: Diagnostic): string {
   return `bindingProfiles: ${d.code} ${d.severity}: ${d.message}${d.suggestion !== undefined ? ` (${d.suggestion})` : ''}`;
 }
 
-/** The problem with applying `policy` in this binding, if any: a rule it does not put in force. */
-export function unappliedRule(policy: ProfilePolicy): string | null {
-  return policy.destinations.length > 0
-    ? 'a profile sets allowed_destinations, a destination policy (§4.4.2) this binding does not check yet: the profiles are refused rather than applied without it (STANDARD 1.2.0 §5.21.4)'
-    : null;
-}
-
 /**
  * Check `documents` with the core and keep what a grounded tool applies.
  * Throws the core's error (`CoreError`, kind `bad_request`, with the
- * diagnostics of §5.21.2) for a profile with an error, and an `Error` for a
- * profile that sets a rule this binding does not apply. Reports each
+ * diagnostics of §5.21.2) for a profile with an error. Reports each
  * warning (a misspelled top-level member is W604, and ignored) to
  * `onWarning`, and keeps them as `warnings` (§5.21.4).
  */
@@ -69,8 +61,6 @@ export function bindingProfiles(
 ): BindingProfiles {
   const list = Object.freeze([...documents]);
   const policy = core.profilePolicy([...list]);
-  const problem = unappliedRule(policy);
-  if (problem !== null) throw new Error(problem);
   const warnings = Object.freeze(core.checkProfiles([...list]).diagnostics.filter((d) => d.severity === 'warning'));
   const report = options.onWarning ?? ((d: Diagnostic) => console.warn(warningText(d)));
   for (const w of warnings) report(w);

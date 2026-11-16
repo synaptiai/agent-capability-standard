@@ -79,7 +79,7 @@
     },
     "InvokeCapability": {
       "allOf": [{ "$ref": "#/$defs/head" }],
-      "required": ["step", "capability", "store_as", "domain", "inputs", "deadline", "attempt"],
+      "required": ["step", "capability", "store_as", "domain", "inputs", "deadline", "attempt", "idempotency_key"],
       "properties": {
         "kind": { "const": "InvokeCapability" },
         "step": { "$ref": "#/$defs/step" },
@@ -266,13 +266,12 @@
     "not_covered_item": {
       "type": "object",
       "required": ["item", "reason"],
-      "additionalProperties": false,
       "properties": {
         "item": { "type": "string" },
         "reason": { "type": "string", "pattern": "^(transmitted|delegated|outside_scope|x-[a-z0-9][a-z0-9_.-]{0,61})$" },
         "detail": { "type": "string" }
       },
-      "description": "Section 4.4.1: a change the checkpoint never covered."
+      "description": "Section 4.4.1: a change the checkpoint never covered. A member this protocol does not define, and a detail that is not a string, are ignored (section 5.19.1)."
     },
     "Decision": {
       "type": "object",

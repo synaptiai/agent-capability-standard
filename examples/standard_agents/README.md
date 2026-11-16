@@ -8,9 +8,9 @@ needs a restore point and an approval recorded through an authenticated
 endpoint.
 
 The binding is a safety layer on a tool-calling host under Standard 1.2.0
-([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)), and meets
-its conformance class, SL, except the §5.18.10 checks its statement lists as
-not applied; it claims the class once those are applied. Its statement is
+([§5.18](../../spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)), and claims
+its conformance class, SL
+([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its statement is
 [`standard_agents_binding.json`](../../tests/conformance/calls/statements/standard_agents_binding.json).
 [Standard Agents interoperability](../../docs/integrations/standard_agents.md)
 explains the design, what it guarantees and what it cannot.
@@ -128,7 +128,7 @@ for example `F501 CHECKPOINT_REQUIRED: ...`, with the §9.8 diagnostic in
 | F502 | The call needs an approval that has not been given for exactly these arguments |
 | F501, F503 | No unused checkpoint of this execution; F503 for a rollback when no checkpoint was ever taken |
 | V102 | A capability the call requires (other than `checkpoint`) has not run in the thread |
-| F504 | A composite invoked a tool it does not list in `invokes` |
+| F504 | A composite invoked a tool it does not list in `invokes`; `persist` data or an `audit` record holds a credential; a `send` call's destination is not one the destination policies in force allow |
 | R402 | The output breaks its contract or is not I-JSON |
 | R407 | The binding could not complete its checks, or the record of a call that ran |
 
@@ -152,6 +152,41 @@ session action is bound to a `controlTool`, which is never refused:
 ```typescript
 controlTool({ name: 'finish', description: 'End the turn.', args: z.object({}) });
 ```
+
+Sends go only where the destination policies in force allow (Standard
+1.2.0 §4.4.2). Put the host's policies, and the applied profiles' (the
+core's `profilePolicy`), in force for every grounded `send` tool in the
+module that defines the agent's tools:
+
+```typescript
+import { configureLayer } from '../../src/acs/layer.js';
+
+configureLayer({ destinations: [['https://hooks.example.com/*', '*@example.com']] });
+```
+
+A `send` call whose destination no pattern of a policy matches, or whose
+destination is not a string, is refused with F504 before any approval is
+asked for. The destination is `args.destination` unless the tool says
+where with its `destination` option (`destination: (args) => args.to`); a
+`send` tool defined without the option obeys the policy all the same.
+Without `configureLayer`, no policy is in force. A tool's `profiles` add
+their `allowed_destinations` for that tool and, given to a composite, for
+the sends its code invokes at any depth (each nested call the binding
+attributes to it, §5.18.4).
+
+`memoryTools()` gives a `persist` and a `recall` tool on the thread's
+key-value store (§4.5): scope `session` (the thread), an envelope with the
+data's `stored_at` and, with a `ttl`, its `expires_at`, after which a recall
+does not find it; data or a key holding a credential is refused
+(`secret_in_data`). What §4.5 asks a host to state, for its one scope:
+entries survive a restart of the host, since the runtime keeps thread values
+in durable per-thread storage that survives process restarts and redeploys
+(Standard Agents Runtime, Durable Key-Value Store); they are retained while
+the thread lasts, unless their `ttl` ends them first, and the binding
+deletes none; a value is limited to `max_value_bytes` (1,000,000 bytes of
+JSON text by default; `over_capacity` above it), and the binding sets no
+limit on the number of entries, so the runtime's own caps on key length,
+value size and key count, which it may set, are the limits.
 
 A restore point counts only in the execution it was taken in, and for ten
 minutes at most, so the order that works is: ask, wait for the approval, then

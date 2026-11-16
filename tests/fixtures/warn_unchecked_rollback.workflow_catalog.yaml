@@ -1,0 +1,40 @@
+# Standard version: 1.2.0
+# A rollback step whose restored only an audit binding reads: the step
+# completes whether or not it restored, and nothing decides on it (STANDARD
+# v1.2 §4.4.1): W624.
+restore_config:
+  goal: Change a configuration and restore it.
+  risk: high
+  spec_version: "1.2"
+  steps:
+  - capability: checkpoint
+    purpose: Save the configuration before the change.
+    store_as: checkpoint_out
+    input_bindings:
+      scope: config/app.yaml
+  - capability: constrain
+    purpose: Check the change against the policy.
+    store_as: policy_out
+    input_bindings:
+      target: config/app.yaml
+      constraints:
+      - no secrets in the file
+  - capability: mutate
+    purpose: Apply the change.
+    store_as: change_out
+    input_bindings:
+      target: config/app.yaml
+      operation:
+        set: {replicas: 3}
+  - capability: rollback
+    purpose: Restore the configuration.
+    store_as: rollback_out
+    input_bindings:
+      checkpoint_id: ${checkpoint_out.checkpoint_id}
+  - capability: audit
+    purpose: Record the rollback.
+    store_as: audit_out
+    input_bindings:
+      event:
+        what: rolled back
+        restored: ${rollback_out.restored}

@@ -43,6 +43,16 @@ output; a review quorum (`quorum@1`, on `constrain`) relies on them. With
 `wait` (`wait@1`) the step delegates, then waits for that delegate's
 result, which the output carries as `result`; a `retry` delegates again.
 
+A delegate is another party (STANDARD v1.2 §5.15.4): the delegator's
+checkpoints never authorise what it changes, and a rollback to the
+delegator's checkpoint restores only what that checkpoint captured. A change
+the delegate makes elsewhere is not undone by it (a host lists it as
+`not_covered`, reason `delegated`). Before each change, the delegate needs a
+checkpoint valid in the scope where the change is checked; its host attests
+that as `effective.checkpointed`. To keep a delegation from leaving changes
+no rollback reaches, bind `read_only: true`, or undo its changes in a step of
+their own.
+
 ## Procedure
 
 1) **Analyze task**: Understand the overall objective
@@ -100,6 +110,7 @@ effective:  # Delegation settings actually used, as attested by the host
   model_family: string
   role: string
   read_only: boolean
+  checkpointed: boolean  # Before each change, the delegate had a checkpoint valid where that change is checked (§5.15.4)
 result: object | null  # The delegate's result (with its sender) when the step waits for it (wait@1)
 delegation:
   task: string  # Original task description
@@ -144,7 +155,7 @@ assumptions: []
 | `accepted` | boolean | Whether the target agent accepted the task |
 | `task_id` | string | Identifier of this delegation call, its own also when it continues another (Standard v1.2 §5.15.3) |
 | `agent` | string | The agent the task was assigned to |
-| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `model_id`, `role`, `read_only`); a review quorum relies on them. `model_family` is derived from `model_id` by the rule of Standard v1.2 §5.15 |
+| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `model_id`, `role`, `read_only`), and `checkpointed`, which attests the delegate's checkpoint before each change (§5.15.4); a review quorum relies on them. `model_family` is derived from `model_id` by the rule of Standard v1.2 §5.15 |
 | `result` | object | The delegate's result, with its `sender` (and `sender_identity` under identity@1), when the step waits for it; otherwise null |
 | `delegation` | object | Overall delegation summary |
 | `subtasks` | array | Individual subtask definitions with contracts |

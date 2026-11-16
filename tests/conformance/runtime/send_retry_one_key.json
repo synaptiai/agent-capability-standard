@@ -1,0 +1,116 @@
+{
+  "description": "A send is approved once; its retry after R401 carries the same idempotency key as its first attempt (the id of the pass's first InvokeCapability), so a host transmits at most once under the one approval (\u00a74.4.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "report_state"
+          }
+        },
+        {
+          "capability": "send",
+          "purpose": "send step",
+          "store_as": "s",
+          "input_bindings": {
+            "destination": "ops",
+            "payload": {
+              "report": 1
+            }
+          },
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "send",
+        "step": 1,
+        "attempt": 1,
+        "idempotency_key": "run-1:3"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R401",
+        "message": "no answer"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "send",
+        "step": 1,
+        "attempt": 2,
+        "idempotency_key": "run-1:3"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "sent": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "status": "executed",
+        "idempotency_key": "run-1:3"
+      }
+    ]
+  },
+  "trace_kinds": [
+    "approval_requested",
+    "retry",
+    "step_completed"
+  ]
+}

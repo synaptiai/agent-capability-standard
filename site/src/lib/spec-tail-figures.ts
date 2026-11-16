@@ -603,6 +603,53 @@ export function digestCaption(groups: DigestGroup[]): string {
   return `The ${plural(total, 'normative approval digest vector', 'normative approval digest vectors')}: ${andList(parts)}; each gives the canonical JSON of what is shown and its SHA-256.`;
 }
 
+// ---------------------------------- the destination and memory vectors (§10.3)
+
+export const DESTINATION_VECTORS_SOURCE = 'tests/conformance/destinations/match.json';
+export const MEMORY_VECTORS_SOURCE = 'tests/conformance/memory/store.json';
+
+export interface EffectVectorGroup {
+  label: string;
+  count: number;
+  /** The file the group's vectors are in. */
+  source: string;
+}
+
+/**
+ * The destination vectors (§4.4.2) and memory vectors (§4.5) §10.3 makes
+ * normative: the patterns, valid and invalid; the destinations checked
+ * against policies, allowed and refused; and the memory store's cases.
+ * Checked against §10.3, which must name both files, and against the files.
+ */
+export function effectVectors(text: string, where: string): EffectVectorGroup[] {
+  const prose = sectionBlocks(text, '10.3 ', where).map((b) => toString(b)).join(' ');
+  for (const k of [DESTINATION_VECTORS_SOURCE, MEMORY_VECTORS_SOURCE]) {
+    if (!prose.includes(k)) throw new Error(`${where}: §10.3 no longer names ${k}`);
+  }
+  const dest = JSON.parse(readRepoFile(DESTINATION_VECTORS_SOURCE)) as { patterns?: { valid?: unknown }[]; matches?: { allowed?: unknown }[] };
+  if (!Array.isArray(dest.patterns) || !Array.isArray(dest.matches)) throw new Error(`${DESTINATION_VECTORS_SOURCE}: no patterns or matches list`);
+  if (dest.patterns.some((p) => typeof p.valid !== 'boolean')) throw new Error(`${DESTINATION_VECTORS_SOURCE}: a pattern without a boolean valid`);
+  if (dest.matches.some((m) => typeof m.allowed !== 'boolean')) throw new Error(`${DESTINATION_VECTORS_SOURCE}: a match without a boolean allowed`);
+  const mem = JSON.parse(readRepoFile(MEMORY_VECTORS_SOURCE)) as { status?: unknown; cases?: unknown[] };
+  if (mem.status !== 'normative' || !Array.isArray(mem.cases)) throw new Error(`${MEMORY_VECTORS_SOURCE}: not a normative list of cases`);
+  const valid = dest.patterns.filter((p) => p.valid === true).length;
+  const allowed = dest.matches.filter((m) => m.allowed === true).length;
+  return [
+    { label: 'Valid patterns', count: valid, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Invalid patterns', count: dest.patterns.length - valid, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Destinations allowed', count: allowed, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Destinations refused', count: dest.matches.length - allowed, source: DESTINATION_VECTORS_SOURCE },
+    { label: 'Memory store cases', count: mem.cases.length, source: MEMORY_VECTORS_SOURCE },
+  ];
+}
+
+export function effectVectorsCaption(groups: EffectVectorGroup[]): string {
+  const n = (label: string) => groups.find((g) => g.label === label)?.count ?? 0;
+  const patterns = n('Valid patterns') + n('Invalid patterns');
+  const destinations = n('Destinations allowed') + n('Destinations refused');
+  return `The normative destination vectors check ${plural(patterns, 'pattern', 'patterns')} (${n('Valid patterns')} valid, ${n('Invalid patterns')} invalid) and ${plural(destinations, 'destination', 'destinations')} against policies (${n('Destinations allowed')} allowed, ${n('Destinations refused')} refused); the memory vectors script ${plural(n('Memory store cases'), 'store', 'stores')} through persist and recall.`;
+}
+
 // ---------------------------------------------- F-S30 which change bumps which number
 
 export function versionBumps(text: string, where: string): { bump: string; change: string; example: string; changes: string[] }[] {

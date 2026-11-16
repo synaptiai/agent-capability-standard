@@ -19,7 +19,7 @@ from grounded_agency import (
     _core,
 )
 from grounded_agency.grounding import GroundingPolicy
-from grounded_agency.workflows import RunStartError, WorkflowEngine, WorkflowRunner
+from grounded_agency.workflows import WorkflowEngine, WorkflowRunner
 from tests.runtime_replay import load, play, start
 from tests.test_runner import Clock, FakeHost
 
@@ -464,22 +464,20 @@ def test_strict_mode_off_refuses_a_raised_checkpoint(
     [{"allowed_destinations": []}, {"allowed_destinations": ["mailto:*"]}],
     ids=["none", "mailto"],
 )
-def test_the_adapter_refuses_a_send_rule_it_does_not_check(
+def test_the_adapter_applies_a_profiles_send_rule(
     ontology_path: str, tmp_path: Path, rule: dict[str, Any]
 ) -> None:
-    """The adapter checks no send destination yet: a profile that sets a
-    destination policy is refused, never applied without the rule
-    (STANDARD v1.2 §5.21.4)."""
-    with pytest.raises(ProfileError, match="allowed_destinations") as caught:
-        GroundedAgentAdapter(
-            GroundedAgentConfig(
-                ontology_path=ontology_path,
-                checkpoint_dir=str(tmp_path / ".cp"),
-                profiles=[{"domain": "d", "version": "1.0.0", **rule}],
-            )
+    """A profile's ``allowed_destinations`` is a destination policy the
+    adapter puts in force for send calls (STANDARD v1.2 §5.21.3, §4.4.2);
+    tests/test_adapter_effects.py checks the calls it refuses."""
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[{"domain": "d", "version": "1.0.0", **rule}],
         )
-    assert "this adapter does not apply" in str(caught.value)
-    assert "profile d sets one" in str(caught.value)
+    )
+    assert adapter._destinations == [rule["allowed_destinations"]]
 
 
 @pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.stem)
@@ -749,30 +747,59 @@ CATALOG = {
 }
 
 
-def test_the_executor_refuses_a_destination_rule_no_check_reads_yet(
-    validator: _core.Validator, tmp_path: Path
+SEND_CATALOG = {
+    "w": {
+        "goal": "g",
+        "risk": "high",
+        "spec_version": "1.1",
+        "steps": [
+            {
+                "capability": "checkpoint",
+                "purpose": "p",
+                "store_as": "cp",
+                "input_bindings": {"scope": "*"},
+            },
+            {
+                "capability": "send",
+                "purpose": "p",
+                "store_as": "s",
+                "input_bindings": {"destination": "https://x.example/", "payload": "p"},
+            },
+        ],
+    }
+}
+
+
+@pytest.mark.parametrize("patterns", [[], ["mailto:*"]], ids=["none", "mailto"])
+def test_the_executor_applies_a_profile_destination_policy(
+    validator: _core.Validator, patterns: list[str]
 ) -> None:
-    """A profile's destination policy refuses the start, through ``_core``
-    and through the runner: no executor check reads it yet, and a run never
-    goes ahead as if it were absent."""
-    profile = {"domain": "d", "version": "1.0.0", "allowed_destinations": []}
-    with pytest.raises(ValueError, match="does not implement .*allowed_destinations"):
-        _core.Run.start(
-            validator,
-            CATALOG,
-            "w",
-            {},
-            header=None,
-            run_id="r",
-            now_ms=0,
-            profiles=[profile],
-        )
-    path = tmp_path / "catalog.yaml"
-    path.write_text(json.dumps(CATALOG))
-    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
-    engine.load_catalog(path)
-    with pytest.raises(RunStartError, match="allowed_destinations"):
-        WorkflowRunner(engine, profiles=[profile]).start("w")
+    """A profile's ``allowed_destinations`` is a destination policy in force
+    (STANDARD v1.2 §5.21.3, §4.4.2): a send it does not allow fails F504
+    with ``destination_not_allowed`` before anyone is asked to approve it."""
+    profile = {"domain": "d", "version": "1.0.0", "allowed_destinations": patterns}
+    run = _core.Run.start(
+        validator,
+        SEND_CATALOG,
+        "w",
+        {},
+        header=None,
+        run_id="r",
+        now_ms=0,
+        profiles=[profile],
+    )
+    action = run.next()
+    run.submit(
+        action["id"],
+        {"kind": "Output", "value": {"checkpoint_id": "cp1", "evidence_anchors": []}},
+        0,
+    )
+    end = run.next()
+    assert (end["kind"], end["code"], end["reason"]) == (
+        "Failed",
+        "F504",
+        "destination_not_allowed",
+    )
 
 
 def test_the_runner_applies_a_profile_grounding_policy(tmp_path: Path) -> None:

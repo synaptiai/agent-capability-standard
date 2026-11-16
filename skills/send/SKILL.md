@@ -66,7 +66,7 @@ hooks:
 
 ## Intent
 
-Send a message, event, or payload to an external destination with full policy enforcement, approval gates, and audit trail. This capability handles external side effects that cannot be undone.
+Send a message, event, or payload to an external destination with full policy enforcement, approval gates, and audit trail. This capability handles external side effects that cannot be undone: the checkpoint before it restores the agent's own state, not the transmission, so a send is made safe before it happens (STANDARD v1.2 §4.4.2).
 
 **CRITICAL: This capability requires explicit user approval before execution.**
 
@@ -84,7 +84,7 @@ Send a message, event, or payload to an external destination with full policy en
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `destination` | Yes | string | Target endpoint, queue, API, or address |
+| `destination` | Yes | string | Where the data goes, in the host's naming (a URL, an address, a queue or a channel); checked against the destination policies in force (STANDARD v1.2 §4.4.2) |
 | `payload` | Yes | any | Data to send |
 | `protocol` | No | string | Communication protocol (http, grpc, smtp, amqp, etc.) |
 
@@ -100,12 +100,12 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 2) **Verify checkpoint**: Confirm recovery point exists
    - Validate that a checkpoint was created before this send
    - BLOCK send if checkpoint is missing
-   - External sends are irreversible - checkpoint is for state recovery
+   - The checkpoint restores the agent's own state, not the transmission (§4.4.2): once delivered, the data cannot be recalled, and a later rollback reports the send as `not_covered` (`transmitted`)
 
-3) **Validate destination**: Ensure target is permitted
-   - Check destination against allowlist if defined
+3) **Validate destination**: Ensure the destination is permitted
+   - Where a destination policy is in force (the host's, or an applied profile's `allowed_destinations`), code checks it before approval and refuses a destination it does not allow (F504, STANDARD v1.2 §4.4.2); never try another destination to get around a refusal
+   - In a workflow, a `constrain` step with the destination as `target` records the check, and the approval `shows` the destination (§12.5, Guarded Send)
    - Verify destination format matches protocol
-   - Block sends to disallowed destinations
 
 4) **Apply constraints**: Enforce policy limits
    - Check rate limits have not been exceeded
@@ -121,9 +121,10 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 6) **Execute send**: Transmit to destination
    - Use appropriate protocol handler
+   - Pass the pass's idempotency key to a destination that accepts one (an `Idempotency-Key` header, a message de-duplication id)
    - Capture response or confirmation
    - Handle timeouts gracefully
-   - Retry according to policy if configured
+   - Retry: a retry carries the same idempotency key; never transmit twice under one key; when unsure whether an earlier attempt delivered, do not send again (report `outcome_unknown`, §4.4.2)
 
 7) **Verify delivery**: Confirm successful transmission
    - Check response status/acknowledgment
@@ -163,6 +164,9 @@ approval:
   token: string  # Approval token used
   timestamp: string  # When approval was given
   scope: string  # What was approved
+compensation:  # How the effect can be compensated, if known; nothing performs it automatically (§4.4.2)
+  strategy: string
+  inverse_effects: array[string]
 confidence: number  # probability that the message was delivered as reported (§4.1.1)
 evidence_anchors: [{ref: "sent:<idempotency_key>", kind: record}, {ref: "log:timestamp", kind: log}, {ref: "api:response", kind: api}]  # a message sent is grounded by its record, under the pass's idempotency key (STANDARD v1.2 §3.1)
 assumptions: []  # Explicit assumptions
@@ -179,6 +183,7 @@ assumptions: []  # Explicit assumptions
 | `delivery` | object | Outcome of send operation |
 | `constraints_applied` | array | Policy checks performed |
 | `approval` | object | Approval gate information |
+| `compensation` | object | How the transmission's effect can be compensated (`strategy`, `inverse_effects`), in the form of `TransitionRule.rollback`; a workflow that compensates does so in a send of its own (§4.4.2) |
 | `confidence` | number | Probability, 0.0-1.0, that the message was delivered as reported (§4.1.1) |
 | `evidence_anchors` | array of evidence anchors (§6.5) | Logs, responses, confirmations |
 | `assumptions` | array | Explicit assumptions (e.g., "network stable") |
@@ -220,9 +225,9 @@ constraints_applied:
   - constraint: "rate_limit: 100/hour"
     enforced: true
     details: "Current rate: 45/hour"
-  - constraint: "allowed_domains"
+  - constraint: "destination policy (STANDARD v1.2 §4.4.2)"
     enforced: true
-    details: "api.partner.com is in allowlist"
+    details: "https://api.partner.com/webhooks/* allows it"
 approval:
   token: "approve-send-2024-01-15-001"
   timestamp: "2024-01-15T10:30:00Z"
@@ -311,7 +316,8 @@ next_actions:
 - ALWAYS validate destination against policy before sending
 - ALWAYS log what was sent for audit (sanitize sensitive data)
 - DO NOT retry indefinitely - respect retry limits
-- BLOCK sends to destinations not in allowlist when list is defined
+- BLOCK sends to destinations the destination policy does not allow, where one is in force (code refuses them with F504, §4.4.2)
+- NEVER transmit twice under one idempotency key; when unsure whether an earlier attempt delivered, do not send again
 - If approval token is missing, REQUEST approval before proceeding
 - Never send credentials, API keys, or secrets in payloads
 

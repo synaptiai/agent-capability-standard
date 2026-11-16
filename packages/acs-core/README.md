@@ -29,6 +29,8 @@ Package 0.1.0 implements the Agent Capability Standard 1.2.0
 | `canonical` | `canonicalize` (RFC 8785), `sha256Hex` and `digest`: the approval digest the reference executor computes (section 5.14) |
 | `redact` | `redactText` and `redactJson`: secrets replaced by `[REDACTED]` (section 6.7), with the same default patterns as the Python redactor; `holdsCredential`, the credential shapes a refusal of `persist` or `audit` data recognises (section 5.18.10) |
 | `evidence` | `isEvidenceAnchor`, `ANCHOR_KINDS` and `INFERENCE_METHODS`: the evidence anchor (section 6.5) and the common output fields (section 4.1.1); `groundingPolicies` and `checkGrounding`: the grounding check of one output (section 5.20), with `parseRef`, `covers` and `refsIn` for `acs:` references; the evidence record and store types (section 6.6) |
+| `destinations` | `checkPattern(pattern)` and `checkPolicies(policies)`: the destination pattern grammar (section 4.4.2), null for a valid pattern or the problem with it; `matches(pattern, destination)` and `allowed(policies, destination)`: whether every policy in force allows a `send` destination |
+| `duration` | `parseDurationMs(text)`: a duration (section 5.10.1) in whole milliseconds, rounded up as the core rounds it, or null for text outside the grammar |
 | `binding` | `checkBindings(records, options)`: loads tool binding records (section 5.18.1) and computes each tool's effective flags, the tools a composite invokes included, with the diagnostics of section 5.18 (S303, S304, V101, V105, V107, V109, V110, W602; with the offered tools, W617, V111, V102 and F506). `annotationRecord` reads the record a Standard Agents `acs` annotation carries |
 | `output` | `encodeCapabilityOutput` and `decodeCapabilityOutput`: a capability output as the I-JSON text of the object, with every required field (section 5.18.9), else `CapabilityOutputError` (R402) |
 
@@ -44,8 +46,9 @@ The tests read the conformance vectors in place:
 `tests/conformance/approval/digests.json`,
 `tests/conformance/secrets/redact.json`,
 `tests/conformance/secrets/credentials.json`, the grounding vectors
-`tests/conformance/grounding/check.json` and the binding fixtures of the
-safety-layer class, `tests/conformance/bindings/*.json`.
+`tests/conformance/grounding/check.json`, the destination vectors
+`tests/conformance/destinations/match.json` and the binding fixtures of
+the safety-layer class, `tests/conformance/bindings/*.json`.
 
 ## The core through WebAssembly
 
@@ -86,10 +89,13 @@ answer what domain profiles change (section 5.21.3). `start` reports each
 warning of loading its profiles (a misspelled member is W604, and ignored)
 to `onWarning`, `console.warn` by default. The executor checks a profile's
 grounding policy (`require_grounding`) with its grounding check (section
-5.20) and its minimum confidence; it does not check a destination policy
-(`allowed_destinations`) yet, so `start` refuses a profile that sets one
-(`CoreError` kind `start`) rather than run without the rule (section
-5.21.4); no shipped profile does. A refused request
+5.20) and its minimum confidence, and puts its destination policy
+(`allowed_destinations`) in force beside the host's own, the `destinations`
+option of `start` (a list of policies, each a list of patterns; section
+4.4.2): a `send` step whose destination one of them does not allow fails
+F504 (`destination_not_allowed`) before approval, and an invalid pattern
+refuses the start. A run restored from a snapshot keeps the policies it
+started with. A refused request
 throws `CoreError` with its `kind` and, where the core gives them, its
 diagnostics. A WebAssembly trap marks the instance broken; load a new one.
 Release contexts and runs with `dispose()` (a `FinalizationRegistry` is the

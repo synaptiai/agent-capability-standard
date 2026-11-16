@@ -10,8 +10,8 @@
 [RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
 validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); the Python SDK adapter and the Standard Agents binding implement
-§5.18 and meet §10.4 except the §5.18.10 rows their conformance statements
-list as not applied, and claim class SL once those are applied; the
+§5.18, and the binding claims class SL (§10.4), the adapter once the
+§5.18.10 row its statement lists as not applied is applied; the
 executor and both layers check grounding (§5.20) and apply domain profiles
 (§5.21); `grounded_agency` implements §7.1's entity ids and §8's
 arithmetic; §7.2 and §7.3 are not implemented
@@ -79,7 +79,8 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Trust Score** | The weight of a piece of evidence: source weight × confidence × age decay (§8.1) |
 | **Binding** | A reference from one step to another step's output |
 | **Gate** | A conditional check that can halt or redirect workflow execution |
-| **Checkpoint** | A saved state that enables rollback |
+| **Checkpoint** | A copy, kept by the host, of the state within its scope, from which that state can be restored (§4.4.1) |
+| **Rollback** | Returning what a checkpoint captured to the state it had then; it never changes the record of what happened (§4.4.1) |
 | **Grounding** | Anchoring a claim to evidence its producer had (§3.1) |
 | **Evidence anchor** | A reference to one piece of evidence: `ref`, `kind` and optional `timestamp`, `excerpt`, `digest` (§6.5) |
 | **Inferred** | Said of an output not grounded in evidence that carries `inference_method` and `confidence` (§3.1, §4.1.1) |
@@ -92,6 +93,10 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Run** | One execution of a workflow, from its start to its terminal action (§5.19) |
 | **Action** | What a run asks its host to do next, or how it ended (§5.19.1) |
 | **Audit record** | An action record or a canonical event that says what happened (§6.4) |
+| **Pass** | One execution of a step from its start to its outcome, its retries included; a recovery loop or a resumption that runs the step again starts a new pass (§4.4.2) |
+| **Idempotency key** | What every attempt of one pass carries, so that a host performs the effect once (§4.4.2) |
+| **Destination policy** | A list of patterns a `send`'s destination must match (§4.4.2) |
+| **Memory scope** | Who can read an entry `persist` stored, and how long it lasts (§4.5) |
 
 Terms of domain profiles, contracts, entities and ordering:
 
@@ -153,6 +158,11 @@ leaves documents the loss.
   ontology's `requires` edges, V102) and before any step whose effective
   `requires_checkpoint` is true (F501), so a mutation that needs one has a
   restore point (§4.3, §4.4, §5.2.1)
+- A checkpoint restores state, not effects: a rollback cannot recall a
+  transmission or reach what a delegate changed elsewhere (§4.4.1, §4.4.2,
+  §5.15.4). An irreversible effect is made safe before it happens: checked,
+  approved, sent only where a destination policy allows, and performed at
+  most once per approval (§4.4.2)
 - A plan is not required. Where a workflow has `plan`, it MUST run before
   `execute` and `mutate`; where it has `constrain`, before `execute`,
   `mutate`, `send` and `generate` (`precedes`: ordering only, V102). A
@@ -364,9 +374,9 @@ See [EDGE_TYPES.md](EDGE_TYPES.md) for the full edge list and rationale.
 
 | Capability | Requires | Notes |
 |------------|----------|-------|
-| `mutate` | `checkpoint` | Cannot mutate without prior checkpoint |
-| `send` | `checkpoint` | Cannot send without prior checkpoint |
-| `rollback` | `checkpoint` | Must have checkpoint to revert to |
+| `mutate` | `checkpoint` | Cannot mutate without prior checkpoint, the restore point for what it changes (§4.4.1) |
+| `send` | `checkpoint` | Cannot send without prior checkpoint, which restores the agent's own state, not the transmission (§4.4.2) |
+| `rollback` | `checkpoint` | Must have checkpoint to revert to (§4.4.1) |
 | `verify` | _(none)_ | `alternative_to` constrain; verify checks post-hoc, constrain checks pre-execution |
 
 `mutation_overridable: true` lets a step declare `mutation: false` for a
@@ -377,15 +387,260 @@ it elsewhere MUST be rejected when loaded.
 
 #### 4.4.1 Checkpoints and Rollback
 
-<!-- owner: S5; text: S5.md part 2.4 -->
+A **checkpoint** is a copy, kept by the host, of the state within its
+**scope**, from which that state can be restored. Only the host knows what it
+can copy and put back, so the host says what a checkpoint covers:
+
+- A `checkpoint` step's `scope` names what to capture, in the host's naming
+  (paths or patterns, keys, resource identifiers); `*` asks for everything
+  the host can restore. A checkpoint the executor has its host take (`CreateCheckpoint`,
+  §5.2.2) covers what the step it precedes may change, as far as the host can
+  tell, and otherwise everything the host can restore.
+- A host SHOULD report what a checkpoint holds: `mechanism` (how it was
+  taken: `vcs_snapshot`, `file_copy`, `store_snapshot`, `savepoint`, or an
+  `x-` name), `captured` (what it holds), `excluded` (what the scope named
+  that it does not hold, such as a secret the host will not copy or a system
+  it cannot copy), `digest` (of the captured content, as
+  `<algorithm>:<lowercase hex>`, e.g. `sha256:…`) and `expires_at` (when the
+  host may discard the content).
+- A host SHOULD keep a checkpoint's content at least until the run that
+  took it ends; a rollback to discarded content reports it `discarded`. Validity (§5.2.2) limits what a checkpoint authorises;
+  retention limits what it can restore. A checkpoint that was used up or is
+  no longer valid can be restored while its content is kept.
+- A checkpoint never captures the record of what happened (below), even
+  where the scope names it, as `*` does: the host leaves it out and reports
+  it in `excluded`.
+
+A **rollback** returns what a checkpoint captured to the state it had when
+the checkpoint was taken, whoever changed it since. A `rollback` step's
+`scope` may name part of what was captured; the rollback then concerns that
+part only. An item the rollback's `scope` names that the checkpoint did not
+capture (never in its scope, or `excluded` from it) is concerned too, and
+cannot be restored: it is in `unrestored` with reason `not_captured`. Its
+output reports the outcome:
+
+| Field | Meaning |
+|-------|---------|
+| `restored` | `true` only if every item the rollback concerns is back in its checkpointed state; otherwise `false` |
+| `unrestored` | The items the rollback concerns that are not back in their checkpointed state, each with a `reason`: `failed` (restoring it failed), `conflict` (it was changed since in a way the host will not overwrite), `discarded` (the checkpoint's content for it is gone), `not_captured` (the rollback's `scope` names it and the checkpoint did not capture it), or an `x-` reason. Empty or absent exactly when `restored` is `true` |
+| `not_covered` | Changes made since the checkpoint that it never covered, which no rollback to it restores, each with a `reason`: `transmitted` (data a `send` delivered, §4.4.2), `delegated` (a change a delegate made, §5.15.4), `outside_scope` (any other change outside what the checkpoint captured), or an `x-` reason. They do not make `restored` false |
+| `changes_reverted` | What the rollback undid: each `item`, with the `operation` it undid (`create`, `modify`, `delete` or `other`) |
+| `verification` | The `digest` of the restored content, computed as the checkpoint's was, and whether it `match`es the checkpoint's `digest` |
+
+`verification` is computed over all the checkpoint captured, whatever part
+the rollback restored. A host MUST NOT report `restored: true` for a
+rollback it did not complete, and SHOULD list in `unrestored` and
+`not_covered` what it knows of: a host that performed `send` steps of the
+run after the checkpoint lists each transmission (§4.4.2), and only the
+run's own. An item holds no secret (§6.7). An `x-` reason is the letters
+`x-`, then a lowercase letter or digit, then at most 61 lowercase letters,
+digits, `_`, `.` or `-`.
+
+**What a rollback does not restore.** The record of what happened is never
+within a rollback's reach: the run's stores, trace, action records and
+approval decisions, evidence and audit records (§6.4), the conversation or
+transcript of the agents involved, including what a model was told and what
+it answered, and the host's own records of what it did and may do: its
+audit log, its checkpoint and approval state (a used checkpoint stays used),
+its idempotency keys (§4.4.2) and its saved runs (§5.19.4). A rollback
+changes the world back; it does not change the account of it. A host whose
+checkpoint would otherwise capture one of these (a file under the directory
+the checkpoint copies) leaves it out of the checkpoint, and a rollback
+neither overwrites nor removes it. Data `persist` wrote (§4.5) is restored
+only when the checkpoint captured it.
+
+**At run time.** A `rollback` step completes whether or not `restored` is
+true: its output says what happened, and the workflow decides what follows,
+with an after-gate that stops or a failure mode whose `when` escalates
+(§12.5, *Checked Rollback*). A `rollback` step in a workflow that targets 1.2
+or later whose `restored` no `condition`, gate `when` or failure-mode `when`
+of the workflow reads is W624 (`UNCHECKED_ROLLBACK`): a rollback that did not
+restore would go unnoticed. A host that cannot perform a `rollback` step at
+all answers with an `Error` (§5.19.1). The executor's own rollbacks (a gate's
+or a failure mode's `rollback`, §5.6, §5.12) are `Rollback` actions: the host
+answers `RolledBack` only when everything the checkpoint captured is
+restored, and otherwise an `Error`, and the run ends F503. `RolledBack` may
+list `not_covered` (§5.19.1).
 
 #### 4.4.2 Transmissions
 
-<!-- owner: S5; text: S5.md part 2.5 -->
+`send` delivers data to a recipient outside the run, and once delivered it
+cannot be recalled. The checkpoint `send` requires (§4.3) is the restore
+point for the agent's own state, which the run goes on changing around the
+transmission: it records the intent and the local state before it, and is
+not an undo of it. A rollback to it lists each transmission made since in
+`not_covered`, reason `transmitted` (§4.4.1). What keeps a transmission safe
+is what happens before it: the policy check (`constrain`, §4.3), an approval
+that shows the destination and the payload (§5.14), the destination policy,
+and performing it at most once.
+
+**At most once per approval.** Every `InvokeCapability` action carries an
+`idempotency_key` (§5.19.1): `<run_id>:<n>`, where `<n>` is the `id` of the
+pass's first `InvokeCapability`. It is therefore the same for every attempt
+of one pass (its retries, §5.2, and the action a restored run issues again,
+§5.19.4), and different for every other pass of every step of the run,
+nested runs included. A `delegate` attempt that names the delegation it
+`replaces` (§5.13) asks for a new delegation, and its key is built from its
+own `id`. A host MUST NOT transmit twice for one key. Given an attempt whose
+key it has already transmitted under, it answers with the output of that
+transmission instead of transmitting again. Where it cannot tell whether an
+earlier attempt under the key transmitted, and the destination does not
+de-duplicate by the key, it does not transmit and answers an `Error` with
+reason `outcome_unknown` (R402). A host SHOULD pass the key to a destination
+whose protocol accepts one (an `Idempotency-Key` header, a message
+de-duplication id). One approval therefore authorises at most one
+transmission: the attempts of a pass share its decision and its key. A host
+SHOULD apply the same rule to every other capability whose effective
+`mutation` is true, except a delegation that names one it `replaces`.
+
+A key is unique only while `run_id` is. A host that keeps keys across runs
+or across its own restarts MUST NOT reuse a `run_id` (§5.19.2). The inputs
+of a pass do not change between its attempts, so a host MUST NOT answer an
+attempt with the output kept under its key when the attempt's capability or
+inputs differ from those the key was first used with: it does not act, and
+answers an `Error` with reason `key_conflict` (R402). Since a restored run
+issues its pending attempt again (§5.19.4), a host that saves runs keeps the
+keys it acted under at least as long as it keeps the runs.
+
+**Compensation.** A host that knows how a transmission's effect can be
+compensated (a message recalled, an order cancelled) MAY report it as
+`compensation` in the output, in the form of `world_state_schema.yaml`'s
+`TransitionRule.rollback`: a `strategy` and its `inverse_effects`. Nothing
+performs it automatically, a rollback included. A workflow that compensates
+does so in a step of its own, such as a `send` to the cancelling endpoint,
+with its own checkpoint and approval.
+
+**Destination policy.** A destination policy is a list of destination
+patterns. A pattern is a non-empty string of one of three forms, compared
+with a destination by code point, without case folding or Unicode
+normalisation:
+
+- with no `*`: it matches a destination equal to it;
+- `<prefix>*`, where the last character of `<prefix>` is `/`, `:`, `@`, `.`,
+  `?` or `#`, and where, if `<prefix>` contains `//`, a `/`, `?` or `#`
+  occurs after its first `//` (so that the authority it names is complete):
+  it matches a destination that starts with `<prefix>`;
+- `*<suffix>`, where `<suffix>` has at least two characters and starts with
+  `@` or `.`: it matches a destination that ends with `<suffix>` and whose
+  part before `<suffix>` is non-empty and consists only of ASCII letters,
+  digits, `.`, `-`, `_` and `+`.
+
+Any other pattern (an empty one, `*` alone, a `*` elsewhere or twice, a
+prefix that ends otherwise or stops inside an authority, such as
+`https://hooks.example.com:*` or `https://hooks.example.*`) is invalid, and
+a policy that holds one MUST be refused when it is loaded. A policy allows a
+destination when one of its patterns matches it; an empty policy allows
+none. A send is allowed when every policy in force allows its destination.
+The vectors in `tests/conformance/destinations/match.json` are normative.
+
+The suffix form names host or domain suffixes (`*.example.com`) and address
+domains (`*@example.com`), not URLs: `https://evil.net/?.example.com` and
+`a@evil.net,b@example.com` match neither. To allow URLs, use the prefix
+form with a complete authority (`https://hooks.example.com/*`).
+
+The policies in force for a run are those its host gives the executor when it
+starts the run (§5.19.2) and the `allowed_destinations` of each domain
+profile applied to the run (§5.21.3). The executor checks a `send` step,
+whenever any policy is in force, once its inputs are resolved, before it asks
+for approval or uses a checkpoint: a `destination` that is not a string, or
+that a policy in force does not allow, fails the step with F504 and reason
+`destination_not_allowed` (an executor refusal, not retried, §5.2). A safety
+layer applies the policies in force for it to every `send` call, before
+approval and the checkpoint, and refuses a call it cannot tell the
+destination of, a call of an unbound tool included (§5.18.10). A host
+whose own policy refuses a send answers an `Error` with reason
+`destination_not_allowed`. With no policy in force, the behaviour of 1.1
+is kept: the destination is the host's to check.
+
+A destination policy is checked where the data leaves the run. A host SHOULD
+also confine what a send can reach below the agent, with credentials scoped
+to the allowed origins (a token only those services accept, an egress
+allow-list), so that a send the check misses still fails.
+
+**The destination in the approval.** The approver of a `send` SHOULD see
+where the data goes. Without `shows`, the shown value is the step's inputs
+(§5.14), which hold the destination. A `send` step in a workflow that targets
+1.2 or later, whose `approval.shows` leaves out a destination given by
+reference, is W625 (`DESTINATION_NOT_SHOWN`): each reference in `destination`
+must be a `shows` reference, or have one whose root is the same and whose
+path is a prefix of its path (`${request}` shows `${request.url}`). A literal
+destination is part of the workflow the approver acts under and needs no
+`shows` entry.
 
 ### 4.5 Memory
 
-<!-- owner: S5; text: S5.md part 2.6 -->
+`persist` stores data under a key, and `recall` reads it back. A host that
+performs them follows these rules.
+
+**Scope.** Both take an optional `scope`, which says who can read an entry
+and how long it lasts:
+
+| Scope | Visible to | Lasts until |
+|-------|-----------|-------------|
+| `run` | The run the host started (one `run_id`, §5.19.2) and every run nested in it (§5.13), whichever of them stored it | That run ends; a run that ended `deferred` keeps it until it is resumed and ends, or is cancelled (§5.14.1, §5.19.5) |
+| `session` | Every run and agent the host groups into one session, such as a conversation or a thread | The session ends |
+| `user` | Every session the host runs on behalf of one principal (§5.15) | The host's retention ends it |
+| `project` | Every session the host serves for one project, such as a workspace or a repository | The host's retention ends it |
+| `global` | Everything the host serves | The host's retention ends it |
+
+A host MAY provide other scopes, named as `x-` reasons are (§4.4.1), and
+states what each means. A literal `scope` that is none of these is W626
+(`UNKNOWN_MEMORY_SCOPE`). Without `scope`, the host uses its default scope,
+which it states; `session` is RECOMMENDED. An entry is visible only within
+its scope: a `recall` in another session, for another principal or for
+another project MUST NOT find it. Keys are compared by code point, and one
+key in two scopes names two entries.
+
+A host that does not provide the scope asked for neither stores nor looks
+up: it answers an `Error` with reason `unsupported_scope` (R402). The output
+of `persist` and of `recall` carries `scope`, the scope used. When a step
+binds `scope` and it resolves to a value, the executor fails the step (R402,
+reason `unsupported_scope`) unless the output's `scope` equals that value: a
+host that does not know the input would use another scope without saying so.
+The check applies in a workflow that targets 1.2 or later; in an earlier
+one, `scope` is W616 and the executor passes it on, as an older consumer
+does (§11.5).
+
+**`stored: true`** asserts that the data is stored under the key in the
+scope: from the time the `persist` step completes, a `recall` of that key in
+that scope returns the data (`found: true`) until the entry ends. The data
+round-trips as I-JSON (RFC 7493): a recall returns a value equal to the one
+stored, object member order aside. When `key` is not bound, the host chooses
+one and returns it as `key`. A `persist` to a key that holds an entry
+replaces it. **`stored: false`** asserts that nothing changed: no entry was
+written or replaced. The step completes either way, and a workflow that
+depends on the write checks `stored` (§12.5). A host that refuses a write
+SHOULD answer an `Error` instead, so that retries and failure modes apply;
+when it refuses for size or capacity, the reason is `over_capacity` and the
+message names the limit. Data or a key that holds a secret the host
+recognises is refused, not stored (§6.7): the host answers an `Error` with
+reason `secret_in_data`, and its message does not repeat the secret.
+
+**Expiry.** `ttl` is a duration (§5.10.1) longer than zero. The entry ends
+`ttl` after its `stored_at`, which the output reports as `expires_at`; from
+then on a `recall` does not find it. A literal `ttl` outside the duration
+grammar, or of zero, is W614. A host given a `ttl` it cannot parse, or
+that would end the entry after 9999-12-31T23:59:59.999Z (the last instant
+a date-time states), or that cannot end entries, does not store: it
+answers an `Error` with reason `unsupported_ttl` (R402).
+Without `ttl`, an entry lasts as long as its scope.
+
+**`recall`.** `found` is `true` when a live entry has the key in the scope;
+`data` is then its data, and `stored_at` (and `expires_at`, when it has one)
+its times. Otherwise `found` is `false` and `data` is the step's `default`,
+or null without one. `stored_at` is the name both capabilities use for the
+time an entry was stored; `persist` also returns it as `timestamp`, which is
+deprecated (a reference to it is W603).
+
+**Ending entries.** This version defines no operation that deletes an entry.
+An entry ends when it expires, when its scope ends, or under the host's
+retention policy; once it has ended, a `recall` does not find it.
+
+**What a host states.** A host that performs `persist` and `recall` states,
+for each scope it provides, whether entries survive a restart of the host,
+its retention policy, and its limits on the size of a value and the number
+of entries. A host that states it implements this section passes the vectors
+in `tests/conformance/memory/store.json` for the scopes it provides.
 
 ---
 
@@ -1800,7 +2055,38 @@ that call's work, not the delegate it continued.
 
 #### 5.15.4 Checkpoints Across a Delegation
 
-<!-- owner: S5; text: S5.md part 2.7 -->
+A delegate is another party. What it changes is its own action, under its
+own safety rules, not a step of the delegating run.
+
+- **Authorisation.** A run's checkpoints authorise its own steps (§5.2.2),
+  those of the runs it invokes included (§5.13), and never what a delegate
+  does, except where a safety layer orders the delegate's calls in the
+  delegator's scope (§5.18.5; last item below). Before each change, a
+  delegate that changes anything MUST have a checkpoint valid in the scope
+  where that change is checked: §5.2.2 when it runs a workflow, §5.18.6 on a
+  tool-calling host. In a scope of its own, that is a checkpoint it takes;
+  in a shared scope, one taken in that scope that no other change has used.
+  A host that runs the delegate so attests it as `effective.checkpointed:
+  true`. A checkpoint that a `delegate` step itself needs (its effective
+  `requires_checkpoint`, as §5.15.2 raises it for a target that may change
+  state) is the delegator's restore point, taken before it hands the change
+  over.
+- **Restoration.** A rollback restores what its checkpoint captured
+  (§4.4.1), whoever changed it. It does not reach what a delegate changed
+  outside that, and it neither recalls a delegation nor stops a delegate. A
+  host that knows of such changes lists them in `not_covered`, reason
+  `delegated`. Where a delegate works on state the delegator's checkpoint
+  captured, such as a subagent in the same working tree, the rollback
+  restores that state, the delegate's changes to it included.
+- **All or nothing.** To keep a delegation from leaving changes no rollback
+  reaches, bind `read_only: true` (§5.15), so that the delegate changes
+  nothing, or undo its changes explicitly: a later step that asks the
+  delegate to reverse them (a `delegate` step that `continues` the
+  delegation, §5.15.3), or one that restores the system the delegate changed.
+- **Tool-calling hosts.** A safety layer that orders a delegate's calls in
+  the delegator's scope (§5.18.5) applies that scope's rules to both: a
+  checkpoint taken in the scope authorises one change, whichever agent makes
+  it, and the next change, by either agent, needs another checkpoint.
 
 ### 5.16 Quorum
 
@@ -2388,7 +2674,7 @@ model) MAY add a refusal; it never satisfies or replaces a required check.
 | `persist` | Its data holds no secret the layer recognises (§6.7) | F504 |
 | `audit` | It appends records and changes no other state (§4.4) | — |
 | `audit` | The record it appends holds no secret the layer recognises (§6.7) | F504 |
-| `send` | Its destination is one every destination policy in force allows (§4.4.2), checked before approval and the checkpoint; a layer that cannot tell a call's destination under a policy refuses it | F504 |
+| `send` | Its destination is one every destination policy in force allows (§4.4.2), checked before approval and the checkpoint; under a policy, a layer refuses a call whose destination it cannot tell, and a call of an unbound tool (§5.18.2), which may send anywhere | F504 |
 | `transform` | Where its output is recorded or stored, a secret it read is not carried into the record: it is redacted (§6.7) | — |
 | every capability | Its output satisfies the output contract (§5.18.9) | R402 |
 | every capability | Records and evidence the layer writes carry no secret: it redacts them (§6.7) | — |
@@ -2429,9 +2715,9 @@ terminal action (`Completed` or `Failed`). Every action carries:
 
 | Action | The host | Responses |
 |--------|----------|-----------|
-| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none; the host selects an implementation for it as §5.2.4 says), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§5.20, §6.5); absent, it attests nothing), `Error` |
+| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none; the host selects an implementation for it as §5.2.4 says), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), `idempotency_key` names the pass (§4.4.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§5.20, §6.5); absent, it attests nothing), `Error` |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `Checkpoint` (`checkpoint_id`), `Error` (the step fails F501) |
-| `Rollback` | restores `checkpoint_id` | `RolledBack`, `Error` (the run ends F503) |
+| `Rollback` | restores `checkpoint_id` | `RolledBack`, when everything the checkpoint captured is restored, optionally with `not_covered` (§4.4.1); `Error` (the run ends F503) |
 | `RequestApproval` | asks `approver`, in `mode`, about `shown`, by `expires_at` when it is not null (§5.14) | `Decision` (`decision_id`, `decision`, `approvers`, `digest`) |
 | `RecheckSource` | reads `source` again, to compare by `compare` (§5.14) | `Current` (`value`), `Error` (the step fails F502) |
 | `AwaitEvent` | waits for an event that matches `event_type`, `source_kind`, `correlate` and the sender checks (§5.13, §5.15, §5.17), by `deadline`, and watches `liveness` | `Event` (`event`, optional `principal` and `identity`), `LivenessLost` (R406), `Error` |
@@ -2491,6 +2777,13 @@ that has ended takes no response. A response member this protocol does not
 define is ignored, as in 1.1: a host may send members a later version
 defines. Likewise, a host MUST ignore an action member it does not know:
 later versions may add members to actions.
+
+A `RolledBack` whose `not_covered` is not a list of objects, each with a
+string `item` and a `reason` that is `transmitted`, `delegated`,
+`outside_scope` or an `x-` reason (§4.4.1), is refused as malformed: an item
+the checkpoint covered and the host did not restore makes the answer an
+`Error`. An item's other members, and a `detail` that is not a string, are
+ignored.
 
 An `Error` carries a `code` and a `message`, and may carry a `reason`
 (§5.19.7). Neither holds a secret (§6.7): both reach the run's diagnostics,
@@ -2595,7 +2888,9 @@ later. Such a host:
    idempotent, the host SHOULD record the key with the effect, so a repeat
    can be found. (A delivery key names one action; the idempotency key of
    §4.4.2 names a pass, every attempt of a step, and keeps a retry from
-   repeating an effect.)
+   repeating an effect.) A pending `InvokeCapability` restored from a state
+   that predates idempotency keys is given the key `<run_id>:<id>`, its own
+   id, which the later attempts of its pass reuse (§4.4.2).
 4. **Interrupted turns.** When the host's own execution stops between
    performing an action and submitting the response (its process ends, a
    client stops it), the run is unchanged: on its next turn the host
@@ -2708,8 +3003,8 @@ action carries it as `reason` when the run ends with that failure, and the
 step's action record as `reason_code` (§6.4). The executor raises
 `not_recorded` itself for an `audit` step (§6.4),
 `destination_not_allowed` with F504 for a `send` step (§4.4.2),
-`unsupported_scope` with R402 for a `persist` or `recall` step whose output
-does not echo its scope (§4.5), and `below_minimum_confidence` and
+`unsupported_scope` with R402 for a `persist` or `recall` step of a 1.2
+workflow whose output does not echo its scope (§4.5), and `below_minimum_confidence` and
 `invalid_confidence` with F504 for an output an applied profile's minimum
 confidence covers (§5.21.3).
 
@@ -3149,6 +3444,10 @@ cancelled; and, in its `approval`, the `decision_id` of the decision. A
 record of a step that an applied domain profile requires a person for
 carries `person_required: true` (§5.21.3); `always_ask: true` says only
 that the action used an item from an always-ask trust class (§5.17).
+The record of a step's pass carries the pass's `idempotency_key` (§4.4.2)
+once the step has called its capability. The record of a `Rollback` whose
+`RolledBack` listed `not_covered` carries it as `details.not_covered`
+(§4.4.1).
 
 **The `audit` capability.** An `audit` step records its `event`. The
 implementation performing the step writes an action record of its own:
@@ -3844,6 +4143,15 @@ and a safety layer that applies grounding policies, MUST give the status and
 code each vector expects. The runtime fixtures whose names start with
 `grounding_` script the check inside runs.
 
+The destination vectors (`tests/conformance/destinations/match.json`) are
+normative for every implementation of a destination policy (§4.4.2): each
+pattern is valid or invalid as the file says, and each destination is
+allowed or not by the listed policies. The memory vectors
+(`tests/conformance/memory/store.json`) script a memory store through
+`persist` and `recall` operations at given times and in given scopes, with
+the outputs or error reasons it must give; a host that states it implements
+§4.5 passes those whose scopes it provides.
+
 Trust vectors (`tests/conformance/trust/`), profile vectors
 (`tests/conformance/profiles/`) and entity id vectors
 (`tests/conformance/entities/ids.json`) are normative for §8, §5.21 and §7.1.
@@ -4187,11 +4495,11 @@ This section provides guidance for common decisions when applying the standard.
 Use this decision tree:
 
 ```
-Does the step modify external state?
-├── No → Checkpoint not required
-└── Yes → Is the modification reversible by other means?
-    ├── Yes (idempotent, can retry) → Checkpoint recommended but optional
-    └── No → Checkpoint REQUIRED
+Does the step change anything outside the run?
+├── No → No checkpoint
+└── Yes → Can a saved copy of what it changes be put back?
+    ├── Yes (a file, a record, a configuration) → A checkpoint is REQUIRED
+    └── No (a message, a payment, a published event) → Still REQUIRED; it cannot undo it
 ```
 
 **Examples:**
@@ -4199,9 +4507,9 @@ Does the step modify external state?
 | Operation | Checkpoint Required? | Reason |
 |-----------|---------------------|--------|
 | Read file contents | No | No mutation |
-| Write to database | Yes | State change, may not be reversible |
+| Write to database | Yes | The checkpoint restores the rows it captured |
 | Send HTTP GET | No | Read-only |
-| Send HTTP POST | Yes | May cause side effects |
+| HTTP POST that delivers a message (`send`) | Yes, with approval | Restores local state, not the delivery; prevent a wrong send instead (§4.4.2) |
 | Rename file | Yes | May overwrite existing file |
 | Append to log | Optional | Append-only, can ignore duplicate |
 
@@ -4342,6 +4650,63 @@ back and re-plans, and `plan_out` reads the evidence the loop injects.
           failure_evidence: ${verify_out.violations}
         max_loops: 3
 ```
+
+**Pattern: Guarded Send**
+
+A send whose destination comes from the request (declaring `approval@1`).
+The host also enforces the list as a destination policy (§4.4.2), which fails
+the step with F504 before anyone is asked; `constrain` records the check in
+the run, and `shows` puts the destination in front of the approver.
+
+```yaml
+- capability: constrain
+  purpose: Check the destination against the allowed destinations.
+  input_bindings:
+    target: ${request.destination}
+    constraints:
+      - allowed_destinations: ["https://hooks.example.com/*", "*@example.com"]
+    action_on_violation: block
+  store_as: policy_out
+- capability: checkpoint
+  purpose: Save a restore point for the agent's own state.
+  input_bindings:
+    scope: report_state
+  store_as: checkpoint_out
+- capability: send
+  purpose: Deliver the report.
+  input_bindings:
+    destination: ${request.destination}
+    payload: "${report_out.content: object}"
+  gates:
+    - when: ${policy_out.compliant} == false
+      action: stop
+      message: The destination is not allowed.
+  approval:
+    approver: {kind: human, role: ops}
+    shows: ["${request.destination}", "${report_out.content}"]
+  store_as: send_out
+```
+
+**Pattern: Checked Rollback**
+
+A rollback reports whether it restored everything (§4.4.1); the step
+completes either way, so the workflow checks.
+
+```yaml
+- capability: rollback
+  purpose: Restore the configuration.
+  input_bindings:
+    checkpoint_id: ${checkpoint_out.checkpoint_id}
+  gates:
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.
+  store_as: rollback_out
+```
+
+To call a person instead of stopping, use a failure mode whose `when` is the
+same expression and whose action escalates to a handler (§5.12).
 
 ---
 
@@ -4669,7 +5034,37 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   `Anchor` and one `Uncertainty`; events MAY record `redactions`
 
 ### D.6 Checkpoint, rollback, send and memory (RFC-0009)
-<!-- owner: S5; entries: S5.md part 2.15 -->
+
+**Clarifications of 1.1 semantics** (apply to 1.0, 1.1 and 1.2 workflows):
+
+| Area | 1.1.0 text | 1.2.0 |
+|------|------------|-------|
+| Checkpoint | "A saved state that enables rollback" | A host-kept copy of the state within its scope; what it captured; retention apart from validity (§2, §4.4.1) |
+| `rollback` `restored` | Not stated | `true` only when everything the rollback concerns is restored, an item its `scope` names that the checkpoint never captured included; the step completes either way; the executor's own `Rollback` is answered `RolledBack` only on a full restore, else F503 (§4.4.1) |
+| What a rollback restores | Not stated | Never the record of what happened: stores, trace, records, transcript, the host's audit log, checkpoint state, idempotency keys and saved runs (§4.4.1) |
+| `send` and its checkpoint | Not stated | The checkpoint restores the agent's own state, not the transmission (§3.3, §4.4.2, §12.1) |
+| Checkpoints across a delegation | Not stated | A run's checkpoints never authorise a delegate's changes, except in a safety layer's shared scope, where one checkpoint authorises one change by either agent; a rollback reaches only what its checkpoint captured (§5.15.4) |
+| `persist` `stored: false` | Not stated | Nothing was written; the step completes (§4.5) |
+
+**New in 1.2.0:**
+- Checkpoint and rollback outputs (§4.4.1): `checkpoint` `mechanism`,
+  `captured`, `excluded`, `digest`, `expires_at`; `rollback` `unrestored`,
+  `not_covered`, `changes_reverted`, `verification`; `RolledBack`
+  `not_covered`
+- Transmissions (§4.4.2): `idempotency_key` on every `InvokeCapability` and
+  at most one transmission per key, never a replay under a reused key;
+  `send` output `compensation`; destination policies, their normative
+  vectors, the executor's start option and F504
+- Memory (§4.5): `persist` and `recall` `scope` (input and output), the `ttl`
+  grammar, `stored_at` and `expires_at`, host guarantees, memory vectors
+- `delegate` `effective.checkpointed` (§5.15.4)
+- Codes W624, W625, W626; W614 covers a `persist` `ttl`, W603 a reference to
+  `persist`'s `timestamp`
+- Error reasons `outcome_unknown`, `key_conflict`, `destination_not_allowed`,
+  `unsupported_scope`, `unsupported_ttl`, `over_capacity`, `secret_in_data`
+  (§5.19.7); `unrestored` reason `not_captured` (§4.4.1)
+- `world_state_schema.yaml` 1.2.0: `ActionRecord.idempotency_key`
+- Domain profiles: `allowed_destinations` (§5.21.3)
 
 ### D.7 Profiles, trust, versioning and schema dialect (RFC-0010)
 

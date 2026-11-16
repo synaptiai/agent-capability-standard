@@ -1,0 +1,801 @@
+{
+  "description": "Memory store vectors (Agent Capability Standard 1.2.0, section 4.5). Normative for a host that states it implements section 4.5, for the cases whose scopes it provides (every scope a case lists). Each case runs on a fresh store with the case's config (max_value_bytes: the largest value, as the UTF-8 length of its canonical JSON). Each op happens at time `at` (milliseconds since the Unix epoch) in a context: `context` merged over the case's default {run: r1, frame: [main], session: s1, user: u1, project: p1}, where `run` is the action's run_id and `frame` its frame (given so that a host that keys the run scope by frame fails run_scope_nested). An op is a `persist` or a `recall` (the capability's inputs) with `expect` (the output, matched by the subset rule: every member it names must match, objects recursively, except `data`, which must equal; `stored_at` and `expires_at` compare as instants) or `error` (the reason of the Error the host must answer instead), or an `end` of a scope instance. In inputs and expect, \"{{key:N}}\" is the key op N returned, \"{{default}}\" the runner's stated default scope, and \"{{unprovided}}\" a scope the runner does not provide (x-unprovided). `why` is informative.",
+  "standard": "1.2.0",
+  "section": "4.5",
+  "status": "normative",
+  "context": {
+    "run": "r1",
+    "frame": [
+      "main"
+    ],
+    "session": "s1",
+    "user": "u1",
+    "project": "p1"
+  },
+  "cases": [
+    {
+      "name": "read_after_write",
+      "scopes": [
+        "session"
+      ],
+      "why": "stored: true means a later recall of the key in the scope returns the data; both outputs echo the scope",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": {
+              "a": [
+                1,
+                "x",
+                null,
+                true,
+                0.5
+              ]
+            },
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true,
+            "key": "k",
+            "scope": "session",
+            "stored_at": "1970-01-01T00:00:00.000Z"
+          }
+        },
+        {
+          "at": 5,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": true,
+            "data": {
+              "a": [
+                1,
+                "x",
+                null,
+                true,
+                0.5
+              ]
+            },
+            "scope": "session",
+            "stored_at": "1970-01-01T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "replace",
+      "scopes": [
+        "session"
+      ],
+      "why": "a persist to a key that holds an entry replaces it",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true
+          }
+        },
+        {
+          "at": 1,
+          "persist": {
+            "key": "k",
+            "data": 2,
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true,
+            "stored_at": "1970-01-01T00:00:00.001Z"
+          }
+        },
+        {
+          "at": 2,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": true,
+            "data": 2,
+            "stored_at": "1970-01-01T00:00:00.001Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "missing_default",
+      "scopes": [
+        "session"
+      ],
+      "why": "no live entry: found false and data the default",
+      "ops": [
+        {
+          "at": 0,
+          "recall": {
+            "key": "none",
+            "default": {
+              "d": 1
+            },
+            "scope": "session"
+          },
+          "expect": {
+            "found": false,
+            "data": {
+              "d": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "missing_null",
+      "scopes": [
+        "session"
+      ],
+      "why": "no live entry and no default: data is null",
+      "ops": [
+        {
+          "at": 0,
+          "recall": {
+            "key": "none",
+            "scope": "session"
+          },
+          "expect": {
+            "found": false,
+            "data": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "null_data",
+      "scopes": [
+        "session"
+      ],
+      "why": "null is a value: it is stored and found",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": null,
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true
+          }
+        },
+        {
+          "at": 1,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": true,
+            "data": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "session_isolation",
+      "scopes": [
+        "session"
+      ],
+      "why": "an entry is visible only within its scope: another session does not find it",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true
+          }
+        },
+        {
+          "at": 1,
+          "context": {
+            "session": "s2"
+          },
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": false,
+            "data": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "user_isolation",
+      "scopes": [
+        "user"
+      ],
+      "why": "another principal does not find a user entry",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "user"
+          },
+          "expect": {
+            "stored": true,
+            "scope": "user"
+          }
+        },
+        {
+          "at": 1,
+          "context": {
+            "session": "s2"
+          },
+          "recall": {
+            "key": "k",
+            "scope": "user"
+          },
+          "expect": {
+            "found": true,
+            "data": 1
+          }
+        },
+        {
+          "at": 2,
+          "context": {
+            "user": "u2"
+          },
+          "recall": {
+            "key": "k",
+            "scope": "user"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "project_isolation",
+      "scopes": [
+        "project"
+      ],
+      "why": "another project does not find a project entry",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "project"
+          },
+          "expect": {
+            "stored": true,
+            "scope": "project"
+          }
+        },
+        {
+          "at": 1,
+          "context": {
+            "project": "p2"
+          },
+          "recall": {
+            "key": "k",
+            "scope": "project"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "scopes_separate",
+      "scopes": [
+        "session",
+        "global"
+      ],
+      "why": "one key in two scopes names two entries",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true
+          }
+        },
+        {
+          "at": 1,
+          "persist": {
+            "key": "k",
+            "data": 2,
+            "scope": "global"
+          },
+          "expect": {
+            "stored": true,
+            "scope": "global"
+          }
+        },
+        {
+          "at": 2,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": true,
+            "data": 1
+          }
+        },
+        {
+          "at": 3,
+          "recall": {
+            "key": "k",
+            "scope": "global"
+          },
+          "expect": {
+            "found": true,
+            "data": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "ttl_expiry",
+      "scopes": [
+        "session"
+      ],
+      "why": "the entry ends ttl after stored_at: found until then, not from then on",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session",
+            "ttl": "1s"
+          },
+          "expect": {
+            "stored": true,
+            "expires_at": "1970-01-01T00:00:01.000Z"
+          }
+        },
+        {
+          "at": 999,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": true,
+            "expires_at": "1970-01-01T00:00:01.000Z"
+          }
+        },
+        {
+          "at": 1000,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": false,
+            "data": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "ttl_iso",
+      "scopes": [
+        "session"
+      ],
+      "why": "the ISO 8601 form of the section 5.10.1 grammar",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session",
+            "ttl": "PT0.5S"
+          },
+          "expect": {
+            "stored": true,
+            "expires_at": "1970-01-01T00:00:00.500Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ttl_invalid",
+      "scopes": [
+        "session"
+      ],
+      "why": "a ttl outside the grammar is refused, and nothing is written",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session",
+            "ttl": "five fortnights"
+          },
+          "error": "unsupported_ttl"
+        },
+        {
+          "at": 1,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "ttl_zero",
+      "scopes": [
+        "session"
+      ],
+      "why": "a ttl is longer than zero",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session",
+            "ttl": "0s"
+          },
+          "error": "unsupported_ttl"
+        }
+      ]
+    },
+    {
+      "name": "ttl_unrepresentable",
+      "scopes": [
+        "session"
+      ],
+      "why": "expires_at is a date-time, whose last instant is 9999-12-31T23:59:59.999Z: a ttl that ends an entry later is refused, and nothing is stored (a refused write changes nothing); one that ends it at that instant is stored",
+      "ops": [
+        {
+          "at": 1,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "session",
+            "ttl": "P100000000D"
+          },
+          "error": "unsupported_ttl"
+        },
+        {
+          "at": 253402214399999,
+          "persist": {
+            "key": "last",
+            "data": 3,
+            "scope": "session",
+            "ttl": "P1D"
+          },
+          "expect": {
+            "stored": true,
+            "expires_at": "9999-12-31T23:59:59.999Z"
+          }
+        },
+        {
+          "at": 253402214400000,
+          "persist": {
+            "key": "k",
+            "data": 2,
+            "scope": "session",
+            "ttl": "P1D"
+          },
+          "error": "unsupported_ttl"
+        },
+        {
+          "at": 253402214400000,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "ijson_round_trip",
+      "scopes": [
+        "session"
+      ],
+      "why": "the data round-trips as I-JSON: strings (non-ASCII and control characters), an integer of 2^53, a small float, empty containers",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": {
+              "s": "\u00e9\ud83d\ude00\u0000",
+              "n": 9007199254740992,
+              "f": 1e-07,
+              "o": {},
+              "l": []
+            },
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true
+          }
+        },
+        {
+          "at": 1,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": true,
+            "data": {
+              "s": "\u00e9\ud83d\ude00\u0000",
+              "n": 9007199254740992,
+              "f": 1e-07,
+              "o": {},
+              "l": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "generated_key",
+      "scopes": [
+        "session"
+      ],
+      "why": "without key the host chooses one and returns it",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "data": 1,
+            "scope": "session"
+          },
+          "expect": {
+            "stored": true
+          }
+        },
+        {
+          "at": 1,
+          "recall": {
+            "key": "{{key:0}}",
+            "scope": "session"
+          },
+          "expect": {
+            "found": true,
+            "data": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "default_scope",
+      "scopes": [
+        "{{default}}"
+      ],
+      "why": "without scope the host uses its stated default and says which",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1
+          },
+          "expect": {
+            "stored": true,
+            "scope": "{{default}}"
+          }
+        },
+        {
+          "at": 1,
+          "recall": {
+            "key": "k"
+          },
+          "expect": {
+            "found": true,
+            "data": 1,
+            "scope": "{{default}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "unprovided_scope",
+      "scopes": [],
+      "why": "a host that does not provide the scope asked for neither stores nor looks up",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "{{unprovided}}"
+          },
+          "error": "unsupported_scope"
+        },
+        {
+          "at": 1,
+          "recall": {
+            "key": "k",
+            "scope": "{{unprovided}}"
+          },
+          "error": "unsupported_scope"
+        }
+      ]
+    },
+    {
+      "name": "run_scope_ends",
+      "scopes": [
+        "run"
+      ],
+      "why": "a run entry lasts until the run ends",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "run"
+          },
+          "expect": {
+            "stored": true,
+            "scope": "run"
+          }
+        },
+        {
+          "at": 1,
+          "end": {
+            "scope": "run",
+            "instance": "r1"
+          }
+        },
+        {
+          "at": 2,
+          "recall": {
+            "key": "k",
+            "scope": "run"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "run_scope_nested",
+      "scopes": [
+        "run"
+      ],
+      "why": "run is the run the host started (one run_id) and every run nested in it, not a frame: a nested run's entry is visible to its parent and to a later invocation of the same nested workflow, and not to another run",
+      "ops": [
+        {
+          "at": 0,
+          "context": {
+            "run": "r1",
+            "frame": [
+              "main",
+              "child"
+            ]
+          },
+          "persist": {
+            "key": "k",
+            "data": 1,
+            "scope": "run"
+          },
+          "expect": {
+            "stored": true
+          }
+        },
+        {
+          "at": 1,
+          "context": {
+            "run": "r1",
+            "frame": [
+              "main"
+            ]
+          },
+          "recall": {
+            "key": "k",
+            "scope": "run"
+          },
+          "expect": {
+            "found": true,
+            "data": 1
+          }
+        },
+        {
+          "at": 2,
+          "context": {
+            "run": "r1",
+            "frame": [
+              "main",
+              "child"
+            ]
+          },
+          "recall": {
+            "key": "k",
+            "scope": "run"
+          },
+          "expect": {
+            "found": true,
+            "data": 1
+          }
+        },
+        {
+          "at": 3,
+          "context": {
+            "run": "r2",
+            "frame": [
+              "main"
+            ]
+          },
+          "recall": {
+            "key": "k",
+            "scope": "run"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "over_capacity",
+      "scopes": [
+        "session"
+      ],
+      "config": {
+        "max_value_bytes": 16
+      },
+      "why": "a value over the host's limit is refused, naming the limit",
+      "ops": [
+        {
+          "at": 0,
+          "persist": {
+            "key": "k",
+            "data": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "scope": "session"
+          },
+          "error": "over_capacity"
+        },
+        {
+          "at": 1,
+          "recall": {
+            "key": "k",
+            "scope": "session"
+          },
+          "expect": {
+            "found": false
+          }
+        }
+      ]
+    }
+  ]
+}

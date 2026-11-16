@@ -1,0 +1,77 @@
+{
+  "description": "A recall step that binds scope run gets an output with no scope: the R402 is retried, and the retry's output echoes the scope (\u00a74.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "recall",
+          "purpose": "recall step",
+          "store_as": "m",
+          "input_bindings": {
+            "key": "k",
+            "scope": "run"
+          },
+          "retry": {
+            "max": 1,
+            "backoff": "none"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "recall",
+        "attempt": 1,
+        "inputs": {
+          "scope": "run"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "found": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "recall",
+        "attempt": 2,
+        "inputs": {
+          "scope": "run"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "found": true,
+          "scope": "run",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "retry",
+    "step_completed"
+  ]
+}

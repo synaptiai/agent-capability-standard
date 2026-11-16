@@ -479,7 +479,7 @@ except CapabilityOutputError as e:
 
 ## Conformance (class SL)
 
-The adapter meets the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)) except the §5.18.10 checks its conformance statement lists as not applied, and claims the class once those are applied. Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it lists the checks of §5.18.10 it does not apply yet: the destination policy of `send`, and the output contract of a tool's result, since Claude Code's tools and MCP tools return results in their own forms, which the adapter passes on unchecked. It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False` and `approval="off"` are outside the class.
+The adapter meets the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)) except the §5.18.10 check its conformance statement lists as not applied, and claims the class once it is applied. Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it lists the check of §5.18.10 it does not apply yet: the output contract of a tool's result, since Claude Code's tools and MCP tools return results in their own forms, which the adapter passes on unchecked. It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False` and `approval="off"` are outside the class.
 
 ## Structured Output
 
@@ -824,10 +824,10 @@ is not a number from 0 to 1), after the grounding check: both apply to the
 outputs the layer sees, those of the tools `create_grounded_mcp_server`
 serves, and a warning is logged once for any other tool they would cover
 (Claude Code's own tools return no capability output), whose calls the
-conformance statement names among its host gaps (§5.21.4). The adapter checks
-no send's destination yet, so a profile that sets `allowed_destinations`
-raises `ProfileError` when the adapter is built, rather than be applied
-without the rule (§5.21.4); no shipped profile sets it. A profile that
+conformance statement names among its host gaps (§5.21.4). A profile's
+`allowed_destinations` is a destination policy in force beside
+`GroundedAgentConfig.allowed_destinations` (below); no shipped profile sets
+it. A profile that
 requires a person for every call:
 
 ```python
@@ -1014,6 +1014,23 @@ class GroundedClient:
 ```
 
 ### GroundedAgentAdapter
+
+**Checkpoint content.** With `GroundedAgentConfig(snapshots=FileSnapshotStore(".", ".snapshots"))`,
+a checkpoint also keeps a copy of the files its scope names, and
+`adapter.checkpoint_tracker.restore_checkpoint(checkpoint_id)` puts them
+back, used or not (STANDARD 1.2.0 §4.4.1); it never captures `.claude/`,
+`.audit/`, the tracker's state, the audit log or the evidence store's
+file. A subagent's calls share the adapter's scope, so one checkpoint
+authorises one change by either (§5.15.4).
+
+**Destination policies.** `GroundedAgentConfig(allowed_destinations=[...])`
+and the profiles' `allowed_destinations` are destination policies (§4.4.2):
+a `send` call whose destination, read at its binding's `destination`
+pointer, one does not allow, or whose binding names none, is refused with
+F504 before approval. So is a call of an unbound tool, which the adapter
+cannot tell sends or not (§5.18.2), and a call of a composite whose
+`invokes` reach a binding that performs `send`: the adapter does not see a
+tool's nested calls, so it cannot tell where they go (§5.18.4).
 
 ```python
 class GroundedAgentAdapter:

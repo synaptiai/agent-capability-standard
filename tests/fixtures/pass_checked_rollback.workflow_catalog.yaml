@@ -1,0 +1,37 @@
+# Standard version: 1.2.0
+# A rollback step whose restored an after-gate reads (STANDARD v1.2 §4.4.1,
+# §12.5 Checked Rollback): no W624.
+restore_config:
+  goal: Change a configuration and restore it when the check fails.
+  risk: high
+  spec_version: "1.2"
+  steps:
+  - capability: checkpoint
+    purpose: Save the configuration before the change.
+    store_as: checkpoint_out
+    input_bindings:
+      scope: config/app.yaml
+  - capability: constrain
+    purpose: Check the change against the policy.
+    store_as: policy_out
+    input_bindings:
+      target: config/app.yaml
+      constraints:
+      - no secrets in the file
+  - capability: mutate
+    purpose: Apply the change.
+    store_as: change_out
+    input_bindings:
+      target: config/app.yaml
+      operation:
+        set: {replicas: 3}
+  - capability: rollback
+    purpose: Restore the configuration.
+    store_as: rollback_out
+    input_bindings:
+      checkpoint_id: ${checkpoint_out.checkpoint_id}
+    gates:
+    - when: ${rollback_out.restored} == false
+      phase: after
+      action: stop
+      message: The rollback did not restore everything; see unrestored.

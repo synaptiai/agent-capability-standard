@@ -173,10 +173,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Conformance statement schema: `approval.expires` is a duration or null;
   the new `not_applied` lists the §5.18.10 checks a layer does not apply,
   and a layer that lists any does not conform to class SL until it applies
-  them. The Python SDK adapter and the Standard Agents binding list theirs
-  (secrets and redaction, §6.7; the destination policy, §4.4.2; for the
-  adapter, the output contract of a tool's result): they meet class SL
-  except those checks, and claim it once they apply them.
+  them. The Python SDK adapter lists the output contract of a tool's result
+  and claims class SL once it applies it; the Standard Agents binding lists
+  none and claims class SL.
 - **Breaking (plugin):** two composed skills take their directory names
   (Agent Skills requires `name` to equal the directory): the slash commands
   `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
@@ -194,11 +193,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `tools/validate_profiles.py` checks profiles with the core and fails on
   any diagnostic; its old helper functions are gone. A profile that sets a
   rule an implementation does not put in force is refused too, rather than
-  applied without it (§5.21.4): until the destination check (§4.4.2) reads
-  it, the executor (`_core.Run.start`, `WorkflowRunner`, WebAssembly
-  `run.start`, and a restore), `GroundedAgentAdapter` (`ProfileError`) and
-  the Standard Agents binding refuse a profile with `allowed_destinations`
-  (no shipped profile sets it), and the adapter, with `strict_mode=False`
+  applied without it (§5.21.4): the adapter, with `strict_mode=False`
   (which only logs a missing checkpoint), a `checkpoint_policy` that raises
   `requires_checkpoint`. A profile's grounding policy (`require_grounding`,
   every shipped profile's) and its `minimum_confidence` are applied: an
@@ -403,6 +398,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `catalogs` and `agents` (they were refused as not implemented).
 - Standard Agents binding: `LintDiagnostic.code` gains `V107` and
   `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
+- Checkpoints, rollbacks, sends and memory (Standard 1.2.0 §4.4.1, §4.4.2,
+  §4.5; RFC-0009):
+  - Every `InvokeCapability` action carries `idempotency_key`
+    (`<run_id>:<n>`, the same for every attempt of one pass), and the
+    pass's action record carries it too. A host that keeps no keys can
+    ignore it; a pending action restored from a state saved before it gets
+    `<run_id>:<id>`.
+  - A host or an applied profile that gives destination policies puts them
+    in force: a `send` step whose destination one does not allow fails F504
+    (`destination_not_allowed`) before approval or a checkpoint. A domain
+    profile with `allowed_destinations` is no longer refused by the
+    executor, `WorkflowRunner`, `GroundedAgentAdapter` or the Standard
+    Agents binding: it is applied. `_core.Run.start(destinations=...)`,
+    `WorkflowRunner.start/run(destinations=...)`,
+    `GroundedAgentConfig(allowed_destinations=...)` and the binding's
+    `configureLayer({destinations})` give the host's own; an invalid
+    pattern is refused, and a `WorkflowRunner` policy given as a string
+    rather than a list of patterns raises `TypeError`. While a policy is in
+    force, `GroundedAgentAdapter` also refuses (F504) a call of an unbound
+    tool, which it cannot tell sends or not, and of a composite whose
+    `invokes` reach a binding that performs `send`: it does not see nested
+    calls, so it cannot tell where they go. In the Standard Agents binding,
+    the `allowed_destinations` of profiles given to a composite reach the
+    sends its code invokes, at any depth.
+  - A `persist` or `recall` step of a workflow that targets 1.2 and binds
+    `scope` fails R402 (`unsupported_scope`) unless the output echoes the
+    scope. Steps that do not bind it, and those of a 1.0 or 1.1 workflow
+    (where `scope` is W616 and passed on), are unchanged.
+  - `RolledBack` may carry `not_covered`, which the executor validates (a
+    malformed one, `null` included, is refused), traces and records. An
+    item's members other than `item`, `reason` and a string `detail` are
+    ignored, not refused.
+  - Validator: W624 (a 1.2 `rollback` step whose `restored` nothing
+    checks), W625 (a 1.2 `send` approval whose `shows` hides its
+    destination), W626 (an unknown literal memory scope), W614 for a
+    literal `persist` `ttl` outside the duration grammar or zero, W603 for
+    a reference to `persist`'s deprecated `timestamp` (read `stored_at`),
+    and W616 for a 1.0 or 1.1 workflow that binds the memory `scope`.
+  - Python SDK: `WorkflowRunner.run/advance/drive(save=...)` refuses a host
+    whose `IdempotencyLog` is in memory (give it a path); a rollback by
+    `Host` lists a send whose outcome is unknown as transmitted
+    (`detail: "outcome unknown"`); with a
+    `MemoryStore`, a run's `run` scope ends with the run, in the host's
+    store and in `WorkflowRunner(memory=...)`'s (so `cancel` without a host
+    ends it too). `MemoryStore` stores and returns copies of values, and
+    refuses (`unsupported_ttl`, nothing stored) a `ttl` that would end an
+    entry after 9999-12-31T23:59:59.999Z, as the binding's `memoryTools`
+    do; `Host` gives a `persist` with no `key` one derived from the pass's
+    `idempotency_key`. `FileSnapshotStore` reads a scope item that names a
+    directory (`src`, `src/`, `./src`, an absolute path under the root) as
+    everything under it, lists an item outside the root in `excluded`,
+    never captures or restores `.audit/`, reports a rollback pattern that
+    names nothing captured as `not_captured` unless the checkpoint's scope
+    covers it, and computes `verification` over everything the checkpoint
+    captured; `GroundedAgentAdapter` and `WorkflowRunner` keep a file
+    evidence store out of every checkpoint. `Host.__init__`
+    takes keyword-only `memory`, `idempotency`, `session_id`, `user`,
+    `project` and `protected_paths`; a subclass that calls
+    `super().__init__(tracker)` is unaffected.
+  - Plugin: the `checkpoint` skill takes a git checkpoint with a plain
+    `git stash create` (and `HEAD` on a clean tree) instead of `git stash
+    push`, which the safety layers count as a gated `mutate`; the
+    `rollback` skill restores with `git restore`.
 
 ### Added
 - Standard 1.2.0, host protocol, runs and audit records
@@ -767,6 +825,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Claude Code, ACS), checked by `tests/test_skill_frontmatter.py`.
 - Standard 1.2.0 text of §4.1.2 (schema dialect), §5.21, §7.1, §8.1–§8.3,
   §11.5–§11.7 and Appendix D.7; RFC-0010.
+
+- Standard 1.2.0, checkpoints, rollbacks, sends and memory
+  ([RFC-0009](spec/RFC-0009-checkpoint-rollback-send-memory.md); findings
+  ACS-18, ACS-19, ACS-26, ACS-27, ACS-48, ACS-52): §4.4.1 (what a
+  checkpoint holds, what `restored` asserts, what a rollback never
+  reaches), §4.4.2 (transmissions, idempotency keys, compensation,
+  destination policies), §4.5 (memory scopes, `ttl`, what `stored: true`
+  guarantees), §5.15.4 (checkpoints across a delegation), the §12.5
+  patterns Guarded Send and Checked Rollback, Appendix D.6. Ontology
+  outputs `checkpoint.mechanism/captured/excluded/digest/expires_at`,
+  `rollback.unrestored/not_covered/changes_reverted/verification`,
+  `send.compensation`, `persist`/`recall` `scope`, `stored_at`,
+  `expires_at`, `delegate.effective.checkpointed`.
+- Normative vectors `tests/conformance/destinations/match.json` (run by the
+  core, Python and TypeScript) and `tests/conformance/memory/store.json`;
+  22 runtime fixtures (idempotency keys, destination refusals, rollback
+  reports, memory scope echo) and 8 validator fixtures.
+- Python SDK: `FileSnapshotStore` (checkpoint content that never captures
+  the host's own records; `CheckpointTracker(snapshots=...)`,
+  `restore_checkpoint`, `checkpoint_output`), `MemoryStore`
+  (`MemoryContext`, `MemoryStoreError`), `IdempotencyLog`,
+  `Host.send_once`, and `Host` defaults that perform `checkpoint`,
+  `rollback`, `persist` and `recall` and answer `Rollback` with these
+  stores; `GroundedAgentConfig(allowed_destinations=..., snapshots=...)`.
+- TypeScript package: `destinations.ts` (`checkPattern`, `allowed`, ...)
+  and `duration.ts` (`parseDurationMs`). Standard Agents binding:
+  `configureLayer`, a `send` tool's `destination` option, `memoryTools`.
 
 ### Changed
 - The shipped domain profiles are version 2.0.0, cite Standard 1.2.0 and

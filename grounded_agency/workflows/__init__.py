@@ -19,6 +19,7 @@ from .engine import (
     WorkflowStep,
     WorkflowStepResult,
 )
+from .idempotency import IdempotencyLog
 from .runner import (
     Host,
     HostCannotServe,
@@ -46,6 +47,7 @@ __all__ = [
     "Host",
     "HostCannotServe",
     "HostResponseError",
+    "IdempotencyLog",
     "OverlapGate",
     "RunArchiveError",
     "RunIncomplete",

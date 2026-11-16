@@ -192,7 +192,10 @@ capability_rulings:
     notes: >
       The storage of a `persist` function tool, under a key prefix of the
       package's own. Thread values carry no expiry and no stored-at time, so
-      the tool writes both in an envelope beside the data. A `setValue` call
+      the tool writes both in an envelope beside the data, `{v, data,
+      stored_at, expires_at}`. Its memory scope is `session`, the thread;
+      any other scope is refused (`unsupported_scope`), and `ttl` is a
+      duration in the §5.10.1 grammar (Standard 1.2.0 §4.5). A `setValue` call
       made by a handler, a hook, an effect or a thread endpoint passes
       through no tool and has no place to declare a capability; such calls
       are kept inside grounded tools, apart from the binding's own records.
@@ -207,9 +210,9 @@ capability_rulings:
     capabilities: [recall]
     notes: >
       The lookup of a `recall` function tool. `found` and `stored_at` come
-      from the envelope that `persist` wrote, and an entry whose expiry has
-      passed is treated as missing. The thread store cannot be listed, so the
-      lookup is by exact key.
+      from the envelope that `persist` wrote, and an entry whose
+      `expires_at` has passed reads as missing (`found: false`). The thread
+      store cannot be listed, so the lookup is by exact key.
     rows:
       - checkpoint-rollback-state#state-02
       - models-context-memory-security#remember-01

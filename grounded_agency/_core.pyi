@@ -168,13 +168,14 @@ class Run:
         that requires a capability the ontology does not define (V101), is
         a ``ValueError``. ``profiles``: the domain profiles applied to every
         step of the run and its nested runs, checked at start and saved with
-        the run (§5.21); one with an error, or one that sets a destination
-        policy (``allowed_destinations``), which no check of this executor
-        reads yet, refuses the start (``ValueError``), as a restore of a
-        state holding one is refused. ``catalogs`` and ``agents`` are the
+        the run (§5.21); one with an error refuses the start (``ValueError``).
+        ``destinations``: the host's destination policies (§4.4.2), each a
+        list of patterns; with the profiles' ``allowed_destinations`` they are
+        the policies a ``send`` step's destination must meet (F504
+        ``destination_not_allowed`` otherwise); a policy with an invalid
+        pattern is a ``ValueError``. ``catalogs`` and ``agents`` are the
         other catalogs of the catalog set (§5.1.1) and agent manifests
-        (§5.15.1), as for ``validate_catalog``. ``destinations`` are refused
-        (``ValueError``) until the 1.2 workstreams implement them."""
+        (§5.15.1), as for ``validate_catalog``."""
 
     @staticmethod
     def restore(

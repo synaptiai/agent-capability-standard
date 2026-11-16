@@ -457,6 +457,7 @@ fn start_err(py: Python<'_>, e: StartError) -> PyErr {
         | StartError::Identity(_)
         | StartError::Unsupported(_)
         | StartError::Grounding(_)
+        | StartError::Policy(_)
         | StartError::Header(_) => PyValueError::new_err(message),
     }
 }

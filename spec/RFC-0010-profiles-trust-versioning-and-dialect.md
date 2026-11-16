@@ -120,14 +120,13 @@ its own (Claude Code's tools, for the Python adapter) names those calls in
 its conformance statement and reports, for each tool whose calls a rule
 would check, that the rule checks nothing for them; one that receives no
 capability output refuses a profile with either rule. A profile's
-destination policy is checked once the destination check of §4.4.2 lands
-with its own workstream (S5); until
-then the executor refuses to start or restore a run under a profile that
-sets `allowed_destinations`, the Python adapter and the Standard Agents
-binding refuse it too, and the Python adapter, with `strict_mode=False`
+destination policy is in force beside the host's own (§4.4.2, RFC-0009):
+the executor fails a `send` step it does not allow, and the Python adapter
+and the Standard Agents binding refuse such a `send` call; the Python
+adapter, with `strict_mode=False`
 (which only logs a missing checkpoint), refuses a `checkpoint_policy` that
 raises a flag. No shipped profile sets
-`allowed_destinations`, so every one applies as it is.
+`allowed_destinations`.
 
 ### 2) The schema dialect is defined, with a normative rendering
 
@@ -270,8 +269,8 @@ affected.
   `profile_minimum_confidence_waited_delegate`; `profile_grounding_*`
   (§5.20: required, met, wrong kind, in a nested run, before the minimum
   confidence); for the header `header_1_2_sender_check_needs_identities` and
-  `header_null_sender_check_not_read` (§5.17). With the workstream whose
-  check it exercises: `profile_destinations_refuse` (§4.4.2, S5).
+  `header_null_sender_check_not_read` (§5.17); `profile_destinations_refuse`
+  and `profile_destinations_none` (§4.4.2, with RFC-0009).
 - The runtime fixture format requires `header` (a version or `null`); every
   existing fixture gains `"header": null`, with unchanged expectations. A
   script entry may list `absent` members, which the pending action must not

@@ -1,0 +1,164 @@
+{
+  "description": "An after-gate on the rollback's restored stops the run when it did not restore everything (\u00a712.5, Checked Rollback).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "constrain",
+          "purpose": "constrain step",
+          "store_as": "policy",
+          "input_bindings": {
+            "target": "config",
+            "constraints": [
+              "policy"
+            ]
+          }
+        },
+        {
+          "capability": "mutate",
+          "purpose": "mutate step",
+          "store_as": "m",
+          "input_bindings": {
+            "target": "config",
+            "operation": {
+              "set": 1
+            }
+          }
+        },
+        {
+          "capability": "rollback",
+          "purpose": "rollback step",
+          "store_as": "rb",
+          "input_bindings": {
+            "checkpoint_id": "${cp.checkpoint_id}"
+          },
+          "gates": [
+            {
+              "when": "${rb.restored} == false",
+              "phase": "after",
+              "action": "stop",
+              "message": "The rollback did not restore everything."
+            }
+          ]
+        },
+        {
+          "capability": "audit",
+          "purpose": "audit step",
+          "store_as": "a",
+          "input_bindings": {
+            "event": {
+              "what": "rolled back"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "constrain",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "compliant": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "mutate",
+        "step": 2
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "success": true,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "rollback",
+        "step": 3,
+        "inputs": {
+          "checkpoint_id": "cp1"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "restored": false,
+          "unrestored": [
+            {
+              "item": "cfg",
+              "reason": "failed"
+            }
+          ],
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R403",
+    "step": 3
+  },
+  "trace_kinds": [
+    "gate_fired",
+    "step_failed"
+  ]
+}

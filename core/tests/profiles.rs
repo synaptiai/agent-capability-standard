@@ -249,32 +249,6 @@ fn a_header_that_is_not_supported_refuses_the_start() {
     }
 }
 
-/// A run under a profile with `rule` is refused at start and at restore: no
-/// executor check reads a profile's destination policy yet, and a run never
-/// goes ahead as if the rule were absent.
-fn refused_at_start_and_restore(rule: (&str, Value), names: &str) {
-    let ctx = ctx();
-    let cat = catalog(json!([
-        {"capability": "retrieve", "purpose": "p", "store_as": "r",
-         "input_bindings": {"target": "x"}}
-    ]));
-    let mut profile = json!({"domain": "d", "version": "1.0.0"});
-    profile[rule.0] = rule.1;
-    match Run::start(&ctx, &cat, "w", Map::new(), options(vec![profile.clone()])) {
-        Err(StartError::Unsupported(m)) => assert!(m.contains(names), "{m}"),
-        other => panic!("{:?}", other.err()),
-    }
-    // A state that holds the profile (written by another executor, or
-    // before this one stopped applying the rule) does not restore either.
-    let run = Run::start(&ctx, &cat, "w", Map::new(), options(Vec::new())).unwrap();
-    match Run::restore(&ctx, &cat, &holding(&run, &profile), None) {
-        Err(acs_core::exec::RestoreError::Start(StartError::Unsupported(m))) => {
-            assert!(m.contains(names), "{m}");
-        }
-        other => panic!("{:?}", other.err()),
-    }
-}
-
 /// `run`'s snapshot with `profile` put into its state as an applied profile.
 fn holding(run: &Run, profile: &Value) -> acs_core::exec::Snapshot {
     let mut state: Value = serde_json::from_str(&run.snapshot(None).state).unwrap();
@@ -333,12 +307,51 @@ fn a_profile_grounding_policy_is_checked_at_start_and_after_a_restore() {
 }
 
 #[test]
-fn a_profile_destination_policy_is_refused_until_the_send_check_reads_it() {
-    refused_at_start_and_restore(("allowed_destinations", json!([])), "allowed_destinations");
-    refused_at_start_and_restore(
-        ("allowed_destinations", json!(["mailto:*"])),
-        "allowed_destinations",
-    );
+fn a_profile_destination_policy_is_checked_at_start_and_after_a_restore() {
+    // §5.21.3: `allowed_destinations` is a destination policy in force
+    // beside the host's (§4.4.2); a `send` it does not allow fails F504
+    // before approval, in a fresh run and in one restored with the profile.
+    let ctx = ctx();
+    let cat = catalog(json!([
+        {"capability": "checkpoint", "purpose": "p", "store_as": "cp",
+         "input_bindings": {"scope": "*"}},
+        {"capability": "send", "purpose": "p", "store_as": "s",
+         "input_bindings": {"destination": "https://x.example/", "payload": "p"}}
+    ]));
+    for patterns in [json!(["mailto:*"]), json!([])] {
+        let profile = json!({"domain": "d", "version": "1.0.0", "allowed_destinations": patterns});
+        let fresh =
+            Run::start(&ctx, &cat, "w", Map::new(), options(vec![profile.clone()])).unwrap();
+        let plain = Run::start(&ctx, &cat, "w", Map::new(), options(Vec::new())).unwrap();
+        let restored = Run::restore(&ctx, &cat, &holding(&plain, &profile), None).unwrap();
+        for mut run in [fresh, restored] {
+            let id = run.next().id;
+            let out = json!({"checkpoint_id": "cp1", "evidence_anchors": []});
+            run.submit(
+                id,
+                acs_core::exec::Response::Output {
+                    value: out,
+                    evidence_seen: None,
+                },
+                0,
+            )
+            .unwrap();
+            let end = serde_json::to_value(run.next()).unwrap();
+            assert_eq!(
+                (
+                    end["kind"].as_str(),
+                    end["code"].as_str(),
+                    end["reason"].as_str()
+                ),
+                (
+                    Some("Failed"),
+                    Some("F504"),
+                    Some("destination_not_allowed")
+                ),
+                "{patterns}"
+            );
+        }
+    }
 }
 
 #[test]

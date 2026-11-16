@@ -130,9 +130,10 @@ Execute **persist** to write stable learnings, decisions, and patterns to durabl
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `data` | Yes | any | Data to store |
-| `key` | No | string | Storage key |
-| `ttl` | No | string | Time to live |
+| `data` | Yes | any | Data to store; it round-trips as I-JSON, and data holding a secret is refused (STANDARD v1.2 §4.5, §6.7) |
+| `key` | No | string | Storage key; without one the host chooses it and returns it as `key` |
+| `ttl` | No | string | Time to live, a duration (§5.10.1) longer than zero, e.g. `30d` or `PT12H`; the entry ends `ttl` after `stored_at` |
+| `scope` | No | string | Who can read the entry and how long it lasts: `run`, `session`, `user`, `project`, `global` or an `x-` name (§4.5); the host's default (`session`) when absent |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
@@ -144,10 +145,12 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Ensure no sensitive data (credentials, PII) is being persisted: data that holds a secret is refused, not redacted, since memory is read back as fact (STANDARD v1.2 §6.7). Persist where the secret is kept (an environment variable's name, a vault path), not the secret
    - Validate content structure if object
 
-2) **Determine destination**: Select where to write (from `key`, if given)
-   - `CLAUDE.md`: Project-level decisions and patterns
-   - Specific file: Domain or feature-specific knowledge
-   - `auto`: Choose based on content type and scope
+2) **Determine scope and destination** (STANDARD v1.2 §4.5): the entry `{key, scope, data, stored_at, expires_at}` goes to the scope's store
+   - `session` (the default): this conversation
+   - `project`: a file the project keeps (`CLAUDE.md` for decisions and patterns, a specific file for domain knowledge)
+   - `user`, `global`, `run`: the store the host provides for them
+   - A scope this host does not provide: store nothing, and answer `unsupported_scope`; a `ttl` that is not a duration longer than zero: store nothing, and answer `unsupported_ttl`
+   - Data that holds a secret: store nothing, and answer `secret_in_data`
 
 3) **Read existing content**: Load current state of destination
    - Parse structure and sections
@@ -164,29 +167,30 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Format according to destination conventions
    - Include rationale if decision/pattern
 
-6) **Apply merge strategy**:
-   - `append`: Add to end of section
-   - `replace`: Overwrite matching existing entry
-   - `merge`: Intelligently combine with existing
+6) **Apply the write**: A persist to a key that holds an entry replaces it
+   - To combine with what is there, `recall` it first and persist the combined data
+   - Within a file, `append` a new section, or `replace` the entry under the key
 
 7) **Write to destination**: Execute the write operation
    - Use Edit tool for file modifications
    - Preserve file formatting and structure
    - Add section headers if needed
 
-8) **Verify write**: Confirm content was persisted correctly
-   - Re-read destination file
-   - Confirm new content present
-   - Validate structure integrity
+8) **Verify write** (read-after-write, §4.5): read the key back in the scope and compare
+   - The data read back equals the data stored; then report `stored: true` with `stored_at` (and `expires_at` for a `ttl`)
+   - `stored: false` means nothing was written or replaced: the step completes, and a workflow that depends on the write checks `stored`
 
 ## Output Contract
 
 Return a structured object:
 
 ```yaml
-stored: boolean  # true when the data is in the store after this step (written, merged, or already present)
+stored: boolean  # true: a recall of the key in the scope returns the data until the entry ends; false: nothing was written (§4.5)
 key: string  # Storage key (destination and section, e.g. "CLAUDE.md#Patterns")
-timestamp: string  # ISO 8601 date-time of persistence
+scope: string  # The scope used (§4.5)
+stored_at: string  # ISO 8601 date-time the entry was stored
+expires_at: string | null  # When the entry ends, for an entry with a ttl
+timestamp: string  # Deprecated: the same instant as stored_at
 persisted:
   content_type: decision | pattern | fact | context
   content_id: string  # Unique identifier for this persisted item
@@ -218,9 +222,12 @@ assumptions: array[string]  # Explicit assumptions
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `stored` | boolean | Whether the data is in the store after this step (written, merged, or already present as a duplicate) |
+| `stored` | boolean | True: a later `recall` of the key in the scope returns the data until the entry ends (read-after-write, §4.5); false: nothing was written or replaced |
 | `key` | string | Storage key the data lives under (destination and section) |
-| `timestamp` | string | ISO 8601 date-time of persistence |
+| `scope` | string | The scope used; a step of a 1.2 workflow that binds `scope` fails unless this echoes it (R402, `unsupported_scope`) |
+| `stored_at` | string | ISO 8601 date-time the entry was stored |
+| `expires_at` | string | When the entry ends, for an entry with a `ttl`; from then on a `recall` does not find it |
+| `timestamp` | string | Deprecated: the same instant as `stored_at`; read `stored_at` (a reference to it is W603) |
 | `persisted.content_id` | string | Unique ID for retrieval with `recall` |
 | `persisted.destination` | string | File path of storage location |
 | `write_operation` | object | Details of the write performed |
@@ -245,12 +252,16 @@ data:
     - "Must support complex queries"
     - "Team has PostgreSQL experience"
 key: "CLAUDE.md#Architecture Decisions"
+scope: project
 ```
 
 **Output:**
 ```yaml
 stored: true
 key: "CLAUDE.md#Architecture Decisions"
+scope: project
+stored_at: "2024-01-16T10:00:00Z"
+expires_at: null
 timestamp: "2024-01-16T10:00:00Z"
 persisted:
   content_type: decision

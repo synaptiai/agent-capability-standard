@@ -575,12 +575,12 @@ fn submit_refuses_responses_that_do_not_answer() {
     let mut run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
     let id = run.next().id;
     let before = run.snapshot(None);
-    let wrong_id = run.submit(id + 1, Response::RolledBack, 0);
+    let wrong_id = run.submit(id + 1, Response::RolledBack { not_covered: None }, 0);
     assert!(matches!(
         wrong_id,
         Err(acs_core::exec::SubmitError::WrongAction { .. })
     ));
-    let wrong_kind = run.submit(id, Response::RolledBack, 0);
+    let wrong_kind = run.submit(id, Response::RolledBack { not_covered: None }, 0);
     assert!(matches!(
         wrong_kind,
         Err(acs_core::exec::SubmitError::Unexpected { .. })
@@ -1221,22 +1221,26 @@ fn the_header_is_validated_and_kept() {
 }
 
 #[test]
-fn start_refuses_options_not_implemented_yet() {
+fn start_and_restore_check_destination_policies() {
+    // A destination policy that holds an invalid pattern refuses the start
+    // (§4.4.2), and a state that holds one does not restore.
     let ctx = ctx();
-    let cases = [StartOptions {
+    let bad = StartOptions {
+        destinations: vec![vec!["*".into()]],
+        ..opts()
+    };
+    assert!(matches!(
+        Run::start(&ctx, &one_step(), "w", topic(), bad),
+        Err(acs_core::exec::StartError::Policy(_))
+    ));
+    let good = StartOptions {
         destinations: vec![vec!["ops".into()]],
         ..opts()
-    }];
-    for options in cases {
-        assert!(matches!(
-            Run::start(&ctx, &one_step(), "w", topic(), options),
-            Err(acs_core::exec::StartError::Unsupported(_))
-        ));
-    }
-    // Nor does a restore accept a state that holds one.
-    let run = Run::start(&ctx, &one_step(), "w", topic(), opts()).unwrap();
+    };
+    let run = Run::start(&ctx, &one_step(), "w", topic(), good).unwrap();
+    assert!(Run::restore(&ctx, &one_step(), &run.snapshot(None), None).is_ok());
     let snap = forged(&run.snapshot(None), |s| {
-        s["destinations"] = serde_json::json!([["ops"]]);
+        s["destinations"] = serde_json::json!([["a*b"]]);
     });
     assert!(matches!(
         Run::restore(&ctx, &one_step(), &snap, None),

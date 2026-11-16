@@ -177,7 +177,7 @@ describe('Standard figure data', () => {
     const t = T.decisionTree(text, STD);
     const count = (n: T.TreeNode): number => n.branches.reduce((a, b) => a + 1 + count(b.node), 0);
     expect(count(t)).toBe(lines.length);
-    expect(lines.some((l) => l.endsWith('→ Checkpoint REQUIRED'))).toBe(true);
+    expect(lines.some((l) => l.endsWith('→ A checkpoint is REQUIRED'))).toBe(true);
   });
 
   it('lists each level the bullets §10.2 gives it (F-S28)', () => {
@@ -437,6 +437,22 @@ describe('host protocol figures (§2, §5.10.2, §5.19.1, §5.19.8, §10.5)', ()
     expect(f.fixtures).toBe(files.length);
     expect(f.entries.map((e) => e.key)).toEqual(['expect', 'tick', 'wake_at', 'cancel', 'resume']);
     for (const e of f.entries) expect(e.count, e.key).toBe(scripts.filter((s) => s.some((x) => e.key in x)).length);
+  });
+});
+
+describe('§10.3 destination and memory vectors', () => {
+  it('counts every pattern, destination and memory case once, from the files §10.3 names', () => {
+    const dest = JSON.parse(repoText('tests/conformance/destinations/match.json')) as { patterns: { valid: boolean }[]; matches: { allowed: boolean }[] };
+    const mem = JSON.parse(repoText('tests/conformance/memory/store.json')) as { cases: unknown[] };
+    const groups = Object.fromEntries(T.effectVectors(text, STD).map((g) => [g.label, g.count]));
+    expect(groups).toEqual({
+      'Valid patterns': dest.patterns.filter((p) => p.valid).length,
+      'Invalid patterns': dest.patterns.filter((p) => !p.valid).length,
+      'Destinations allowed': dest.matches.filter((m) => m.allowed).length,
+      'Destinations refused': dest.matches.filter((m) => !m.allowed).length,
+      'Memory store cases': mem.cases.length,
+    });
+    expect(() => T.effectVectors(text.replace(/tests\/conformance\/memory\/store\.json/g, 'elsewhere'), STD)).toThrow(/no longer names/);
   });
 });
 

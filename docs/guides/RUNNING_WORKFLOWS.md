@@ -86,9 +86,9 @@ flowchart TB
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; select the implementation for it with `select_implementation`, [§5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter); a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
+| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; select the implementation for it with `select_implementation`, [§5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter); a waiting `delegate` that delegates again names the delegation it replaces in `replaces`); `idempotency_key` (`<run_id>:<n>`) is the same for every attempt of one pass of the step: perform the effect at most once per key ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
-| `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
+| `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` only when everything the checkpoint captured is restored, optionally with `"not_covered": [{"item", "reason"}, ...]` (changes it never covered: `transmitted`, `delegated`, `outside_scope`, [§4.4.1](../../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)); otherwise an `Error` (the run fails F503) |
 | `RequestApproval` | asks `approver` about `shown`, in `mode`: `in_session`, whoever attends the run, in its session; `out_of_band`, a separate channel whose approvers need not attend the run (keep the run's snapshot while you wait). `queued_action_id` names the queued action a resumed run is asking about, on every such request ([Resuming a deferred run](#resuming-a-deferred-run)) | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable`; with `identity@1`, optionally `approver_identities` (each an `agent_identity`, one per principal; `approvers` then empty or their principals) |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
 | `AwaitEvent` | waits for a matching event until `deadline` (a waiting delegate whose host attested who took it names that principal as `delegate_principal`: only its results count) | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's), `{"kind": "LivenessLost"}` (R406), or `{"kind": "Error", "code": "R401"/"R402"/"R406", "message": ...}` (any other code is read as R402) |
@@ -166,6 +166,22 @@ the digest and the expiry, never other stores or inputs of the run.
 
 ## What the executor enforces
 
+- **Destination policies.** With a policy in force (the host's
+  `destinations=` at start, or an applied profile's `allowed_destinations`),
+  a `send` step whose destination a policy does not allow, or is not a
+  string, fails with F504 (`destination_not_allowed`) once its inputs are
+  resolved, before anyone is asked to approve it and before a checkpoint is
+  used; a failure mode can match it with `on_error: F504`
+  ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
+- **Memory scope echo.** A `persist` or `recall` step of a 1.2 workflow
+  that binds `scope` fails with R402 (`unsupported_scope`, retried as any
+  R402) unless the output's `scope` equals it; in a 1.0 or 1.1 workflow
+  `scope` is W616 and passed on unchecked
+  ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
+- **Steps that report.** A `rollback` step completes whatever its
+  `restored` says, and a `persist` step whatever its `stored` says: check
+  them with an after-gate (§12.5, Checked Rollback). W624 reports a 1.2
+  rollback step nothing checks.
 - **Grounding.** Under a grounding policy (a workflow's `grounding`, with
   `grounding@1`, or one the host gives when the run starts), each host
   `Output` of a required capability is checked after the fields its
@@ -593,6 +609,70 @@ changes, `every` counted from the Unix epoch), `OverlapGate` (the `skip`,
 seen ids for deduplication across restarts) and `trigger_attendance` (an
 `invoke` trigger's run always has its invoker's attendance).
 
+### Hosts for checkpoints, rollback, memory and sends
+
+`Host` performs `checkpoint`, `rollback`, `persist` and `recall` steps, and
+answers the executor's `Rollback`, when it is given the stores for them; a
+subclass calls `super().invoke_capability(action)` for those capabilities:
+
+```python
+from grounded_agency import (
+    CheckpointTracker, FileSnapshotStore, IdempotencyLog, MemoryStore,
+)
+from grounded_agency.workflows import Host
+
+snapshots = FileSnapshotStore("/srv/work", "/srv/state/snapshots")
+host = Host(
+    CheckpointTracker(".checkpoints", snapshots=snapshots),
+    memory=MemoryStore("/srv/state/memory.json"),
+    idempotency=IdempotencyLog("/srv/state/keys.jsonl"),
+    protected_paths=["/srv/work/runs"],   # where you save runs, if under the root
+)
+```
+
+- **Checkpoints** ([§4.4.1](../../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)).
+  `FileSnapshotStore` copies the files under its root that a checkpoint's
+  scope names (root-relative patterns, or paths: a directory names
+  everything under it; by SHA-256, with a manifest and a digest;
+  directories 0700, copies 0600), excludes secret-bearing file names by
+  default, and never captures, overwrites or removes `.claude/` or
+  `.audit/` (the plugin's audit logs), its own store, the tracker's state
+  and marker, or any path registered with `Host(protected_paths=...)` or
+  `Host.protect` (the memory and key files are registered for you, and the
+  runner registers its `evidence_store` file): a rollback changes the world
+  back, not the record of it. A `rollback` step's output reports
+  `restored`, `unrestored` (`not_captured` for an item its `scope` names
+  that the checkpoint did not capture, a pattern that names no captured
+  file included), `changes_reverted` and `verification` (over everything
+  the checkpoint captured, so a partial rollback matches only when the
+  rest is unchanged); the executor's `Rollback` gets
+  `RolledBack` only on a full restore, with this run's transmissions as
+  `not_covered` (a send whose outcome is unknown among them, with `detail`
+  `outcome unknown`), and F503 otherwise.
+- **Memory** ([§4.5](../../spec/STANDARD-v1.2.0.md#45-memory)).
+  `MemoryStore` keeps entries by scope (`run` is the `run_id`, which every
+  nested run shares; `session` is the host's `session_id`; `user` and
+  `project` the host's), with `ttl`, limits and the statement a host makes
+  (`statement()`); data or a key holding a credential is refused
+  (`secret_in_data`), and a value is stored and recalled as a copy. A
+  `persist` step with no `key` gets one derived from the pass's
+  `idempotency_key`, so a retry or a re-delivery replaces its entry. The
+  runner ends a run's `run` scope when the run ends, unless it ended
+  `deferred`, in the host's memory and in `WorkflowRunner(memory=...)`:
+  pass the store there, so that `cancel` without a host ends a deferred
+  run's entries too. It passes `tests/conformance/memory/store.json`.
+- **Sends** ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
+  Call `self.send_once(action, effect)` from your `send` implementation:
+  with an `IdempotencyLog`, an attempt whose key already transmitted gets
+  that output again, one whose earlier attempt may have transmitted gets
+  `outcome_unknown`, and a key reused with other inputs gets
+  `key_conflict`. A host that saves runs keeps its keys as long:
+  `run`, `advance` and `drive` with `save=` refuse a log without a path.
+  Keep `run_id`s unique (the runner refuses one it has used).
+- **Destination policies.** `WorkflowRunner.start(..., destinations=[[...]])`
+  (and `run`) puts the host's policies in force beside the applied
+  profiles'.
+
 ## Applying domain profiles
 
 A host applies domain profiles (Standard 1.2.0 §5.21) to every run it
@@ -604,11 +684,11 @@ an error, not an ignored setting) and again when a run starts, cover the
 steps of nested runs, and are saved with the run's snapshot. An unknown
 top-level member is W604 and ignored (§5.21.2): `AppliedProfiles` logs it
 at WARNING with the member meant (`did you mean 'checkpoint_policy'?`) and
-keeps it in `warnings`. A workflow's `profile` field applies nothing. The
-executor does not check a profile's destination policy
-(`allowed_destinations`, §4.4.2) yet: a run under a profile that sets one
-does not start (`RunStartError`), rather than run without the rule; no
-shipped profile sets one. What changes in a run under a profile:
+keeps it in `warnings`. A workflow's `profile` field applies nothing. A
+profile's destination policy (`allowed_destinations`, §4.4.2) joins the
+policies in force: a `send` step it does not allow fails F504
+(`destination_not_allowed`) before approval; no shipped profile sets one.
+What changes in a run under a profile:
 
 - **Approvals.** A step whose effective risk `require_review` covers, or
   that is above `auto_approve`, needs approval, as a step whose
@@ -707,7 +787,7 @@ members of its `detail`.
 | `checkpoint_created` | A checkpoint is recorded: the host answered `CreateCheckpoint`, or a `checkpoint` step completed | `checkpoint_id` |
 | `checkpoint_consumed` | A step that requires a checkpoint uses the latest valid one | `checkpoint_id` |
 | `checkpoints_invalidated` | A completed wait or delay, or a resumption, ends the validity of earlier checkpoints | `checkpoint_ids` |
-| `rolled_back` | The host answered a `Rollback` that a gate or a failure mode asked for | none |
+| `rolled_back` | The host answered a `Rollback` that a gate or a failure mode asked for (`RolledBack`: everything the checkpoint captured is restored) | `not_covered`, when the host listed changes the checkpoint never covered (STANDARD §4.4.1) |
 | `event_dropped` | A wait receives an event that does not match; recorded once per reason for each wait | `reason` |
 | `event_received` | A wait receives its matching event; `dropped` counts the dropped events by reason | `event_type`, `dropped` |
 | `delegated` | A waiting `delegate` has delegated and now waits for the result; `principal` is present when the host attested who took the delegation (`identity@1`) | `task_id`, `principal` |

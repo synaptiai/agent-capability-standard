@@ -76,26 +76,20 @@ function data(result: ToolResult): Record<string, unknown> {
 const LABELS = { labels: ['bug'], confidence: 0.95, evidence_anchors: [{ ref: 'file:t.md', kind: 'file' }] };
 
 describe('bindingProfiles', () => {
-  it('refuses a destination policy the binding does not check (§5.21.4)', () => {
-    expect(() => bindingProfiles(core({ destinations: [['mailto:*']] }), [{ domain: 'd' }])).toThrow(
-      /allowed_destinations/,
-    );
-    const handmade = {
-      documents: [],
-      policy: { ...NO_RULES, destinations: [[]] },
-      warnings: [],
-      flags: core({}).profileFlags,
-    };
+  it("keeps a profile's destination policy, which a send tool applies (§5.21.3; test/layer.test.ts)", () => {
+    const profiles = bindingProfiles(core({ destinations: [['mailto:*']] }), [{ domain: 'd' }], { onWarning: () => {} });
+    expect(profiles.policy.destinations).toEqual([['mailto:*']]);
+    // A tool that does not send defines under it as under any profile.
     expect(() =>
       groundedTool({
         name: 'n',
         capability: 'retrieve',
         description: 'd',
         args: z.object({}),
-        profiles: { ...handmade, flags: (c: CapabilityId) => handmade.flags([], c) },
+        profiles,
         execute: async () => ({ data: 1, confidence: 1, evidence_anchors: [] }) as never,
       }),
-    ).toThrow(/allowed_destinations/);
+    ).not.toThrow();
   });
 
   it("reports each loading warning and keeps it (§5.21.2's W604: the member is ignored)", () => {

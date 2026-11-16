@@ -1,0 +1,150 @@
+{
+  "description": "A recovery loop runs the send again: a new pass, with a new approval and a new idempotency key (\u00a74.4.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "report_state"
+          }
+        },
+        {
+          "capability": "send",
+          "purpose": "send step",
+          "store_as": "s",
+          "input_bindings": {
+            "destination": "ops",
+            "payload": {
+              "report": 1
+            }
+          },
+          "failure_modes": [
+            {
+              "condition": "the send failed",
+              "on_error": "R402",
+              "action": "request_more_context",
+              "recovery": {
+                "goto_step": "cp",
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "recovery@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "send",
+        "step": 1,
+        "attempt": 1,
+        "idempotency_key": "run-1:3"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "refused"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "cp2",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "send",
+        "step": 1,
+        "attempt": 1,
+        "idempotency_key": "run-1:6"
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "sent": true,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed"
+  },
+  "trace_kinds": [
+    "failure_mode_fired",
+    "loop"
+  ]
+}

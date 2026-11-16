@@ -978,3 +978,56 @@ into `round3/b`); what S5 needs:
 - **TypeScript package**: `workflowTarget(workflow, header)` and
   `agentsApply(workflow, header)` (`src/agents.ts`); the binding's
   `declaredAgents` and `lintDelegationTargets` take the header.
+
+## 2026-11-16 — S5 (checkpoint, rollback, send and memory), for the merge with S3
+
+- **Pre-call point.** S5's send check is `Machine::destination_refusal()`,
+  called in `ready()` right after the inputs are resolved, before
+  `Stage::Approval`: the policies in force are `state.destinations` then
+  `program.policy.destinations()` (S6's profiles). S3's delegate refusals go
+  at the same point; the two concern different capabilities.
+- **Keys.** Every `InvokeCapability` carries `idempotency_key`, required in
+  `host_protocol.schema.json` and `protocol.py`; `restore` fills a pending
+  action that has none (`fill_idempotency_key`), whatever the state's
+  version. S3's `restore_set` must go through the same fill.
+- **No unimplemented start option is left** (`StartOptions::unimplemented`
+  and `profile::Policy::unenforced` are gone); `refuse_unapplied` in the
+  adapter keeps only the `strict_mode=False` checkpoint rule, and the
+  binding's `unappliedRule` is gone. ACS-05 is `fixed`.
+- **Site.** §12.1's tree is one node per line (the site's tree figure reads
+  it so); 1.0 and 1.1 keep their own `checkpoint-tree` slot
+  (`CHECKPOINT_TREE_OLD`). §4.4.1-§4.5 and §5.15.4 have run replays of S5's
+  fixtures; §5.19.1's `response-replay` slot is at paragraph 6.
+- **SL claims.** The binding's statement has no `not_applied` and the
+  binding claims class SL; the adapter keeps the output-contract row. Every
+  text that states the claims says so (FOUNDATION-notes, S1 review rounds).
+
+## 2026-11-16 — after the S5 sync (S3 merged into `round3/a`)
+
+`round3/S5sync-base` tagged, then `claude/gallant-hypatia-wbucn3` (with S3)
+merged into `round3/a`. For phase 4 and any later stream:
+
+- **Pre-call point** (`Machine::ready()`): inputs resolved, then S5's send
+  destination check (F504 `destination_not_allowed`), then S3's delegate
+  refusals (R402), then `Stage::Approval`. Neither asks an approver or uses a
+  checkpoint.
+- **No refusal of an unimplemented option is left.** `StartOptions::
+  unimplemented`, `Policy::unenforced` and the call in `Run::prepare` are
+  gone; `Run::start` goes through `start_set`, and every restore through
+  `restore_set`, which fills a missing `idempotency_key`. `StartError::
+  Unsupported` is kept for the API (the Python binding maps it) but nothing
+  in the core constructs it now.
+- **W616 for `persist`/`recall` `scope`** is the last `FEATURES` row (after
+  S3's `agents` and `continues`, as §11.5's table orders them), located at
+  its step (`Use::step`); validator fixture `pass_memory_scope_v11_warn`.
+- **§2**: S5's four rows stay in the first table, right after S2b's run
+  terms (FOUNDATION D2's order S2b, S5), not in the third table S3's note
+  proposed: **Pass** and **Idempotency key** are run terms.
+- **Site.** The merge put two enforced runs over 1800px: §10.3 (S3's, S4's,
+  S5's and S6's vector paragraphs, 1877px) and the home page's design
+  principles (S3's and S5's §3.3 bullets, 1815px). §10.3 now has a figure,
+  `effect-vectors` (the destination and memory vectors, from the two files),
+  after S5's paragraph; S5's §3.3 bullet is shorter. The longest enforced
+  run of the Standard page is now §5.14's, between `deferral-replay` and
+  `resume-replay`: 1800px at 1440 (S2b's text, unchanged by this merge).
+  Any text added there needs a figure.

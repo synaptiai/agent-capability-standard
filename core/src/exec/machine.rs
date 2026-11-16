@@ -313,6 +313,15 @@ impl<'a> Machine<'a> {
                     }
                 }
             }
+            // Likewise the pass's idempotency key (§4.4.2).
+            match self.frame_ref().cur.idempotency_key.clone() {
+                Some(k) => self.st.rec_mut(r)["idempotency_key"] = json!(k),
+                None => {
+                    if let Some(record) = self.st.rec_mut(r).as_object_mut() {
+                        record.remove("idempotency_key");
+                    }
+                }
+            }
             return r;
         }
         let top = self.st.frames.len() - 1;
@@ -360,6 +369,10 @@ impl<'a> Machine<'a> {
         if let Some(c) = &f.cur.checkpoint_id {
             record["checkpoint_id"] = json!(c);
         }
+        // Once the step has called its capability, its pass's key (§6.4).
+        if let Some(k) = &f.cur.idempotency_key {
+            record["idempotency_key"] = json!(k);
+        }
         if let Some(a) = approval {
             record["approval"] = a;
         }
@@ -384,6 +397,10 @@ impl<'a> Machine<'a> {
         let r = self.push_record(top, status, None);
         let record = self.st.rec_mut(r);
         record["capability"] = json!(capability);
+        // The step's pass key is not this action's (§4.4.2).
+        if let Some(m) = record.as_object_mut() {
+            m.remove("idempotency_key");
+        }
         match checkpoint_id {
             Some(c) => record["checkpoint_id"] = json!(c),
             None => {
@@ -976,6 +993,14 @@ impl<'a> Machine<'a> {
             return self.step_error("R402", format!("the step's resolved inputs: {e}"));
         }
         self.frame().cur.inputs = inputs;
+        if step.capability == "send"
+            && let Some(message) = self.destination_refusal()
+        {
+            // Before approval and the checkpoint: no one is asked and no
+            // checkpoint is used for a send that may not go (§4.4.2). An
+            // executor refusal, not retried.
+            return self.step_error_with("F504", message, Reason::of("destination_not_allowed"));
+        }
         // A delegation the executor refuses is refused here, once its inputs
         // are resolved and before it is put to an approver or uses a
         // checkpoint (§5.15.2).
@@ -985,6 +1010,38 @@ impl<'a> Machine<'a> {
             return self.step_error("R402", e);
         }
         self.set_stage(Stage::Approval)
+    }
+
+    /// Why the current `send` step's destination may not go, if a
+    /// destination policy is in force and does not allow it (§4.4.2). The
+    /// policies in force are the host's, then each applied profile's
+    /// (§5.21.3). The message does not repeat the destination, which can
+    /// hold a credential (§6.7); the step's inputs hold it.
+    fn destination_refusal(&self) -> Option<String> {
+        let mut policies = self.st.destinations.clone();
+        policies.extend(self.program.policy.destinations());
+        if policies.is_empty() {
+            return None;
+        }
+        match self
+            .frame_ref()
+            .cur
+            .inputs
+            .get("destination")
+            .and_then(Value::as_str)
+        {
+            Some(d) if crate::destination::allowed(&policies, d) => None,
+            Some(_) => Some(format!(
+                "the step's destination is not one the {} destination {} in force {} (§4.4.2)",
+                policies.len(),
+                if policies.len() == 1 { "policy" } else { "policies" },
+                if policies.len() == 1 { "allows" } else { "all allow" },
+            )),
+            None => Some(
+                "the step's destination is not a string, so no destination policy in force can allow it (§4.4.2)"
+                    .to_string(),
+            ),
+        }
     }
 
     /// Why the executor refuses a delegation in a workflow that declares
@@ -1914,6 +1971,22 @@ impl<'a> Machine<'a> {
         }
         let inputs = self.frame_ref().cur.inputs.clone();
         let attempt = self.frame_ref().cur.attempt;
+        // The pass's idempotency key (§4.4.2): the id of its first
+        // InvokeCapability, kept by every later attempt of the pass (a
+        // retry keeps `cur`; `begin` starts a new pass with a new one). A
+        // delegation that replaces another is a new one, with its own key.
+        let next = self.st.next_id;
+        let run_id = self.st.run_id.clone();
+        let cur = &mut self.frame().cur;
+        if cur.idempotency_key.is_none() || cur.replaces.is_some() {
+            cur.idempotency_key = Some(format!("{run_id}:{next}"));
+        }
+        let key = cur.idempotency_key.clone();
+        // The record of the pass carries the key once the step calls its
+        // capability (§6.4).
+        if let Some(r) = cur.record {
+            self.st.rec_mut(r)["idempotency_key"] = json!(key);
+        }
         self.emit(
             Body::InvokeCapability {
                 step: index,
@@ -1927,6 +2000,7 @@ impl<'a> Machine<'a> {
                 inputs,
                 deadline,
                 attempt,
+                idempotency_key: key,
                 replaces: self.frame_ref().cur.replaces.clone(),
             },
             Purpose::Capability,
@@ -2079,6 +2153,29 @@ impl<'a> Machine<'a> {
                 "R402",
                 format!("{detail}, which the '{capability}' contract requires"),
             );
+        }
+        // A memory step that bound a scope gets that scope or fails (§4.5):
+        // a host that does not know the input would store or look up
+        // elsewhere without saying so. Retried as any R402. Below 1.2,
+        // `scope` is an input the executor passes on and does not read, as
+        // 1.1 did (W616).
+        if matches!(step.capability.as_str(), "persist" | "recall")
+            && self.program.workflows[&self.frame_ref().workflow].targets_1_2
+            && let Some(bound) = self
+                .frame_ref()
+                .cur
+                .inputs
+                .get("scope")
+                .filter(|v| !v.is_null())
+            && value.get("scope") != Some(bound)
+        {
+            let message = format!(
+                "the step asked for memory scope {bound} and the output's scope is {}",
+                value
+                    .get("scope")
+                    .map_or_else(|| "absent".to_string(), Value::to_string)
+            );
+            return self.exec_error_with("R402", message, Reason::of("unsupported_scope"));
         }
         let wf = &self.program.workflows[&self.frame_ref().workflow];
         // A delegation's attested identity is read under identity@1 only.
@@ -2761,7 +2858,7 @@ impl<'a> Machine<'a> {
     pub(crate) fn submit(
         &mut self,
         id: u64,
-        response: Response,
+        mut response: Response,
         now: u64,
     ) -> Result<(), SubmitError> {
         if self.st.finished.is_some() {
@@ -2788,7 +2885,7 @@ impl<'a> Machine<'a> {
                 Response::Checkpoint { .. } | Response::Error { .. }
             ) | (
                 Body::Rollback { .. },
-                Response::RolledBack | Response::Error { .. }
+                Response::RolledBack { .. } | Response::Error { .. }
             ) | (Body::RequestApproval { .. }, Response::Decision { .. })
                 | (
                     Body::RecheckSource { .. },
@@ -2812,6 +2909,13 @@ impl<'a> Machine<'a> {
         };
         for v in values {
             super::ijson(v).map_err(SubmitError::Malformed)?;
+        }
+        if let Response::RolledBack {
+            not_covered: Some(items),
+        } = &mut response
+        {
+            super::ijson(&Value::Array(items.clone())).map_err(SubmitError::Malformed)?;
+            *items = super::not_covered_kept(items).map_err(SubmitError::Malformed)?;
         }
         let frame_wf = &self.program.workflows[&self.frame_ref().workflow];
         let identity_declared = frame_wf.extension("identity@1");
@@ -2936,14 +3040,12 @@ impl<'a> Machine<'a> {
                     reason,
                 }));
             }
-            (Purpose::GateRollback { message }, Response::RolledBack) => {
-                self.side_record("rollback", "executed", rolled_back(&pending), None);
-                self.trace_step("rolled_back", json!({}));
+            (Purpose::GateRollback { message }, Response::RolledBack { not_covered }) => {
+                self.rolled_back_ok(&pending, not_covered);
                 self.step_error("R403", message);
             }
-            (Purpose::FailureRollback { mode }, Response::RolledBack) => {
-                self.side_record("rollback", "executed", rolled_back(&pending), None);
-                self.trace_step("rolled_back", json!({}));
+            (Purpose::FailureRollback { mode }, Response::RolledBack { not_covered }) => {
+                self.rolled_back_ok(&pending, not_covered);
                 self.recover(mode);
             }
             (
@@ -3220,6 +3322,26 @@ impl<'a> Machine<'a> {
             checkpoint_id,
         });
         Ok(())
+    }
+
+    /// The host restored the checkpoint of the executor's own rollback
+    /// (§4.4.1): its record (record mode `actions`) and the `rolled_back`
+    /// trace event carry what the checkpoint never covered, when the host
+    /// listed any.
+    fn rolled_back_ok(&mut self, pending: &Pending, not_covered: Option<Vec<Value>>) {
+        let written = self.st.records_written();
+        self.side_record("rollback", "executed", rolled_back(pending), None);
+        let detail = match not_covered {
+            Some(nc) => {
+                if self.st.records_written() > written {
+                    let r = written;
+                    self.st.rec_mut(r)["details"] = json!({"not_covered": nc});
+                }
+                json!({"not_covered": nc})
+            }
+            None => json!({}),
+        };
+        self.trace_step("rolled_back", detail);
     }
 
     /// The reason a failure-mode checkpoint or rollback failed with, on the

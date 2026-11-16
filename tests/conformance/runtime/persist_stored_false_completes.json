@@ -1,0 +1,82 @@
+{
+  "description": "A persist step whose output says stored false completes: nothing was written, and the workflow checks stored when it depends on the write (\u00a74.5).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "persist",
+          "purpose": "persist step",
+          "store_as": "p",
+          "input_bindings": {
+            "data": {
+              "a": 1
+            },
+            "key": "k"
+          }
+        },
+        {
+          "capability": "recall",
+          "purpose": "recall step",
+          "store_as": "r",
+          "input_bindings": {
+            "key": "k"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "persist",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "stored": false,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "recall",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": null,
+          "found": false,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "p": {
+        "stored": false
+      },
+      "r": {
+        "found": false
+      }
+    }
+  },
+  "trace_kinds": [
+    "step_completed"
+  ]
+}

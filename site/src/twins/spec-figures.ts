@@ -38,6 +38,13 @@ const REPLAY_TITLES: Record<string, string> = {
   'agents-replay': "A delegation that takes its target's flags, from §5.15.2",
   'read-only-replay': "A read-only delegation its host does not attest, from §5.15.2",
   'continue-replay': "A continuation matched by its own task_id, from §5.15.3",
+  'rollback-replay': 'A rollback that did not restore everything, stopped, from §4.4.1',
+  'not-covered-replay': 'A rollback after a send, the send not covered, from §4.4.1',
+  'send-key-replay': 'One approval, one key, across a retry, from §4.4.2',
+  'destination-replay': 'A send to a destination no policy allows, from §4.4.2',
+  'scope-replay': 'A memory step whose scope the host did not use, from §4.5',
+  'stored-replay': 'A persist that stored nothing, completed, from §4.5',
+  'delegate-rollback-replay': "A rollback after a delegation, the delegate's change not covered, from §5.15.4",
 };
 
 function replayBlock(slot: string): string {
@@ -83,6 +90,11 @@ export function specEarlyBlocks(): string[] {
   ];
 }
 
+/** The blocks for §4.4.1 to §4.5, in page order. */
+export function specEffectBlocks(): string[] {
+  return ['rollback-replay', 'not-covered-replay', 'send-key-replay', 'destination-replay', 'scope-replay', 'stored-replay'].map(replayBlock);
+}
+
 /** The blocks for §5.9 to §5.19, in page order. */
 export function specLateBlocks(): string[] {
   const { source, text } = currentStandardText();
@@ -125,6 +137,7 @@ export function specLateBlocks(): string[] {
     replayBlock('agents-replay'),
     replayBlock('read-only-replay'),
     replayBlock('continue-replay'),
+    replayBlock('delegate-rollback-replay'),
     figure(
       'Trust classes, from §5.17',
       D.trustCaption(trust),
@@ -153,6 +166,7 @@ export function specTailBlocks(): string[] {
   const heat = T.codeHeat(text, source);
   const suite = T.conformanceSuite(text, source);
   const digests = T.digestVectors(text, source);
+  const effects = T.effectVectors(text, source);
   return [
     replayBlock('audit-replay'),
     replayBlock('secret-replay'),
@@ -176,6 +190,7 @@ export function specTailBlocks(): string[] {
     ),
     figure('The conformance suite, from §10.3', T.suiteCaption(suite), table(['Part', 'Count', 'Folder'], suite.map((p) => [p.label, String(p.count), code(p.dir)]))),
     figure('The approval digest vectors, from §10.3', T.digestCaption(digests), table(['Vectors', 'Count'], digests.map((g) => [g.label, String(g.count)]))),
+    figure('The destination and memory vectors, from §10.3', T.effectVectorsCaption(effects), table(['Vectors', 'Count', 'File'], effects.map((g) => [g.label, String(g.count), code(g.source)]))),
   ];
 }
 

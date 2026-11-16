@@ -244,9 +244,8 @@ findings:
     set the thresholds low, medium, high and healthcare.yaml sets none, low, low; every `block_autonomous`
     and `require_grounding` entry is an ontology capability id. Read schemas/profiles/profile_schema.yaml
     lines 1-111 and tools/validate_profiles.py lines 120-258 (type and enum checks only).'
-  status: partly_fixed
-  resolution: 'Partly fixed: the Standard text and every rule but one are in force; a profile''s destination
-    policy is refused until S5''s destination check reads it. Standard 1.2.0 §5.21 (Domain Profiles), accepted
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.21 (Domain Profiles), accepted
     from RFC-0010: a host applies profiles to a run at start, a safety layer to the calls it covers, a
     validator may be given them; a workflow''s `profile` field stays descriptive. Rules only tighten (trust
     weights replace, §8.3); every member''s effect is stated in effective flags (§5.2.1) and §5.14, a person
@@ -270,10 +269,10 @@ findings:
     tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_* (profile_grounding_*
     among them); validator fixtures with `profiles`; the shipped profiles migrated to 2.0.0, each applied as
     it is by the executor, the adapter and the binding; the compliance documents say where a setting is
-    enforced. Remaining (S5): the executor, the adapter and the binding refuse a profile with
-    `allowed_destinations` (`Policy::unenforced`, `refuse_unapplied`, `unappliedRule`) until the destination
-    check (§4.4.2) reads `Policy::destinations` and its counterparts, with the fixture
-    profile_destinations_refuse; no shipped profile sets it.'
+    enforced. A profile''s `allowed_destinations` is a destination policy in force beside the host''s own
+    (§4.4.2, RFC-0009): the executor reads `Policy::destinations` in its send check, the adapter and the
+    binding apply it to send calls (F504 before approval); runtime fixtures profile_destinations_refuse,
+    profile_destinations_none and destination_profile_policy_refuses; no shipped profile sets it.'
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
@@ -851,9 +850,17 @@ findings:
   verified: 'Read spec/STANDARD-v1.1.0.md lines 84-93, 678-683, 786-790 and 904-940. Listed by script
     every ontology edge that touches `delegate`: decompose enables delegate, delegate enables synchronize,
     delegate specializes invoke; none from `checkpoint`.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §5.15.4 (Checkpoints Across a Delegation), accepted from RFC-0009: a
+    run''s checkpoints never authorise a delegate''s changes, except where a safety layer orders the
+    delegate''s calls in the delegator''s scope, where one checkpoint authorises one change by either
+    agent; before each change a delegate needs a checkpoint valid in the scope where that change is
+    checked, which its host may attest as `delegate.effective.checkpointed` (ontology 2.2.0); a rollback
+    restores what its checkpoint captured, whoever changed it, and reaches nothing else (`not_covered`,
+    `delegated`); all-or-nothing needs `read_only: true` or an explicit undo step. The Python adapter''s
+    shared scope is that case, pinned by tests/test_adapter_effects.py
+    (`test_subagent_mutation_uses_shared_checkpoint`); the runtime fixture `delegate_rollback_own_state`
+    pins the executor''s rollback after a delegation; the delegate skill states it.'
   concerns:
   - multi-agent
   related:
@@ -888,9 +895,20 @@ findings:
   verified: 'Read the cited lines. Ran a `send` step with `retry: {max: 1}` on the reference executor,
     the host answering R401 and then an output: the host received two `InvokeCapability` actions with
     identical `inputs` (`attempt` 1 and 2) and one approval request, and the run completed.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §3.3, §4.4, §4.4.2 (Transmissions) and §12.1, accepted from RFC-0009: for
+    `send` the checkpoint restores the agent''s own state, not the transmission, and a rollback lists it
+    as `not_covered`, `transmitted`; every `InvokeCapability` carries an executor-issued
+    `idempotency_key` (`<run_id>:<n>`, the same for every attempt of one pass, new for loops and
+    replacing delegations; a pending action restored from an older state gets `<run_id>:<id>`); a host
+    MUST NOT transmit twice per key, answers `outcome_unknown` when unsure and `key_conflict` for a
+    reused key; `send.compensation` takes the form of `TransitionRule.rollback` and is performed only by
+    a step of its own. Implemented in core/src/exec/machine.rs (`execute()`, records) and
+    core/src/exec/mod.rs (restore), schemas/host_protocol.schema.json (`idempotency_key` required),
+    grounded_agency/workflows/idempotency.py (`IdempotencyLog`) and `Host.send_once`; `WorkflowRunner`
+    refuses to save runs with an in-memory key log. Tests: core/tests/effects.rs,
+    tests/test_idempotency.py; runtime fixtures `send_retry_one_key`, `send_loop_new_key`,
+    `send_outcome_unknown`, `delegate_replaces_new_key`.'
   concerns:
   - checkpoint-rollback-state
   related:
@@ -1217,9 +1235,23 @@ findings:
     `restored` occurs in core/src only in comments about snapshots. The base `Host.rollback` in grounded_agency/workflows/runner.py
     (lines 93-96) raises `NotImplementedError("no rollback")`, and grounded_agency/adapter.py (lines 306,
     403) leaves file capture to the Claude Agent SDK.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §2 and §4.4.1 (Checkpoints and Rollback), accepted from RFC-0009: a
+    checkpoint is a host-kept copy of the state within its scope; a host reports `mechanism`,
+    `captured`, `excluded`, `digest` and `expires_at` (retention, apart from validity); `restored: true`
+    asserts that everything the rollback concerns is back, with `unrestored` (`failed`, `conflict`,
+    `discarded`, `not_captured`) and `not_covered` (`transmitted`, `delegated`, `outside_scope`) as two
+    lists; the record of what happened is never within a rollback''s reach; a `rollback` step completes
+    either way and W624 reports an unchecked one in a 1.2 workflow, while the executor''s own `Rollback`
+    is answered `RolledBack` only on a full restore, else F503 (`RolledBack.not_covered`, §5.19.1).
+    Ontology 2.2.0 carries the outputs. Implemented in core/src/exec/machine.rs and
+    core/src/validate/effects.rs, grounded_agency/state/snapshots.py (`FileSnapshotStore`, protected
+    paths, secret-path exclusions, private modes), `CheckpointTracker(snapshots=...)` and
+    `Host.rollback`; the checkpoint and rollback skills are host-neutral (`git stash create`, `git
+    restore`). Tests: core/tests/effects.rs, tests/test_snapshots.py, tests/test_runner_effects.py;
+    runtime fixtures `rollback_step_not_restored_completes`, `rollback_step_checked`,
+    `rolled_back_not_covered`; validator fixtures `warn_unchecked_rollback`, `pass_checked_rollback`,
+    `pass_unchecked_rollback_v11`.'
   concerns:
   - checkpoint-rollback-state
   related:
@@ -1256,9 +1288,20 @@ findings:
     with tools/validate_workflows.py --strict: no diagnostic for the value. Ran it on the reference executor:
     the host received the string unchanged. The first validator run wrote the tool''s default output file,
     the git-ignored tools/validator_suggestions.json; later runs used --suggestions-out.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.5 (Memory), accepted from RFC-0009: optional `scope` on `persist` and
+    `recall` (`run` = the run the host started and every run nested in it, `session`, `user`, `project`,
+    `global`, `x-` names), each defined by visibility and lifetime and echoed in the output; the
+    executor fails a 1.2 step that binds a scope the output does not echo (R402, `unsupported_scope`); `ttl`
+    is a §5.10.1 duration longer than zero (W614 for a literal outside it, `unsupported_ttl` from a
+    host); `stored_at` on both, `persist.timestamp` deprecated (W603); W626 for an unknown literal
+    scope; W616 for the input in a 1.0 or 1.1 workflow. Implemented in core/src/exec/machine.rs
+    (`output()`), core/src/validate/effects.rs and grounded_agency/state/memory.py; the persist and
+    recall skills follow it. Tests: core/tests/effects.rs; runtime fixtures `persist_scope_echo`,
+    `persist_scope_mismatch`, `recall_scope_absent`, `persist_scope_unbound`,
+    `persist_scope_v11_unchecked`; validator fixtures
+    `warn_memory_inputs`, `warn_persist_timestamp`, `pass_memory_scope_v11_warn`;
+    tests/conformance/memory/store.json.'
   concerns:
   - checkpoint-rollback-state
   - models-context-memory-security
@@ -2190,9 +2233,18 @@ findings:
     document. Say what `stored: false` does to the step.'
   verified: 'Read the cited lines. Ran a `persist` step on the reference executor with the host returning
     `stored: false`: the step completed and the run went on.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.5 (Memory), accepted from RFC-0009: `stored: true` means
+    read-after-write in the scope until the entry ends, an I-JSON round trip and replace on the same
+    key; `stored: false` means nothing changed and the step completes; refusals are `Error`s
+    (`over_capacity` naming the limit, `unsupported_scope`, `unsupported_ttl`, `secret_in_data`);
+    entries end by expiry, scope end or retention, with no delete operation; a host states durability,
+    retention and limits per scope. Normative vectors tests/conformance/memory/store.json, passed by
+    grounded_agency/state/memory.py (`MemoryStore`, in memory and on file: tests/test_memory_store.py)
+    and by the Standard Agents binding''s `memoryTools` (session scope:
+    examples/standard_agents/test/memory.test.ts); runtime fixture `persist_stored_false_completes`.
+    Each host states durability, retention and limits: `MemoryStore.statement()`, and for `memoryTools`
+    examples/standard_agents/README.md and docs/integrations/standard_agents.md.'
   concerns:
   - checkpoint-rollback-state
   related:
@@ -2351,9 +2403,24 @@ findings:
     it with origin-scoped credentials.'
   verified: 'Read the cited lines. Ran a `send` to an arbitrary URL on the reference executor with no
     `constrain` step: the host received the destination unchanged.'
-  status: open
-  resolution: Not changed in this round. The proposed change is to the Standard's normative text, the
-    ontology or a canonical schema, which GOVERNANCE routes through an RFC; it waits for that decision.
+  status: fixed
+  resolution: 'Standard 1.2.0 §4.4.2 (Transmissions, destination policy), accepted from RFC-0009: a
+    destination policy is a list of patterns of three forms (exact; a prefix after a delimiter that
+    completes any authority; a suffix from `@` or `.` preceded only by host-name or local-part
+    characters), with normative vectors tests/conformance/destinations/match.json covering every known
+    bypass; the policies in force are the host''s (start option) and each applied profile''s
+    `allowed_destinations` (§5.21.3); the executor fails a disallowed `send` with F504
+    (`destination_not_allowed`) before approval or a checkpoint; safety layers refuse such calls
+    (§5.18.10), the Python adapter (`GroundedAgentConfig.allowed_destinations`, a binding''s
+    `destination` pointer; an unbound tool and a composite whose `invokes` reach a `send` binding are
+    refused, since it cannot tell whether or where they send) and the Standard Agents binding
+    (`configureLayer`, which every `send` tool obeys; a composite''s profiles reach the sends it
+    invokes), so neither conformance statement lists the row; W625 reports a 1.2 `send` whose approval
+    hides its destination; §12.5 documents Guarded Send; the send skill cites the policy. One grammar in
+    core/src/destination.rs (Python through `_core`) and one in packages/acs-core/src/destinations.ts.
+    Tests: core/tests/effects.rs, tests/test_destinations.py, tests/test_adapter_effects.py,
+    examples/standard_agents/test/layer.test.ts; runtime fixtures `destination_*`; validator fixtures
+    `warn_destination_not_shown`, `pass_destination_shown`.'
   concerns:
   - models-context-memory-security
   related:

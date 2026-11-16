@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::diag::Diagnostic;
-use crate::grounding;
 use crate::validate::{self, Context};
+use crate::{destination, grounding};
 use machine::Machine;
 use program::Program;
 
@@ -232,8 +232,10 @@ pub struct StartOptions {
     /// the run and of its nested runs. A policy that requires a capability
     /// the ontology does not define is refused (`StartError::Grounding`).
     pub grounding: Vec<grounding::Policy>,
-    /// The host's destination policies (§4.4.2). Workstream S5 applies them;
-    /// until then a non-empty list is refused.
+    /// The host's destination policies (§4.4.2): with the applied
+    /// profiles' `allowed_destinations`, the policies a `send` step's
+    /// destination must meet. A policy that holds an invalid pattern is
+    /// refused (`StartError::Policy`).
     pub destinations: Vec<Vec<String>>,
 }
 
@@ -246,19 +248,6 @@ pub struct StartOptions {
 pub struct SetOptions {
     pub catalogs: Vec<(Value, Option<String>)>,
     pub agents: Vec<Value>,
-}
-
-impl StartOptions {
-    /// The first member this executor does not implement yet, if one is
-    /// given: refused rather than ignored, so that no run goes ahead as if a
-    /// policy it was given were absent. Each workstream removes its line
-    /// when it implements the member.
-    fn unimplemented(&self) -> Option<&'static str> {
-        if !self.destinations.is_empty() {
-            return Some("destination policies (§4.4.2)");
-        }
-        None
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,6 +284,13 @@ pub enum Body {
         inputs: Value,
         deadline: Option<u64>,
         attempt: u32,
+        /// The pass's idempotency key (§4.4.2): `<run_id>:<n>`, `n` the `id`
+        /// of the pass's first `InvokeCapability`, the same for every attempt
+        /// of the pass. Always present on an action this executor issues;
+        /// absent only on a pending action read from a state that predates
+        /// keys, which `restore` fills in (§5.19.4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        idempotency_key: Option<String>,
         /// A waiting `delegate` delegated again (§5.13): the `task_id` of
         /// the delegation this one replaces, which the host may cancel.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -397,6 +393,16 @@ impl Body {
     }
 }
 
+/// A member that, when present, must be a list: `null` is refused rather
+/// than read as absent (`#[serde(default)]` gives `None` when it is
+/// absent).
+fn present_list<'de, D>(d: D) -> Result<Option<Vec<Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<Value>::deserialize(d).map(Some)
+}
+
 /// The host's answer to the pending action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
@@ -421,7 +427,19 @@ pub enum Response {
     Checkpoint {
         checkpoint_id: String,
     },
-    RolledBack,
+    /// The checkpoint is restored: everything it captured is back
+    /// (§4.4.1). `not_covered` lists changes since the checkpoint that it
+    /// never covered (a transmission, a delegate's change elsewhere).
+    /// Absent is `None`; a member that is not a list (`null` included) is
+    /// refused as malformed (§5.19.1).
+    RolledBack {
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present_list"
+        )]
+        not_covered: Option<Vec<Value>>,
+    },
     Decision {
         decision_id: String,
         decision: String,
@@ -455,7 +473,7 @@ impl Response {
             Response::Output { .. } => "Output",
             Response::Error { .. } => "Error",
             Response::Checkpoint { .. } => "Checkpoint",
-            Response::RolledBack => "RolledBack",
+            Response::RolledBack { .. } => "RolledBack",
             Response::Decision { .. } => "Decision",
             Response::Current { .. } => "Current",
             Response::Event { .. } => "Event",
@@ -479,6 +497,8 @@ pub enum StartError {
     /// A grounding policy is malformed or requires a capability the
     /// ontology does not define (§5.20, V101).
     Grounding(String),
+    /// A destination policy holds an invalid pattern (§4.4.2).
+    Policy(String),
 }
 
 impl fmt::Display for StartError {
@@ -495,6 +515,7 @@ impl fmt::Display for StartError {
             StartError::Inputs(m) | StartError::Program(m) => f.write_str(m),
             StartError::Identity(m) => write!(f, "actor_identity: {m}"),
             StartError::Grounding(m) => f.write_str(m),
+            StartError::Policy(m) => write!(f, "destination policy: {m}"),
             StartError::Unsupported(m) => write!(f, "this executor does not implement {m} yet"),
             StartError::Header(h) => write!(
                 f,
@@ -693,6 +714,10 @@ pub(crate) struct StepState {
     /// a step in record mode `actions`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub started: bool,
+    /// The pass's idempotency key (§4.4.2), once the step has called its
+    /// capability: every attempt of the pass carries it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1140,9 +1165,6 @@ impl Run {
         inputs: Map<String, Value>,
         options: StartOptions,
     ) -> Result<Run, StartError> {
-        if let Some(what) = options.unimplemented() {
-            return Err(StartError::Unsupported(what.to_string()));
-        }
         if let Some(h) = options
             .header
             .as_deref()
@@ -1152,6 +1174,7 @@ impl Run {
         }
         grounding_error(ctx, &options.grounding)
             .map_or(Ok(()), |e| Err(StartError::Grounding(e)))?;
+        destination::check_policies(&options.destinations).map_err(StartError::Policy)?;
         let program = Self::prepare(
             ctx,
             catalog,
@@ -1233,12 +1256,6 @@ impl Run {
             .collect();
         if !errors.is_empty() {
             return Err(StartError::Invalid(errors));
-        }
-        // A profile rule whose check this executor does not apply yet is
-        // refused, as `StartOptions::unimplemented` refuses the host's own
-        // policies: a run never goes ahead as if the rule were absent.
-        if let Some(what) = policy.unenforced() {
-            return Err(StartError::Unsupported(what.to_string()));
         }
         Program::build_set(ctx, catalog_set, &agents, workflow, policy).map_err(StartError::Program)
     }
@@ -1564,13 +1581,9 @@ impl Run {
             // A version-1 pending action carried no run_id.
             p.action.run_id = state.run_id.clone();
         }
-        // Members this executor does not implement yet: it could not have
-        // written a state that holds them.
-        if !state.destinations.is_empty() {
-            return Err(RestoreError::Malformed(
-                "the state holds a start option this executor does not implement".into(),
-            ));
-        }
+        fill_idempotency_key(&mut state);
+        destination::check_policies(&state.destinations)
+            .map_err(|e| RestoreError::Malformed(format!("destination policy: {e}")))?;
         let program = Self::prepare(
             ctx,
             catalog,
@@ -2060,6 +2073,71 @@ fn grounding_error(ctx: &Context, policies: &[grounding::Policy]) -> Option<Stri
             .err()
             .map(|e| format!("grounding[{i}].{e}"))
     })
+}
+
+/// A pending `InvokeCapability` read from a state that predates idempotency
+/// keys gets `<run_id>:<id>`, its own id (§5.19.4), and so do the step it
+/// is for, so that the later attempts of its pass reuse the key and every
+/// `InvokeCapability` the executor delivers carries one (§4.4.2), and the
+/// record of the pass the step already wrote, which carries the pass's key
+/// (§6.4) and is not written again when that attempt succeeds.
+fn fill_idempotency_key(state: &mut State) {
+    let Some(p) = state.pending.as_mut() else {
+        return;
+    };
+    let Body::InvokeCapability {
+        idempotency_key: key @ None,
+        ..
+    } = &mut p.action.body
+    else {
+        return;
+    };
+    let filled = format!("{}:{}", state.run_id, p.action.id);
+    *key = Some(filled.clone());
+    let Some(f) = state.frames.last_mut() else {
+        return;
+    };
+    f.cur.idempotency_key = Some(filled.clone());
+    // A record the host has already taken is not in the state.
+    if let Some(r) = f.cur.record
+        && r >= state.records_base
+        && let Some(record) = state.records.get_mut(r - state.records_base)
+    {
+        record["idempotency_key"] = json!(filled);
+    }
+}
+
+/// `items`, a `RolledBack`'s `not_covered`, as the executor keeps them, or
+/// why the list is malformed (§4.4.1, §5.19.1): each must be an object with
+/// a string `item` and a `reason` that is `transmitted`, `delegated`,
+/// `outside_scope` or an `x-` reason. Each is kept with its `item`, its
+/// `reason` and its `detail` when that is a string: any other member, one a
+/// later version may define included, is ignored.
+pub(crate) fn not_covered_kept(items: &[Value]) -> Result<Vec<Value>, String> {
+    let mut kept = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let Some(m) = item.as_object() else {
+            return Err(format!("not_covered[{i}] is not an object"));
+        };
+        let Some(name) = m.get("item").filter(|v| v.is_string()) else {
+            return Err(format!("not_covered[{i}].item is not a string"));
+        };
+        let reason = m.get("reason").and_then(Value::as_str).unwrap_or_default();
+        let x_reason = grounding::vendor(reason) && reason.len() <= 2 + 1 + 61;
+        if !(matches!(reason, "transmitted" | "delegated" | "outside_scope") || x_reason) {
+            return Err(format!(
+                "not_covered[{i}].reason must be transmitted, delegated, outside_scope or an x- reason; a change the checkpoint captured that the host did not restore makes the answer an Error"
+            ));
+        }
+        let mut one = serde_json::Map::new();
+        one.insert("item".into(), name.clone());
+        one.insert("reason".into(), json!(reason));
+        if let Some(detail) = m.get("detail").filter(|d| d.is_string()) {
+            one.insert("detail".into(), detail.clone());
+        }
+        kept.push(Value::Object(one));
+    }
+    Ok(kept)
 }
 
 /// Why `v` is not an `agent_identity` (`schemas/agent_identity_schema.yaml`),

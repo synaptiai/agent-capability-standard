@@ -200,9 +200,9 @@ standing mandate covers), and an output fails that its grounding policy
 host computes trust scores (`grounded_agency.trust`). A profile with an
 error is refused; a misspelled top-level member is a logged warning (W604).
 
-No reference component checks a destination policy (`allowed_destinations`,
-§4.4.2) yet, so each refuses a profile that sets one; no shipped profile
-(`schemas/profiles/`, examples, version 2.0.0) does.
+A profile's destination policy (`allowed_destinations`, §4.4.2) is in force
+beside the host's: a `send` it does not allow fails F504 before approval.
+No shipped profile (`schemas/profiles/`, version 2.0.0) sets one.
 
 Without a profile, what is enforced rests on the ontology's safety flags:
 
