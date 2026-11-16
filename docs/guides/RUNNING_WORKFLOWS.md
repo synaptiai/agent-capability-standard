@@ -586,7 +586,7 @@ wake-up time or the next poll.
 A snapshot holds a fixed part (about 0.5 kB), each stored step's output and
 the inputs it ran with, the action records (about 0.3 kB each, 0.6 kB with an
 approval), the trace (about 0.15 kB an event, three to six a step) and the
-pending action. Measured at the end of each of the 351 runtime fixtures, a
+pending action. Measured at the end of each of the 353 runtime fixtures, a
 snapshot is 1.2 kB to 35 kB (median 2.8 kB), of which the trace is about
 42% (47% of all their bytes together); the terminal action no longer stores
 copies of the records and outputs (in 1.1 that copy was a median 13%, up to

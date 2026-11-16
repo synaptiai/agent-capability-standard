@@ -233,3 +233,79 @@ All green on the final tree:
   the 61 diagnostic codes ... No fixture or case expects V103, S301, S302,
   R407 and W612", and /spec/1.2.0/'s suite figure counts 8 positive
   fixtures with warnings.
+
+## Round 1 — core-rust, ci-build
+
+Two issues, both in core-rust; both real, none rejected. No ci-build issue
+was reported.
+
+1. **WebAssembly `run.start`/`run.resume` defaulted a non-string
+   `attendance` or `records` (low).** Real, reproduced: before the fix,
+   `run.start` with `options.attendance` `true`, `0`, `{}` or `["actions"]`
+   started an attended run, and `records: ["actions"]` gave approvals mode
+   (the host loses its per-step records), where `_core.Run.start` raises
+   `TypeError` (`core/src/python.rs` takes `&str`). Root cause: optional
+   members read with `.and_then(Value::as_str)`, which reads a member of
+   the wrong type as one left out. Fix (`core/src/wasm.rs`):
+   `optional_string`, left out or `null` is the default, a string as
+   before, any other type `bad_request` ("'<key>' must be a string");
+   `attendance()` (both operations) and the `records` match use it, and so
+   does `key_hex`, which had its own copy of the rule. The same search found
+   one more member read that way, `yaml.parse`'s `max_bytes` (a string or a
+   negative number fell back to the default limit, where Python's
+   `load_yaml` takes `u64`): now `bad_request` unless left out, `null` or a
+   non-negative integer. `expr.check`'s per-root `always_present` still
+   reads a non-boolean as `false`: no other binding takes that scope, so
+   nothing disagrees. The TypeScript package sends only typed strings
+   (`wasm.ts`), so its users see no change, and the interface is new on this
+   branch (no `core/src/wasm.rs` on origin/main), so there is no Upgrading
+   entry. Test: `core/tests/wasm.rs`
+   `start_and_resume_refuse_a_non_string_attendance_or_records` (four wrong
+   types for each member on start, three on resume, `null` as the default,
+   `max_bytes`); it failed before the fix.
+2. **No test pinned refusing a decision that arrives after `expires_at`
+   (low).** Real, reproduced: with `machine.rs`'s `} else if
+   expires_at.is_some_and(|e| now > e) {` mutated to `false && ...` and the
+   new fixtures moved away, the lib tests (257), `runtime` (35, all
+   fixtures in every mode), `host_protocol` (31) and `effects` (19) all
+   pass. The executor was correct. Fix: two runtime fixtures beside
+   `approval_expired` in `scripts/gen_runtime_fixtures.py` (`approval_case`
+   gains `tail`): `approval_decided_after_expiry`, an approved decision
+   submitted at 3600001 with no tick before it, ends Failed F502 with an
+   `expired` record (trace `approval_decided`, not `approval_expired`); and
+   `approval_decided_at_expiry`, the same decision at 3600000, is in time
+   and the mutate runs (Completed), pinning §5.14's "no later than". The
+   reviewer's suggested form, `{**approve("d1"), "at": 3600001}`, puts `at`
+   inside the response, where the executor ignores it as a member the
+   protocol does not define; the fixture format's `at` is a member of the
+   script entry (`fixture.schema.json` `act.at`), which every runner passes
+   to submit, so the fixture uses that. Mutation checks with the fixtures
+   in place: `false && ...` fails `approval_decided_after_expiry` in
+   `runtime_fixtures` and `runtime_fixtures_ex_matching`; `now >= e` fails
+   `approval_decided_at_expiry` in both. Python (`tests/test_runner.py`)
+   and TypeScript through WebAssembly play them too. 353 runtime fixtures;
+   the running-workflows guide's snapshot-size paragraph says 353
+   (re-measured the same way, every figure unchanged: 1.2 to 34.8 kB,
+   median 2.8 kB, trace 42% mean and 47% of all bytes; after taking, 1.0 to
+   11.8 kB, median 1.5 kB). The site's counts follow from the files (once
+   tracked by git).
+
+### Checks after round 1 (core-rust, ci-build)
+
+- Rust (`core/`, 1.99.1): fmt; clippy plain, `python`, `wasm`; `cargo test
+  --locked` (the timing test included); `--features wasm --test wasm` (13);
+  MSRV `cargo +1.88.0 check --locked --all-targets --features python`. No
+  change reaches the Python extension (`wasm.rs` is behind the `wasm`
+  feature; `machine.rs` restored byte for byte after the mutation checks).
+- Python: `gen_runtime_fixtures --check` (353), `gen_call_fixtures`,
+  `gen_trigger_vectors`, `gen_standard_agents_binding`,
+  `gen_capability_json_schemas` and `sync_skill_schemas` `--check`;
+  `validate_doc_links`; ruff check and format (CI's list);
+  `scripts/run_conformance.py`; `pytest tests/` (4366 passed, 18 skipped).
+- TypeScript: `packages/acs-core` `build:wasm`, build, check, test (1811);
+  the binding check and test (191, 2 skipped).
+- Site: `npm run check`, `npm test` (1172), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` (0 enforced runs over 1800px), and
+  `scripts/check-axe.mjs` over /guides/running-workflows/, /spec/ and
+  /spec/1.2.0/ (12 runs, no violations). The built /spec/ and /spec/1.2.0/
+  figures count 353 runtime fixtures, 347 of them expecting actions.

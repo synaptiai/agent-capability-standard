@@ -377,7 +377,9 @@ add(
 )
 
 
-def approval_case(name, description, decision, end, trace=(), approval=None, extra=()):
+def approval_case(
+    name, description, decision, end, trace=(), approval=None, extra=(), tail=()
+):
     m = mutate()
     requires = None
     if approval is not None:
@@ -392,6 +394,7 @@ def approval_case(name, description, decision, end, trace=(), approval=None, ext
             {"expect": inv("constrain"), "respond": out(compliant=True)},
             *extra,
             decision,
+            *tail,
         ],
         end,
         trace,
@@ -443,6 +446,37 @@ approval_case(
     ["approval_expired"],
     approval={"approver": {"kind": "human"}, "expires": "1h"},
     extra=[{"expect": {"kind": "RequestApproval", "expires_at": 3600000}}],
+)
+
+approval_case(
+    "approval_decided_after_expiry",
+    "An approved decision that arrives after the request's expires_at, with no tick before it, is F502 with an expired record: a decision must arrive no later than expires_at.",
+    {
+        "expect": {"kind": "RequestApproval", "expires_at": 3600000},
+        "respond": approve("d1"),
+        "at": 3600001,
+    },
+    {"kind": "Failed", "code": "F502", "action_records": [{"status": "expired"}]},
+    ["approval_decided"],
+    approval={"approver": {"kind": "human"}, "expires": "1h"},
+)
+
+approval_case(
+    "approval_decided_at_expiry",
+    "An approved decision that arrives at the request's expires_at is in time: the step runs.",
+    {
+        "expect": {"kind": "RequestApproval", "expires_at": 3600000},
+        "respond": approve("d1"),
+        "at": 3600000,
+    },
+    {
+        "kind": "Completed",
+        "outcome": "completed",
+        "action_records": [{"status": "executed"}],
+    },
+    ["approval_decided"],
+    approval={"approver": {"kind": "human"}, "expires": "1h"},
+    tail=[{"expect": inv("mutate", step=2), "respond": out(success=True)}],
 )
 
 
