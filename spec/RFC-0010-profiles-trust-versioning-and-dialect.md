@@ -100,6 +100,20 @@ implement it, and TypeScript reaches the same implementation through the
 WebAssembly core; `tests/conformance/profiles/load.json` and
 `tests/conformance/profiles/effective.json` are normative.
 
+An implementation that does not put one of these rules in force refuses a
+profile that sets it, as it refuses a profile with an error (§5.21.4),
+rather than apply the rest and act as if the rule were absent. The
+reference executor checks a profile's grounding policy once the grounding
+check of §5.20 (RFC-0008) reads it, and its destination policy once the
+destination check of §4.4.2 does; both checks land with their own
+workstreams, and the profiles' policies are wired to them when those merge.
+Until then the executor refuses to start or restore a run under a profile
+that sets `require_grounding` or `allowed_destinations`, and the Python
+adapter, which checks no call output or send, refuses those and
+`minimum_confidence`. Every shipped profile sets `require_grounding`, so
+until then the validator is the one component that applies them as they
+are.
+
 ### 2) The schema dialect is defined, with a normative rendering
 
 §4.1.2 lists the Draft 2020-12 keywords contracts use and defines `type:
@@ -150,7 +164,10 @@ OASF adapter through one core function. §11.7 lists the artifacts of 1.2.0
 with their versions. §11.5 adds 1.2, generalises W616 to any feature newer
 than a workflow's target, and makes the catalog's header an explicit value
 of the start operation (a version or an explicit none), so the executor and
-the validator apply the same target's rules to the same catalog.
+the validator apply the same target's rules to the same catalog. W616 reads
+one table of features; the 1.2 features belong to other workstreams (S2a,
+S2b, S3, S4, S5), and each adds its rows, and S3 the S303 for `agents`
+before 1.2, with the feature itself.
 
 ### 5a) The header reaches the executor
 
@@ -165,7 +182,9 @@ file's header version. The Rust `StartOptions` has no default, the host
 protocol schema, the fixture format, the WebAssembly `run.start` and
 TypeScript's `StartArgs` require the member, `_core.Run.start` requires the
 keyword, and `WorkflowRunner` carries each file's header into its
-workflows' `spec_version`. A runtime fixture pins the 1.2-header case.
+workflows' `spec_version`. Two runtime fixtures pin the 1.2-header case
+with the approver `sender_check` of §5.17 they exercise, which lands with
+its own workstream (S2a); they are added when it merges.
 
 ### 6) Skill frontmatter follows the Agent Skills format plus Claude Code's keys
 
@@ -225,14 +244,24 @@ affected.
   normative, open cases decided), `resolve.json` (new).
 - `tests/conformance/entities/ids.json` (new, normative).
 - Runtime fixtures `profile_*` with a `profiles` member, among them
-  `profile_person_does_not_mark_readers`, `profile_star_always_starts` and
-  `profile_minimum_confidence_not_a_number`; `header_1_2_sender_check_needs_identities`
-  and `header_null_sender_check_not_read` for the header.
+  `profile_person_does_not_mark_readers`, `profile_star_always_starts`,
+  `profile_minimum_confidence_not_a_number` and
+  `profile_minimum_confidence_waited_delegate`. With the workstreams whose
+  checks they exercise: `profile_grounding_required` (§5.20),
+  `profile_destinations_refuse` (§4.4.2), and for the header
+  `header_1_2_sender_check_needs_identities` and
+  `header_null_sender_check_not_read` (§5.17).
 - The runtime fixture format requires `header` (a version or `null`); every
-  existing fixture gains `"header": null`, with unchanged expectations.
+  existing fixture gains `"header": null`, with unchanged expectations. A
+  script entry may list `absent` members, which the pending action must not
+  hold (a person's request names no `mandate_ref`), since the subset rule of
+  `expect` cannot say that a member is absent.
 - Validator fixtures with profiles (`tests/fixtures/EXPECTATIONS.json` gains
   `profiles`), among them `pass_profile_star_always`, and for `spec_version`
-  1.2, 1.3 and W616.
+  1.2 and 1.3. W616 for a 1.2 feature is pinned by a fixture of the first
+  workstream whose feature it uses (`warn_version_feature_1_2`, S3's
+  `continues`); each workstream adds its features' rows to the table W616
+  reads.
 - The TypeScript package replays the validator, runtime and expression
   fixtures and the profile vectors through the WebAssembly core.
 

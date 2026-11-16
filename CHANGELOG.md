@@ -192,7 +192,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   profile written for 1.1, which nothing applied, is refused where it is
   applied now: migrate it as the shipped profiles were (each to 2.0.0).
   `tools/validate_profiles.py` checks profiles with the core and fails on
-  any diagnostic; its old helper functions are gone.
+  any diagnostic; its old helper functions are gone. A profile that sets a
+  rule an implementation does not put in force is refused too, rather than
+  applied without it (§5.21.4): until the grounding check (§5.20) and the
+  destination check (§4.4.2) read them, the executor (`_core.Run.start`,
+  `WorkflowRunner`, WebAssembly `run.start`, and a restore) refuses a profile
+  with `require_grounding` or `allowed_destinations`, every shipped profile
+  included, and `GroundedAgentAdapter` refuses those and
+  `minimum_confidence` (`ProfileError`), since it checks no call output or
+  send. An unknown top-level profile member stays a warning (W604) and is
+  now logged at WARNING with the member meant.
 - Python SDK: `grounded_agency.trust.decay_factor` counts an age below zero
   as zero (it raised `ValueError`), and `TrustModel` reads its field
   authorities from `field_authority.fields`, refusing a malformed entry or
@@ -201,7 +210,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `GroundedAgentConfig(profiles=...)` needs `approval="ask"`.
 - An ontology whose capability contract keeps a `$ref` that names nothing,
   is cyclic or nests deeper than 12 is refused when it is loaded (it was
-  kept silently), by the CLI, Python, the executor and WebAssembly alike.
+  kept silently): by the validator CLI, the executor and WebAssembly, and in
+  Python by `_core.Validator`, `WorkflowEngine` and `GroundedAgentAdapter`,
+  which now loads its ontology through the core as well. An adapter whose
+  ontology is not at `<root>/schemas/` names the directory its `$ref`s are
+  relative to with `GroundedAgentConfig(schema_root=...)`. A same-file
+  `$ref` (`#<pointer>`) names a node of the ontology itself (§4.1.2).
 - TypeScript package: `npm test` replays the fixtures through the
   WebAssembly core, so run `npm run build:wasm` (which needs the
   `wasm32-unknown-unknown` target) and `npm run build` first; the binding
@@ -294,15 +308,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `GroundedAgentConfig(profiles=...)`, `WorkflowRunner(profiles=...)`,
   `_core.Validator.check_profiles`, `profile_flags`, `profile_policy`;
   `tools/validate_workflows.py --profile`. Normative profile vectors
-  (`tests/conformance/profiles/`), 14 runtime fixtures and validator
-  fixtures with profiles (`EXPECTATIONS.json` gains `profiles`).
+  (`tests/conformance/profiles/`), 15 runtime fixtures and validator
+  fixtures with profiles (`EXPECTATIONS.json` gains `profiles`). A runtime
+  fixture's script entry may list `absent` members, which the pending
+  action must not hold. The adapter's records digest (`config_sha256`)
+  covers the applied profiles; `GroundedAgentConfig(schema_root=...)`.
 - Trust (§8): `grounded_agency.trust.resolve` with the six strategies of
   §8.2 and tie-breaking, `Candidate`, `Resolution`, `merge_trust_weights`;
   the trust vectors are normative, with `resolve.json`. The
   conflicting-sources benchmark resolves with `resolve` (same results).
 - Entity ids (§7.1): `grounded_agency.entities.parse_entity_id`,
   `tests/conformance/entities/ids.json`; `entity_taxonomy.yaml`'s pattern
-  is checked against its examples.
+  is checked against its examples, and names every white space and control
+  character a segment cannot hold (U+00A0, U+2028 and U+0085 among them),
+  so it means the same in every regular expression dialect.
 - Cited versions (§11.6): `grounded_agency.versions.check_cited` and
   `CitedVersionError`; the OASF adapter refuses a mapping that cites
   another ontology major or an unsupported Standard.
@@ -313,7 +332,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `Context::from_values` with an in-memory schema store.
   `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
   a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
-  `NPM_TOKEN` are set (a dry run otherwise).
+  `NPM_TOKEN` are both set (a dry run otherwise).
 - `skills/README.md` lists each frontmatter key's owner (Agent Skills,
   Claude Code, ACS), checked by `tests/test_skill_frontmatter.py`.
 - Standard 1.2.0 text of §4.1.2 (schema dialect), §5.21, §7.1, §8.1–§8.3,
@@ -324,7 +343,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   ontology 2.2.0, key `checkpoint_policy` by capability id or `"*"`, and
   list anchor kinds as `required_anchor_types`. The documentation and the
   compliance documents say a profile setting is enforced where a profile
-  is applied; the site's domain figures follow §5.21.3.
+  is applied, and which rules the reference implementation refuses until
+  it checks them; the site's domain figures follow §5.21.3. A profile's
+  `checkpoint_policy` `never` for `rollback` is W602, as for `mutate` and
+  `send` (a `checkpoint` `requires` edge needs a checkpoint before it).
 - Direct dependencies are at their latest releases. Python: the dev ranges are
   pytest 8.4.2–9, pytest-asyncio 1.x, mypy 1.19.1–2 and ruff 0.17 (CI runs
   ruff 0.17.4).
@@ -391,9 +413,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   on stderr. The audit hook logged only Skill calls, with their arguments; it
   logs every call with a digest of the input. Refusals open with the
   diagnostic code (`F501 CHECKPOINT_REQUIRED:`).
-- Documentation no longer says that a domain profile setting is enforced: no
-  shipped component applies a profile, and the compliance documents say which
-  component enforces what.
+- Documentation no longer says that a domain profile setting is enforced
+  where no shipped component applied a profile; the compliance documents say
+  which component enforces what (Standard 1.2.0 applies profiles, see
+  Changed).
 - A Bash call whose input is not a dictionary, or whose `command` is not
   text, made the tool mapper raise, and the PreToolUse hook then let the
   call through. It is now treated as an unknown, checkpoint-gated mutation.

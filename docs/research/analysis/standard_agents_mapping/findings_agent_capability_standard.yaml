@@ -235,22 +235,29 @@ findings:
     set the thresholds low, medium, high and healthcare.yaml sets none, low, low; every `block_autonomous`
     and `require_grounding` entry is an ontology capability id. Read schemas/profiles/profile_schema.yaml
     lines 1-111 and tools/validate_profiles.py lines 120-258 (type and enum checks only).'
-  status: fixed
-  resolution: 'Standard 1.2.0 §5.21 (Domain Profiles), accepted from RFC-0010: a host applies profiles to a run at
-    start, a safety layer to the calls it covers, a validator may be given them; a workflow''s `profile`
-    field stays descriptive. Rules only tighten (trust weights replace, §8.3); every member''s effect is
-    stated in effective flags (§5.2.1) and §5.14, a person for `require_human`/`block_autonomous`
-    without a mark (records carry `person_required`), `checkpoint` steps exempt from
-    `checkpoint_policy`, a minimum confidence (F504 `below_minimum_confidence`/`invalid_confidence`);
-    key grammars are capability ids or `*`, anchor kinds and trust classes; loading diagnostics S303,
-    S304, V101, V109, W602-W604, `critical` deprecated. Implemented once in core/src/profile.rs for the
-    validator (`--profile`, `Options.profiles`) and the executor (`StartOptions.profiles`), exposed to
-    Python (`AppliedProfiles`, `GroundedAgentConfig(profiles=)`, `WorkflowRunner(profiles=)`) and to
-    TypeScript through the WebAssembly core. Normative vectors tests/conformance/profiles/load.json and
-    effective.json; runtime fixtures profile_*; validator fixtures with `profiles`; the shipped profiles
-    migrated to 2.0.0; the compliance documents say where a setting is enforced. The profiles''
-    grounding and destination policies are given to the grounding and destination checks of §5.20 and
-    §4.4.2 (`Policy::grounding`, `Policy::destinations`).'
+  status: partly_fixed
+  resolution: 'Partly fixed: the Standard text and every rule but two are in force; the profiles'' grounding
+    and destination policies are refused until the checks they feed are on main. Standard 1.2.0 §5.21 (Domain
+    Profiles), accepted from RFC-0010: a host applies profiles to a run at start, a safety layer to the calls
+    it covers, a validator may be given them; a workflow''s `profile` field stays descriptive. Rules only
+    tighten (trust weights replace, §8.3); every member''s effect is stated in effective flags (§5.2.1) and
+    §5.14, a person for `require_human`/`block_autonomous` without a mark (records carry `person_required`),
+    `checkpoint` steps exempt from `checkpoint_policy`, a minimum confidence (F504
+    `below_minimum_confidence`/`invalid_confidence`); key grammars are capability ids or `*`, anchor kinds and
+    trust classes; loading diagnostics S303, S304, V101, V109, W602-W604, `critical` deprecated; an
+    implementation refuses a profile whose rule it does not put in force (§5.21.4). Implemented once in
+    core/src/profile.rs for the validator (`--profile`, `Options.profiles`) and the executor
+    (`StartOptions.profiles`: thresholds, checkpoint policy, the person, minimum confidence, waited
+    delegations included), exposed to Python (`AppliedProfiles`, `GroundedAgentConfig(profiles=)` for flags
+    and the person, `WorkflowRunner(profiles=)`) and to TypeScript through the WebAssembly core. Normative
+    vectors tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_*; validator
+    fixtures with `profiles`; the shipped profiles migrated to 2.0.0; the compliance documents say where a
+    setting is enforced. Remaining: the executor refuses a profile with `require_grounding` or
+    `allowed_destinations` (`Policy::unenforced`, core/tests/profiles.rs) until S4''s grounding check (§5.20)
+    and S5''s destination check (§4.4.2) read `Policy::grounding` and `Policy::destinations`, with the
+    fixtures profile_grounding_required and profile_destinations_refuse; the Python adapter, which checks no
+    call output or send, refuses those rules and `minimum_confidence` (tests/test_profiles.py). Every shipped
+    profile sets `require_grounding`, so only the validator applies one as it is until then.'
   concerns:
   - checkpoint-rollback-state
   - evidence-audit-observability
@@ -1038,15 +1045,16 @@ findings:
     standard, ontology and plugin).
   status: fixed
   resolution: 'Standard 1.2.0 §11.6 (Ontology Versions): the ontology''s own SemVer with a change table that
-    classifies constraint changes and records 2.1.0''s `transform.output` widening; pairing with
-    Standard versions; a citation rule for documents outside workflows (`standard` and `ontology`;
-    another ontology major or an unsupported Standard is V109). §11.7 lists the artifacts of 1.2.0 with
-    their versions, checked by tests/test_version_lines.py (test_standard_artifact_table). §11.5 adds
-    1.2, generalises W616 to a table of features and makes the catalog header an explicit start member.
-    The consumers implement the citation rule through one core function (`_core.check_cited_versions`):
-    the profile loader and the OASF adapter (`grounded_agency.versions`, CitedVersionError); the ROADMAP
-    Versions table has five lines and site/src/data/versions.ts reads the TypeScript package''s
-    version.'
+    classifies constraint changes and records 2.1.0''s `transform.output` widening; pairing with Standard
+    versions; a citation rule for documents outside workflows (`standard` and `ontology`; another ontology
+    major or an unsupported Standard is V109). §11.7 lists the artifacts of 1.2.0 with their versions, checked
+    by tests/test_version_lines.py (test_standard_artifact_table). §11.5 adds 1.2, makes W616 read one table
+    of features (core `semantics::FEATURES`) and makes the catalog header an explicit start member; each 1.2
+    feature''s row of that table, and the S303 for `agents` before 1.2, land with the workstream that adds the
+    feature (S2a, S2b, S3, S4, S5). The consumers implement the citation rule through one core function
+    (`_core.check_cited_versions`): the profile loader and the OASF adapter (`grounded_agency.versions`,
+    CitedVersionError); the ROADMAP Versions table has five lines and site/src/data/versions.ts reads the
+    TypeScript package''s version.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-26
@@ -1162,15 +1170,16 @@ findings:
     core/src/types.rs lines 158-184 and core/src/schema.rs lines 244-258. skills/*/schemas/ holds 36 generated
     output schemas and no input schema.'
   status: fixed
-  resolution: 'Standard 1.2.0 §4.1.2 (Schema Dialect) defines the contracts'' keywords: Draft 2020-12 ones from a
-    fixed list, `type: any`, `type: "a|b"`, `$ref` with sibling keywords merged over the target (a
-    missing target, a cycle or a chain deeper than 12 refuses the ontology at load: core Context::new,
-    core/tests/contracts.rs), `nullable`, and `x-` annotations with `x-acs-` reserved (Appendix B). The
-    Draft 2020-12 rendering''s rules are normative; schemas/generated/capability_contracts.schema.json
-    is generated from the core''s resolved contracts, and the §5.4 divergence on `nullable` is stated
-    and pinned (tests/test_capability_json_schemas.py). schemas/capability_ontology.schema.json''s
-    dialect metaschema checks the ontology in CI; the TypeScript package compiles the rendering under
-    strict ajv.'
+  resolution: 'Standard 1.2.0 §4.1.2 (Schema Dialect) defines the contracts'' keywords: Draft 2020-12 ones
+    from a fixed list, `type: any`, `type: "a|b"`, `$ref` to a repository path or the same file with sibling
+    keywords merged over the target (a missing target, a cycle or a chain deeper than 12 refuses the ontology
+    at load: core Context::new, and so the validator, the executor, WebAssembly and the Python adapter;
+    core/tests/contracts.rs, tests/test_capability_json_schemas.py), `nullable`, and `x-` annotations with
+    `x-acs-` reserved (Appendix B). The Draft 2020-12 rendering''s rules are normative;
+    schemas/generated/capability_contracts.schema.json is generated from the core''s resolved contracts, and
+    the §5.4 divergence on `nullable` is stated and pinned (tests/test_capability_json_schemas.py).
+    schemas/capability_ontology.schema.json''s dialect metaschema checks the ontology in CI; the TypeScript
+    package compiles the rendering under strict ajv.'
   concerns:
   - tools-contracts
   - models-context-memory-security
@@ -1748,13 +1757,13 @@ findings:
   status: fixed
   resolution: 'packages/acs-core (`@synaptiai/acs-core` 0.1.0): the plain-TypeScript entry holds the ontology
     table, effective flags, RFC 8785 canonical JSON and the approval digest; the `./wasm` entry runs the
-    reference validator and executor, domain profiles included, in process through core/src/wasm.rs
-    (feature `wasm`: three C-ABI exports over JSON, no new dependency; `Context::from_values` with an
-    in-memory schema store). The package''s tests replay the validator fixtures, every runtime fixture
-    (straight and restored before each entry), the expression fixtures and the profile vectors through
-    the module; CI builds it. .github/workflows/publish-npm.yml publishes from a tag `acs-core-vX.Y.Z`
-    on main when NPM_PUBLISH_ENABLED and NPM_TOKEN are set (a dry run otherwise). The Standard Agents
-    binding depends on the package.'
+    reference validator and executor, domain profiles included, in process through core/src/wasm.rs (feature
+    `wasm`: three C-ABI exports over JSON, no new dependency; `Context::from_values` with an in-memory schema
+    store). The package''s tests replay the validator fixtures, every runtime fixture (straight and restored
+    before each entry), the expression fixtures and the profile vectors through the module; CI builds it.
+    .github/workflows/publish-npm.yml publishes from a tag `acs-core-vX.Y.Z` on main when NPM_PUBLISH_ENABLED
+    and NPM_TOKEN are both set (a dry run otherwise; tests/test_ci_workflows.py). The Standard Agents binding
+    depends on the package.'
   concerns:
   - tools-contracts
   - published-api-extension-points
@@ -2564,13 +2573,14 @@ findings:
   verified: Read spec/STANDARD-v1.1.0.md lines 1176-1182 and schemas/entity_taxonomy.yaml lines 10-16.
     Found by the coverage check, which looked for sections of the Standard that no mapping row cites.
   status: fixed
-  resolution: 'Standard 1.2.0 §7.1 takes the taxonomy''s form `<class>:<namespace>/<local_id>`, states its grammar
-    (namespace outermost first, `namespace_components` the recommended order) and gives examples of both
-    files, 1.1''s printed example rewritten. schemas/entity_taxonomy.yaml 1.1.0 adds
-    `id_convention.pattern` and that example; grounded_agency/entities.py parses ids;
-    tests/conformance/entities/ids.json (normative) pins the grammar (tests/test_entities.py), and
-    tools/validate_canonical_schemas.py checks every taxonomy example against the pattern and the class
-    list.'
+  resolution: 'Standard 1.2.0 §7.1 takes the taxonomy''s form `<class>:<namespace>/<local_id>`, states its
+    grammar (namespace outermost first, `namespace_components` the recommended order) and gives examples of
+    both files, 1.1''s printed example rewritten. schemas/entity_taxonomy.yaml 1.1.0 adds
+    `id_convention.pattern`, which names each white space and control character a segment cannot hold so that
+    it means the same in every regular expression dialect, and that example; grounded_agency/entities.py
+    parses ids; tests/conformance/entities/ids.json (normative) pins the grammar, U+00A0, U+2028, U+3000,
+    U+FEFF and U+0085 included (tests/test_entities.py), and tools/validate_canonical_schemas.py checks every
+    taxonomy example against the pattern and the class list.'
   concerns:
   - evidence-audit-observability
 questions:

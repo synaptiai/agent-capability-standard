@@ -56,12 +56,40 @@ def test_publish_checks_out_the_tag_and_refuses_one_off_main() -> None:
     runs = "\n".join(str(s.get("run", "")) for s in steps(job))
     assert "git merge-base --is-ancestor" in runs
     publish = [s for s in steps(job) if "npm publish" in str(s.get("run", ""))]
-    assert {s["if"] for s in publish} == {
-        "vars.NPM_PUBLISH_ENABLED == 'true'",
-        "vars.NPM_PUBLISH_ENABLED != 'true'",
-    }
     real = next(s for s in publish if "--dry-run" not in s["run"])
     assert real["env"]["NODE_AUTH_TOKEN"] == "${{ secrets.NPM_TOKEN }}"
+
+
+def test_publish_dry_runs_unless_enabled_and_the_token_is_set() -> None:
+    """The real publish needs both the variable and the token; the dry run
+    runs in every other case, so exactly one of the two steps runs."""
+    (job,) = PUBLISH["jobs"].values()
+    assert job["env"]["HAS_NPM_TOKEN"] == "${{ secrets.NPM_TOKEN != '' }}"
+    publish = [s for s in steps(job) if "npm publish" in str(s.get("run", ""))]
+    conditions = {"--dry-run" in s["run"]: s["if"] for s in publish}
+    assert conditions == {
+        False: "vars.NPM_PUBLISH_ENABLED == 'true' && env.HAS_NPM_TOKEN == 'true'",
+        True: "vars.NPM_PUBLISH_ENABLED != 'true' || env.HAS_NPM_TOKEN != 'true'",
+    }
+
+    def runs(condition: str, enabled: str, token: str) -> bool:
+        # The two conditions' grammar: `a == 'x' && b == 'y'`, `a != 'x' || b != 'y'`.
+        values = {"vars.NPM_PUBLISH_ENABLED": enabled, "env.HAS_NPM_TOKEN": token}
+        joiner = " && " if " && " in condition else " || "
+        results = []
+        for term in condition.split(joiner):
+            name, op, literal = term.split(" ", 2)
+            same = values[name] == literal.strip("'")
+            results.append(same if op == "==" else not same)
+        return all(results) if joiner == " && " else any(results)
+
+    for enabled in ("true", "", "false"):
+        for token in ("true", "false"):
+            ran = [dry for dry, c in conditions.items() if runs(c, enabled, token)]
+            assert ran == [not (enabled == "true" and token == "true")], (
+                enabled,
+                token,
+            )
 
 
 def test_every_wasm_build_names_its_toolchain() -> None:

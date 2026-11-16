@@ -239,12 +239,13 @@ compliance:
 
 **Evidence Requirements:**
 
-The healthcare profile mandates five anchor types for all clinical claims:
-- `clinical_data_point`: Grounding in actual patient data
-- `guideline_reference`: Linkage to published clinical guidelines
-- `audit_trail`: Record of the decision-making process
-- `clinician_verification`: Human clinician sign-off
-- `timestamp`: Temporal anchoring for all events
+The healthcare profile requires grounding (`require_grounding`) for `detect`, `predict`, `classify`, `plan` and `compare`, with these anchor kinds (Standard 1.2.0 §6.5; profile 2.0.0 maps its 1.0.0 labels to them):
+- `record`: patient data and the audit trail (1.0.0's `clinical_data_point` and `audit_trail`)
+- `url`: published clinical guidelines (1.0.0's `guideline_reference`)
+- `human_note`: a clinician's sign-off (1.0.0's `clinician_verification`)
+- `file`, `sensor` and `api`: the kinds of its domain sources
+
+1.0.0's `timestamp` is not an anchor kind: every anchor carries its own time. The reference implementation does not check a profile's grounding policy yet, so the executor and the Python adapter refuse the profile rather than apply it without that rule (Standard 1.2.0 §5.21.4).
 
 **Limitations:**
 
@@ -266,7 +267,7 @@ The manufacturing domain profile (`schemas/profiles/manufacturing.yaml`) targets
 
 **Equipment Lifecycle Tracking:**
 
-The manufacturing profile's trust weight hierarchy (PLC > SCADA > hardware sensors > MES API > ERP) reflects the industrial automation reliability stack, with direct hardware readings receiving the highest trust. The `before_actuator_command: always` checkpoint policy ensures that all machine control commands can be reversed.
+The manufacturing profile's trust weight hierarchy (PLC > SCADA > hardware sensors > MES API > ERP) reflects the industrial automation reliability stack, with direct hardware readings receiving the highest trust. Its checkpoint policy `execute: always` (1.0.0's `before_actuator_command`) requires a checkpoint before every machine control command where the profile is applied, so each can be rolled back to.
 
 **Quality Control Workflows:**
 

@@ -1,5 +1,5 @@
 {
-  "description": "block_autonomous requires a person for the mutate step: it is asked of a human with always_ask and no mandate_ref, though its approver is a standing mandate; its record carries person_required, and the decision no mandate_ref.",
+  "description": "block_autonomous requires a person for the mutate step: it is asked of a human with always_ask and no mandate_ref (the request has none), though its approver is a standing mandate; its record carries person_required, and the decision no mandate_ref.",
   "catalog": {
     "w": {
       "goal": "g",
@@ -91,6 +91,9 @@
           "always_ask": true
         }
       },
+      "absent": [
+        "approver.mandate_ref"
+      ],
       "respond": {
         "kind": "Decision",
         "decision_id": "d1",

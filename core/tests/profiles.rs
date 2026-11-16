@@ -227,3 +227,75 @@ fn a_header_that_is_not_supported_refuses_the_start() {
         other => panic!("{:?}", other.err()),
     }
 }
+
+/// A run under a profile with `rule` is refused at start and at restore: no
+/// executor check reads a profile's grounding or destination policy yet,
+/// and a run never goes ahead as if the rule were absent.
+fn refused_at_start_and_restore(rule: (&str, Value), names: &str) {
+    let ctx = ctx();
+    let cat = catalog(json!([
+        {"capability": "retrieve", "purpose": "p", "store_as": "r",
+         "input_bindings": {"target": "x"}}
+    ]));
+    let mut profile = json!({"domain": "d", "version": "1.0.0"});
+    profile[rule.0] = rule.1;
+    match Run::start(&ctx, &cat, "w", Map::new(), options(vec![profile.clone()])) {
+        Err(StartError::Unsupported(m)) => assert!(m.contains(names), "{m}"),
+        other => panic!("{:?}", other.err()),
+    }
+    // A state that holds the profile (written by another executor, or
+    // before this one stopped applying the rule) does not restore either.
+    let run = Run::start(&ctx, &cat, "w", Map::new(), options(Vec::new())).unwrap();
+    let mut state: Value = serde_json::from_str(&run.snapshot(None).state).unwrap();
+    state["profiles"] = json!([profile]);
+    let text = acs_core::exec::canonical::canonical(&state);
+    let snapshot = acs_core::exec::Snapshot {
+        sha256: acs_core::exec::canonical::sha256_hex(&text),
+        hmac: None,
+        state: text,
+    };
+    match Run::restore(&ctx, &cat, &snapshot, None) {
+        Err(acs_core::exec::RestoreError::Start(StartError::Unsupported(m))) => {
+            assert!(m.contains(names), "{m}");
+        }
+        other => panic!("{:?}", other.err()),
+    }
+}
+
+#[test]
+fn a_profile_grounding_policy_is_refused_until_the_grounding_check_reads_it() {
+    refused_at_start_and_restore(
+        (
+            "evidence_policy",
+            json!({"require_grounding": ["retrieve"], "required_anchor_types": ["file"]}),
+        ),
+        "require_grounding",
+    );
+}
+
+#[test]
+fn a_profile_destination_policy_is_refused_until_the_send_check_reads_it() {
+    refused_at_start_and_restore(("allowed_destinations", json!([])), "allowed_destinations");
+    refused_at_start_and_restore(
+        ("allowed_destinations", json!(["mailto:*"])),
+        "allowed_destinations",
+    );
+}
+
+#[test]
+fn the_rules_a_run_applies_start_it() {
+    // Thresholds, checkpoint rules, a minimum confidence, trust weights and
+    // `required_anchor_types` alone (which has no effect) do not refuse.
+    let ctx = ctx();
+    let cat = catalog(json!([
+        {"capability": "retrieve", "purpose": "p", "store_as": "r",
+         "input_bindings": {"target": "x"}}
+    ]));
+    let profile = json!({"domain": "d", "version": "1.0.0",
+        "risk_thresholds": {"auto_approve": "high"},
+        "checkpoint_policy": {"mutate": "always"},
+        "evidence_policy": {"minimum_confidence": 0.5, "required_anchor_types": ["file"]},
+        "trust_weights": {"trust_class:peer_agent": 0.5}});
+    let run = Run::start(&ctx, &cat, "w", Map::new(), options(vec![profile])).unwrap();
+    assert_eq!(run.next().body.kind(), "InvokeCapability");
+}

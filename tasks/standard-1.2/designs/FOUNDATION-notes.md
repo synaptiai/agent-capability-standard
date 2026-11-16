@@ -558,3 +558,36 @@ Workstreams should run `npm run check:axe` (or at least
   both loaders (`iJsonProblem` in `packages/acs-core/src/ijson.ts`; the
   core's canonical JSON in Python). `iJsonProblem` is the TypeScript
   package's one I-JSON check: S4 or S5 code that needs one should use it.
+
+## 2026-11-16 — S6 review round 1 (affects S2b, S4, S5)
+
+- **A profile rule no check reads is refused, not ignored.**
+  `profile::Policy::unenforced()` names a profile's grounding policy
+  (`require_grounding`) or destination policy (`allowed_destinations`), and
+  `Run::prepare` (`core/src/exec/mod.rs`, so start, restore, Python and
+  WebAssembly) refuses it with `StartError::Unsupported`, as
+  `StartOptions::unimplemented()` refuses the host's own. **S4**, when its
+  grounding check reads `self.program.policy.grounding()`, deletes the
+  grounding line; **S5**, when its send check reads
+  `self.program.policy.destinations()`, deletes the destination line (S6
+  Pending items 1 and 5). The Python adapter refuses the same rules and
+  `minimum_confidence` (`self.profiles.refuse_unapplied(...)` in
+  `GroundedAgentAdapter.__post_init__`): S4's adapter output check and
+  S5's send check delete their names there. §5.21.4 states the rule: an
+  implementation refuses a profile that sets a rule it does not put in
+  force.
+- **Fixture format: `absent`.** A runtime fixture's script entry may list
+  `absent`: member paths (`approver.mandate_ref`) the pending action must
+  not hold. It is in `tests/conformance/runtime/schema/fixture.schema.json`
+  and checked by `tests/runtime_replay.py` `play`, `core/tests/runtime.rs`
+  `play` and `packages/acs-core/test/wasm-runtime.test.ts` `play`. **S2b**
+  keeps it when it edits those files and lists it among the script entry
+  members in §10.5.
+- **Same-file `$ref` in contracts.** `SchemaStore::resolve_node_in(node,
+  doc, budget)` resolves `#<pointer>` in `doc`; `Context::new` resolves
+  contracts with it against the ontology, so §4.1.2's same-file form loads.
+- **The adapter loads its ontology through the core.**
+  `GroundedAgentAdapter` builds `_core.Validator(ontology_path,
+  schema_root)` for every configuration (`GroundedAgentConfig.schema_root`,
+  default the ontology's grandparent, as `WorkflowEngine`): a contract
+  `$ref` that names nothing refuses the configuration.

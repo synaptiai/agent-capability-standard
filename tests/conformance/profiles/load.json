@@ -104,6 +104,26 @@
       }
     },
     {
+      "name": "domain_starts_with_digit",
+      "about": "domain starts with a lower-case letter; a digit first is outside its grammar",
+      "profiles": [
+        {
+          "domain": "3d-vision",
+          "version": "1.0.0"
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "#0",
+            "field": "domain"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
       "name": "version_not_semver",
       "about": "version is MAJOR.MINOR.PATCH",
       "profiles": [
@@ -428,6 +448,29 @@
             "code": "W602",
             "profile": "d",
             "field": "checkpoint_policy.mutate"
+          }
+        ]
+      }
+    },
+    {
+      "name": "checkpoint_never_requires_edge",
+      "about": "never has no effect where a checkpoint requires edge of the ontology requires one (rollback)",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "checkpoint_policy": {
+            "rollback": "never"
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": [
+          {
+            "code": "W602",
+            "profile": "d",
+            "field": "checkpoint_policy.rollback"
           }
         ]
       }

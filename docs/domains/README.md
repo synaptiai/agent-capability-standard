@@ -194,12 +194,20 @@ WebAssembly core. A workflow's `profile` field applies nothing, and the
 plugin hooks apply no profile. Applied, a profile only tightens: its
 thresholds and `checkpoint_policy` raise the flags of steps and calls (under
 `require_human` and `block_autonomous` a person approves each one, and no
-standing mandate covers it), `require_grounding` is a grounding policy,
-`minimum_confidence` fails an output below it (F504) and
-`allowed_destinations` limits sends. Its `trust_weights` replace weights where
-a host computes trust scores (`grounded_agency.trust`). A profile with an
-error is refused, so a misspelled capability id is never an ignored setting.
-The profiles under `schemas/profiles/` are examples, version 2.0.0.
+standing mandate covers it), and the executor fails an output below
+`minimum_confidence` (F504). Its `trust_weights` replace weights where a host
+computes trust scores (`grounded_agency.trust`). A profile with an error is
+refused, so a misspelled capability id is never an ignored setting; a
+misspelled top-level member is a logged warning (W604).
+
+`require_grounding` (a grounding policy, §5.20) and `allowed_destinations`
+(a destination policy, §4.4.2) take effect once the reference implementation
+checks those policies. Until then the executor and the adapter refuse a
+profile that sets either, and the adapter also one that sets
+`minimum_confidence` (it checks no output), rather than apply the profile
+without the rule; every shipped profile sets `require_grounding`, so only
+the validator applies it as it is. The profiles under `schemas/profiles/`
+are examples, version 2.0.0.
 
 Without a profile, what is enforced rests on the ontology's safety flags:
 

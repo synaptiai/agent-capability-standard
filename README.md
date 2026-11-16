@@ -228,7 +228,7 @@ Reference workflow compositions defined in the [workflow catalog](schemas/workfl
 
 ### Domain Profiles
 
-Example profiles of trust weights, risk thresholds and checkpoint rules for specific industries. A profile takes effect where a host, a safety layer or the validator applies it (Standard v1.2 §5.21):
+Example profiles of trust weights, risk thresholds and checkpoint rules for specific industries. A profile takes effect where a host, a safety layer or the validator applies it (Standard v1.2 §5.21). The reference executor and adapter do not check a profile's grounding or destination policy yet and refuse a profile that sets one, as every example does with `require_grounding` ([status](docs/domains/README.md#status-of-domain-profiles)):
 
 | Domain | Key Feature | Profile |
 |--------|------------|---------|

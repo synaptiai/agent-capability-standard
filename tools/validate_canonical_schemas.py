@@ -394,11 +394,7 @@ def validate_entity_taxonomy(
     # id of a class or alias the taxonomy lists.
     pattern_text = convention.get("pattern")
     try:
-        pattern = (
-            re.compile(pattern_text, re.ASCII)
-            if isinstance(pattern_text, str)
-            else None
-        )
+        pattern = re.compile(pattern_text) if isinstance(pattern_text, str) else None
     except re.error as exc:
         errors.append(f"[{name}] id_convention.pattern does not compile: {exc}")
         return

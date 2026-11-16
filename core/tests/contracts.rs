@@ -1,6 +1,6 @@
-//! The schema dialect at ontology load (STANDARD v1.2 §4.1.2): a contract
-//! whose `$ref` names nothing, is cyclic or nests deeper than the limit is
-//! refused; and a context built from documents in memory resolves and
+//! The schema dialect at ontology load (STANDARD v1.2 §4.1.2): a contract's
+//! same-file `$ref` names a node of the ontology; one whose `$ref` names
+//! nothing, is cyclic or nests deeper than the limit is refused; and a context built from documents in memory resolves and
 //! validates exactly as one read from disk.
 
 use std::path::{Path, PathBuf};
@@ -85,6 +85,58 @@ fn a_cyclic_ref_is_refused() {
     documents.push(("a.yaml".into(), json!({"A": {"$ref": "a.yaml#/A"}})));
     let m = refused(&doc, documents);
     assert!(m.contains("'a.yaml#/A' at '/properties/a'"), "{m}");
+}
+
+/// The repository ontology with a top-level `x-defs` and `retrieve`'s
+/// output contract replaced.
+fn with_local_defs(defs: Value, output: Value) -> Value {
+    let mut doc = with_retrieve_output(output);
+    doc["x-defs"] = defs;
+    doc
+}
+
+#[test]
+fn a_same_file_ref_names_a_node_of_the_ontology() {
+    // §4.1.2: `$ref: "#<pointer>"` names a node of the file it is in, here
+    // the ontology, from memory and from disk alike; a same-file ref inside
+    // what it names resolves there too.
+    let doc = with_local_defs(
+        json!({"Thing": {"type": "object", "properties": {"inner": {"$ref": "#/x-defs/Inner"}}},
+               "Inner": {"type": "string"}}),
+        json!({"type": "object", "properties": {"x_local": {"$ref": "#/x-defs/Thing"}}}),
+    );
+    let expected = json!({"type": "object", "properties": {"x_local": {
+        "type": "object", "properties": {"inner": {"type": "string"}}}}});
+    let ctx = Context::from_values(&doc, repository_documents())
+        .unwrap_or_else(|e| panic!("a same-file ref loads: {e}"));
+    assert_eq!(ctx.contracts_json()["retrieve"]["output"], expected);
+    let dir = std::env::temp_dir().join(format!("acs-same-file-ref-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("ontology.json");
+    std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+    let from_disk = Context::load(&path, &root());
+    std::fs::remove_dir_all(&dir).unwrap();
+    let from_disk = from_disk.unwrap_or_else(|e| panic!("from disk: {e}"));
+    assert_eq!(from_disk.contracts_json()["retrieve"]["output"], expected);
+}
+
+#[test]
+fn a_same_file_ref_that_names_nothing_or_cycles_is_refused() {
+    let doc = with_local_defs(
+        json!({}),
+        json!({"type": "object", "properties": {"x_local": {"$ref": "#/x-defs/Nowhere"}}}),
+    );
+    let m = refused(&doc, repository_documents());
+    assert!(
+        m.contains("'#/x-defs/Nowhere' at '/properties/x_local'"),
+        "{m}"
+    );
+    let doc = with_local_defs(
+        json!({"Loop": {"$ref": "#/x-defs/Loop"}}),
+        json!({"$ref": "#/x-defs/Loop"}),
+    );
+    let m = refused(&doc, repository_documents());
+    assert!(m.contains("'#/x-defs/Loop'"), "{m}");
 }
 
 /// A chain of `refs` `$ref`s ending at a schema.

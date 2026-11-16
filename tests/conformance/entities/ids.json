@@ -1,5 +1,5 @@
 {
-  "description": "Entity id vectors (Agent Capability Standard 1.2.0, section 7.1). Normative. An id is <class>:<namespace>/<local_id>: the class is a class name or alias of schemas/entity_taxonomy.yaml 1.1.0 (listed in `classes`, so the file is self-contained) or a vendor class x- then a lower-case letter or digit; the namespace is one or more '/'-separated segments, outermost first; a segment is one or more characters, none of them '/', ':', white space or a control character. A valid id parses into its class, namespace segments and local id; an invalid one is refused. Ids are compared as strings, case-sensitively.",
+  "description": "Entity id vectors (Agent Capability Standard 1.2.0, section 7.1). Normative. An id is <class>:<namespace>/<local_id>: the class is a class name or alias of schemas/entity_taxonomy.yaml 1.1.0 (listed in `classes`, so the file is self-contained) or a vendor class x- then a lower-case letter or digit; the namespace is one or more '/'-separated segments, outermost first; a segment is one or more characters, none of them '/', ':', white space (a character JSON Schema's \\s matches: ECMA-262's WhiteSpace and LineTerminator, so U+00A0, U+2028 and U+FEFF too) or a control character (U+0000-U+001F, U+007F-U+009F). A valid id parses into its class, namespace segments and local id; an invalid one is refused. Ids are compared as strings, case-sensitively.",
   "standard": "1.2.0",
   "section": "7.1",
   "status": "normative",
@@ -268,6 +268,57 @@
       "id": "svc:acme/a\u0007b",
       "expect": {
         "error": true
+      }
+    },
+    {
+      "name": "no_break_space",
+      "about": "U+00A0 is white space (JSON Schema's \\s matches it)",
+      "id": "svc:acme/a\u00a0b",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "line_separator",
+      "about": "U+2028 is white space (a line terminator)",
+      "id": "svc:acme/a\u2028b",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "ideographic_space",
+      "about": "U+3000 is white space",
+      "id": "svc:acme/a\u3000b",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "byte_order_mark",
+      "about": "U+FEFF is white space for JSON Schema's \\s",
+      "id": "svc:acme/a\ufeffb",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "c1_control_character",
+      "about": "U+0085 (NEL) is a control character (U+007F-U+009F)",
+      "id": "svc:acme/a\u0085b",
+      "expect": {
+        "error": true
+      }
+    },
+    {
+      "name": "non_ascii_letter",
+      "id": "svc:acme/café",
+      "expect": {
+        "class": "svc",
+        "namespace": [
+          "acme"
+        ],
+        "local_id": "café"
       }
     }
   ]

@@ -30,6 +30,9 @@ CONFIDENT = profile("confident", evidence_policy={"minimum_confidence": 0.9})
 
 M1 = {"kind": "standing_mandate", "mandate_ref": "m1"}
 PERSON = {"kind": "human", "always_ask": True}
+# A person's request names no mandate, whatever the step's approver declares
+# (§5.21.3): the subset rule of `expect` cannot say so, `absent` does.
+NO_MANDATE = ["approver.mandate_ref"]
 
 
 def retrieve(store="r", **kw):
@@ -86,14 +89,16 @@ def register(add):
     add(
         "profile_person_overrides_mandate",
         "block_autonomous requires a person for the mutate step: it is asked of a"
-        " human with always_ask and no mandate_ref, though its approver is a standing"
-        " mandate; its record carries person_required, and the decision no mandate_ref.",
+        " human with always_ask and no mandate_ref (the request has none), though its"
+        " approver is a standing mandate; its record carries person_required, and the"
+        " decision no mandate_ref.",
         person_catalog(),
         [
             {"expect": inv("checkpoint"), "respond": out(checkpoint_id="cp1")},
             {"expect": inv("constrain"), "respond": out(compliant=True)},
             {
                 "expect": {"kind": "RequestApproval", "step": 2, "approver": PERSON},
+                "absent": NO_MANDATE,
                 "respond": approve("d1", who=("dana",)),
             },
             {"expect": inv("mutate", step=2), "respond": out(success=True)},
@@ -138,11 +143,13 @@ def register(add):
             {"expect": inv("constrain"), "respond": out(compliant=True)},
             {
                 "expect": {"kind": "RequestApproval", "step": 2, "approver": PERSON},
+                "absent": NO_MANDATE,
                 "respond": approve("d1", who=("dana",)),
             },
             {"expect": inv("mutate", step=2), "respond": out(success=True)},
             {
                 "expect": {"kind": "RequestApproval", "step": 3, "approver": M1},
+                "absent": ["approver.always_ask"],
                 "respond": approve("d2", who=("mandate",)),
             },
             {"expect": inv("retrieve", step=3), "respond": out(data=1, confidence=1)},
@@ -314,6 +321,42 @@ def register(add):
     )
 
     add(
+        "profile_minimum_confidence_waited_delegate",
+        "A delegate step that waits: the output its host returns when it accepts the"
+        " delegation becomes the step's output once the result arrives, so its"
+        " confidence is checked at once; below the minimum, the step fails with F504"
+        " (below_minimum_confidence) and no result is awaited.",
+        {
+            "w": wf(
+                [
+                    st(
+                        "delegate",
+                        "d",
+                        input_bindings={"task": {"review": "x"}, "agent": "a"},
+                        timeout="1h",
+                        wait={"event_type": "review.done"},
+                    )
+                ],
+                requires=["wait@1"],
+            )
+        },
+        [
+            {
+                "expect": inv("delegate", step=0),
+                "respond": out(accepted=True, task_id="t1", agent="a", confidence=0.5),
+            }
+        ],
+        {
+            "kind": "Failed",
+            "code": "F504",
+            "step": 0,
+            "reason": "below_minimum_confidence",
+        },
+        ["step_failed"],
+        profiles=[CONFIDENT],
+    )
+
+    add(
         "profile_minimum_confidence_met",
         "A confidence at or above the applied minimum passes.",
         classify(),
@@ -358,6 +401,7 @@ def register(add):
         [
             {
                 "expect": {"kind": "RequestApproval", "step": 0, "approver": PERSON},
+                "absent": NO_MANDATE,
                 "respond": approve("d1"),
             },
             {"expect": inv("retrieve", step=0), "respond": out(data=1, confidence=1)},

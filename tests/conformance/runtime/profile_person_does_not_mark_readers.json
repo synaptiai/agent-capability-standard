@@ -105,6 +105,9 @@
           "always_ask": true
         }
       },
+      "absent": [
+        "approver.mandate_ref"
+      ],
       "respond": {
         "kind": "Decision",
         "decision_id": "d1",
@@ -138,6 +141,9 @@
           "mandate_ref": "m1"
         }
       },
+      "absent": [
+        "approver.always_ask"
+      ],
       "respond": {
         "kind": "Decision",
         "decision_id": "d2",

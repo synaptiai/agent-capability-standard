@@ -670,6 +670,10 @@ class GroundedAgentConfig:
     # Domain profiles applied to every call the adapter covers (STANDARD
     # 1.2.0 §5.21): loaded profiles or paths of profile files.
     profiles: Sequence[Mapping | str | PathLike] = ()
+
+    # The directory the ontology's $ref paths are relative to (§4.1.2).
+    # None: the directory above the ontology's (the repository root).
+    schema_root: str | None = None
 ```
 
 **Domain profiles.** `GroundedAgentConfig(profiles=[...])` applies domain
@@ -682,17 +686,33 @@ through the host's permission prompt; such a call's records carry
 (`AppliedProfiles`, `adapter.profiles`), as it does for the executor. A
 profile with an error raises `ProfileError` when the adapter is built, and
 profiles need `approval="ask"` (with approvals off, the approvals they
-require would be skipped). The profiles' grounding, minimum confidence and
-destination rules are on `adapter.profiles` (`grounding`,
-`minimum_confidence`, `destinations`) for the checks that read outputs and
-sends.
+require would be skipped). The applied profiles are part of every record's
+`config_sha256`.
+
+The adapter checks no call's output and no send's destination yet, so it
+does not put a profile's grounding policy (`require_grounding`), minimum
+confidence (`minimum_confidence`) or destination policy
+(`allowed_destinations`) in force. A profile that sets one raises
+`ProfileError` naming it when the adapter is built, rather than be applied
+without the rule (§5.21.4); every shipped profile sets `require_grounding`.
+A profile that sets only thresholds and a checkpoint policy applies:
 
 ```python
 adapter = GroundedAgentAdapter(
-    GroundedAgentConfig(profiles=["schemas/profiles/healthcare.yaml"])
+    GroundedAgentConfig(
+        profiles=[{
+            "domain": "clinic",
+            "version": "1.0.0",
+            "risk_thresholds": {"require_human": "low"},
+        }]
+    )
 )
 adapter.mapper.map_tool("Read", {"file_path": "notes.md"}).person_required  # True
 ```
+
+The ontology is loaded by the core as well when the adapter is built: a
+capability contract whose `$ref` names nothing under `schema_root`, is
+cyclic or nests too deep raises `ValueError` (§4.1.2).
 
 Any other value of `approval` raises `ValueError`, as does an `expiry_minutes` above 30 or not above 0, and a `checkpoint_reservation_seconds` of 0. `GroundedAgentAdapter(config, clock=...)` takes a clock (a function returning an aware `datetime`) that the checkpoint tracker and the records read, so a test can move time.
 

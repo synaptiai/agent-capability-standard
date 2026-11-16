@@ -308,7 +308,7 @@ flowchart LR
 
 The framework includes domain-specific templates to accelerate adoption. Choose the domain closest to your use case:
 
-A profile is informative data: no shipped component loads or selects one, and of its settings only `trust_weights` has reference code, `grounded_agency/trust.py`, which applies them when your host passes them. The key characteristics below are what each profile declares, for your host and your workflows to implement. See [Status of Domain Profiles](domains/README.md#status-of-domain-profiles).
+A profile takes effect where it is applied (Standard 1.2.0 §5.21): your host gives it to the reference executor (`WorkflowRunner(engine, profiles=[...])`), your safety layer to the calls it covers (`GroundedAgentConfig(profiles=[...])`), or you validate a catalog under it (`tools/validate_workflows.py --profile`); a workflow does not select one. Its thresholds and checkpoint policy raise the flags of steps and calls, and its `trust_weights` replace weights where your host computes trust scores (`grounded_agency.trust`). The key characteristics below are what each profile sets. The reference implementation does not check a grounding or destination policy yet, so the executor and the adapter refuse a profile that sets one, as every shipped profile does with `require_grounding`. See [Status of Domain Profiles](domains/README.md#status-of-domain-profiles).
 
 ### Manufacturing
 For production monitoring, quality control, predictive maintenance, and supply chain.
@@ -384,7 +384,7 @@ cat schemas/workflows/healthcare_workflows.yaml
 | Something else | Pick the closest, then customize |
 
 Each domain provides:
-- **Profile** — Pre-calibrated trust weights, risk thresholds, checkpoint policies, as informative data
+- **Profile** — Pre-calibrated trust weights, risk thresholds, checkpoint and evidence policies, applied by a host or safety layer
 - **Workflows** — Ready-to-use workflow patterns
 - **Documentation** — Customization and integration guidance
 

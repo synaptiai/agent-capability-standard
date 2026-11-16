@@ -15,8 +15,9 @@ validator apply: this module computes nothing itself.
 
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -31,7 +32,30 @@ __all__ = [
     "load_profile",
 ]
 
+logger = logging.getLogger(__name__)
+
 ProfileSource = Mapping[str, Any] | str | os.PathLike[str]
+
+# The rules a profile puts in force besides flags (§5.21.3), by the name
+# AppliedProfiles.refuse_unapplied takes: what each is, and the member that
+# sets it (under evidence_policy, or top-level).
+_RULES: dict[str, tuple[str, str, str | None]] = {
+    "grounding": (
+        "a grounding policy (STANDARD v1.2 §5.20)",
+        "require_grounding",
+        "evidence_policy",
+    ),
+    "minimum_confidence": (
+        "a minimum confidence (§5.21.3)",
+        "minimum_confidence",
+        "evidence_policy",
+    ),
+    "destinations": (
+        "a destination policy (§4.4.2)",
+        "allowed_destinations",
+        None,
+    ),
+}
 
 
 def load_profile(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -74,6 +98,16 @@ class EffectiveFlags:
     """A person must decide, each time: no standing mandate covers it."""
 
 
+def _sets(document: Mapping[str, Any], rule: str) -> bool:
+    """Whether a loaded profile puts ``rule`` (a key of ``_RULES``) in
+    force: an empty ``require_grounding`` sets no grounding policy, an empty
+    ``allowed_destinations`` allows no send (§5.21.3)."""
+    _, member, under = _RULES[rule]
+    holder = document.get(under) if under else document
+    value = holder.get(member) if isinstance(holder, Mapping) else None
+    return bool(value) if rule == "grounding" else value is not None
+
+
 @cache
 def _default_validator() -> _core.Validator:
     from .adapter import get_default_ontology_path
@@ -104,7 +138,10 @@ class AppliedProfiles:
 
         Raises:
             ProfileError: a profile has an error (S303, S304, V101, V109).
-                Warnings (W602, W603, W604) are kept in :attr:`warnings`.
+                Warnings (W602, W603, W604) are kept in :attr:`warnings`
+                and logged: a misspelled top-level member is W604 and
+                ignored (§5.21.2), so the log names it with the member
+                meant.
             OSError: a profile file cannot be read.
         """
         documents: list[dict[str, Any]] = []
@@ -132,6 +169,17 @@ class AppliedProfiles:
         self.documents: list[dict[str, Any]] = documents
         """The profiles as given: what ``Run.start(profiles=...)`` takes."""
         self.warnings: list[dict[str, Any]] = diagnostics
+        for w in diagnostics:
+            where = w.get("location", {})
+            hint = w.get("suggestion")
+            logger.warning(
+                "%s %s (profile %s, field %r; STANDARD v1.2 §5.21.2)%s",
+                w["code"],
+                w["message"],
+                where.get("profile"),
+                where.get("field"),
+                f": {hint}" if hint else "",
+            )
         policy = self._checker().profile_policy(documents) if documents else {}
         self.minimum_confidence: float | None = policy.get("minimum_confidence")
         """The highest ``minimum_confidence`` (§5.21.3), if any sets one."""
@@ -143,6 +191,32 @@ class AppliedProfiles:
         self.trust_weights: dict[str, float] = policy.get("trust_weights", {})
         """The trust weight overrides (§8.3), the lowest per key."""
         self._flags: dict[tuple[str, tuple[tuple[str, Any], ...]], EffectiveFlags] = {}
+
+    def refuse_unapplied(self, rules: Iterable[str], applier: str) -> None:
+        """Refuse these profiles where one puts in force a rule of
+        ``rules`` that ``applier`` does not apply: ``"grounding"`` (a
+        grounding policy, §5.20), ``"minimum_confidence"`` or
+        ``"destinations"`` (a destination policy, §4.4.2). Applied without
+        the rule, a run or a call would go ahead as if it were absent.
+
+        Raises:
+            ProfileError: a profile sets one of ``rules``; its
+                ``diagnostics`` is empty (the profiles load, ``applier``
+                cannot apply them).
+            KeyError: a name in ``rules`` is not one of the three.
+        """
+        for rule in rules:
+            what, member, under = _RULES[rule]
+            setting = [str(d.get("domain")) for d in self.documents if _sets(d, rule)]
+            if setting:
+                path = f"{under}.{member}" if under else member
+                raise ProfileError(
+                    f"{applier} does not apply {what} yet, and profile "
+                    f"{', '.join(setting)} sets one ({path}): the profiles are "
+                    f"refused rather than applied without it (STANDARD v1.2 "
+                    f"§5.21.4)",
+                    [],
+                )
 
     def _checker(self) -> _core.Validator:
         """The validator given, or the packaged ontology's, loaded only when

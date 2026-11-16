@@ -108,10 +108,15 @@ class Run:
         agents: list[Any] | None = None,
     ) -> Run:
         """``header`` is required: the version the catalog's header declares,
-        or None for a catalog without one (§11.5). ``records="actions"``,
-        ``profiles``, ``grounding``, ``destinations``, ``catalogs`` and
-        ``agents`` are refused (``ValueError``) until the 1.2 workstreams
-        implement them."""
+        or None for a catalog without one (§11.5). ``profiles``: the domain
+        profiles applied to every step of the run and its nested runs,
+        checked at start and saved with the run (§5.21); one with an error,
+        or one that sets a grounding policy (``require_grounding``) or a
+        destination policy (``allowed_destinations``), which no check of
+        this executor reads yet, refuses the start (``ValueError``), as a
+        restore of a state holding one is refused. ``records="actions"``,
+        ``grounding``, ``destinations``, ``catalogs`` and ``agents`` are
+        refused (``ValueError``) until the 1.2 workstreams implement them."""
 
     @staticmethod
     def restore(

@@ -1012,9 +1012,10 @@ requires for normative changes.
 - **Vectors other implementations can test against**: the reference
   executor's approval digests and the trust score arithmetic of §8, listed in
   [CONFORMANCE.md](../../spec/CONFORMANCE.md).
-- **Documents that say what is enforced.** Domain profiles are presented as
-  informative data, which they are: no shipped component applies one. The
-  executor's trace kinds are listed and tested.
+- **Documents that say what is enforced.** Domain profiles take effect where
+  a host or safety layer applies them (§5.21): the reference executor and the
+  Python adapter do; this binding applies none yet. The executor's trace
+  kinds are listed and tested.
 
 ### Accepted from RFC-0005
 

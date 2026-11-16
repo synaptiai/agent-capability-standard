@@ -64,7 +64,7 @@ The Grounded Agency framework provides:
 
 ## 4. Domain Profile Classification Matrix
 
-**Profile settings take effect where a profile is applied.** A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), `require_grounding` with `required_anchor_types` is a grounding policy, and `minimum_confidence` fails an output below it (F504); a profile only tightens, and one with an error is refused. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+**Profile settings take effect where a profile is applied.** A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), and the executor fails a step whose output's confidence is below `minimum_confidence` (F504); a profile only tightens, and one with an error is refused. A rule an implementation does not put in force refuses the profile instead of being dropped: the executor does not check a profile's grounding policy (`require_grounding` with `required_anchor_types`, §5.20) or destination policy (`allowed_destinations`, §4.4.2) yet, and the adapter checks no call output or send, so it refuses `minimum_confidence` too. Every shipped profile sets `require_grounding`, so the executor and the adapter refuse it until those checks land; the validator applies its flags. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 ### 4.1 Classification Summary
 
@@ -92,7 +92,7 @@ The Grounded Agency framework provides:
 - `minimum_confidence: 0.90` — Highest confidence threshold
 - `compliance.hipaa: required` — Existing regulatory awareness
 
-**Framework Readiness:** The healthcare profile declares more than EU AI Act Art. 14 (human oversight) asks for: its `block_autonomous` list names `mutate`, `send`, `execute` and `delegate`, and its evidence policy lists `clinician_verification` as a required anchor type. Where the profile is applied (Standard 1.2.0 §5.21), the reference executor, the validator and the Python adapter enforce these settings: a person approves each such step or call.
+**Framework Readiness:** The healthcare profile declares more than EU AI Act Art. 14 (human oversight) asks for: its `block_autonomous` list names `mutate`, `send`, `execute` and `delegate`, its `require_human: low` covers every risk level, and its evidence policy requires grounding for `detect`, `predict`, `classify`, `plan` and `compare`, with `human_note` (a clinician's verification) among the anchor kinds it accepts. Applied (Standard 1.2.0 §5.21), the person requirements are enforced: a person approves each such step or call, and no standing mandate does. The grounding policy is not checked by the reference implementation yet, so the executor and the Python adapter refuse the profile rather than apply it without that rule; the validator applies its flags.
 
 **Gaps:** Post-market monitoring plan (addressed in EUAIA-PMM-001), formal declaration of conformity.
 
@@ -106,9 +106,9 @@ The Grounded Agency framework provides:
 - `require_human: high` — High-risk requires human execution
 - `block_autonomous: [mutate, send]` — State changes and communications blocked
 - `minimum_confidence: 0.85` — High confidence threshold
-- Checkpoint policy includes `before_actuator_command: always` — Safety-critical gating
+- Checkpoint policy `execute: always` and `mutate: always` (1.0.0's `before_actuator_command` and `before_process_change`) — Safety-critical gating
 
-**Framework Readiness:** The manufacturing profile declares a checkpoint before every actuator command (`before_actuator_command: always`) and lists `mutate` and `send` under `block_autonomous`. No shipped component enforces either setting. The ontology's flags cover part of it: `mutate` and `send` require a checkpoint and approval. The validator rejects a workflow without a `checkpoint` step before them, the reference executor runs them only with a valid checkpoint and an approval decision, and the plugin hook blocks Write, Edit, MultiEdit, NotebookEdit and Bash calls without a checkpoint marker; the hook asks for no approval. This aligns with Art. 9 (risk management) and Art. 14 (human oversight).
+**Framework Readiness:** The manufacturing profile requires a checkpoint before every `execute` (an actuator command) and `mutate` (`checkpoint_policy`), and lists `mutate` and `send` under `block_autonomous`. Applied (Standard 1.2.0 §5.21), these raise the steps' and calls' flags: the validator reports a raised checkpoint with no `checkpoint` step before it (F501), the reference executor takes a checkpoint before each such step, and a person approves each `mutate` and `send`. Its grounding policy is not checked yet, so the executor and the Python adapter refuse the profile until it is; the validator applies its flags. Without the profile, the ontology's flags cover part of it: `mutate` and `send` require a checkpoint and approval. The validator rejects a workflow without a `checkpoint` step before them, the reference executor runs them only with a valid checkpoint and an approval decision, and the plugin hook blocks Write, Edit, MultiEdit, NotebookEdit and Bash calls without a checkpoint marker; the hook asks for no approval. This aligns with Art. 9 (risk management) and Art. 14 (human oversight).
 
 **Gaps:** Sector-specific safety standards (Machinery Regulation 2023/1230 harmonization), post-market monitoring plan.
 
@@ -154,7 +154,7 @@ The Grounded Agency framework provides:
 | Content moderation | Limited Risk | N/A | Content detection with transparency |
 | Satellite imagery analysis | Minimal Risk | N/A | No rights or safety impact |
 
-**Conservative Assessment:** Any vision system capable of processing human biometric data should be assessed as *potentially high-risk* until deployment context confirms otherwise. The profile's `block_autonomous: [mutate, send]` and `before_classification_output: always` checkpoint policy declare a safety baseline for a host to implement.
+**Conservative Assessment:** Any vision system capable of processing human biometric data should be assessed as *potentially high-risk* until deployment context confirms otherwise. The profile's `block_autonomous: [mutate, send]` and its checkpoint policy (`persist: always`, 1.0.0's `before_classification_output`; `mutate: always`; `"*": medium_risk`) are the safety baseline a host or safety layer enforces when it applies the profile (Standard 1.2.0 §5.21), once its grounding policy can be checked (until then the executor and the Python adapter refuse it).
 
 #### Audio (Context-Dependent — Potentially High Risk)
 
@@ -176,7 +176,7 @@ The Grounded Agency framework provides:
 
 **Risk Inheritance Rule:** If a multimodal system combines vision (potentially biometric) with audio (potentially speaker identification), the combined system inherits the highest applicable risk tier. Example: a video analysis system with facial recognition + speaker verification is classified under Annex III Area 1.
 
-**Framework Readiness:** The multimodal profile lists `source_modality` and `target_modality` as required evidence anchors, so a host that checks them can track risk per modality. The `minimum_confidence: 0.75` threshold is the lowest among all profiles, reflecting the inherent uncertainty in cross-modal transformations.
+**Framework Readiness:** The multimodal profile requires grounding for `detect`, `classify`, `predict` and `plan` (1.0.0's `source_modality` and `target_modality` were labels, not anchor kinds; its anchor kinds are `file`, `log`, `sensor` and those of its sources), so a host that checks grounding can trace each cross-modal output to its evidence. The `minimum_confidence: 0.75` threshold is the lowest among all profiles, reflecting the inherent uncertainty in cross-modal transformations.
 
 ```mermaid
 ---
@@ -196,8 +196,8 @@ The framework's internal risk model maps to EU AI Act requirements:
 | Framework Risk Tier | Capabilities (Count) | EU AI Act Mapping | Art. 9 Controls |
 |--------------------|---------------------|-------------------|-----------------|
 | **Low** (29 capabilities) | retrieve, search, observe, receive, detect, classify, measure, predict, compare, discover, plan, decompose, critique, explain, state, transition, attribute, ground, simulate, generate, transform, integrate, verify, checkpoint, constrain, audit, persist, recall, inquire | Minimal or Limited Risk baseline | Evidence grounding, confidence thresholds, trust decay |
-| **Medium** (5 capabilities) | execute, rollback, delegate, synchronize, invoke | Limited to High Risk | Approval gate on `execute`, audit logging; domain blocking where a host implements the profile |
-| **High** (2 capabilities) | mutate, send | High Risk (when in Annex III context) | Mandatory checkpoint, dual approval, PreToolUse hook gate, full provenance chain; domain blocking where a host implements the profile |
+| **Medium** (5 capabilities) | execute, rollback, delegate, synchronize, invoke | Limited to High Risk | Approval gate on `execute`, audit logging; domain blocking (`block_autonomous`) where a host or safety layer applies the profile |
+| **High** (2 capabilities) | mutate, send | High Risk (when in Annex III context) | Mandatory checkpoint, dual approval, PreToolUse hook gate, full provenance chain; domain blocking (`block_autonomous`) where a host or safety layer applies the profile |
 
 **Note:** This mapping shows structural alignment, not equivalence. A low-risk *capability* in a high-risk *deployment* still carries the deployment's regulatory obligations.
 
@@ -208,9 +208,9 @@ The framework's internal risk model maps to EU AI Act requirements:
 | Annex III Area | Description | Relevant Profiles | Profile Settings (declared) |
 |---------------|-------------|-------------------|-------------------|
 | **Area 1** — Biometrics | Biometric identification, categorisation, emotion recognition | vision, audio, multimodal | `block_autonomous`, checkpoint before identification, evidence grounding |
-| **Area 2(b)** — Machinery safety | AI as safety component of machinery products | manufacturing | `before_actuator_command: always`, `before_process_change: always` |
+| **Area 2(b)** — Machinery safety | AI as safety component of machinery products | manufacturing | `checkpoint_policy` `execute: always`, `mutate: always` |
 | **Area 4** — Employment | Recruitment, HR analytics, task allocation | data_analysis (context) | Evidence anchors with `data_lineage`, human review gates |
-| **Area 5(a)** — Healthcare | Medical devices, clinical decision support | healthcare | `block_autonomous: [mutate, send, execute, delegate]`, `clinician_verification` |
+| **Area 5(a)** — Healthcare | Medical devices, clinical decision support | healthcare | `block_autonomous: [mutate, send, execute, delegate]`, `require_grounding` with `human_note` among its anchor kinds |
 | **Area 5(b)** — Financial | Credit scoring, risk assessment | data_analysis (context) | `data_lineage` evidence, `require_review: medium` |
 
 ### 6.2 Areas Not Currently Addressed

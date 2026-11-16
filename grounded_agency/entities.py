@@ -4,7 +4,9 @@ An entity's id is written ``<class>:<namespace>/<local_id>``: the class is
 the entity's ``type`` (a class name or alias of
 ``schemas/entity_taxonomy.yaml``, or a vendor class ``x-…``); the namespace
 is one or more ``/``-separated segments, outermost first; a segment holds no
-``/``, ``:``, white space or control character. ``id_convention.pattern`` of
+``/``, ``:``, white space (any character JSON Schema's ``\\s`` matches, so
+U+00A0 and U+2028 too) or control character (U+0000-U+001F,
+U+007F-U+009F). ``id_convention.pattern`` of
 the taxonomy is the grammar, and ``tests/conformance/entities/ids.json`` fixes
 it. Standard library only.
 """
@@ -17,13 +19,18 @@ from typing import Any, NamedTuple
 
 __all__ = ["ENTITY_ID", "EntityId", "parse_entity_id", "taxonomy_classes"]
 
-ENTITY_ID = re.compile(
-    r"[a-z][a-z0-9_-]*:[^/:\s\x00-\x1f\x7f]+(?:/[^/:\s\x00-\x1f\x7f]+)+",
-    re.ASCII,
+# What a segment never holds besides "/" and ":": the control characters
+# (U+0000-U+001F, U+007F-U+009F) and the white space JSON Schema's \s
+# matches (ECMA-262's WhiteSpace and LineTerminator), named one by one so the
+# pattern means the same in every dialect.
+_NOT_IN_SEGMENT = (
+    r"\x00-\x20\x7f-\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 )
-"""The grammar of §7.1 (``id_convention.pattern`` without its anchors).
-ASCII: white space is the ASCII white space a JSON Schema ``\\s`` pattern
-also matches in the taxonomy's own pattern under ``re.ASCII``."""
+
+ENTITY_ID = re.compile(
+    rf"[a-z][a-z0-9_-]*:[^/:{_NOT_IN_SEGMENT}]+(?:/[^/:{_NOT_IN_SEGMENT}]+)+"
+)
+"""The grammar of §7.1 (``id_convention.pattern`` without its anchors)."""
 
 _VENDOR_CLASS = re.compile(r"x-[a-z0-9][a-z0-9_-]*", re.ASCII)
 

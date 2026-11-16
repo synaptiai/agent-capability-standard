@@ -231,15 +231,25 @@ class GroundedAgentConfig:
             keeps in memory (``call_records``, ``diagnostics``).
         profiles: Domain profiles applied to every tool call the adapter
             covers (STANDARD 1.2.0 section 5.21), each a loaded profile or
-            the path of a profile file: they raise the flags of the call's
-            capability, require a person's approval for ``require_human``
-            and ``block_autonomous`` (records carry ``person_required``),
-            and their evidence, confidence and destination rules are in
-            force where the adapter checks outputs and sends
-            (``adapter.profiles``). A profile with an error refuses the
-            configuration (:class:`~grounded_agency.profiles.ProfileError`).
-            Profiles need ``approval="ask"``: with approvals off, the
-            approvals they require would be skipped.
+            the path of a profile file (``adapter.profiles``): their
+            ``risk_thresholds`` and ``checkpoint_policy`` raise the flags of
+            the call's capability, and ``require_human`` and
+            ``block_autonomous`` require a person's approval (records carry
+            ``person_required``). The adapter checks no call's output and no
+            send's destination yet, so a profile that sets
+            ``evidence_policy.require_grounding``,
+            ``evidence_policy.minimum_confidence`` or
+            ``allowed_destinations`` refuses the configuration rather than
+            be applied without them, as does a profile with an error
+            (:class:`~grounded_agency.profiles.ProfileError`). Profiles need
+            ``approval="ask"``: with approvals off, the approvals they
+            require would be skipped.
+        schema_root: The directory the ontology's ``$ref`` paths are
+            relative to (STANDARD 1.2.0 section 4.1.2). Default: the
+            directory above the ontology's (the repository root for
+            ``schemas/capability_ontology.yaml``). A contract whose ``$ref``
+            names nothing there, is cyclic or nests too deep refuses the
+            configuration (``ValueError``).
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -259,6 +269,7 @@ class GroundedAgentConfig:
     evidence_include_tool_input: bool = False
     call_record_limit: int = 10000
     profiles: Sequence[Mapping[str, Any] | str | os.PathLike[str]] = ()
+    schema_root: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
@@ -433,18 +444,22 @@ class GroundedAgentAdapter:
         # Load now, so an ontology that cannot be read fails here and not
         # at the first tool call.
         _ = self.registry.ontology
+        self._schema_root = (
+            Path(self.config.schema_root)
+            if self.config.schema_root is not None
+            else Path(self.config.ontology_path).resolve().parent.parent
+        )
+        # The core loads the ontology too, resolving every contract's $ref:
+        # one outside the schema dialect refuses the configuration, as it
+        # refuses the validator and the executor (STANDARD 1.2.0 section
+        # 4.1.2).
+        core = _core.Validator(str(self.config.ontology_path), str(self._schema_root))
         # Domain profiles (STANDARD 1.2.0 section 5.21), checked against the
-        # adapter's ontology; an error refuses the configuration.
-        self.profiles = AppliedProfiles(
-            self.config.profiles,
-            validator=(
-                _core.Validator(
-                    str(self.config.ontology_path),
-                    str(Path(self.config.ontology_path).resolve().parent.parent),
-                )
-                if self.config.profiles
-                else None
-            ),
+        # adapter's ontology; an error refuses the configuration, and so
+        # does a rule on outputs or sends, which this adapter does not check.
+        self.profiles = AppliedProfiles(self.config.profiles, validator=core)
+        self.profiles.refuse_unapplied(
+            ("grounding", "minimum_confidence", "destinations"), "this adapter"
         )
         self.mapper = ToolCapabilityMapper(self.registry, profiles=self.profiles)
         now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
@@ -491,6 +506,10 @@ class GroundedAgentAdapter:
         from .query import CostSummary
 
         self.cost_summary = CostSummary()
+        if self.profiles:
+            # Every record's digest covers the profiles: one that has no
+            # I-JSON form refuses the configuration here, not at a record.
+            _ = self.recorded_by
 
     # ------------------------------------------------------------------
     # Records (STANDARD 1.2.0 section 5.18.8)
@@ -506,7 +525,7 @@ class GroundedAgentAdapter:
         changed, not for every record."""
         from . import __version__, _core
 
-        settings = {
+        settings: dict[str, Any] = {
             "strict_mode": self.config.strict_mode,
             "approval": self.config.approval,
             "expiry_minutes": self.config.expiry_minutes,
@@ -521,6 +540,9 @@ class GroundedAgentAdapter:
             "ontology_version": self.registry.version,
             "prompting_modes": sorted(PROMPTING_PERMISSION_MODES),
         }
+        if self.profiles:
+            # The applied profiles decide calls too (section 5.21).
+            settings["profiles"] = self.profiles.documents
         key = (self.mapper.records_revision, _core.canonical_json(settings))
         cached = self._config_digest
         if cached is not None and cached[0] == key:
@@ -707,6 +729,7 @@ class GroundedAgentAdapter:
             self._workflow_engine = WorkflowEngine(
                 ontology_path=self.config.ontology_path,
                 checkpoint_tracker=self.checkpoint_tracker,
+                schema_root=self._schema_root,
             )
         return self._workflow_engine
 

@@ -58,12 +58,15 @@ import { AcsCore, loadDocuments } from '@synaptiai/acs-core/wasm';
 const core = await AcsCore.load();
 const ctx = core.context(await loadDocuments());
 
+// A domain profile: a person approves every step.
+const clinic = { domain: 'clinic', version: '1.0.0', risk_thresholds: { require_human: 'low' } };
+
 // Validate a catalog file's text with the version its header declares.
 const { catalog, header } = core.parseCatalog(text);
-const report = ctx.validate(catalog, { header, profiles: [healthcare] });
+const report = ctx.validate(catalog, { header, profiles: [clinic] });
 
 // Run a workflow: answer each action until the run ends.
-const run = ctx.start({ catalog, header, workflow: 'change_config', runId: 'r1', nowMs: Date.now(), profiles: [healthcare] });
+const run = ctx.start({ catalog, header, workflow: 'change_config', runId: 'r1', nowMs: Date.now(), profiles: [clinic] });
 for (let action = run.next(); !run.finished(); action = run.next()) {
   run.submit(action.id, await host.answer(action), Date.now());
 }
@@ -73,7 +76,11 @@ const saved = run.snapshot(); // restore with ctx.restore({ catalog, snapshot: s
 `header` is required on `validate` and `start`: the version the catalog's
 `# Standard version:` header declares, or `null` for a catalog without one
 (section 11.5). `ctx.checkProfiles`, `profileFlags` and `profilePolicy`
-answer what domain profiles change (section 5.21.3). A refused request
+answer what domain profiles change (section 5.21.3). The executor does not
+check a profile's grounding policy (`require_grounding`) or destination
+policy (`allowed_destinations`) yet, so `start` refuses a profile that sets
+one (`CoreError` kind `start`), every shipped profile included, rather than
+run without the rule (section 5.21.4). A refused request
 throws `CoreError` with its `kind` and, where the core gives them, its
 diagnostics. A WebAssembly trap marks the instance broken; load a new one.
 Release contexts and runs with `dispose()` (a `FinalizationRegistry` is the

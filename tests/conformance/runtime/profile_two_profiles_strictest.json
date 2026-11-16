@@ -32,6 +32,9 @@
           "always_ask": true
         }
       },
+      "absent": [
+        "approver.mandate_ref"
+      ],
       "respond": {
         "kind": "Decision",
         "decision_id": "d1",

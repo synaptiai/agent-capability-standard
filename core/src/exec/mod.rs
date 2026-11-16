@@ -804,6 +804,12 @@ impl Run {
         if !errors.is_empty() {
             return Err(StartError::Invalid(errors));
         }
+        // A profile rule whose check this executor does not apply yet is
+        // refused, as `StartOptions::unimplemented` refuses the host's own
+        // policies: a run never goes ahead as if the rule were absent.
+        if let Some(what) = policy.unenforced() {
+            return Err(StartError::Unsupported(what.to_string()));
+        }
         Program::build(ctx, catalog, workflow, policy).map_err(StartError::Program)
     }
 

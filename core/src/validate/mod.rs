@@ -119,10 +119,11 @@ impl Context {
     }
 
     /// A context from a parsed ontology and a schema store. Every
-    /// capability's contracts are resolved; one that still holds a `$ref`
-    /// (it names nothing, is cyclic, or nests deeper than the limit) is
-    /// outside the schema dialect, and the ontology is refused (STANDARD
-    /// v1.2 §4.1.2).
+    /// capability's contracts are resolved, a same-file `$ref`
+    /// (`#<pointer>`) against `doc`; one that still holds a `$ref` (it
+    /// names nothing, is cyclic, or nests deeper than the limit) is outside
+    /// the schema dialect, and the ontology is refused (STANDARD v1.2
+    /// §4.1.2).
     pub fn new(doc: &Value, schemas: SchemaStore) -> Result<Context, LoadError> {
         let ontology = Ontology::from_value(doc)?;
         let mut coercions = Vec::new();
@@ -165,7 +166,7 @@ impl Context {
                 if !v.is_object() {
                     return Ok(empty());
                 }
-                schemas.resolve_node(v, &mut budget).map_err(|e| {
+                schemas.resolve_node_in(v, doc, &mut budget).map_err(|e| {
                     LoadError::Invalid(format!(
                         "the {which} schema of capability '{}' cannot be used: {e}",
                         cap.id

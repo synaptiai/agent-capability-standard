@@ -18,7 +18,7 @@ from grounded_agency import (
     ProfileError,
     _core,
 )
-from grounded_agency.workflows import WorkflowEngine, WorkflowRunner
+from grounded_agency.workflows import RunStartError, WorkflowEngine, WorkflowRunner
 from tests.runtime_replay import load, play, start
 from tests.test_runner import Clock, FakeHost
 
@@ -136,6 +136,14 @@ def test_every_domain_catalog_validates_strictly_under_its_own_profile(
         assert report["diagnostics"] == [], (path.name, report["diagnostics"])
 
 
+def healthcare_flags_only() -> dict[str, Any]:
+    """healthcare.yaml without its evidence_policy: the rules this adapter
+    applies (flags and a person), none it would refuse."""
+    profile = _core.load_yaml(str(ROOT / "schemas" / "profiles" / "healthcare.yaml"))
+    del profile["evidence_policy"]
+    return profile
+
+
 @pytest.mark.asyncio
 async def test_the_adapter_asks_a_person_for_every_call_under_healthcare(
     ontology_path: str, tmp_path: Path
@@ -146,7 +154,7 @@ async def test_the_adapter_asks_a_person_for_every_call_under_healthcare(
         GroundedAgentConfig(
             ontology_path=ontology_path,
             checkpoint_dir=str(tmp_path / ".cp"),
-            profiles=[ROOT / "schemas" / "profiles" / "healthcare.yaml"],
+            profiles=[healthcare_flags_only()],
         )
     )
     mapping = adapter.mapper.map_tool("Read", {"file_path": "a"})
@@ -161,6 +169,95 @@ async def test_the_adapter_asks_a_person_for_every_call_under_healthcare(
     assert result["hookSpecificOutput"]["permissionDecision"] == "ask"
     record = adapter.call_records[-1]
     assert (record["decision"], record["person_required"]) == ("asked", True)
+
+
+@pytest.mark.parametrize(
+    ("rule", "member"),
+    [
+        ({"evidence_policy": {"require_grounding": ["classify"]}}, "require_grounding"),
+        ({"evidence_policy": {"minimum_confidence": 0.5}}, "minimum_confidence"),
+        ({"allowed_destinations": []}, "allowed_destinations"),
+        ({"allowed_destinations": ["mailto:*"]}, "allowed_destinations"),
+    ],
+)
+def test_the_adapter_refuses_an_output_or_send_rule_it_does_not_check(
+    ontology_path: str, tmp_path: Path, rule: dict[str, Any], member: str
+) -> None:
+    """The adapter checks no call output and no send destination yet: a
+    profile that sets a grounding policy, a minimum confidence or a
+    destination policy is refused, never applied without the rule
+    (STANDARD v1.2 §5.21.4)."""
+    with pytest.raises(ProfileError, match=member) as caught:
+        GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                profiles=[{"domain": "d", "version": "1.0.0", **rule}],
+            )
+        )
+    assert "this adapter does not apply" in str(caught.value)
+    assert "profile d sets one" in str(caught.value)
+
+
+@pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.stem)
+def test_the_adapter_refuses_every_shipped_profile_for_its_grounding_policy(
+    ontology_path: str, tmp_path: Path, path: Path
+) -> None:
+    with pytest.raises(ProfileError, match="require_grounding"):
+        GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                profiles=[path],
+            )
+        )
+
+
+def test_anchor_kinds_alone_are_applied_by_the_adapter(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """``required_anchor_types`` without ``require_grounding`` has no
+    effect (§5.21.3), so nothing is refused."""
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[
+                {
+                    "domain": "d",
+                    "version": "1.0.0",
+                    "evidence_policy": {"required_anchor_types": ["file"]},
+                }
+            ],
+        )
+    )
+    assert adapter.profiles.grounding == []
+
+
+def test_the_profiles_are_in_every_record_digest(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    def digest(profiles: list[dict[str, Any]]) -> str:
+        return GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                profiles=profiles,
+            )
+        ).recorded_by["config_sha256"]
+
+    plain = digest([])
+    low = digest([{"domain": "d", "version": "1.0.0"}])
+    review = digest(
+        [
+            {
+                "domain": "d",
+                "version": "1.0.0",
+                "risk_thresholds": {"require_review": "low"},
+            }
+        ]
+    )
+    assert len({plain, low, review}) == 3
 
 
 def test_the_adapter_without_profiles_is_unchanged(
@@ -217,6 +314,79 @@ def test_the_runner_applies_its_profiles(tmp_path: Path) -> None:
     assert plain.ok and plain.action_records == []
     with pytest.raises(ProfileError):
         WorkflowRunner(engine, profiles=[{"domain": "d"}])
+
+
+def test_a_misspelled_member_is_logged_with_the_member_meant(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A misspelled top-level member is W604 and ignored (§5.21.2): it is
+    not silent, the log names the member meant."""
+    with caplog.at_level("WARNING", logger="grounded_agency.profiles"):
+        applied = AppliedProfiles(
+            [
+                {
+                    "domain": "d",
+                    "version": "1.0.0",
+                    "risk_thresholds": {"require_human": "low"},
+                    "checkpoint_polcy": {"*": "always"},
+                }
+            ]
+        )
+    assert [w["code"] for w in applied.warnings] == ["W604"]
+    (logged,) = [r.getMessage() for r in caplog.records]
+    assert "W604" in logged and "checkpoint_polcy" in logged
+    assert "did you mean 'checkpoint_policy'?" in logged
+
+
+@pytest.mark.parametrize(
+    ("rule", "member"),
+    [
+        (
+            {"evidence_policy": {"require_grounding": ["retrieve"]}},
+            "require_grounding",
+        ),
+        ({"allowed_destinations": []}, "allowed_destinations"),
+    ],
+)
+def test_the_executor_refuses_a_rule_no_check_reads_yet(
+    validator: _core.Validator, tmp_path: Path, rule: dict[str, Any], member: str
+) -> None:
+    """A profile's grounding or destination policy refuses the start, through
+    ``_core`` and through the runner: no executor check reads it yet, and a
+    run never goes ahead as if it were absent."""
+    catalog = {
+        "w": {
+            "goal": "g",
+            "risk": "low",
+            "spec_version": "1.1",
+            "steps": [
+                {
+                    "capability": "retrieve",
+                    "purpose": "p",
+                    "store_as": "r",
+                    "input_bindings": {"target": "x"},
+                }
+            ],
+        }
+    }
+    profile = {"domain": "d", "version": "1.0.0", **rule}
+    with pytest.raises(ValueError, match=f"does not implement .*{member}"):
+        _core.Run.start(
+            validator,
+            catalog,
+            "w",
+            {},
+            header=None,
+            run_id="r",
+            now_ms=0,
+            profiles=[profile],
+        )
+    path = tmp_path / "catalog.yaml"
+    path.write_text(json.dumps(catalog))
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(path)
+    with pytest.raises(RunStartError, match=member):
+        WorkflowRunner(engine, profiles=[profile]).start("w")
 
 
 def replay(

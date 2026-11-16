@@ -10,7 +10,7 @@ The data analysis domain profile is calibrated for environments where:
 - **Statistics require rigor** — Uncertainty must be explicit
 - **Models need governance** — Drift detection and retraining
 
-The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+The profile takes effect where a host, a safety layer or the validator applies it (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, its rules raise the flags of the steps and calls they name, and only tighten. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for the rules (`require_grounding` among them) whose profile the reference executor and adapter refuse until they check them.
 
 ## Domain Profile
 

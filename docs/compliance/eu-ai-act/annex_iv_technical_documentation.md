@@ -121,7 +121,7 @@ Each profile records:
 - `evidence_policy` — Required anchor types, minimum confidence, grounding requirements
 - `domain_sources` — Trusted data sources with default trust levels
 
-**Profiles are applied.** A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), `require_grounding` with `required_anchor_types` is a grounding policy, and `minimum_confidence` fails an output below it (F504); a profile only tightens, and one with an error is refused. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
+**Profiles are applied.** A domain profile takes effect where it is applied (Standard 1.2.0 §5.21): a host gives it to a run (the reference executor, `Run.start(profiles=…)` and `WorkflowRunner(profiles=…)`), a safety layer applies it to the calls it covers (the Python adapter, `GroundedAgentConfig(profiles=…)`), or the validator is given it (`tools/validate_workflows.py --profile`). Applied, `block_autonomous`, `require_human`, `require_review`, `auto_approve` and `checkpoint_policy` raise the flags of the steps and calls they name (a person approves each one that `require_human` or `block_autonomous` covers, and no standing mandate does), and the executor fails a step whose output's confidence is below `minimum_confidence` (F504); a profile only tightens, and one with an error is refused. A rule an implementation does not put in force refuses the profile instead of being dropped: the executor does not check a profile's grounding policy (`require_grounding` with `required_anchor_types`, §5.20) or destination policy (`allowed_destinations`, §4.4.2) yet, and the adapter checks no call output or send, so it refuses `minimum_confidence` too. Every shipped profile sets `require_grounding`, so the executor and the adapter refuse it until those checks land; the validator applies its flags. The plugin hooks apply no profile, and a workflow's `profile` field applies nothing, so a deployment that relies on a profile setting applies the profile in its host or safety layer. Retention periods (`compliance`) remain declarations for the deployer's log storage. See [Status of Domain Profiles](../../domains/README.md#status-of-domain-profiles).
 
 **Reference:** `schemas/profiles/*.yaml`, `schemas/profiles/profile_schema.yaml`
 
@@ -318,7 +318,7 @@ The framework classifies all 36 capabilities into three risk tiers:
 | Risk Tier | Control Type | Controls |
 |-----------|-------------|----------|
 | **Low** | Detective | Evidence grounding (mandatory evidence_anchors + confidence), trust decay, critique loops |
-| **Medium** | Preventive + Detective | Approval gate on `execute` (`requires_approval`), audit logging; domain blocking (`block_autonomous`) where the deployer's host implements the profile |
+| **Medium** | Preventive + Detective | Approval gate on `execute` (`requires_approval`), audit logging; domain blocking (`block_autonomous`) where a host or safety layer applies the profile (Standard 1.2.0 §5.21) |
 | **High** | Preventive + Detective + Corrective | Mandatory checkpoint, dual approval (checkpoint + explicit), PreToolUse hook gate, full provenance chain, rollback capability |
 
 **Cross-reference:** EUAIA-CLS-001 (EU AI Act risk mapping), AIMS-RSK-001 (risk treatment plan)
@@ -328,8 +328,8 @@ The framework classifies all 36 capabilities into three risk tiers:
 | Known Risk | Mitigation | Residual Risk | Monitoring |
 |-----------|-----------|---------------|-----------|
 | Hallucination (ungrounded output) | Evidence grounding requirement; `ground` capability | Reduced but not eliminated — depends on underlying LLM | Evidence coverage KPI (EUAIA-PMM-001) |
-| Unauthorized mutation | Checkpoint gate, approval requirement; domain blocking where the host implements the profile | Very low — structural enforcement prevents bypass | Checkpoint enforcement rate KPI |
-| Data exfiltration via `send` | Checkpoint gate, approval requirement; domain blocking where the host implements the profile | Very low — structural enforcement of the checkpoint and approval flags; a profile's `block_autonomous` blocks nothing unless the host implements it | Mutation frequency KPI |
+| Unauthorized mutation | Checkpoint gate, approval requirement; domain blocking where a host or safety layer applies the profile | Very low — structural enforcement prevents bypass | Checkpoint enforcement rate KPI |
+| Data exfiltration via `send` | Checkpoint gate, approval requirement; domain blocking where a host or safety layer applies the profile | Very low — structural enforcement of the checkpoint and approval flags; a profile's `block_autonomous` takes effect only where the profile is applied, and its `allowed_destinations` is refused until the destination check lands | Mutation frequency KPI |
 | Stale data influence | Trust decay (τ₁/₂ = 10d), minimum trust floor (0.25) | Low — mathematical decay ensures bounded staleness | Confidence drift KPI |
 | Over-reliance on AI output | Human oversight controls, `inquire` escalation, `critique` self-assessment | Medium — depends on deployer implementation of oversight | Human escalation rate KPI |
 | Domain profile misconfiguration | Schema validation, profile validator | Low — structural validation catches schema violations | Profile configuration compliance KPI |
@@ -342,7 +342,7 @@ The framework classifies all 36 capabilities into three risk tiers:
 | Misuse Scenario | Impact | Framework Mitigation |
 |----------------|--------|---------------------|
 | Deployer disabling safety hooks | Removes checkpoint enforcement | Hooks are structural; disabling requires deliberate action; audit log detects absence |
-| Deployer setting all risk thresholds to `auto_approve` | Removes the oversight a host that implements the profile would apply | No shipped component applies a profile's thresholds, so they do not weaken the ontology's flags: `requires_checkpoint` and `requires_approval` apply whatever the profile says, and a workflow step's weaker declaration has no effect and is reported (W602). `tools/validate_profiles.py` rejects threshold values outside the schema's enumerations; git history shows the configuration |
+| Deployer setting all risk thresholds to `auto_approve` | Would remove the oversight the profile's other thresholds add | A profile only tightens (Standard 1.2.0 §5.21.1): `auto_approve: high` raises nothing, and no threshold lowers the ontology's flags, so `requires_checkpoint` and `requires_approval` apply whatever the profile says; a workflow step's weaker declaration has no effect and is reported (W602), and so is a profile's `checkpoint_policy` `never` for a capability that needs a checkpoint. The core refuses a threshold outside its four levels (S303); git history shows the configuration |
 | Using minimal-risk profile for high-risk deployment | Insufficient controls for deployment context | EUAIA-CLS-001 classification guides profile selection; compliance KPIs detect gaps |
 | Treating framework outputs as ground truth | Over-reliance without human verification | Evidence anchors and confidence scores provide uncertainty signals; not presented as certainty |
 
@@ -378,7 +378,7 @@ A comprehensive post-market monitoring plan is defined in **EUAIA-PMM-001**, cov
 |-----------|---------|---------------|
 | `tools/validate_ontology.py` | Ontology graph integrity | Orphan nodes, cycles, edge symmetry, layer membership |
 | `tools/validate_workflows.py` | Workflow composition validity | Type compatibility between steps, binding resolution, capability existence |
-| `tools/validate_profiles.py` | Domain profile schema compliance | Profile structure against `profile_schema.yaml`: required fields, types, value ranges and enumerations. It does not check that the listed capabilities or workflows exist |
+| `tools/validate_profiles.py` | Domain profile compliance | Each shipped profile loaded by the core (Standard 1.2.0 §5.21.2): required fields, types, value ranges and grammars (S303, S304), every capability id it lists against the ontology (V101) and its cited `standard` and `ontology` versions (V109); warnings fail it too. The ids in `workflows` are informative and not checked |
 | `tools/validate_skill_refs.py` | Skill file reference integrity | No phantom file paths in SKILL.md frontmatter |
 | `tools/validate_yaml_util_sync.py` | YAML utility consistency | `safe_yaml.py` ↔ `yaml_util.py` synchronization |
 | `tools/validate_transform_refs.py` | Transform mapping integrity | No broken `mapping_ref` paths in transform configurations |

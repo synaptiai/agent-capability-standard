@@ -47,7 +47,10 @@ def test_id_vector(vector: dict[str, Any]) -> None:
 
 
 def test_the_taxonomy_pattern_is_the_grammar() -> None:
-    pattern = re.compile(TAXONOMY["id_convention"]["pattern"], re.ASCII)
+    # No flag: the pattern names every character it refuses, so it means
+    # the same here as in ECMA-262 (JSON Schema's dialect) and under
+    # re.ASCII, which the parity below would hide.
+    pattern = re.compile(TAXONOMY["id_convention"]["pattern"])
     assert pattern.pattern == "^" + ENTITY_ID.pattern.replace("(?:", "(") + "$"
     for vector in IDS["vectors"]:
         grammatical = pattern.fullmatch(vector["id"]) is not None

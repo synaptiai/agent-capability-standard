@@ -229,7 +229,9 @@ def test_standard_artifact_table() -> None:
     """Standard 1.2 §11.7: every file the table names exists; a row with a
     version names the version the file declares (`meta.version` or
     `schema.version`); the ontology row is the ontology's version, which §4
-    opens by naming; every vector directory is under the conformance row."""
+    opens by naming; the conformance row is the one directory every vector
+    file the Standard names (§10.3: trust, profile and entity id vectors,
+    runtime fixtures, ...) is in, and each of those files exists."""
     path, _ = current_standard()
     text = path.read_text("utf-8")
     listed: list[str] = []
@@ -252,9 +254,13 @@ def test_standard_artifact_table() -> None:
     assert f"capability ontology {ontology_version()}" in opening
     conformance = [n for n in listed if n.startswith("tests/conformance")]
     assert conformance == ["tests/conformance/"]
-    vector_dirs = {
-        p.parent
-        for p in (ROOT / "tests" / "conformance").rglob("*.json")
-        if "schema" not in p.parent.parts
-    }
-    assert all(d.is_relative_to(ROOT / "tests" / "conformance") for d in vector_dirs)
+    named = set(re.findall(r"`(tests/conformance/[^`]+)`", text)) - {conformance[0]}
+    for vector in ("trust/", "profiles/", "entities/ids.json", "runtime/*.json"):
+        assert f"{conformance[0]}{vector}" in named, vector
+    for name in sorted(named):
+        if "*" in name:
+            assert sorted(ROOT.glob(name)), f"{name} names no file"
+        elif name.endswith("/"):
+            assert sorted((ROOT / name).glob("*.json")), f"{name} holds no vector"
+        else:
+            json.loads((ROOT / name).read_text("utf-8"))

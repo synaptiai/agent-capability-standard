@@ -11,6 +11,16 @@ const FIXTURES = import.meta.glob<Record<string, Json>>('../../../tests/conforma
   import: 'default',
 });
 
+/** Whether `action` holds the member `path` names (member names joined by `.`, as a script entry's `absent` lists them). */
+function holds(action: Json, path: string): boolean {
+  let node: Json = action;
+  for (const name of path.split('.')) {
+    if (node === null || typeof node !== 'object' || Array.isArray(node) || !(name in node)) return false;
+    node = (node as Record<string, Json>)[name] as Json;
+  }
+  return true;
+}
+
 /** `expected` matches `actual` when every key it names matches. */
 function matches(expected: Json, actual: Json): boolean {
   if (expected !== null && typeof expected === 'object' && !Array.isArray(expected)) {
@@ -66,7 +76,12 @@ function play(ctx: CoreContext, f: Record<string, Json>, restoreEach: boolean): 
       return;
     }
     const action = run.next() as unknown as Record<string, Json>;
-    if ('expect' in entry) expect(matches(entry.expect as Json, action as Json), `entry ${i}: ${JSON.stringify(action)}`).toBe(true);
+    if ('expect' in entry) {
+      expect(matches(entry.expect as Json, action as Json), `entry ${i}: ${JSON.stringify(action)}`).toBe(true);
+      for (const path of (entry.absent as string[] | undefined) ?? []) {
+        expect(holds(action as Json, path), `entry ${i}: ${path} must be absent: ${JSON.stringify(action)}`).toBe(false);
+      }
+    }
     if ('respond' in entry) {
       now = (entry.at as number | undefined) ?? now;
       run.submit(action.id as number, fill(entry.respond as Json, action) as { kind: string }, now);

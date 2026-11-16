@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value, json};
 
 use crate::diag::{Code, Diagnostic};
-use crate::ontology::{Ontology, Risk};
+use crate::ontology::{EdgeType, Ontology, Risk};
 use crate::validate::Report;
 use crate::validate::identity::TRUST_CLASSES;
 use crate::validate::semantics;
@@ -541,11 +541,18 @@ impl Loader<'_> {
                     );
                     continue;
                 };
+                // The ontology requires a checkpoint before `key` by the
+                // capability's flag or by a `checkpoint` `requires` edge
+                // (`rollback`, §4.3).
                 if parsed == CheckpointRule::Never
-                    && self
+                    && (self
                         .ontology
                         .get(key)
                         .is_some_and(|n| n.requires_checkpoint)
+                        || self
+                            .ontology
+                            .incoming(key, EdgeType::Requires)
+                            .contains(&EXEMPT_FROM_CHECKPOINT_POLICY))
                 {
                     self.push(
                         Code::SafetyFlagDowngrade,
@@ -789,6 +796,30 @@ impl Policy {
             .iter()
             .filter_map(|p| p.allowed_destinations.clone())
             .collect()
+    }
+
+    /// The first rule of these profiles that this implementation does not
+    /// put in force yet, if any: an executor refuses to start or restore a
+    /// run under it rather than run as if the rule were absent (§5.21.4).
+    /// The grounding check (§5.20) and the destination check (§4.4.2) read
+    /// [`Policy::grounding`] and [`Policy::destinations`]; each line goes
+    /// when its check is wired to them.
+    pub fn unenforced(&self) -> Option<&'static str> {
+        if self
+            .profiles
+            .iter()
+            .any(|p| !p.require_grounding.is_empty())
+        {
+            return Some("a profile's grounding policy (evidence_policy.require_grounding, §5.20)");
+        }
+        if self
+            .profiles
+            .iter()
+            .any(|p| p.allowed_destinations.is_some())
+        {
+            return Some("a profile's destination policy (allowed_destinations, §4.4.2)");
+        }
+        None
     }
 
     /// The trust weight overrides (§8.3): the lowest any profile gives each

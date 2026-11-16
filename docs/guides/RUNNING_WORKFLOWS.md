@@ -270,10 +270,19 @@ executor took, see [The trace](#the-trace)).
 A host applies domain profiles (Standard 1.2.0 §5.21) to every run it
 starts: `WorkflowRunner(engine, profiles=[...])`, each a loaded profile or
 the path of a profile file. They are checked when the runner is built
-(`ProfileError` on an error: a misspelled capability id or rule member is
+(`ProfileError` on an error: a misspelled capability id, or a misspelled
+member of `risk_thresholds` or `evidence_policy`, both closed mappings, is
 an error, not an ignored setting) and again when a run starts, cover the
-steps of nested runs, and are saved with the run's snapshot. A workflow's
-`profile` field applies nothing. What changes in a run under a profile:
+steps of nested runs, and are saved with the run's snapshot. An unknown
+top-level member is W604 and ignored (§5.21.2): `AppliedProfiles` logs it
+at WARNING with the member meant (`did you mean 'checkpoint_policy'?`) and
+keeps it in `warnings`. A workflow's `profile` field applies nothing. The
+executor does not check a profile's grounding policy
+(`evidence_policy.require_grounding`, §5.20) or destination policy
+(`allowed_destinations`, §4.4.2) yet: a run under a profile that sets one
+does not start (`RunStartError`), rather than run without the rule; every
+shipped profile sets `require_grounding`. What changes in a run under a
+profile:
 
 - **Approvals.** A step whose effective risk `require_review` covers, or
   that is above `auto_approve`, needs approval, as a step whose

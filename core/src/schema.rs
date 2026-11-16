@@ -161,7 +161,20 @@ impl SchemaStore {
     /// produced is charged to `budget`, which the caller shares across all
     /// the resolutions one validation keeps in memory.
     pub fn resolve_node(&self, node: &Value, budget: &mut usize) -> Result<Value, TooLarge> {
-        self.expand(node, None, &mut Vec::new(), budget)
+        self.expand(node, None, None, &mut Vec::new(), budget)
+    }
+
+    /// [`Self::resolve_node`] for a node of `doc`, a document that need not
+    /// be in the store (the ontology, which may lie outside the schema
+    /// root): a same-file `$ref`, `#<pointer>`, names a node of `doc`
+    /// (STANDARD v1.2 §4.1.2).
+    pub fn resolve_node_in(
+        &self,
+        node: &Value,
+        doc: &Value,
+        budget: &mut usize,
+    ) -> Result<Value, TooLarge> {
+        self.expand(node, None, Some(doc), &mut Vec::new(), budget)
     }
 
     /// Resolve `r` and every `$ref` inside what it names; a `#/...` ref
@@ -173,7 +186,7 @@ impl SchemaStore {
         };
         let file = r.split_once('#').map_or(r, |(f, _)| f).to_string();
         let mut chain = vec![absolute(r, None)];
-        self.expand(&target, Some(&file), &mut chain, budget)
+        self.expand(&target, Some(&file), None, &mut chain, budget)
             .map(Some)
     }
 
@@ -181,11 +194,15 @@ impl SchemaStore {
     /// and a ref already on it (a cycle), or one that names nothing usable,
     /// is kept as it is. Every node produced spends one unit of `budget`,
     /// kept refs included: refs that fan out can multiply a small file into
-    /// an exponentially large tree, so expansion stops there.
+    /// an exponentially large tree, so expansion stops there. `local` is
+    /// the document a ref with no file part (`#<pointer>`, made absolute
+    /// against no base) names a node of; without it such a ref names
+    /// nothing.
     fn expand(
         &self,
         node: &Value,
         base: Option<&str>,
+        local: Option<&Value>,
         chain: &mut Vec<String>,
         budget: &mut usize,
     ) -> Result<Value, TooLarge> {
@@ -195,6 +212,8 @@ impl SchemaStore {
             let abs = absolute(r, base);
             let target = if chain.len() >= MAX_REF_DEPTH || chain.contains(&abs) {
                 None
+            } else if let (Some(doc), Some(pointer)) = (local, abs.strip_prefix('#')) {
+                json_pointer(doc, pointer).cloned()
             } else {
                 self.resolve_ref(&abs)
             };
@@ -212,7 +231,7 @@ impl SchemaStore {
                 .map_or(abs.as_str(), |(f, _)| f)
                 .to_string();
             chain.push(abs);
-            let out = self.expand(&Value::Object(merged), Some(&file), chain, budget);
+            let out = self.expand(&Value::Object(merged), Some(&file), local, chain, budget);
             chain.pop();
             return out;
         }
@@ -220,12 +239,12 @@ impl SchemaStore {
         Ok(match node {
             Value::Object(m) => Value::Object(
                 m.iter()
-                    .map(|(k, v)| Ok((k.clone(), self.expand(v, base, chain, budget)?)))
+                    .map(|(k, v)| Ok((k.clone(), self.expand(v, base, local, chain, budget)?)))
                     .collect::<Result<_, TooLarge>>()?,
             ),
             Value::Array(a) => Value::Array(
                 a.iter()
-                    .map(|v| self.expand(v, base, chain, budget))
+                    .map(|v| self.expand(v, base, local, chain, budget))
                     .collect::<Result<_, TooLarge>>()?,
             ),
             other => other.clone(),
@@ -573,6 +592,7 @@ mod tests {
                 .expand(
                     &node,
                     Some(r.split('#').next().unwrap()),
+                    None,
                     &mut vec![r.into()],
                     &mut budget,
                 )

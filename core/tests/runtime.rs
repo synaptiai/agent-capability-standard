@@ -27,6 +27,14 @@ fn matches(expected: &Value, actual: &Value) -> bool {
     }
 }
 
+/// Whether `action` holds the member `path` names (member names joined by
+/// `.`, as a script entry's `absent` lists them).
+fn holds(action: &Value, path: &str) -> bool {
+    path.split('.')
+        .try_fold(action, |node, name| node.get(name))
+        .is_some()
+}
+
 /// Replace `"{{digest}}"` in a response with the pending action's digest.
 fn fill(response: &Value, action: &Value) -> Value {
     match response {
@@ -133,6 +141,13 @@ fn play(ctx: &Context, name: &str, f: &Value, restore: bool) -> (Vec<String>, Va
                 matches(expect, &action),
                 "{name}: script[{i}]: expected {expect}\n  got {action}"
             );
+            for path in entry["absent"].as_array().into_iter().flatten() {
+                let path = path.as_str().unwrap();
+                assert!(
+                    !holds(&action, path),
+                    "{name}: script[{i}]: {path} must be absent\n  got {action}"
+                );
+            }
         }
         if let Some(respond) = entry.get("respond") {
             if let Some(at) = entry.get("at").and_then(Value::as_u64) {

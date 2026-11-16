@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -720,3 +721,53 @@ def test_unresolved_contract_ref_is_refused(
     message = str(caught.value)
     assert "retrieve" in message and "output" in message
     assert "schemas/nowhere.yaml#/X" in message
+
+
+def test_the_adapter_refuses_an_unresolved_contract_ref(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """The safety layer loads the ontology through the core as well: a
+    contract `$ref` that names nothing refuses its configuration (§4.1.2),
+    though the layer never reads that contract. The same ontology with the
+    target in place loads."""
+    from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+    output = {
+        "type": "object",
+        "properties": {"data": {"$ref": "schemas/nope.yaml#/x"}},
+    }
+    path = synthetic(tmp_path, ontology, output)
+    root = tmp_path / "root"
+    shutil.copytree(ROOT / "schemas", root / "schemas")
+
+    def adapter() -> GroundedAgentAdapter:
+        return GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=str(path),
+                schema_root=str(root),
+                checkpoint_dir=str(tmp_path / ".cp"),
+            )
+        )
+
+    with pytest.raises(ValueError, match=r"schemas/nope\.yaml#/x.*names nothing"):
+        adapter()
+    (root / "schemas" / "nope.yaml").write_text("x: {type: string}\n")
+    assert adapter().capability_count == 36
+
+
+def test_a_same_file_contract_ref_resolves_in_the_ontology(
+    tmp_path: Path, ontology: dict[str, Any]
+) -> None:
+    """`$ref: "#<pointer>"` names a node of the ontology itself (§4.1.2)."""
+    changed = copy.deepcopy(ontology)
+    changed["x-defs"] = {"Thing": {"type": "object", "properties": {}}}
+    output = {
+        "type": "object",
+        "properties": {"x_local": {"$ref": "#/x-defs/Thing"}},
+    }
+    path = synthetic(tmp_path, changed, output)
+    contracts = _core.Validator(str(path), str(ROOT)).contracts()
+    assert contracts["retrieve"]["output"]["properties"]["x_local"] == {
+        "type": "object",
+        "properties": {},
+    }

@@ -617,7 +617,7 @@ The reference forms below are this guide's convention for `ref`; the Standard de
 
 Every format above points into a stored file, so the `kind` of these anchors is `file`. An anchor whose source is of another sort takes the kind of that source (`url`, `sensor`, `tool`, `log`, `api` or `human_note`) and the same position in `ref`.
 
-Domain profiles list anchor types of their own in `evidence_policy.required_anchor_types` (`bounding_box`, `time_segment` and `image_reference` among them). Those are labels in a profile, which is informative data ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)); none of them is an `Anchor.kind`.
+A domain profile's `evidence_policy.required_anchor_types` lists anchor kinds (`file`, `url`, `sensor`, …), never a form: a kind outside `Anchor.kind` refuses the profile (S303, Standard 1.2.0 §5.21.2). Profiles 1.0.0 listed forms and labels there (`bounding_box`, `time_segment`, `image_reference`); version 2.0.0 maps each to its kind, `file` for the formats above ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)).
 
 ### 4.2 Anchor Schema
 

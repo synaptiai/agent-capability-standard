@@ -1585,6 +1585,12 @@ impl<'a> Machine<'a> {
                     "a delegation the step waits on needs a task_id to match its result",
                 );
             }
+            // The accepted delegation's output becomes the step's output
+            // once the result arrives (with `result` added): its
+            // confidence is checked now (§5.21.3).
+            if let Some(flow) = self.confidence_failure(&value) {
+                return flow;
+            }
             let mut traced = json!({"task_id": value.get("task_id")});
             if wf.extension("identity@1")
                 && let Some(p) = super::delegate_principal(&value)
@@ -1600,25 +1606,8 @@ impl<'a> Machine<'a> {
         // An applied profile's minimum confidence (§5.21.3), after the
         // required fields (and S4's grounding check), before the
         // after-gates.
-        if let Some(min) = self.program.policy.minimum_confidence()
-            && let Some(fault) = crate::profile::check_confidence(&value, min)
-        {
-            return match fault {
-                crate::profile::ConfidenceFault::Below(c) => self.step_error_with(
-                    "F504",
-                    format!(
-                        "confidence {c} is below the minimum confidence {min} of the applied profiles"
-                    ),
-                    Reason::of("below_minimum_confidence"),
-                ),
-                crate::profile::ConfidenceFault::Invalid(text) => self.step_error_with(
-                    "F504",
-                    format!(
-                        "the output's confidence {text} is not a number from 0 to 1, and an applied profile sets a minimum confidence"
-                    ),
-                    Reason::of("invalid_confidence"),
-                ),
-            };
+        if let Some(flow) = self.confidence_failure(&value) {
+            return flow;
         }
         if step.capability == "checkpoint" {
             let id = value
@@ -1630,6 +1619,29 @@ impl<'a> Machine<'a> {
         }
         self.frame().cur.output = Some(value);
         self.set_stage(Stage::After)
+    }
+
+    /// The step's failure when `value`, an output the host returned for
+    /// it, fails the applied profiles' minimum confidence (§5.21.3): F504
+    /// with `below_minimum_confidence` or `invalid_confidence`.
+    fn confidence_failure(&mut self, value: &Value) -> Option<Flow> {
+        let min = self.program.policy.minimum_confidence()?;
+        Some(match crate::profile::check_confidence(value, min)? {
+            crate::profile::ConfidenceFault::Below(c) => self.step_error_with(
+                "F504",
+                format!(
+                    "confidence {c} is below the minimum confidence {min} of the applied profiles"
+                ),
+                Reason::of("below_minimum_confidence"),
+            ),
+            crate::profile::ConfidenceFault::Invalid(text) => self.step_error_with(
+                "F504",
+                format!(
+                    "the output's confidence {text} is not a number from 0 to 1, and an applied profile sets a minimum confidence"
+                ),
+                Reason::of("invalid_confidence"),
+            ),
+        })
     }
 
     fn derived_checkpoint_id(&self) -> String {

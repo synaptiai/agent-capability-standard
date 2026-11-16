@@ -46,3 +46,42 @@ describe('profile effect vectors', () => {
     expect(() => ctx.profilePolicy([{ domain: 'd' }])).toThrow(CoreError);
   });
 });
+
+describe('a run under a profile rule no executor check reads yet', () => {
+  // The core refuses to start a run under a profile's grounding or
+  // destination policy rather than run as if it were absent (section 5.21.3).
+  const catalog = {
+    w: {
+      goal: 'g',
+      risk: 'low',
+      spec_version: '1.1',
+      steps: [{ capability: 'retrieve', purpose: 'p', store_as: 'r', input_bindings: { target: 'x' } }],
+    },
+  };
+  const rules: [string, Record<string, Json>][] = [
+    ['require_grounding', { evidence_policy: { require_grounding: ['retrieve'] } }],
+    ['allowed_destinations', { allowed_destinations: [] }],
+  ];
+  for (const [member, rule] of rules) {
+    it(`is refused at start: ${member}`, async () => {
+      const ctx = await repositoryContext();
+      const profiles = [{ domain: 'd', version: '1.0.0', ...rule }] as Json[];
+      let caught: unknown;
+      try {
+        ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(CoreError);
+      expect((caught as CoreError).kind).toBe('start');
+      expect((caught as CoreError).message).toContain(member);
+    });
+  }
+  it('starts under the rules it applies', async () => {
+    const ctx = await repositoryContext();
+    const profiles = [{ domain: 'd', version: '1.0.0', evidence_policy: { minimum_confidence: 0.5 } }] as Json[];
+    const run = ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
+    expect((run.next() as unknown as Record<string, Json>).kind).toBe('InvokeCapability');
+    run.dispose();
+  });
+});

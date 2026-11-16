@@ -1745,7 +1745,7 @@ its zero-based position among the profiles given, when it has no valid
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `domain` | string | Yes | Lower-case letters and digits, in words joined by single `-` |
+| `domain` | string | Yes | Lower-case letters and digits, starting with a letter, in words joined by single `-` |
 | `version` | string | Yes | The profile's own version, `MAJOR.MINOR.PATCH` |
 | `standard` | string | No | The Standard version the profile is written for (§11.6) |
 | `ontology` | string | No | The ontology version the profile is written for (§11.6) |
@@ -1768,7 +1768,7 @@ its zero-based position among the profiles given, when it has no valid
 | V101 | A capability id in `block_autonomous`, in `require_grounding` or as a `checkpoint_policy` key other than `*` is not one the ontology defines |
 | V109 | Its `standard` is not one the implementation supports, or its `ontology`'s major differs from the implementation's ontology's (§11.6) |
 | W604 | A top-level member is not one the table lists; it is ignored. A member whose name starts with `x-` is never reported |
-| W602 | Its `checkpoint_policy` gives `never` for a capability whose ontology requires a checkpoint; it has no effect |
+| W602 | Its `checkpoint_policy` gives `never` for a capability the ontology requires a checkpoint before (by `requires_checkpoint`, or a `checkpoint` `requires` edge as for `rollback`); it has no effect |
 | W603 | Its `require_review` or `require_human` is `critical`, which is deprecated and read as `none` |
 
 #### 5.21.3 Effect on Steps and Calls
@@ -1839,7 +1839,10 @@ calls it covers, as §5.20 says for hosts outside a workflow.
 
 An implementation that applies profiles (an executor, a safety layer, or a
 validator given them) MUST report each profile vector's diagnostics and
-compute each one's effective flags and rules (§10.3).
+compute each one's effective flags and rules (§10.3). One that does not put
+a rule of §5.21.3 in force (a safety layer that checks no output, say)
+refuses a profile that sets it, as it refuses a profile with an error,
+rather than apply the profile without it.
 
 ---
 
@@ -1945,10 +1948,11 @@ An entity's id (`Entity.id` in `world_state_schema.yaml`, and an
 | `namespace` | string | Yes | One or more segments separated by `/`, outermost first, which with the class make the id unique within the world (`meta.world_id`). The taxonomy's `namespace_components` (organisation, domain, environment, system, subsystem) is the recommended order: an id SHOULD use those that apply, in that order, and MAY add segments of its own (`person:acme/hr/employee/12345`). The grammar does not check what a segment means |
 | `local_id` | string | Yes | The entity's identifier within the namespace: one segment |
 
-A segment is one or more characters, none of them `/`, `:`, white space or a
-control character (percent-encode them, RFC 3986). An id therefore has
-exactly one `:`, and at least one `/` after it. Ids are compared as strings,
-case-sensitively. `id_convention.pattern` in `entity_taxonomy.yaml` is the
+A segment is one or more characters, none of them `/`, `:`, white space (a
+character JSON Schema's `\s` matches, U+00A0, U+2028 and U+FEFF among them)
+or a control character (U+0000–U+001F, U+007F–U+009F); percent-encode them
+(RFC 3986). An id therefore has exactly one `:`, and at least one `/` after
+it. Ids are compared as strings, case-sensitively. `id_convention.pattern` in `entity_taxonomy.yaml` is the
 grammar; the entity id vectors (§10.3) fix it.
 
 ```

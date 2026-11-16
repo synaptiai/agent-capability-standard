@@ -12,7 +12,7 @@ The healthcare domain profile is calibrated for environments where:
 - **Regulatory compliance is required** — HIPAA, FDA, HL7 standards apply
 - **Audit trails are critical** — 7-year retention for medical records
 
-Its `block_autonomous` list (`mutate`, `send`, `execute`, `delegate`) and its `require_human: low` threshold state the rule above. They take effect where a host, a safety layer or the validator applies the profile (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, every step and call needs a person's approval each time, which no standing mandate covers. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles).
+Its `block_autonomous` list (`mutate`, `send`, `execute`, `delegate`) and its `require_human: low` threshold state the rule above. They take effect where a host, a safety layer or the validator applies the profile (Standard 1.2.0 [§5.21](../../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): applied, every step and call needs a person's approval each time, which no standing mandate covers. A workflow's `profile` field applies nothing. See [Status of Domain Profiles](../README.md#status-of-domain-profiles) for the rules (`require_grounding` among them) whose profile the reference executor and adapter refuse until they check them.
 
 ## Domain Profile
 
