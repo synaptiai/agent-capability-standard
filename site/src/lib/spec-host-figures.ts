@@ -6,7 +6,7 @@
 // trigger vectors, the runtime fixtures and their schema), and throws when
 // the two disagree. The captions are written here, so the page and its
 // Markdown copy match.
-import type { List, ListItem, RootContent } from 'mdast';
+import type { List, ListItem, RootContent, Table } from 'mdast';
 import { toString } from 'mdast-util-to-string';
 import { loadCatalogEnums, RUNTIME_FIXTURE_DIR } from '../data/spec-sources';
 import { readRepoFile, trackedIn } from './repo';
@@ -72,9 +72,10 @@ export interface HostLoop {
  * responses it names must be the schema's.
  */
 export function hostLoop(text: string, where: string): HostLoop {
-  const terms = tableRows(sectionTable(text, '2. ', 0, where))
-    .slice(1)
-    .map((r) => r[0]!);
+  // §2 may hold its terms in more than one table.
+  const terms = sectionBlocks(text, '2. ', where)
+    .filter((n): n is Table => n.type === 'table')
+    .flatMap((t) => tableRows(t).slice(1).map((r) => r[0]!));
   const missing = RUN_TERMS.filter((t) => !terms.includes(t));
   if (missing.length > 0) throw new Error(`${where}: §2 defines no ${andList(missing)}`);
   const doc: unknown = JSON.parse(readRepoFile(HOST_PROTOCOL_SCHEMA));

@@ -32,6 +32,12 @@ const REPLAY_TITLES: Record<string, string> = {
   'citation-replay': 'A citation of a value the step does not bind, from §5.20',
   'audit-replay': 'An audit step whose record was not written, from §6.4',
   'secret-replay': 'A persist refused for a secret in its data, from §6.7',
+  'export-replay': "A target another catalog does not export, from §5.1.1",
+  'family-replay': "Families compared exactly, from §5.15",
+  'manifest-replay': "A delegation whose target has no manifest, from §5.15.1",
+  'agents-replay': "A delegation that takes its target's flags, from §5.15.2",
+  'read-only-replay': "A read-only delegation its host does not attest, from §5.15.2",
+  'continue-replay': "A continuation matched by its own task_id, from §5.15.3",
 };
 
 function replayBlock(slot: string): string {
@@ -72,6 +78,7 @@ export function specEarlyBlocks(): string[] {
         D.safetyDefaults(o).flatMap((g) => g.caps.map((c) => [code(c.id), g.layer, c.risk, yes(c.mutation), D.checkpointViaEdge(c) ? 'Yes, via requires edge' : yes(c.requires_checkpoint), yes(c.requires_approval)])),
       ),
     ),
+    replayBlock('export-replay'),
     replayBlock('group-replay'),
   ];
 }
@@ -113,6 +120,11 @@ export function specLateBlocks(): string[] {
         ],
       ),
     ),
+    replayBlock('family-replay'),
+    replayBlock('manifest-replay'),
+    replayBlock('agents-replay'),
+    replayBlock('read-only-replay'),
+    replayBlock('continue-replay'),
     figure(
       'Trust classes, from §5.17',
       D.trustCaption(trust),

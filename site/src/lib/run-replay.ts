@@ -32,6 +32,12 @@ export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
   'citation-replay': 'grounding_acs_sibling_unbound',
   'audit-replay': 'audit_require_record_fails',
   'secret-replay': 'error_reason_secret_in_data',
+  'export-replay': 'invoke_computed_not_exported',
+  'family-replay': 'quorum_family_exact',
+  'manifest-replay': 'agents_manifest_missing',
+  'agents-replay': 'agents_raise_checkpoint_approval',
+  'read-only-replay': 'agents_read_only_not_attested',
+  'continue-replay': 'delegate_continues_own_task_id',
 };
 
 export type ReplayStatus = 'ran' | 'deferred' | 'skipped' | 'not-reached';

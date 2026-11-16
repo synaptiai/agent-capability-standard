@@ -88,6 +88,11 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Diagnostic** | An error or warning reported by a validator or executor (§9) |
 | **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and the ontology (§5.2.1) |
 | **Runs before** | Step A runs before step B when A comes earlier in the step list and is not in B's parallel group (§4.3) |
+
+Terms of hosts, runs, catalogs and delegation:
+
+| Term | Definition |
+|------|------------|
 | **Tool-calling host** | A runtime in which a model chooses each tool call and its arguments, and no workflow's step list determines the next action (§5.18) |
 | **Call** | One invocation of one tool on a tool-calling host |
 | **Tool binding** | A record that states which capability a tool performs and which safety flags it declares (§5.18.1) |
@@ -281,29 +286,22 @@ before the other starts.
 Validators SHOULD implement these checks in time linear in the number of steps.
 
 **Scope of `conflicts_with`.** The rule applies within one workflow's step
-list: two steps whose capabilities conflict never share a `parallel_group`.
-It does not apply across runs or across agents, which neither a validator
-nor the executor can see:
-
-- runs a host executes at the same time: those a schedule trigger starts
-  with `overlap: allow_all` (§5.10), those event triggers start, and those
-  the host starts on its own;
-- a `delegate` the workflow does not wait for (§5.13), which works beside its
-  delegator.
-
-A `rollback` in one may then overlap a `mutate` or `persist` in another on the
-same state. A host that lets runs or delegates act on the same state at the
-same time SHOULD serialise each `rollback` with every `mutate` and `persist` on
-the state it restores, or fail the later step (R402).
+list. It does not apply across runs or agents, which no validator or
+executor sees: runs a host executes at once (those a schedule starts with
+`overlap: allow_all`, §5.10, those event triggers start, those the host
+starts itself), and a `delegate` the workflow does not wait for (§5.13). A
+`rollback` in one may then overlap a `mutate` or `persist` in another. A host
+that lets runs or delegates act on the same state at once SHOULD serialise
+each `rollback` with every `mutate` and `persist` on the state it restores,
+or fail the later step (R402).
 
 A workflow *exercises* the capabilities of its steps (handlers included),
-`rollback` when a gate or failure mode has `action: rollback`, and those the
-workflows it invokes exercise, transitively (§5.12). A workflow that has a
-trigger with `overlap: allow_all` and exercises both capabilities of a
-`conflicts_with` pair is W623 (`CONCURRENT_RUN_CONFLICT`). Event triggers do
-not count: they declare no overlap policy, so whether their runs overlap is
-the host's, under the SHOULD above; W623 reports only overlap the workflow
-itself allows.
+`rollback` for a gate's or failure mode's `action: rollback`, and those of
+the workflows it invokes, transitively (§5.12). A workflow with a trigger
+whose `overlap` is `allow_all` that exercises both capabilities of a
+`conflicts_with` pair is W623 (`CONCURRENT_RUN_CONFLICT`). Event triggers
+declare no overlap policy, so whether their runs overlap is the host's
+(the SHOULD above), and W623 leaves them out.
 
 A check before a mutation is expressed with `constrain`, which the
 ontology orders before `execute`, `mutate`, `send` and `generate`. `verify`
@@ -1203,12 +1201,11 @@ wait would be unclear.
 
 #### 5.13.1 Answers to an Inquiry
 
-`inquire` returns the questions to put to someone. Its output carries
-`inquiry_id`, naming the inquiry, and each question an `id`, unique within
-the inquiry, and an `answer_type`: `text` (the answer is a string), `choice`
-(one of the question's `options`), `boolean` or `number`. These are optional
-in the ontology, for compatibility, but a host that produces an `inquire`
-output MUST give it an `inquiry_id` and each question an `id`.
+`inquire`'s output carries `inquiry_id`, naming the inquiry, and each
+question an `id`, unique within it, and an `answer_type`: `text` (a string),
+`choice` (one of its `options`), `boolean` or `number`. Optional in the
+ontology, for compatibility; a host that produces an `inquire` output MUST
+give it an `inquiry_id` and each question an `id`.
 
 The answers arrive through `receive` (the ontology's `inquire` → `receive`
 edge), as an item, or the event a wait matches, that carries `inquiry_id` and
