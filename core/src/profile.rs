@@ -175,6 +175,30 @@ pub enum ConfidenceFault {
     Below(f64),
 }
 
+impl ConfidenceFault {
+    /// The failure's reason token (§5.19.7).
+    pub fn reason(&self) -> &'static str {
+        match self {
+            ConfidenceFault::Invalid(_) => "invalid_confidence",
+            ConfidenceFault::Below(_) => "below_minimum_confidence",
+        }
+    }
+
+    /// The failure's message, under the minimum `min`.
+    pub fn message(&self, min: f64) -> String {
+        match self {
+            ConfidenceFault::Below(c) => {
+                format!(
+                    "confidence {c} is below the minimum confidence {min} of the applied profiles"
+                )
+            }
+            ConfidenceFault::Invalid(text) => format!(
+                "the output's confidence {text} is not a number from 0 to 1, and an applied profile sets a minimum confidence"
+            ),
+        }
+    }
+}
+
 /// A number from 0 to 1 (a boolean is not a number; JSON has no NaN).
 fn unit(v: &Value) -> Option<f64> {
     v.as_f64().filter(|x| (0.0..=1.0).contains(x))
@@ -830,17 +854,10 @@ impl Policy {
     /// The first rule of these profiles that this implementation does not
     /// put in force yet, if any: an executor refuses to start or restore a
     /// run under it rather than run as if the rule were absent (§5.21.4).
-    /// The grounding check (§5.20) and the destination check (§4.4.2) read
-    /// [`Policy::grounding`] and [`Policy::destinations`]; each line goes
-    /// when its check is wired to them.
+    /// The destination check (§4.4.2) reads [`Policy::destinations`]; this
+    /// line goes when it is wired to them. (The grounding check reads
+    /// [`Policy::grounding`].)
     pub fn unenforced(&self) -> Option<&'static str> {
-        if self
-            .profiles
-            .iter()
-            .any(|p| !p.require_grounding.is_empty())
-        {
-            return Some("a profile's grounding policy (evidence_policy.require_grounding, §5.20)");
-        }
         if self
             .profiles
             .iter()

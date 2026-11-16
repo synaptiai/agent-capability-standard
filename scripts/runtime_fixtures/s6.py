@@ -27,6 +27,22 @@ CHECKPOINT_EXECUTE = profile(
     "checkpoint-execute", checkpoint_policy={"execute": "always"}
 )
 CONFIDENT = profile("confident", evidence_policy={"minimum_confidence": 0.9})
+GROUNDED = profile(
+    "grounded",
+    evidence_policy={
+        "require_grounding": ["classify"],
+        "required_anchor_types": ["file"],
+    },
+)
+GROUNDED_CONFIDENT = profile(
+    "grounded-confident",
+    evidence_policy={
+        "require_grounding": ["classify"],
+        "required_anchor_types": ["file"],
+        "minimum_confidence": 0.9,
+    },
+)
+FILE_ANCHOR = {"ref": "file:docs/item.md", "kind": "file"}
 PERSON_INVOKE = profile(
     "person-invoke", risk_thresholds={"block_autonomous": ["invoke"]}
 )
@@ -563,4 +579,88 @@ def register(add):
         },
         ["person_required", "approval_requested"],
         profiles=[REVIEW_MEDIUM, HUMAN_LOW],
+    )
+
+    # A profile's grounding policy (evidence_policy.require_grounding, with
+    # required_anchor_types as its kinds) is checked as a host's is (§5.20,
+    # §5.21.3): in every frame, after the required fields, before the
+    # minimum confidence.
+    add(
+        "profile_grounding_required",
+        "require_grounding: [classify] applies to a 1.1 workflow: a classify output"
+        " with no anchors fails its step with F505.",
+        classify(),
+        [{"expect": inv("classify"), "respond": out(labels=["a"], confidence=1)}],
+        {"kind": "Failed", "code": "F505", "step": 0},
+        ["step_failed"],
+        profiles=[GROUNDED],
+    )
+
+    add(
+        "profile_grounding_met",
+        "An output with an anchor of a kind the profile requires (file) passes the"
+        " profile's grounding policy.",
+        classify(),
+        [
+            {
+                "expect": inv("classify"),
+                "respond": out(
+                    labels=["a"], confidence=1, evidence_anchors=[FILE_ANCHOR]
+                ),
+            }
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["grounding", "step_completed"],
+        profiles=[GROUNDED],
+    )
+
+    add(
+        "profile_grounding_wrong_kind",
+        "required_anchor_types are the policy's kinds: a log anchor does not count"
+        " under [file], so the step fails with F505.",
+        classify(),
+        [
+            {
+                "expect": inv("classify"),
+                "respond": out(
+                    labels=["a"],
+                    confidence=1,
+                    evidence_anchors=[{"ref": "log:app#42", "kind": "log"}],
+                ),
+            }
+        ],
+        {"kind": "Failed", "code": "F505", "step": 0},
+        ["step_failed"],
+        profiles=[GROUNDED],
+    )
+
+    add(
+        "profile_grounding_in_nested_run",
+        "A profile's grounding policy covers the run's nested runs: the classify"
+        " step an invoke runs fails with F505 without anchors, and the run fails at"
+        " the invoke step (R402).",
+        {
+            "w": wf([invoke_child()]),
+            "child": wf([st("classify", "c", input_bindings={"item": "x"})]),
+        },
+        [
+            {
+                "expect": inv("classify", frame=["w", "child"]),
+                "respond": out(labels=["a"], confidence=1),
+            }
+        ],
+        {"kind": "Failed", "code": "R402", "step": 0},
+        ["step_failed", "invoke_returned"],
+        profiles=[GROUNDED],
+    )
+
+    add(
+        "profile_grounding_before_minimum_confidence",
+        "The grounding check comes before the minimum confidence: an output with no"
+        " anchors and a confidence below the minimum fails with F505, not F504.",
+        classify(),
+        [{"expect": inv("classify"), "respond": out(labels=["a"], confidence=0.5)}],
+        {"kind": "Failed", "code": "F505", "step": 0},
+        ["step_failed"],
+        profiles=[GROUNDED_CONFIDENT],
     )

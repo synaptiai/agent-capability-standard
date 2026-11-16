@@ -263,12 +263,16 @@ class GroundedAgentConfig:
             ``risk_thresholds`` and ``checkpoint_policy`` raise the flags of
             the call's capability, and ``require_human`` and
             ``block_autonomous`` require a person's approval (records carry
-            ``person_required``). The adapter checks no call's output and no
+            ``person_required``). Their grounding policies
+            (``evidence_policy.require_grounding``, with
+            ``required_anchor_types`` as kinds) join ``grounding``, and
+            their ``minimum_confidence`` fails an output below it with F504:
+            both apply to the outputs this layer sees, those of the tools
+            ``create_grounded_mcp_server`` serves (a warning is logged once
+            for any other tool they would cover). The adapter checks no
             send's destination yet, so a profile that sets
-            ``evidence_policy.require_grounding``,
-            ``evidence_policy.minimum_confidence`` or
             ``allowed_destinations`` refuses the configuration rather than
-            be applied without them, as does a profile with an error
+            be applied without it, as does a profile with an error
             (:class:`~grounded_agency.profiles.ProfileError`). Profiles need
             ``approval="ask"``: with approvals off, the approvals they
             require would be skipped. With ``strict_mode=False``, which
@@ -494,6 +498,11 @@ def call_action_record(entry: dict[str, Any], scope: str) -> dict[str, Any] | No
     if isinstance(diagnostic, dict) and diagnostic.get("code"):
         record["code"] = diagnostic["code"]
     mapped = set(_CALL_MAPPED)
+    if isinstance(entry.get("reason"), str):
+        # The failure's reason token (section 5.19.7), as a step's record
+        # holds it.
+        record["reason_code"] = entry["reason"]
+        mapped.add("reason")
     if entry.get("approvers") == ["in_session"] and entry.get("digest"):
         record["approval"] = {
             "digest": entry["digest"],
@@ -582,18 +591,27 @@ class GroundedAgentAdapter:
         core = _core.Validator(str(self.config.ontology_path), str(self._schema_root))
         # Domain profiles (STANDARD 1.2.0 section 5.21), checked against the
         # adapter's ontology; an error refuses the configuration, and so
-        # does a rule on outputs or sends, which this adapter does not check,
-        # and (strict_mode=False only logs a missing checkpoint) a raised
+        # does a rule on sends, which this adapter does not check, and
+        # (strict_mode=False only logs a missing checkpoint) a raised
         # checkpoint requirement (section 5.21.4).
         self.profiles = AppliedProfiles(self.config.profiles, validator=core)
-        self.profiles.refuse_unapplied(
-            ("grounding", "minimum_confidence", "destinations"), "this adapter"
-        )
+        self.profiles.refuse_unapplied(("destinations",), "this adapter")
         if not self.config.strict_mode:
             self.profiles.refuse_unapplied(
                 ("checkpoints",), "this adapter with strict_mode=False"
             )
         self.mapper = ToolCapabilityMapper(self.registry, profiles=self.profiles)
+        # The grounding policies the layer applies to call outputs (section
+        # 5.20): the configuration's, then one per applied profile with
+        # require_grounding, whose kinds are its required_anchor_types
+        # (section 5.21.3).
+        from_profiles = (
+            GroundingPolicy.from_profile(g) for g in self.profiles.grounding
+        )
+        self._grounding: tuple[GroundingPolicy, ...] = (
+            *self.config.grounding,
+            *(p for p in from_profiles if p is not None),
+        )
         now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
         self._now = now
         # The tracker enforces the layer's maximum age on every checkpoint,
@@ -730,21 +748,26 @@ class GroundedAgentAdapter:
         output: Any,
         call: str | None = None,
     ) -> str | None:
-        """Apply ``config.grounding`` to a call's output (§5.20 *Hosts
-        outside a workflow*). The call's argument names are the references
-        it binds (an ``acs:<argument>`` anchor may cite one), and no
-        ``evidence_seen`` is given. Returns the refusal's text form (F505,
-        kept in ``diagnostics`` and a call record) when the output fails a
-        policy that requires the call's capability, else None. ``output``
-        that is not an object fails as an output with no anchors."""
-        if not self.config.grounding:
+        """Apply the grounding policies (``config.grounding``, then the
+        applied profiles', section 5.21.3) and the profiles' minimum
+        confidence to a call's output (§5.20 *Hosts outside a workflow*).
+        The call's argument names are the references it binds (an
+        ``acs:<argument>`` anchor may cite one), and no ``evidence_seen`` is
+        given. Returns the refusal's text form (F505, or F504 with reason
+        ``below_minimum_confidence`` or ``invalid_confidence``, kept in
+        ``diagnostics`` and a call record) when the output fails, else None.
+        Grounding is checked first, as the executor checks it. ``output``
+        that is not an object fails a grounding policy as an output with no
+        anchors; it has no confidence for a minimum to check."""
+        minimum = self.profiles.minimum_confidence
+        if not self._grounding and minimum is None:
             return None
         mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
         capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
-        policies = [
-            p for p in self.config.grounding if capability and p.requires(capability)
-        ]
-        if not policies:
+        if not capability:
+            return None
+        policies = [p for p in self._grounding if p.requires(capability)]
+        if not policies and minimum is None:
             return None
         bound = [
             k
@@ -752,7 +775,9 @@ class GroundedAgentAdapter:
             if isinstance(k, str) and _IDENTIFIER.fullmatch(k)
         ]
         message: str | None = None
-        if not isinstance(output, dict):
+        code = ErrorCode.PROVENANCE_MISSING
+        reason: str | None = None
+        if policies and not isinstance(output, dict):
             message = (
                 f"{tool}'s result holds no {capability} output (section 5.18.9), "
                 "so nothing grounds it, and a grounding policy requires "
@@ -764,18 +789,25 @@ class GroundedAgentAdapter:
                 if not result.ok:
                     message = f"{tool}'s output: {result.message}"
                     break
+        if message is None and minimum is not None:
+            fault = _core.check_confidence(output, minimum)
+            if fault is not None:
+                message = f"{tool}'s output: {fault['message']} (section 5.21.3)"
+                code = ErrorCode.CONSTRAINT_VIOLATED
+                reason = fault["reason"]
         if message is None:
             return None
         # The call has run (section 5.20): its outcome is a failure with the
         # code, recorded against the call, not a refusal of a call that did
         # not run. The post-call hooks do not record it again.
         text = self._refuse(
-            ErrorCode.PROVENANCE_MISSING,
+            code,
             mapping,
             tool,
             call,
             message,
             outcome="failed",
+            reason=reason,
         )
         if call is not None:
             with self._state_lock:
@@ -1054,32 +1086,37 @@ class GroundedAgentAdapter:
             self._grounded_tools.add(tool)
 
     def _warn_unchecked_output(self, mapping: ToolMapping, tool: str) -> None:
-        """Warn, once per tool, that a grounding policy requires the
-        capability of a call whose output this layer never sees (a tool
-        that ``create_grounded_mcp_server`` does not serve, Claude Code's
-        own tools included): section 5.20 is not applied to it."""
-        if not self.config.grounding or mapping is UNCLASSIFIED_TOOL:
+        """Warn, once per tool, that a grounding policy (the
+        configuration's or an applied profile's) requires the capability of
+        a call whose output this layer never sees, or that a profile sets a
+        minimum confidence for it (a tool that ``create_grounded_mcp_server``
+        does not serve, Claude Code's own tools included): section 5.20, and
+        the minimum of section 5.21.3, are not applied to it."""
+        if mapping is UNCLASSIFIED_TOOL:
+            return
+        if not self._grounding and self.profiles.minimum_confidence is None:
             return
         required = sorted(
-            {
-                c
-                for c in mapping.capabilities
-                for p in self.config.grounding
-                if p.requires(c)
-            }
+            {c for c in mapping.capabilities for p in self._grounding if p.requires(c)}
         )
-        if not required:
+        if not required and self.profiles.minimum_confidence is None:
             return
         with self._state_lock:
             if tool in self._grounded_tools or tool in self._ungrounded_warned:
                 return
             self._ungrounded_warned.add(tool)
+        rules = []
+        if required:
+            rules.append(f"a grounding policy requires {', '.join(required)}")
+        if self.profiles.minimum_confidence is not None:
+            rules.append("an applied profile sets a minimum confidence")
         logger.warning(
-            "A grounding policy requires %s, but %s is not a tool "
-            "create_grounded_mcp_server serves: its result is not a capability "
-            "output this layer sees, so section 5.20 is not applied to its calls",
-            ", ".join(required),
+            "For %s, %s; but it is not a tool create_grounded_mcp_server "
+            "serves: its result is not a capability output this layer sees, so "
+            "neither section 5.20 nor the minimum of section 5.21.3 is applied "
+            "to its calls",
             tool,
+            " and ".join(rules),
         )
 
     def _get_or_create_workflow_engine(self) -> Any:

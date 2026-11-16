@@ -70,6 +70,13 @@ def check_grounding(
     are 0 for a refused output). ``ValueError`` for a malformed policy or a
     bound reference that is not a reference body."""
 
+def check_confidence(output: Any, minimum: float) -> dict[str, Any] | None:
+    """A domain profile's minimum confidence applied to one output (STANDARD
+    v1.2 §5.21.3): None when the output passes (it is not an object, has no
+    ``confidence``, or one at or above ``minimum``), else ``{code: "F504",
+    reason: "below_minimum_confidence" | "invalid_confidence", message}``.
+    ``ValueError`` when ``minimum`` is not a number from 0 to 1."""
+
 @final
 class Validator:
     """Raises ``FileNotFoundError`` (or another ``OSError``) when the

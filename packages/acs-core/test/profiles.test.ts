@@ -62,8 +62,8 @@ describe('profile effect vectors', () => {
 });
 
 describe('a run under a profile rule no executor check reads yet', () => {
-  // The core refuses to start a run under a profile's grounding or
-  // destination policy rather than run as if it were absent (section 5.21.3).
+  // The core refuses to start a run under a profile's destination policy
+  // rather than run as if it were absent (section 5.21.4).
   const catalog = {
     w: {
       goal: 'g',
@@ -72,30 +72,46 @@ describe('a run under a profile rule no executor check reads yet', () => {
       steps: [{ capability: 'retrieve', purpose: 'p', store_as: 'r', input_bindings: { target: 'x' } }],
     },
   };
-  const rules: [string, Record<string, Json>][] = [
-    ['require_grounding', { evidence_policy: { require_grounding: ['retrieve'] } }],
-    ['allowed_destinations', { allowed_destinations: [] }],
-  ];
-  for (const [member, rule] of rules) {
-    it(`is refused at start: ${member}`, async () => {
-      const ctx = await repositoryContext();
-      const profiles = [{ domain: 'd', version: '1.0.0', ...rule }] as Json[];
-      let caught: unknown;
-      try {
-        ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(CoreError);
-      expect((caught as CoreError).kind).toBe('start');
-      expect((caught as CoreError).message).toContain(member);
-    });
-  }
+  it('is refused at start: allowed_destinations', async () => {
+    const ctx = await repositoryContext();
+    const profiles = [{ domain: 'd', version: '1.0.0', allowed_destinations: [] }] as Json[];
+    let caught: unknown;
+    try {
+      ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(CoreError);
+    expect((caught as CoreError).kind).toBe('start');
+    expect((caught as CoreError).message).toContain('allowed_destinations');
+  });
   it('starts under the rules it applies', async () => {
     const ctx = await repositoryContext();
     const profiles = [{ domain: 'd', version: '1.0.0', evidence_policy: { minimum_confidence: 0.5 } }] as Json[];
     const run = ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
     expect((run.next() as unknown as Record<string, Json>).kind).toBe('InvokeCapability');
     run.dispose();
+  });
+  it("checks an output against a profile's grounding policy (section 5.21.3)", async () => {
+    const ctx = await repositoryContext();
+    const profiles = [
+      {
+        domain: 'd',
+        version: '1.0.0',
+        evidence_policy: { require_grounding: ['retrieve'], required_anchor_types: ['file'] },
+      },
+    ] as Json[];
+    for (const [anchors, kind] of [
+      [[], 'Failed'],
+      [[{ ref: 'file:a.md', kind: 'file' }], 'Completed'],
+    ] as const) {
+      const run = ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles });
+      const action = run.next() as unknown as Record<string, Json>;
+      run.submit(action.id as number, { kind: 'Output', value: { data: 1, confidence: 1, evidence_anchors: anchors as unknown as Json } }, 0);
+      const end = run.next() as unknown as Record<string, Json>;
+      expect(end.kind).toBe(kind);
+      if (kind === 'Failed') expect(end.code).toBe('F505');
+      run.dispose();
+    }
   });
 });

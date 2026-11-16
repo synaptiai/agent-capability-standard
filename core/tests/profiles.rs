@@ -250,8 +250,8 @@ fn a_header_that_is_not_supported_refuses_the_start() {
 }
 
 /// A run under a profile with `rule` is refused at start and at restore: no
-/// executor check reads a profile's grounding or destination policy yet,
-/// and a run never goes ahead as if the rule were absent.
+/// executor check reads a profile's destination policy yet, and a run never
+/// goes ahead as if the rule were absent.
 fn refused_at_start_and_restore(rule: (&str, Value), names: &str) {
     let ctx = ctx();
     let cat = catalog(json!([
@@ -267,15 +267,7 @@ fn refused_at_start_and_restore(rule: (&str, Value), names: &str) {
     // A state that holds the profile (written by another executor, or
     // before this one stopped applying the rule) does not restore either.
     let run = Run::start(&ctx, &cat, "w", Map::new(), options(Vec::new())).unwrap();
-    let mut state: Value = serde_json::from_str(&run.snapshot(None).state).unwrap();
-    state["profiles"] = json!([profile]);
-    let text = acs_core::exec::canonical::canonical(&state);
-    let snapshot = acs_core::exec::Snapshot {
-        sha256: acs_core::exec::canonical::sha256_hex(&text),
-        hmac: None,
-        state: text,
-    };
-    match Run::restore(&ctx, &cat, &snapshot, None) {
+    match Run::restore(&ctx, &cat, &holding(&run, &profile), None) {
         Err(acs_core::exec::RestoreError::Start(StartError::Unsupported(m))) => {
             assert!(m.contains(names), "{m}");
         }
@@ -283,15 +275,61 @@ fn refused_at_start_and_restore(rule: (&str, Value), names: &str) {
     }
 }
 
+/// `run`'s snapshot with `profile` put into its state as an applied profile.
+fn holding(run: &Run, profile: &Value) -> acs_core::exec::Snapshot {
+    let mut state: Value = serde_json::from_str(&run.snapshot(None).state).unwrap();
+    state["profiles"] = json!([profile]);
+    let text = acs_core::exec::canonical::canonical(&state);
+    acs_core::exec::Snapshot {
+        sha256: acs_core::exec::canonical::sha256_hex(&text),
+        hmac: None,
+        state: text,
+    }
+}
+
 #[test]
-fn a_profile_grounding_policy_is_refused_until_the_grounding_check_reads_it() {
-    refused_at_start_and_restore(
-        (
-            "evidence_policy",
-            json!({"require_grounding": ["retrieve"], "required_anchor_types": ["file"]}),
-        ),
-        "require_grounding",
-    );
+fn a_profile_grounding_policy_is_checked_at_start_and_after_a_restore() {
+    // §5.21.3: `require_grounding` is a grounding policy (§5.20) whose kinds
+    // are `required_anchor_types`; it applies to a 1.1 workflow, and a run
+    // restored from a state that holds the profile applies it too.
+    let ctx = ctx();
+    let cat = catalog(json!([
+        {"capability": "classify", "purpose": "p", "store_as": "c",
+         "input_bindings": {"item": "x"}}
+    ]));
+    let profile = json!({"domain": "d", "version": "1.0.0", "evidence_policy":
+        {"require_grounding": ["classify"], "required_anchor_types": ["file"]}});
+    let output = |anchors: Value| acs_core::exec::Response::Output {
+        value: json!({"labels": ["a"], "confidence": 1, "evidence_anchors": anchors}),
+        evidence_seen: None,
+    };
+    let fresh = || Run::start(&ctx, &cat, "w", Map::new(), options(vec![profile.clone()]));
+    let restored = || {
+        let plain = Run::start(&ctx, &cat, "w", Map::new(), options(Vec::new())).unwrap();
+        Run::restore(&ctx, &cat, &holding(&plain, &profile), None)
+            .map_err(|e| StartError::Unsupported(e.to_string()))
+    };
+    for start in [&fresh as &dyn Fn() -> Result<Run, StartError>, &restored] {
+        let mut run = start().unwrap();
+        let id = run.next().id;
+        run.submit(id, output(json!([])), 0).unwrap();
+        let end = serde_json::to_value(run.next()).unwrap();
+        assert_eq!(
+            (end["kind"].as_str(), end["code"].as_str()),
+            (Some("Failed"), Some("F505"))
+        );
+        let mut run = start().unwrap();
+        let id = run.next().id;
+        let anchor = json!([{"ref": "file:docs/item.md", "kind": "file"}]);
+        run.submit(id, output(anchor), 0).unwrap();
+        assert_eq!(run.next().body.kind(), "Completed");
+        let grounding = run
+            .trace()
+            .iter()
+            .find(|t| t["kind"] == "grounding")
+            .cloned();
+        assert_eq!(grounding.unwrap()["detail"]["policies"], json!(1));
+    }
 }
 
 #[test]

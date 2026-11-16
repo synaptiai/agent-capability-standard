@@ -2076,29 +2076,16 @@ impl<'a> Machine<'a> {
     /// with `below_minimum_confidence` or `invalid_confidence`.
     fn confidence_failure(&mut self, value: &Value) -> Option<Flow> {
         let min = self.program.policy.minimum_confidence()?;
-        Some(match crate::profile::check_confidence(value, min)? {
-            crate::profile::ConfidenceFault::Below(c) => self.step_error_with(
-                "F504",
-                format!(
-                    "confidence {c} is below the minimum confidence {min} of the applied profiles"
-                ),
-                Reason::of("below_minimum_confidence"),
-            ),
-            crate::profile::ConfidenceFault::Invalid(text) => self.step_error_with(
-                "F504",
-                format!(
-                    "the output's confidence {text} is not a number from 0 to 1, and an applied profile sets a minimum confidence"
-                ),
-                Reason::of("invalid_confidence"),
-            ),
-        })
+        let fault = crate::profile::check_confidence(value, min)?;
+        Some(self.step_error_with("F504", fault.message(min), Reason::of(fault.reason())))
     }
 
     /// §5.20's check of a host's output for the current step: under every
     /// policy that requires its capability (the frame workflow's own, then
-    /// the host's, which apply in every frame), each on its own. With none,
-    /// nothing is checked or traced, as in 1.1. On success the trace gets
-    /// one `grounding` event, from the last policy checked.
+    /// the host's, then the applied profiles' (§5.21.3); the last two apply
+    /// in every frame), each on its own. With none, nothing is checked or
+    /// traced, as in 1.1. On success the trace gets one `grounding` event,
+    /// from the last policy checked.
     fn grounding_check(&mut self, output: &Value, seen: Option<&[String]>) -> Result<(), String> {
         let step = self.step_ref();
         let wf = &self.program.workflows[&self.frame_ref().workflow];
@@ -2106,6 +2093,7 @@ impl<'a> Machine<'a> {
             .grounding
             .iter()
             .chain(&self.st.grounding)
+            .chain(&self.program.grounding)
             .filter(|p| p.requires(&step.capability))
             .collect();
         let Some(last) = policies.len().checked_sub(1) else {

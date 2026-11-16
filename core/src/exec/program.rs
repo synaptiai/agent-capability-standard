@@ -137,6 +137,10 @@ pub struct Program {
     /// The domain profiles applied to the run (§5.21): saved with the run
     /// as given, and loaded again when it is restored.
     pub policy: Policy,
+    /// The grounding policies the applied profiles put in force (§5.21.3,
+    /// §5.20), one per profile with `require_grounding`: like a host's,
+    /// they apply in every frame.
+    pub grounding: Vec<crate::grounding::Policy>,
 }
 
 fn parse(src: &str) -> Result<Expr, String> {
@@ -213,6 +217,7 @@ impl Program {
         Ok(Program {
             workflows,
             digest,
+            grounding: policy.grounding(),
             policy,
         })
     }

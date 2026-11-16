@@ -350,10 +350,13 @@ class WorkflowRunner:
             profiles: Domain profiles the host applies to every run it
                 starts (STANDARD v1.2 §5.21), each a loaded profile or a
                 path: they raise the steps' flags, require a person for the
-                steps ``require_human`` and ``block_autonomous`` cover, and
+                steps ``require_human`` and ``block_autonomous`` cover, apply
+                their grounding policies (``require_grounding``, F505) and
                 fail an output below ``minimum_confidence`` with F504. They
                 are checked here (:class:`~grounded_agency.profiles.ProfileError`)
-                and saved with each run.
+                and saved with each run; one that sets ``allowed_destinations``
+                refuses the start (:class:`RunStartError`) until the
+                executor checks destinations.
             max_actions: Most actions to answer in one :meth:`drive` before
                 giving up on a run (:class:`RunIncomplete`). Polls that got
                 no answer do not count.

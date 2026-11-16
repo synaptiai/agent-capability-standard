@@ -18,6 +18,7 @@ from grounded_agency import (
     ProfileError,
     _core,
 )
+from grounded_agency.grounding import GroundingPolicy
 from grounded_agency.workflows import RunStartError, WorkflowEngine, WorkflowRunner
 from tests.runtime_replay import load, play, start
 from tests.test_runner import Clock, FakeHost
@@ -136,14 +137,6 @@ def test_every_domain_catalog_validates_strictly_under_its_own_profile(
         assert report["diagnostics"] == [], (path.name, report["diagnostics"])
 
 
-def healthcare_flags_only() -> dict[str, Any]:
-    """healthcare.yaml without its evidence_policy: the rules this adapter
-    applies (flags and a person), none it would refuse."""
-    profile = _core.load_yaml(str(ROOT / "schemas" / "profiles" / "healthcare.yaml"))
-    del profile["evidence_policy"]
-    return profile
-
-
 @pytest.mark.asyncio
 async def test_the_adapter_asks_a_person_for_every_call_under_healthcare(
     ontology_path: str, tmp_path: Path
@@ -154,7 +147,7 @@ async def test_the_adapter_asks_a_person_for_every_call_under_healthcare(
         GroundedAgentConfig(
             ontology_path=ontology_path,
             checkpoint_dir=str(tmp_path / ".cp"),
-            profiles=[healthcare_flags_only()],
+            profiles=[ROOT / "schemas" / "profiles" / "healthcare.yaml"],
         )
     )
     mapping = adapter.mapper.map_tool("Read", {"file_path": "a"})
@@ -307,22 +300,17 @@ def test_strict_mode_off_refuses_a_raised_checkpoint(
 
 
 @pytest.mark.parametrize(
-    ("rule", "member"),
-    [
-        ({"evidence_policy": {"require_grounding": ["classify"]}}, "require_grounding"),
-        ({"evidence_policy": {"minimum_confidence": 0.5}}, "minimum_confidence"),
-        ({"allowed_destinations": []}, "allowed_destinations"),
-        ({"allowed_destinations": ["mailto:*"]}, "allowed_destinations"),
-    ],
+    "rule",
+    [{"allowed_destinations": []}, {"allowed_destinations": ["mailto:*"]}],
+    ids=["none", "mailto"],
 )
-def test_the_adapter_refuses_an_output_or_send_rule_it_does_not_check(
-    ontology_path: str, tmp_path: Path, rule: dict[str, Any], member: str
+def test_the_adapter_refuses_a_send_rule_it_does_not_check(
+    ontology_path: str, tmp_path: Path, rule: dict[str, Any]
 ) -> None:
-    """The adapter checks no call output and no send destination yet: a
-    profile that sets a grounding policy, a minimum confidence or a
+    """The adapter checks no send destination yet: a profile that sets a
     destination policy is refused, never applied without the rule
     (STANDARD v1.2 §5.21.4)."""
-    with pytest.raises(ProfileError, match=member) as caught:
+    with pytest.raises(ProfileError, match="allowed_destinations") as caught:
         GroundedAgentAdapter(
             GroundedAgentConfig(
                 ontology_path=ontology_path,
@@ -335,17 +323,84 @@ def test_the_adapter_refuses_an_output_or_send_rule_it_does_not_check(
 
 
 @pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.stem)
-def test_the_adapter_refuses_every_shipped_profile_for_its_grounding_policy(
+def test_the_adapter_applies_every_shipped_profile(
     ontology_path: str, tmp_path: Path, path: Path
 ) -> None:
-    with pytest.raises(ProfileError, match="require_grounding"):
-        GroundedAgentAdapter(
-            GroundedAgentConfig(
-                ontology_path=ontology_path,
-                checkpoint_dir=str(tmp_path / ".cp"),
-                profiles=[path],
-            )
+    """Every shipped profile sets require_grounding, and the adapter applies
+    it as a grounding policy (§5.21.3), with the configuration's own."""
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[path],
         )
+    )
+    (expected,) = adapter.profiles.grounding
+    assert [p.to_dict() for p in adapter._grounding] == [
+        GroundingPolicy.from_profile(expected).to_dict()  # type: ignore[union-attr]
+    ]
+
+
+def test_the_adapter_applies_a_profile_grounding_policy_and_minimum_confidence(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """A call's output (§5.20 *Hosts outside a workflow*) is checked against
+    a profile's grounding policy (required_anchor_types are its kinds),
+    then against the profiles' minimum confidence (F504, with its reason),
+    as the executor checks a step's output; the record of a call that failed
+    carries the reason, and its exported action record ``reason_code``."""
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[
+                {
+                    "domain": "d",
+                    "version": "1.0.0",
+                    "evidence_policy": {
+                        "require_grounding": ["retrieve"],
+                        "required_anchor_types": ["file"],
+                        "minimum_confidence": 0.9,
+                    },
+                }
+            ],
+        )
+    )
+    args = {"file_path": "a.py"}
+    anchor = {"ref": "file:a.py", "kind": "file"}
+
+    def output(confidence: Any, *anchors: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "data": "x",
+            "confidence": confidence,
+            "evidence_anchors": list(anchors),
+        }
+
+    # Grounding first: no anchor (and a low confidence) is F505.
+    text = adapter.check_call_output("Read", args, output(0.5), call="c1")
+    assert text is not None and text.startswith("F505 PROVENANCE_MISSING:")
+    # A log anchor is not of the profile's kinds.
+    log = {"ref": "log:app#1", "kind": "log"}
+    assert adapter.check_call_output("Read", args, output(1, log)) is not None
+    assert adapter.check_call_output("Read", args, output(0.95, anchor)) is None
+    text = adapter.check_call_output("Read", args, output(0.5, anchor), call="c2")
+    assert text is not None and text.startswith("F504 CONSTRAINT_VIOLATED:")
+    assert "below the minimum confidence 0.9" in text
+    text = adapter.check_call_output("Read", args, output("high", anchor), call="c3")
+    assert text is not None and "not a number from 0 to 1" in text
+    failed = [r for r in adapter.call_records if r.get("call") in ("c2", "c3")]
+    assert [(r["decision"], r["reason"]) for r in failed] == [
+        ("failed", "below_minimum_confidence"),
+        ("failed", "invalid_confidence"),
+    ]
+    exported = adapter.export_action_records("scope")
+    assert [r.get("reason_code") for r in exported if r.get("call_id") == "c2"] == [
+        "below_minimum_confidence"
+    ]
+    # A capability the policy does not require is held to the minimum only.
+    assert adapter.check_call_output("Grep", {"pattern": "x"}, output(1)) is None
+    grep = adapter.check_call_output("Grep", {"pattern": "x"}, output(0.1))
+    assert grep is not None and grep.startswith("F504")
 
 
 def test_anchor_kinds_alone_are_applied_by_the_adapter(
@@ -473,42 +528,34 @@ def test_a_misspelled_member_is_logged_with_the_member_meant(
     assert "did you mean 'checkpoint_policy'?" in logged
 
 
-@pytest.mark.parametrize(
-    ("rule", "member"),
-    [
-        (
-            {"evidence_policy": {"require_grounding": ["retrieve"]}},
-            "require_grounding",
-        ),
-        ({"allowed_destinations": []}, "allowed_destinations"),
-    ],
-)
-def test_the_executor_refuses_a_rule_no_check_reads_yet(
-    validator: _core.Validator, tmp_path: Path, rule: dict[str, Any], member: str
-) -> None:
-    """A profile's grounding or destination policy refuses the start, through
-    ``_core`` and through the runner: no executor check reads it yet, and a
-    run never goes ahead as if it were absent."""
-    catalog = {
-        "w": {
-            "goal": "g",
-            "risk": "low",
-            "spec_version": "1.1",
-            "steps": [
-                {
-                    "capability": "retrieve",
-                    "purpose": "p",
-                    "store_as": "r",
-                    "input_bindings": {"target": "x"},
-                }
-            ],
-        }
+CATALOG = {
+    "w": {
+        "goal": "g",
+        "risk": "low",
+        "spec_version": "1.1",
+        "steps": [
+            {
+                "capability": "retrieve",
+                "purpose": "p",
+                "store_as": "r",
+                "input_bindings": {"target": "x"},
+            }
+        ],
     }
-    profile = {"domain": "d", "version": "1.0.0", **rule}
-    with pytest.raises(ValueError, match=f"does not implement .*{member}"):
+}
+
+
+def test_the_executor_refuses_a_destination_rule_no_check_reads_yet(
+    validator: _core.Validator, tmp_path: Path
+) -> None:
+    """A profile's destination policy refuses the start, through ``_core``
+    and through the runner: no executor check reads it yet, and a run never
+    goes ahead as if it were absent."""
+    profile = {"domain": "d", "version": "1.0.0", "allowed_destinations": []}
+    with pytest.raises(ValueError, match="does not implement .*allowed_destinations"):
         _core.Run.start(
             validator,
-            catalog,
+            CATALOG,
             "w",
             {},
             header=None,
@@ -517,11 +564,67 @@ def test_the_executor_refuses_a_rule_no_check_reads_yet(
             profiles=[profile],
         )
     path = tmp_path / "catalog.yaml"
-    path.write_text(json.dumps(catalog))
+    path.write_text(json.dumps(CATALOG))
     engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
     engine.load_catalog(path)
-    with pytest.raises(RunStartError, match=member):
+    with pytest.raises(RunStartError, match="allowed_destinations"):
         WorkflowRunner(engine, profiles=[profile]).start("w")
+
+
+def test_the_runner_applies_a_profile_grounding_policy(tmp_path: Path) -> None:
+    """A profile's grounding policy (§5.21.3) is checked by the executor the
+    runner drives, as a host's policy is (§5.20): an output with no anchor
+    of the profile's kinds fails its step with F505; one with a file anchor
+    completes."""
+    path = tmp_path / "catalog.yaml"
+    path.write_text(json.dumps(CATALOG))
+    engine = WorkflowEngine(ONTOLOGY, schema_root=ROOT)
+    engine.load_catalog(path)
+    profile = {
+        "domain": "d",
+        "version": "1.0.0",
+        "evidence_policy": {
+            "require_grounding": ["retrieve"],
+            "required_anchor_types": ["file"],
+        },
+    }
+
+    class Anchored(FakeHost):
+        def __init__(self, anchors: list[dict[str, Any]]) -> None:
+            super().__init__(Clock())
+            self.anchors = anchors
+
+        def invoke_capability(self, action: dict[str, Any]) -> dict[str, Any]:
+            answer = super().invoke_capability(action)
+            answer["value"]["evidence_anchors"] = self.anchors
+            return answer
+
+    for anchors, end in (
+        ([], (None, "F505")),
+        ([{"ref": "file:a.md", "kind": "file"}], ("completed", None)),
+    ):
+        runner = WorkflowRunner(engine, profiles=[profile])
+        result = runner.run("w", None, Anchored(anchors))
+        assert (result.outcome, result.code) == end, result
+
+
+@pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.stem)
+def test_every_shipped_profile_starts_a_run(
+    validator: _core.Validator, path: Path
+) -> None:
+    """No shipped profile sets a rule the executor does not apply."""
+    profile = _core.load_yaml(str(path))
+    run = _core.Run.start(
+        validator,
+        CATALOG,
+        "w",
+        {},
+        header=None,
+        run_id="r",
+        now_ms=0,
+        profiles=[profile],
+    )
+    assert run.next()["kind"] in ("InvokeCapability", "RequestApproval")
 
 
 def replay(

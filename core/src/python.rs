@@ -910,6 +910,30 @@ fn check_grounding(
     to_py(py, &result)
 }
 
+/// A domain profile's minimum confidence applied to one output (STANDARD
+/// v1.2 §5.21.3): None when the output passes (it is not an object, has no
+/// `confidence`, or one at or above `minimum`), else `{code: "F504",
+/// reason: below_minimum_confidence|invalid_confidence, message}`.
+#[pyfunction]
+fn check_confidence(
+    py: Python<'_>,
+    output: &Bound<'_, PyAny>,
+    minimum: f64,
+) -> PyResult<Py<PyAny>> {
+    if !(0.0..=1.0).contains(&minimum) {
+        return Err(PyValueError::new_err(
+            "minimum must be a number from 0 to 1",
+        ));
+    }
+    match crate::profile::check_confidence(&from_py(output)?, minimum) {
+        None => Ok(py.None()),
+        Some(fault) => to_py(
+            py,
+            &json!({"code": "F504", "reason": fault.reason(), "message": fault.message(minimum)}),
+        ),
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
@@ -927,6 +951,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(destination_allowed, m)?)?;
     m.add_function(wrap_pyfunction!(next_fire, m)?)?;
     m.add_function(wrap_pyfunction!(check_grounding, m)?)?;
+    m.add_function(wrap_pyfunction!(check_confidence, m)?)?;
     let spec_versions: Vec<String> = validate::semantics::SUPPORTED_VERSIONS
         .iter()
         .map(|(a, b)| format!("{a}.{b}"))
