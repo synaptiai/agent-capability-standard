@@ -579,3 +579,85 @@ The items are by area; the reviewers' issue numbers are, item = issue: 1 =
   /guides/running-workflows/, /guides/claude-agent-sdk/,
   /community/release-notes/, /spec/1.2.0/ and the six capability pages
   whose skills changed): no violations, no sideways scroll.
+
+## Round 1 — typescript
+
+Three issues, all real; none rejected. Two are documentation gaps (the
+CHANGELOG, the binding README); the third (the package README's module
+table) gains a test that fails on the old README.
+
+1. **Two binding modules removed, the binding on the unpublished package,
+   neither in the CHANGELOG (low).** Real. `git diff --stat
+   origin/main...HEAD` deletes `examples/standard_agents/src/acs/canonical.ts`
+   (`canonicalize`, `digest`, `sha256Hex`, `NotCanonicalizableError`,
+   `Json`) and `src/acs/ontology.gen.ts` (`CAPABILITIES`, `ONTOLOGY_VERSION`,
+   `REQUIRES`); main's `test/grounded.test.ts`, `canonical.test.ts` and
+   `canonical_input.test.ts` import `../src/acs/canonical.js`, which no
+   longer exists. The package is new on this branch (no `packages/acs-core`
+   on origin/main), and the CHANGELOG had no entry introducing it either:
+   only entries that name its later additions and its npm publishing. Its
+   Added entry for `scripts/gen_standard_agents_binding.py` still said the
+   script writes "the binding's ontology table ... and the digest fixtures",
+   which it no longer does. Fix (`CHANGELOG.md`): an Upgrading bullet for
+   the binding (both modules removed; the binding depends on
+   `@synaptiai/acs-core` through `file:../../packages/acs-core` and imports
+   its `dist/`, so `npm ci` and `npm run build:ts` there first; where each
+   former export now comes from, `CAPABILITIES`, `REQUIRES` and
+   `ONTOLOGY_VERSION` also through `src/acs/ontology.ts`; the binding's copy
+   `test/fixtures/approval-digests.json` removed in favour of
+   `tests/conformance/approval/digests.json`, which main already had; the
+   package is on npm only once `publish-npm.yml` runs with
+   `NPM_PUBLISH_ENABLED` and `NPM_TOKEN`, so a copy outside the repository
+   builds or bundles it). An Added bullet introduces the package (0.1.0,
+   its modules, the `./wasm` entry, tests reading the vectors in place, CI).
+   The generator's Added bullet names what it writes now
+   (`packages/acs-core/src/ontology.gen.ts`, the annotation schema,
+   `tests/conformance/approval/digests.json`).
+2. **The binding README's build steps fail on a fresh clone (medium).**
+   Real, reproduced: a fresh `git clone` of this branch, then in
+   `packages/acs-core` `npm ci` (exit 0) and `npm run build` (exit 1, ENOENT
+   on `dist/acs_core.wasm` at `scripts/bundle-documents.mjs:12`, which loads
+   the WebAssembly core to parse the schema documents). CLAUDE.md, AGENTS.md,
+   ci.yml (`Build the TypeScript package`) and the package README already
+   say the binding needs only `build:ts`. Fix
+   (`examples/standard_agents/README.md`): `npm run build:ts`, with why
+   (the binding imports only the plain-TypeScript entry; the full build
+   bundles the documents through the WebAssembly core, which `build:wasm`
+   builds with Rust). Verified in the same fresh clone: `npm ci`, `npm run
+   build:ts` (exit 0), then in the binding `npm ci`, `npm run check` (exit
+   0) and `npm test` (191 passed, 2 skipped). No other document gives the
+   binding the full build (searched every tracked `.md`, `.ts`, `.mjs`,
+   `.yml` and `.json` for `npm run build`). Documentation only, so no test.
+3. **The package README's module table left out five exported modules
+   (low).** Real: `src/index.ts` re-exports `agents`, `domains`,
+   `families`, `ijson` and `issues`, and the table under "What it holds"
+   (rendered at /guides/typescript-package/) listed none, so
+   `parseJsonExact`, which spec/CONFORMANCE.md tells SL implementers the
+   TypeScript runners use, was documented nowhere in the package. Fix
+   (`packages/acs-core/README.md`): a row for each (`iJsonProblem` with
+   its limits, `MAX_DEPTH` among them, and `parseJsonExact`;
+   `manifestMaxima`, `joinMaxima`, `checkTask`, `workflowTarget`,
+   `agentsApply`; `modelFamily`, `isModelFamily`; `isDomainId`,
+   `selectImplementation`, `UnsupportedDomainError`; `issuePath`), each
+   with its section; the opening list names what the entry holds as
+   `src/index.ts`'s comment does; the list of vectors the tests read gains
+   `output/vectors.json`, `agents/maxima.json`, `families/derive.json` and
+   `domains/match.json`. Test: `test/package.test.ts` "lists in the
+   README's module table every module the entry exports" compares the
+   table's first column with the `export * from` lines of `src/index.ts`;
+   with the old README it fails, naming the five modules.
+
+### Checks after round 1 (typescript)
+
+- TypeScript: `packages/acs-core` `build:wasm`, build, check, test (1817:
+  the new README test); the binding check and test (191, 2 skipped). In a
+  fresh clone, the binding README's corrected steps (`npm ci`, `npm run
+  build:ts`, then the binding's `npm ci`, check and test) pass.
+- Python: `validate_doc_links` (674 references); `pytest tests/` (4498
+  passed, 18 skipped). No Python, Rust or generated file changed.
+- Rust (`core/`, 1.99.1): `cargo test --locked` (no Rust source changed).
+- Site: `npm run check`, `npm test` (1172), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` (0 enforced runs over 1800px) and
+  `scripts/check-axe.mjs` over the three pages this round changed
+  (/guides/typescript-package/, /community/release-notes/,
+  /guides/examples/standard-agents/): no violations, no sideways scroll.

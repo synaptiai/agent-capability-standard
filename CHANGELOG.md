@@ -233,6 +233,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   WebAssembly core, so run `npm run build:wasm` (which needs the
   `wasm32-unknown-unknown` target) and `npm run build` first; the binding
   needs only `npm run build:ts`.
+- Standard Agents binding: `src/acs/canonical.ts` and
+  `src/acs/ontology.gen.ts` are removed. The binding depends on the
+  TypeScript package `@synaptiai/acs-core` (`file:../../packages/acs-core`)
+  and imports its built `dist/`, so run `npm ci` and `npm run build:ts` in
+  `packages/acs-core` before the binding's check and tests. Import
+  `canonicalize`, `digest`, `sha256Hex`, `NotCanonicalizableError` and
+  `Json` from `@synaptiai/acs-core`, and `CAPABILITIES`, `REQUIRES` and
+  `ONTOLOGY_VERSION` from it or from `src/acs/ontology.ts`. The binding's
+  copy of the approval digest vectors, `test/fixtures/approval-digests.json`,
+  is removed: read `tests/conformance/approval/digests.json`. The package
+  is not on npm until `.github/workflows/publish-npm.yml` publishes it (it
+  does only when `NPM_PUBLISH_ENABLED` and `NPM_TOKEN` are set), so a copy
+  of the binding outside this repository builds the package from
+  `packages/acs-core` or bundles it.
 - Standard Agents binding: a trace entry's `approval.approvers` (and
   `GroundedCall.approvers`) are now the approvers' principals,
   `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
@@ -633,9 +647,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   its tests.
 - `schemas/interop/standard_agents_annotation.schema.json`: the schema of
   the `acs` annotation the binding puts on a tool.
-- `scripts/gen_standard_agents_binding.py` generates the binding's ontology
-  table, the annotation schema and the digest fixtures from the ontology and
-  the reference executor; `--check` fails on drift (CI).
+- `scripts/gen_standard_agents_binding.py` generates the TypeScript
+  package's ontology table (`packages/acs-core/src/ontology.gen.ts`), the
+  annotation schema and the approval digest vectors
+  (`tests/conformance/approval/digests.json`) from the ontology and the
+  reference executor; `--check` fails on drift (CI).
 - `tasks/standard-agents-upstream/`: nine issue texts for the Standard Agent
   Specification, and `file-issues.sh`, which files them in order with the
   GitHub CLI.
@@ -680,6 +696,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   PostToolUse hook with another server's; `GroundedAgentConfig.check_outputs`;
   `tool_result_output` in `grounded_agency.capabilities`, the output an MCP
   result carries (§5.18.10); `create_checkpoint_recorder(refuses_output=...)`.
+- TypeScript package `@synaptiai/acs-core` 0.1.0, in `packages/acs-core/`
+  ([its README](packages/acs-core/README.md)): the host-neutral core the
+  Standard Agents binding is built on, with the ontology table, effective
+  flags, canonical JSON and the approval digest, I-JSON checks
+  (`iJsonProblem`, `parseJsonExact`), redaction, evidence and grounding,
+  destination policies, durations, tool binding records, capability
+  outputs, agent manifests, model families, step domains and diagnostic
+  paths; the reference core through WebAssembly is its `./wasm` entry. Its
+  tests read the conformance vectors in place; CI type-checks, builds and
+  tests it.
 - TypeScript package: `checkBindings`, `annotationRecord`,
   `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
   `prerequisitesOf`. The Standard Agents binding adds `controlTool`,

@@ -1,6 +1,7 @@
 // What the published package holds: `npm pack --dry-run` lists the built
 // entries, the module, the bundled documents and the legal files, and no
-// sources or tests; LICENSE and NOTICE are the repository's.
+// sources or tests; LICENSE and NOTICE are the repository's; the README's
+// module table lists every module the main entry exports.
 import { describe, expect, it } from 'vitest';
 
 const CHILD = 'node:child_process';
@@ -20,6 +21,17 @@ describe('the npm package', () => {
       expect(files, f).toContain(f);
     }
     expect(files.filter((f) => f.startsWith('src/') || f.startsWith('test/'))).toEqual([]);
+  });
+
+  it("lists in the README's module table every module the entry exports", async () => {
+    const fs = (await import(/* @vite-ignore */ FS)) as { readFile(u: URL, e: 'utf8'): Promise<string> };
+    const index = await fs.readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+    const exported = [...index.matchAll(/^export \* from '\.\/([a-z_-]+)\.js';$/gm)].map((m) => m[1]);
+    expect(exported.length).toBeGreaterThan(0);
+    const readme = await fs.readFile(new URL('../README.md', import.meta.url), 'utf8');
+    const section = readme.split('\n## What it holds\n')[1]?.split('\n## ')[0] ?? '';
+    const listed = [...section.matchAll(/^\| `([a-z_-]+)` \|/gm)].map((m) => m[1]);
+    expect([...listed].sort()).toEqual([...exported].sort());
   });
 
   it('carries the repository LICENSE and NOTICE', async () => {
