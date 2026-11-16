@@ -464,22 +464,20 @@ def test_strict_mode_off_refuses_a_raised_checkpoint(
     [{"allowed_destinations": []}, {"allowed_destinations": ["mailto:*"]}],
     ids=["none", "mailto"],
 )
-def test_the_adapter_refuses_a_send_rule_it_does_not_check(
+def test_the_adapter_applies_a_profiles_send_rule(
     ontology_path: str, tmp_path: Path, rule: dict[str, Any]
 ) -> None:
-    """The adapter checks no send destination yet: a profile that sets a
-    destination policy is refused, never applied without the rule
-    (STANDARD v1.2 §5.21.4)."""
-    with pytest.raises(ProfileError, match="allowed_destinations") as caught:
-        GroundedAgentAdapter(
-            GroundedAgentConfig(
-                ontology_path=ontology_path,
-                checkpoint_dir=str(tmp_path / ".cp"),
-                profiles=[{"domain": "d", "version": "1.0.0", **rule}],
-            )
+    """A profile's ``allowed_destinations`` is a destination policy the
+    adapter puts in force for send calls (STANDARD v1.2 §5.21.3, §4.4.2);
+    tests/test_adapter_effects.py checks the calls it refuses."""
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[{"domain": "d", "version": "1.0.0", **rule}],
         )
-    assert "this adapter does not apply" in str(caught.value)
-    assert "profile d sets one" in str(caught.value)
+    )
+    assert adapter._destinations == [rule["allowed_destinations"]]
 
 
 @pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.stem)

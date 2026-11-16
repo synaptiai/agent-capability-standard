@@ -67,6 +67,7 @@ from .state.evidence_store import (
 )
 from .state.rate_limiter import RateLimitConfig, RateLimiter
 from .state.redaction import DEFAULT_REDACTOR, Redactor
+from .state.snapshots import FileSnapshotStore
 
 if TYPE_CHECKING:
     from .coordination.orchestrator import OrchestrationRuntime
@@ -269,16 +270,32 @@ class GroundedAgentConfig:
             their ``minimum_confidence`` fails an output below it with F504:
             both apply to the outputs this layer sees, those of the tools
             ``create_grounded_mcp_server`` serves (a warning is logged once
-            for any other tool they would cover). The adapter checks no
-            send's destination yet, so a profile that sets
-            ``allowed_destinations`` refuses the configuration rather than
-            be applied without it, as does a profile with an error
+            for any other tool they would cover). Their
+            ``allowed_destinations`` are destination policies in force
+            beside ``allowed_destinations`` (section 4.4.2). A profile with
+            an error refuses the configuration
             (:class:`~grounded_agency.profiles.ProfileError`). Profiles need
             ``approval="ask"``: with approvals off, the approvals they
             require would be skipped. With ``strict_mode=False``, which
             only logs a missing checkpoint, a profile whose
             ``checkpoint_policy`` raises ``requires_checkpoint`` (a value
             other than ``never``) refuses the configuration too.
+        snapshots: Where the layer's checkpoints keep their content
+            (STANDARD 1.2.0 section 4.4.1): with a
+            :class:`~grounded_agency.state.snapshots.FileSnapshotStore`, each
+            checkpoint copies the files in its scope, and
+            ``adapter.checkpoint_tracker.restore_checkpoint`` puts them back.
+            The tracker's state, its marker and the audit log are protected
+            in it. None: checkpoints record metadata only.
+        allowed_destinations: A destination policy (STANDARD 1.2.0 section
+            4.4.2): the patterns a ``send`` call's destination must match.
+            With the applied profiles' ``allowed_destinations``, the
+            policies in force: a call of a tool that performs ``send`` is
+            refused with F504, before approval and the checkpoint, when one
+            does not allow the destination its binding's ``destination``
+            pointer names, or when the binding names none (the layer cannot
+            tell where it sends). None: no policy of the host's own. An
+            invalid pattern is a ``ValueError``.
         schema_root: The directory the ontology's ``$ref`` paths are
             relative to (STANDARD 1.2.0 section 4.1.2). Default: the
             directory above the ontology's (the repository root for
@@ -308,6 +325,8 @@ class GroundedAgentConfig:
     evidence_store: EvidenceStoreProtocol | None = None
     secret_values: tuple[str, ...] = ()
     grounding: tuple[GroundingPolicy, ...] = ()
+    allowed_destinations: Sequence[str] | None = None
+    snapshots: FileSnapshotStore | None = None
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
@@ -349,6 +368,33 @@ class GroundedAgentConfig:
         ):
             raise ValueError("secret_values must be a sequence of strings")
         self.secret_values = tuple(self.secret_values)
+        if self.allowed_destinations is not None:
+            if isinstance(self.allowed_destinations, str) or not all(
+                isinstance(p, str) for p in self.allowed_destinations
+            ):
+                raise ValueError("allowed_destinations must be a sequence of strings")
+            for pattern in self.allowed_destinations:
+                try:
+                    _core.check_destination_pattern(pattern)
+                except ValueError as e:
+                    raise ValueError(f"allowed_destinations: {e}") from None
+            self.allowed_destinations = tuple(self.allowed_destinations)
+
+
+def _json_pointer(value: Any, pointer: str) -> tuple[bool, Any]:
+    """The member of ``value`` an RFC 6901 pointer names: ``(found, member)``."""
+    if pointer == "":
+        return True, value
+    node = value
+    for token in pointer[1:].split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict) and token in node:
+            node = node[token]
+        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+            node = node[int(token)]
+        else:
+            return False, None
+    return True, node
 
 
 def _error(code: ErrorCode, message: str, location: dict[str, Any]) -> ValidationError:
@@ -599,14 +645,22 @@ class GroundedAgentAdapter:
         core = _core.Validator(str(self.config.ontology_path), str(self._schema_root))
         # Domain profiles (STANDARD 1.2.0 section 5.21), checked against the
         # adapter's ontology; an error refuses the configuration, and so
-        # does a rule on sends, which this adapter does not check, and
-        # (strict_mode=False only logs a missing checkpoint) a raised
+        # does (strict_mode=False only logs a missing checkpoint) a raised
         # checkpoint requirement (section 5.21.4). A grounding policy and a
         # minimum confidence are in force on the outputs the layer receives
         # (the served tools'), and reported for each other tool whose calls
         # they would check (_warn_unchecked_output, section 5.21.4).
         self.profiles = AppliedProfiles(self.config.profiles, validator=core)
-        self.profiles.refuse_unapplied(("destinations",), "this adapter")
+        # The destination policies in force for send calls (section 4.4.2):
+        # the configuration's, then each applied profile's (5.21.3).
+        self._destinations: list[list[str]] = [
+            *(
+                [list(self.config.allowed_destinations)]
+                if self.config.allowed_destinations is not None
+                else []
+            ),
+            *(list(p) for p in self.profiles.destinations),
+        ]
         if not self.config.strict_mode:
             self.profiles.refuse_unapplied(
                 ("checkpoints",), "this adapter with strict_mode=False"
@@ -633,7 +687,13 @@ class GroundedAgentAdapter:
             reservation_seconds=self.config.checkpoint_reservation_seconds,
             clock=now,
             max_age_minutes=self.config.expiry_minutes,
+            snapshots=self.config.snapshots,
         )
+        if self.config.snapshots is not None:
+            # The audit log is never within a rollback's reach (section
+            # 4.4.1): the plugin's .claude/ always is out of it; this covers
+            # a log the configuration moved elsewhere.
+            self.config.snapshots.protect(self.config.audit_log_path)
         # The layer's redactor (STANDARD v1.2 §6.7): what it recognises as a
         # secret, the host's own values included. Its records, refusals and
         # evidence are redacted with it, and persist and audit calls whose
@@ -722,6 +782,47 @@ class GroundedAgentAdapter:
             elif redactor is not self.redactor:
                 for v in values:
                     redactor.add_secret(v)
+
+    def _destination_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None, args: Any
+    ) -> str | None:
+        """The F504 refusal of a call of a tool that performs ``send`` whose
+        destination a destination policy in force does not allow, or whose
+        destination this layer cannot tell (section 4.4.2, 5.18.10): read
+        at the binding's ``destination`` pointer. None for any other call,
+        and when no policy is in force. The destination is not repeated: it
+        is in the call's input (section 6.7)."""
+        if not self._destinations or "send" not in mapping.capabilities:
+            return None
+        found, value = (
+            _json_pointer(args, mapping.destination)
+            if mapping.destination is not None
+            else (False, None)
+        )
+        if not found or not isinstance(value, str):
+            why = (
+                "its binding names no destination argument"
+                if mapping.destination is None
+                else f"its argument at {mapping.destination!r} is not a string"
+            )
+            return self._refuse(
+                ErrorCode.CONSTRAINT_VIOLATED,
+                mapping,
+                tool,
+                call,
+                f"{tool} sends, and this layer cannot tell where: {why}, so no "
+                f"destination policy in force can allow it (STANDARD 1.2.0 §4.4.2)",
+            )
+        if _core.destination_allowed(self._destinations, value):
+            return None
+        return self._refuse(
+            ErrorCode.CONSTRAINT_VIOLATED,
+            mapping,
+            tool,
+            call,
+            f"{tool} sends to a destination the destination policies in force do "
+            f"not allow (STANDARD 1.2.0 §4.4.2)",
+        )
 
     def _secret_refusal(
         self, mapping: ToolMapping, tool: str, call: str | None, args: Any
@@ -879,6 +980,9 @@ class GroundedAgentAdapter:
             # The policies behind F505 refusals (section 5.20); no secret
             # value is ever part of the configuration's digest.
             settings["grounding"] = [p.to_dict() for p in self.config.grounding]
+        if self.config.allowed_destinations is not None:
+            # The host policy behind F504 refusals of sends (section 4.4.2).
+            settings["allowed_destinations"] = list(self.config.allowed_destinations)
         key = (self.mapper.records_revision, _core.canonical_json(settings))
         cached = self._config_digest
         if cached is not None and cached[0] == key:
@@ -1575,7 +1679,9 @@ class GroundedAgentAdapter:
                         )
                     )
 
-                refusal = self._secret_refusal(mapping, tool_name, call, tool_input)
+                refusal = self._secret_refusal(
+                    mapping, tool_name, call, tool_input
+                ) or self._destination_refusal(mapping, tool_name, call, tool_input)
                 if refusal is not None:
                     return deny(refusal)
                 self._warn_unchecked_output(mapping, tool_name)
@@ -2058,9 +2164,11 @@ class GroundedAgentAdapter:
                 if _args_key(args1) != _args_key(input_data):
                     # Section 5.18.7, changed arguments: classify again.
                     mapping1 = mapper.map_tool(tool_name, args1)
-                    refusal = self._secret_refusal(
-                        mapping1, tool_name, holder, args1
-                    ) or self._prerequisite_refusal(mapping1, tool_name, holder)
+                    refusal = (
+                        self._secret_refusal(mapping1, tool_name, holder, args1)
+                        or self._destination_refusal(mapping1, tool_name, holder, args1)
+                        or self._prerequisite_refusal(mapping1, tool_name, holder)
+                    )
                     if refusal is None and (
                         mapping1.requires_checkpoint
                         and not mapping0.requires_checkpoint

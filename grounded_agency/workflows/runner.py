@@ -29,8 +29,9 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Callable, Mapping, MutableSet, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableSet, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .. import _core
@@ -38,8 +39,10 @@ from ..grounding import Policies, as_policies
 from ..profiles import AppliedProfiles
 from ..state.checkpoint_tracker import CheckpointTracker
 from ..state.evidence_store import EvidenceAnchor, EvidenceStoreProtocol
+from ..state.memory import MemoryContext, MemoryError, MemoryStore
 from ..state.redaction import DEFAULT_REDACTOR, Redactor
 from .engine import WorkflowEngine
+from .idempotency import IdempotencyLog
 from .protocol import RECORD_MODES
 from .triggers import EventGate, trigger_attendance
 
@@ -90,7 +93,17 @@ class Host:
     The clock methods default to wall-clock time.
 
     With a :class:`CheckpointTracker`, :meth:`create_checkpoint` records
-    checkpoints in it.
+    checkpoints in it. When the tracker keeps content (a
+    :class:`~grounded_agency.state.snapshots.FileSnapshotStore`), the host
+    also performs ``checkpoint`` and ``rollback`` steps and answers the
+    executor's ``Rollback`` by restoring files (STANDARD v1.2 §4.4.1); with
+    a :class:`~grounded_agency.state.memory.MemoryStore` it performs
+    ``persist`` and ``recall`` (§4.5); with an :class:`IdempotencyLog`,
+    :meth:`send_once` transmits at most once per idempotency key (§4.4.2).
+    A subclass calls ``super().invoke_capability(action)`` for those.
+    The host's own records (the memory and idempotency files, and each of
+    ``protected_paths``, such as where you save runs) are protected in the
+    snapshot store: no checkpoint captures them, no rollback reaches them.
 
     A run may ask for an action again after it was restored (STANDARD v1.2
     §5.19.4): make what you do for an action idempotent under its delivery
@@ -100,8 +113,91 @@ class Host:
     (§5.19.6), not a ``send``: send only the action's values.
     """
 
-    def __init__(self, checkpoint_tracker: CheckpointTracker | None = None) -> None:
+    def __init__(
+        self,
+        checkpoint_tracker: CheckpointTracker | None = None,
+        *,
+        memory: MemoryStore | None = None,
+        idempotency: IdempotencyLog | None = None,
+        session_id: str | None = None,
+        user: str | None = None,
+        project: str | None = None,
+        protected_paths: Iterable[str | Path] = (),
+    ) -> None:
+        """``session_id``, ``user`` and ``project`` name the instances of
+        the memory scopes this host serves (§4.5); one host is one session
+        (a random ``session_id`` by default)."""
         self.checkpoint_tracker = checkpoint_tracker
+        self.memory = memory
+        self.idempotency = idempotency
+        self.session_id = session_id or uuid.uuid4().hex
+        self.user = user
+        self.project = project
+        for path in (
+            memory.path if memory is not None else None,
+            idempotency.path if idempotency is not None else None,
+            *protected_paths,
+        ):
+            if path is not None:
+                self.protect(path)
+
+    def protect(self, path: str | Path) -> None:
+        """Keep ``path`` (a file, or a directory and everything under it)
+        out of every checkpoint's reach (§4.4.1), such as the directory you
+        save runs to. Nothing to do without a snapshot store."""
+        tracker = self.checkpoint_tracker
+        if tracker is not None and tracker.snapshots is not None:
+            tracker.snapshots.protect(path)
+
+    def send_once(self, action: Action, effect: Callable[[], Response]) -> Response:
+        """Perform a ``send`` (or any other effect) at most once per
+        ``action["idempotency_key"]`` (§4.4.2): what a ``send``
+        implementation calls, with ``effect`` doing the transmission. An
+        attempt whose key was transmitted under gets that output again; one
+        that may have transmitted gets ``outcome_unknown``; a key reused for
+        another request gets ``key_conflict``. Without an
+        :class:`IdempotencyLog`, ``effect()``."""
+        log: IdempotencyLog | None = getattr(self, "idempotency", None)
+        if log is None:
+            return effect()
+        return log.perform(action, effect)
+
+    def _transmitted_since(self, since_ms: int, run_id: str) -> list[dict[str, str]]:
+        """This run's transmissions since ``since_ms``: what a rollback
+        lists as ``not_covered`` (``transmitted``, §4.4.1). Destinations
+        are redacted (§6.7)."""
+        log = getattr(self, "idempotency", None)
+        if log is None:
+            return []
+        out = []
+        for entry in log.performed_since(since_ms, run_id=run_id):
+            destination = entry.get("destination")
+            item = (
+                f"send to {DEFAULT_REDACTOR.redact_text(destination)[0]} ({entry['key']})"
+                if isinstance(destination, str)
+                else f"send ({entry['key']})"
+            )
+            out.append({"item": item, "reason": "transmitted"})
+        return out
+
+    def _restore(
+        self, checkpoint_id: str, scope: Sequence[str] | None, run_id: str
+    ) -> tuple[Any, list[dict[str, str]]] | None:
+        """Restore a checkpoint with the tracker's snapshot store: the
+        restore and the run's transmissions since the checkpoint, or None
+        when the tracker never took it."""
+        tracker = self.checkpoint_tracker
+        assert tracker is not None
+        checkpoint = tracker.find_checkpoint(checkpoint_id)
+        if checkpoint is None:
+            return None
+        restored = tracker.restore_checkpoint(checkpoint_id, scope)
+        since = int(checkpoint.created_at.timestamp() * 1000)
+        return restored, self._transmitted_since(since, run_id)
+
+    def _snapshots(self) -> bool:
+        tracker = getattr(self, "checkpoint_tracker", None)
+        return tracker is not None and tracker.snapshots is not None
 
     def now_ms(self) -> int:
         """The current time in milliseconds since the Unix epoch."""
@@ -131,8 +227,55 @@ class Host:
         trace or history: a ref there was seen by some earlier request, not
         necessarily by this one. Leave it out when you do not know the
         request: absent attests nothing, while an empty list attests that
-        the producer saw no evidence."""
-        raise NotImplementedError(f"no implementation for {action['capability']}")
+        the producer saw no evidence.
+
+        The default performs ``checkpoint`` and ``rollback`` with a tracker
+        that keeps content, and ``persist`` and ``recall`` with a memory
+        store (see the class); anything else raises ``NotImplementedError``.
+        """
+        capability = action["capability"]
+        inputs = action.get("inputs") or {}
+        tracker = getattr(self, "checkpoint_tracker", None)
+        memory = getattr(self, "memory", None)
+        if capability == "checkpoint" and tracker is not None and self._snapshots():
+            scope = str(inputs.get("scope") or "*").split() or ["*"]
+            checkpoint_id = tracker.create_checkpoint(
+                scope=scope,
+                reason=f"checkpoint step {action['step']} of {'/'.join(action['frame'])}",
+            )
+            return {"kind": "Output", "value": tracker.checkpoint_output(checkpoint_id)}
+        if capability == "rollback" and self._snapshots():
+            given = inputs.get("scope")
+            part = str(given).split() if given else None
+            done = self._restore(
+                str(inputs.get("checkpoint_id")), part, action["run_id"]
+            )
+            if done is None:
+                return {
+                    "kind": "Error",
+                    "code": "R402",
+                    "message": "unknown checkpoint: this host never took it",
+                }
+            restored, not_covered = done
+            return {"kind": "Output", "value": restored.output(not_covered=not_covered)}
+        if capability in ("persist", "recall") and memory is not None:
+            ctx = MemoryContext(
+                run=action.get("run_id"),
+                session=self.session_id,
+                user=self.user,
+                project=self.project,
+            )
+            try:
+                operation = memory.persist if capability == "persist" else memory.recall
+                return {"kind": "Output", "value": operation(inputs, ctx)}
+            except MemoryError as e:
+                return {
+                    "kind": "Error",
+                    "code": "R402",
+                    "reason": e.reason,
+                    "message": e.message,
+                }
+        raise NotImplementedError(f"no implementation for {capability}")
 
     def create_checkpoint(self, action: Action) -> Response:
         """Take a checkpoint before ``action["step"]``; return ``{"kind":
@@ -147,8 +290,34 @@ class Host:
 
     def rollback(self, action: Action) -> Response:
         """Restore ``action["checkpoint_id"]``; return ``{"kind":
-        "RolledBack"}``, or an ``Error`` (the run fails with F503)."""
-        raise NotImplementedError("no rollback")
+        "RolledBack"}`` only when everything the checkpoint captured is
+        restored, optionally with ``not_covered`` (changes it never covered,
+        such as this run's transmissions, §4.4.1), or an ``Error`` (the run
+        fails with F503). The default restores with a tracker that keeps
+        content."""
+        if not self._snapshots():
+            raise NotImplementedError("no rollback")
+        done = self._restore(action["checkpoint_id"], None, action["run_id"])
+        if done is None:
+            return {
+                "kind": "Error",
+                "code": "F503",
+                "message": "unknown checkpoint: this host never took it",
+            }
+        restored, not_covered = done
+        if not restored.restored:
+            items = ", ".join(
+                f"{u['item']} ({u['reason']})" for u in restored.unrestored[:10]
+            )
+            return {
+                "kind": "Error",
+                "code": "F503",
+                "message": f"{len(restored.unrestored)} items not restored: {items}",
+            }
+        response: Response = {"kind": "RolledBack"}
+        if not_covered:
+            response["not_covered"] = not_covered
+        return response
 
     def request_approval(self, action: Action) -> Response:
         """Ask ``action["approver"]`` to approve ``action["shown"]``; return
@@ -352,11 +521,12 @@ class WorkflowRunner:
                 path: they raise the steps' flags, require a person for the
                 steps ``require_human`` and ``block_autonomous`` cover, apply
                 their grounding policies (``require_grounding``, F505) and
-                fail an output below ``minimum_confidence`` with F504. They
-                are checked here (:class:`~grounded_agency.profiles.ProfileError`)
-                and saved with each run; one that sets ``allowed_destinations``
-                refuses the start (:class:`RunStartError`) until the
-                executor checks destinations.
+                fail an output below ``minimum_confidence`` with F504, and
+                put their ``allowed_destinations`` in force beside the
+                host's own destination policies (a ``send`` they do not
+                allow fails F504 before approval, §4.4.2). They are checked
+                here (:class:`~grounded_agency.profiles.ProfileError`) and
+                saved with each run.
             max_actions: Most actions to answer in one :meth:`drive` before
                 giving up on a run (:class:`RunIncomplete`). Polls that got
                 no answer do not count.
@@ -441,6 +611,7 @@ class WorkflowRunner:
         trigger: int | None = None,
         event: Mapping[str, Any] | None = None,
         grounding: Policies = None,
+        destinations: Sequence[Sequence[str]] | None = None,
     ) -> _core.Run:
         """Start a run without driving it (drive it with :meth:`drive`, or
         step it yourself; save it before you act on its first action,
@@ -470,6 +641,13 @@ class WorkflowRunner:
         and fails the step with F505 when it is neither grounded nor marked
         inferred. Each policy was checked against the ontology when it was
         made, and the core checks it again.
+
+        ``destinations`` is the host's destination policies (§4.4.2), each a
+        list of patterns: with the applied profiles' ``allowed_destinations``
+        they are in force for every ``send`` step of the run and its nested
+        runs, which fails F504 (``destination_not_allowed``) before approval
+        when one does not allow its destination. A pattern that is not one
+        refuses the start.
 
         The executor is given no catalog header (``header=None``, STANDARD
         v1.2 §11.5), and loses nothing by it: the engine writes the header
@@ -522,6 +700,7 @@ class WorkflowRunner:
                 profiles=self._profiles.documents or None,
                 records=records,
                 grounding=[p.to_dict() for p in as_policies(grounding)] or None,
+                destinations=[list(p) for p in destinations or ()] or None,
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None
@@ -703,12 +882,15 @@ class WorkflowRunner:
         save: Callable[[dict[str, Any]], None] | None = None,
         key: bytes | None = None,
         grounding: Policies = None,
+        destinations: Sequence[Sequence[str]] | None = None,
     ) -> RunResult:
         """Start ``workflow`` (as :meth:`start`) and drive it to its end with
         ``host``. With ``save``, the run's state is saved after it starts and
         after every change (:meth:`drive`). Without ``archive``, keep the
         result's ``run_record`` and ``action_records`` yourself (STANDARD
         v1.2 §5.19.8)."""
+        if save is not None:
+            _check_durable(host)
         run = self.start(
             workflow,
             inputs,
@@ -720,6 +902,7 @@ class WorkflowRunner:
             trigger=trigger,
             event=event,
             grounding=grounding,
+            destinations=destinations,
         )
         if save is not None:
             save(run.snapshot(key))
@@ -769,6 +952,8 @@ class WorkflowRunner:
         """A turn and the actions it answered; an empty turn when it ran
         out of ``budget``."""
         _check_key(key)
+        if save is not None:
+            _check_durable(host)
         now = host.now_ms()
         _check_ms(now)
         before = run.next()
@@ -781,7 +966,7 @@ class WorkflowRunner:
         while answered < budget:
             action = run.next()
             if action["kind"] in TERMINAL:
-                return Turn(self._ended(run, action), None, None), answered
+                return Turn(self._ended(run, action, host), None, None), answered
             if action["kind"] == "Sleep":
                 return Turn(None, run.wake_at(), action), answered
             response = self._dispatch(host, action)
@@ -891,10 +1076,20 @@ class WorkflowRunner:
             save(run.snapshot(key))
         if host is not None and before["kind"] not in TERMINAL | {"Sleep"}:
             host.withdraw(before, "cancelled")
-        return self._ended(run, run.next())
+        return self._ended(run, run.next(), host)
 
-    def _ended(self, run: _core.Run, action: Action) -> RunResult:
-        """The result of an ended run, handed to the archive (§5.19.8)."""
+    def _ended(
+        self, run: _core.Run, action: Action, host: Host | None = None
+    ) -> RunResult:
+        """The result of an ended run, handed to the archive (§5.19.8). The
+        run's ``run`` memory scope ends with it, unless it ended
+        ``deferred``, whose entries last until it is resumed and ends, or is
+        cancelled (§4.5)."""
+        memory = getattr(host, "memory", None)
+        if memory is not None and not (
+            action["kind"] == "Completed" and action.get("outcome") == "deferred"
+        ):
+            memory.end_scope("run", run.run_id)
         result = self._result(run, action)
         if self._archive is not None:
             try:
@@ -1071,6 +1266,17 @@ class WorkflowRunner:
             reason=action.get("reason"),
             checkpoint_id=action.get("checkpoint_id"),
             run_record=run.run_record(),
+        )
+
+
+def _check_durable(host: Host) -> None:
+    """A host that saves runs re-delivers a pending attempt after a
+    restart (§5.19.4), so its idempotency keys must last as long (§4.4.2)."""
+    log = getattr(host, "idempotency", None)
+    if log is not None and not log.durable:
+        raise ValueError(
+            "a host that saves runs keeps its idempotency keys as durably as "
+            "the runs (STANDARD §4.4.2): give IdempotencyLog a path"
         )
 
 

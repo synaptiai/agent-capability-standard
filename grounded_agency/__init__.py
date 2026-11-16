@@ -92,8 +92,11 @@ from .state.evidence_store import (
     StoreInfo,
 )
 from .state.jsonl_evidence_store import JsonlEvidenceStore
+from .state.memory import MemoryContext, MemoryStore
+from .state.memory import MemoryError as MemoryStoreError
 from .state.rate_limiter import RateLimitConfig, RateLimiter
 from .state.redaction import Redactor
+from .state.snapshots import FileSnapshotStore
 from .trust import Candidate, Resolution, merge_trust_weights
 from .trust import resolve as resolve_conflict
 from .versions import CitedVersionError
@@ -105,6 +108,7 @@ from .workflows.engine import (
     WorkflowStep,
     WorkflowStepResult,
 )
+from .workflows.idempotency import IdempotencyLog
 from .workflows.tracer import ConformanceReport, StepTrace, WorkflowTracer
 
 # Configure package-level logger
@@ -146,6 +150,12 @@ __all__ = [
     "JsonlEvidenceStore",
     "StoreInfo",
     "Redactor",
+    # Checkpoint content, memory and sends (STANDARD v1.2 §4.4.1-§4.5)
+    "FileSnapshotStore",
+    "MemoryStore",
+    "MemoryContext",
+    "MemoryStoreError",
+    "IdempotencyLog",
     # Grounding (STANDARD v1.2 §3.1, §5.20)
     "GroundingPolicy",
     "GroundingResult",

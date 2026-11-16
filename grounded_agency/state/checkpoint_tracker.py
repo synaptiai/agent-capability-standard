@@ -15,6 +15,14 @@ of STANDARD 1.2.0 section 5.18.6 (and section 5.2.2 for steps):
   never reports a refusal) counts as used.
 - Validity ends at an execution boundary (:meth:`end_validity`) and at the
   maximum age, at most 30 minutes.
+
+Validity is what a checkpoint authorises; retention is what it can restore
+(STANDARD 1.2.0 section 4.4.1). With a :class:`FileSnapshotStore`
+(``snapshots``), a checkpoint also holds a copy of the files in its scope:
+:meth:`CheckpointTracker.restore_checkpoint` puts them back, whether or not
+the checkpoint is still valid or was used, as long as its content is kept.
+The tracker's own state, archive and marker are never captured, so no
+rollback brings a used checkpoint back.
 """
 
 from __future__ import annotations
@@ -30,7 +38,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from .snapshots import FileSnapshotStore, Restore
 
 # Platform-portable ELOOP errno values (Linux=40, macOS/BSD=62).
 _ELOOP_ERRNOS: set[int] = {getattr(_errno_mod, "ELOOP", 40), 62}
@@ -226,6 +239,7 @@ class CheckpointTracker:
         reservation_seconds: float | None = None,
         clock: Callable[[], datetime] | None = None,
         max_age_minutes: float | None = None,
+        snapshots: FileSnapshotStore | None = None,
     ) -> None:
         """
         Initialize the tracker.
@@ -251,6 +265,12 @@ class CheckpointTracker:
                        state file, included). More than 0 and at most 30
                        (default: 30); it is also the default expiry of
                        :meth:`create_checkpoint`.
+            snapshots: Where checkpoints keep their content (STANDARD 1.2.0
+                       section 4.4.1). With it, :meth:`create_checkpoint`
+                       copies the files in the checkpoint's scope and
+                       :meth:`restore_checkpoint` puts them back; the
+                       tracker's ``checkpoint_dir`` and ``marker_dir`` are
+                       protected in it, never captured or restored.
 
         Raises:
             ValueError: If ``reservation_seconds`` is not more than 0, or
@@ -286,7 +306,19 @@ class CheckpointTracker:
         self._checkpoint_history: list[Checkpoint] = []
         # When the newest checkpoint was taken: survives history pruning.
         self._last_taken_at: datetime | None = None
+        self._snapshots = snapshots
+        if snapshots is not None:
+            # The tracker's own records are never within a rollback's reach
+            # (section 4.4.1): a used checkpoint stays used.
+            snapshots.protect(self._checkpoint_dir)
+            if self._marker_dir is not None:
+                snapshots.protect(self._marker_dir)
         self._load_persisted_state()
+
+    @property
+    def snapshots(self) -> FileSnapshotStore | None:
+        """The store that keeps checkpoints' content, if any."""
+        return self._snapshots
 
     def _now(self) -> datetime:
         return self._clock()
@@ -599,6 +631,16 @@ class CheckpointTracker:
                 f"1.2.0 §5.18.6 caps a checkpoint's maximum age at 30 minutes"
             )
         checkpoint_id = self._generate_checkpoint_id()
+        metadata = dict(metadata or {})
+        if self._snapshots is not None:
+            # The content, before the checkpoint is recorded (I/O outside
+            # the lock): a capture that fails records no checkpoint.
+            capture = self._snapshots.capture(checkpoint_id, scope)
+            summary = capture.output()
+            summary["captured"] = len(capture.captured)
+            summary.pop("checkpoint_id", None)
+            summary.pop("timestamp", None)
+            metadata["capture"] = summary
         now = self._now()
         checkpoint = Checkpoint(
             id=checkpoint_id,
@@ -606,7 +648,7 @@ class CheckpointTracker:
             reason=reason,
             created_at=now,
             expires_at=now + timedelta(minutes=min(minutes, self._max_age_minutes)),
-            metadata=metadata or {},
+            metadata=metadata,
         )
 
         with self._lock:
@@ -632,6 +674,70 @@ class CheckpointTracker:
         timestamp = self._now().strftime("%Y%m%d_%H%M%S")
         random_suffix = os.urandom(16).hex()
         return f"chk_{timestamp}_{random_suffix}"
+
+    def find_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
+        """A checkpoint by id: active, in history, or archived (pruned from
+        the history), valid or not; None when the tracker never took it."""
+        with self._lock:
+            found = self._find(checkpoint_id)
+        if found is not None:
+            return found
+        for archived in self.get_archived_checkpoints():
+            if archived.id == checkpoint_id:
+                return archived
+        return None
+
+    def restore_checkpoint(
+        self, checkpoint_id: str, scope: Sequence[str] | None = None
+    ) -> Restore:
+        """Put back what checkpoint ``checkpoint_id`` captured, within
+        ``scope`` (all of it when None), STANDARD 1.2.0 section 4.4.1. It
+        neither uses nor invalidates any checkpoint (section 5.2.2: a
+        rollback uses none), and works on a used or expired checkpoint while
+        its content is kept.
+
+        Raises:
+            KeyError: The tracker never took the checkpoint.
+            NotImplementedError: The tracker keeps no content (no
+                ``snapshots``).
+        """
+        if self.find_checkpoint(checkpoint_id) is None:
+            raise KeyError(checkpoint_id)
+        if self._snapshots is None:
+            raise NotImplementedError("this tracker keeps no checkpoint content")
+        return self._snapshots.restore(checkpoint_id, scope)
+
+    def checkpoint_output(self, checkpoint_id: str) -> dict[str, Any]:
+        """The ``checkpoint`` capability's output for a checkpoint this
+        tracker took: its id, time and, with a snapshot store, what it
+        captured (section 4.4.1).
+
+        Raises:
+            KeyError: The tracker never took the checkpoint.
+        """
+        checkpoint = self.find_checkpoint(checkpoint_id)
+        if checkpoint is None:
+            raise KeyError(checkpoint_id)
+        out: dict[str, Any] = {
+            "checkpoint_id": checkpoint.id,
+            "timestamp": checkpoint.created_at.astimezone(UTC)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+        }
+        capture = checkpoint.metadata.get("capture")
+        if isinstance(capture, dict):
+            out.update({k: v for k, v in capture.items() if k != "captured"})
+            manifest = (
+                self._snapshots.manifest(checkpoint.id)
+                if self._snapshots is not None
+                else None
+            )
+            if manifest is not None:
+                out["captured"] = sorted(manifest["files"])
+        out["evidence_anchors"] = [
+            {"ref": f"checkpoint:{checkpoint.id}", "kind": "record"}
+        ]
+        return out
 
     def has_commit(self, commit: str, since: datetime | None = None) -> bool:
         """Whether a checkpoint taken at or after ``since`` (any time when
@@ -685,6 +791,14 @@ class CheckpointTracker:
             with open(archive_file, "a", encoding="utf-8") as f:
                 for cp in checkpoints:
                     f.write(json.dumps(cp.to_dict()) + "\n")
+            # Content retention ends with the history entry (section 4.4.1):
+            # a later rollback to it reports `discarded`.
+            if self._snapshots is not None:
+                for cp in checkpoints:
+                    try:
+                        self._snapshots.discard(cp.id)
+                    except (OSError, ValueError) as e:
+                        logger.warning("Failed to discard checkpoint content: %s", e)
             logger.info(
                 "Archived %d pruned checkpoints to %s",
                 len(checkpoints),
