@@ -23,7 +23,7 @@ import {
 import { readRepoFile } from '../lib/repo';
 import { edgeTypeCount, safetyRows } from '../lib/views';
 import { cell, code, figure, table } from './md';
-import { specEarlyBlocks, specLateBlocks, specTailBlocks } from './spec-figures';
+import { specEarlyBlocks, specEffectBlocks, specLateBlocks, specTailBlocks } from './spec-figures';
 import { slotBlocks } from './spec-slot-blocks';
 import { SPEC_SLOTS } from '../lib/spec-slots';
 import { loadVersions } from '../data/versions';
@@ -126,6 +126,7 @@ export function specFigureBlocks(): string[] {
         safetyCritical(o).map((c) => [code(c.id), ...safetyRows(c).map((r) => cell(r.value))]),
       ),
     ),
+    ...specEffectBlocks(),
     figure(
       'Step anatomy, from §5.2',
       stepAnatomyCaption(schema),

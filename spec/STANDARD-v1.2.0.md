@@ -9,10 +9,9 @@
 [RFC-0009](RFC-0009-checkpoint-rollback-send-memory.md) and
 [RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
 validator and executor implement §4, §5 and §9–§11 and claim class EX
-(§10.5); the Standard Agents binding implements §5.18 and claims class SL
-(§10.4); the Python SDK adapter implements §5.18 and meets §10.4 except the
-§5.18.10 row its conformance statement lists as not applied, and claims
-class SL once it is applied; the
+(§10.5); the Python SDK adapter and the Standard Agents binding implement
+§5.18, and the binding claims class SL (§10.4), the adapter once the
+§5.18.10 row its statement lists as not applied is applied; the
 executor and both layers check grounding (§5.20) and apply domain profiles
 (§5.21); `grounded_agency` implements §7.1's entity ids and §8's
 arithmetic; §7.2 and §7.3 are not implemented
@@ -364,9 +363,8 @@ A **checkpoint** is a copy, kept by the host, of the state within its
 can copy and put back, so the host says what a checkpoint covers:
 
 - A `checkpoint` step's `scope` names what to capture, in the host's naming
-  (paths or patterns, keys, resource identifiers; for instance a
-  white-space-separated list); `*` asks for everything the host can
-  restore. A checkpoint the executor has its host take (`CreateCheckpoint`,
+  (paths or patterns, keys, resource identifiers); `*` asks for everything
+  the host can restore. A checkpoint the executor has its host take (`CreateCheckpoint`,
   §5.2.2) covers what the step it precedes may change, as far as the host can
   tell, and otherwise everything the host can restore.
 - A host SHOULD report what a checkpoint holds: `mechanism` (how it was
@@ -377,8 +375,7 @@ can copy and put back, so the host says what a checkpoint covers:
   `<algorithm>:<lowercase hex>`, e.g. `sha256:…`) and `expires_at` (when the
   host may discard the content).
 - A host SHOULD keep a checkpoint's content at least until the run that
-  took it ends; a rollback to content the host has discarded reports it
-  `discarded`. Validity (§5.2.2) limits what a checkpoint authorises;
+  took it ends; a rollback to discarded content reports it `discarded`. Validity (§5.2.2) limits what a checkpoint authorises;
   retention limits what it can restore. A checkpoint that was used up or is
   no longer valid can be restored while its content is kept.
 - A checkpoint never captures the record of what happened (below), even
@@ -4131,16 +4128,9 @@ Use this decision tree:
 ```
 Does the step change anything outside the run?
 ├── No → No checkpoint
-└── Yes → Can a saved copy of what it changes be put back
-          (a file, a record, a configuration)?
-    ├── Yes → A checkpoint is REQUIRED before it: it is the restore point
-    │         (`mutate`, or raise `requires_checkpoint`)
-    └── No: it transmits (a message, a payment, a published event) →
-              `send`: a checkpoint is still REQUIRED, but it restores only
-              the agent's own state. Prevent a wrong transmission instead:
-              `constrain` before it, an approval that shows the destination
-              and the payload, a destination policy, and at most one
-              transmission per approval (§4.4.2)
+└── Yes → Can a saved copy of what it changes be put back?
+    ├── Yes (a file, a record, a configuration) → A checkpoint is REQUIRED
+    └── No (a message, a payment, a published event) → Still REQUIRED; it cannot undo it
 ```
 
 **Examples:**
@@ -4150,7 +4140,7 @@ Does the step change anything outside the run?
 | Read file contents | No | No mutation |
 | Write to database | Yes | The checkpoint restores the rows it captured |
 | Send HTTP GET | No | Read-only |
-| HTTP POST that delivers a message or an order (`send`) | Yes, with approval | The checkpoint restores local state, not the delivery; the idempotency key keeps a retry from delivering twice (§4.4.2) |
+| HTTP POST that delivers a message (`send`) | Yes, with approval | Restores local state, not the delivery; prevent a wrong send instead (§4.4.2) |
 | Rename file | Yes | May overwrite existing file |
 | Append to log | Optional | Append-only, can ignore duplicate |
 

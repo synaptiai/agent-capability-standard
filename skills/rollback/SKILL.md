@@ -120,24 +120,18 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - An expired or used checkpoint can still be restored while its content is kept: validity limits what a checkpoint authorises, not what it restores (STANDARD 1.2.0 §4.4.1, §5.2.2)
    - If its content is gone, report `restored: false` with `{item: "*", reason: discarded}`
 
-2) **Read what changed** (read-only). The git form, each a separate call:
-   - `git diff --name-status <sha> -- <paths>`: tracked changes since the checkpoint, for `changes_reverted`
-   - `git ls-files --others --exclude-standard -- <paths>`: untracked files now. Files **created since** are these minus the checkpoint's `excluded` list; untracked files that were in `excluded` were never captured
+2) **Read what changed** (read-only): `git diff --name-status <sha> -- <paths>` (tracked changes, for `changes_reverted`) and `git ls-files --others --exclude-standard -- <paths>`; files **created since** are the untracked ones not in the checkpoint's `excluded`
 
-3) **Restore by mechanism**. The git form is one line, a gated `mutate` in the safety layer (it needs a fresh checkpoint and an approval: it overwrites the current state):
-   - `restore_kind: stash`: `git restore --source=<sha> --worktree -- <paths> && git restore --source=<sha>^2 --staged -- <paths>` (the worktree from the stash commit, the index from its index parent; tracked files added since are removed, files deleted since come back)
-   - `restore_kind: head`: `git restore --source=<sha> --staged --worktree -- <paths>`
-   - Then, only when the created-since list is not empty, `&& rm -f -- <created paths>` in the same line. Never `git clean` with an empty path list, which removes every untracked file.
-   - `git stash apply <sha>` (the full commit id a checkpoint recorded) also counts as a rollback, but aborts with "Your local changes would be overwritten" once a file it touches changed since the checkpoint, the usual case for a rollback; a bare `git stash pop` or `git stash apply`, or any other revision, restores no checkpoint and is refused (F503)
+3) **Restore by mechanism**. The git form is one line, a gated `mutate` (a fresh checkpoint and an approval: it overwrites the current state):
+   - `restore_kind: stash`: `git restore --source=<sha> --worktree -- <paths> && git restore --source=<sha>^2 --staged -- <paths>`; `restore_kind: head`: `git restore --source=<sha> --staged --worktree -- <paths>`
+   - Then, only when files were created since, `&& rm -f -- <created paths>`; never `git clean` with an empty path list
+   - `git stash apply <sha>` aborts once a file it touches changed since the checkpoint; a bare `git stash pop` or `apply` is refused (F503)
    - `file_copy`: copy each file back from the manifest, and remove the files created in scope since
-   - Leave the record of what happened alone: never overwrite or remove `.claude/`, the audit log or the host's state
+   - Never touch `.claude/`, the audit log or the host's state
 
-4) **Verify** (read-only): `git diff --quiet <sha> -- <paths>` and the untracked list again; recompute the digest as the checkpoint computed it, for `verification`
+4) **Verify** (read-only): `git diff --quiet <sha> -- <paths>` and the untracked list again, for `verification`
 
-5) **Report**:
-   - `unrestored`: each path the restore failed for (`failed`), each created-since file not removed (`failed`), each item the rollback's `scope` names that the checkpoint did not capture, untracked files in `excluded` included (`not_captured`), content that is gone (`discarded`)
-   - `not_covered`: changes to excluded files no scope named (`outside_scope`); when `HEAD` moved since the checkpoint, `{item: "HEAD", reason: outside_scope, detail: "commits made since are not undone"}`; a transmission made since (`transmitted`)
-   - `restored` is true only if `unrestored` is empty; the step completes either way, so say so, and list what was not restored
+5) **Report**: `unrestored` for what failed (`failed`), was never captured (`not_captured`) or is gone (`discarded`); `not_covered` for changes the checkpoint never covered (`outside_scope`, `transmitted`, and `HEAD` when commits were made since). `restored` is true only if `unrestored` is empty; the step completes either way
 
 6) **Ground claims**: the rollback's own record, the restore and the verification commands
 

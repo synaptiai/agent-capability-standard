@@ -84,7 +84,7 @@ const o = loadOntology();
 const schema = loadCatalogSchema();
 const KNOWN = ['layers', 'edges', 'safety', 'step', 'reference', 'annotations', 'gates', 'failures'];
 const OLDER = ['categories', ...Object.keys(T.TABLE_FIGURES)];
-const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'digest-vectors', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2'];
+const TAIL = [...OLDER, 'codes-9.2', 'codes-9.3', 'codes-9.4', 'codes-9.5', 'codes-9.6', 'codes-9.7', 'schema-shelf', 'merge-thresholds', 'decay', 'families', 'code-heat', 'levels', 'suite', 'digest-vectors', 'bumps', 'checkpoint-tree', 'pattern-0', 'pattern-1', 'pattern-2', 'pattern-3', 'pattern-4'];
 const NEW = [...TAIL, ...Object.keys(T.CODE_TABLE_FIGURES), 'principles', 'sl-fixtures', 'quorum-fields', 'requirements', 'safety-order', 'safety-defaults', 'precedence', 'static-checks', 'extensions', 'triggers', 'recovery-loop', 'wait-timeline', 'silent-source', 'approval', 'delegate', 'quorum', 'trust-classes', 'sender-filter', 'approver-count', 'host-loop', 'overlap', 'protocol-actions', 'run-records', 'fixture-entries'];
 if (!KNOWN.includes(slot) && !NEW.includes(slot) && !(slot in REPLAY_FIXTURES)) throw new Error(`SpecFigure: slot ${slot} has no figure`);
 const REPLAY_TITLES: Record<string, string> = {
@@ -104,6 +104,13 @@ const REPLAY_TITLES: Record<string, string> = {
   'citation-replay': 'A citation of a value the step does not bind',
   'audit-replay': 'An audit step whose record was not written',
   'secret-replay': 'A persist refused for a secret in its data',
+  'rollback-replay': 'A rollback that did not restore everything, stopped',
+  'not-covered-replay': 'A rollback after a send, the send not covered',
+  'send-key-replay': 'One approval, one key, across a retry',
+  'destination-replay': 'A send to a destination no policy allows',
+  'scope-replay': 'A memory step whose scope the host did not use',
+  'stored-replay': 'A persist that stored nothing, completed',
+  'delegate-rollback-replay': "A rollback after a delegation, the delegate's change not covered",
 };
 // A link to a numbered section of this page's own Standard (1.0.0's links stay on 1.0.0).
 const sectionLink = (sec: string) => {

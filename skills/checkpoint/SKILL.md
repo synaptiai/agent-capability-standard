@@ -98,12 +98,11 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - a provider snapshot (a volume, a VM image) as an `x-` name
    Keep checkpoint content where the host keeps it, outside the files in scope.
 
-3) **Capture**. The git form (`vcs_snapshot`), each a separate plain Bash call: the safety layer counts exactly the plain `git stash create` as `checkpoint`, and a line with `$(`, `;` or `&&` as a gated `mutate`.
-   1. `git stash create "checkpoint:<id>"`: saves the tracked state (worktree and index) as an unreferenced stash commit and prints its sha, leaving the working tree unchanged. **An empty output means a clean tree.**
-   2. On a clean tree, `git rev-parse HEAD` (read-only): the restore point is `HEAD`. Record `restore_point` (the sha) and `restore_kind` (`stash` or `head`).
-   3. `git ls-files --others --exclude-standard -- <paths>` (read-only): untracked files in scope, which `git stash create` does not capture. List them in `excluded`, or copy them (`file_copy`, a gated call of its own). Ignored files are outside the checkpoint.
-   Do not run `git stash store` or `git update-ref`: either names a commit the caller chooses, which the safety layer does not count as a checkpoint, and as a gated `mutate` it would use up the checkpoint the `create` just took. Git keeps the unreferenced commit until `gc.pruneExpire` (two weeks by default); report no `expires_at` for it.
-   For `file_copy`: copy each file in scope with a manifest of its path and SHA-256, into a private directory (0700) outside the scope.
+3) **Capture**. The git form (`vcs_snapshot`), each a separate plain Bash call (the safety layer counts exactly a plain `git stash create` as `checkpoint`):
+   1. `git stash create "checkpoint:<id>"` saves the tracked state as an unreferenced stash commit and prints its sha; **an empty output means a clean tree**
+   2. On a clean tree, `git rev-parse HEAD`: the restore point is `HEAD` (record `restore_kind`: `stash` or `head`)
+   3. `git ls-files --others --exclude-standard -- <paths>`: untracked files, which the stash does not capture, go in `excluded`
+   Never `git stash store` or `git update-ref`: either is a gated `mutate` that names a commit the caller chooses. For `file_copy`, copy each file with a manifest of its SHA-256 into a private directory outside the scope.
 
 4) **Generate the restore command**: how to roll back (skill-level aid, not contract)
    - For `vcs_snapshot`: the `rollback` skill's `git restore --source=<sha>` form

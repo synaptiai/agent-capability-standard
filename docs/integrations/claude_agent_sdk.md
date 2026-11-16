@@ -322,43 +322,6 @@ checkpoint_id = adapter.checkpoint_tracker.create_checkpoint(
 # commit it printed, or HEAD for a clean tree, as the restore point.
 ```
 
-A checkpoint the adapter's tracker takes records metadata only, unless the
-configuration gives it a place to keep content (STANDARD 1.2.0 §4.4.1):
-
-```python
-from grounded_agency import FileSnapshotStore
-
-adapter = GroundedAgentAdapter(GroundedAgentConfig(
-    snapshots=FileSnapshotStore(".", ".snapshots"),
-))
-checkpoint_id = adapter.create_checkpoint(["src/*.py"], "Before refactoring")
-# ... later, whether or not the checkpoint was used:
-result = adapter.checkpoint_tracker.restore_checkpoint(checkpoint_id)
-result.restored, result.unrestored, result.changes_reverted
-```
-
-The store copies the files the scope names, excludes secret-bearing file
-names, and never captures or restores `.claude/`, the tracker's state, its
-marker or the audit log. One adapter is one checkpoint scope: a subagent's
-calls (`Task`, classified `delegate`) share it, so one checkpoint authorises
-one change by either, and a rollback restores the subagent's file changes
-too (§5.15.4).
-
-**Destination policies.** `GroundedAgentConfig(allowed_destinations=[...])`
-puts a destination policy in force for every call of a tool that performs
-`send` (STANDARD 1.2.0 §4.4.2), with each applied profile's: a call whose
-destination, read at its binding's `destination` pointer, a policy does not
-allow is refused with F504 before approval and the checkpoint, and so is a
-send whose binding names no destination argument. The check runs again on
-arguments the host's permission flow changed.
-
-```python
-adapter.mapper.register_binding({
-    "tool": "mcp__mail__deliver", "standard": "1.2.0", "ontology": "2.2.0",
-    "capability": "send", "destination": "/to",
-})
-```
-
 ### Consuming Checkpoints
 
 The adapter uses a checkpoint up for each gated call. The host API still consumes the active checkpoint directly:
@@ -1051,6 +1014,19 @@ class GroundedClient:
 ```
 
 ### GroundedAgentAdapter
+
+**Checkpoint content.** With `GroundedAgentConfig(snapshots=FileSnapshotStore(".", ".snapshots"))`,
+a checkpoint also keeps a copy of the files its scope names, and
+`adapter.checkpoint_tracker.restore_checkpoint(checkpoint_id)` puts them
+back, used or not (STANDARD 1.2.0 §4.4.1); it never captures `.claude/`,
+the tracker's state or the audit log. A subagent's calls share the
+adapter's scope, so one checkpoint authorises one change by either (§5.15.4).
+
+**Destination policies.** `GroundedAgentConfig(allowed_destinations=[...])`
+and the profiles' `allowed_destinations` are destination policies (§4.4.2):
+a `send` call whose destination, read at its binding's `destination`
+pointer, one does not allow, or whose binding names none, is refused with
+F504 before approval.
 
 ```python
 class GroundedAgentAdapter:

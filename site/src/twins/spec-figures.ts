@@ -32,6 +32,13 @@ const REPLAY_TITLES: Record<string, string> = {
   'citation-replay': 'A citation of a value the step does not bind, from §5.20',
   'audit-replay': 'An audit step whose record was not written, from §6.4',
   'secret-replay': 'A persist refused for a secret in its data, from §6.7',
+  'rollback-replay': 'A rollback that did not restore everything, stopped, from §4.4.1',
+  'not-covered-replay': 'A rollback after a send, the send not covered, from §4.4.1',
+  'send-key-replay': 'One approval, one key, across a retry, from §4.4.2',
+  'destination-replay': 'A send to a destination no policy allows, from §4.4.2',
+  'scope-replay': 'A memory step whose scope the host did not use, from §4.5',
+  'stored-replay': 'A persist that stored nothing, completed, from §4.5',
+  'delegate-rollback-replay': "A rollback after a delegation, the delegate's change not covered, from §5.15.4",
 };
 
 function replayBlock(slot: string): string {
@@ -76,6 +83,11 @@ export function specEarlyBlocks(): string[] {
   ];
 }
 
+/** The blocks for §4.4.1 to §4.5, in page order. */
+export function specEffectBlocks(): string[] {
+  return ['rollback-replay', 'not-covered-replay', 'send-key-replay', 'destination-replay', 'scope-replay', 'stored-replay'].map(replayBlock);
+}
+
 /** The blocks for §5.9 to §5.19, in page order. */
 export function specLateBlocks(): string[] {
   const { source, text } = currentStandardText();
@@ -113,6 +125,7 @@ export function specLateBlocks(): string[] {
         ],
       ),
     ),
+    replayBlock('delegate-rollback-replay'),
     figure(
       'Trust classes, from §5.17',
       D.trustCaption(trust),

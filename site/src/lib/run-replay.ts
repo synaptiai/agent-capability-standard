@@ -32,6 +32,13 @@ export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
   'citation-replay': 'grounding_acs_sibling_unbound',
   'audit-replay': 'audit_require_record_fails',
   'secret-replay': 'error_reason_secret_in_data',
+  'rollback-replay': 'rollback_step_checked',
+  'not-covered-replay': 'rolled_back_not_covered',
+  'send-key-replay': 'send_retry_one_key',
+  'destination-replay': 'destination_policy_refuses',
+  'scope-replay': 'persist_scope_mismatch',
+  'stored-replay': 'persist_stored_false_completes',
+  'delegate-rollback-replay': 'delegate_rollback_own_state',
 };
 
 export type ReplayStatus = 'ran' | 'deferred' | 'skipped' | 'not-reached';

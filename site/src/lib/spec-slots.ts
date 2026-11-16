@@ -42,6 +42,12 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'layers', level: 3, section: '4.2 ', at: 'heading' },
   { key: 'edges', level: 3, section: '4.3 ', at: 'heading' },
   { key: 'safety', level: 3, section: '4.4 ', at: 'heading' },
+  { key: 'rollback-replay', level: 4, section: '4.4.1 ', at: after('table', 0, 'Field Meaning') },
+  { key: 'not-covered-replay', level: 4, section: '4.4.1 ', at: after('paragraph', 4, 'At run time. A rollback step completes w') },
+  { key: 'send-key-replay', level: 4, section: '4.4.2 ', at: after('paragraph', 2, 'A key is unique only while run_id is. A ') },
+  { key: 'destination-replay', level: 4, section: '4.4.2 ', at: after('paragraph', 7, 'The policies in force for a run are thos') },
+  { key: 'scope-replay', level: 3, section: '4.5 ', at: after('paragraph', 3, 'A host that does not provide the scope as') },
+  { key: 'stored-replay', level: 3, section: '4.5 ', at: after('paragraph', 4, 'stored: true asserts that the data is st') },
   { key: 'table-5.1', level: 3, section: '5.1 ', at: fieldTable() },
   { key: 'step', level: 3, section: '5.2 ', at: 'heading' },
   { key: 'safety-defaults', level: 4, section: '5.2.1 ', at: 'heading' },
@@ -66,6 +72,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'resume-replay', level: 4, section: '5.14.1 ', at: after('paragraph', 1, 'Runs that did not end deferred. A run th') },
   { key: 'resume-skip-replay', level: 4, section: '5.14.1 ', at: after('list', 0, 'What it keeps. Its stores, inputs, injec') },
   { key: 'delegate', level: 3, section: '5.15 ', at: after('code', 0, '- capability: delegate') },
+  { key: 'delegate-rollback-replay', level: 4, section: '5.15.4 ', at: after('list', 0, 'Authorisation. A run\'s checkpoints autho') },
   { key: 'quorum', level: 3, section: '5.16 ', at: after('code', 0, '- capability: constrain') },
   { key: 'quorum-fields', level: 3, section: '5.16 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Field Description' } },
   { key: 'trust-classes', level: 3, section: '5.17 ', at: after('code', 0, '- capability: receive') },
@@ -80,7 +87,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'capability-checks', level: 4, section: '5.18.10 ', at: codeTable('Capability Check Code') },
   { key: 'protocol-actions', level: 4, section: '5.19.1 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Action The host Responses' } },
   { key: 'protocol-replay', level: 4, section: '5.19.1 ', at: after('list', 2, "outputs: the root workflow's stores at t") },
-  { key: 'response-replay', level: 4, section: '5.19.1 ', at: after('paragraph', 5, 'An Error carries a code and a message, a') },
+  { key: 'response-replay', level: 4, section: '5.19.1 ', at: after('paragraph', 6, 'An Error carries a code and a message, a') },
   { key: 'wake-replay', level: 4, section: '5.19.3 ', at: after('list', 0, 'A Sleep ends at a tick whose time is at ') },
   { key: 'cancel-replay', level: 4, section: '5.19.5 ', at: after('paragraph', 0, 'A host MAY cancel a run that has not end') },
   { key: 'reason-replay', level: 4, section: '5.19.7 ', at: after('paragraph', 0, 'An Error response MAY carry a reason, a ') },
@@ -117,11 +124,21 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'bumps', level: 3, section: '11.4 ', at: 'heading' },
   { key: 'version-codes', level: 3, section: '11.5 ', at: codeTable('Code A workflow or catalog is reported w', 1) },
   { key: 'citing-codes', level: 3, section: '11.6 ', at: codeTable('Code A consumer reports a cited document', 1) },
-  { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },
+  { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step change anything outside th' } },
   { key: 'pattern-0', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 0, startsWith: '- capability: plan' } },
   { key: 'pattern-1', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 1, startsWith: '- capability: retrieve' } },
   { key: 'pattern-2', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 2, startsWith: '- capability: plan' } },
+  { key: 'pattern-3', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 3, startsWith: '- capability: constrain' } },
+  { key: 'pattern-4', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 4, startsWith: '- capability: rollback' } },
 ];
+
+/** §12.1's tree as Standards 1.0.0 and 1.1.0 write it (1.2.0 rewrote it). */
+const CHECKPOINT_TREE_OLD: SpecSlot = {
+  key: 'checkpoint-tree',
+  level: 3,
+  section: '12.1 ',
+  at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' },
+};
 
 /**
  * Standard 1.0.0: only figures drawn from its own text (visual spec 3.9 gives
@@ -136,7 +153,7 @@ export const SPEC_SLOTS_100: readonly SpecSlot[] = [
   { key: 'table-6.3', level: 3, section: '6.3 ', at: fieldTable() },
   { key: 'categories', level: 3, section: '9.1 ', at: 'heading' },
   { key: 'bumps', level: 3, section: '11.4 ', at: 'heading' },
-  { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },
+  CHECKPOINT_TREE_OLD,
   { key: 'pattern-0', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 0, startsWith: '- capability: plan' } },
   { key: 'pattern-1', level: 3, section: '12.5 ', at: { place: 'before', block: 'code', index: 1, startsWith: '- capability: retrieve' } },
   // Its Recovery Loop fence holds one step, which a strip would not add to.
@@ -175,7 +192,13 @@ const TEXT_FIGURES_110: ReadonlySet<string> = new Set([
   'pattern-2',
 ]);
 export const SPEC_SLOTS_110: readonly SpecSlot[] = SPEC_SLOTS.flatMap((s): SpecSlot[] =>
-  s.key === 'families' ? [{ key: 'categories', level: 3, section: '9.1 ', at: 'heading' }] : TEXT_FIGURES_110.has(s.key) ? [s] : [],
+  s.key === 'families'
+    ? [{ key: 'categories', level: 3, section: '9.1 ', at: 'heading' }]
+    : s.key === 'checkpoint-tree'
+      ? [CHECKPOINT_TREE_OLD]
+      : TEXT_FIGURES_110.has(s.key)
+        ? [s]
+        : [],
 );
 
 /** The slot map of each Standard version that has one, by version. */

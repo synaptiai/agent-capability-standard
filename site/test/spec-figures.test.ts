@@ -177,7 +177,7 @@ describe('Standard figure data', () => {
     const t = T.decisionTree(text, STD);
     const count = (n: T.TreeNode): number => n.branches.reduce((a, b) => a + 1 + count(b.node), 0);
     expect(count(t)).toBe(lines.length);
-    expect(lines.some((l) => l.endsWith('→ Checkpoint REQUIRED'))).toBe(true);
+    expect(lines.some((l) => l.endsWith('→ A checkpoint is REQUIRED'))).toBe(true);
   });
 
   it('lists each level the bullets §10.2 gives it (F-S28)', () => {
