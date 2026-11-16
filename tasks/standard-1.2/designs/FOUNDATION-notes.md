@@ -789,3 +789,30 @@ Workstreams should run `npm run check:axe` (or at least
   pins the refusal rule for Python, TypeScript and `hooks/secret_scan.sh`;
   a stream that changes the scan re-syncs the skills' copies.
 
+
+## 2026-11-16 — S3 (delegation, catalogs and diagnostics), for the streams after it
+
+- **§2 Terms is two tables** (S5): the general terms, then, after the
+  `host-loop` figure, "Terms of hosts, runs, catalogs and delegation"
+  (S1's, S2b's and S3's rows). S5's four rows go in the second table, before
+  S3's four. The site reads §2's run terms from every table.
+- **§5.15 figures** (S5): `family-replay`, `manifest-replay`,
+  `agents-replay`, `read-only-replay` and `continue-replay` draw S3's runtime
+  fixtures; §5.15.4 follows `continue-replay`. A long §5.15.4 needs a figure
+  of its own.
+- **Validator entry points** (S6): `validate::validate_set(ctx, set, agents,
+  policy)` is the one validation function; `validate_with` builds the set and
+  loads the agent manifests from `Options`, and still refuses `profiles`.
+  S6's `validate_catalog_with` wraps `validate_set` with the applied
+  profiles' policy. `Program::build_set` and `Run::prepare` pass
+  `Policy::default()` beside the target maxima; S6 passes the profiles'
+  policy there. Diagnostics carrying `profile` or `tool` get no `path`
+  (`validate/location.rs`).
+- **W616 features** (S6, §11.5): `continues` is a `FEATURES` entry; a
+  catalog manifest in a file whose header targets 1.0 or 1.1 is W616 from
+  `validate/catalog.rs`; `agents` is S303 below 1.2. S6's
+  `warn_version_feature_1_2` fixture must use `continues`.
+- **Runtime fixture keys**: `catalogs` (`[{catalog, header}]`) and `agents`
+  are passed by both harnesses (`fixture_set` in `core/tests/runtime.rs`,
+  `set_options` in `tests/runtime_replay.py`) to `Run::start_set` /
+  `Run.start(catalogs=..., agents=...)` and to restore.
