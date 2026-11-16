@@ -692,7 +692,7 @@ class GroundedAgentAdapter:
         changed, not for every record."""
         from . import __version__, _core
 
-        settings = {
+        settings: dict[str, Any] = {
             "strict_mode": self.config.strict_mode,
             "approval": self.config.approval,
             "expiry_minutes": self.config.expiry_minutes,

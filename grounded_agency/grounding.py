@@ -118,9 +118,10 @@ class GroundingPolicy:
         """A policy from ``{require, kinds?, attested?}``."""
         if not isinstance(data, Mapping):
             raise ValueError("a grounding policy is a mapping")
+        kinds = data.get("kinds")
         return cls(
-            require=data.get("require"),  # type: ignore[arg-type]
-            kinds=data.get("kinds"),
+            require=_strings(data.get("require"), "require"),
+            kinds=None if kinds is None else _strings(kinds, "kinds"),
             attested=data.get("attested", False),
         )
 
@@ -143,7 +144,10 @@ class GroundingPolicy:
         if not require:
             return None
         kinds = policy.get("required_anchor_types") or None
-        return cls(require=require, kinds=kinds)
+        return cls(
+            require=_strings(require, "require"),
+            kinds=None if kinds is None else _strings(kinds, "kinds"),
+        )
 
 
 Policies = GroundingPolicy | Sequence[GroundingPolicy] | None

@@ -660,7 +660,15 @@ class EvidenceStoreProtocol(Protocol):
         ...
 
     def append_many(
-        self, anchors: Iterable[EvidenceAnchor], **context: Any
+        self,
+        anchors: Iterable[EvidenceAnchor],
+        *,
+        capability: str | None = None,
+        run_id: str | None = None,
+        frame: Iterable[str] | None = None,
+        step: int | None = None,
+        tool: str | None = None,
+        call_id: str | None = None,
     ) -> list[EvidenceRecord]:
         """Keep several anchors with one context; notify once."""
         ...
