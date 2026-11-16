@@ -883,3 +883,26 @@ Workstreams should run `npm run check:axe` (or at least
 - **WebAssembly `run.start`** answers `{run, warnings}`; `CoreContext.start`
   reports them to `StartArgs.onWarning`. **S3**: keep `warnings` when
   `start_options` gains `catalogs` and `agents`.
+
+## 2026-11-16 — S5 (checkpoint, rollback, send and memory), for the merge with S3
+
+- **Pre-call point.** S5's send check is `Machine::destination_refusal()`,
+  called in `ready()` right after the inputs are resolved, before
+  `Stage::Approval`: the policies in force are `state.destinations` then
+  `program.policy.destinations()` (S6's profiles). S3's delegate refusals go
+  at the same point; the two concern different capabilities.
+- **Keys.** Every `InvokeCapability` carries `idempotency_key`, required in
+  `host_protocol.schema.json` and `protocol.py`; `restore` fills a pending
+  action that has none (`fill_idempotency_key`), whatever the state's
+  version. S3's `restore_set` must go through the same fill.
+- **No unimplemented start option is left** (`StartOptions::unimplemented`
+  and `profile::Policy::unenforced` are gone); `refuse_unapplied` in the
+  adapter keeps only the `strict_mode=False` checkpoint rule, and the
+  binding's `unappliedRule` is gone. ACS-05 is `fixed`.
+- **Site.** §12.1's tree is one node per line (the site's tree figure reads
+  it so); 1.0 and 1.1 keep their own `checkpoint-tree` slot
+  (`CHECKPOINT_TREE_OLD`). §4.4.1-§4.5 and §5.15.4 have run replays of S5's
+  fixtures; §5.19.1's `response-replay` slot is at paragraph 6.
+- **SL claims.** The binding's statement has no `not_applied` and the
+  binding claims class SL; the adapter keeps the output-contract row. Every
+  text that states the claims says so (FOUNDATION-notes, S1 review rounds).
