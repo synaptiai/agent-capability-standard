@@ -98,18 +98,6 @@ hooks:
               exit 2
             fi
             exit 0
-  PostToolUse:
-    - matcher: "Edit"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[PERSIST] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Edit | input_sha256: ${DIGEST:-unavailable}" >> .audit/persist-operations.log 2>/dev/null || true
 ---
 
 ## Intent

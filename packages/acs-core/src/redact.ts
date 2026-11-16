@@ -17,8 +17,14 @@
  * password, an assignment to a credential name (`password`, `token`,
  * `api_key`, ..., alone or ending a longer name) of four characters or more,
  * PEM private key bodies, AWS access key ids, GitHub and Slack tokens, `sk-`
- * keys and JWTs. In a JSON value, a string member whose name is a credential
- * name is redacted whole.
+ * keys and JWTs. In a JSON value, a string member whose name ends in a
+ * credential name (in any case, after any prefix: `accessToken`,
+ * `dbPassword`, `x-api-key`) or in `authorization` or `cookie` (the
+ * structured `Authorization`, `Proxy-Authorization`, `Cookie` and
+ * `Set-Cookie` headers) is redacted whole. A member name is redacted as any
+ * string is: a name that holds a secret is replaced by its redacted text, and
+ * one that would then repeat a name already in its object gets ` (2)`,
+ * ` (3)`, ... so that no member is lost.
  *
  * The patterns are ASCII: no `u` flag, so `\b` and case-insensitive
  * matching are ASCII-only, as `re.ASCII` makes them in Python; whitespace is
@@ -86,7 +92,8 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   /\b(?<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/dg,
 ];
 
-const SECRET_MEMBER = new RegExp(`^(?:[\\s\\S]*[_-])?(?:${NAMES})$`, 'i');
+/** A member name that ends in a credential name, or names a header that carries one. */
+const SECRET_MEMBER = new RegExp(`^[\\s\\S]*(?:${NAMES}|authorization|cookie)$`, 'i');
 
 /** The registered values a redactor replaces: long enough, distinct, longest first. */
 function registered(secrets: readonly string[]): string[] {
@@ -150,17 +157,28 @@ export function redactJson(value: Json, secrets: readonly string[] = []): { valu
     if (v !== null && typeof v === 'object') {
       const out: { [key: string]: Json } = {};
       for (const [k, item] of Object.entries(v)) {
-        const here = `${pointer}/${pointerToken(k)}`;
+        let name = redactWith(k, values, DEFAULT_PATTERNS);
+        const renamed = name !== k;
+        if (renamed) {
+          // A name that holds a secret: never repeat another.
+          let unique = name;
+          for (let n = 2; Object.hasOwn(out, unique) || Object.hasOwn(v, unique); n++) {
+            unique = `${name} (${n})`;
+          }
+          name = unique;
+        }
+        const here = `${pointer}/${pointerToken(name)}`;
+        if (renamed) pointers.push(here);
         if (
           typeof item === 'string' &&
           [...item].length >= MIN_SECRET_LENGTH &&
           item !== MARKER &&
           SECRET_MEMBER.test(k)
         ) {
-          out[k] = MARKER;
-          pointers.push(here);
+          out[name] = MARKER;
+          if (!renamed) pointers.push(here);
         } else {
-          out[k] = walk(item, here);
+          out[name] = walk(item, here);
         }
       }
       return out;

@@ -963,7 +963,7 @@ findings:
     audit_required.
     Run::run_record, RunResult.run_record, WorkflowRunner(archive=); grounded_agency.trust.manual_override;
     create_evidence_collector(required=True); hooks/posttooluse_log_tool.sh reports every call it does not
-    log or cannot sign (exit 1). Fixtures audit_require_record_*, audit_recorded_false_*, run_record_*;
+    log or cannot sign (exit 1), and no skill keeps a log of its own beside it. Fixtures audit_require_record_*, audit_recorded_false_*, run_record_*;
     tests/test_audit_records.py, tests/test_hooks_unit.py. RFC-0006 Part B, decision B10.'
   concerns:
   - evidence-audit-observability
@@ -1445,8 +1445,8 @@ findings:
     members, `cancelled`, a `rejected` that covers executor and safety-layer refusals and
     `approval.decision_id`; the executor''s record mode `actions` records every step that runs, every
     failure-mode checkpoint and every rollback; `audit` records its event under details.event of a record of
-    its own; the trace is not an audit record. The plugin hook''s line is an ActionRecord, the audit skill
-    writes one, CoordinationEvent.to_action_record and the TypeScript actionRecord export them. Fixtures
+    its own; the trace is not an audit record. The plugin hook''s line is an ActionRecord (the skills no
+    longer append free-form lines to .audit/), the audit skill writes one, CoordinationEvent.to_action_record and the TypeScript actionRecord export them. Fixtures
     records_actions_*, records_failure_*, records_default_unchanged; tests/test_audit_records.py validates
     every writer''s records against ActionRecord. RFC-0006 Part B, decision B9.'
   concerns:
@@ -1712,7 +1712,7 @@ findings:
     applies the checks by other means or does not cover those calls. spec/SECURITY.md §5.4 maps every
     condition of the six skills'' hooks to a §5.18.10 or §5.18.8 row or to a model-judged addition; the
     rollback skill''s command hook makes the rollback row''s check in the plugin''s form (a restore must
-    name a commit a checkpoint marker recorded, F503 otherwise), and the `transform` and `persist`
+    name a commit a checkpoint recorded, F503 otherwise, one lookup in .claude/checkpoints/commits/), and the `transform` and `persist`
     secret rows are code where a layer applies §6.7. The send and rollback prompt hooks no longer judge
     approval, checkpoints, rate limits or expiry; the remaining prompt conditions are labelled
     model-judged additions. Tests: tests/test_skill_hooks.py.'
@@ -1871,7 +1871,8 @@ findings:
     is `rollback` only when it restores a checkpoint taken in the scope; a control-only tool is never
     refused and is recorded, and a host action tied to a tool that can be refused is F506. The Python
     mapper classifies Bash by command (a compound line takes the strictest of its commands; `git stash`
-    forms by class, `pop|apply <commit>` a rollback only for a commit a checkpoint recorded) and binds
+    forms by class, `pop|apply <commit>` a rollback only for a commit a checkpoint recorded; a command,
+    expansion or argument it does not recognise gets the worst case, `mutate` and `send`) and binds
     `Skill` as `invoke`; a grounded MCP server serves a control-only tool unguarded; the Standard Agents
     binding has `additional_capabilities` and `controlTool`, and its lint reports F506. Tests:
     tests/test_bash_classification.py, tests/test_mcp_integration.py (TestGroundedServerGuard),
@@ -2435,8 +2436,9 @@ findings:
     `allowed_destinations` (§5.21.3); the executor fails a disallowed `send` with F504
     (`destination_not_allowed`) before approval or a checkpoint; safety layers refuse such calls
     (§5.18.10), the Python adapter (`GroundedAgentConfig.allowed_destinations`, a binding''s
-    `destination` pointer; an unbound tool and a composite whose `invokes` reach a `send` binding are
-    refused, since it cannot tell whether or where they send) and the Standard Agents binding
+    `destination` pointer; an unbound tool, a Bash command whose classification includes `send`
+    (Bash''s worst case, any command it does not recognise) and a composite whose `invokes` reach a
+    `send` binding are refused, since it cannot tell whether or where they send) and the Standard Agents binding
     (`configureLayer`, which every `send` tool obeys; a composite''s profiles reach the sends it
     invokes), so neither conformance statement lists the row; W625 reports a 1.2 `send` whose approval
     hides its destination; §12.5 documents Guarded Send; the send skill cites the policy. One grammar in

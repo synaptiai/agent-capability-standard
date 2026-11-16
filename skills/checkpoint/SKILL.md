@@ -34,36 +34,13 @@ hooks:
             - Sensitive data would be captured
             - Checkpoint storage location is invalid
           once: false
-  PostToolUse:
-    - matcher: "Bash"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[CHECKPOINT] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Bash | input_sha256: ${DIGEST:-unavailable}" >> .audit/checkpoint-operations.log 2>/dev/null || true
-    - matcher: "Edit"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[CHECKPOINT] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Edit | input_sha256: ${DIGEST:-unavailable}" >> .audit/checkpoint-operations.log 2>/dev/null || true
 ---
 
 ## Intent
 
 Execute **checkpoint** to take a copy of the state within a scope, kept where the host keeps it, from which that state can be restored before a mutating operation (STANDARD v1.2 §4.4.1). This is the foundation of safe agentic execution: a later `rollback` returns what the checkpoint captured to its saved state.
 
-A checkpoint restores state, not effects: it cannot recall a transmission a later `send` makes (§4.4.2), and it reaches only what it captured. It never captures the record of what happened (the audit logs, `.claude/` and `.audit/`, the host's checkpoint and approval state): a scope that names those leaves them out and lists them in `excluded`.
+A checkpoint restores state, not effects: it cannot recall a transmission a later `send` makes (§4.4.2), and it reaches only what it captured. It never captures the record of what happened (`.claude/`, which holds the plugin's audit log, `.audit/`, where earlier releases' skills logged, and the host's checkpoint and approval state): a scope that names those leaves them out and lists them in `excluded`.
 
 **Success criteria:**
 - The state in scope is captured, and what was left out is listed in `excluded`
@@ -254,7 +231,7 @@ Apply the following verification patterns:
 - NEVER delete checkpoint content until explicitly requested
 - ALWAYS verify the capture immediately after creation
 - Do not checkpoint sensitive files (.env, credentials): exclude them and list them in `excluded`
-- Never capture the audit logs, `.claude/` and `.audit/`, or the host's checkpoint, approval or idempotency state (§4.4.1)
+- Never capture `.claude/` (the plugin's audit log) or `.audit/` (earlier releases' logs), or the host's checkpoint, approval or idempotency state (§4.4.1)
 - Keep checkpoint content where the host keeps it, outside the files in scope
 - Include the reason in the checkpoint's label for the audit trail
 

@@ -35,33 +35,32 @@ hooks:
           once: false
         - type: command
           command: |
-            # Block a request to localhost or a private IPv4 address (a host-specific
-            # destination rule, STANDARD 1.2.0 §5.18.10, F504). Claude Code passes
-            # the tool call as JSON on stdin; exit 2 blocks the call and the reason
-            # on stderr is shown to Claude. A call that cannot be read is blocked
-            # (R407).
+            # Block a request to localhost or a loopback, private, link-local or
+            # unspecified address (a host-specific destination rule, STANDARD 1.2.0
+            # §5.18.10, F504). Claude Code passes the tool call as JSON on stdin;
+            # exit 2 blocks the call and the reason on stderr is shown to Claude. A
+            # call that cannot be read is blocked (R407).
             CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            ADDR='(localhost|127\.0\.0\.1|10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)'
+            printf '%s\n' "$CMD" | grep -qiE "(curl|wget|http)" || exit 0
+            # IPv4 in dotted-decimal form: localhost, 0/8, 127/8 (loopback), 10/8,
+            # 172.16/12, 192.168/16 and 169.254/16 (link-local, cloud metadata).
+            ADDR='(localhost|0(\.[0-9]+){3}|127(\.[0-9]+){3}|10(\.[0-9]+){3}|192\.168(\.[0-9]+){2}|172\.(1[6-9]|2[0-9]|3[01])(\.[0-9]+){2}|169\.254(\.[0-9]+){2})'
+            # IPv6 literals: ::1, ::, ::ffff:<IPv4> (mapped), fc00::/7 (unique
+            # local), fe80::/10 (link-local).
+            ADDR6='\[(::|0*:|f[cd][0-9a-f]*:|fe[89ab][0-9a-f]*:)[^]]*\]'
+            # IPv4 in another form a resolver accepts, as a URL's host: one to three
+            # parts (127.1, 2130706433), or a part in hex (0x7f) or octal (0177).
+            NUMERIC='((0x[0-9a-f]*|[0-9]+)\.){0,2}(0x[0-9a-f]*|[0-9]+)|([0-9a-fx.]*\.)?(0x[0-9a-f]*|0[0-9]+)(\.[0-9a-fx]*)*'
             # The address must stand where a host does: after a URL scheme, a user@,
             # a space or a quote, and before a port, a path, a query or the end.
             # Host names are case-insensitive, so the match is too.
-            if printf '%s\n' "$CMD" | grep -qiE "(curl|wget|http)" && printf '%s\n' "$CMD" | grep -qiE "(^|[[:space:]\"']|://|@)${ADDR}([:/?#[:space:]\"']|\$)"; then
-              echo "F504 CONSTRAINT_VIOLATED: the send skill does not send to localhost or a private IPv4 address (internal network access)" >&2
+            AFTER="([:/?#[:space:]\"']|\$)"
+            if printf '%s\n' "$CMD" | grep -qiE "(^|[[:space:]\"']|://|@)(${ADDR}|${ADDR6})${AFTER}" \
+              || printf '%s\n' "$CMD" | grep -qiE "(://|@)(${NUMERIC})${AFTER}"; then
+              echo "F504 CONSTRAINT_VIOLATED: the send skill does not send to localhost or a loopback, private, link-local or unspecified address, in any form (internal network access)" >&2
               exit 2
             fi
             exit 0
-  PostToolUse:
-    - matcher: "Bash"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[SEND] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Bash | input_sha256: ${DIGEST:-unavailable}" >> .audit/send-operations.log 2>/dev/null || true
 ---
 
 ## Intent

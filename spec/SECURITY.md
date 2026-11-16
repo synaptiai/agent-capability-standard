@@ -249,8 +249,10 @@ destination it chose.
   allow with F504, before anyone is asked and before a checkpoint is used;
   safety layers refuse such calls the same way, and, while a policy is in
   force, every call that may send where they cannot tell: a send whose
-  destination they cannot read, a call of an unbound tool, and (a layer
-  that does not see nested calls) a composite that invokes a send. Its
+  destination they cannot read, a call of an unbound tool, a shell command
+  whose classification includes `send` (one the classifier does not
+  recognise among them, since its worst case is `send`, §5.18.3), and (a
+  layer that does not see nested calls) a composite that invokes a send. Its
   suffix form names host
   or address suffixes only (`https://evil.net/?.example.com` does not end in
   `*.example.com` in its sense), and a prefix that starts an authority must
@@ -399,30 +401,24 @@ The Standard states the checks of the capabilities host-neutrally (STANDARD 1.2.
 | Skill, hook | Condition | Standard (1.2.0) | Enforced by |
 |-------------|-----------|------------------|-------------|
 | `skills/audit/SKILL.md`, command hook on `Bash` | A command that appends to `.claude/audit/records.jsonl` holds a credential-shaped value (the shared scan, `hooks/secret_scan.sh`: key and token formats, PEM keys, bearer tokens, a URL's userinfo password that is not a placeholder, an `Authorization` or `Proxy-Authorization` header's value of 8 or more characters mixing letters and digits, and an assignment to a credential name whose value is quoted with no whitespace and 8 or more characters, or unquoted, 12 or more characters, mixing letters and digits) | §5.18.10 `audit` secret row (§6.7, F504) | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
-| `skills/audit/SKILL.md`, PostToolUse command hooks on `Read`, `Grep` | Log the call with a digest of its input | §5.18.8 records (logging, not a check) | Code: records |
 | `skills/checkpoint/SKILL.md`, prompt hook on `Bash` | Scope covers every file to be mutated | Model-judged addition, not required | A model judges |
 | `skills/checkpoint/SKILL.md`, prompt hook on `Bash` | No sensitive file is captured | Model-judged addition, not required (§6.7 governs records and evidence, not restore content) | A model judges |
 | `skills/checkpoint/SKILL.md`, prompt hook on `Bash` | Reason documented; type fits the operation; storage location valid | Model-judged addition, not required | A model judges |
-| `skills/checkpoint/SKILL.md`, PostToolUse command hooks on `Bash`, `Edit` | Log the call | §5.18.8 records | Code: records |
 | `skills/persist/SKILL.md`, prompt hook on `Edit` | No credentials, keys or secrets in the content | §5.18.10 `persist` secret row (§6.7, F504): a check the Standard requires of code, which the command hook makes; the prompt is an addition | Code: the command hook (below); a model judges as well |
 | `skills/persist/SKILL.md`, prompt hook on `Edit` | No personal data; no malicious code; stable knowledge; not a duplicate; no contradiction | Model-judged addition, not required | A model judges |
 | `skills/persist/SKILL.md`, prompt hook on `Edit` | File within project scope | §5.18.10 `persist` target row (§5.18.3: a write outside the memory store is `mutate`) | Code: classification; the command hook's path rules narrow it further |
 | `skills/persist/SKILL.md`, command hook on `Edit` | Path with `//`, `.` or `..` segments; under `/etc`, `/usr`, `/bin`, `/sbin`, `~/.ssh`, `~/.aws` or `~/.config`; a name ending in `.env`, `credentials`, `secrets`, `password`, `.pem` or `.key` | §5.18.10 `persist` target row, host-specific narrowing | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
 | `skills/persist/SKILL.md`, command hook on `Edit` | The content written (`new_string` or `content`) holds a credential-shaped value (the shared scan, `hooks/secret_scan.sh`, as for `audit`) | §5.18.10 `persist` secret row (§6.7, F504): refused, not redacted, since memory is read back as fact | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
-| `skills/persist/SKILL.md`, PostToolUse command hook on `Edit` | Log the call | §5.18.8 records | Code: records |
 | `skills/rollback/SKILL.md`, prompt hook on `Bash` | Checkpoint exists and is valid; not expired | Removed from the prompt: §5.18.10 `rollback` row (F503); an expired or used checkpoint can be restored (§5.2.2) | Code: the safety layer |
 | `skills/rollback/SKILL.md`, prompt hook on `Bash` | Current state captured; scope matches; no conflicting operation; integrity verified; no loss beyond scope; uncommitted changes not overwritten | Model-judged addition, not required | A model judges |
-| `skills/rollback/SKILL.md`, command hook on `Bash` | A `git stash pop` or `git stash apply` whose one argument is not the full id of a commit a checkpoint marker of the project recorded (the marker, or one under `.claude/checkpoints/used/` or `ended/`) | §5.18.10 `rollback` row (F503), host-specific form: in this skill a restore must be of a checkpoint taken in the project, valid or not; the plugin's pre-tool-use hook counts the same restore as `rollback` and any other as a gated `mutate` | Code: blocks the call with `F503 ROLLBACK_FAILED:` |
-| `skills/rollback/SKILL.md`, PostToolUse command hook on `Bash` | Log the call | §5.18.8 records | Code: records |
+| `skills/rollback/SKILL.md`, command hook on `Bash` | A `git stash pop` or `git stash apply` whose one argument is not the full id of a commit a checkpoint of the project recorded (the marker's, or one entered in `.claude/checkpoints/commits/`: one lookup, however many checkpoints were taken) | §5.18.10 `rollback` row (F503), host-specific form: in this skill a restore must be of a checkpoint taken in the project, valid or not; the plugin's pre-tool-use hook counts the same restore as `rollback` and any other as a gated `mutate` | Code: blocks the call with `F503 ROLLBACK_FAILED:` |
 | `skills/send/SKILL.md`, prompt hook on `Bash` | Destination on the allowlist | §5.18.10 `send` destination row (§4.4.2, F504) where a policy is in force; a model-judged addition only where none is | Code (policy), else a model |
 | `skills/send/SKILL.md`, prompt hook on `Bash` | No sensitive data in the payload | Model-judged addition, not required | A model judges |
 | `skills/send/SKILL.md`, prompt hook on `Bash` | User approved; checkpoint exists; rate limits | Removed from the prompt: §5.18.10 `mutate`, `send` row (F502, F501) and a host policy (F504, §5.18.8) | Code: the safety layer |
-| `skills/send/SKILL.md`, command hook on `Bash` | A `curl`, `wget` or `http` command names as a host `localhost` (in any case), `127.0.0.1` or a private IPv4 address (`10.x.x.x`, `172.16.x.x` to `172.31.x.x`, `192.168.x.x`) | §5.18.10 `send` destination row, host-specific narrowing | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
-| `skills/send/SKILL.md`, PostToolUse command hook on `Bash` | Log the call | §5.18.8 records | Code: records |
+| `skills/send/SKILL.md`, command hook on `Bash` | A `curl`, `wget` or `http` command names as a host `localhost` (in any case); an IPv4 address in `0/8`, `127/8` (loopback), `10/8`, `172.16/12`, `192.168/16` or `169.254/16` (link-local, cloud metadata); an IPv6 literal `[::1]`, `[::]`, `[::ffff:…]`, `[fc00::/7]` or `[fe80::/10]`; or, as a URL's host, an IPv4 address in another form a resolver accepts (`127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1`) | §5.18.10 `send` destination row, host-specific narrowing | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
 | `skills/transform/SKILL.md`, prompt hook on `Read` (removed after its first successful run) | Source exists, is readable, format understood | Model-judged addition, not required | A model judges |
 | `skills/transform/SKILL.md`, prompt hook on `Read` | No sensitive data exposed by the transformation | §5.18.10 `transform` row (a secret is redacted where the output is recorded, §6.7): a check the Standard requires of code; personal data: a model-judged addition | A model judges; code: the plugin records no output (its audit log keeps a digest of the input), and the SDK adapter's `Redactor` and the binding's `redactJson` redact what each records |
 | `skills/transform/SKILL.md`, prompt hook on `Read` | The transformation is logged | §5.18.8 records | Code: the layer records every call |
-| `skills/transform/SKILL.md`, PostToolUse command hook on `Read` | Log the call | §5.18.8 records | Code: records |
 
 The plugin's own hooks implement these rows for the calls they see:
 
@@ -430,17 +426,17 @@ The plugin's own hooks implement these rows for the calls they see:
 |-------------|-------|------------------|-------------|
 | `hooks/pretooluse_require_checkpoint.sh` | A valid checkpoint marker for this gated call alone, used up by the call | §5.18.6 (F501) | Code: blocks the call |
 | `hooks/pretooluse_require_checkpoint.sh` | Approval asked in modes that reach a person; blocked in others | §5.18.7 (F502) | Code: asks or blocks |
-| `hooks/pretooluse_require_checkpoint.sh` | A rollback restores a checkpoint a marker of the project recorded; any other restore is a `mutate` | §5.18.3, §5.18.6 | Code: classifies the call |
+| `hooks/pretooluse_require_checkpoint.sh` | A rollback restores a commit a checkpoint of the project recorded (the marker's, or one in `.claude/checkpoints/commits/`, one lookup); any other restore is a `mutate` | §5.18.3, §5.18.6 | Code: classifies the call |
 | `hooks/pretooluse_require_checkpoint.sh` | A failure of the hook blocks the call | §5.18.8 (R407) | Code: blocks the call |
-| `hooks/posttooluse_take_checkpoint.sh` | The marker is written by a successful `git stash create`; a marker it replaces is filed under `.claude/checkpoints/ended/` | §5.18.6 | Code: records |
+| `hooks/posttooluse_take_checkpoint.sh` | The marker is written by a successful `git stash create`, after its commit is entered in `.claude/checkpoints/commits/`; a marker it replaces is filed under `.claude/checkpoints/ended/` | §5.18.6 | Code: records |
 | `hooks/stop_end_checkpoints.sh` | The marker's validity ends when a turn ends: it is filed under `.claude/checkpoints/ended/`, where a rollback can still restore its commit | §5.18.6 (execution boundary) | Code: records |
-| `hooks/posttooluse_log_tool.sh` | Every tool call that ran is logged, with a digest in place of its input and the configuration that decided it | §5.18.8 records | Code: records, cannot block |
+| `hooks/posttooluse_log_tool.sh` | Every tool call that ran is logged as an action record, with a digest in place of its input and the configuration that decided it; a line it cannot write is reported (a non-zero exit with the reason), never dropped silently. No skill keeps a log of its own | §5.18.8 records, §6.4 | Code: records, cannot block |
 
 Three consequences follow:
 
 - The checkpoint and approval requirements of §1.1 do not rest on a prompt. For a tool call they are enforced by the plugin's pre-tool-use hook (or a safety layer such as the SDK adapter), and for a workflow by the validator and the executor. No prompt hook asks about approval, a checkpoint or rate limits any more.
 - The command hooks match text. A private address reached through a host name, or a system directory reached through a relative path or a symbolic link, is not matched. They narrow what a skill can do; they are not a sandbox.
-- A command hook needs `jq` to read the tool call. Without it the three blocking skill hooks and the plugin's pre-tool-use hook block the call, since they cannot read it, the audit hook writes nothing, and the skills' logging hooks write their line with `unavailable` in place of the digest.
+- A command hook needs `jq` to read the tool call. Without it the four blocking skill hooks (audit, persist, rollback and send) and the plugin's pre-tool-use hook block the call, since they cannot read it, and the plugin's log hook writes nothing and reports that it could not (`jq is not installed`).
 
 These hooks are Claude Code's mechanism, one implementation of the checks the Standard states as requirements of the capabilities (§5.18.10). A host that loads a skill's text as instructions without running its frontmatter hooks applies those checks by other means, or its safety layer does not cover the skill's calls and its conformance statement says so; a host that claims a conforming safety layer runs no covered call without the layer's decision (§5.18.8).
 

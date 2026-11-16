@@ -181,12 +181,9 @@ class TestAdapterRestore:
         # An option that writes, on any git form
         "git stash show --output=f",
         "git stash list --output=f",
-        # A git option before `stash` is not recognised
-        "git -C d stash list",
+        "git stash show --outp=f",
         # The stash classes need a line of one command
         "ls && git stash list",
-        "file -bC x",
-        "file -C x",
     ],
 )
 def test_other_forms_are_gated_mutations(
@@ -194,6 +191,24 @@ def test_other_forms_are_gated_mutations(
 ) -> None:
     mapping = _bash(mapper, command)
     assert mapping.capabilities == ("mutate",), command
+    assert _gated(mapping), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A git option before `stash` is not recognised
+        "git -C d stash list",
+        # An allow-listed command with an argument it does not take as read-only
+        "file -bC x",
+        "file -C x",
+    ],
+)
+def test_unrecognised_forms_get_the_worst_case(
+    mapper: ToolCapabilityMapper, command: str
+) -> None:
+    mapping = _bash(mapper, command)
+    assert mapping.capabilities == ("mutate", "send"), command
     assert _gated(mapping), command
 
 
@@ -220,3 +235,106 @@ def test_a_compound_line_takes_every_capability_and_the_strictest_flags(
 )
 def test_read_only_lines_observe(mapper: ToolCapabilityMapper, command: str) -> None:
     assert _bash(mapper, command).capabilities == ("observe",)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Expansions shlex does not perform: bash makes -delete or --output
+        # of them (§5.18.3: an argument the classifier does not recognise).
+        "find d $'-delete'",
+        'find d $"-delete"',
+        "find d {-delete,-print}",
+        "git diff $'--output=x'",
+        'git diff $"--output=x"',
+        "echo $HOME",
+        "ls ${HOME}",
+        # A pathname expansion may be any file name, an option included.
+        "uniq *.txt",
+        "find * -name x",
+        "git diff *",
+        "file *",
+        # Abbreviated long options (getopt_long and git take any prefix).
+        "sort --o=x f",
+        "git diff --outp=x",
+        "git log --out=x",
+        "hostname --fi=x",
+        "date --se=x",
+        "file --compi -m m",
+        # Options and operands outside the read-only set.
+        "printf x | sort -S 1k --compress-program=sh > /dev/null",
+        "sort -T /tmp f",
+        "sort -no out f",
+        "hostname --file=x",
+        "hostname -F x",
+        "hostname newname",
+        "date 010112002025",
+        "date -s now",
+        "uniq in out",
+        "uniq -c in out",
+        "file --preserve-date x",
+        "less -o log f",
+        "less --log-file=log f",
+    ],
+)
+def test_arguments_the_classifier_does_not_take_as_read_only(
+    mapper: ToolCapabilityMapper, command: str
+) -> None:
+    mapping = _bash(mapper, command)
+    assert mapping.capability_id != "observe", command
+    assert _gated(mapping), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sort -nr -k2,2 -t: f",
+        "sort -k 2 -S 1k --stable --check=quiet f",
+        "sort -- -o",
+        "ls *.py | sort",
+        "grep 'a$' f",
+        'grep "a\\$" f',
+        "git rev-parse @{u}",
+        "git log --oneline -5",
+        "git log -- '*.py'",
+        "date +%s",
+        "date -u -d yesterday +%F",
+        "date -Iseconds",
+        "uniq -c -f 2 f",
+        "file --mime-type -b x",
+        "hostname -f",
+        "find . -name '*.py' -type f",
+    ],
+)
+def test_read_only_arguments_stay_read_only(
+    mapper: ToolCapabilityMapper, command: str
+) -> None:
+    assert _bash(mapper, command).capabilities == ("observe",), command
+
+
+@pytest.mark.parametrize(
+    ("command", "capabilities"),
+    [
+        # The worst case of a command whose effect is unknown includes send.
+        ("pytest", ("mutate", "send")),
+        ("", ("mutate", "send")),
+        ("curl https://example.com/?q=1", ("mutate", "send")),
+        ("gh issue comment 5 --body x", ("mutate", "send")),
+        ("python3 -c 'print(1)'", ("execute", "send")),
+        # A change to a remote, registry or cluster the command names.
+        ("git push origin main", ("mutate", "send")),
+        ("npm publish", ("mutate", "send")),
+        ("docker push img", ("mutate", "send")),
+        ("kubectl apply -f x.yaml", ("mutate", "send")),
+        # Recognised effects keep their capability.
+        ("curl -X POST u -d x", ("send",)),
+        ("rm -rf d", ("mutate",)),
+        ("git stash push", ("mutate",)),
+    ],
+)
+def test_the_worst_case_includes_send(
+    mapper: ToolCapabilityMapper, command: str, capabilities: tuple[str, ...]
+) -> None:
+    mapping = _bash(mapper, command)
+    assert mapping.capabilities == capabilities, command
+    assert _gated(mapping), command

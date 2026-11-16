@@ -334,7 +334,7 @@ class TestFrontmatterHooks:
 
 
 # ---------------------------------------------------------------------------
-# send: a request to localhost or a private IPv4 address
+# send: a request to localhost or an internal address
 # ---------------------------------------------------------------------------
 
 
@@ -354,6 +354,23 @@ class TestSendCommandHook:
             "curl http://Localhost/",
             "curl 10.0.0.1",
             "curl 'http://10.0.0.1?q=1'",
+            # the rest of 127/8, 0/8 and link-local (cloud metadata)
+            "curl http://127.0.0.2/",
+            "curl http://0.0.0.0:8080/",
+            "curl http://169.254.169.254/latest/meta-data/",
+            # IPv4 in the other forms a resolver accepts
+            "curl http://127.1/",
+            "curl http://0x7f000001/",
+            "curl http://0X7F.1/",
+            "curl http://2130706433/",
+            "curl http://017700000001/",
+            "curl http://0177.0.0.1/",
+            "curl http://user@127.1/",
+            # IPv6 loopback, mapped, link-local and unique-local literals
+            "curl http://[::1]/",
+            "curl http://[::ffff:127.0.0.1]/",
+            "curl -s http://[fe80::1]:8080/",
+            "curl http://[fd00::1]/",
         ],
     )
     def test_blocks_internal_destination(
@@ -363,7 +380,8 @@ class TestSendCommandHook:
         result = run_command(hook, bash_call(command), tmp_path, shell)
         assert_blocked(
             result,
-            "does not send to localhost or a private IPv4 address",
+            "does not send to localhost or a loopback, private, link-local or "
+            "unspecified address",
             "F504 CONSTRAINT_VIOLATED: ",
         )
 
@@ -379,6 +397,13 @@ class TestSendCommandHook:
             "curl https://example.com/?v=10.2.3.4",
             "ls -la",
             "ping 10.0.0.5",
+            # a number that is an argument, not a host
+            "curl --max-time 30 https://example.com/",
+            # public addresses, canonical
+            "curl http://8.8.8.8/",
+            "curl http://1.0.0.1/",
+            "curl http://[2001:db8::1]/",
+            "curl https://example.com:8443/x",
         ],
     )
     def test_allows_other_commands(
@@ -645,15 +670,17 @@ ROLLBACK_ENV = {**GIT_ENV, "CLAUDE_PROJECT_DIR": ""}
 
 def checkpoint(repo: Path, where: str = "marker") -> str:
     """Take a checkpoint as the plugin does: `git stash create` (which writes
-    no refs/stash, so `git stash list` stays empty) and a marker recording
-    its commit, live or filed under used/ or ended/."""
+    no refs/stash, so `git stash list` stays empty), its commit entered in
+    .claude/checkpoints/commits/ and a marker recording it, live or filed
+    under used/ or ended/."""
     (repo / "a.txt").write_text("two\n")
     sha = git(repo, "stash", "create", "checkpoint:x").strip()
     assert git(repo, "stash", "list") == ""
     record = json.dumps({"checkpoint_id": sha, "commit": sha})
     claude = repo / ".claude"
+    (claude / "checkpoints" / "commits").mkdir(parents=True)
+    (claude / "checkpoints" / "commits" / sha).touch()
     if where == "marker":
-        claude.mkdir()
         (claude / "checkpoint.ok").write_text(record)
     else:
         (claude / "checkpoints" / where).mkdir(parents=True)
@@ -677,6 +704,21 @@ class TestRollbackCommandHook:
         for command in (f"git stash apply {sha}", f"git stash pop {sha}"):
             result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
             assert result.returncode == 0, result.stderr
+
+    def test_a_filed_marker_without_its_entry_restores_nothing(
+        self, repo: Path, shell: str
+    ) -> None:
+        """The hook looks the commit up in .claude/checkpoints/commits/ (one
+        lookup, however long the history): a record filed under ended/ that
+        nothing entered restores nothing."""
+        sha = checkpoint(repo, "ended")
+        (repo / ".claude" / "checkpoints" / "commits" / sha).unlink()
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        result = run_command(
+            hook, bash_call(f"git stash apply {sha}"), repo, shell, ROLLBACK_ENV
+        )
+        assert result.returncode == 2
+        assert result.stderr.startswith("F503 ROLLBACK_FAILED: ")
 
     @pytest.mark.parametrize(
         "command",
@@ -766,84 +808,74 @@ TOOL_INPUTS: dict[str, dict[str, Any]] = {
     "Grep": {"pattern": SECRET, "path": "/work/app"},
 }
 
-LOG_HOOKS = [
-    (skill, hook["matcher"])
-    for skill in SKILLS_WITH_HOOKS
-    for hook in hooks_of(skill, "PostToolUse", "command")
-]
 
-
-@pytest.mark.parametrize("shell", SHELLS)
-@pytest.mark.parametrize(("skill", "matcher"), LOG_HOOKS)
-class TestSkillLogHooks:
-    def test_logs_a_digest_and_not_the_input(
-        self, tmp_path: Path, shell: str, skill: str, matcher: str
-    ) -> None:
-        tool_input = TOOL_INPUTS[matcher]
-        tool_call = {
-            "hook_event_name": "PostToolUse",
-            "tool_name": matcher,
-            "tool_input": tool_input,
-            "tool_response": {"stdout": SECRET},
-        }
-        command = command_hook(skill, "PostToolUse", matcher)
-        result = run_command(command, tool_call, tmp_path, shell)
-        assert result.returncode == 0, result.stderr
-
-        logs = list((tmp_path / ".audit").glob("*.log"))
-        assert len(logs) == 1, "one log file under .audit/"
-        lines = logs[0].read_text(encoding="utf-8").splitlines()
-        assert len(lines) == 1, "one line per call"
-
-        line = lines[0]
-        assert f"| {matcher} | input_sha256: {input_digest(tool_input)}" in line
-        assert SECRET not in line
-        for value in tool_input.values():
-            if isinstance(value, str):
-                assert value not in line, "the tool input is not written"
-
-    def test_unreadable_call_is_logged_without_a_digest(
-        self, tmp_path: Path, shell: str, skill: str, matcher: str
-    ) -> None:
-        command = command_hook(skill, "PostToolUse", matcher)
-        # a DIGEST in the environment is not taken for the call's digest
-        result = run_command(
-            command, f"not json {SECRET}", tmp_path, shell, {"DIGEST": "f" * 64}
-        )
-        assert result.returncode == 0
-
-        (log,) = (tmp_path / ".audit").glob("*.log")
-        line = log.read_text(encoding="utf-8")
-        assert "input_sha256: unavailable" in line
-        assert SECRET not in line
+@pytest.mark.parametrize("skill", SKILLS_WITH_HOOKS)
+def test_no_skill_keeps_a_log_of_its_own(skill: str) -> None:
+    """A host's log of what it did is written as action records (STANDARD
+    1.2.0 §6.4), and a capture that fails is reported, never silently: the
+    plugin's log hook, registered for every tool, does both. No skill keeps
+    a free-form log of its own beside it."""
+    assert hooks_of(skill, "PostToolUse", "command") == []
+    assert hooks_of(skill, "PostToolUseFailure", "command") == []
+    plugin = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+    for event in ("PostToolUse", "PostToolUseFailure"):
+        assert any(
+            group.get("matcher") == "*"
+            and any(
+                h["command"].endswith("/posttooluse_log_tool.sh")
+                for h in group["hooks"]
+            )
+            for group in plugin[event]
+        ), event
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
-def test_skill_log_digest_matches_the_plugin_audit_log(tmp_path: Path) -> None:
-    """The same call has the same digest in a skill's log and in audit.log."""
+@pytest.mark.parametrize("tool", sorted(TOOL_INPUTS))
+def test_the_plugin_log_records_a_digest_and_not_the_input(
+    tmp_path: Path, tool: str
+) -> None:
+    """The calls the skills make (Bash, Edit, Read, Grep) are logged by the
+    plugin's hook as action records with a digest of the input in place of
+    the input."""
     tool_call = {
         "hook_event_name": "PostToolUse",
-        "tool_name": "Bash",
-        "tool_input": TOOL_INPUTS["Bash"],
+        "tool_name": tool,
+        "tool_input": TOOL_INPUTS[tool],
+        "tool_response": {"stdout": SECRET},
     }
-    command = command_hook("send", "PostToolUse", "Bash")
-    assert run_command(command, tool_call, tmp_path, SHELLS[0]).returncode == 0
-    skill_line = (tmp_path / ".audit" / "send-operations.log").read_text()
-
     env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
-    subprocess.run(
+    result = subprocess.run(
         ["bash", str(POSTTOOLUSE_HOOK)],
         input=json.dumps(tool_call),
         capture_output=True,
         text=True,
         env=env,
         timeout=30,
-        check=True,
     )
-    entry = json.loads((tmp_path / ".claude" / "audit.log").read_text())
+    assert result.returncode == 0, result.stderr
+    text = (tmp_path / ".claude" / "audit.log").read_text(encoding="utf-8")
+    (entry,) = [json.loads(line) for line in text.splitlines()]
+    assert entry["details"]["input_sha256"] == input_digest(TOOL_INPUTS[tool])
+    assert SECRET not in text
+    assert not (tmp_path / ".audit").exists()
 
-    assert entry["details"]["input_sha256"] == input_digest(TOOL_INPUTS["Bash"])
-    assert f"input_sha256: {entry['details']['input_sha256']}" in skill_line
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+def test_a_log_that_cannot_be_written_is_reported(tmp_path: Path) -> None:
+    """§6.4: a capture that fails is reported where the operator sees it:
+    the hook exits non-zero with the reason on stderr, never silently."""
+    (tmp_path / ".claude").write_text("not a directory")
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
+    result = subprocess.run(
+        ["bash", str(POSTTOOLUSE_HOOK)],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "curl x"}}),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert result.returncode not in (0, 2)
+    assert result.stderr.strip()
 
 
 class TestPromptHooksAreModelJudgedAdditions:

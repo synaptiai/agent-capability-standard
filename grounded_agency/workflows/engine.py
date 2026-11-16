@@ -347,10 +347,11 @@ class WorkflowDefinition:
     # The standard version targeted: the workflow's own ``spec_version`` or,
     # failing that, its catalog's ``# Standard version:`` header.
     spec_version: str | None = None
-    # The agents its delegate steps may delegate to (STANDARD v1.2 §5.15.2),
-    # when it declares them as a list of strings.
-    agents: list[str] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    # The agents its delegate steps may delegate to (STANDARD v1.2 §5.15.2),
+    # when it declares them as a list of strings. After ``extra``, so that a
+    # definition built positionally as before keeps its fields.
+    agents: list[str] | None = None
     source: dict[str, Any] | None = field(
         default=None, init=False, repr=False, compare=False
     )

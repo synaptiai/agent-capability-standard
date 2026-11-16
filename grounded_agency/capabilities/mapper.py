@@ -52,10 +52,23 @@ _DESTRUCTIVE_PATTERNS = re.compile(
     \s+(>|>>)\s |                                                   # Redirects
     \|\s*(rm|tee|dd)\s |                                           # Piped destructive
     \bsed\s+-i |                                                   # In-place sed
-    \bgit\s+(push|reset|checkout\s+--|clean|stash\s+drop|branch\s+-[dD]) |  # Git mutations
-    \bnpm\s+(publish|unpublish) |                                  # npm mutations
-    \bdocker\s+(rm|rmi|prune|push) |                               # Docker mutations
-    \bkubectl\s+(delete|apply|patch|edit)                          # k8s mutations
+    \bgit\s+(reset|checkout\s+--|clean|stash\s+drop|branch\s+-[dD]) |  # Git mutations
+    \bdocker\s+(rm|rmi|prune)                                      # Docker mutations
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Mutations of a system the command reaches by an argument or its
+# configuration (a remote, a registry, a cluster): `mutate`, and `send` as
+# well, since the classifier cannot tell which system receives the change
+# (STANDARD 1.2.0 section 5.18.3: a request to another system whose effect the
+# binding does not know is `send`), so a destination policy applies to it.
+_REMOTE_MUTATION_PATTERNS = re.compile(
+    r"""
+    \bgit\s+push\b |                                               # Pushes
+    \bnpm\s+(publish|unpublish)\b |                                # Registries
+    \bdocker\s+push\b |
+    \bkubectl\s+(delete|apply|patch|edit)\b                        # Clusters
     """,
     re.VERBOSE | re.IGNORECASE,
 )
@@ -241,30 +254,194 @@ _GIT_BRANCH_LISTING: frozenset[str] = frozenset(
 )
 
 
-def _simple_commands(command: str) -> list[list[str]] | None:
-    """
-    The simple commands of a shell command line, each as its words.
+@dataclass(frozen=True, slots=True)
+class _Options:
+    """The options with which a command only reads (GNU getopt_long rules:
+    short options may share a word, a long option may be any prefix of its
+    name, and options may follow operands). Any other option, and any
+    prefix of a long option that writes, makes the command write
+    (:func:`_option_writes`)."""
 
-    Returns None when the line holds something this reading cannot show to be
-    harmless: an unbalanced quote, a subshell or group, a here-document, or an
-    output redirection to anything but /dev/null. Redirections are dropped
-    from the words. Comments are not recognised, so `ls # ; rm x` reads as two
-    commands: a reading that errs splits a command into more commands to
-    check, never fewer.
-    """
+    flags: str = ""  # short options without an argument
+    with_arg: str = ""  # short options with an argument, attached or the next word
+    attached_arg: str = ""  # short options with an optional, attached argument
+    long: frozenset[str] = frozenset()  # long options, `=value` allowed
+    long_with_arg: frozenset[str] = frozenset()  # value attached or the next word
+    writing: frozenset[str] = frozenset()  # long options that write
+    max_operands: int | None = None  # None: any number of operands
+    operand_prefix: str = ""  # every operand must start with it
+
+
+# The options with which each of these commands only reads (GNU coreutils,
+# file, net-tools hostname). Any other option is taken to write: sort -o,
+# -T and --compress-program (which runs a program), date -s and an operand
+# that sets the clock, hostname -F, -b and an operand, file -C, uniq's second
+# operand. An abbreviation of a writing option (`sort --o=x`, `file --compi`)
+# writes too.
+_READ_ONLY_OPTIONS: dict[str, _Options] = {
+    "sort": _Options(
+        flags="bdfgiMhnRrVcCmsuz",
+        with_arg="kSt",
+        long=frozenset(
+            "ignore-leading-blanks dictionary-order ignore-case "
+            "general-numeric-sort ignore-nonprinting month-sort "
+            "human-numeric-sort numeric-sort random-sort reverse version-sort "
+            "check merge stable unique zero-terminated debug help "
+            "version".split()
+        ),
+        long_with_arg=frozenset(
+            "random-source sort batch-size files0-from key buffer-size "
+            "field-separator parallel".split()
+        ),
+        writing=frozenset({"output", "temporary-directory", "compress-program"}),
+    ),
+    "uniq": _Options(
+        flags="cdDiuz",
+        with_arg="fsw",
+        long=frozenset(
+            "count repeated all-repeated group ignore-case unique "
+            "zero-terminated help version".split()
+        ),
+        long_with_arg=frozenset({"skip-fields", "skip-chars", "check-chars"}),
+        max_operands=1,  # `uniq INPUT OUTPUT` writes OUTPUT
+    ),
+    "date": _Options(
+        flags="uR",
+        with_arg="dfr",
+        attached_arg="I",
+        long=frozenset(
+            "date debug file iso-8601 resolution rfc-email rfc-3339 reference "
+            "utc universal help version".split()
+        ),
+        long_with_arg=frozenset({"date", "file", "reference", "rfc-3339"}),
+        writing=frozenset({"set"}),
+        operand_prefix="+",  # any other operand sets the clock
+    ),
+    "hostname": _Options(
+        flags="aAdfiIsvyhV",
+        long=frozenset(
+            "alias all-fqdns domain fqdn long ip-address all-ip-addresses "
+            "short verbose yp nis help version".split()
+        ),
+        writing=frozenset({"file", "boot"}),
+        max_operands=0,  # an operand sets the host name
+    ),
+    "file": _Options(
+        flags="bcdEhiklLNn0rsSvzZ",
+        with_arg="eFfmP",
+        long=frozenset(
+            "brief checking-printout exclude-quiet extension no-dereference "
+            "mime mime-type mime-encoding keep-going list dereference no-pad "
+            "no-buffer print0 raw special-files no-sandbox uncompress "
+            "uncompress-noreport apple help version".split()
+        ),
+        long_with_arg=frozenset(
+            {"exclude", "separator", "files-from", "magic-file", "parameter"}
+        ),
+        writing=frozenset({"compile", "preserve-date"}),
+    ),
+}
+
+# Commands whose arguments can make them write: a word the shell expands
+# (an unquoted `*`, `?` or `[`) may become any file name, an option
+# included, so such a word makes the command write.
+_ARGUMENT_WRITERS: frozenset[str] = frozenset(
+    {*_READ_ONLY_OPTIONS, "find", "git", "less", "more"}
+)
+
+# A brace expansion, `{a,b}` or `{1..3}`, in a line whose quoted characters
+# are masked: bash replaces it with words this reading never sees.
+_BRACE_EXPANSION = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+
+
+@dataclass(frozen=True, slots=True)
+class _Command:
+    """A simple command: its words, as the shell passes them, and whether
+    one of them holds an unquoted `*`, `?` or `[` (a pathname expansion)."""
+
+    words: list[str]
+    globbed: bool = False
+
+
+def _mask_quoted(command: str) -> tuple[str, bool] | None:
+    """``command`` with each quoted character (the quotes, a backslash and
+    what it escapes, and everything between quotes) replaced by ``x``, and
+    whether the shell expands a parameter in it: a `$` outside single
+    quotes (`$NAME`, `$'...'`, `$"..."`, `${...}`, `$(...)`), whose value
+    this reading cannot know. None for an unbalanced quote."""
+    out: list[str] = []
+    expands = False
+    quote = ""
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if quote == "'":
+            out.append("x")
+            if ch == "'":
+                quote = ""
+        elif ch == "\\" and i + 1 < len(command):
+            out.append("xx")
+            i += 1
+        elif quote == '"':
+            out.append("x")
+            if ch == '"':
+                quote = ""
+            elif ch == "$":
+                expands = True
+        elif ch in "'\"":
+            out.append("x")
+            quote = ch
+        else:
+            out.append(ch)
+            if ch == "$":
+                expands = True
+        i += 1
+    if quote:
+        return None
+    return "".join(out), expands
+
+
+def _tokens(command: str) -> list[str] | None:
+    """The shell words and operators of a line (POSIX rules, operators as
+    their own tokens); None when they cannot be read."""
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     lexer.commenters = ""
     try:
-        tokens = list(lexer)
+        return list(lexer)
     except ValueError:
         return None
-    commands: list[list[str]] = [[]]
+
+
+def _simple_commands(command: str) -> list[_Command] | None:
+    """
+    The simple commands of a shell command line, each as its words.
+
+    Returns None when the line holds something this reading cannot show to be
+    harmless: an unbalanced quote, a parameter or brace expansion, a subshell
+    or group, a here-document, or an output redirection to anything but
+    /dev/null. Redirections are dropped from the words. Comments are not
+    recognised, so `ls # ; rm x` reads as two commands: a reading that errs
+    splits a command into more commands to check, never fewer.
+    """
+    masked = _mask_quoted(command)
+    if masked is None or masked[1] or _BRACE_EXPANSION.search(masked[0]):
+        return None
+    tokens = _tokens(command)
+    if tokens is None:
+        return None
+    # The same reading of the masked line gives the same words, each with
+    # its quoted characters masked: an unquoted glob character is one left.
+    # Should the two readings ever differ, every word counts as expanded.
+    shadow = _tokens(masked[0])
+    if shadow is None or len(shadow) != len(tokens):
+        shadow = ["*"] * len(tokens)
+    commands: list[_Command] = [_Command([])]
     i = 0
     while i < len(tokens):
         token = tokens[i]
         if token in _SEPARATORS:
-            commands.append([])
+            commands.append(_Command([]))
         elif token == "<":
             i += 1  # reads a file: skip its name
         elif token in _OUTPUT_REDIRECTS:
@@ -275,39 +452,86 @@ def _simple_commands(command: str) -> list[list[str]] | None:
         elif token and set(token) <= _OPERATOR_CHARS:
             return None  # (, ), <<, <>, ;; and the like
         else:
-            commands[-1].append(token)
+            last = commands[-1]
+            commands[-1] = _Command(
+                [*last.words, token],
+                last.globbed or any(c in "*?[" for c in shadow[i]),
+            )
         i += 1
-    return [words for words in commands if words]
+    return [c for c in commands if c.words]
 
 
-def _writes(words: list[str]) -> bool:
+def _option_writes(args: list[str], options: _Options) -> bool:
+    """Whether ``args`` hold an option or operand outside ``options``."""
+    readable_long = options.long | options.long_with_arg
+    operands: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            operands.extend(args[i + 1 :])
+            break
+        if arg.startswith("--"):
+            name, eq, _ = arg[2:].partition("=")
+            # getopt_long takes any prefix of a long option's name.
+            if not name or any(w.startswith(name) for w in options.writing):
+                return True
+            matches = [o for o in readable_long if o.startswith(name)]
+            if not matches:
+                return True
+            if not eq and any(o in options.long_with_arg for o in matches):
+                i += 1  # its value is the next word
+        elif arg.startswith("-") and arg != "-":
+            for n, letter in enumerate(arg[1:], start=2):
+                if letter in options.with_arg:
+                    if n == len(arg):
+                        i += 1  # its argument is the next word
+                    break
+                if letter in options.attached_arg:
+                    break
+                if letter not in options.flags:
+                    return True
+        else:
+            operands.append(arg)
+        i += 1
+    if options.max_operands is not None and len(operands) > options.max_operands:
+        return True
+    return any(not o.startswith(options.operand_prefix) for o in operands)
+
+
+def _long_prefix_of(arg: str, names: Iterable[str]) -> bool:
+    """Whether ``arg`` is a long option that is, or abbreviates, one of
+    ``names`` (getopt_long and git take any prefix of a name)."""
+    if not arg.startswith("--"):
+        return False
+    name = arg[2:].partition("=")[0]
+    return bool(name) and any(n.startswith(name) or name.startswith(n) for n in names)
+
+
+def _writes(words: list[str], globbed: bool = False) -> bool:
     """Whether an allow-listed command is given an option that writes,
-    deletes or runs something. Errs towards True."""
+    deletes or runs something. ``globbed``: one of its words is expanded
+    by the shell, so it may be any option. Errs towards True."""
     name, args = words[0], words[1:]
+    if globbed and name in _ARGUMENT_WRITERS:
+        return True
+    options = _READ_ONLY_OPTIONS.get(name)
+    if options is not None:
+        return _option_writes(args, options)
     short = [a for a in args if a.startswith("-") and not a.startswith("--")]
     if name == "find":
         return any(a in _FIND_WRITES for a in args)
-    if name == "sort":
-        return any(a.startswith("--output") for a in args) or any(
-            "o" in a[1:] for a in short
+    if name == "less":
+        # -o and -O copy the input to a log file; +cmd runs a less command.
+        return (
+            any(a.startswith("+") for a in args)
+            or any(_long_prefix_of(a, ("log-file", "LOG-FILE")) for a in args)
+            or any("o" in a[1:] or "O" in a[1:] for a in short)
         )
-    if name == "uniq":
-        # `uniq INPUT OUTPUT` writes OUTPUT.
-        return len([a for a in args if not a.startswith("-")]) > 1
-    if name == "date":
-        return any(a.startswith("--set") for a in args) or any(
-            "s" in a[1:] for a in short
-        )
-    if name == "hostname":
-        return any(not a.startswith("-") for a in args)
-    if name == "file":
-        # -C, or C inside a short-option cluster such as -bC, compiles a
-        # magic file and writes it.
-        return "--compile" in args or any("C" in a[1:] for a in short)
-    if name in ("less", "more"):
+    if name == "more":
         return any(a.startswith("+") for a in args)  # runs a pager command
     if name == "git":
-        if any(a.startswith("--output") for a in args):
+        if any(_long_prefix_of(a, ("output",)) for a in args):
             return True
         sub, rest = args[0], args[1:]
         if sub == "branch":
@@ -319,13 +543,14 @@ def _writes(words: list[str]) -> bool:
     return False
 
 
-def _is_read_only(words: list[str]) -> bool:
+def _is_read_only(command: _Command) -> bool:
     """Whether a simple command is on the read-only allow-list (by its exact
     name, or its name and subcommand) with no option that writes."""
+    words = command.words
     listed = (
         words[0] in _READ_ONLY_COMMANDS or " ".join(words[:2]) in _READ_ONLY_COMMANDS
     )
-    return listed and not _writes(words)
+    return listed and not _writes(words, command.globbed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1036,8 +1261,10 @@ class ToolCapabilityMapper:
 
         1. Always-dangerous patterns (command substitution, backticks,
            variable expansion, eval, exec, source, control characters) and
-           process substitution make the command a gated mutation at once.
-           So does a line `_simple_commands` cannot read.
+           process substitution give the line the worst case at once
+           (:meth:`_worst_case`: a gated `mutate` and `send`). So does a
+           line `_simple_commands` cannot read, one with a parameter or
+           brace expansion included.
         2. Only when the line is exactly one simple command with no option
            that writes (`_writes`), a `git stash <sub>` form is classified
            by `_GIT_STASH_CLASSES`: `create` takes a checkpoint, `list` and
@@ -1054,7 +1281,10 @@ class ToolCapabilityMapper:
            their capabilities in order (`_combine`).
 
         Security principle: fail-safe defaults. A command is high-risk until
-        it is shown to be on the read-only allow-list.
+        it is shown to be on the read-only allow-list, and a command the
+        classifier does not recognise gets the worst case, `send` included
+        (section 5.18.3), so that a destination policy refuses it rather
+        than skip it.
 
         Args:
             tool_input: Bash tool input with 'command' key
@@ -1063,37 +1293,37 @@ class ToolCapabilityMapper:
             ToolMapping based on command analysis
         """
         command = tool_input.get("command", "")
-        mutation = self._builtin("Bash", "mutate", checkpoint_gated=True)
+        worst = self._worst_case()
 
         # Empty or non-string command is suspicious - fail-safe
         if not isinstance(command, str) or not command.strip():
-            return mutation
+            return worst
 
         # SEC-002: These bypass all other checks and are always high-risk.
         if _ALWAYS_DANGEROUS_PATTERNS.search(
             command
         ) or _PROCESS_SUBSTITUTION_PATTERNS.search(command):
-            return mutation
+            return worst
 
         commands = _simple_commands(command)
         if not commands:
-            return mutation
+            return worst
 
         if len(commands) == 1:
-            words = commands[0]
+            words = commands[0].words
             if (
                 len(words) >= 3
                 and words[0] == "git"
                 and words[1] == "stash"
                 and words[2] in _GIT_STASH_CLASSES
-                and not _writes(words)
+                and not _writes(words, commands[0].globbed)
             ):
                 capability = _GIT_STASH_CLASSES[words[2]]
                 if capability != "rollback" or self._restores_checkpoint(words):
                     return self._builtin("Bash", capability)
-                return mutation
+                return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
-        results = [self._classify_single_command(words) for words in commands]
+        results = [self._classify_single_command(c) for c in commands]
         gated = [r for r in results if r.risk != "low"]
         if not gated:
             return self._builtin("Bash", "observe")
@@ -1144,32 +1374,52 @@ class ToolCapabilityMapper:
             self._combined_mappings[key] = combined
         return combined
 
-    def _classify_single_command(self, words: list[str]) -> ToolMapping:
-        """
-        Classify one simple command, given as its words.
+    def _worst_case(self, capability: str = "mutate") -> ToolMapping:
+        """Bash's worst case (section 5.18.3): ``capability`` (a gated
+        mutation) and ``send``, for a command whose effect the classifier
+        does not know. It may transmit anywhere, so a destination policy in
+        force refuses it: this layer cannot tell where (section 4.4.2)."""
+        return self._combine(
+            [
+                self._builtin("Bash", capability, checkpoint_gated=True),
+                self._builtin("Bash", "send", checkpoint_gated=True),
+            ]
+        )
 
-        Checks in order: interpreter → network → destructive → read-only
-        allowlist → secure default-deny. It never returns a `git stash`
-        class: those need a line of one command (`_classify_bash_command`).
+    def _classify_single_command(self, command: _Command) -> ToolMapping:
         """
-        text = " ".join(words)
-        # SEC-002: Check for interpreter invocations (python -c, node -e, etc.)
+        Classify one simple command.
+
+        Checks in order: interpreter → network → remote mutation →
+        destructive → `git stash` → read-only allowlist → the worst case. It
+        never returns a `git stash` class: those need a line of one command
+        (`_classify_bash_command`), so here every `git stash` form is a
+        gated mutation of the local repository.
+        """
+        text = " ".join(command.words)
+        # SEC-002: an interpreter runs code this classifier does not see,
+        # which may transmit (python -c, node -e, a script).
         if _INTERPRETER_PATTERNS.search(text):
-            return self._builtin("Bash", "execute", checkpoint_gated=True)
+            return self._worst_case("execute")
 
         # Check for network send operations
         if _NETWORK_SEND_PATTERNS.search(text):
             return self._builtin("Bash", "send", checkpoint_gated=True)
 
+        # A change to a system the command names: it cannot tell which.
+        if _REMOTE_MUTATION_PATTERNS.search(text):
+            return self._worst_case()
+
         # Check for destructive operations
-        if _DESTRUCTIVE_PATTERNS.search(text):
+        if _DESTRUCTIVE_PATTERNS.search(text) or command.words[:2] == ["git", "stash"]:
             return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
-        if _is_read_only(words):
+        if _is_read_only(command):
             return self._builtin("Bash", "observe")
 
-        # SECURE DEFAULT: a command not shown to be read-only is high-risk.
-        return self._builtin("Bash", "mutate", checkpoint_gated=True)
+        # SECURE DEFAULT: a command not shown to be read-only is high-risk,
+        # and its effect, a transmission included, is unknown.
+        return self._worst_case()
 
     def is_high_risk(self, tool_name: str, tool_input: dict[str, Any]) -> bool:
         """Check if a tool invocation is high risk."""

@@ -43,7 +43,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     that must not share this with separate adapters.
   - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
     must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
-    set, at most the expiry. `GroundedAgentConfig` gains `call_record_limit`.
+    set, more than 0 and at most the expiry, and
+    `CheckpointTracker(reservation_seconds=...)`, if set, more than 0: a 0,
+    which made a hold lapse at once, now raises `ValueError`.
+    `GroundedAgentConfig` gains `call_record_limit`.
   - `CheckpointTracker(max_age_minutes=...)` (default 30; the adapter passes
     its `expiry_minutes`) bounds every checkpoint: one taken through
     `adapter.checkpoint_tracker.create_checkpoint()` with a longer
@@ -66,6 +69,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     checkpoint a step can use, one in the history included, and takes a new
     one only when every valid checkpoint is held; before, it took a new one
     whenever the active checkpoint had been used.
+  - A call that needs a checkpoint and carries no `tool_use_id` (a `None`
+    or id-less `can_use_tool` context, a PreToolUse hook called without
+    one) is refused: F501 when no valid checkpoint exists, else R407, since
+    the layer cannot hold a checkpoint for a call it cannot name. Before,
+    such a call was allowed when a valid checkpoint existed. Claude Code
+    always names its calls; code that calls the callback or the hook itself
+    passes a context with a `tool_use_id`, one per call.
   - Approval is asked only in the permission modes `default`, `acceptEdits`
     and `plan`. In `bypassPermissions`, `auto`, `dontAsk` or any other mode,
     a call that requires approval is refused (F502), since nothing puts it to
@@ -90,6 +100,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     adapter's scope recorded (`metadata["commit"]`); git applies any merge
     commit as if it were a stash, so any other `pop` or `apply`, a bare one
     included, is a gated mutation that needs a checkpoint and approval.
+    `git rev-parse` and `git ls-files` are read-only (they were gated
+    mutations). A command whose effect the classifier does not know (any
+    command off its lists, `curl URL`, `gh`, a `git push`, `npm publish`,
+    `docker push` or `kubectl` change) now has `send` beside `mutate`, and
+    an interpreter `send` beside `execute`, in its capabilities and records,
+    so a profile's rule for `send` applies to it and a destination policy
+    refuses it (F504). These lines are no longer read-only: one with a `$`
+    outside single quotes (`echo $HOME` included) or a brace expansion; an
+    unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`,
+    `hostname`, `file`, `git`, `less` or `more` command (quote a pattern you
+    pass on); and `sort`, `uniq`, `date`, `hostname` or `file` with an
+    option outside the listed read-only set or an abbreviation of one that
+    writes (`sort --o=x`, `git diff --outp=x`), or `date` with an operand
+    other than `+FORMAT`.
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
@@ -111,8 +135,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   expired, its turn ended, a newer one replaced it) is filed under
   `.claude/checkpoints/ended/`, as a used one is under `used/`. A read-only
   Bash command and `git stash list|show` need no marker, and `git stash
-  pop|apply <commit>` needs none when a marker, live or filed, recorded
-  `<commit>`; any other restore needs a marker like any write. The rollback
+  pop|apply <commit>` needs none when a checkpoint recorded `<commit>` (the
+  marker's commit, or the entry `.claude/checkpoints/commits/<commit>` a
+  successful `git stash create` writes, one lookup however many checkpoints
+  were taken); any other restore needs a marker like any write. The rollback
   skill's command hook refuses (F503) a `git stash pop|apply` that does not
   name such a commit, whatever `git stash list` holds; before, it refused a
   restore only when `git stash list` was empty. The rollback and send skills'
@@ -127,7 +153,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules.
   `ACS_CHECKPOINT_MAX_AGE` (seconds, at most 1800) sets the marker's expiry.
   Each audit line gains `recorded_by`. The composed skills take a checkpoint
-  with `/checkpoint` instead of writing `.claude/checkpoint.ok`.
+  with `/checkpoint` instead of writing `.claude/checkpoint.ok`. The hook
+  reads a Bash command's words as bash does (quotes removed), so a quoted or
+  abbreviated option that writes (`"--output=x"`, `--outp`, `file --compi`)
+  and a `git` or `file` command with an unquoted `*`, `?` or `[` need a
+  marker. The audit, checkpoint, persist, rollback, send and transform
+  skills no longer append their own lines to `.audit/*-operations.log`: the
+  plugin's log hook records every call in `.claude/audit.log`, as action
+  records, and reports a line it cannot write. The send skill's command hook also refuses the
+  rest of 127/8, 0/8, 169.254/16, IPv6 loopback, mapped, link-local and
+  unique-local literals, and an IPv4 host in another form (`127.1`,
+  `2130706433`, `0x7f000001`).
 - Standard Agents binding: `STANDARD_VERSION` is 1.2.0 and the `acs`
   annotation carries the tool binding record (`tool`, declared `flags`,
   `additional_capabilities`, `invokes`, `approval`); the copies of the layer

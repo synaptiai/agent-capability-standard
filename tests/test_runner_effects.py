@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from grounded_agency.grounding import GroundingPolicy
 from grounded_agency.state.checkpoint_tracker import CheckpointTracker
 from grounded_agency.state.memory import MemoryStore
 from grounded_agency.state.snapshots import FileSnapshotStore
@@ -145,7 +146,9 @@ def runner(tmp_path: Path) -> WorkflowRunner:
     return WorkflowRunner(engine)
 
 
-def files_host(tmp_path: Path, **kw: Any) -> tuple[Path, Files]:
+def files_host(
+    tmp_path: Path, host_class: type[Files] | None = None, **kw: Any
+) -> tuple[Path, Files]:
     root = tmp_path / "work"
     root.mkdir(parents=True)
     (root / "app.cfg").write_text("v0")
@@ -153,7 +156,7 @@ def files_host(tmp_path: Path, **kw: Any) -> tuple[Path, Files]:
     tracker = CheckpointTracker(
         checkpoint_dir=tmp_path / ".checkpoints", snapshots=snapshots
     )
-    return root, Files(root, tracker, **kw)
+    return root, (host_class or Files)(root, tracker, **kw)
 
 
 def test_checkpoint_rollback_persist_and_recall_steps(
@@ -356,6 +359,52 @@ def test_destination_policies_reach_the_run(
         destinations=[policy],
     )
     assert ok.ok and host.sent == ["https://hooks.example.com/r"]
+
+
+class AttestedSends(Files):
+    """Sends with an evidence anchor and the host's attestation of it
+    (STANDARD v1.2 §5.20), through :meth:`Host.send_once`."""
+
+    def invoke_capability(self, action: dict[str, Any]) -> dict[str, Any]:
+        if action["capability"] != "send":
+            return super().invoke_capability(action)
+
+        def transmit() -> dict[str, Any]:
+            self.sent.append(action["inputs"]["destination"])
+            return {
+                "kind": "Output",
+                "value": {
+                    "sent": True,
+                    "evidence_anchors": [{"ref": "file:report.txt", "kind": "file"}],
+                },
+                "evidence_seen": ["file:report.txt"],
+            }
+
+        return self.send_once(action, transmit)
+
+
+def test_a_redelivered_send_keeps_its_attestation(
+    runner: WorkflowRunner, tmp_path: Path
+) -> None:
+    # The host transmits, then stops before it submits; the restored run
+    # re-delivers the send under the same key (§5.19.4), and the log answers
+    # it with the kept output and its evidence_seen, which an attested policy
+    # needs (§5.20): the run completes, and the report went out once.
+    _, host = files_host(
+        tmp_path, AttestedSends, idempotency=IdempotencyLog(tmp_path / "k.jsonl")
+    )
+    policy = GroundingPolicy(require={"send"}, attested=True)
+    run = runner.start("send_report", {"to": "ops"}, grounding=policy, now_ms=1000)
+    while (action := run.next())["kind"] != "InvokeCapability" or (
+        action["capability"] != "send"
+    ):
+        response = WorkflowRunner._dispatch(host, action)
+        run.submit(action["id"], response, 1000)
+    saved = run.snapshot(None)
+    host.invoke_capability(action)
+    result = runner.drive(runner.restore(saved), host)
+    assert result.ok, result
+    assert host.sent == ["ops"]
 
 
 def test_a_saving_runner_needs_durable_keys(

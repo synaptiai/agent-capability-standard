@@ -200,17 +200,11 @@ def test_a_checkpoint_whose_turn_ended_can_still_be_restored(tmp_path: Path) -> 
 
 def test_an_expired_checkpoint_can_still_be_restored(tmp_path: Path) -> None:
     now = int(time.time())
-    claude = tmp_path / ".claude"
-    claude.mkdir()
-    (claude / "checkpoint.ok").write_text(
-        json.dumps(
-            {
-                "checkpoint_id": SHA,
-                "commit": SHA,
-                "created_at": now - 120,
-                "expires_at": now - 60,
-            }
-        )
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    marker = _marker(tmp_path)
+    assert marker is not None
+    (tmp_path / ".claude" / "checkpoint.ok").write_text(
+        json.dumps({**marker, "created_at": now - 120, "expires_at": now - 60})
     )
     write = {
         "tool_name": "Write",
@@ -259,3 +253,32 @@ def test_stop_exits_0_without_a_claude_directory(tmp_path: Path) -> None:
         timeout=30,
     )
     assert result.returncode == 0
+
+
+def test_a_restore_looks_up_one_entry_not_the_history(tmp_path: Path) -> None:
+    """A successful `git stash create` enters its commit in
+    .claude/checkpoints/commits/, and a restore looks that entry up: it
+    reads no file of the history (used/, ended/), which grows with every
+    checkpoint taken, so the check takes the same time however long the
+    history is (a check that ran past the hook's timeout would let the
+    call run)."""
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    entry = tmp_path / ".claude" / "checkpoints" / "commits" / SHA
+    assert entry.is_file() and entry.read_text() == ""
+    _run(STOP, {"hook_event_name": "Stop"}, tmp_path)
+    assert _marker(tmp_path) is None
+    assert _restore(tmp_path, SHA).returncode == 0
+    # A record in the history alone, which nothing entered, restores nothing.
+    ended = tmp_path / ".claude" / "checkpoints" / "ended"
+    ended.mkdir(parents=True, exist_ok=True)
+    (ended / "planted.1").write_text(
+        json.dumps({"checkpoint_id": OTHER, "commit": OTHER})
+    )
+    other = _restore(tmp_path, OTHER)
+    assert other.returncode == 2
+    assert other.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+
+
+def test_a_clean_tree_enters_no_commit(tmp_path: Path) -> None:
+    _run(TAKE, _stash("git stash create", {"stdout": ""}), tmp_path)
+    assert not (tmp_path / ".claude" / "checkpoints" / "commits").exists()

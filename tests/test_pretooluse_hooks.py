@@ -530,6 +530,11 @@ def _write_marker(
     }
     if commit is not None:
         marker["commit"] = commit
+        # As posttooluse_take_checkpoint.sh does: the commit is entered
+        # before the marker names it.
+        commits = marker_dir / "checkpoints" / "commits"
+        commits.mkdir(parents=True, exist_ok=True)
+        (commits / commit).touch()
     (marker_dir / "checkpoint.ok").write_text(json.dumps(marker))
 
 

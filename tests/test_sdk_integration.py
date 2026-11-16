@@ -777,8 +777,17 @@ class TestCheckpointReservation:
     async def test_context_without_tool_use_id_still_needs_a_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
+        """With no valid checkpoint the refusal is F501, as for a call with
+        an id: the missing checkpoint is what to fix first."""
         callback = adapter._make_permission_callback()
-        assert _denied(await callback("Write", {}, SimpleNamespace()))
+        pre = adapter._make_pretooluse_safety_hook()
+        for context in (SimpleNamespace(), None):
+            denied = await callback("Write", {}, context)
+            assert _denied(denied)
+            assert denied.message.startswith("F501 CHECKPOINT_REQUIRED:")
+        result = await pre({"tool_name": "Write", "tool_input": {}}, None, None)
+        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("F501 CHECKPOINT_REQUIRED:")
 
     @pytest.mark.asyncio
     async def test_denied_call_releases_its_reservation(

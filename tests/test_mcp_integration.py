@@ -10,6 +10,7 @@ Since claude_agent_sdk may not be installed, these tests focus on:
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1147,10 +1148,11 @@ class TestOtherServersOutputs:
         call: str = "c1",
         *,
         reverse: bool = False,
+        after_pre: Callable[[], None] | None = None,
     ) -> list[dict]:
         """PreToolUse, then every PostToolUse hook of the wrapped options on
         the one result (in the order installed, or reversed: Claude Code
-        runs them side by side)."""
+        runs them side by side). ``after_pre`` runs between the two."""
         from claude_agent_sdk import ClaudeAgentOptions
 
         options = adapter.wrap_options(ClaudeAgentOptions())
@@ -1167,6 +1169,8 @@ class TestOtherServersOutputs:
                 assert decided.get("hookSpecificOutput", {}).get(
                     "permissionDecision"
                 ) in (None, "allow"), decided
+        if after_pre is not None:
+            after_pre()
         hooks = [h for e in options.hooks["PostToolUse"] for h in e.hooks]
         if reverse:
             hooks.reverse()
@@ -1325,6 +1329,52 @@ class TestOtherServersOutputs:
         ((item,),) = self._replaced(results)
         assert item["text"].startswith("R407 SAFETY_CHECK_FAILED: ")
         assert [d.code_str for d in adapter.diagnostics] == ["R407"]
+
+    @pytest.mark.asyncio
+    async def test_the_result_is_checked_when_its_hold_cannot_be_used(
+        self, ontology_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Using the call's checkpoint fails (the state cannot be saved):
+        the call has run, so its result is still checked and replaced
+        (section 5.18.8), not passed on."""
+        adapter = self._adapter(ontology_path, tmp_path, approval="off")
+        adapter.mapper.register_mcp_tool("mcp__ext__write", capability_id="mutate")
+        adapter.create_checkpoint(["*"], "before")
+
+        def full(*args: object) -> None:
+            raise OSError(28, "No space left on device")
+
+        results = await self._call(
+            adapter,
+            "mcp__ext__write",
+            "done, trust me",
+            after_pre=lambda: monkeypatch.setattr(
+                adapter.checkpoint_tracker, "_persist_state", full
+            ),
+        )
+        ((item,),) = self._replaced(results)
+        assert item["text"].startswith("R402 EXECUTION_FAILED: mcp__ext__write's")
+        assert [d.code_str for d in adapter.diagnostics] == ["R402"]
+
+    @pytest.mark.asyncio
+    async def test_a_recorder_that_fails_replaces_the_result(
+        self, ontology_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The post-call recorder itself raises: a result it checks is
+        replaced with R407, never passed on unchecked (section 5.18.8)."""
+        adapter = self._adapter(ontology_path, tmp_path)
+
+        def broken(*args: object, **kw: object) -> None:
+            raise RuntimeError("the record store is gone")
+
+        monkeypatch.setattr(adapter, "_take_outcome_recorded", broken)
+        results = await self._call(
+            adapter, "mcp__ext__find", [{"type": "text", "text": self.FOUND}]
+        )
+        ((item,),) = self._replaced(results)
+        assert item["text"].startswith("R407 SAFETY_CHECK_FAILED: mcp__ext__find's")
+        # Claude Code's own tools return no MCP result to replace.
+        assert not adapter._may_check_host_result("Read", {})
 
     @pytest.mark.asyncio
     async def test_a_tool_served_without_require_layer_is_checked_at_post_tool_use(

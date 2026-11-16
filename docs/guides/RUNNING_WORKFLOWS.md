@@ -642,9 +642,10 @@ host = Host(
   scope names (root-relative patterns, or paths: a directory names
   everything under it; by SHA-256, with a manifest and a digest;
   directories 0700, copies 0600), excludes secret-bearing file names by
-  default, and never captures, overwrites or removes `.claude/` or
-  `.audit/` (the plugin's audit logs), its own store, the tracker's state
-  and marker, or any path registered with `Host(protected_paths=...)` or
+  default, and never captures, overwrites or removes `.claude/` (the
+  plugin's audit log) or `.audit/` (where its earlier releases' skills
+  logged), its own store, the tracker's state and marker, or any path
+  registered with `Host(protected_paths=...)` or
   `Host.protect` (the memory and key files are registered for you, and the
   runner registers its `evidence_store` file): a rollback changes the world
   back, not the record of it. A `rollback` step's output reports
@@ -671,9 +672,10 @@ host = Host(
 - **Sends** ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
   Call `self.send_once(action, effect)` from your `send` implementation:
   with an `IdempotencyLog`, an attempt whose key already transmitted gets
-  that output again, one whose earlier attempt may have transmitted gets
-  `outcome_unknown`, and a key reused with other inputs gets
-  `key_conflict`. A host that saves runs keeps its keys as long:
+  that output again (its `evidence_seen` included), one whose earlier
+  attempt may have transmitted gets `outcome_unknown`, and a key reused
+  with other inputs gets `key_conflict`. A host that saves runs keeps its
+  keys as long:
   `run`, `advance` and `drive` with `save=` refuse a log without a path.
   Keep `run_id`s unique (the runner refuses one it has used).
 - **Destination policies.** `WorkflowRunner.start(..., destinations=[[...]])`

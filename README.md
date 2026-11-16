@@ -247,12 +247,14 @@ Example profiles of trust weights, risk thresholds and checkpoint rules for spec
 
 ### Safety Hooks
 
-Hooks implementing VERIFY layer capabilities:
+The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 
-| Hook | Capability | Purpose |
-|------|------------|---------|
-| `pretooluse_require_checkpoint.sh` | `checkpoint` | Enforce checkpoint before mutations |
-| `posttooluse_log_tool.sh` | `audit` | Log every tool call to the audit trail, with a digest in place of its input |
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `pretooluse_require_checkpoint.sh` | PreToolUse | Classify the call; one checkpoint per gated call (F501); ask for approval (F502); let a restore of a recorded checkpoint run as a `rollback` |
+| `posttooluse_take_checkpoint.sh` | PostToolUse (`Bash`) | Take the checkpoint after a successful `git stash create`: write the marker, with its commit recorded for a later rollback |
+| `stop_end_checkpoints.sh` | Stop | End the marker's validity when a turn ends, filing it under `.claude/checkpoints/ended/` |
+| `posttooluse_log_tool.sh` | PostToolUse, PostToolUseFailure | The plugin's log of tool calls: one action record per call (§6.4), HMAC-chained, with a digest in place of its input; it is not an `audit` step |
 
 ## Documentation
 

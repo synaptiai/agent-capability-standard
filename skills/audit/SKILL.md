@@ -50,29 +50,6 @@ hooks:
               exit 2
             fi
             exit 0
-  PostToolUse:
-    - matcher: "Read"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-READ] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Read | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
-    - matcher: "Grep"
-      hooks:
-        - type: command
-          command: |
-            # Log the call without its input. Claude Code passes the tool call as
-            # JSON on stdin; a SHA-256 digest of tool_input stands in for it.
-            DIGEST=""
-            INPUT="$(jq -cS '.tool_input' 2>/dev/null)" &&
-              DIGEST="$(printf '%s' "$INPUT" | { sha256sum 2>/dev/null || shasum -a 256 2>/dev/null || openssl dgst -sha256 -r 2>/dev/null; } | cut -c1-64)"
-            mkdir -p .audit 2>/dev/null || true
-            echo "[AUDIT-SEARCH] $(date -u +%Y-%m-%dT%H:%M:%SZ) | Grep | input_sha256: ${DIGEST:-unavailable}" >> .audit/audit-meta.log 2>/dev/null || true
 ---
 
 ## Live Context
@@ -83,7 +60,7 @@ Current audit context:
 - Git authors today: !`git log --since="midnight" --format="%an" 2>/dev/null | sort | uniq -c || echo "None"`
 - Uncommitted changes: !`git status --short 2>/dev/null || echo "Not a git repo"`
 - Recent file modifications: !`find . -type f -mtime -1 -not -path './.git/*' 2>/dev/null | wc -l | tr -d ' '` files in last 24h
-- Audit log exists: !`ls -la .audit/ 2>/dev/null | head -5 || echo "No .audit/ directory"`
+- Tool-call log exists: !`wc -l "${CLAUDE_PROJECT_DIR:-.}/.claude/audit.log" 2>/dev/null || echo "No .claude/audit.log"`
 - Audit records exist: !`wc -l "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl" 2>/dev/null || echo "No .claude/audit/records.jsonl"`
 - Checkpoint log exists: !`ls -la .checkpoints/ 2>/dev/null | head -5 || echo "No .checkpoints/ directory"`
 

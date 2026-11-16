@@ -24,9 +24,16 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
 - PEM ``PRIVATE KEY`` blocks (the body);
 - AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys and JWTs.
 
-In a JSON value, a string member whose name is a credential name (as above)
-is redacted whole. The assignment rule is deliberately broad: replacing a
-word of prose costs little where a secret would cost much.
+In a JSON value, a string member whose name ends in a credential name (as
+above, in any case and after any prefix: ``accessToken``, ``dbPassword``,
+``x-api-key``) or in ``authorization`` or ``cookie`` (the structured form of
+the ``Authorization``, ``Proxy-Authorization``, ``Cookie`` and
+``Set-Cookie`` headers) is redacted whole. A member name is redacted as any
+string is: a name that holds a secret is replaced by its redacted text, and
+a name that would then repeat one already in its object gets `` (2)``,
+`` (3)``, ... so that no member is lost. The assignment rule is
+deliberately broad: replacing a word of prose costs little where a secret
+would cost much.
 
 A refusal is another matter: ``persist`` data or an ``audit`` record that
 holds a secret is refused, not redacted (§6.7), and a refusal of ordinary
@@ -197,9 +204,10 @@ def _credential_text(text: str) -> bool:
     )
 
 
-# A member name that is a credential name, alone or ending a longer name.
+# A member name that ends in a credential name, or names a header that
+# carries one (Authorization, Proxy-Authorization, Cookie, Set-Cookie).
 _SECRET_MEMBER = re.compile(
-    rf"(?:.*[_-])?(?:{_NAMES})", re.ASCII | re.IGNORECASE | re.DOTALL
+    rf".*(?:{_NAMES}|authorization|cookie)", re.ASCII | re.IGNORECASE | re.DOTALL
 )
 
 
@@ -301,17 +309,28 @@ class Redactor:
         if isinstance(value, dict):
             out: dict[str, Any] = {}
             for k, v in value.items():
-                here = f"{pointer}/{_pointer_token(str(k))}"
+                name, renamed = self.redact_text(str(k))
+                if renamed:
+                    # A name that holds a secret: never repeat another.
+                    unique, n = name, 1
+                    while unique in out or unique in value:
+                        n += 1
+                        unique = f"{name} ({n})"
+                    name = unique
+                here = f"{pointer}/{_pointer_token(name)}"
+                if renamed:
+                    pointers.append(here)
                 if (
                     isinstance(v, str)
                     and len(v) >= MIN_SECRET_LENGTH
                     and v != MARKER
                     and _SECRET_MEMBER.fullmatch(str(k))
                 ):
-                    out[k] = MARKER
-                    pointers.append(here)
+                    out[name] = MARKER
+                    if not renamed:
+                        pointers.append(here)
                 else:
-                    out[k] = self._walk(v, here, pointers)
+                    out[name] = self._walk(v, here, pointers)
             return out
         if isinstance(value, (list, tuple)):
             return [

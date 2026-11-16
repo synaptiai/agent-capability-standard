@@ -6,8 +6,11 @@
 # Claude Code passes the call as a JSON object on stdin. When its command is
 # exactly one `git stash create` (no character that joins or expands
 # commands, no option that writes: the same reading as
-# pretooluse_require_checkpoint.sh) and the response shows no error, the hook
-# writes .claude/checkpoint.ok atomically:
+# pretooluse_require_checkpoint.sh, whose split_words this hook holds too)
+# and the response shows no error, the hook enters the printed commit in
+# .claude/checkpoints/commits/ (an empty file named by it, which the
+# pre-tool-use hook and the rollback skill look up to restore it) and writes
+# .claude/checkpoint.ok atomically:
 #
 #   {"checkpoint_id": <the printed commit, or clean-<epoch>-<pid>>,
 #    "commit": <the printed commit> | "HEAD",
@@ -18,8 +21,8 @@
 # nothing when the tree is clean, in which case HEAD is the restore point.
 # MAX_AGE is ACS_CHECKPOINT_MAX_AGE when it is an integer from 1 to 1800,
 # else 1800 seconds (30 minutes, the Standard's cap). A marker the new one
-# replaces is filed under .claude/checkpoints/ended/ first, so its commit can
-# still be restored. A failed call reaches PostToolUseFailure, where this
+# replaces is filed under .claude/checkpoints/ended/ first; its commit, entered
+# in commits/, can still be restored. A failed call reaches PostToolUseFailure, where this
 # hook is not registered.
 #
 # It always exits 0: the call has already run, and this hook only records.
@@ -34,12 +37,43 @@ command="${command%"${command##*[![:space:]]}"}"
 if [ -z "$command" ] || [[ "$command" == *[\;\&\|\<\>\$\`\(\)\{\}\\]* ]] || [[ "$command" == *$'\n'* ]] || [[ "$command" == *$'\r'* ]]; then
   exit 0
 fi
-read -r -a words <<< "$command"
-if [ "${words[0]}" != "git" ] || [ "${words[1]:-}" != "stash" ] || [ "${words[2]:-}" != "create" ]; then
+# Read the line as bash splits and dequotes it: the pre-tool-use hook's
+# function, kept the same by a test.
+split_words() {
+  local line="$1" ch quote="" word="" inword=0 i
+  WORDS=()
+  GLOBBED=0
+  for ((i = 0; i < ${#line}; i++)); do
+    ch="${line:i:1}"
+    if [ -n "$quote" ]; then
+      if [ "$ch" = "$quote" ]; then quote=""; else word+="$ch"; fi
+      continue
+    fi
+    case "$ch" in
+      \' | \") quote="$ch"; inword=1 ;;
+      ' ' | $'\t')
+        if [ "$inword" = 1 ]; then WORDS+=("$word"); fi
+        word=""
+        inword=0
+        ;;
+      \* | \? | \[) GLOBBED=1; word+="$ch"; inword=1 ;;
+      *) word+="$ch"; inword=1 ;;
+    esac
+  done
+  if [ -n "$quote" ]; then return 1; fi
+  if [ "$inword" = 1 ]; then WORDS+=("$word"); fi
+  return 0
+}
+
+split_words "$command" || exit 0
+words=("${WORDS[@]}")
+if [ "$GLOBBED" = 1 ] || [ "${words[0]}" != "git" ] || [ "${words[1]:-}" != "stash" ] || [ "${words[2]:-}" != "create" ]; then
   exit 0
 fi
 for word in "${words[@]}"; do
-  if [[ "$word" == --output* ]]; then exit 0; fi
+  name="${word#--}"
+  name="${name%%=*}"
+  if [[ "$word" == --?* && ( "output" == "$name"* || "$name" == output* ) ]]; then exit 0; fi
 done
 
 failed=$(printf '%s' "$input" | jq -r '(.tool_response.is_error == true) or (.tool_response.interrupted == true)' 2>/dev/null) || exit 0
@@ -72,6 +106,16 @@ mkdir -p "$claude_dir" 2>/dev/null || exit 0
 marker="${claude_dir}/checkpoint.ok"
 if [ -L "$marker" ]; then
   exit 0
+fi
+
+# Enter the commit before the marker names it, so no marker records a
+# commit the lookup misses.
+if [ "$commit" != "HEAD" ]; then
+  commits_dir="${claude_dir}/checkpoints/commits"
+  mkdir -p "$commits_dir" 2>/dev/null || exit 0
+  if [ -L "$commits_dir/$commit" ] || ! : > "$commits_dir/$commit" 2>/dev/null; then
+    exit 0
+  fi
 fi
 
 tmp=$(mktemp "${claude_dir}/checkpoint.XXXXXX") || exit 0

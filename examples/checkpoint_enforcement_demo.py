@@ -20,11 +20,23 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
+from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+_calls = count(1)
+
+
+def call() -> SimpleNamespace:
+    """The context Claude Code passes to ``can_use_tool``: it names the call
+    (``tool_use_id``), which holds the checkpoint it uses. Each call has its
+    own id; a call without one cannot hold a checkpoint (R407)."""
+    return SimpleNamespace(tool_use_id=f"demo-{next(_calls)}")
 
 
 async def approve(tool_name: str, tool_input: dict, context: object) -> object:
@@ -64,6 +76,8 @@ async def main():
             ontology_path=str(
                 Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
             ),
+            # A fresh directory: no checkpoint of an earlier run is left.
+            checkpoint_dir=tempfile.mkdtemp(prefix="acs-demo-"),
         )
     )
 
@@ -83,7 +97,7 @@ async def main():
 
     print("\nAttempting mutations without checkpoint:")
     for tool_name, tool_input in mutations:
-        result = await permission_callback(tool_name, tool_input, None)
+        result = await permission_callback(tool_name, tool_input, call())
 
         if is_allowed(result):
             print(f"  {tool_name}: allowed")
@@ -100,24 +114,23 @@ async def main():
     print(f"Created checkpoint: {checkpoint_id}")
     print(f"Valid checkpoint exists: {adapter.has_valid_checkpoint()}")
 
-    print("\nAttempting same mutations with checkpoint:")
-    for tool_name, tool_input in mutations[:2]:  # Just Write and Edit
-        result = await permission_callback(tool_name, tool_input, None)
+    print("\nAttempting a mutation with checkpoint:")
+    tool_name, tool_input = mutations[0]
+    result = await permission_callback(tool_name, tool_input, call())
+    if is_allowed(result):
+        print(f"  {tool_name}: ALLOWED (checkpoint: {checkpoint_id[:20]}...)")
+    else:
+        print(f"  {tool_name}: blocked")
+        print(f"    {getattr(result, 'message', '')}")
 
-        if is_allowed(result):
-            print(f"  {tool_name}: ALLOWED (checkpoint: {checkpoint_id[:20]}...)")
-        else:
-            print(f"  {tool_name}: blocked")
-
-    # Phase 3: Consume checkpoint - back to blocked
-    print("\n--- Phase 3: After Consuming Checkpoint ---")
-    consumed_id = adapter.consume_checkpoint()
-    print(f"Consumed checkpoint: {consumed_id}")
+    # Phase 3: The allowed call used the checkpoint - back to blocked
+    print("\n--- Phase 3: After the Checkpoint Is Used ---")
+    print("The allowed call used the checkpoint: each gated call needs its own.")
     print(f"Valid checkpoint exists: {adapter.has_valid_checkpoint()}")
 
     print("\nAttempting mutations after checkpoint consumed:")
     for tool_name, tool_input in mutations[:2]:
-        result = await permission_callback(tool_name, tool_input, None)
+        result = await permission_callback(tool_name, tool_input, call())
 
         if is_allowed(result):
             print(f"  {tool_name}: allowed")
@@ -136,7 +149,7 @@ async def main():
     ]
 
     for tool_name, tool_input in read_only:
-        result = await permission_callback(tool_name, tool_input, None)
+        result = await permission_callback(tool_name, tool_input, call())
         allowed = is_allowed(result)
 
         mapping = adapter.mapper.map_tool(tool_name, tool_input)
@@ -149,14 +162,17 @@ async def main():
     pre_tool_use = adapter._make_pretooluse_safety_hook()
     write = {"tool_name": "Write", "tool_input": mutations[0][1]}
 
-    asked = await pre_tool_use(write, "demo_write", None)
+    # One call: PreToolUse holds the checkpoint under its tool_use_id, and
+    # can_use_tool then decides the same call.
+    write_call = call()
+    asked = await pre_tool_use(write, write_call.tool_use_id, None)
     output = asked.get("hookSpecificOutput", {})
     print(f"\nPreToolUse hook answers: {output.get('permissionDecision')}")
     print(f"  {output.get('permissionDecisionReason')}")
 
     print("\nWith no can_use_tool callback, no one can approve:")
     no_approver = adapter._make_permission_callback()
-    result = await no_approver("Write", mutations[0][1], None)
+    result = await no_approver("Write", mutations[0][1], write_call)
     print(f"  Write: {'allowed' if is_allowed(result) else 'BLOCKED'}")
     print(f"    {getattr(result, 'message', '')}")
 

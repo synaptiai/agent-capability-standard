@@ -490,7 +490,9 @@ whose protocol accepts one (an `Idempotency-Key` header, a message
 de-duplication id). One approval therefore authorises at most one
 transmission: the attempts of a pass share its decision and its key. A host
 SHOULD apply the same rule to every other capability whose effective
-`mutation` is true, except a delegation that names one it `replaces`.
+`mutation` is true, a delegation that names one it `replaces` included: its
+key is its own, so the rule keeps a re-delivery of it from delegating twice
+and never answers it with the delegation it replaces.
 
 A key is unique only while `run_id` is. A host that keeps keys across runs
 or across its own restarts MUST NOT reuse a `run_id` (§5.19.2). The inputs

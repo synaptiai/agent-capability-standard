@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -152,14 +153,20 @@ async def demo_permission_enforcement():
         # approve) decides the call once the checkpoint rule is satisfied.
         callback = adapter._make_permission_callback(approve)
 
+        # Claude Code names each call (tool_use_id); the call holds the
+        # checkpoint it uses under that id.
         # Without checkpoint
-        result = await callback("mcp__deploy__push", {}, None)
+        result = await callback(
+            "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="deploy-1")
+        )
         print(f"Without checkpoint: {'allowed' if is_allowed(result) else 'BLOCKED'}")
         print(f"  {getattr(result, 'message', '')}")
 
         # With checkpoint
         adapter.create_checkpoint(["*"], "Before deploy")
-        result = await callback("mcp__deploy__push", {}, None)
+        result = await callback(
+            "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="deploy-2")
+        )
         print(f"With checkpoint: {'ALLOWED' if is_allowed(result) else 'blocked'}")
 
 

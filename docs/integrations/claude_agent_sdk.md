@@ -188,9 +188,9 @@ A tool registered with no capability is unbound too, and is reported as W617 (`U
 
 ### Bash Command Classification
 
-Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability.
+Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability. A command whose effect the mapper does not know gets Bash's worst case, `mutate` and `send` (`execute` and `send` for an interpreter): it may transmit anywhere, so a destination policy refuses it (below).
 
-The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line is a mutation when it redirects output to anything but `/dev/null`, opens a subshell or a here-document, has an unbalanced quote, or uses command substitution, `${...}`, `eval` or `source`. An allow-listed command given an option that writes is a mutation too: `find -delete` or `-exec`, `sort -o`, `uniq IN OUT`, `git diff --output`, `git branch NAME`, `git remote set-url`, `file -C`. `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
+The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line gets the worst case when it redirects output to anything but `/dev/null`, opens a subshell or a here-document, has an unbalanced quote, or expands what the mapper cannot see: a `$` outside single quotes, a brace expansion, backticks, `eval` or `source`. An allow-listed command is read-only only with the arguments it reads with: `sort`, `uniq`, `date`, `hostname` and `file` take a listed set of options and operands (`sort -o` or `--compress-program`, `uniq IN OUT`, `date -s`, `hostname NAME`, `file -C` and any abbreviation of a writing option, `sort --o=x`, write); `find -delete` or `-exec`, `git ... --output` (or an abbreviation), `git branch NAME`, `git remote set-url` and `less -o` write; and an unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`, `hostname`, `file`, `git`, `less` or `more` command may become an option (quote a pattern: `git log -- '*.py'`). `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
 
 **`git stash`**, only when the line is exactly one simple command with no option that writes: `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, and `git stash pop <commit>` and `git stash apply <commit>` are `rollback` when `<commit>` is the full id of a commit a checkpoint of this adapter's scope recorded (the commit `git stash create` printed, kept as the checkpoint's `metadata["commit"]`). git applies any merge commit as if it were a stash, so any other revision, an abbreviated id, an option, and a bare `pop` or `apply` (which read `refs/stash`, where `git stash create` writes nothing) are a gated mutation. Any other form (`store`, `push`, `drop`, none) is a gated mutation, as is `git -C dir stash ...`.
 
@@ -203,11 +203,11 @@ The command line is read with the shell's quoting rules and split into simple co
 | `git stash create` | checkpoint | low | No | No |
 | `git stash pop <commit>`, `git stash apply <commit>`, a commit a checkpoint recorded | rollback | medium | No (one taken earlier) | No |
 | `git stash pop`, `git stash apply` of anything else | mutate | high | Yes | Yes |
-| `rm`, `mv`, `chmod` | mutate | high | Yes | Yes |
-| `sed`, `awk`, `env`, `git push` | mutate | high | Yes | Yes |
+| `rm`, `mv`, `chmod`, `git stash push` | mutate | high | Yes | Yes |
 | `curl -X POST`, `ssh` | send | high | Yes | Yes |
-| `python -c`, `node -e` | execute | high | Yes | Yes |
-| any other command | mutate | high | Yes | Yes |
+| `git push`, `npm publish`, `docker push`, `kubectl apply` | mutate, send | high | Yes | Yes |
+| `python -c`, `node -e`, `python script.py` | execute, send | high | Yes | Yes |
+| any other command (`sed`, `awk`, `env`, `curl URL`, `gh`, `make`) | mutate, send | high | Yes | Yes |
 
 ### MCP Tool Mapping
 
@@ -387,11 +387,11 @@ flowchart TB
   1. *Control-only.* A tool bound `control: true` is allowed and recorded; no check applies to it.
   2. *Rate limit (F504).* A call over its risk level's limit is refused, in strict and non-strict mode alike; a failure of the limiter is R407.
   3. *Prerequisites.* A checkpoint never taken in the scope is F501 (F503 for a `rollback` call); any other missing prerequisite V102.
-  4. *Checkpoint (F501).* A call whose mapping requires a checkpoint holds the newest valid one no other call holds, under its `tool_use_id` (a call with none is R407).
+  4. *Checkpoint (F501).* A call whose mapping requires a checkpoint holds the newest valid one no other call holds, under its `tool_use_id` (a call with none is F501 when no valid checkpoint exists, else R407: the layer cannot hold one for a call it cannot name).
   5. *Approval (F502).* With `approval="ask"` (the default), a call whose mapping requires approval is answered `"ask"`, in the permission modes that put it to a person; see [Approval](#approval). Each refusal here releases the hold step 4 took.
 
   For a pre-approved tool this hook is the only check that runs, so it does not let errors through: a tool the mapper does not know or cannot classify is unbound, and any other error refuses the call with R407 in strict mode and is logged in non-strict mode.
-- **PostToolUse**: Collects evidence anchors; the checkpoint recorder takes a checkpoint for a successful state-saving call; a call that still holds a checkpoint uses it, whatever its outcome; a call that succeeded counts its capabilities as run, for later prerequisites.
+- **PostToolUse**: Collects evidence anchors; the checkpoint recorder takes a checkpoint for a successful state-saving call; a call that still holds a checkpoint uses it, whatever its outcome; a call that succeeded counts its capabilities as run, for later prerequisites. The result of a bound tool of another MCP server is checked here, and replaced with the refusal when it fails the check; when the hook itself fails, such a result is replaced with R407, never passed on unchecked.
 - **PostToolUseFailure**: A failed or interrupted call uses the checkpoint it held.
 - **Stop**: The end of a turn is an execution boundary. Holds of the stopping session's calls count as used, and every checkpoint the adapter holds stops authorising anything.
 - **SubagentStop**: Holds of the finished subagent's calls count as used; not a boundary.
@@ -850,10 +850,12 @@ A profile's grounding policy (`require_grounding`, with
 and its `minimum_confidence` fails an output below it with F504 (reason
 `below_minimum_confidence`, or `invalid_confidence` for a `confidence` that
 is not a number from 0 to 1), after the grounding check: both apply to the
-outputs the layer sees, those of the tools `create_grounded_mcp_server`
-serves, and a warning is logged once for any other tool they would cover
-(Claude Code's own tools return no capability output), whose calls the
-conformance statement names (`calls_without_output`, §5.21.4). A profile's
+outputs of every MCP tool bound to a capability (a tool
+`create_grounded_mcp_server` serves checks its own result, and the
+PostToolUse hook checks another server's), and a warning is logged once for
+any other tool they would cover (Claude Code's own tools return no
+capability output), whose calls the conformance statement names
+(`calls_without_output`, §5.21.4). A profile's
 `allowed_destinations` is a destination policy in force beside
 `GroundedAgentConfig.allowed_destinations` (below); no shipped profile sets
 it. A profile that
@@ -1059,7 +1061,12 @@ pointer, one does not allow, or whose binding names none, is refused with
 F504 before approval. So is a call of an unbound tool, which the adapter
 cannot tell sends or not (§5.18.2), and a call of a composite whose
 `invokes` reach a binding that performs `send`: the adapter does not see a
-tool's nested calls, so it cannot tell where they go (§5.18.4).
+tool's nested calls, so it cannot tell where they go (§5.18.4). A Bash
+command whose classification includes `send` (one that transmits, one the
+mapper does not recognise, an interpreter, a push or publish) is refused
+too, since a command line names no destination the adapter reads: under a
+destination policy, Bash runs only the commands the mapper shows to be
+local (the read-only ones, `rm`, `mv`, `git stash`, ...).
 
 ```python
 class GroundedAgentAdapter:
