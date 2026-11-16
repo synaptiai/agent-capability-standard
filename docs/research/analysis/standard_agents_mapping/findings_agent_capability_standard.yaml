@@ -46,7 +46,7 @@ findings:
     result of an MCP tool bound to a capability, R402: a tool create_grounded_mcp_server serves
     checks its own, and PostToolUse checks another server''s) and claim the class. A call whose
     output is refused has failed: it takes no checkpoint and is no prerequisite that ran. Fixtures:
-    tests/conformance/bindings/ (33) and tests/conformance/calls/ (28, five of them on refused
+    tests/conformance/bindings/ (33) and tests/conformance/calls/ (30, five of them on refused
     outputs), from scripts/gen_call_fixtures.py, with the statements in
     tests/conformance/calls/statements/; the Python adapter runs them in tests/test_binding_fixtures.py
     and tests/test_call_fixtures.py, the Standard Agents binding in
@@ -2316,8 +2316,11 @@ findings:
     `pass_qualified_invoke`, `pass_qualified_invoke_v11_warn`, `fail_qualified_invoke_hidden`,
     `fail_qualified_cycle`, `fail_catalog_manifest*`, `pass_catalog_manifest_v11_warn`,
     `pass_names_warn`, `fail_qualified_invoke_names`; runtime `invoke_qualified_library`,
-    `invoke_computed_not_exported`, `invoke_qualified_non_identifier_name`. Migrating the
-    duplicated example to a qualified invoke waits until the reference catalog carries a manifest.'
+    `invoke_computed_not_exported`, `invoke_qualified_non_identifier_name`. Outside the proposed
+    change: examples/digital_twin_sync_loop.workflow_catalog.yaml still copies three workflows of
+    schemas/workflow_catalog.yaml (a test keeps them identical). It can invoke them by qualified id
+    once the reference catalog carries a manifest, which is a 1.2 feature (W616), and the shipped
+    catalogs still target 1.1.0.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-50

@@ -6,11 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-**Upgrading:**
+Standard 1.2.0 (Candidate Standard) and capability ontology 2.2.0, accepted
+by RFC-0005 to RFC-0010, with their implementation: the reference validator
+and executor, the Python SDK, the plugin's hooks and skills, the new
+TypeScript package `@synaptiai/acs-core` and the Standard Agents binding.
+They resolve the findings of the Standard Agents mapping, which this release
+also adds: all 64 findings about this standard are fixed
+([`findings_agent_capability_standard.yaml`](docs/research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml)).
+Every change to the Standard is backward compatible: a workflow valid under
+1.1.0 validates and runs as before, and a change that would invalidate one
+is phased in as a warning (Standard 1.2.0, Appendix D). The implementations
+change in the ways listed under Upgrading. The plugin release that carries
+this is a MAJOR version (3.0.0), for the renamed skills and the hooks'
+behaviour; the version files change only at that release.
+
+**Upgrading from v2.0.0.** Every breaking or behaviour change for a user of
+the Python SDK, the plugin, the Standard Agents binding or the TypeScript
+package, by component. A change described under Changed or Fixed is named
+here and marked so.
+
+**Requirements.**
+
 - Python 3.14 or 3.15 is required (`requires-python = ">=3.14"`); 3.10–3.13
   are no longer supported. The extension's stable-ABI floor is 3.14.
 - Building from source needs Rust 1.88 or newer (was 1.86), because `sha2`
   0.11 requires it.
+
+**Python SDK: tool calls and the adapter (Standard 1.2.0 §5.18).**
+
 - Python SDK: a tool the mapper does not know is now the strictest case (a
   high-risk mutation that needs a checkpoint and approval), not `observe`;
   register an MCP tool with its real capability. `GroundedAgentConfig.approval`
@@ -24,14 +47,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   MCP tool registered without a `risk` takes its capability's risk (was
   `"medium"`), so a `retrieve` or `search` tool counts against the low-risk
   rate limit.
+- Python SDK, `wrap_options()` (Changed): tools pre-approved in
+  `allowed_tools` now count against the rate limit (raise
+  `GroundedAgentConfig(rate_limit=...)` if an agent needs more); an error in
+  the PreToolUse safety check denies the call; `Skill` is no longer added to
+  `allowed_tools`; Stop and SubagentStop hooks are added.
 - Python SDK, Bash: `sed`, `awk` and `env` are no longer read-only, since they
   can write a file or run another command; a call to one needs a checkpoint
-  and approval like any other mutation.
-- Plugin audit log: `.claude/audit.log` now holds one JSON line per tool call
-  with a digest of the input in place of the input; `tools/verify_audit_log.py`
-  verifies old and new lines in one chain.
-- `schemas/interop/oasf_mapping.yaml`: `meta.grounded_agency_version` is
-  replaced by `meta.agent_capability_standard.standard` and `.ontology`.
+  and approval like any other mutation. The classifier reads the whole line
+  with the shell's quoting rules (Fixed): a line is read-only only when
+  every command in it is.
 - Python SDK, tool calls (Standard 1.2.0 §5.18):
   - A checkpoint is used up when its call is allowed (at the permission
     callback's allow, or at PostToolUse for a call that did not pass the
@@ -126,200 +151,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `adapter.wrap_options()` cannot run them. Pass `require_layer=False`
     for the earlier behaviour (outside class SL). A control-only tool
     (`control: true`) is served as it is: it is never refused.
-- Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
-  Claude Code's JSON payload and needs `jq`; anything else is blocked with
-  R407, as is a failure of the hook. The checkpoint marker is used up by the
-  gated call it authorises, so each such call needs its own; a successful
-  `git stash create` writes the marker and the new Stop hook ends its
-  validity when the turn ends. A marker whose validity ended unused (it
-  expired, its turn ended, a newer one replaced it) is filed under
-  `.claude/checkpoints/ended/`, as a used one is under `used/`. A read-only
-  Bash command and `git stash list|show` need no marker, and `git stash
-  pop|apply <commit>` needs none when a checkpoint recorded `<commit>` (the
-  marker's commit, or the entry `.claude/checkpoints/commits/<commit>` a
-  successful `git stash create` writes, one lookup however many checkpoints
-  were taken); any other restore needs a marker like any write. The rollback
-  skill's command hook refuses (F503) a `git stash pop|apply` that does not
-  name such a commit, whatever `git stash list` holds; before, it refused a
-  restore only when `git stash list` was empty. The rollback and send skills'
-  command hooks open a refusal with its code and name (`F503
-  ROLLBACK_FAILED:`, `F504 CONSTRAINT_VIOLATED:`, `R407
-  SAFETY_CHECK_FAILED:`) in place of `BLOCK:`. The
-  marker's `created_at` and `expires_at` must be whole seconds of at most 12
-  digits, the first not in the future and the second at most 1800 seconds
-  after it; otherwise the call is blocked with F501 and the marker removed. A
-  gated call is answered `ask` with an F502 reason in the permission modes
-  default, acceptEdits and plan, and blocked with F502 in the others;
-  `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules.
-  `ACS_CHECKPOINT_MAX_AGE` (seconds, at most 1800) sets the marker's expiry.
-  Each audit line gains `recorded_by`. The composed skills take a checkpoint
-  with `/checkpoint` instead of writing `.claude/checkpoint.ok`. The hook
-  reads a Bash command's words as bash does (quotes removed), so a quoted or
-  abbreviated option that writes (`"--output=x"`, `--outp`, `file --compi`)
-  and a `git` or `file` command with an unquoted `*`, `?` or `[` need a
-  marker. The audit, checkpoint, persist, rollback, send and transform
-  skills no longer append their own lines to `.audit/*-operations.log`: the
-  plugin's log hook records every call in `.claude/audit.log`, as action
-  records, and reports a line it cannot write. The send skill's command hook also refuses the
-  rest of 127/8, 0/8, 169.254/16, IPv6 loopback, mapped, link-local and
-  unique-local literals, and an IPv4 host in another form (`127.1`,
-  `2130706433`, `0x7f000001`).
-- Standard Agents binding: `STANDARD_VERSION` is 1.2.0 and the `acs`
-  annotation carries the tool binding record (`tool`, declared `flags`,
-  `additional_capabilities`, `invokes`, `approval`); the copies of the layer
-  and flags are informative. `lintPromptTools` and `lintAgentBindings` report
-  `W617`, `V111`, `V102` and `F506` in place of `unclassified`,
-  `misnamed_tool` and `bound_gated_tool`. A prerequisite other than a
-  checkpoint that has not run is refused with V102, and a check or record
-  the binding cannot complete with R407. A tool's success result is the
-  output's I-JSON text, and an output with an integer beyond 2^53, a
-  non-finite number or a lone surrogate is refused with R402. A composite
-  lists the tools it invokes in `invokes`, which also becomes its `uses`; an
-  invocation outside the list is refused (F504). A call that needs approval
-  whose arguments are not I-JSON is refused with F502 before anything is
-  asked or used. An approval policy's `min_approvers` is at most
-  `MAX_APPROVERS` (1000). A grounded tool's `recorded_by.config_sha256`
-  digests `{annotation, settings: {checkpoint_max_age_ms}}`, not the
-  annotation alone.
-- **Breaking (plugin):** two composed skills take their directory names
-  (Agent Skills requires `name` to equal the directory): the slash commands
-  `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
-  `/capability-gap-analysis` and `/digital-twin-sync-loop`. The plugin
-  release that carries this is a MAJOR version (3.0.0). No workflow,
-  ontology or schema changes. The `layer` frontmatter key is removed from
-  the 13 skills that had it (the ontology gives a capability's layer).
-- Domain profiles (Standard 1.2.0 §5.21) are now applied where they are
-  given, and refused when malformed: a `checkpoint_policy` key must be a
-  capability id or `"*"` (a label such as `before_send` is V101), the
-  members of `risk_thresholds` and `evidence_policy` are closed (another is
-  S303), and `required_anchor_types` lists anchor kinds. A third-party
-  profile written for 1.1, which nothing applied, is refused where it is
-  applied now: migrate it as the shipped profiles were (each to 2.0.0).
-  `tools/validate_profiles.py` checks profiles with the core and fails on
-  any diagnostic; its old helper functions are gone. A profile that sets a
-  rule an implementation does not put in force is refused too, rather than
-  applied without it (§5.21.4): the adapter, with `strict_mode=False`
-  (which only logs a missing checkpoint), a `checkpoint_policy` that raises
-  `requires_checkpoint`. A profile's grounding policy (`require_grounding`,
-  every shipped profile's) and its `minimum_confidence` are applied: an
-  output they cover that is not grounded fails with F505, one not confident
-  enough with F504, in runs, in the adapter (on the outputs of every MCP
-  tool bound to a capability, served or not) and in the binding. A member without
-  an exact JSON form (an integer beyond 2^53) is S303. An unknown top-level
-  profile member stays a warning (W604) and is now reported with the member
-  meant: logged at WARNING by the Python layers, and passed by the
-  binding's `bindingProfiles` to its `onWarning` (`console.warn` by
-  default).
-- Python SDK: `OASFAdapter.translate` raises `UnknownCapabilityError` (V101,
-  with the closest id) for an entry that names a capability the ontology
-  does not define; it logged a warning and translated the entry without it,
-  so its `max_risk` and `requires_checkpoint` could be too low. Catch it
-  where a mapping written against a later ontology may be loaded.
-- Python SDK: `grounded_agency.trust.decay_factor` counts an age below zero
-  as zero (it raised `ValueError`), and `TrustModel` reads its field
-  authorities from `field_authority.fields`, refusing a malformed entry or
-  an unknown tie-breaker. `_core.Run.start` and
-  `Validator.validate` take `profiles`, which they apply;
-  `GroundedAgentConfig(profiles=...)` needs `approval="ask"`.
-- An ontology whose capability contract keeps a `$ref` that names nothing,
-  is cyclic or nests deeper than 12 is refused when it is loaded (it was
-  kept silently): by the validator CLI, the executor and WebAssembly, and in
-  Python by `_core.Validator`, `WorkflowEngine` and `GroundedAgentAdapter`,
-  which now loads its ontology through the core as well. An adapter whose
-  ontology is not at `<root>/schemas/` names the directory its `$ref`s are
-  relative to with `GroundedAgentConfig(schema_root=...)`. A same-file
-  `$ref` (`#<pointer>`) names a node of the ontology itself (§4.1.2).
-- TypeScript package: `npm test` replays the fixtures through the
-  WebAssembly core, so run `npm run build:wasm` (which needs the
-  `wasm32-unknown-unknown` target) and `npm run build` first; the binding
-  needs only `npm run build:ts`.
-- Standard Agents binding: `src/acs/canonical.ts` and
-  `src/acs/ontology.gen.ts` are removed. The binding depends on the
-  TypeScript package `@synaptiai/acs-core` (`file:../../packages/acs-core`)
-  and imports its built `dist/`, so run `npm ci` and `npm run build:ts` in
-  `packages/acs-core` before the binding's check and tests. Import
-  `canonicalize`, `digest`, `sha256Hex`, `NotCanonicalizableError` and
-  `Json` from `@synaptiai/acs-core`, and `CAPABILITIES`, `REQUIRES` and
-  `ONTOLOGY_VERSION` from it or from `src/acs/ontology.ts`. The binding's
-  copy of the approval digest vectors, `test/fixtures/approval-digests.json`,
-  is removed: read `tests/conformance/approval/digests.json`. The package
-  is not on npm until `.github/workflows/publish-npm.yml` publishes it (it
-  does only when `NPM_PUBLISH_ENABLED` and `NPM_TOKEN` are set), so a copy
-  of the binding outside this repository builds the package from
-  `packages/acs-core` or bundles it.
-- Standard Agents binding: a trace entry's `approval.approvers` (and
-  `GroundedCall.approvers`) are now the approvers' principals,
-  `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
-  `approval.approver_identities`; compare approvers by principal. They list
-  only the approvers whose approvals counted when the call ran
-  (`countedDecisions`): one that had lapsed under `expires_ms` is left out.
-  `POST acs/approvals` takes the digest in either case.
-  `decideApproval` takes an optional last argument, `ApproverOptions`
-  (`kind`, `ownerId`). Decisions stored by an earlier version have no
-  identity, and a call that uses one records no `approver_identities`.
-- Reference executor: the saved state of a run that deferred steps holds two
-  more members (`ahead`, and `parked` for a nested run that ended deferred);
-  a state with deferrals that an earlier version saved still restores, but
-  cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
-  new one. The state of a run that never deferred holds neither.
-- Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
-  version 2. The terminal action is derived from the state rather than
-  stored with copies of the records and outputs, every action carries
-  `run_id`, and the state may hold the record mode and the chain heads of
-  what a host took; version-1 snapshots still restore (a finished run's
-  stored terminal action must equal the one derived). Actions and records
-  gain members (`run_id`; on records `run_id`, `frame`, `step`,
-  `capability`, `checkpoint_id`, `code`, `approval.decision_id`); code that
-  compares whole actions or records must allow them. `_core.Run.next()`
-  returns a fresh dict each time, `Run.tick` returns whether it changed the
-  run, and `Run::next` in Rust returns an owned `Action`.
-- Reference executor, starting a run (Standard 1.2.0 §11.5): the catalog's
-  version header is a start member every caller states. `_core.Run.start`
-  takes a required keyword-only `header`, the version the catalog's
-  `# Standard version:` header declares or `None` for a catalog without
-  one; a call without it raises `TypeError`. In Rust, `StartOptions` gains
-  `header`, `records`, `profiles`, `grounding` and `destinations`, which
-  every construction names. `WorkflowRunner` states the header itself.
-- `WorkflowRunner`: `run` and `start` take `attendance=None` (the trigger's
-  attendance, else attended, as before) and refuse a caller-given `run_id`
-  the runner has already started (`RunStartError`): a `run_id` must be
-  unique among the runs whose records or keys the host keeps (§5.19.2).
-  `drive` is now a loop of `advance` turns: it sleeps until the run's
-  wake-up time (`run.wake_at()`) instead of a deadline it computed, and
-  calls `Host.withdraw` for an action the run timed out. `RunResult` gains
-  `run_id`, `reason`, `checkpoint_id` and `run_record`.
-- Coordination: the orchestrator's `audit` step returns the `audit`
-  contract's output (`recorded`, `audit_id`, `record`, `timestamp`,
-  `evidence_anchors`) instead of `{"audited": true}`, and records only the
-  step's `event`, `context` and `retention`, the event under
-  `details.event` of a record of the log's own (Standard 1.2.0 §6.4).
-- Plugin audit log: each line of `.claude/audit.log` is now an action
-  record (Standard 1.2.0 §6.4): `action_id`, `timestamp`, `actor`,
-  `intent`, `status`, `tool`, `call_id`, `details` (`event`, `skill`,
-  `input_sha256`), `recorded_by`, `prev_hmac`, `hmac`. Logs that mix old and
-  new lines still verify. The hook now reports, as a non-blocking error
-  (exit 1, the reason on standard error), every call it does not log or
-  cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
-  line with `hmac: "no-hmac-available"`, which broke the chain), a line that
-  could not be built, an unreadable last line, an unavailable digest.
-- Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
-  an action record of its own (Standard 1.2.0 §6.4), with the event under
-  `details.event`, the collected `audit_record`, `changes` and `provenance`
-  under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (else
-  the hook's default key), so `tools/verify_audit_log.py --log-file
-  .claude/audit/records.jsonl` checks the file. Lines an earlier version
-  wrote (`audit_id`, `timestamp`, `event`, `context`, `retention`,
-  `audit_record`, `changes`, `provenance`) carry no chain and do not verify:
-  move an existing file aside and let the skill start a new one (it does so
-  itself when the last line has no `hmac`), and read the old members under
-  `details` in new lines.
-- Reference executor: an approved step that fails now has a `failed`
-  record, with the step's code, also when its failure mode's rollback or
-  checkpoint then fails (F503, F501) or finds no checkpoint to roll back
-  to; 1.1 left that record `approved`, which a cancellation would then turn
-  into `cancelled` and which held back `take_records` for the rest of the
-  run. A record a resumed run reuses no longer keeps the `checkpoint_id` of
-  an earlier pass.
+- Python SDK, tool calls: a `persist` call (`TodoWrite`, a tool bound to
+  `persist`) or an `audit` call whose data holds a credential-shaped value
+  (a key or token format, a credential assignment, a URL's userinfo
+  password, an `Authorization` header's value) is refused with F504
+  (Standard 1.2.0 §5.18.10, §6.7), also when the host's permission flow
+  changes the call's arguments.
+- Python SDK, the output contract of a tool's result (Standard 1.2.0
+  §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
+  `create_grounded_mcp_server` serves or one of another server bound with
+  `register_mcp_tool` or `load_bindings`, must return that capability's
+  output as the I-JSON text of the output object, its one text content
+  item, with every field the capability's output contract requires. The
+  SDK's server delivers a result's content and `is_error` to the session,
+  not its `structuredContent`, so the text is what is checked: a result
+  that carries its output only as `structuredContent` is refused, and a
+  `structuredContent` beside the text is not read. A result that does not
+  carry the output (prose, a partial object, an integer beyond ±2^53, a
+  confidence outside 0 to 1) fails the call that ran with R402, and the
+  call's record is `failed` with R402: a served tool returns an error
+  result whose text opens with `R402 EXECUTION_FAILED:`, and for another
+  server's tool the PostToolUse hook replaces the result the session reads
+  with that text (`updatedMCPToolOutput`). Such a call has failed: a
+  `checkpoint` tool's call takes no checkpoint, and no call counts as a
+  prerequisite that ran. A result is an error, passed on as before, only
+  when its `is_error` is `True`; any other value is checked. Return the
+  output's JSON text, or set `GroundedAgentConfig(check_outputs=False)`
+  (outside class SL; the configuration's `config_sha256` then records it),
+  which skips only this check: the grounding policies and a minimum
+  confidence read the output the one text item carries. The check runs
+  before the grounding policies and the profiles' minimum confidence, as
+  the executor's does, and those apply to the output it read.
+  `create_grounded_mcp_server` guards every tool with a callable `handler`,
+  whatever its class, and refuses one without (`ValueError`, R407) unless
+  `require_layer=False`.
+
+**Python SDK: evidence, workflows and coordination.**
+
 - Python SDK, evidence (Standard 1.2.0 §6.5, §6.6):
   - Anchor kinds are §6.5's: `tool_output` and `command` anchors are now
     `tool`, `mutation` and coordination anchors `record`. The old names are
@@ -358,59 +226,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `synchronize` gives `{synchronized, agreed_state, participants,
     evidence_anchors}` instead of the agreed state itself (read
     `output["agreed_state"]`).
-- Python SDK, tool calls: a `persist` call (`TodoWrite`, a tool bound to
-  `persist`) or an `audit` call whose data holds a credential-shaped value
-  (a key or token format, a credential assignment, a URL's userinfo
-  password, an `Authorization` header's value) is refused with F504
-  (Standard 1.2.0 §5.18.10, §6.7), also when the host's permission flow
-  changes the call's arguments.
-- Standard Agents binding: `fileAnchor` returns `{ref, kind: 'file', digest:
-  'sha256:...'}` instead of `metadata.sha256`; every trace entry's
-  `evidence_anchors` and `error` are stored redacted (default patterns,
-  plus the tool's `secrets`), as are the notifications; a `persist` or
-  `audit` tool refuses data that holds a credential (F504), a URL's
-  userinfo password and an `Authorization` header's value included.
-- Plugin: the `persist` skill refuses content that holds a credential-shaped
-  value (a URL's userinfo password and an `Authorization` header's value
-  included), and the `audit` skill an append to
-  `.claude/audit/records.jsonl` that holds one (F504); both hooks' refusals
-  now open with the Standard's
-  code and name (`F504 CONSTRAINT_VIOLATED:`, `R407 SAFETY_CHECK_FAILED:`).
-- Validator: an `audit` step's literal `retention` outside the duration
-  grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
-  1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
-- Validator (every Standard version): W620 for a workflow name that is not
-  an identifier or is `catalog`, a step `domain` that is not a domain id
-  (`schemas/workflow_catalog.yaml`'s `plan-invalidation` is now
-  `plan_invalidation`; rename yours the same way) and a literal model family
-  outside `[a-z][a-z0-9_-]*`; W623 for a schedule trigger with `overlap:
-  allow_all` on a workflow that exercises both capabilities of a
-  `conflicts_with` pair. A top-level `catalog` mapping without `steps` is
-  now the catalog's manifest, no longer a malformed workflow (S304).
-  Diagnostics gain `location.path` (RFC 6901) and, in a catalog set,
-  `location.catalog`; `column` counts code points (it counted bytes).
-- Validator and executor, workflows that target 1.2: a `delegate` step
-  that may act on the world unchecked is W621 and one with a computed agent
-  and no `agents` is W622; an accepted `read_only` delegation whose host
-  does not attest `effective.read_only` fails the step (R402), not retried.
-  A delegation that binds `continues` and attests a fresh context, or
-  returns the `task_id` it continues, fails (R402). An attested identity's
-  `model_id` must equal `effective.model_id` (R402). An identity's
-  `model_id` is a string, as `agent_identity_schema.yaml` 1.1.0 says: an
-  identity whose `model_id` is not is malformed, so it refuses the run's
-  start as the actor identity and fails what reports it, like an identity
-  with a non-string `role`. Below 1.2 the executor reads no identity's
-  `model_id`, as 1.1 did not (schema 1.0.0 does not define it).
-- Validator, workflows that target 1.0 or 1.1: the workflow field `agents`
-  and the `delegate` input `continues` are W616 where 1.1 reported W604
-  (with no version, W605 alone); the executor still ignores `agents` and
-  passes `continues` on unread there. A qualified `invoke` target
-  (`<catalog id>/<name>` naming no workflow of the caller's catalog) is W616
-  too, whatever catalogs are given. Every W616 about a step member (1.1
-  features such as gate `phase` included) now carries the step's `step` and
-  `capability` with `field` relative to the step (`gates[0].phase`, not
-  `steps[0].gates[0].phase`), and is sorted with that step's findings; its
-  code and `location.path` are unchanged.
+- `WorkflowRunner`: `run` and `start` take `attendance=None` (the trigger's
+  attendance, else attended, as before) and refuse a caller-given `run_id`
+  the runner has already started (`RunStartError`): a `run_id` must be
+  unique among the runs whose records or keys the host keeps (§5.19.2).
+  `drive` is now a loop of `advance` turns: it sleeps until the run's
+  wake-up time (`run.wake_at()`) instead of a deadline it computed, and
+  calls `Host.withdraw` for an action the run timed out. `RunResult` gains
+  `run_id`, `reason`, `checkpoint_id` and `run_record`.
+- Coordination: the orchestrator's `audit` step returns the `audit`
+  contract's output (`recorded`, `audit_id`, `record`, `timestamp`,
+  `evidence_anchors`) instead of `{"audited": true}`, and records only the
+  step's `event`, `context` and `retention`, the event under
+  `details.event` of a record of the log's own (Standard 1.2.0 §6.4).
 - Python SDK: `AgentDescriptor.identity()` refuses a `model_family` not
   written `[a-z][a-z0-9_-]*` (`ValueError`) and derives one from a
   `model_id` in its metadata; `DelegationProtocol.delegate()` refuses a task
@@ -422,8 +250,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `answer_type`, `inquiry_id`, and `ambiguity_analysis` as an object (it
   gave strings, against the contract). `_core.Run.start` and `restore` take
   `catalogs` and `agents`.
-- Standard Agents binding: `LintDiagnostic.code` gains `V107` and
-  `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
+- Python SDK: `OASFAdapter.translate` raises `UnknownCapabilityError` (V101,
+  with the closest id) for an entry that names a capability the ontology
+  does not define; it logged a warning and translated the entry without it,
+  so its `max_risk` and `requires_checkpoint` could be too low. Catch it
+  where a mapping written against a later ontology may be loaded.
+- Python SDK: `grounded_agency.trust.decay_factor` counts an age below zero
+  as zero (it raised `ValueError`), and `TrustModel` reads its field
+  authorities from `field_authority.fields`, refusing a malformed entry or
+  an unknown tie-breaker. `_core.Run.start` and
+  `Validator.validate` take `profiles`, which they apply;
+  `GroundedAgentConfig(profiles=...)` needs `approval="ask"`.
+- Python SDK: `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s
+  (Changed), so `str()` of a member is its value.
+
+**Across components (validator, executor, Python SDK, binding).**
+
+- An ontology whose capability contract keeps a `$ref` that names nothing,
+  is cyclic or nests deeper than 12 is refused when it is loaded (it was
+  kept silently): by the validator CLI, the executor and WebAssembly, and in
+  Python by `_core.Validator`, `WorkflowEngine` and `GroundedAgentAdapter`,
+  which now loads its ontology through the core as well. An adapter whose
+  ontology is not at `<root>/schemas/` names the directory its `$ref`s are
+  relative to with `GroundedAgentConfig(schema_root=...)`. A same-file
+  `$ref` (`#<pointer>`) names a node of the ontology itself (§4.1.2).
+- Domain profiles (Standard 1.2.0 §5.21) are now applied where they are
+  given, and refused when malformed: a `checkpoint_policy` key must be a
+  capability id or `"*"` (a label such as `before_send` is V101), the
+  members of `risk_thresholds` and `evidence_policy` are closed (another is
+  S303), and `required_anchor_types` lists anchor kinds. A third-party
+  profile written for 1.1, which nothing applied, is refused where it is
+  applied now: migrate it as the shipped profiles were (each to 2.0.0).
+  `tools/validate_profiles.py` checks profiles with the core and fails on
+  any diagnostic; its old helper functions are gone. A profile that sets a
+  rule an implementation does not put in force is refused too, rather than
+  applied without it (§5.21.4): the adapter, with `strict_mode=False`
+  (which only logs a missing checkpoint), a `checkpoint_policy` that raises
+  `requires_checkpoint`. A profile's grounding policy (`require_grounding`,
+  every shipped profile's) and its `minimum_confidence` are applied: an
+  output they cover that is not grounded fails with F505, one not confident
+  enough with F504, in runs, in the adapter (on the outputs of every MCP
+  tool bound to a capability, served or not) and in the binding. A member without
+  an exact JSON form (an integer beyond 2^53) is S303. An unknown top-level
+  profile member stays a warning (W604) and is now reported with the member
+  meant: logged at WARNING by the Python layers, and passed by the
+  binding's `bindingProfiles` to its `onWarning` (`console.warn` by
+  default).
 - Checkpoints, rollbacks, sends and memory (Standard 1.2.0 §4.4.1, §4.4.2,
   §4.5; RFC-0009):
   - Every `InvokeCapability` action carries `idempotency_key`
@@ -487,36 +359,346 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `git stash create` (and `HEAD` on a clean tree) instead of `git stash
     push`, which the safety layers count as a gated `mutate`; the
     `rollback` skill restores with `git restore`.
-- Python SDK, the output contract of a tool's result (Standard 1.2.0
-  §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
-  `create_grounded_mcp_server` serves or one of another server bound with
-  `register_mcp_tool` or `load_bindings`, must return that capability's
-  output as the I-JSON text of the output object, its one text content
-  item, with every field the capability's output contract requires. The
-  SDK's server delivers a result's content and `is_error` to the session,
-  not its `structuredContent`, so the text is what is checked: a result
-  that carries its output only as `structuredContent` is refused, and a
-  `structuredContent` beside the text is not read. A result that does not
-  carry the output (prose, a partial object, an integer beyond ±2^53, a
-  confidence outside 0 to 1) fails the call that ran with R402, and the
-  call's record is `failed` with R402: a served tool returns an error
-  result whose text opens with `R402 EXECUTION_FAILED:`, and for another
-  server's tool the PostToolUse hook replaces the result the session reads
-  with that text (`updatedMCPToolOutput`). Such a call has failed: a
-  `checkpoint` tool's call takes no checkpoint, and no call counts as a
-  prerequisite that ran. A result is an error, passed on as before, only
-  when its `is_error` is `True`; any other value is checked. Return the
-  output's JSON text, or set `GroundedAgentConfig(check_outputs=False)`
-  (outside class SL; the configuration's `config_sha256` then records it),
-  which skips only this check: the grounding policies and a minimum
-  confidence read the output the one text item carries. The check runs
-  before the grounding policies and the profiles' minimum confidence, as
-  the executor's does, and those apply to the output it read.
-  `create_grounded_mcp_server` guards every tool with a callable `handler`,
-  whatever its class, and refuses one without (`ValueError`, R407) unless
-  `require_layer=False`.
+
+**Reference validator and executor.**
+
+- Reference executor: the saved state of a run that deferred steps holds two
+  more members (`ahead`, and `parked` for a nested run that ended deferred);
+  a state with deferrals that an earlier version saved still restores, but
+  cannot be resumed (`Run.resume` refuses it): cancel such a run and start a
+  new one. The state of a run that never deferred holds neither.
+- Reference executor, host protocol (Standard 1.2.0 §5.19): snapshots are
+  version 2. The terminal action is derived from the state rather than
+  stored with copies of the records and outputs, every action carries
+  `run_id`, and the state may hold the record mode and the chain heads of
+  what a host took; version-1 snapshots still restore (a finished run's
+  stored terminal action must equal the one derived). Actions and records
+  gain members (`run_id`; on records `run_id`, `frame`, `step`,
+  `capability`, `checkpoint_id`, `code`, `approval.decision_id`); code that
+  compares whole actions or records must allow them. `_core.Run.next()`
+  returns a fresh dict each time, `Run.tick` returns whether it changed the
+  run, and `Run::next` in Rust returns an owned `Action`.
+- Reference executor, starting a run (Standard 1.2.0 §11.5): the catalog's
+  version header is a start member every caller states. `_core.Run.start`
+  takes a required keyword-only `header`, the version the catalog's
+  `# Standard version:` header declares or `None` for a catalog without
+  one; a call without it raises `TypeError`. In Rust, `StartOptions` gains
+  `header`, `records`, `profiles`, `grounding` and `destinations`, which
+  every construction names. `WorkflowRunner` states the header itself.
+- Reference executor: an approved step that fails now has a `failed`
+  record, with the step's code, also when its failure mode's rollback or
+  checkpoint then fails (F503, F501) or finds no checkpoint to roll back
+  to; 1.1 left that record `approved`, which a cancellation would then turn
+  into `cancelled` and which held back `take_records` for the rest of the
+  run. A record a resumed run reuses no longer keeps the `checkpoint_id` of
+  an earlier pass.
+- Validator: an `audit` step's literal `retention` outside the duration
+  grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
+  1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
+- Validator (every Standard version): W620 for a workflow name that is not
+  an identifier or is `catalog`, a step `domain` that is not a domain id
+  (`schemas/workflow_catalog.yaml`'s `plan-invalidation` is now
+  `plan_invalidation`; rename yours the same way) and a literal model family
+  outside `[a-z][a-z0-9_-]*`; W623 for a schedule trigger with `overlap:
+  allow_all` on a workflow that exercises both capabilities of a
+  `conflicts_with` pair. A top-level `catalog` mapping without `steps` is
+  now the catalog's manifest, no longer a malformed workflow (S304).
+  Diagnostics gain `location.path` (RFC 6901) and, in a catalog set,
+  `location.catalog`; `column` counts code points (it counted bytes).
+- Validator and executor, workflows that target 1.2: a `delegate` step
+  that may act on the world unchecked is W621 and one with a computed agent
+  and no `agents` is W622; an accepted `read_only` delegation whose host
+  does not attest `effective.read_only` fails the step (R402), not retried.
+  A delegation that binds `continues` and attests a fresh context, or
+  returns the `task_id` it continues, fails (R402). An attested identity's
+  `model_id` must equal `effective.model_id` (R402). An identity's
+  `model_id` is a string, as `agent_identity_schema.yaml` 1.1.0 says: an
+  identity whose `model_id` is not is malformed, so it refuses the run's
+  start as the actor identity and fails what reports it, like an identity
+  with a non-string `role`. Below 1.2 the executor reads no identity's
+  `model_id`, as 1.1 did not (schema 1.0.0 does not define it).
+- Validator, workflows that target 1.0 or 1.1: the workflow field `agents`
+  and the `delegate` input `continues` are W616 where 1.1 reported W604
+  (with no version, W605 alone); the executor still ignores `agents` and
+  passes `continues` on unread there. A qualified `invoke` target
+  (`<catalog id>/<name>` naming no workflow of the caller's catalog) is W616
+  too, whatever catalogs are given. Every W616 about a step member (1.1
+  features such as gate `phase` included) now carries the step's `step` and
+  `capability` with `field` relative to the step (`gates[0].phase`, not
+  `steps[0].gates[0].phase`), and is sorted with that step's findings; its
+  code and `location.path` are unchanged.
+
+**Plugin: hooks and skills (released with plugin 3.0.0).**
+
+- **Breaking (plugin):** two composed skills take their directory names
+  (Agent Skills requires `name` to equal the directory): the slash commands
+  `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
+  `/capability-gap-analysis` and `/digital-twin-sync-loop`. The plugin
+  release that carries this is a MAJOR version (3.0.0). No workflow,
+  ontology or schema changes. The `layer` frontmatter key is removed from
+  the 13 skills that had it (the ontology gives a capability's layer).
+- Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
+  Claude Code's JSON payload and needs `jq`; anything else is blocked with
+  R407, as is a failure of the hook. The checkpoint marker is used up by the
+  gated call it authorises, so each such call needs its own; a successful
+  `git stash create` writes the marker and the new Stop hook ends its
+  validity when the turn ends. A marker whose validity ended unused (it
+  expired, its turn ended, a newer one replaced it) is filed under
+  `.claude/checkpoints/ended/`, as a used one is under `used/`. A read-only
+  Bash command and `git stash list|show` need no marker, and `git stash
+  pop|apply <commit>` needs none when a checkpoint recorded `<commit>` (the
+  marker's commit, or the entry `.claude/checkpoints/commits/<commit>` a
+  successful `git stash create` writes, one lookup however many checkpoints
+  were taken); any other restore needs a marker like any write. The rollback
+  skill's command hook refuses (F503) a `git stash pop|apply` that does not
+  name such a commit, whatever `git stash list` holds; before, it refused a
+  restore only when `git stash list` was empty. The rollback and send skills'
+  command hooks open a refusal with its code and name (`F503
+  ROLLBACK_FAILED:`, `F504 CONSTRAINT_VIOLATED:`, `R407
+  SAFETY_CHECK_FAILED:`) in place of `BLOCK:`. The
+  marker's `created_at` and `expires_at` must be whole seconds of at most 12
+  digits, the first not in the future and the second at most 1800 seconds
+  after it; otherwise the call is blocked with F501 and the marker removed. A
+  gated call is answered `ask` with an F502 reason in the permission modes
+  default, acceptEdits and plan, and blocked with F502 in the others;
+  `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules.
+  `ACS_CHECKPOINT_MAX_AGE` (seconds, at most 1800) sets the marker's expiry.
+  Each audit line gains `recorded_by`. The composed skills take a checkpoint
+  with `/checkpoint` instead of writing `.claude/checkpoint.ok`. The hook
+  reads a Bash command's words as bash does (quotes removed), so a quoted or
+  abbreviated option that writes (`"--output=x"`, `--outp`, `file --compi`)
+  and a `git` or `file` command with an unquoted `*`, `?` or `[` need a
+  marker. The audit, checkpoint, persist, rollback, send and transform
+  skills no longer append their own lines to `.audit/*-operations.log`: the
+  plugin's log hook records every call in `.claude/audit.log`, as action
+  records, and reports a line it cannot write. The send skill's command hook also refuses the
+  rest of 127/8, 0/8, 169.254/16, IPv6 loopback, mapped, link-local and
+  unique-local literals, and an IPv4 host in another form (`127.1`,
+  `2130706433`, `0x7f000001`).
+- Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
+  call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
+  `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,
+  `skill`, `input_sha256`: a digest of the input in place of the input),
+  `recorded_by`, `prev_hmac`, `hmac`. `tools/verify_audit_log.py` verifies
+  old and new lines in one chain, so logs that mix them still verify. The hook now reports, as a non-blocking error
+  (exit 1, the reason on standard error), every call it does not log or
+  cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
+  line with `hmac: "no-hmac-available"`, which broke the chain), a line that
+  could not be built, an unreadable last line, an unavailable digest.
+- Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
+  an action record of its own (Standard 1.2.0 §6.4), with the event under
+  `details.event`, the collected `audit_record`, `changes` and `provenance`
+  under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (else
+  the hook's default key), so `tools/verify_audit_log.py --log-file
+  .claude/audit/records.jsonl` checks the file. Lines an earlier version
+  wrote (`audit_id`, `timestamp`, `event`, `context`, `retention`,
+  `audit_record`, `changes`, `provenance`) carry no chain and do not verify:
+  move an existing file aside and let the skill start a new one (it does so
+  itself when the last line has no `hmac`), and read the old members under
+  `details` in new lines.
+- Plugin: the `persist` skill refuses content that holds a credential-shaped
+  value (a URL's userinfo password and an `Authorization` header's value
+  included), and the `audit` skill an append to
+  `.claude/audit/records.jsonl` that holds one (F504); both hooks' refusals
+  now open with the Standard's
+  code and name (`F504 CONSTRAINT_VIOLATED:`, `R407 SAFETY_CHECK_FAILED:`).
+- Skills: the `send`, `rollback`, `checkpoint`, `persist` and `transform`
+  skills' prompt hooks no longer judge approval, checkpoints, rate limits or
+  expiry (Changed), and the persist, rollback and send skills' command hooks
+  now block (exit 2) a call they refuse, which they let through before
+  (Fixed).
+
+**Standard Agents binding and TypeScript package.**
+
+- TypeScript package: `npm test` replays the fixtures through the
+  WebAssembly core, so run `npm run build:wasm` (which needs the
+  `wasm32-unknown-unknown` target) and `npm run build` first; the binding
+  needs only `npm run build:ts`.
+- Standard Agents binding: `src/acs/canonical.ts` and
+  `src/acs/ontology.gen.ts` are removed. The binding depends on the
+  TypeScript package `@synaptiai/acs-core` (`file:../../packages/acs-core`)
+  and imports its built `dist/`, so run `npm ci` and `npm run build:ts` in
+  `packages/acs-core` before the binding's check and tests. Import
+  `canonicalize`, `digest`, `sha256Hex`, `NotCanonicalizableError` and
+  `Json` from `@synaptiai/acs-core`, and `CAPABILITIES`, `REQUIRES` and
+  `ONTOLOGY_VERSION` from it or from `src/acs/ontology.ts`. The binding's
+  copy of the approval digest vectors, `test/fixtures/approval-digests.json`,
+  is removed: read `tests/conformance/approval/digests.json`. The package
+  is not on npm until `.github/workflows/publish-npm.yml` publishes it (it
+  does only when `NPM_PUBLISH_ENABLED` and `NPM_TOKEN` are set), so a copy
+  of the binding outside this repository builds the package from
+  `packages/acs-core` or bundles it.
+- Standard Agents binding: `STANDARD_VERSION` is 1.2.0 and the `acs`
+  annotation carries the tool binding record (`tool`, declared `flags`,
+  `additional_capabilities`, `invokes`, `approval`); the copies of the layer
+  and flags are informative. `lintPromptTools` and `lintAgentBindings` report
+  `W617`, `V111`, `V102` and `F506` in place of `unclassified`,
+  `misnamed_tool` and `bound_gated_tool`. A prerequisite other than a
+  checkpoint that has not run is refused with V102, and a check or record
+  the binding cannot complete with R407. A tool's success result is the
+  output's I-JSON text, and an output with an integer beyond 2^53, a
+  non-finite number or a lone surrogate is refused with R402. A composite
+  lists the tools it invokes in `invokes`, which also becomes its `uses`; an
+  invocation outside the list is refused (F504). A call that needs approval
+  whose arguments are not I-JSON is refused with F502 before anything is
+  asked or used. An approval policy's `min_approvers` is at most
+  `MAX_APPROVERS` (1000). A grounded tool's `recorded_by.config_sha256`
+  digests `{annotation, settings: {checkpoint_max_age_ms}}`, not the
+  annotation alone. The annotation schema now refuses a copy of the layer
+  or flags that names another layer or a weaker flag than the capability's
+  (Changed).
+- Standard Agents binding: a trace entry's `approval.approvers` (and
+  `GroundedCall.approvers`) are now the approvers' principals,
+  `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
+  `approval.approver_identities`; compare approvers by principal. They list
+  only the approvers whose approvals counted when the call ran
+  (`countedDecisions`): one that had lapsed under `expires_ms` is left out.
+  `POST acs/approvals` takes the digest in either case.
+  `decideApproval` takes an optional last argument, `ApproverOptions`
+  (`kind`, `ownerId`). Decisions stored by an earlier version have no
+  identity, and a call that uses one records no `approver_identities`.
+- Standard Agents binding: `fileAnchor` returns `{ref, kind: 'file', digest:
+  'sha256:...'}` instead of `metadata.sha256`; every trace entry's
+  `evidence_anchors` and `error` are stored redacted (default patterns,
+  plus the tool's `secrets`), as are the notifications; a `persist` or
+  `audit` tool refuses data that holds a credential (F504), a URL's
+  userinfo password and an `Authorization` header's value included.
+- Standard Agents binding: `LintDiagnostic.code` gains `V107` and
+  `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
+
+**Interoperability data.**
+
+- `schemas/interop/oasf_mapping.yaml`: `meta.grounded_agency_version` is
+  replaced by `meta.agent_capability_standard.standard` and `.ontology`.
 
 ### Added
+- Standard 1.2.0 (Candidate Standard), `spec/STANDARD-v1.2.0.md`, with
+  capability ontology 2.2.0, accepted by RFC-0005 to RFC-0010 (RFC-0002
+  stays a Draft). Appendix D lists every change from 1.1.0 and
+  `spec/CHANGELOG.md` summarises them; the entries below follow the RFCs.
+  Ontology 2.2.0 is additive (§11.6, which now says how the ontology is
+  versioned): every output contract declares `confidence`,
+  `inference_method` and `uncertainty`, its `evidence_anchors` items are
+  §6.5 anchors (a bare string or another object is accepted as a deprecated
+  legacy form), and the inputs and outputs each RFC adds are listed with it.
+  New codes: V110, V111, R407, R408, F506 and W617–W626.
+- Standard 1.2.0, tool-calling hosts
+  ([RFC-0005](spec/RFC-0005-tool-calling-hosts.md); findings ACS-01,
+  ACS-02, ACS-03, ACS-07, ACS-08, ACS-36, ACS-38, ACS-39, ACS-41, ACS-55,
+  ACS-57): how the Standard applies to a host where a model chooses tool
+  calls. §5.18 Tool-Calling Hosts: the tool binding record
+  (`schemas/interop/tool_binding.schema.json`), unbound tools, classification
+  by effect, composite and control-only tools, the scope, order and
+  concurrency of calls, one checkpoint and one decision per call, refusals as
+  §9.8 diagnostics, records that name the layer, and capability outputs on a
+  text-only channel; §5.2.2 states the executor's checkpoint use for steps.
+  §10.4 adds the safety-layer conformance class SL.
+- Safety-layer conformance fixtures: 33 binding fixtures in
+  `tests/conformance/bindings/` and 30 call-sequence fixtures in
+  `tests/conformance/calls/`, with their schemas and the statements of the
+  two reference layers, generated by `scripts/gen_call_fixtures.py`
+  (`--check` in CI). The Python SDK adapter and the Standard Agents binding
+  run them.
+- Conformance statement schema
+  (`tests/conformance/calls/schema/statement.schema.json`, §10.4):
+  `approval.expires` is a duration or null; `not_applied` lists the
+  §5.18.10 checks a layer does not apply, and a layer that lists any does
+  not conform to class SL until it applies them; `calls_without_output`
+  names the covered calls whose results carry no capability output, to
+  which no output check applies. Both reference layers list nothing in
+  `not_applied` and claim class SL: the Python SDK adapter checks the
+  output contract of the results it receives as capability outputs, those
+  of every MCP tool bound to a capability, in the form the session reads
+  them (R402), and its statement names the calls whose results come in
+  other forms (Claude Code's own tools) in `calls_without_output`; the
+  Standard Agents binding checks every grounded tool's output.
+- Python SDK: `load_bindings`, `check_offered` and `ToolBinding` (binding
+  records, W617, V111, V102, F506); `encode_capability_output`,
+  `decode_capability_output` and `CapabilityOutputError` (§5.18.9);
+  `grounded_agency.errors.text_form`.
+- Python SDK tool binding records (`grounded_agency.capabilities.bindings`,
+  Standard 1.2.0 §5.18.1): a record with a member that has no I-JSON form
+  (an `x-` member holding an integer beyond 2^53, a lone surrogate or an
+  object that is not JSON) is S303 and not loaded, and its tool stays
+  unbound. A float that canonical JSON writes as an integer beyond ±2^53
+  (1.8e16) has no I-JSON form either: in a record it is S303, and in the
+  arguments of a call that requires approval F502, as in the TypeScript
+  package (`i_json_problem`). `approval.min_approvers` written as `1.0`
+  loads; `approval.role: null` is S303, and `approval.expires` longer than
+  2^53 - 1 ms is S303. A diagnostic's `location.field` is the member's path
+  with keys joined by a dot (`approval.min_approvers`, `flags.risk`); W602
+  names `flags.<flag>`. `adapter.recorded_by["config_sha256"]` digests the
+  rate limits (`config.rate_limit`), which decide F504 refusals, with the
+  bindings and settings.
+- Python SDK: `GroundedAgentAdapter.check_call_result` checks the result of
+  a call of an MCP tool bound to a capability (the output contract, R402;
+  then grounding, F505, and a minimum confidence, F504): a tool
+  `create_grounded_mcp_server` serves calls it with its result, and the
+  PostToolUse hook with another server's; `GroundedAgentConfig.check_outputs`;
+  `tool_result_output` in `grounded_agency.capabilities`, the output an MCP
+  result carries (§5.18.10); `create_checkpoint_recorder(refuses_output=...)`.
+- Approval digest vectors of kind `tool_call` for a call's shown values.
+- Capability output vectors (informative), `tests/conformance/output/vectors.json`,
+  which the Python and TypeScript codecs of §5.18.9 both pass. TypeScript
+  package: `iJsonProblem`. Python SDK: `CheckpointTracker.valid_checkpoint_id()`,
+  `has_commit()` and `max_age_minutes`.
+- TypeScript package: `checkBindings`, `annotationRecord`,
+  `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
+  `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
+  `additional_capabilities` and `invokes` with one-shot nesting tokens.
+- TypeScript package (`packages/acs-core`): `decodeCapabilityOutput` accepts
+  a number written in exponent form (1.8e16, 1e300) and checks integer
+  literals in the text itself; `encodeCapabilityOutput` accepts a value it
+  writes in exponent form (1e21 and above) and refuses one it would write as
+  an integer literal beyond ±2^53 (1.8e16). A tool binding record's
+  `location.field` follows the Python loader's dotted paths. `iJsonProblem`
+  refuses a `bigint`, and `parseJsonExact` reads JSON text with an integer
+  literal beyond ±2^53 as a `bigint` instead of rounding it (JSON.parse
+  reads 9007199254740993 as 2^53): read text that is then checked as I-JSON
+  with it.
+- Standard 1.2.0, approval, deferral and run identity
+  ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part A;
+  findings ACS-10, ACS-11, ACS-12, ACS-13, ACS-35, ACS-44):
+  - §5.14 states the request for a step with no or a partial `approval`
+    field, what the approval digest is computed over (the shown array,
+    RFC 8785, lowercase hexadecimal, compared regardless of case), the
+    integer bound as the executor applies it, that whatever reads values
+    from JSON text refuses a member name twice in one object (the core's
+    `exec::read_json` does), and the meaning of `in_session` and
+    `out_of_band`. `tests/conformance/approval/digests.json`
+    is normative under §10.3, with a vector for a `shows` reference that
+    resolves to nothing.
+  - Resuming a deferred run (§5.14.1): `_core.Run.resume`,
+    `WorkflowRunner.resume` and `RunResult.resumable`. The deferred steps
+    run again as the same run, with the steps that ran ahead of them that
+    they read and a checkpoint step a queued mutation binds; a nested run
+    that ended deferred continues; a queued step is asked afresh (of a
+    person when attended), every request of the step names
+    `queued_action_id` (a re-ask after a recheck and a retry included) until
+    its action is carried out, and its `planned` record is updated in place
+    with each decision and refusal; a queued record the resumption decides
+    or supersedes takes the time and actor of then. A recovery loop during
+    a resumption runs again only the steps from its target to the step that
+    looped, a deferred handler among them keeping its nested run, and the
+    resumption then goes on, so nothing that ran ahead runs twice. Trace
+    kinds `run_resumed` and `invoke_resumed`.
+  - With `identity@1`, an approval decision may attest its approvers
+    (`approver_identities`); approvers are then counted by principal and
+    checked against the requested kind and role, and the record lists the
+    approvers that counted (`ActionRecord.approval.approver_identities`). In
+    a workflow that targets 1.2, the approver may require `sender_check`
+    and `accept_trust_classes` (V106 without `identity@1`, S303 when
+    malformed); in an earlier target they stay unknown fields (W604) and
+    get W616.
+  - A run keeps its actor (§5.17): `Run.restore` and
+    `WorkflowRunner.restore` take `actor_identity` and refuse another
+    principal; a resumption may name a new actor, which the trace and later
+    records show.
+  - 41 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
+    `resume` entry and the `{{digest_upper}}` placeholder) and four
+    validator fixtures (`*approver_identity*`). Each `step` digest vector
+    gives what its step shows from (`bindings`, `recheck_read`), so an
+    executor can be checked against the file alone.
 - Standard 1.2.0, host protocol, runs and audit records
   ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part B;
   findings ACS-14, ACS-15, ACS-20, ACS-30, ACS-31, ACS-32, ACS-33, ACS-34,
@@ -578,190 +760,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `changed`, `wake_at` and `cancel` entries and whose fixture may state
     `records` and `run_record`; four validator fixtures (W618, W619,
     `require_record`).
-- Standard 1.2.0, approval, deferral and run identity
-  ([RFC-0006](spec/RFC-0006-host-protocol-approval-and-runs.md), Part A;
-  findings ACS-10, ACS-11, ACS-12, ACS-13, ACS-35, ACS-44):
-  - §5.14 states the request for a step with no or a partial `approval`
-    field, what the approval digest is computed over (the shown array,
-    RFC 8785, lowercase hexadecimal, compared regardless of case), the
-    integer bound as the executor applies it, that whatever reads values
-    from JSON text refuses a member name twice in one object (the core's
-    `exec::read_json` does), and the meaning of `in_session` and
-    `out_of_band`. `tests/conformance/approval/digests.json`
-    is normative under §10.3, with a vector for a `shows` reference that
-    resolves to nothing.
-  - Resuming a deferred run (§5.14.1): `_core.Run.resume`,
-    `WorkflowRunner.resume` and `RunResult.resumable`. The deferred steps
-    run again as the same run, with the steps that ran ahead of them that
-    they read and a checkpoint step a queued mutation binds; a nested run
-    that ended deferred continues; a queued step is asked afresh (of a
-    person when attended), every request of the step names
-    `queued_action_id` (a re-ask after a recheck and a retry included) until
-    its action is carried out, and its `planned` record is updated in place
-    with each decision and refusal; a queued record the resumption decides
-    or supersedes takes the time and actor of then. A recovery loop during
-    a resumption runs again only the steps from its target to the step that
-    looped, a deferred handler among them keeping its nested run, and the
-    resumption then goes on, so nothing that ran ahead runs twice. Trace
-    kinds `run_resumed` and `invoke_resumed`.
-  - With `identity@1`, an approval decision may attest its approvers
-    (`approver_identities`); approvers are then counted by principal and
-    checked against the requested kind and role, and the record lists the
-    approvers that counted (`ActionRecord.approval.approver_identities`). In
-    a workflow that targets 1.2, the approver may require `sender_check`
-    and `accept_trust_classes` (V106 without `identity@1`, S303 when
-    malformed); in an earlier target they stay unknown fields (W604) and
-    get W616.
-  - A run keeps its actor (§5.17): `Run.restore` and
-    `WorkflowRunner.restore` take `actor_identity` and refuse another
-    principal; a resumption may name a new actor, which the trace and later
-    records show.
-  - 41 runtime fixtures (`approval_*`, `approver_*`, `resume_*`; a script's
-    `resume` entry and the `{{digest_upper}}` placeholder) and four
-    validator fixtures (`*approver_identity*`). Each `step` digest vector
-    gives what its step shows from (`bindings`, `recheck_read`), so an
-    executor can be checked against the file alone.
-- [Standard Agents interoperability](docs/integrations/standard_agents.md):
-  a mapping of this standard against the Standard Agent Specification 0.2.0,
-  how to build a grounded agent on it, and the changes proposed to each
-  standard.
-- `docs/research/analysis/standard_agents_mapping/`: the row-level mapping
-  behind that document (319 rows in ten concerns, each with references and
-  verbatim quotes from both sides), the findings it produced about each
-  standard (83 and 64) and the questions the texts leave open. `tests/test_standard_agents_mapping.py` keeps the index, the
-  files and their references to this repository in agreement.
-- `examples/standard_agents/`: a reference binding in TypeScript and a worked
-  example. `groundedTool` classifies a Standard Agents tool by an ontology
-  capability and enforces the capability's checkpoint, approval and output
-  rules inside the tool; approvals are recorded through an authenticated
-  thread endpoint and bound to the §5.14 digest, which is tested against the
-  reference executor's. A rejection cannot be lost to an approval made at the
-  same moment and stops a call that is starting on that approval, a decision
-  applies only to the round of the request it was made on (`POST
-  acs/approvals` takes `{ digest, round, decision }`), a call is recorded
-  before its tool runs, a checkpoint or an approval authorises a call only
-  inside an execution and a checkpoint for ten minutes at most, and canonical
-  JSON refuses unpaired surrogates. `lintPromptTools` and `lintAgentBindings` check a prompt's
-  tools and an agent's stop and session bindings before anything runs. CI
-  type-checks it against the published `@standardagents/spec` types and runs
-  its tests.
-- `schemas/interop/standard_agents_annotation.schema.json`: the schema of
-  the `acs` annotation the binding puts on a tool.
-- `scripts/gen_standard_agents_binding.py` generates the TypeScript
-  package's ontology table (`packages/acs-core/src/ontology.gen.ts`), the
-  annotation schema and the approval digest vectors
-  (`tests/conformance/approval/digests.json`) from the ontology and the
-  reference executor; `--check` fails on drift (CI).
-- `tasks/standard-agents-upstream/`: nine issue texts for the Standard Agent
-  Specification, and `file-issues.sh`, which files them in order with the
-  GitHub CLI.
-- [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) (Accepted, Standard
-  1.2.0): how the Standard applies to a host where a model chooses tool
-  calls, with a tool binding record, checkpoint and approval rules for a
-  sequence of calls, a conformance class and call-sequence fixtures.
-- `schemas/interop/standard_agents_mapping.yaml`: the Standard Agents
-  binding's conventions as data (capability rulings, anchor forms, identity
-  map), checked against the ontology and the mapping rows.
-- `schemas/generated/capability_contracts.schema.json`: the 72 capability
-  contracts as strict JSON Schema 2020-12, generated by
-  `scripts/gen_capability_json_schemas.py` (`--check` in CI).
-- Conformance vectors (informative): approval digests in
-  `tests/conformance/approval/`, trust scores in `tests/conformance/trust/`,
-  and `grounded_agency.trust`, a reference of the section 8 arithmetic.
-- `spec/ROADMAP.md` lists the four version lines and where each is declared;
-  `tests/test_version_lines.py` keeps them in agreement.
-- `docs/guides/RUNNING_WORKFLOWS.md` lists the executor's trace event fields
-  and kinds, tested against the core.
-- Standard 1.2.0 §5.18, Tool-Calling Hosts: the tool binding record
-  (`schemas/interop/tool_binding.schema.json`), unbound tools, classification
-  by effect, composite and control-only tools, the scope, order and
-  concurrency of calls, one checkpoint and one decision per call, refusals as
-  §9.8 diagnostics, records that name the layer, and capability outputs on a
-  text-only channel; §5.2.2 states the executor's checkpoint use for steps.
-  §10.4 adds the safety-layer conformance class SL.
-- Safety-layer conformance fixtures: 33 binding fixtures in
-  `tests/conformance/bindings/` and 30 call-sequence fixtures in
-  `tests/conformance/calls/`, with their schemas and the statements of the
-  two reference layers, generated by `scripts/gen_call_fixtures.py`
-  (`--check` in CI). The Python SDK adapter and the Standard Agents binding
-  run them.
-- Python SDK: `load_bindings`, `check_offered` and `ToolBinding` (binding
-  records, W617, V111, V102, F506); `encode_capability_output`,
-  `decode_capability_output` and `CapabilityOutputError` (§5.18.9);
-  `grounded_agency.errors.text_form`.
-- Python SDK: `GroundedAgentAdapter.check_call_result` checks the result of
-  a call of an MCP tool bound to a capability (the output contract, R402;
-  then grounding, F505, and a minimum confidence, F504): a tool
-  `create_grounded_mcp_server` serves calls it with its result, and the
-  PostToolUse hook with another server's; `GroundedAgentConfig.check_outputs`;
-  `tool_result_output` in `grounded_agency.capabilities`, the output an MCP
-  result carries (§5.18.10); `create_checkpoint_recorder(refuses_output=...)`.
-- TypeScript package `@synaptiai/acs-core` 0.1.0, in `packages/acs-core/`
-  ([its README](packages/acs-core/README.md)): the host-neutral core the
-  Standard Agents binding is built on, with the ontology table, effective
-  flags, canonical JSON and the approval digest, I-JSON checks
-  (`iJsonProblem`, `parseJsonExact`), redaction, evidence and grounding,
-  destination policies, durations, tool binding records, capability
-  outputs, agent manifests, model families, step domains and diagnostic
-  paths; the reference core through WebAssembly is its `./wasm` entry. Its
-  tests read the conformance vectors in place; CI type-checks, builds and
-  tests it.
-- TypeScript package: `checkBindings`, `annotationRecord`,
-  `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
-  `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
-  `additional_capabilities` and `invokes` with one-shot nesting tokens.
-- Standard 1.2.0, evidence, grounding and secrets
-  ([RFC-0008](spec/RFC-0008-evidence-grounding-and-secrets.md); findings
-  ACS-06, ACS-21, ACS-22, ACS-23, ACS-40, ACS-51, ACS-53, ACS-58):
-  - §3.1 defines grounded and inferred outputs; §4.1.1 defines
-    `confidence`, `inference_method` and `uncertainty`; §6.5 one evidence
-    anchor (`ref`, `kind`, `timestamp`, `excerpt`, `digest`; kinds with
-    `record` and `x-...`; the `acs:` ref scheme; bare strings and other
-    objects deprecated), the evidence available to a producer, and how an
-    output reporting an action is grounded (a `record` anchor); §6.6 evidence
-    records, stores and the `acs.evidence_recorded` notification; §6.7
-    secrets in records; §6.3 retention follows the store, and `audit`
-    reports its `store`.
-  - §5.20 Grounding: the extension `grounding@1` and host policies (a list,
-    covering nested runs) make the reference executor check host outputs:
-    `acs:` citations covered by a bound reference, the `Output` response's
-    `evidence_seen`, `attested`; F505 is raised and can fire a failure
-    mode; with `grounding@1` an `invoke` step carries its nested run's
-    anchors. In a 1.2 target `grounding` without the extension is V106.
-    Python: `_core.check_grounding`, `Run.trace(since=...)`,
-    `Run.trace_seq`, `grounded_agency.grounding` (`GroundingPolicy`,
-    `check_grounding_output`), `WorkflowRunner.run(grounding=...)`,
-    `GroundedAgentConfig.grounding` (applied to the outputs of the MCP
-    tools bound to a capability; a refused output's call record is
-    `failed` with F505 and the call id, and a policy that requires the
-    capability of a call whose output the adapter cannot see, Claude
-    Code's own tools, is warned about once per tool). TypeScript
-    package: `evidence.ts` (`checkGrounding`, `groundingPolicies`, `covers`,
-    `refsIn`) and `holdsCredential`; the binding's `grounding`, `seen` and
-    `secrets` options. A host policy with a member other than `require`,
-    `kinds`, `attested` and `x-...` is refused in all three languages; an
-    `acs:` reference holds no index above 2^53 - 1.
-  - Vectors: `tests/conformance/grounding/check.json` (normative, run in
-    Rust, Python and TypeScript); `tests/conformance/secrets/credentials.json`
-    (informative: the credential shapes the refusals of `persist` and
-    `audit` data recognise, run in Python, TypeScript and the plugin's shell
-    scan); 23 `grounding_*` runtime fixtures and
-    `error_reason_secret_in_data`; seven workflow fixtures.
-  - Evidence stores: `EvidenceStoreProtocol`, `EvidenceRecord`, `StoreInfo`,
-    a durable `JsonlEvidenceStore` (repairs a torn last line),
-    `subscribe()`, `record_capture_failure()`; the runner's
-    `evidence_store` records the evidence of outputs the core kept, and its
-    `redactor` registers the host's secrets; `GroundedAgentConfig` gains
-    `evidence_store` and `secret_values`; `EvidenceAnchor.from_checkpoint`,
-    and `create_checkpoint` records it. Binding: `exportEvidence`,
-    `getEvidence`, `findEvidence`, `exportEvidenceJsonl`,
-    `EVIDENCE_STORE_INFO`, `checkpointAnchor`.
-  - `schemas/interop/evidence.schema.json` is listed in §6.1; the catalog
-    schema accepts `grounding@1`.
-  - Plugin: `hooks/secret_scan.sh`, the one scan the `persist` and `audit`
-    skills' hooks copy; every skill's `evidence_anchors` examples are §6.5
-    anchors, and the capability skills gloss `confidence` as §4.1.1 defines
-    it.
 - Standard 1.2.0, delegation, catalogs and validator diagnostics
   ([RFC-0007](spec/RFC-0007-delegation-catalogs-and-diagnostics.md);
   findings ACS-04, ACS-09, ACS-16, ACS-17, ACS-24, ACS-29, ACS-46, ACS-47,
@@ -824,86 +822,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `delegate_identity_model_id_v11_unchecked` pin 1.1); normative vectors
     `tests/conformance/domains/match.json`, `agents/maxima.json`,
     `families/derive.json` and `inquiry/answers.json`.
-- Approval digest vectors of kind `tool_call` for a call's shown values.
-- Capability output vectors (informative), `tests/conformance/output/vectors.json`,
-  which the Python and TypeScript codecs of §5.18.9 both pass. TypeScript
-  package: `iJsonProblem`. Python SDK: `CheckpointTracker.valid_checkpoint_id()`,
-  `has_commit()` and `max_age_minutes`.
-
-- Domain profiles (Standard 1.2.0 §5.21, RFC-0010): the core loads and
-  checks them (`profile::Policy`), the validator and the executor apply
-  them (raised flags, a person for `require_human` and `block_autonomous`
-  with `person_required` on records and in the trace, F504
-  `below_minimum_confidence` and `invalid_confidence`, W606 for a
-  mandate-only step), and they are saved with a run. Python:
-  `AppliedProfiles`, `ProfileError`, `load_profile`,
-  `GroundedAgentConfig(profiles=...)`, `WorkflowRunner(profiles=...)`,
-  `_core.Validator.check_profiles`, `profile_flags`, `profile_policy`;
-  `tools/validate_workflows.py --profile`. Normative profile vectors
-  (`tests/conformance/profiles/`), 17 runtime fixtures and validator
-  fixtures with profiles (`EXPECTATIONS.json` gains `profiles`). A runtime
-  fixture's script entry may list `absent` members, which the pending
-  action must not hold. The adapter's records digest (`config_sha256`)
-  covers the applied profiles; `GroundedAgentConfig(schema_root=...)`. When
-  a profile requires a person for a call, the adapter's ask reason says
-  `requires approval by a person`, and an unbound tool's record carries
-  `person_required` when a profile requires one for `mutate`
-  (`ToolCapabilityMapper.person_required`).
-- Trust (§8): `grounded_agency.trust.resolve` with the six strategies of
-  §8.2 and tie-breaking (a single candidate is chosen whatever the
-  strategy), `Candidate`, `Resolution`, `merge_trust_weights`;
-  the trust vectors are normative, with `resolve.json`. The
-  conflicting-sources benchmark resolves with `resolve` (same results).
-- Entity ids (§7.1): `grounded_agency.entities.parse_entity_id`,
-  `tests/conformance/entities/ids.json`; `entity_taxonomy.yaml`'s pattern
-  is checked against its examples, and names every white space and control
-  character a segment cannot hold (U+00A0, U+2028 and U+0085 among them),
-  so it means the same in every regular expression dialect.
-- Cited versions (§11.6): `grounded_agency.versions.check_cited` and
-  `CitedVersionError`; the OASF adapter refuses a mapping that cites
-  another ontology major or an unsupported Standard.
-- WebAssembly (ACS-42): the core's `wasm` feature (`core/src/wasm.rs`, a
-  JSON interface over three C-ABI exports) and the TypeScript package's
-  `./wasm` entry (`AcsCore`, `CoreContext`, `CoreRun`, `loadDocuments`),
-  which runs the validator and executor, profiles included, in process,
-  with the host protocol's run operations (`run.resume`, `run.cancel`,
-  `run.wake_at`, `run.take_trace`, `run.take_records`, `run.run_record`,
-  `run.trace` since a `seq`; `CoreRun.resume`, `cancel`, `wakeAt`, ...);
-  `Context::from_values` with an in-memory schema store.
-  `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
-  a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
-  `NPM_TOKEN` are both set (a dry run otherwise).
-- Domain profiles in every reference layer (§5.21.3): a profile's grounding
-  policy is checked by the executor's grounding check (§5.20) and by
-  `GroundedAgentAdapter.check_call_output`, which also applies the
-  profiles' minimum confidence (`_core.check_confidence`) to the output of
-  every MCP tool bound to a capability, served or not, with or without
-  `config.grounding`; an exported call record carries `reason_code` and
-  `person_required` (a failed call's record too). A composite tool takes
-  the flags a profile raises for each binding it `invokes`, and its person
-  requirement, transitively (§5.18.4), in the adapter
-  (`ToolCapabilityMapper.map_tool`) as in the binding, so no profile rule
-  is bypassed through a composite. The Standard Agents binding applies
-  profiles through `groundedTool({profiles})` and `bindingProfiles` (raised
-  flags at the call's effective risk with its `invokes`, and for what the
-  tools it invokes perform; a person's approval, also for a composite whose
-  approval covers a call needing one; grounding; minimum confidence;
-  loading warnings such as W604 reported to `onWarning`), and a TypeScript
-  host's `CoreContext.start` reports those warnings likewise (the
-  WebAssembly interface's `run.start` answers them as `warnings`).
-  Runtime fixtures `profile_grounding_*` and the header fixtures
-  `header_1_2_sender_check_needs_identities` and
-  `header_null_sender_check_not_read`; validator fixtures
-  `warn_version_feature_1_2`, `warn_version_feature_1_2_grounding`
-  (`grounding@1` and F505 in `on_error`) and
-  `warn_version_feature_1_2_trust_classes` (`accept_trust_classes`), with
-  the other streams' `pass_approver_identity_1_1_warn` and `*_v11_warn`
-  fixtures one for every 1.2 feature of §11.5's table.
-- `skills/README.md` lists each frontmatter key's owner (Agent Skills,
-  Claude Code, ACS), checked by `tests/test_skill_frontmatter.py`.
-- Standard 1.2.0 text of §4.1.2 (schema dialect), §5.21, §7.1, §8.1–§8.3,
-  §11.5–§11.7 and Appendix D.7; RFC-0010.
-
+- Standard 1.2.0, evidence, grounding and secrets
+  ([RFC-0008](spec/RFC-0008-evidence-grounding-and-secrets.md); findings
+  ACS-06, ACS-21, ACS-22, ACS-23, ACS-40, ACS-51, ACS-53, ACS-58):
+  - §3.1 defines grounded and inferred outputs; §4.1.1 defines
+    `confidence`, `inference_method` and `uncertainty`; §6.5 one evidence
+    anchor (`ref`, `kind`, `timestamp`, `excerpt`, `digest`; kinds with
+    `record` and `x-...`; the `acs:` ref scheme; bare strings and other
+    objects deprecated), the evidence available to a producer, and how an
+    output reporting an action is grounded (a `record` anchor); §6.6 evidence
+    records, stores and the `acs.evidence_recorded` notification; §6.7
+    secrets in records; §6.3 retention follows the store, and `audit`
+    reports its `store`.
+  - §5.20 Grounding: the extension `grounding@1` and host policies (a list,
+    covering nested runs) make the reference executor check host outputs:
+    `acs:` citations covered by a bound reference, the `Output` response's
+    `evidence_seen`, `attested`; F505 is raised and can fire a failure
+    mode; with `grounding@1` an `invoke` step carries its nested run's
+    anchors. In a 1.2 target `grounding` without the extension is V106.
+    Python: `_core.check_grounding`, `Run.trace(since=...)`,
+    `Run.trace_seq`, `grounded_agency.grounding` (`GroundingPolicy`,
+    `check_grounding_output`), `WorkflowRunner.run(grounding=...)`,
+    `GroundedAgentConfig.grounding` (applied to the outputs of the MCP
+    tools bound to a capability; a refused output's call record is
+    `failed` with F505 and the call id, and a policy that requires the
+    capability of a call whose output the adapter cannot see, Claude
+    Code's own tools, is warned about once per tool). TypeScript
+    package: `evidence.ts` (`checkGrounding`, `groundingPolicies`, `covers`,
+    `refsIn`) and `holdsCredential`; the binding's `grounding`, `seen` and
+    `secrets` options. A host policy with a member other than `require`,
+    `kinds`, `attested` and `x-...` is refused in all three languages; an
+    `acs:` reference holds no index above 2^53 - 1.
+  - Vectors: `tests/conformance/grounding/check.json` (normative, run in
+    Rust, Python and TypeScript); `tests/conformance/secrets/credentials.json`
+    (informative: the credential shapes the refusals of `persist` and
+    `audit` data recognise, run in Python, TypeScript and the plugin's shell
+    scan); 23 `grounding_*` runtime fixtures and
+    `error_reason_secret_in_data`; seven workflow fixtures.
+  - Evidence stores: `EvidenceStoreProtocol`, `EvidenceRecord`, `StoreInfo`,
+    a durable `JsonlEvidenceStore` (repairs a torn last line),
+    `subscribe()`, `record_capture_failure()`; the runner's
+    `evidence_store` records the evidence of outputs the core kept, and its
+    `redactor` registers the host's secrets; `GroundedAgentConfig` gains
+    `evidence_store` and `secret_values`; `EvidenceAnchor.from_checkpoint`,
+    and `create_checkpoint` records it. Binding: `exportEvidence`,
+    `getEvidence`, `findEvidence`, `exportEvidenceJsonl`,
+    `EVIDENCE_STORE_INFO`, `checkpointAnchor`.
+  - `schemas/interop/evidence.schema.json` is listed in §6.1; the catalog
+    schema accepts `grounding@1`.
+  - Plugin: `hooks/secret_scan.sh`, the one scan the `persist` and `audit`
+    skills' hooks copy; every skill's `evidence_anchors` examples are §6.5
+    anchors, and the capability skills gloss `confidence` as §4.1.1 defines
+    it.
 - Standard 1.2.0, checkpoints, rollbacks, sends and memory
   ([RFC-0009](spec/RFC-0009-checkpoint-rollback-send-memory.md); findings
   ACS-18, ACS-19, ACS-26, ACS-27, ACS-48, ACS-52): §4.4.1 (what a
@@ -930,43 +900,142 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - TypeScript package: `destinations.ts` (`checkPattern`, `allowed`, ...)
   and `duration.ts` (`parseDurationMs`). Standard Agents binding:
   `configureLayer`, a `send` tool's `destination` option, `memoryTools`.
-- Python SDK tool binding records (`grounded_agency.capabilities.bindings`,
-  Standard 1.2.0 §5.18.1): a record with a member that has no I-JSON form
-  (an `x-` member holding an integer beyond 2^53, a lone surrogate or an
-  object that is not JSON) is S303 and not loaded, and its tool stays
-  unbound. A float that canonical JSON writes as an integer beyond ±2^53
-  (1.8e16) has no I-JSON form either: in a record it is S303, and in the
-  arguments of a call that requires approval F502, as in the TypeScript
-  package (`i_json_problem`). `approval.min_approvers` written as `1.0`
-  loads; `approval.role: null` is S303, and `approval.expires` longer than
-  2^53 - 1 ms is S303. A diagnostic's `location.field` is the member's path
-  with keys joined by a dot (`approval.min_approvers`, `flags.risk`); W602
-  names `flags.<flag>`. `adapter.recorded_by["config_sha256"]` digests the
-  rate limits (`config.rate_limit`), which decide F504 refusals, with the
-  bindings and settings.
-- TypeScript package (`packages/acs-core`): `decodeCapabilityOutput` accepts
-  a number written in exponent form (1.8e16, 1e300) and checks integer
-  literals in the text itself; `encodeCapabilityOutput` accepts a value it
-  writes in exponent form (1e21 and above) and refuses one it would write as
-  an integer literal beyond ±2^53 (1.8e16). A tool binding record's
-  `location.field` follows the Python loader's dotted paths. `iJsonProblem`
-  refuses a `bigint`, and `parseJsonExact` reads JSON text with an integer
-  literal beyond ±2^53 as a `bigint` instead of rounding it (JSON.parse
-  reads 9007199254740993 as 2^53): read text that is then checked as I-JSON
-  with it.
-- Conformance statement schema
-  (`tests/conformance/calls/schema/statement.schema.json`, §10.4):
-  `approval.expires` is a duration or null; `not_applied` lists the
-  §5.18.10 checks a layer does not apply, and a layer that lists any does
-  not conform to class SL until it applies them; `calls_without_output`
-  names the covered calls whose results carry no capability output, to
-  which no output check applies. Both reference layers list nothing in
-  `not_applied` and claim class SL: the Python SDK adapter checks the
-  output contract of the results it receives as capability outputs, those
-  of every MCP tool bound to a capability, in the form the session reads
-  them (R402), and its statement names the calls whose results come in
-  other forms (Claude Code's own tools) in `calls_without_output`; the
-  Standard Agents binding checks every grounded tool's output.
+- Standard 1.2.0, profiles, trust, versioning and schema dialect
+  ([RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md);
+  findings ACS-05, ACS-25, ACS-28, ACS-42, ACS-56, ACS-59, ACS-64): the
+  text of §4.1.2 (schema dialect), §5.21 (domain profiles), §7.1 (entity
+  ids), §8.1–§8.3 (trust), §11.5–§11.7 (versions and artifacts) and
+  Appendix D.7. The entries on domain profiles, trust, entity ids, cited
+  versions and WebAssembly below implement it.
+- Domain profiles (Standard 1.2.0 §5.21, RFC-0010): the core loads and
+  checks them (`profile::Policy`), the validator and the executor apply
+  them (raised flags, a person for `require_human` and `block_autonomous`
+  with `person_required` on records and in the trace, F504
+  `below_minimum_confidence` and `invalid_confidence`, W606 for a
+  mandate-only step), and they are saved with a run. Python:
+  `AppliedProfiles`, `ProfileError`, `load_profile`,
+  `GroundedAgentConfig(profiles=...)`, `WorkflowRunner(profiles=...)`,
+  `_core.Validator.check_profiles`, `profile_flags`, `profile_policy`;
+  `tools/validate_workflows.py --profile`. Normative profile vectors
+  (`tests/conformance/profiles/`), 17 runtime fixtures and validator
+  fixtures with profiles (`EXPECTATIONS.json` gains `profiles`). A runtime
+  fixture's script entry may list `absent` members, which the pending
+  action must not hold. The adapter's records digest (`config_sha256`)
+  covers the applied profiles; `GroundedAgentConfig(schema_root=...)`. When
+  a profile requires a person for a call, the adapter's ask reason says
+  `requires approval by a person`, and an unbound tool's record carries
+  `person_required` when a profile requires one for `mutate`
+  (`ToolCapabilityMapper.person_required`).
+- Domain profiles in every reference layer (§5.21.3): a profile's grounding
+  policy is checked by the executor's grounding check (§5.20) and by
+  `GroundedAgentAdapter.check_call_output`, which also applies the
+  profiles' minimum confidence (`_core.check_confidence`) to the output of
+  every MCP tool bound to a capability, served or not, with or without
+  `config.grounding`; an exported call record carries `reason_code` and
+  `person_required` (a failed call's record too). A composite tool takes
+  the flags a profile raises for each binding it `invokes`, and its person
+  requirement, transitively (§5.18.4), in the adapter
+  (`ToolCapabilityMapper.map_tool`) as in the binding, so no profile rule
+  is bypassed through a composite. The Standard Agents binding applies
+  profiles through `groundedTool({profiles})` and `bindingProfiles` (raised
+  flags at the call's effective risk with its `invokes`, and for what the
+  tools it invokes perform; a person's approval, also for a composite whose
+  approval covers a call needing one; grounding; minimum confidence;
+  loading warnings such as W604 reported to `onWarning`), and a TypeScript
+  host's `CoreContext.start` reports those warnings likewise (the
+  WebAssembly interface's `run.start` answers them as `warnings`).
+  Runtime fixtures `profile_grounding_*` and the header fixtures
+  `header_1_2_sender_check_needs_identities` and
+  `header_null_sender_check_not_read`; validator fixtures
+  `warn_version_feature_1_2`, `warn_version_feature_1_2_grounding`
+  (`grounding@1` and F505 in `on_error`) and
+  `warn_version_feature_1_2_trust_classes` (`accept_trust_classes`), with
+  the other streams' `pass_approver_identity_1_1_warn` and `*_v11_warn`
+  fixtures one for every 1.2 feature of §11.5's table.
+- Trust (§8): `grounded_agency.trust.resolve` with the six strategies of
+  §8.2 and tie-breaking (a single candidate is chosen whatever the
+  strategy), `Candidate`, `Resolution`, `merge_trust_weights`;
+  the trust vectors are normative, with `resolve.json`. The
+  conflicting-sources benchmark resolves with `resolve` (same results).
+- Entity ids (§7.1): `grounded_agency.entities.parse_entity_id`,
+  `tests/conformance/entities/ids.json`; `entity_taxonomy.yaml`'s pattern
+  is checked against its examples, and names every white space and control
+  character a segment cannot hold (U+00A0, U+2028 and U+0085 among them),
+  so it means the same in every regular expression dialect.
+- Cited versions (§11.6): `grounded_agency.versions.check_cited` and
+  `CitedVersionError`; the OASF adapter refuses a mapping that cites
+  another ontology major or an unsupported Standard.
+- WebAssembly (ACS-42): the core's `wasm` feature (`core/src/wasm.rs`, a
+  JSON interface over three C-ABI exports) and the TypeScript package's
+  `./wasm` entry (`AcsCore`, `CoreContext`, `CoreRun`, `loadDocuments`),
+  which runs the validator and executor, profiles included, in process,
+  with the host protocol's run operations (`run.resume`, `run.cancel`,
+  `run.wake_at`, `run.take_trace`, `run.take_records`, `run.run_record`,
+  `run.trace` since a `seq`; `CoreRun.resume`, `cancel`, `wakeAt`, ...);
+  `Context::from_values` with an in-memory schema store.
+  `.github/workflows/publish-npm.yml` publishes `@synaptiai/acs-core` from
+  a tag `acs-core-vX.Y.Z` on `main` when `NPM_PUBLISH_ENABLED` and
+  `NPM_TOKEN` are both set (a dry run otherwise).
+- TypeScript package `@synaptiai/acs-core` 0.1.0, in `packages/acs-core/`
+  ([its README](packages/acs-core/README.md)): the host-neutral core the
+  Standard Agents binding is built on, with the ontology table, effective
+  flags, canonical JSON and the approval digest, I-JSON checks
+  (`iJsonProblem`, `parseJsonExact`), redaction, evidence and grounding,
+  destination policies, durations, tool binding records, capability
+  outputs, agent manifests, model families, step domains and diagnostic
+  paths; the reference core through WebAssembly is its `./wasm` entry. Its
+  tests read the conformance vectors in place; CI type-checks, builds and
+  tests it.
+- `skills/README.md` lists each frontmatter key's owner (Agent Skills,
+  Claude Code, ACS), checked by `tests/test_skill_frontmatter.py`.
+- [Standard Agents interoperability](docs/integrations/standard_agents.md):
+  a mapping of this standard against the Standard Agent Specification 0.2.0,
+  how to build a grounded agent on it, and the changes proposed to each
+  standard.
+- `docs/research/analysis/standard_agents_mapping/`: the row-level mapping
+  behind that document (319 rows in ten concerns, each with references and
+  verbatim quotes from both sides), the findings it produced about each
+  standard (83 and 64) and the questions the texts leave open. `tests/test_standard_agents_mapping.py` keeps the index, the
+  files and their references to this repository in agreement.
+- `examples/standard_agents/`: a reference binding in TypeScript and a worked
+  example. `groundedTool` classifies a Standard Agents tool by an ontology
+  capability and enforces the capability's checkpoint, approval and output
+  rules inside the tool; approvals are recorded through an authenticated
+  thread endpoint and bound to the §5.14 digest, which is tested against the
+  reference executor's. A rejection cannot be lost to an approval made at the
+  same moment and stops a call that is starting on that approval, a decision
+  applies only to the round of the request it was made on (`POST
+  acs/approvals` takes `{ digest, round, decision }`), a call is recorded
+  before its tool runs, a checkpoint or an approval authorises a call only
+  inside an execution and a checkpoint for ten minutes at most, and canonical
+  JSON refuses unpaired surrogates. `lintPromptTools` and `lintAgentBindings` check a prompt's
+  tools and an agent's stop and session bindings before anything runs. CI
+  type-checks it against the published `@standardagents/spec` types and runs
+  its tests.
+- `schemas/interop/standard_agents_annotation.schema.json`: the schema of
+  the `acs` annotation the binding puts on a tool.
+- `scripts/gen_standard_agents_binding.py` generates the TypeScript
+  package's ontology table (`packages/acs-core/src/ontology.gen.ts`), the
+  annotation schema and the approval digest vectors
+  (`tests/conformance/approval/digests.json`) from the ontology and the
+  reference executor; `--check` fails on drift (CI).
+- `tasks/standard-agents-upstream/`: nine issue texts for the Standard Agent
+  Specification, and `file-issues.sh`, which files them in order with the
+  GitHub CLI.
+- `schemas/interop/standard_agents_mapping.yaml`: the Standard Agents
+  binding's conventions as data (capability rulings, anchor forms, identity
+  map), checked against the ontology and the mapping rows.
+- `schemas/generated/capability_contracts.schema.json`: the 72 capability
+  contracts as strict JSON Schema 2020-12, generated by
+  `scripts/gen_capability_json_schemas.py` (`--check` in CI).
+- Conformance vectors: approval digests in `tests/conformance/approval/`
+  and trust scores in `tests/conformance/trust/`, both normative in
+  Standard 1.2.0 (§10.3), and `grounded_agency.trust`, a reference of the
+  section 8 arithmetic.
+- `spec/ROADMAP.md` lists the five version lines and where each is declared;
+  `tests/test_version_lines.py` keeps them in agreement.
+- `docs/guides/RUNNING_WORKFLOWS.md` lists the executor's trace event fields
+  and kinds, tested against the core.
 
 ### Changed
 - The shipped domain profiles are version 2.0.0, cite Standard 1.2.0 and
@@ -977,16 +1046,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   it checks them; the site's domain figures follow §5.21.3. A profile's
   `checkpoint_policy` `never` for `rollback` is W602, as for `mutate` and
   `send` (a `checkpoint` `requires` edge needs a checkpoint before it).
-- Direct dependencies are at their latest releases. Python: the dev ranges are
-  pytest 8.4.2–9, pytest-asyncio 1.x, mypy 1.19.1–2 and ruff 0.17 (CI runs
-  ruff 0.17.4).
-  Rust: `hmac` 0.13, `sha2` 0.11, `saphyr`/`saphyr-parser` 0.3.3; CI builds
-  with Rust 1.99.1. Two indirect crates stay behind: `encoding_rs` (capped
-  by `saphyr`) and `ordered-float` (5.5 needs Rust 1.90). Go: cel-go 0.33.2
-  for the CEL differential check, which now needs Go 1.26.
-  GitHub Actions: checkout v7, setup-python v7, cache v6, upload-artifact
-  v7, setup-go v7.
-- CI tests Python 3.14 and 3.15.
+- `schemas/interop/standard_agents_annotation.schema.json` describes the
+  annotation as a carrier of the tool binding record: `standard` and
+  `ontology` are required, the copies of the layer and flags optional, and a
+  copy that names another layer or a weaker flag than the capability's is
+  invalid.
+- `schemas/interop/standard_agents_mapping.yaml` cites Standard 1.2.0 and
+  ontology 2.2.0.
+- The `send`, `rollback`, `checkpoint`, `persist` and `transform` skills'
+  prompt hooks no longer judge what code decides (approval, a checkpoint,
+  rate limits, expiry); what they still judge is labelled a model-judged
+  addition (Standard 1.2.0 §5.18.10). `spec/SECURITY.md` §5.4 maps every
+  condition of the skills' hooks, and §5.5 says why the plugin's hooks do
+  not claim class SL.
 - The rate limit (SEC-010) is enforced in the adapter's PreToolUse hook
   instead of the permission callback. The SDK approves a tool in
   `allowed_tools` without calling the callback, so listed tools used to skip
@@ -1012,19 +1084,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   calls reach the permission callback (the SDK warned that it was shadowed).
 - `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s, so `str()` of
   a member is its value.
-- `schemas/interop/standard_agents_annotation.schema.json` describes the
-  annotation as a carrier of the tool binding record: `standard` and
-  `ontology` are required, the copies of the layer and flags optional, and a
-  copy that names another layer or a weaker flag than the capability's is
-  invalid.
-- `schemas/interop/standard_agents_mapping.yaml` cites Standard 1.2.0 and
-  ontology 2.2.0.
-- The `send`, `rollback`, `checkpoint`, `persist` and `transform` skills'
-  prompt hooks no longer judge what code decides (approval, a checkpoint,
-  rate limits, expiry); what they still judge is labelled a model-judged
-  addition (Standard 1.2.0 §5.18.10). `spec/SECURITY.md` §5.4 maps every
-  condition of the skills' hooks, and §5.5 says why the plugin's hooks do
-  not claim class SL.
+- Direct dependencies are at their latest releases. Python: the dev ranges are
+  pytest 8.4.2–9, pytest-asyncio 1.x, mypy 1.19.1–2 and ruff 0.17 (CI runs
+  ruff 0.17.4).
+  Rust: `hmac` 0.13, `sha2` 0.11, `saphyr`/`saphyr-parser` 0.3.3; CI builds
+  with Rust 1.99.1. Two indirect crates stay behind: `encoding_rs` (capped
+  by `saphyr`) and `ordered-float` (5.5 needs Rust 1.90). Go: cel-go 0.33.2
+  for the CEL differential check, which now needs Go 1.26.
+  GitHub Actions: checkout v7, setup-python v7, cache v6, upload-artifact
+  v7, setup-go v7.
+- CI tests Python 3.14 and 3.15.
 
 ### Fixed
 - A reference index beyond the platform's `usize` (`${a[18446744073709551615]}`)
@@ -1041,15 +1110,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   given.
 - Python SDK: `wrap_options` replaced the host's `can_use_tool` callback; it
   now chains to it.
-- Plugin hooks: the persist, rollback and send skills' command hooks exited 1,
-  which Claude Code does not treat as a block; they now exit 2 with the reason
-  on stderr. The audit hook logged only Skill calls, with their arguments; it
-  logs every call with a digest of the input. Refusals open with the
-  diagnostic code (`F501 CHECKPOINT_REQUIRED:`).
-- Documentation no longer says that a domain profile setting is enforced
-  where no shipped component applied a profile; the compliance documents say
-  which component enforces what (Standard 1.2.0 applies profiles, see
-  Changed).
 - A Bash call whose input is not a dictionary, or whose `command` is not
   text, made the tool mapper raise, and the PreToolUse hook then let the
   call through. It is now treated as an unknown, checkpoint-gated mutation.
@@ -1069,6 +1129,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   denied kept the checkpoint reserved, so the next mutation was refused with
   F501 for up to ten minutes. The adapter no longer reserves for a call it
   asks about in that mode; the call takes the checkpoint once it has run.
+- Plugin hooks: the persist, rollback and send skills' command hooks exited 1,
+  which Claude Code does not treat as a block; they now exit 2 with the reason
+  on stderr. The audit hook logged only Skill calls, with their arguments; it
+  logs every call with a digest of the input. Refusals open with the
+  diagnostic code (`F501 CHECKPOINT_REQUIRED:`).
 - Plugin checkpoint hook: a marker that was not a JSON object made `jq` exit
   5, which Claude Code treats as a non-blocking error, so every Write, Edit
   and Bash call ran. Any failure in the hook now blocks the call (exit 2).
@@ -1088,6 +1153,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `tools/verify_audit_log.py` split lines on U+0085, U+2028 and U+2029 as well
   as newlines, so a log with such a character in a logged name failed
   verification. It splits on newlines only.
+- Documentation no longer says that a domain profile setting is enforced
+  where no shipped component applied a profile; the compliance documents say
+  which component enforces what (Standard 1.2.0 applies profiles, see
+  Changed).
 - Standard Agents binding: an approval accepted after the deadline extended
   the request, so with enough approvers it never expired. No approval is now
   accepted more than `expires_ms` after the request, and one stored later

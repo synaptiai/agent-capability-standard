@@ -5172,7 +5172,10 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   trust weights (§5.21); `profiles/profile_schema.yaml` 1.0.0 as a supporting
   schema; `ActionRecord.person_required` (`world_state_schema.yaml` 1.2.0)
 - How the ontology is versioned and how documents cite it (§11.6); the
-  artifacts of a version (§11.7)
+  artifacts of a version (§11.7), among them the metaschema
+  `schemas/capability_ontology.schema.json`, which now checks the contracts'
+  dialect, and the catalog's JSON Schema `schemas/workflow_catalog.schema.json`,
+  which describes the 1.2 fields
 - `entity_taxonomy.yaml` 1.1.0 (`id_convention.pattern`);
   `authority_trust_model.yaml` 1.2.0 (`field_authority.fields`, descriptions)
 - The start operation's `header` member (§5.19.2, §11.5)

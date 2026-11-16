@@ -119,6 +119,54 @@ This standard makes failures **visible and recoverable**:
 | Complex multi-step agent pipelines | Typed contracts between capabilities |
 | Production systems where failures are costly | Safety by construction, not by hope |
 
+### What Standard 1.2.0 Adds
+
+[Standard 1.2.0](spec/STANDARD-v1.2.0.md) is a Candidate Standard, accepted
+by [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) to
+[RFC-0010](spec/RFC-0010-profiles-trust-versioning-and-dialect.md), with
+capability ontology 2.2.0. A workflow valid under 1.1.0 validates and runs
+as before. It adds:
+
+- **Tool-calling hosts** ([§5.18](spec/STANDARD-v1.2.0.md#518-tool-calling-hosts)):
+  the ontology's rules applied to the tool calls a model chooses, a
+  host-neutral tool binding record, and a conformance class for safety
+  layers, SL ([§10.4](spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)),
+  which the [Python SDK adapter](docs/integrations/claude_agent_sdk.md) and
+  the [Standard Agents binding](docs/integrations/standard_agents.md) claim.
+- **The host protocol** ([§5.19](spec/STANDARD-v1.2.0.md#519-host-protocol)):
+  the actions, responses and run operations between an executor and its
+  host as a published schema, with cancellation, run records and a
+  conformance class for executors, EX
+  ([§10.5](spec/STANDARD-v1.2.0.md#105-executor-conformance)).
+- **Approval and delegation**: the approval digest stated in full, attested
+  approvers and resuming a deferred run
+  ([§5.14.1](spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)); agent
+  manifests and delegation targets
+  ([§5.15.2](spec/STANDARD-v1.2.0.md#5152-delegation-targets)); catalog
+  manifests with qualified names
+  ([§5.1.1](spec/STANDARD-v1.2.0.md#511-catalog-manifests-and-qualified-names)).
+- **Evidence and secrets**: one evidence anchor
+  ([§6.5](spec/STANDARD-v1.2.0.md#65-evidence-anchors)), grounding the
+  executor checks ([§5.20](spec/STANDARD-v1.2.0.md#520-grounding)), and
+  secrets kept out of records
+  ([§6.7](spec/STANDARD-v1.2.0.md#67-secrets-in-records)).
+- **Effects**: what a checkpoint captures and a rollback restores
+  ([§4.4.1](spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)),
+  idempotent transmissions with destination policies
+  ([§4.4.2](spec/STANDARD-v1.2.0.md#442-transmissions)), and memory scopes
+  ([§4.5](spec/STANDARD-v1.2.0.md#45-memory)).
+- **Domain profiles that take effect**
+  ([§5.21](spec/STANDARD-v1.2.0.md#521-domain-profiles)): the executor, the
+  safety layers and the validator apply a profile's flags, person
+  requirements, grounding, confidence and destination rules.
+- **[`@synaptiai/acs-core`](packages/acs-core/README.md)**: the ontology,
+  effective flags and approval digest in TypeScript, and the Rust core
+  through WebAssembly.
+
+[Appendix D](spec/STANDARD-v1.2.0.md#appendix-d-changes-from-110) lists
+every change from 1.1.0, and the [CHANGELOG](CHANGELOG.md) says what changes
+for users of the SDK, the plugin and the binding.
+
 ---
 
 ## Quick Start
@@ -311,7 +359,7 @@ The plugin's hooks (see [hooks/README.md](hooks/README.md)):
 
 ```
 agent-capability-standard/
-├── skills/                  # 36 atomic capability skills (flat structure)
+├── skills/                  # 36 capability skills and 6 composed skills (flat structure)
 │   ├── retrieve/SKILL.md    # PERCEIVE layer
 │   ├── search/SKILL.md
 │   ├── observe/SKILL.md
@@ -325,7 +373,7 @@ agent-capability-standard/
 │   ├── checkpoint/SKILL.md
 │   ├── persist/SKILL.md     # REMEMBER layer
 │   ├── delegate/SKILL.md    # COORDINATE layer
-│   └── ...                  # (36 total skills)
+│   └── ...                  # (42 skills: 36 capabilities, 6 composed)
 ├── schemas/                 # Ontology + workflow + world state schemas
 │   ├── capability_ontology.yaml     # 36-capability ontology
 │   ├── workflow_catalog.yaml
@@ -334,6 +382,7 @@ agent-capability-standard/
 │   │   └── oasf_mapping.yaml          # OASF skill code mapping
 │   └── transforms/          # Type coercion mappings
 ├── core/                    # Rust crate: validator and executor, compiled into grounded_agency._core
+├── packages/acs-core/       # TypeScript package: ontology table, flags, digest; the core through WebAssembly
 ├── grounded_agency/         # Python package (SDK integration)
 ├── hooks/                   # Safety hooks (checkpoint, audit)
 ├── tools/                   # Validator CLI (thin wrapper over core/)
@@ -406,7 +455,7 @@ claude plugin install agent-capability-standard
 
 | Component | Description |
 |-----------|-------------|
-| **36 Skills** | Atomic capability implementations organized by cognitive layer |
+| **42 Skills** | 36 atomic capability skills organized by cognitive layer, and 6 composed skills that run workflows |
 | **Workflow Patterns** | Reusable compositions (analyze, mitigate, optimize, orchestrate) |
 | **Safety Hooks** | Pre-tool hooks that enforce checkpoints before mutations |
 | **Audit Hooks** | Post-tool hooks that maintain action lineage |
