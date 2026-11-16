@@ -1,6 +1,6 @@
 # Modality Handling via Domain Parameters
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2026-11-15
 **Status:** Guide
 
@@ -64,24 +64,25 @@ Note that `transform` uses its native `source_format`/`target_format` input para
 
 ### 1.3 Handling Unsupported Modalities
 
-A host that has no processing pipeline for a step's `domain` cannot run the step. Today it says so in the one way the host protocol offers: it answers the `InvokeCapability` action with an `Error`, whose only members are `code` and `message` ([Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)). The step then fails with R402 (`EXECUTION_FAILED`, [STANDARD-v1.1.0 §9.5](../../spec/STANDARD-v1.1.0.md#95-runtime-errors)), and its `retry` and failure modes apply as for any failed step:
+A host that has no processing pipeline for a step's `domain` cannot run the step. It says so by answering the `InvokeCapability` action with an `Error` whose `reason` is `unsupported_domain` ([STANDARD-v1.2.0 §5.19.7](../../spec/STANDARD-v1.2.0.md#5197-error-reasons); [Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)). A host that does not perform the capability at all says `unsupported_capability`. The step then fails with R402 (`EXECUTION_FAILED`, [STANDARD-v1.2.0 §9.5](../../spec/STANDARD-v1.2.0.md#95-runtime-errors)), and its `retry` and failure modes apply as for any failed step:
 
 ```yaml
 kind: Error
 code: R402
+reason: unsupported_domain
 message: "No processing pipeline available for domain 'haptic.pressure'"
 ```
 
-The Standard defines no code, field or reason for an unsupported domain, and this guide defines none either. The reference executor reads any code a host reports for a capability call, other than R401, as R402, so a host that answered with a code of its own, such as `unsupported_domain`, would still fail the step with R402. The reason is whatever the host writes in `message`, which is free text. A failure mode can match the code (`on_error: R402`) but cannot tell an unsupported domain from any other failed execution.
+The code still decides what the run does: the reference executor reads any code a host reports for a capability call, other than R401, as R402, and the step's retries and failure modes apply. The `reason` is what a reader can rely on without parsing the `message`, which stays free text: the step's trace event carries it, the run's `Failed` action carries it as `reason` when the run ends with that failure, and the step's action record as `reason_code`. A Python host can raise `HostCannotServe("unsupported_domain", message)` from `invoke_capability`, and the runner sends that `Error`. A failure mode matches the code (`on_error: R402`), not the reason.
 
 ```mermaid
 ---
 title: A domain the host does not support
 ---
 flowchart TB
-  accDescr: When the host has no processing pipeline for the step's domain value, it answers the capability call with an Error, the step fails with R402, and the message names the domain.
+  accDescr: When the host has no processing pipeline for the step's domain value, it answers the capability call with an Error with reason unsupported_domain, and the step fails with R402, keeping the reason.
   step["Step with domain: haptic.pressure"] --> has{"Pipeline for this domain?"}
-  has -->|no| err["Error: the step fails with R402, the message names the domain"]
+  has -->|no| err["Error, reason unsupported_domain: the step fails with R402"]
 ```
 
 The gap is found when the step runs, not when the workflow is validated: the validator does not know which domains a host serves.
@@ -594,7 +595,7 @@ flowchart TB
 
 ## 4. Evidence Grounding for Modalities
 
-Every capability output carries `evidence_anchors` -- references that ground the output in verifiable sources. The capability ontology declares the field as an array and gives its items no schema. The canonical schemas of [STANDARD-v1.1.0 §6.1](../../spec/STANDARD-v1.1.0.md#61-required-schema-files) do define an anchor: the `Anchor` type of `schemas/event_schema.yaml` is an object with `ref` and `kind`, and optionally `excerpt` and `timestamp`. The Standard does not say that the items of `evidence_anchors` are `Anchor` objects ([§6.2](../../spec/STANDARD-v1.1.0.md#62-observation-requirements) keeps a capability's `evidence_anchors` apart from an event's `anchors`). This guide writes its anchors in the `Anchor` form, so that every `kind` it uses is one a canonical schema defines.
+Every capability output carries `evidence_anchors` -- references that ground the output in verifiable sources. Since Standard 1.2.0 their items are **evidence anchors** ([STANDARD-v1.2.0 §6.5](../../spec/STANDARD-v1.2.0.md#65-evidence-anchors)): the `Anchor` type of `schemas/event_schema.yaml`, which `schemas/world_state_schema.yaml` repeats and every output contract names, an object with `ref` and `kind`, and optionally `timestamp`, `excerpt` and `digest`. This guide writes its anchors in that form.
 
 `kind` says what sort of source an anchor points to. Where in the source the evidence lies depends on the modality, and goes in `ref`.
 
@@ -615,13 +616,13 @@ The reference forms below are this guide's convention for `ref`; the Standard de
 | **Video** | temporal segment | `video:<path>:time:<start>-<end>` | Time range within a video file |
 | **Multi-Modal** | no form of its own | One anchor per contributing modality, each in its modality's form | The anchors sit side by side in `evidence_anchors` |
 
-Every format above points into a stored file, so the `kind` of these anchors is `file`. An anchor whose source is of another sort takes the kind of that source (`url`, `sensor`, `tool`, `log`, `api` or `human_note`) and the same position in `ref`.
+Every format above points into a stored file, so the `kind` of these anchors is `file`. An anchor whose source is of another sort takes the kind of that source (`url`, `sensor`, `tool`, `log`, `api`, `human_note`, or `record` for a record the agent system itself holds) and the same position in `ref`. The `ref` forms are this guide's schemes, which §6.5 leaves to the producer to document. For media content, an anchor's `digest` (`sha256:` and the hexadecimal SHA-256 of the bytes `ref` names) lets a consumer tell whether the image, recording or video changed since it was read.
 
-A domain profile's `evidence_policy.required_anchor_types` lists anchor kinds (`file`, `url`, `sensor`, …), never a form: a kind outside `Anchor.kind` refuses the profile (S303, Standard 1.2.0 §5.21.2). Profiles 1.0.0 listed forms and labels there (`bounding_box`, `time_segment`, `image_reference`); version 2.0.0 maps each to its kind, `file` for the formats above ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)).
+A domain profile's `evidence_policy.required_anchor_types` lists anchor kinds (`file`, `url`, `sensor`, …), never a form: a kind outside `Anchor.kind` refuses the profile (S303, Standard 1.2.0 §5.21.2), since the list becomes the `kinds` of a grounding policy when the profile is applied ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). Profiles 1.0.0 listed forms and labels there (`bounding_box`, `time_segment`, `image_reference`); version 2.0.0 maps each to its kind, `file` for the formats above ([Status of Domain Profiles](../domains/README.md#status-of-domain-profiles)). A host that needs a modality's anchors told apart by kind uses a vendor kind (`x-bounding_box`).
 
 ### 4.2 Anchor Schema
 
-The anchors in this guide follow the `Anchor` type of `schemas/event_schema.yaml`, regardless of modality:
+The anchors in this guide follow the `Anchor` type of `schemas/event_schema.yaml` 1.2.0, regardless of modality (descriptions left out):
 
 ```yaml
 Anchor:
@@ -632,23 +633,19 @@ Anchor:
       type: string
     kind:
       type: string
-      enum:
-        - file
-        - url
-        - tool
-        - log
-        - sensor
-        - human_note
-        - api
+      pattern: '^(file|url|tool|log|sensor|human_note|api|record|x-[a-z0-9][a-z0-9_.-]*)$'
     timestamp:
       type: string
       nullable: true
     excerpt:
       type: string
       nullable: true
+    digest:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
 ```
 
-`schemas/world_state_schema.yaml` defines an `Anchor` with the same members and six of the seven kinds: it has no `api`. Neither schema has a member for nested anchors, so a claim that rests on several modalities lists one anchor for each.
+`schemas/world_state_schema.yaml` repeats the same type. Neither schema has a member for nested anchors, so a claim that rests on several modalities lists one anchor for each.
 
 ### 4.3 Grounding Rules by Modality
 
@@ -835,7 +832,7 @@ content_moderation:
     # 2. Analyze audio content
     # The ontology orders detect before classify (`detect precedes classify`),
     # so detection runs first rather than in the same parallel group as the
-    # classify steps: steps of one group run concurrently.
+    # classify steps: the steps of one group are not ordered.
     - capability: detect
       domain: audio.speech
       purpose: Detect speech in audio for transcription and analysis.

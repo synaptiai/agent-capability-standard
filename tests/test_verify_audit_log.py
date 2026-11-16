@@ -35,6 +35,34 @@ def sign(content_dict: dict, hmac_key: str = HMAC_KEY) -> dict:
     return {**content_dict, "hmac": compute_hmac(content, hmac_key)}
 
 
+def make_record_entry(
+    tool: str = "Skill",
+    status: str = "executed",
+    prev_hmac: str = "",
+    hmac_key: str = HMAC_KEY,
+) -> dict:
+    """An entry as the hook writes it since STANDARD v1.2: an action record
+    (§6.4) with the chain fields."""
+    content_dict = {
+        "action_id": "toolu_1",
+        "timestamp": "2026-11-15T12:00:00Z",
+        "actor": "agent",
+        "intent": f"{tool} call",
+        "status": status,
+        "tool": tool,
+        "call_id": "toolu_1",
+        "details": {"event": "PostToolUse", "input_sha256": "0" * 64},
+        "recorded_by": {
+            "name": "agent-capability-standard plugin hooks",
+            "version": "2.0.0",
+            "config_sha256": "0" * 64,
+            "settings": {"approval": "ask", "checkpoint_max_age_s": 1800},
+        },
+        "prev_hmac": prev_hmac,
+    }
+    return sign(content_dict, hmac_key)
+
+
 def make_entry(
     skill: str = "test-skill",
     tool_input: dict | None = None,
@@ -278,18 +306,60 @@ class TestVerifyLog:
         write_log(log_path, [e1, e2, e3, e4])
         assert verify_log(log_path, HMAC_KEY) == (4, 4, [])
 
+    def test_the_audit_skill_example_line_verifies(self, tmp_path: Path) -> None:
+        """The record line skills/audit/SKILL.md shows verifies as a chain."""
+        skill = Path(__file__).resolve().parents[1] / "skills" / "audit" / "SKILL.md"
+        lines = skill.read_text(encoding="utf-8").splitlines()
+        (example,) = [line for line in lines if line.startswith('{"action_id":')]
+        log_path = tmp_path / "records.jsonl"
+        log_path.write_text(example + "\n", encoding="utf-8")
+        assert verify_log(log_path, "example-key") == (1, 1, [])
+
     def test_readme_example_entry_verifies(self, tmp_path: Path) -> None:
         """The entry hooks/README.md shows is one the hook would write."""
         readme = Path(__file__).resolve().parents[1] / "hooks" / "README.md"
         lines = readme.read_text(encoding="utf-8").splitlines()
-        (example,) = [line for line in lines if line.startswith('{"ts":')]
+        (example,) = [line for line in lines if line.startswith('{"action_id":')]
         log_path = tmp_path / "audit.log"
         log_path.write_text(example + "\n", encoding="utf-8")
         assert verify_log(log_path, "example-key") == (1, 1, [])
 
         entry = json.loads(example)
         canonical = json.dumps({"skill": "checkpoint"}, separators=(",", ":"))
-        assert entry["input_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        assert entry["details"]["input_sha256"] == digest
+
+    def test_action_record_lines_verify(self, tmp_path: Path) -> None:
+        """The line of STANDARD v1.2 §6.4 (an action record) verifies, also
+        in a log that began with lines of the hook before it."""
+        log_path = tmp_path / "audit.log"
+        e1 = make_legacy_entry()
+        e2 = make_entry(prev_hmac=e1["hmac"])
+        e3 = make_record_entry(prev_hmac=e2["hmac"])
+        e4 = make_record_entry(tool="Bash", status="failed", prev_hmac=e3["hmac"])
+        write_log(log_path, [e1, e2, e3, e4])
+        assert verify_log(log_path, HMAC_KEY) == (4, 4, [])
+
+    def test_a_changed_action_record_line_breaks_the_chain(
+        self, tmp_path: Path
+    ) -> None:
+        log_path = tmp_path / "audit.log"
+        e1 = make_record_entry()
+        e2 = make_record_entry(tool="Bash", prev_hmac=e1["hmac"])
+        e1["status"] = "failed"
+        write_log(log_path, [e1, e2])
+        total, valid, errors = verify_log(log_path, HMAC_KEY)
+        assert (total, valid) == (2, 1)
+        assert any("HMAC mismatch" in e for e in errors)
+
+    @pytest.mark.parametrize(
+        "field", ["action_id", "timestamp", "actor", "intent", "status"]
+    )
+    def test_an_action_record_line_missing_a_field(self, field: str) -> None:
+        entry = make_record_entry()
+        del entry[field]
+        errors = verify_entry(entry, "", HMAC_KEY)
+        assert errors and "Missing fields" in errors[0] and field in errors[0]
 
     def test_missing_file_returns_error(self, tmp_path: Path) -> None:
         log_path = tmp_path / "nonexistent.log"

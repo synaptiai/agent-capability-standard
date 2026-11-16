@@ -382,8 +382,10 @@ DIGEST_VECTORS = [
         "numbers",
         "Numbers are written as ECMAScript writes the binary64 value, so"
         " -0.0, 1.0, 1e+21 and 1e-07 in the JSON text of `shown` become 0, 1,"
-        " 1e+21 and 1e-7. 9007199254740992 is 2^53, the bound that section"
-        " 5.14 gives for integers.",
+        " 1e+21 and 1e-7. 9007199254740992 is 2^53, the largest magnitude"
+        " section 5.14 allows for an integer, a number written without a"
+        " fraction or an exponent. 1e+21 is written with an exponent, so it"
+        " is a binary64 value and that bound does not apply to it.",
         {
             "numbers": [
                 0,
@@ -451,6 +453,17 @@ DIGEST_VECTORS = [
         approval={"approver": HUMAN, "shows": ["${setting}", "${current.data}"]},
     ),
     DigestVector(
+        "unresolved_reference",
+        "A `shows` reference that resolves to nothing (here a member the"
+        " retrieved value does not have) is null in `shown`: one element per"
+        " reference, in order.",
+        {"present": 1},
+        approval={
+            "approver": HUMAN,
+            "shows": ["${current.data.absent}", "${current.data}"],
+        },
+    ),
+    DigestVector(
         "empty_shows",
         "`shows` is an empty list: `shown` is the empty array.",
         approval={"approver": HUMAN, "shows": []},
@@ -483,9 +496,10 @@ DIGEST_VECTORS = [
 DIGEST_FIELDS = {
     "name": "The vector's name, unique in this file.",
     "kind": (
-        "`step`: an approval request of a workflow step, with `approval` and,"
-        " without `shows`, `inputs`; `tool_call`: the approval of a tool call"
-        " (STANDARD v1.2.0 §5.18.7), with `call`."
+        "`step`: an approval request of a workflow step, with `approval`;"
+        " without `shows`, `inputs`; with `shows`, `bindings`; asked again"
+        " after a recheck, `recheck_read`. `tool_call`: the approval of a"
+        " tool call (STANDARD v1.2.0 §5.18.7), with `call`."
     ),
     "about": "What the vector covers.",
     "approval": (
@@ -495,6 +509,20 @@ DIGEST_FIELDS = {
     "inputs": (
         "For a `step` vector: the step's resolved inputs. Present where the"
         " step declares no `shows`, so that `shown` is built from them."
+    ),
+    "bindings": (
+        "For a `step` vector whose step declares `shows`: the values its"
+        " references resolve against, by root name: the workflow input"
+        " `setting` and the store `current` of the step before it, so that"
+        " `${current.data}` resolves to `bindings.current.data`. A reference"
+        " to something they do not hold resolves to null."
+    ),
+    "recheck_read": (
+        "For a `step` vector asked again after a recheck: the value the"
+        " recheck read, which differs from the value approved before (the"
+        " recheck `source` resolved against `bindings`). The vector is the"
+        " request asked again; the first request showed the `shows` values"
+        " alone."
     ),
     "call": (
         "For a `tool_call` vector: the call, `{action, capability, args}`;"
@@ -623,6 +651,17 @@ def _ecmascript_number(x: float) -> str:
     return f"{sign}{digits[0]}{fraction}e{'+' if n > 0 else '-'}{abs(n - 1)}"
 
 
+# The workflow input of every digest run, and what its `retrieve` step
+# returns besides the vector's value.
+SETTING = "x"
+
+
+def retrieved(vector: DigestVector) -> dict[str, Any]:
+    """What the `retrieve` step returns, and so what the store `current`
+    holds."""
+    return {"data": vector.value, "confidence": 1.0, "evidence_anchors": []}
+
+
 def approval_requests(
     validator: _core.Validator, vector: DigestVector
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -633,7 +672,7 @@ def approval_requests(
         validator,
         digest_catalog(vector.approval),
         "change",
-        {"setting": "x"},
+        {"setting": SETTING},
         # The catalog is a value built here, with no header (§11.5).
         header=None,
         attendance="attended",
@@ -641,9 +680,9 @@ def approval_requests(
         now_ms=0,
     )
     outputs: dict[str, dict[str, Any]] = {
-        "retrieve": {"data": vector.value, "confidence": 1.0},
-        "checkpoint": {"checkpoint_id": "cp-1"},
-        "mutate": {"success": True},
+        "retrieve": retrieved(vector),
+        "checkpoint": {"checkpoint_id": "cp-1", "evidence_anchors": []},
+        "mutate": {"success": True, "evidence_anchors": []},
     }
     requests: list[dict[str, Any]] = []
     inputs: dict[str, Any] = {}
@@ -658,8 +697,7 @@ def approval_requests(
         if kind == "InvokeCapability":
             if action["capability"] == "mutate":
                 inputs = action["inputs"]
-            value = {**outputs[action["capability"]], "evidence_anchors": []}
-            response = {"kind": "Output", "value": value}
+            response = {"kind": "Output", "value": outputs[action["capability"]]}
         elif kind == "RequestApproval":
             requests.append(action)
             response = {
@@ -752,6 +790,10 @@ def render_digests() -> str:
             if shown != [inputs]:
                 raise SystemExit(f"{name}: shown is not the step's inputs")
             entry["inputs"] = inputs
+        else:
+            entry["bindings"] = {"setting": SETTING, "current": retrieved(vector)}
+        if vector.reread is not None:
+            entry["recheck_read"] = vector.reread
         entry.update(shown=shown, canonical=canonical, digest=digest)
         vectors.append(entry)
     vectors.extend(tool_call_vectors())
@@ -759,18 +801,24 @@ def render_digests() -> str:
         raise SystemExit("two digest vectors have the same name")
     doc = {
         "generated_by": ME,
-        "standard": "1.1.0",
-        "section": "5.14",
-        "status": "informative",
+        "standard": "1.2.0",
+        "section": "5.14, 5.18.7",
+        "status": "normative",
         "description": (
-            "Approval digests computed by the reference executor"
-            " (core/src/exec/machine.rs, core/src/exec/canonical.rs). Each"
-            " vector is one approval request. STANDARD v1.1.0 section 5.14"
-            " states that a decision is valid only if the SHA-256 digest of"
-            " the canonical JSON (RFC 8785) of the shown values matches. What"
-            " is shown when a step declares no `shows`, and the object added"
-            " when a step asks again after a recheck, are the reference"
-            " executor's behaviour; the Standard does not state them. This"
+            "Approval digests (STANDARD v1.2.0 sections 5.14 and 5.18.7,"
+            " normative under section 10.3), computed by the reference"
+            " executor (core/src/exec/machine.rs, core/src/exec/canonical.rs)."
+            " Each `step` vector is one approval request of a workflow step;"
+            " each `tool_call` vector is the approval of a tool call. The"
+            " shown values are a JSON array; the digest is the SHA-256 of the"
+            " UTF-8 encoding of their canonical JSON (RFC 8785), as 64"
+            " lowercase hexadecimal digits, compared regardless of case. An"
+            " implementation that computes or checks approval digests"
+            " produces each vector's `canonical` text and `digest` from its"
+            " `shown` values; an executor shows each `step` vector's `shown`"
+            " values, given its `inputs` or `bindings` and any"
+            " `recheck_read`, and a safety layer each `tool_call` vector's."
+            " This"
             " file is printable ASCII: any other character is written as a"
             " JSON \\u escape, so no tool that normalises or transcodes text"
             " can change a vector."

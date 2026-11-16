@@ -120,8 +120,8 @@ overlaps:
   - subproblems: array[string]
     description: string
     resolution: string
-confidence: 0..1
-evidence_anchors: ["source:ref"]
+confidence: number  # probability that the subtasks together achieve the task (§4.1.1)
+evidence_anchors: [{ref: "source:ref", kind: record}]
 assumptions: []
 ```
 
@@ -136,8 +136,8 @@ assumptions: []
 | `constraints` | array | Boundaries affecting subproblems |
 | `gaps` | array | Missing coverage identified |
 | `overlaps` | array | Redundant coverage identified |
-| `confidence` | number | 0.0-1.0 based on completeness |
-| `evidence_anchors` | array | References to requirements or sources the decomposition rests on |
+| `confidence` | number | Probability, 0.0-1.0, that the subtasks together achieve the task (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to requirements or sources the decomposition rests on |
 | `assumptions` | array | Assumptions that affect the decomposition |
 
 ## Examples
@@ -356,7 +356,7 @@ gaps: []
 overlaps: []
 confidence: 0.9
 evidence_anchors:
-  - "requirement:auth-system"
+  - {ref: "requirement:auth-system", kind: record}
 assumptions:
   - "Email service available for verification"
   - "OAuth provider apps already created"

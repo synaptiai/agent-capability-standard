@@ -24,12 +24,11 @@
     "With a permission_prompt_tool_name, a call the prompt tool refuses is not reported to the adapter: the checkpoint it held is lost (it counts as used when its hold lapses or the session's turn ends), so the next gated call needs a new checkpoint",
     "The permission mode is read from the hook input, else from the wrapped options: a host that changes the mode during a session and omits it from hook input is checked against the mode the session started in",
     "That Claude Code puts an ask to can_use_tool in modes default, acceptEdits and plan rests on its documentation; the tests call the hook and the callback directly",
-    "strict_mode=False or approval='off' is outside class SL"
+    "strict_mode=False or approval='off' is outside class SL",
+    "§5.20 hosts outside a workflow: GroundedAgentConfig.grounding is applied only to the outputs of tools create_grounded_mcp_server serves (with require_layer); Claude Code's own tools (Read, Grep, Glob, WebFetch, Bash, ...) and the tools of other MCP servers return results in their own forms, with no capability output the layer sees, so a policy that requires their capabilities checks nothing for their calls. The adapter logs a warning, once per tool, when a policy requires the capability of a call it cannot check"
   ],
   "not_applied": [
-    "§5.18.10 persist and audit rows (F504): the data a persist call writes and the record an audit call appends are not checked for a secret the layer recognises (§6.7); such a call is decided by the other checks alone",
     "§5.18.10 send row (F504): no destination policy (§4.4.2) is applied, and a binding's destination member is loaded but not read; a send call is decided by the other checks alone",
-    "§5.18.10 transform row and the every-capability redaction row (§6.7): the records and evidence the adapter writes (call_records, diagnostics, evidence anchors, which keep a call's input when evidence_include_tool_input is true) and a transform output it records are not redacted",
     "§5.18.10 every-capability output-contract row (R402, §5.18.9): a tool's result is not checked against its capability's output contract; Claude Code's tools and MCP tools, those create_grounded_mcp_server serves included, return results in their own forms, which the adapter passes on unchecked"
   ]
 }

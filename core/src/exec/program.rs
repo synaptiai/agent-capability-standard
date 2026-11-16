@@ -84,6 +84,9 @@ pub struct Step {
     /// is an `invoke`, `delegate`, `synchronize` or `rollback`. After a
     /// deferral it is deferred too (§5.14).
     pub acts: bool,
+    /// The references its `input_bindings` make (root and path, without
+    /// annotations): what an `acs:` citation in its output may cite (§5.20).
+    pub bound: Vec<crate::refs::Ref>,
     /// Capabilities the ontology orders before this one through `precedes`
     /// edges, transitively (as `mutate` before `verify`): after one of them
     /// is deferred, so is this step.
@@ -110,6 +113,13 @@ pub struct Workflow {
     pub raw: Map<String, Value>,
     pub steps: Vec<Step>,
     pub declared: Vec<String>,
+    /// The workflow targets 1.2 or later (§11.5): by its `spec_version`,
+    /// else by the catalog header's version. Rules for 1.2 targets only,
+    /// such as the approver's `sender_check` (§5.17), apply.
+    pub targets_1_2: bool,
+    /// The workflow's grounding policy (`grounding@1`, §5.20): it applies to
+    /// its own steps.
+    pub grounding: Option<crate::grounding::Policy>,
 }
 
 impl Workflow {
@@ -157,11 +167,13 @@ fn target(steps: &[Value], name: &str) -> Option<usize> {
 
 impl Program {
     /// Prepare every workflow of the catalog (an `invoke` may name its
-    /// target at run time). The catalog must already have passed validation.
+    /// target at run time). The catalog must already have passed validation,
+    /// with `header`, the version its header declares (§11.5).
     pub fn build(
         ctx: &Context,
         catalog: &Value,
         root: &str,
+        header: Option<&str>,
         policy: Policy,
     ) -> Result<Program, String> {
         let entries = catalog
@@ -173,7 +185,10 @@ impl Program {
             if name.starts_with("x-") || !raw.contains_key("steps") {
                 continue;
             }
-            workflows.insert(name.clone(), Self::workflow(ctx, name, raw, &policy)?);
+            let mut workflow = Self::workflow(ctx, name, raw, &policy)?;
+            workflow.targets_1_2 =
+                crate::validate::semantics::target(raw, header).is_some_and(|t| t >= (1, 2));
+            workflows.insert(name.clone(), workflow);
         }
         if !workflows.contains_key(root) {
             return Err(format!("workflow '{root}' is not in the catalog"));
@@ -231,11 +246,21 @@ impl Program {
             };
             steps.push(Self::step(ctx, name, index, step, list, &declared, policy)?);
         }
+        let grounding = declared
+            .iter()
+            .any(|d| d == "grounding@1")
+            .then(|| {
+                raw.get("grounding")
+                    .and_then(crate::grounding::Policy::from_value)
+            })
+            .flatten();
         Ok(Workflow {
             name: name.to_string(),
             raw: raw.clone(),
             steps,
             declared,
+            targets_1_2: false,
+            grounding,
         })
     }
 
@@ -436,6 +461,7 @@ impl Program {
         Ok(Step {
             reads,
             acts,
+            bound: crate::grounding::bound_refs(raw.get("input_bindings").unwrap_or(&Value::Null)),
             after,
             index,
             store_as: raw
@@ -472,4 +498,49 @@ pub fn invoke_target(step: &Map<String, Value>) -> Option<&str> {
     step.get("input_bindings")
         .and_then(|b| b.get("workflow"))
         .and_then(Value::as_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::Program;
+    use crate::profile::Policy;
+    use crate::validate::tests::ctx;
+
+    #[test]
+    fn bound_references_and_policy() {
+        let catalog = json!({"w": {"goal": "g", "risk": "low", "spec_version": "1.2",
+        "workflow_extensions": {"requires": ["grounding@1"]},
+        "grounding": {"require": ["transform"], "kinds": ["file"]},
+        "steps": [
+            {"capability": "retrieve", "purpose": "p", "store_as": "r",
+             "input_bindings": {"target": "t"}},
+            {"capability": "retrieve", "purpose": "p", "store_as": "s",
+             "input_bindings": {"target": "t"}},
+            {"capability": "transform", "purpose": "p", "store_as": "x",
+             "input_bindings": {"input": "${r.data[0:2]: array<object>}",
+                                "target_format": "x ${s.confidence} y"}}
+        ]}});
+        let program = Program::build(&ctx(), &catalog, "w", None, Policy::default()).unwrap();
+        let w = &program.workflows["w"];
+        let bodies: Vec<String> = w.steps[2]
+            .bound
+            .iter()
+            .map(crate::grounding::body)
+            .collect();
+        assert_eq!(bodies, ["r.data[0:2]", "s.confidence"]);
+        assert!(w.steps[0].bound.is_empty());
+        let policy = w.grounding.as_ref().unwrap();
+        assert!(policy.requires("transform") && policy.kinds.is_some());
+        // Without grounding@1, the field is no policy.
+        let mut plain = catalog.clone();
+        plain["w"]["spec_version"] = json!("1.1");
+        plain["w"]
+            .as_object_mut()
+            .unwrap()
+            .remove("workflow_extensions");
+        let program = Program::build(&ctx(), &plain, "w", None, Policy::default()).unwrap();
+        assert!(program.workflows["w"].grounding.is_none());
+    }
 }

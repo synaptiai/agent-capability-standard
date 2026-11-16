@@ -83,52 +83,52 @@ status: completed | failed | rolled_back
 steps:
   observe_out:
     observation: object
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   search_out:
     results: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   attribute_out:
     causes: array[object]
     strengths: object  # Causal strength per cause
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   constrain_out:
     compliant: boolean
     violations: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   critique_out:
     issues: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   plan_out:
     steps: array[object]
     risks: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   checkpoint_out:
     checkpoint_id: string
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   execute_out:
     result: any
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   verify_out:
     passed: boolean
     violations: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   rollback_out:  # null when no fix was applied or verification passed (the step was skipped)
     restored: boolean
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   audit_out:
     audit_id: string
     recorded: boolean
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 root_cause:
   description: string
-  evidence_anchors: array[string]
+  evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 resolution:
   description: string
   files_changed: array[string]
 verification: PASS | FAIL
 audit_log_pointer: string  # Where the audit step appended its record (.claude/audit/records.jsonl)
 confidence: number  # 0.0-1.0
-evidence_anchors: array[string]
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 ```
 
@@ -143,7 +143,7 @@ assumptions: array[string]
 | `resolution` | object | What was done to fix the issue |
 | `verification` | enum | Final PASS/FAIL after fix applied |
 | `confidence` | number | 0.0-1.0 based on evidence quality |
-| `evidence_anchors` | array | All evidence references collected |
+| `evidence_anchors` | array of evidence anchors (§6.5) | All evidence references collected |
 | `assumptions` | array | Explicit assumptions made during debugging |
 
 ## Examples
@@ -176,14 +176,14 @@ steps:
       expected_status: 200
       actual_status: 401
     evidence_anchors:
-      - "file:tests/test_auth.py:45"
-      - "file:src/api/handlers/auth.py:78"
+      - {ref: "file:tests/test_auth.py:45", kind: file}
+      - {ref: "file:src/api/handlers/auth.py:78", kind: file}
   search_out:
     results:
       - location: "src/api/handlers/auth.py:validate_token"
       - location: "src/utils/jwt.py:decode_token"
     evidence_anchors:
-      - "tool:grep:validate_token"
+      - {ref: "tool:grep:validate_token", kind: tool}
   attribute_out:
     causes:
       - id: signature_after_expiry
@@ -191,7 +191,7 @@ steps:
     strengths:
       signature_after_expiry: 0.9
     evidence_anchors:
-      - "tool:git:blame"
+      - {ref: "tool:git:blame", kind: tool}
   constrain_out:
     compliant: true
     violations: []
@@ -201,38 +201,38 @@ steps:
       - issue: "Signature validation after the expiry check rejects valid tokens"
         location: "src/api/handlers/auth.py:78-85"
     evidence_anchors:
-      - "file:src/api/handlers/auth.py:78-85"
+      - {ref: "file:src/api/handlers/auth.py:78-85", kind: file}
   plan_out:
     steps:
       - action: "Move the signature check before the expiry check"
         verification: "test_login_success passes; no other auth test regresses"
     risks: []
     evidence_anchors:
-      - "file:src/api/handlers/auth.py:78"
+      - {ref: "file:src/api/handlers/auth.py:78", kind: file}
   checkpoint_out:
     checkpoint_id: "chk_20240115_143000"
     evidence_anchors:
-      - "tool:git:stash"
+      - {ref: "tool:git:stash", kind: tool}
   execute_out:
     result: "patch applied; 12 passed"
     evidence_anchors:
-      - "tool:bash:git apply fix.patch && pytest tests/test_auth.py"
+      - {ref: "tool:bash:git apply fix.patch && pytest tests/test_auth.py", kind: tool}
   verify_out:
     passed: true
     violations: []
     evidence_anchors:
-      - "tool:bash:pytest tests/test_auth.py"
+      - {ref: "tool:bash:pytest tests/test_auth.py", kind: tool}
   rollback_out: null  # skipped: verification passed
   audit_out:
     audit_id: "audit_20240115_143500"
     recorded: true
     evidence_anchors:
-      - "file:.claude/audit/records.jsonl"
+      - {ref: "file:.claude/audit/records.jsonl", kind: file}
 root_cause:
   description: "Token signature validation was moved after expiry check during refactor, causing valid tokens to be rejected before signature verification"
   evidence_anchors:
-    - "file:src/api/handlers/auth.py:78-85"
-    - "tool:git:blame"
+    - {ref: "file:src/api/handlers/auth.py:78-85", kind: file}
+    - {ref: "tool:git:blame", kind: tool}
 resolution:
   description: "Restored original validation order: signature check before expiry check"
   files_changed:
@@ -241,10 +241,10 @@ verification: PASS
 audit_log_pointer: ".claude/audit/records.jsonl"
 confidence: 0.95
 evidence_anchors:
-  - "file:tests/test_auth.py:45"
-  - "file:src/api/handlers/auth.py:78-85"
-  - "tool:bash:pytest"
-  - "tool:git:diff"
+  - {ref: "file:tests/test_auth.py:45", kind: file}
+  - {ref: "file:src/api/handlers/auth.py:78-85", kind: file}
+  - {ref: "tool:bash:pytest", kind: tool}
+  - {ref: "tool:git:diff", kind: tool}
 assumptions:
   - "Test environment matches production configuration"
   - "No concurrent changes to auth module"

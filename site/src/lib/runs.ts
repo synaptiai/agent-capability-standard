@@ -85,11 +85,10 @@ export const EXEMPT_RUNS: readonly ExemptRun[] = [
   // reference tables with nothing to draw (category c), as Appendix B is.
   { page: CURRENT_STANDARD, anchor: '98-diagnostic-format', category: 'c', run: '§9.8 Diagnostic Format (format fence and location keys)' },
   { page: CURRENT_STANDARD, anchor: '117-artifacts-of-this-version', category: 'c', run: '§11.7 Artifacts of This Version (file register)' },
-  // The 1.2.0 Candidate's sections that are headings awaiting their text
-  // (tasks/standard-1.2/designs/FOUNDATION.md D2). Each entry goes when its
-  // section is written: test/runs.test.ts fails while one has text.
-  { page: CURRENT_STANDARD, anchor: '519-host-protocol', category: 'a', unwritten: true, run: 'Host Protocol, §5.19 (awaiting its text)' },
-  { page: CURRENT_STANDARD, anchor: '520-grounding', category: 'a', unwritten: true, run: 'Grounding, §5.20 (awaiting its text)' },
+  // A 1.2.0 Candidate section that is a heading awaiting its text is listed
+  // with `unwritten: true` (tasks/standard-1.2/designs/FOUNDATION.md D2)
+  // until it is written: test/runs.test.ts fails while one has text. Every
+  // such section is written now.
   { page: '/start/overview/', anchor: 'why-this-matters', category: 'a', run: 'Why This Matters' },
   { page: '/start/overview/', anchor: 'quick-start', category: 'b', run: 'Quick Start' },
   { page: '/start/overview/', anchor: 'claude-agent-sdk-integration', category: 'b', run: 'Claude Agent SDK Integration' },

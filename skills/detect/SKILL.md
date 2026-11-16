@@ -71,8 +71,8 @@ matches:
     location: string  # file:line or path where found
 locations: array[string]  # Every location where the pattern was found
 false_positive_risk: low | medium | high  # Likelihood of spurious detection
-confidence: number  # 0.0-1.0 based on evidence quality
-evidence_anchors: array[string]  # File:line references
+confidence: number  # probability that the reported detections are correct (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # File:line references; each {ref, kind} (STANDARD v1.2 §6.5)
 assumptions: array[string]  # Explicit assumptions made
 next_actions: array[string]  # 0-3 suggested follow-ups if uncertain
 ```
@@ -86,8 +86,8 @@ next_actions: array[string]  # 0-3 suggested follow-ups if uncertain
 | `matches` | array\<object\> | Found occurrences: each detection signal with strength and location (empty when nothing found) |
 | `locations` | array[string] | Every location where the pattern was found |
 | `false_positive_risk` | enum | Assessment of detection reliability |
-| `confidence` | number | 0.0-1.0 based on evidence completeness |
-| `evidence_anchors` | array[string] | File:line references or tool outputs |
+| `confidence` | number | Probability, 0.0-1.0, that the reported detections are correct (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | File:line references or tool outputs |
 | `assumptions` | array[string] | Explicitly stated assumptions |
 
 ## Examples
@@ -118,8 +118,8 @@ locations:
 false_positive_risk: low
 confidence: 0.85
 evidence_anchors:
-  - "src/api/user_controller.py:47"
-  - "src/api/user_controller.py:52"
+  - {ref: "file:src/api/user_controller.py:47", kind: file}
+  - {ref: "file:src/api/user_controller.py:52", kind: file}
 assumptions:
   - "User input flows from request.params to query variable"
   - "No input sanitization in calling function"
@@ -153,7 +153,7 @@ locations:
 false_positive_risk: low
 confidence: 0.95
 evidence_anchors:
-  - "src/components/Dashboard.jsx:23"
+  - {ref: "file:src/components/Dashboard.jsx:23", kind: file}
 assumptions:
   - "Project uses React 16.3+ where these methods are deprecated"
 next_actions:

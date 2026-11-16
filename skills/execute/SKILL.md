@@ -86,7 +86,7 @@ analysis:
   summary: string  # One-line result summary
   warnings: array[string]  # Notable warnings
   errors: array[string]  # Extracted error messages
-evidence_anchors: ["command:output"]
+evidence_anchors: [{ref: "command:output", kind: tool}]
 ```
 
 ### Field Definitions
@@ -101,7 +101,7 @@ evidence_anchors: ["command:output"]
 | `stderr` | string | Standard error |
 | `execution` | object | Execution metadata |
 | `analysis` | object | Interpreted results |
-| `evidence_anchors` | array | References to the command and its output |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the command and its output |
 
 ## Examples
 
@@ -143,7 +143,7 @@ analysis:
   warnings: []
   errors: []
 evidence_anchors:
-  - "command:npm test:output"
+  - {ref: "command:npm test:output", kind: tool}
 ```
 
 ### Example 2: Execute Query
@@ -178,7 +178,7 @@ analysis:
   warnings: []
   errors: []
 evidence_anchors:
-  - "command:psql:query_result"
+  - {ref: "command:psql:query_result", kind: tool}
 ```
 
 ### Example 3: Execution Failure
@@ -211,7 +211,7 @@ analysis:
   errors:
     - "ModuleNotFoundError: No module named 'nonexistent_module'"
 evidence_anchors:
-  - "command:python:error"
+  - {ref: "command:python:error", kind: tool}
 ```
 
 ## Verification

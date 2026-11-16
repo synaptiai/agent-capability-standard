@@ -1,5 +1,5 @@
 // Text equivalents, in the current Standard's Markdown copy, of the figures
-// from §1 to §5.17 that show more than the table, list or fence they sit
+// from §1 to §5.19 that show more than the table, list or fence they sit
 // beside (visual spec 3.9 "twin block", 6.1). Each block uses the same
 // caption function as the page's <figcaption>; specFigureBlocks() appends
 // them, in page order, to its "Figures on this page" section.
@@ -16,9 +16,22 @@ import type { SpecSlot } from '../lib/spec-slots';
 import { slotBlocks } from './spec-slot-blocks';
 
 const REPLAY_TITLES: Record<string, string> = {
+  'group-replay': 'A group member that fails, from §5.2.3',
   'recovery-replay': 'A recovery that runs out, from §5.12',
   'wait-replay': 'A wait that loses its source, from §5.13',
+  'approval-unattended-replay': 'An approval no one is asked for, from §5.14',
   'deferral-replay': 'What a deferral reaches, from §5.14',
+  'resume-replay': 'What a resumption runs again, from §5.14.1',
+  'resume-skip-replay': 'A queued step that no longer runs, from §5.14.1',
+  'protocol-replay': "A run's actions and the host's answers, from §5.19.1",
+  'wake-replay': "A retry's wait, ended by a tick, from §5.19.3",
+  'cancel-replay': 'A run cancelled while its mutation is pending, from §5.19.5',
+  'reason-replay': 'An error that says why, retried, from §5.19.7',
+  'response-replay': 'Responses with members this version does not define, from §5.19.1',
+  'grounding-replay': 'An ungrounded output, sent back for evidence, from §5.20',
+  'citation-replay': 'A citation of a value the step does not bind, from §5.20',
+  'audit-replay': 'An audit step whose record was not written, from §6.4',
+  'secret-replay': 'A persist refused for a secret in its data, from §6.7',
 };
 
 function replayBlock(slot: string): string {
@@ -33,7 +46,7 @@ function replayBlock(slot: string): string {
   );
 }
 
-/** The blocks for §1 to §5.2.1: F-S0, F-S1 and F-S6. */
+/** The blocks for §1 to §5.2.3: F-S0, F-S1, F-S6 and the parallel group replay. */
 export function specEarlyBlocks(): string[] {
   const { text } = currentStandardText();
   const o = loadOntology();
@@ -59,10 +72,11 @@ export function specEarlyBlocks(): string[] {
         D.safetyDefaults(o).flatMap((g) => g.caps.map((c) => [code(c.id), g.layer, c.risk, yes(c.mutation), D.checkpointViaEdge(c) ? 'Yes, via requires edge' : yes(c.requires_checkpoint), yes(c.requires_approval)])),
       ),
     ),
+    replayBlock('group-replay'),
   ];
 }
 
-/** The blocks for §5.9 to §5.17, in page order. */
+/** The blocks for §5.9 to §5.19, in page order. */
 export function specLateBlocks(): string[] {
   const { source, text } = currentStandardText();
   const ext = D.extensionTiles(text, source);
@@ -70,6 +84,7 @@ export function specLateBlocks(): string[] {
   const asked = D.approverAsked(text, source);
   const deleg = D.delegateGroups(text, source);
   const trust = D.trustClassBars(text, source);
+  const approvers = D.approverCount(text, source);
   return [
     figure('Extensions and what they unlock, from §5.9', D.extensionsCaption(ext), table(['Extension', 'Sections'], ext.map((e) => [code(e.id), e.sections.map((s) => `§${s}`).join(', ')]))),
     replayBlock('recovery-replay'),
@@ -83,7 +98,10 @@ export function specLateBlocks(): string[] {
         table(['when_unattended', 'Result'], plans.map((p) => [`${code(p.plan)}${p.isDefault ? ' (default)' : ''}`, cell(p.result)])),
       ].join('\n\n'),
     ),
+    replayBlock('approval-unattended-replay'),
     replayBlock('deferral-replay'),
+    replayBlock('resume-replay'),
+    replayBlock('resume-skip-replay'),
     figure(
       'What a delegate binds, from §5.15',
       D.delegateCaption(deleg),
@@ -100,6 +118,18 @@ export function specLateBlocks(): string[] {
       D.trustCaption(trust),
       table(['Trust class', 'Default weight', 'In the example'], trust.map((b) => [code(b.cls), String(b.weight), [b.accepted ? 'accepted' : '', b.alwaysAsk ? 'always ask' : ''].filter(Boolean).join(', ')])),
     ),
+    figure(
+      'Who counts as an approver, from §5.17',
+      D.approverCaption(approvers),
+      table(['Approver', 'Kind', 'Role', 'Counts', 'Why'], approvers.rows.map((r) => [code(r.principal), r.kind, r.role ?? '', r.counts ? 'Yes' : 'No', cell(r.why)])),
+    ),
+    replayBlock('protocol-replay'),
+    replayBlock('response-replay'),
+    replayBlock('wake-replay'),
+    replayBlock('cancel-replay'),
+    replayBlock('reason-replay'),
+    replayBlock('grounding-replay'),
+    replayBlock('citation-replay'),
   ];
 }
 
@@ -110,7 +140,10 @@ export function specTailBlocks(): string[] {
   const fams = T.diagnosticFamilies(text, source);
   const heat = T.codeHeat(text, source);
   const suite = T.conformanceSuite(text, source);
+  const digests = T.digestVectors(text, source);
   return [
+    replayBlock('audit-replay'),
+    replayBlock('secret-replay'),
     figure(
       'Merge thresholds, from §7.3',
       T.thresholdsCaption(),
@@ -130,6 +163,7 @@ export function specTailBlocks(): string[] {
       table(['Section', ...heat.families.map((f) => f.name)], heat.sections.map((x, j) => [`§${x.n} ${x.title}`, ...heat.families.map((_, i) => String(heat.counts[i]![j]))])),
     ),
     figure('The conformance suite, from §10.3', T.suiteCaption(suite), table(['Part', 'Count', 'Folder'], suite.map((p) => [p.label, String(p.count), code(p.dir)]))),
+    figure('The approval digest vectors, from §10.3', T.digestCaption(digests), table(['Vectors', 'Count'], digests.map((g) => [g.label, String(g.count)]))),
   ];
 }
 

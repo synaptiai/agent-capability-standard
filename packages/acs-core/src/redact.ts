@@ -24,6 +24,20 @@
  * matching are ASCII-only, as `re.ASCII` makes them in Python; whitespace is
  * spelled out, since `\s` differs between the two; and a value's length is
  * counted in characters (code points), as Python counts it.
+ *
+ * A refusal is another matter: `persist` data or an `audit` record that
+ * holds a secret is refused, not redacted (§6.7), so {@link holdsCredential}
+ * recognises only credential-shaped values, as the Python redactor's
+ * `holds_credential` and the plugin's `hooks/secret_scan.sh` do: a
+ * registered value, key and token formats (PEM private keys, AWS, GitHub,
+ * Slack, `sk-` keys, JWTs, a bearer token of 20 or more characters), the
+ * password of a URL's userinfo unless it is a placeholder, an
+ * `Authorization` or `Proxy-Authorization` header's value of 8 or more token
+ * characters mixing letters and digits, and an assignment to a credential
+ * name whose value is quoted with no whitespace and 8 or more characters, or
+ * unquoted, 12 or more characters, mixing letters and digits; prose such as
+ * `token: rotate monthly` passes. `tests/conformance/secrets/credentials.json`
+ * pins the rule for the three.
  */
 import type { Json } from './canonical.js';
 
@@ -159,4 +173,75 @@ export function redactJson(value: Json, secrets: readonly string[] = []): { valu
 /** Whether {@link redactJson} would change `value`. */
 export function holdsSecret(value: Json, secrets: readonly string[] = []): boolean {
   return redactJson(value, secrets).pointers.length > 0;
+}
+
+// Credential shapes a refusal relies on: the formats of keys and tokens, no
+// prose (grounded_agency/state/redaction.py and hooks/secret_scan.sh hold
+// the same).
+const CREDENTIAL_SHAPES: readonly RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /(?:AKIA|ASIA)[0-9A-Z]{16}/,
+  /gh[pousr]_[A-Za-z0-9]{36}/,
+  /github_pat_[A-Za-z0-9_]{22,}/,
+  /xox[abprs]-[A-Za-z0-9-]{10,}/,
+  /sk-[A-Za-z0-9_-]{20,}/,
+  new RegExp(`[Bb]earer${WS}+[A-Za-z0-9._~+/=-]{20,}`),
+  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+];
+const ASSIGN = `(?:${NAMES})["']?${WS}*[:=]${WS}*`;
+const QUOTED_CREDENTIAL = new RegExp(`${ASSIGN}["'][^${NOT_WS}"']{8,}["']`, 'i');
+const UNQUOTED_VALUE = new RegExp(`${ASSIGN}(?<value>[^${NOT_WS}"']{12,})`, 'gi');
+// The password of a URL's userinfo (`scheme://user:<value>@`), unless it is a
+// placeholder (`password`, `<password>`, `${DB_PASSWORD}`, `****`).
+const URL_PASSWORD = new RegExp(`[A-Za-z][A-Za-z0-9+.-]*://[^${NOT_WS}/:@]+:(?<value>[^${NOT_WS}/@]+)@`, 'g');
+const PLACEHOLDER = /^(?:[$<{*[].*|password|passwd|pwd|pass|secret|token)$/i;
+// An Authorization or Proxy-Authorization header's value, after its scheme:
+// 8 or more token characters with letters and digits.
+const AUTHORIZATION_VALUE = new RegExp(
+  `(?:proxy-)?authorization["']?${WS}*[:=]${WS}*["']?` +
+    `(?:(?:basic|bearer|token|digest|negotiate)${WS}+)?(?<value>[A-Za-z0-9._~+/=-]{8,})`,
+  'gi',
+);
+
+const lettersAndDigits = (v: string): boolean => /[0-9]/.test(v) && /[A-Za-z]/.test(v);
+
+function credentialText(text: string): boolean {
+  if (CREDENTIAL_SHAPES.some((p) => p.test(text))) return true;
+  if (QUOTED_CREDENTIAL.test(text)) return true;
+  for (const m of text.matchAll(URL_PASSWORD)) {
+    if (!PLACEHOLDER.test(m.groups?.['value'] ?? '')) return true;
+  }
+  for (const pattern of [UNQUOTED_VALUE, AUTHORIZATION_VALUE]) {
+    for (const m of text.matchAll(pattern)) {
+      if (lettersAndDigits(m.groups?.['value'] ?? '')) return true;
+    }
+  }
+  return false;
+}
+
+/** Every string in a JSON value, member names included. */
+function stringsIn(value: Json, out: string[]): void {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) value.forEach((v) => stringsIn(v, out));
+  else if (value !== null && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      out.push(k);
+      stringsIn(v, out);
+    }
+  }
+}
+
+/**
+ * Whether `value` holds a registered secret or a credential-shaped value:
+ * the rule for refusing `persist` data and `audit` records (§6.7,
+ * §5.18.10). A JSON value is read string by string and as its JSON text,
+ * so `{"api_key": "..."}` is an assignment.
+ */
+export function holdsCredential(value: Json, secrets: readonly string[] = []): boolean {
+  const strings: string[] = [];
+  stringsIn(value, strings);
+  const values = registered(secrets);
+  if (strings.some((s) => values.some((v) => s.includes(v)))) return true;
+  if (strings.some(credentialText)) return true;
+  return typeof value !== 'string' && credentialText(JSON.stringify(value));
 }

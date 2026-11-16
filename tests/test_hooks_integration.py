@@ -107,7 +107,7 @@ class TestFullPipeline:
         assert len(entries) >= 1
         entry = json.loads(entries[-1])
         assert entry["tool"] == "Skill"
-        assert entry["skill"] == "checkpoint"
+        assert entry["details"]["skill"] == "checkpoint"
 
     def test_no_checkpoint_blocks_mutation(self, tmp_path: Path) -> None:
         """Without checkpoint, PreToolUse should block mutations."""

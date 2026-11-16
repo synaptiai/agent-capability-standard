@@ -15,6 +15,7 @@ pub mod ontology;
 pub mod profile;
 pub mod refs;
 pub mod schema;
+pub mod trigger;
 pub mod types;
 pub mod validate;
 pub mod yaml;

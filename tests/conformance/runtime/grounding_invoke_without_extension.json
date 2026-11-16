@@ -1,0 +1,127 @@
+{
+  "description": "Without grounding@1, an invoke step's evidence_anchors are empty, as in 1.1.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child"
+          }
+        }
+      ]
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        },
+        {
+          "capability": "transform",
+          "purpose": "transform step",
+          "store_as": "t",
+          "input_bindings": {
+            "input": "${r.data: object}",
+            "target_format": "json"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "frame": [
+          "w",
+          "child"
+        ],
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": {
+            "items": [
+              1,
+              2
+            ]
+          },
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "file:a.txt",
+              "kind": "file"
+            },
+            {
+              "ref": "file:b.txt",
+              "kind": "file"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "transform",
+        "frame": [
+          "w",
+          "child"
+        ],
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "output": {},
+          "confidence": 1,
+          "evidence_anchors": [
+            {
+              "ref": "acs:r.data",
+              "kind": "record"
+            },
+            {
+              "ref": "file:a.txt",
+              "kind": "file"
+            },
+            {
+              "ref": "https://example.org/report",
+              "kind": "url"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+      "i": {
+        "evidence_anchors": []
+      }
+    }
+  },
+  "trace_kinds": []
+}

@@ -104,8 +104,8 @@ tally:  # Only when the step has a quorum (quorum@1)
   full_passes: integer
   voters: array[string]
 blocked_reason: string | null  # Why blocked (if applicable)
-confidence: number  # 0.0-1.0
-evidence_anchors: ["policy:...", "file:..."]
+confidence: number  # probability that the verdict is right under the policy (§4.1.1)
+evidence_anchors: [{ref: "policy:...", kind: record}, {ref: "file:...", kind: file}]
 assumptions: []
 ```
 
@@ -121,8 +121,8 @@ assumptions: []
 | `actions_taken` | array | Enforcement actions performed |
 | `tally` | object | Review quorum count (passes, blocks, abstains, full_passes, voters); present only when the step has a `quorum` |
 | `blocked_reason` | string | Explanation if action is blocked |
-| `confidence` | number | 0.0-1.0 based on policy coverage |
-| `evidence_anchors` | array | References to policies evaluated |
+| `confidence` | number | Probability, 0.0-1.0, that the verdict is right under the policy (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to policies evaluated |
 | `assumptions` | array | Policy assumptions made |
 
 ## Examples
@@ -181,8 +181,8 @@ actions_taken:
 blocked_reason: "Action targets system file outside workspace boundary. Editing /etc/passwd is prohibited."
 confidence: 1.0
 evidence_anchors:
-  - "policy:workspace_boundary:path_check"
-  - "policy:sys_file_protection:sensitive_paths"
+  - {ref: "policy:workspace_boundary:path_check", kind: record}
+  - {ref: "policy:sys_file_protection:sensitive_paths", kind: record}
 assumptions: []
 ```
 
@@ -247,8 +247,8 @@ actions_taken:
 blocked_reason: null
 confidence: 0.9
 evidence_anchors:
-  - "policy:external_api_rate_limit:hourly_quota"
-  - "context:requests_this_hour:95"
+  - {ref: "policy:external_api_rate_limit:hourly_quota", kind: record}
+  - {ref: "context:requests_this_hour:95", kind: record}
 assumptions:
   - "Rate limit counter is accurate"
   - "Hour boundary resets at :00"
@@ -302,8 +302,8 @@ actions_taken:
 blocked_reason: "This execute step mutates files (requires_checkpoint: true). Call 'checkpoint' first with scope matching the plan."
 confidence: 1.0
 evidence_anchors:
-  - "policy:mutation_safety:checkpoint_gate"
-  - "composition_patterns.md:CAVR"
+  - {ref: "policy:mutation_safety:checkpoint_gate", kind: record}
+  - {ref: "file:composition_patterns.md:CAVR", kind: file}
 assumptions: []
 ```
 

@@ -13,7 +13,10 @@ The standard is designed so **unsafe actions are hard by construction**.
 Any `mutate`, `send` or `rollback` step MUST be preceded by a `checkpoint` step. The requirement follows the ontology's `requires_checkpoint` flag (`mutate`, `send`) and its `requires` edges from `checkpoint` (`mutate`, `send`, `rollback`), not the `mutation` flag: `checkpoint`, `audit` and `persist` are `mutation: true` but need no checkpoint. A step cannot weaken these flags; a weaker declaration is ignored (W602). This ensures:
 - State can be restored if the mutation fails
 - Partial execution can be recovered
-- Audit trail exists for all changes
+- An audit trail can cover every change: a run started with `records:
+  actions` records every step that ran ([STANDARD v1.2 §6.4](STANDARD-v1.2.0.md#64-audit-records)),
+  every host keeps every run's run record ([§5.19.8](STANDARD-v1.2.0.md#5198-the-runs-record)),
+  and the plugin's hook logs every tool call it can, reporting any it cannot
 
 ### 1.2 Actions Are Ordered
 
@@ -45,12 +48,14 @@ flowchart LR
 
 ### 1.3 Claims Must Be Grounded
 
-All outputs SHOULD include:
-- `evidence_anchors`: Links to original sources
-- `provenance`: How the claim was derived
-- `confidence`: Level of certainty
-
-Ungrounded claims MUST be explicitly marked with `inference_method`.
+Every output carries evidence anchors to evidence its producer had, or is
+marked inferred with `inference_method` and `confidence` (STANDARD v1.2
+§3.1). An anchor is `{ref, kind}`, with an optional `digest` of what was
+read (§6.5); an output that reports an action cites the record of that
+action. A grounding policy makes an executor or a safety layer check it:
+an output that is neither grounded nor marked inferred, cites evidence its
+producer did not have, or cites a workflow value outside what its step
+binds, fails with F505 (§5.20).
 
 ### 1.4 Identity Merges Are Constrained
 
@@ -71,6 +76,36 @@ flowchart TB
   m --> lin[Recorded in lineage]
 ```
 
+### 1.5 Secrets Stay Out of Records
+
+A secret (a password, an API key or token, a session cookie, a private key,
+a credential in a URL or a header, or anything the host classifies as
+secret) never enters an evidence anchor or record, a notification, a
+canonical event, an audit record or a safety layer's record of a call, a
+diagnostic or an `Error` a host returns, an executor's trace, or the data
+`persist` stores (STANDARD v1.2 §6.7). Where one would be written it is
+redacted: replaced by `[REDACTED]`, a transform with documented loss. A
+`persist` of a secret is refused, not redacted, since memory is read back
+as fact. Workflows carry no secrets: a host adds credentials where they are
+used.
+
+The reference implementations enforce this by code:
+
+- The Python SDK's `Redactor` (registered values and default patterns) is
+  applied by every evidence store, by the coordination audit log, by the
+  runner to the `Error` messages it submits, and by the adapter to its
+  records and refusals; the evidence collector keeps no `digest` of a tool
+  response that holds a recognised secret.
+- The TypeScript binding redacts every trace entry it writes and every
+  `acs.evidence_recorded` notification, whether or not the tool registers
+  secrets.
+- The adapter and the binding refuse a `persist` or `audit` call whose data
+  holds a credential-shaped value (F504, §5.18.10).
+- The plugin's `persist` and `audit` skills block, in command hooks that
+  share one scan (`hooks/secret_scan.sh`), content and audit records that
+  hold one; the plugin's audit log keeps a digest of each tool input, never
+  the input.
+
 ---
 
 ## 2. Threat Model
@@ -82,7 +117,7 @@ flowchart TB
 | **Spoofing** | Attacker impersonates a trusted source | Trust model with source verification, provenance tracking |
 | **Tampering** | Attacker modifies data in transit or at rest | Schema validation, checkpoint/rollback, immutable observations |
 | **Repudiation** | Actor denies actions | Audit trails, provenance, evidence anchors |
-| **Information Disclosure** | Sensitive data exposed | Constrain capability for access control |
+| **Information Disclosure** | Sensitive data exposed | Constrain capability for access control; secrets kept out of evidence, records, diagnostics and memory (STANDARD §6.7) |
 | **Denial of Service** | System overwhelmed or blocked | Timeouts, retry limits, recovery loops |
 | **Elevation of Privilege** | Unauthorized capability execution | Prerequisites, approval requirements, policy constraints |
 
@@ -247,6 +282,9 @@ Implementations SHOULD:
 - Log every tool call and every refusal, with the layer and configuration that decided it (STANDARD 1.2.0 §5.18.8)
 - Run a safety layer that fails closed (STANDARD 1.2.0 §5.18.8)
 - Validate outputs against schemas
+- Redact secrets before writing evidence or records (STANDARD 1.2.0 §6.7)
+- Know the durability of the evidence and audit stores, and export what
+  must outlive the session when it is written (STANDARD 1.2.0 §6.3, §6.6)
 
 ### 4.3 Configuration Security
 
@@ -330,15 +368,17 @@ The Standard states the checks of the capabilities host-neutrally (STANDARD 1.2.
 
 | Skill, hook | Condition | Standard (1.2.0) | Enforced by |
 |-------------|-----------|------------------|-------------|
+| `skills/audit/SKILL.md`, command hook on `Bash` | A command that appends to `.claude/audit/records.jsonl` holds a credential-shaped value (the shared scan, `hooks/secret_scan.sh`: key and token formats, PEM keys, bearer tokens, a URL's userinfo password that is not a placeholder, an `Authorization` or `Proxy-Authorization` header's value of 8 or more characters mixing letters and digits, and an assignment to a credential name whose value is quoted with no whitespace and 8 or more characters, or unquoted, 12 or more characters, mixing letters and digits) | §5.18.10 `audit` secret row (§6.7, F504) | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
 | `skills/audit/SKILL.md`, PostToolUse command hooks on `Read`, `Grep` | Log the call with a digest of its input | §5.18.8 records (logging, not a check) | Code: records |
 | `skills/checkpoint/SKILL.md`, prompt hook on `Bash` | Scope covers every file to be mutated | Model-judged addition, not required | A model judges |
 | `skills/checkpoint/SKILL.md`, prompt hook on `Bash` | No sensitive file is captured | Model-judged addition, not required (§6.7 governs records and evidence, not restore content) | A model judges |
 | `skills/checkpoint/SKILL.md`, prompt hook on `Bash` | Reason documented; type fits the operation; storage location valid | Model-judged addition, not required | A model judges |
 | `skills/checkpoint/SKILL.md`, PostToolUse command hooks on `Bash`, `Edit` | Log the call | §5.18.8 records | Code: records |
-| `skills/persist/SKILL.md`, prompt hook on `Edit` | No credentials, keys or secrets in the content | §5.18.10 `persist` secret row (§6.7, F504): a check the Standard requires of code, which a layer applying §6.7 makes; the prompt is an addition | A model judges; code where a layer applies §6.7 |
+| `skills/persist/SKILL.md`, prompt hook on `Edit` | No credentials, keys or secrets in the content | §5.18.10 `persist` secret row (§6.7, F504): a check the Standard requires of code, which the command hook makes; the prompt is an addition | Code: the command hook (below); a model judges as well |
 | `skills/persist/SKILL.md`, prompt hook on `Edit` | No personal data; no malicious code; stable knowledge; not a duplicate; no contradiction | Model-judged addition, not required | A model judges |
 | `skills/persist/SKILL.md`, prompt hook on `Edit` | File within project scope | §5.18.10 `persist` target row (§5.18.3: a write outside the memory store is `mutate`) | Code: classification; the command hook's path rules narrow it further |
-| `skills/persist/SKILL.md`, command hook on `Edit` | Path with `//`, `.` or `..` segments; under `/etc`, `/usr`, `/bin`, `/sbin`, `~/.ssh`, `~/.aws` or `~/.config`; a name ending in `.env`, `credentials`, `secrets`, `password`, `.pem` or `.key` | §5.18.10 `persist` target row, host-specific narrowing | Code: blocks the call |
+| `skills/persist/SKILL.md`, command hook on `Edit` | Path with `//`, `.` or `..` segments; under `/etc`, `/usr`, `/bin`, `/sbin`, `~/.ssh`, `~/.aws` or `~/.config`; a name ending in `.env`, `credentials`, `secrets`, `password`, `.pem` or `.key` | §5.18.10 `persist` target row, host-specific narrowing | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
+| `skills/persist/SKILL.md`, command hook on `Edit` | The content written (`new_string` or `content`) holds a credential-shaped value (the shared scan, `hooks/secret_scan.sh`, as for `audit`) | §5.18.10 `persist` secret row (§6.7, F504): refused, not redacted, since memory is read back as fact | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
 | `skills/persist/SKILL.md`, PostToolUse command hook on `Edit` | Log the call | §5.18.8 records | Code: records |
 | `skills/rollback/SKILL.md`, prompt hook on `Bash` | Checkpoint exists and is valid; not expired | Removed from the prompt: §5.18.10 `rollback` row (F503); an expired or used checkpoint can be restored (§5.2.2) | Code: the safety layer |
 | `skills/rollback/SKILL.md`, prompt hook on `Bash` | Current state captured; scope matches; no conflicting operation; integrity verified; no loss beyond scope; uncommitted changes not overwritten | Model-judged addition, not required | A model judges |
@@ -350,7 +390,7 @@ The Standard states the checks of the capabilities host-neutrally (STANDARD 1.2.
 | `skills/send/SKILL.md`, command hook on `Bash` | A `curl`, `wget` or `http` command names as a host `localhost` (in any case), `127.0.0.1` or a private IPv4 address (`10.x.x.x`, `172.16.x.x` to `172.31.x.x`, `192.168.x.x`) | §5.18.10 `send` destination row, host-specific narrowing | Code: blocks the call with `F504 CONSTRAINT_VIOLATED:` |
 | `skills/send/SKILL.md`, PostToolUse command hook on `Bash` | Log the call | §5.18.8 records | Code: records |
 | `skills/transform/SKILL.md`, prompt hook on `Read` (removed after its first successful run) | Source exists, is readable, format understood | Model-judged addition, not required | A model judges |
-| `skills/transform/SKILL.md`, prompt hook on `Read` | No sensitive data exposed by the transformation | §5.18.10 `transform` row (a secret is redacted where the output is recorded, §6.7): a check the Standard requires of code, which a layer applying §6.7 makes; personal data: a model-judged addition | A model judges; code where a layer applies §6.7 |
+| `skills/transform/SKILL.md`, prompt hook on `Read` | No sensitive data exposed by the transformation | §5.18.10 `transform` row (a secret is redacted where the output is recorded, §6.7): a check the Standard requires of code; personal data: a model-judged addition | A model judges; code: the plugin records no output (its audit log keeps a digest of the input), and the SDK adapter's `Redactor` and the binding's `redactJson` redact what each records |
 | `skills/transform/SKILL.md`, prompt hook on `Read` | The transformation is logged | §5.18.8 records | Code: the layer records every call |
 | `skills/transform/SKILL.md`, PostToolUse command hook on `Read` | Log the call | §5.18.8 records | Code: records |
 
@@ -469,6 +509,7 @@ Unless anonymity is requested.
 - [ ] Audit logging is enabled
 - [ ] Checkpoint storage is reliable
 - [ ] Trust model weights are reviewed
+- [ ] Secrets are registered with the redactor; the evidence store's durability is known
 
 ### 8.3 For Operators
 

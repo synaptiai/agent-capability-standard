@@ -98,7 +98,7 @@ Then execute the sync loop:
 
 17) **Invoke `/execute`** with `run_verification_suite` if a mutation was applied (`mutate_out` is not null), and store output as `execute_out`
     - Run verification tests and commands; skip this step when nothing was mutated
-    - If the verification suite fails or times out (R401/R402), roll back to `checkpoint_out` so the unverified mutation does not stay in place, and end the run with that error (no audit is recorded)
+    - If the verification suite fails or times out (R401/R402), roll back to `checkpoint_out` so the unverified mutation does not stay in place, and end the run with that error (the audit step does not run; the run record the host keeps, STANDARD v1.2 §5.19.8, records the failure)
 
 18) **Invoke `/verify`** on `execute_out` (`drift_resolved`, `no_policy_violation`) if a mutation was applied, and store output as `verify_out`
     - Verify outcome: PASS/FAIL with evidence; skip this step when nothing was mutated. On FAIL, carry on: step 19 rolls back, once, and `audit` records the verdict and the rollback
@@ -126,86 +126,86 @@ steps:
   receive_out:
     data: array[object]  # Received items, each with its sender
     source: string
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   search_out:
     results: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   transform_out:
     output: object  # One canonical event (reference/event_schema.yaml#/event)
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   integrate_out:
     merged: object  # Includes observations and meta.world_id
     conflicts: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   detect_entity_out:
     detected: boolean
     matches: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   classify_out:
     labels: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   state_out:
     state: object  # Canonical world state
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   compare_state_out:
     ranking: array[object]
     tradeoffs: array[object]  # Differences between the snapshots
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   transition_out:
     rules: array[object]
     effects: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   detect_anomaly_out:
     detected: boolean
     matches: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   measure_risk_out:
     value: number  # 0.0-1.0
     uncertainty: object  # lower, upper
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   predict_out:
     prediction: object
     probability: number
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   plan_out:
     steps: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   constrain_out:
     compliant: boolean
     violations: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   checkpoint_out:
     checkpoint_id: string
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   mutate_out:  # null when the step was skipped (constrain_out.compliant was false)
     success: boolean
     previous_state: object
     new_state: object
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   execute_out:  # null when nothing was mutated (the step was skipped)
     result: any
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   verify_out:  # null when nothing was mutated (the step was skipped)
     passed: boolean
     violations: array[object]
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   rollback_out:  # null when nothing was mutated or verification passed (the step was skipped)
     restored: boolean
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   audit_out:
     audit_id: string
     recorded: boolean
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
   explain_out:
     explanation: string
-    evidence_anchors: array[string]
+    evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 verification: PASS | FAIL
 audit_log_pointer: string  # Where the audit step appended its record (.claude/audit/records.jsonl)
 next_sync:
   recommended_interval: string  # e.g., "5m", "1h"
   triggers: array[string]  # Conditions for immediate resync
 confidence: number  # 0.0-1.0
-evidence_anchors: array[string]
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 ```
 
@@ -220,7 +220,7 @@ assumptions: array[string]
 | `audit_log_pointer` | string | Where the audit trail was written |
 | `next_sync` | object | Recommended timing for next synchronization |
 | `confidence` | number | 0.0-1.0 based on evidence quality |
-| `evidence_anchors` | array | All evidence references collected |
+| `evidence_anchors` | array of evidence anchors (§6.5) | All evidence references collected |
 | `assumptions` | array | Explicit assumptions made during sync |
 
 ## Examples
@@ -260,12 +260,12 @@ steps:
           hvac-unit-3a: {temperature: 23.5, setpoint: 22.0, status: "cooling"}
     source: "mqtt://sensors.example.com/floor-3"
     evidence_anchors:
-      - "tool:mqtt:sensors.example.com/floor-3"
+      - {ref: "tool:mqtt:sensors.example.com/floor-3", kind: tool}
   search_out:
     results:
       - {path: "state/floor-3-twin-v46.yaml", version_id: "v46"}
     evidence_anchors:
-      - "file:state/floor-3-twin-v46.yaml"
+      - {ref: "file:state/floor-3-twin-v46.yaml", kind: file}
   transform_out:
     output:
       event_id: "evt_7f3a91"
@@ -283,7 +283,7 @@ steps:
       anchors: [{ref: "mqtt://sensors.example.com/floor-3", kind: "sensor"}]
       provenance: {transformer: "transform", transform_version: "1.0.0", ruleset_id: "raw_log_to_observation_event"}
     evidence_anchors:
-      - "file:reference/transform_mapping_rawlog_to_observation.yaml"
+      - {ref: "file:reference/transform_mapping_rawlog_to_observation.yaml", kind: file}
   integrate_out:
     merged:
       meta: {world_id: "building-floor-3-twin"}
@@ -306,36 +306,36 @@ steps:
           anchors: [{ref: "mqtt://sensors.example.com/floor-3", kind: "sensor"}]
     conflicts: []
     evidence_anchors:
-      - "file:state/floor-3-twin-v46.yaml"
+      - {ref: "file:state/floor-3-twin-v46.yaml", kind: file}
   detect_entity_out:
     detected: true
     matches: [{id: "hvac-unit-3a"}, {id: "sensor-temp-301"}]
     evidence_anchors:
-      - "file:state/floor-3-twin-v46.yaml"
+      - {ref: "file:state/floor-3-twin-v46.yaml", kind: file}
   classify_out:
     labels:
       - {id: "hvac-unit-3a", type: "hvac_controller"}
       - {id: "sensor-temp-301", type: "temperature_sensor"}
     evidence_anchors:
-      - "file:state/floor-3-twin-v46.yaml"
+      - {ref: "file:state/floor-3-twin-v46.yaml", kind: file}
   state_out:
     state:
       meta: {world_id: "building-floor-3-twin", version_id: "v47", parent_version_id: "v46"}
     evidence_anchors:
-      - "file:state/floor-3-twin-v47.yaml"
+      - {ref: "file:state/floor-3-twin-v47.yaml", kind: file}
   compare_state_out:
     ranking: [{option: "v47", changed_entities: 2}]
     tradeoffs:
       - {field: "sensor-temp-301.reading", from: 23.0, to: 24.1}
       - {field: "hvac-unit-3a.temperature", from: 22.4, to: 23.5}
     evidence_anchors:
-      - "file:state/floor-3-twin-v46.yaml"
-      - "file:state/floor-3-twin-v47.yaml"
+      - {ref: "file:state/floor-3-twin-v46.yaml", kind: file}
+      - {ref: "file:state/floor-3-twin-v47.yaml", kind: file}
   transition_out:
     rules: [{trigger: "temperature > setpoint for 10m", next: "cooling_degraded"}]
     effects: [{entity: "hvac-unit-3a", status: "cooling_degraded"}]
     evidence_anchors:
-      - "file:state/floor-3-twin-v47.yaml"
+      - {ref: "file:state/floor-3-twin-v47.yaml", kind: file}
   detect_anomaly_out:
     detected: true
     matches:
@@ -343,58 +343,58 @@ steps:
         pattern: "drift"
         description: "Temperature 1.5°C above setpoint for >10 minutes"
     evidence_anchors:
-      - "file:state/floor-3-twin-v46.yaml:temperature_history"
+      - {ref: "file:state/floor-3-twin-v46.yaml:temperature_history", kind: file}
   measure_risk_out:
     value: 0.35
     uncertainty: {lower: 0.3, upper: 0.4}
     evidence_anchors:
-      - "file:state/floor-3-twin-v47.yaml"
+      - {ref: "file:state/floor-3-twin-v47.yaml", kind: file}
   predict_out:
     prediction: {risk: 0.45, horizon: "1h", trigger: "comfort threshold breach"}
     probability: 0.6
     evidence_anchors:
-      - "file:state/floor-3-twin-v46.yaml:temperature_history"
+      - {ref: "file:state/floor-3-twin-v46.yaml:temperature_history", kind: file}
   plan_out:
     steps:
       - action: "Lower hvac-unit-3a setpoint to 21.5°C"
         verification: "Zone temperature within 0.5°C of setpoint in 15m"
         rollback: "Restore setpoint 22.0°C"
     evidence_anchors:
-      - "file:state/floor-3-twin-v47.yaml"
+      - {ref: "file:state/floor-3-twin-v47.yaml", kind: file}
   constrain_out:
     compliant: true
     violations: []
     evidence_anchors:
-      - "policy:change_policy:setpoint_bounds"
+      - {ref: "policy:change_policy:setpoint_bounds", kind: record}
   checkpoint_out:
     checkpoint_id: "chk_20240115_160500"
     evidence_anchors:
-      - "file:.checkpoints/chk_20240115_160500/manifest.json"
+      - {ref: "file:.checkpoints/chk_20240115_160500/manifest.json", kind: file}
   mutate_out:
     success: true
     previous_state: {setpoint: 22.0}
     new_state: {setpoint: 21.5}
     evidence_anchors:
-      - "tool:api:building.api/hvac/hvac-unit-3a/setpoint"
+      - {ref: "tool:api:building.api/hvac/hvac-unit-3a/setpoint", kind: tool}
   execute_out:
     result: "verification suite: 6 passed"
     evidence_anchors:
-      - "tool:bash:run_verification_suite"
+      - {ref: "tool:bash:run_verification_suite", kind: tool}
   verify_out:
     passed: true
     violations: []
     evidence_anchors:
-      - "tool:bash:run_verification_suite"
+      - {ref: "tool:bash:run_verification_suite", kind: tool}
   rollback_out: null  # skipped: verification passed
   audit_out:
     audit_id: "audit_20240115_162000"
     recorded: true
     evidence_anchors:
-      - "file:.claude/audit/records.jsonl"
+      - {ref: "file:.claude/audit/records.jsonl", kind: file}
   explain_out:
     explanation: "Drift of 1.5°C detected on zone 3a; setpoint lowered to 21.5°C after policy check and checkpoint; verification passed"
     evidence_anchors:
-      - "file:.claude/audit/records.jsonl"
+      - {ref: "file:.claude/audit/records.jsonl", kind: file}
 verification: PASS
 audit_log_pointer: ".claude/audit/records.jsonl"
 next_sync:
@@ -404,9 +404,9 @@ next_sync:
     - "HVAC status changes"
 confidence: 0.88
 evidence_anchors:
-  - "tool:mqtt:sensors.example.com/floor-3"
-  - "file:state/floor-3-twin-v47.yaml"
-  - "file:.claude/audit/records.jsonl"
+  - {ref: "tool:mqtt:sensors.example.com/floor-3", kind: tool}
+  - {ref: "file:state/floor-3-twin-v47.yaml", kind: file}
+  - {ref: "file:.claude/audit/records.jsonl", kind: file}
 assumptions:
   - "Sensor readings are accurate within ±0.1°C"
   - "MQTT connection is reliable"

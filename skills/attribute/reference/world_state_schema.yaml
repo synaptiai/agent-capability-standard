@@ -431,8 +431,10 @@ types:
           and hmac when it appends the record, never taking them from what it records.
       timestamp:
         type: string
-        description: When the record was written. A record that a resumed run updates
-          (Standard v1.2 §5.14.1) carries the time of its latest change.
+        description: When the record was written. A queued record that a resumed run
+          decides, refuses or supersedes (Standard v1.2 §5.14.1) is written again and
+          carries the time of that change; carrying the action out changes only its
+          status.
       actor:
         type: string
         description: agent/human

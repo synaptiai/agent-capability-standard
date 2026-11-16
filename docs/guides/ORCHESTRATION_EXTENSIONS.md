@@ -18,8 +18,9 @@ and, for sender identity, [RFC-0004](../../spec/RFC-0004-agent-identity.md).
 | `delegation@1` | Delegation hints and sender filtering | Yes |
 | `quorum@1` | Independent review quorums | Yes |
 | `identity@1` | Sender identity, trust classes, "always ask" | Yes |
+| `grounding@1` | A grounding policy: the executor checks host outputs (Standard v1.2) | Yes |
 
-The reference validator checks all seven. A workflow that declares any other
+The reference validator checks all eight. A workflow that declares any other
 extension (or another major version) is refused (V106).
 
 ## Declaring the extensions you use
@@ -63,10 +64,21 @@ flowchart TB
 | `schedule` | On a cron schedule or an interval | `schedule` | unattended |
 | `event` | When a matching event arrives | `event` | unattended |
 | `manual` | When a person starts it | — | attended |
-| `invoke` | When another workflow invokes it | — | the invoker's |
+| `invoke` | When another workflow invokes it | — | always the invoker's |
 
-`attendance: attended | unattended` overrides the default. It matters for
-approval steps: an unattended run cannot wait for a person in the session.
+`attendance: attended | unattended` overrides the default, except on an
+`invoke` trigger: a run another workflow invokes always has its invoker's
+attendance. It matters for approval steps: an unattended run cannot wait for
+a person in the session.
+
+The host evaluates triggers, not the executor
+([STANDARD v1.2 §5.10.2](../../spec/STANDARD-v1.2.0.md#5102-evaluating-triggers)):
+it starts each run with the trigger's attendance, a schedule's runs at its
+fire times as `overlap` allows, and one run per event it accepts. The Python
+runner does this with `WorkflowRunner.start(workflow, trigger=i, event=...)`
+and the helpers of `grounded_agency.workflows.triggers` (`next_fire`,
+`OverlapGate`, `EventGate`); see
+[Running Workflows](RUNNING_WORKFLOWS.md#triggers).
 
 ### Schedules
 
@@ -85,9 +97,22 @@ approval steps: an unattended run cannot wait for a person in the session.
 - Put the time zone in `timezone`, not as a `CRON_TZ=` prefix.
 - `every` is an interval instead of a cron expression; give one or the
   other.
-- `overlap` says what happens when a run is still going at the next fire
-  time: `skip` it, keep at most one queued run (`buffer_one`), or start
-  runs concurrently (`allow_all`).
+- `overlap` says what happens when a run this trigger started is still in
+  progress at the next fire time: `skip` it (the default), keep at most one
+  waiting run that starts as soon as none is in progress (`buffer_one`), or
+  start runs beside it (`allow_all`). A run that ended `deferred` and is
+  resumed is in progress again. Fire times that passed while the host was
+  stopped count, together, as one fire time when it resumes.
+- Fire times are local times of `timezone`, at second 0. Where a clock
+  change repeats a local time, it fires once, at the first occurrence; where
+  a change skips one, it fires at that time read with the offset before the
+  change (RFC 5545 §3.3.5). So `30 2 * * *` in `America/New_York` fires at
+  07:30 UTC on the day clocks go forward (02:30 does not occur), and `30 1 *
+  * *` fires once on the day they go back.
+- `every` counts from the Unix epoch, in whole milliseconds (rounded up), not
+  from when the trigger was set up: `every: 7m` fires at 00:07, 00:14, ...
+  UTC from midnight of 1 January 1970, whatever the `timezone`. For a
+  local-time grid, use `cron`. `next_fire(schedule, after_ms)` computes both.
 
 
 ```mermaid
@@ -119,6 +144,15 @@ inputs:
 The triggering event is delivered into the workflow input named by
 `delivers_to`, which must hold a canonical event (its `ref` ends in
 `event_schema.yaml#/event`); anything else is V107.
+
+A host starts one run for each event it accepts: its `event_type` equals the
+trigger's, its `source.kind` the trigger's `source_kind` when there is one,
+and its sender passes the host's sender policy (where the workflow declares
+`identity@1`, a sender authenticated as [§5.17](#sender-identity-identity1)
+says). It may drop an event its policy does not admit, and should record the
+drop. At most one run starts per `event_id`: an event delivered again starts
+nothing new (`EventGate` keeps the ids; give it a store that survives a
+restart).
 
 ## Recovery and escalation (`recovery@1`)
 
@@ -309,7 +343,7 @@ and what the decision binds to:
       apply: "${plan_out.steps: array<object>}"
   approval:
     approver: {kind: human, role: release-manager, min_approvers: 2}
-    mode: out_of_band                # or in_session (the default)
+    mode: out_of_band                # a separate channel; in_session (the default): whoever attends the run
     shows: ["${plan_out.steps}"]     # references; quote them inside [ ] and { }
     binds_to: digest
     recheck: {source: "${plan_out}", compare: digest, on_change: reask}
@@ -317,10 +351,28 @@ and what the decision binds to:
     when_unattended: defer_to_queue  # or skip, or fail (the default)
 ```
 
+- `mode` says where the approvers are asked: `in_session` asks whoever
+  attends the run, in its session (the host's permission prompt, the
+  conversation); `out_of_band` asks through a separate channel (a ticket, a
+  message to an approver group), whose approvers need not attend the run,
+  and whose decision may arrive after the session ends. Neither changes
+  what is shown or which decisions are valid, and a `human` approver is
+  never asked in an unattended run, in either mode.
+- With no `approval` field, a step that requires approval is asked of a
+  person (`{kind: human}`), in session, shown its resolved inputs, with no
+  expiry and no recheck, and fails unattended. A partial field takes the
+  default of each member it leaves out; `expires` runs from the request.
 - The decision is bound to the SHA-256 digest of the shown values: if they
   change before the step runs, the approval no longer applies. `recheck`
   re-reads a source just before acting and asks again (`reask`), replans or
   stops when it changed.
+- What the digest covers: the shown values are an array, one element per
+  `shows` reference in order (null when it resolves to nothing), or
+  `[inputs]`, the step's resolved inputs, without `shows`; asked again
+  after a recheck, the array gains `{"recheck": {"previous", "current"}}`.
+  The digest is the SHA-256 of its RFC 8785 text, in lowercase hexadecimal.
+  An integer in the shown values, a number written without a fraction or
+  an exponent, may not exceed 2^53 in magnitude.
 
 
   ```mermaid
@@ -380,7 +432,9 @@ and what the decision binds to:
 
   The `mutate` needs its own `when_unattended`: when the mandate covers
   the send, nothing is deferred, and an unattended run reaches the
-  `mutate` with no one to approve it.
+  `mutate` with no one to approve it. In the morning, the host resumes the
+  run (`runner.resume`, attended): the queued send and `mutate` are asked
+  of a person, and each `planned` record closes under its `action_id`.
 
 
   ```mermaid
@@ -410,11 +464,21 @@ and what the decision binds to:
 - A run that fails or escalates after a deferral still lists its
   deferrals; a recovery loop that runs a deferred step again supersedes
   its earlier `planned` record.
+- **Carrying out a queued action.** Resume the run (`runner.resume`,
+  [STANDARD §5.14.1](../../spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)):
+  the deferred steps run again, each asked afresh (of a person when someone
+  attends, even if its approver is a mandate), and its `planned` record
+  becomes `executed`, `rejected` or `expired` under the same `action_id`.
+  Steps that ran ahead of the deferral and that those steps read run again
+  first, in step order, so a `verify` after the `mutate` reads the world
+  after it; a `checkpoint` step whose id the `mutate` binds runs again too.
+  A run that ended any other way cannot be resumed; a new run of the
+  workflow does not touch the old run's queue.
 - Decisions are recorded on the world state's action record
-  (`world_state_schema.yaml` 1.1.0): status `approved`, `rejected`,
+  (`world_state_schema.yaml` 1.2.0): status `approved`, `rejected`,
   `expired` or `planned`, with an `approval` entry holding the digest,
-  the decision (`approved`, `rejected`, `expired` or `unavailable`) and
-  the approvers.
+  the decision (`approved`, `rejected`, `expired` or `unavailable`), the
+  approvers that counted and, with `identity@1`, their identities.
 
 ## Delegation hints (`delegation@1`)
 
@@ -556,9 +620,41 @@ with each event a step waits for (`schemas/agent_identity_schema.yaml`):
   task routed to the wrong party or a peer answering in its place, not a
   host that lies.
 
+- **Who approved.** Your host may attest who decided an approval: the
+  decision's `approver_identities`, one `agent_identity` per principal.
+  Approvers are then counted by principal, and an identity counts only if
+  it meets the request: kind `human` for a human approver, and the
+  requested `role`. A workflow that targets 1.2 can require authenticated
+  approvers of given trust classes:
+
+  ```yaml
+  spec_version: "1.2"            # the approver fields need a 1.2 target
+  workflow_extensions:
+    requires: [approval@1, identity@1]
+  # ...
+  approval:
+    approver:
+      kind: human
+      role: release-manager
+      min_approvers: 2
+      sender_check: [directory_id]
+      accept_trust_classes: [decision_person]
+  ```
+
+  Each field is a non-empty list from the vocabularies above. With either,
+  a decision without attested identities counts no one, and an identity
+  authenticated another way, or of another class, does not count. The check
+  proves what your host attests, not that an approver is a person. The
+  target matters: in a 1.1 workflow the two fields are unknown (W604, and
+  W616) and nothing applies them, and a 1.1 consumer would ignore them;
+  declared 1.2, the workflow is refused by a 1.1 consumer (V109) instead.
+
 To record who ran a workflow, start the run with an actor identity
 (`WorkflowRunner.run(..., actor_identity=agent.identity())`); every action
-record then carries it. See [Running workflows](RUNNING_WORKFLOWS.md).
+record then carries it. A run keeps that actor: restoring it for another
+principal is refused, and at a handoff to another agent the run is
+cancelled, or, if it ended `deferred`, resumed under the new agent. See
+[Running workflows](RUNNING_WORKFLOWS.md).
 
 ## Review quorums (`quorum@1`)
 
@@ -690,10 +786,112 @@ flowchart TB
 Placing a delegated step on a particular host or device is not part of
 the standard; RFC-0003 records it as an open question.
 
+## Grounding (`grounding@1`)
+
+Standard v1.2 says what a grounded output is
+([STANDARD-v1.2.0 §3.1](../../spec/STANDARD-v1.2.0.md#31-grounded-claims)):
+its `evidence_anchors` hold an evidence anchor (`{ref, kind}`, §6.5) to
+evidence its producer had; otherwise it is **marked inferred**, with an
+`inference_method` and a `confidence`. `grounding@1` lets a workflow ask the
+executor to check that, for the capabilities it names
+([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)):
+
+```yaml
+# Standard version: 1.2.0
+triage:
+  goal: Classify a lab report.
+  risk: low
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    require: [retrieve, classify]   # the capabilities whose outputs are checked
+    kinds: [file, record]           # optional: only anchors of these kinds count
+    attested: true                  # optional: only anchors the host attests count
+  steps:
+  - capability: retrieve
+    purpose: Read the report.
+    store_as: report
+    input_bindings: {target: reports/latest}
+  - capability: classify
+    purpose: Classify it.
+    store_as: labels
+    input_bindings: {item: "${report.data: object}"}
+    failure_modes:
+    - condition: The classification is not grounded.
+      on_error: F505
+      action: stop
+```
+
+When the host answers a checked step with an `Output`, the executor reads
+its `evidence_anchors` after the fields the contract requires (R402) and
+before the after-gates:
+
+```mermaid
+---
+title: The grounding check of one output
+---
+flowchart TB
+  accDescr: An acs citation outside the step's bindings, or an anchor the host's evidence_seen does not list, fails the step with F505. Otherwise the output passes when an anchor counts, or when it is marked inferred; else F505.
+  o[Output] --> c{"Cites an unbound value or unseen evidence?"}
+  c -->|yes| f[F505]
+  c -->|no| a{"An anchor counts?"}
+  a -->|yes| g[Grounded]
+  a -->|no| i{"Marked inferred?"}
+  i -->|yes| inf[Inferred]
+  i -->|no| f
+```
+
+- **Citing a workflow value.** An anchor whose `ref` is `acs:` and a
+  reference body (`acs:report.data`) names a workflow value. Its kind must
+  be `record`, and one of the references the step's `input_bindings` make
+  must **cover** it: the same root, the bound path a prefix of the cited
+  one, an index within a bound slice counting. A step that binds
+  `${search_out.results[0:3]}` may cite `acs:search_out.results[1].url`, not
+  `acs:search_out.results[7]`, `acs:search_out.total` or `acs:search_out`.
+- **`evidence_seen`.** The host may attest, on the `Output` response, the
+  refs of the evidence the output's producer had for this answer: what it
+  put in the model's request, the anchors inside the step's inputs, what
+  the step's tool calls returned. Never a stored history: a ref there was
+  seen by an earlier request. When it is present, every other anchor must
+  be listed. Absent, it attests nothing; an empty list attests that the
+  producer saw nothing.
+- **`attested: true`** counts only anchors whose availability is
+  established (an `acs:` citation, or one `evidence_seen` lists); an output
+  whose anchors are all unattested then stands only if it is marked
+  inferred.
+- **Legacy items.** A bare string, or an object that is not an evidence
+  anchor (no `kind`, a kind such as `tool_output`), does not count and is
+  not itself a failure: the deprecated forms of 1.1 producers.
+- **Marked inferred** means an `inference_method` of the vocabulary
+  (`model_knowledge`, `deduction`, `induction`, `abduction`, `analogy`,
+  `statistical`, `simulation`, `assumption`, or `x-...`) and a `confidence`
+  from 0 to 1.
+- **Actions** are claims too: a `checkpoint`, `audit` or `send` output is
+  grounded by an anchor to the record of what it did
+  (`{ref: "checkpoint:cp-1", kind: record}`).
+- **Not checked:** outputs the executor builds itself, a quorum's, a
+  wait's, an `invoke` step's, and a `delegate` step that waits (its
+  `Output` is the acceptance; its result is composed). With `grounding@1`
+  an `invoke` step's `evidence_anchors` are its nested run's anchors.
+- F505 is not retried; a failure mode can fire on it.
+
+A workflow's policy covers its own steps. A host can also apply policies to
+a run, a list given when the run starts
+(`WorkflowRunner.run(..., grounding=[GroundingPolicy(...)])`), which also
+cover the steps of nested runs; each policy is checked against the
+ontology, so a misspelt capability is refused (V101) rather than turning a
+check off. A domain profile's `evidence_policy` is such a policy:
+`require_grounding` is its `require` and `required_anchor_types` its
+`kinds`.
+
+In a workflow that targets 1.2, `grounding` without the declaration is
+V106. In a 1.0 or 1.1 workflow it is an unknown field (W604), as it was.
+
 ## Durations
 
 Durations appear in schedules (`every`), waits (`timeout`, liveness
-`interval`) and approvals (`expires`). Write
+`interval`) and approvals (`expires`), and in an `audit` step's
+`retention` (Standard v1.2 §6.3). Write
 `250ms`, `30s`, `5m`, `2h`, `1d`, or an ISO-8601 day-time duration such as
 `PT1H30M`, `P1DT12H` or `PT0.5S`. Years, months and weeks are not allowed,
 because their length varies. A step's `timeout` should use the same

@@ -200,7 +200,7 @@ Key design decisions and their rationale:
 | 9 cognitive layers | Maps to established BDI architecture; provides clear separation of concerns | Flat capability list; 3-layer (perception-reasoning-action) |
 | Structural risk enforcement | Hooks physically prevent unsafe actions; not just logged warnings | Convention-based risk management |
 | Domain profiles | One ontology serving multiple domains via configuration | Separate ontologies per domain |
-| Evidence grounding | Every output carries evidence anchors and confidence | Trust-the-model approach |
+| Evidence grounding | Every output carries evidence anchors, or is marked inferred with an inference method and a confidence (STANDARD v1.2 §3.1); a grounding policy makes the executor check it | Trust-the-model approach |
 
 **Reference:** `docs/methodology/FIRST_PRINCIPLES_REASSESSMENT.md`, `docs/methodology/AGENT_ARCHITECTURE_RESEARCH.md`
 

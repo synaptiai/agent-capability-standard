@@ -1,0 +1,52 @@
+{
+  "description": "An action times out at a tick after its deadline: the wake-up time is the deadline plus 1 ms, and a tick at the deadline changes nothing (\u00a75.19.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "timeout": "10s"
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "deadline": 10000
+      }
+    },
+    {
+      "wake_at": 10001
+    },
+    {
+      "tick": 10000,
+      "changed": false
+    },
+    {
+      "tick": 10001,
+      "changed": true
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R401",
+    "step": 0
+  },
+  "trace_kinds": []
+}

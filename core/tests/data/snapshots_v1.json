@@ -1,0 +1,298 @@
+{
+ "cases": [
+  {
+   "catalog": {
+    "w": {
+     "goal": "g",
+     "inputs": {
+      "topic": {
+       "required": true,
+       "type": "string"
+      }
+     },
+     "risk": "low",
+     "spec_version": "1.1",
+     "steps": [
+      {
+       "capability": "retrieve",
+       "input_bindings": {
+        "target": "${topic}"
+       },
+       "purpose": "p",
+       "store_as": "r"
+      }
+     ]
+    }
+   },
+   "header": null,
+   "name": "pending",
+   "next": {
+    "attempt": 1,
+    "capability": "retrieve",
+    "deadline": null,
+    "domain": null,
+    "frame": [
+     "w"
+    ],
+    "id": 1,
+    "inputs": {
+     "target": "x"
+    },
+    "kind": "InvokeCapability",
+    "step": 0,
+    "store_as": "r"
+   },
+   "snapshot": {
+    "hmac": null,
+    "sha256": "3033b072b29a8532995156ac775fab832991b12c1311f842c5cb0b0e16b41fad",
+    "state": "{\"actor_identity\":null,\"attendance\":\"attended\",\"catalog_digest\":\"5dd4cb8676d39c003c90955b5953c3dd1d7bbfaffd147c0bde3b211b5b323fa9\",\"checkpoints\":[],\"deferrals\":[],\"finished\":null,\"frames\":[{\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":1,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":null,\"inputs\":{\"target\":\"x\"},\"output\":null,\"previous\":null,\"rebaseline\":null,\"record\":null,\"replaces\":null},\"deferred\":[],\"ended\":null,\"escalation\":null,\"inputs\":{\"topic\":\"x\"},\"loops\":{},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{},\"recovery\":null,\"replaces\":[],\"stage\":{\"stage\":\"Execute\"},\"step\":0,\"stores\":{},\"workflow\":\"w\"}],\"next_id\":2,\"now\":5,\"pending\":{\"action\":{\"attempt\":1,\"capability\":\"retrieve\",\"deadline\":null,\"domain\":null,\"frame\":[\"w\"],\"id\":1,\"inputs\":{\"target\":\"x\"},\"kind\":\"InvokeCapability\",\"step\":0,\"store_as\":\"r\"},\"deadline\":null,\"purpose\":{\"purpose\":\"Capability\"}},\"records\":[],\"root\":\"w\",\"run_id\":\"r1\",\"trace\":[{\"at\":5,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":5,\"detail\":{\"capability\":\"retrieve\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0}],\"used_decisions\":[],\"version\":1}"
+   }
+  },
+  {
+   "catalog": {
+    "w": {
+     "goal": "g",
+     "inputs": {
+      "topic": {
+       "required": true,
+       "type": "string"
+      }
+     },
+     "risk": "low",
+     "spec_version": "1.1",
+     "steps": [
+      {
+       "capability": "retrieve",
+       "input_bindings": {
+        "target": "${topic}"
+       },
+       "purpose": "p",
+       "store_as": "r"
+      }
+     ]
+    }
+   },
+   "header": null,
+   "name": "completed",
+   "next": {
+    "action_records": [],
+    "cause": null,
+    "deferred": [],
+    "frame": [
+     "w"
+    ],
+    "id": 2,
+    "kind": "Completed",
+    "outcome": "completed",
+    "outputs": {
+     "r": {
+      "confidence": 1,
+      "data": [
+       1
+      ],
+      "evidence_anchors": []
+     }
+    }
+   },
+   "snapshot": {
+    "hmac": null,
+    "sha256": "c92ce0ae4b19d498f9edbdbd2054f9285ca71497e5056f170094ff9d429a1dda",
+    "state": "{\"actor_identity\":null,\"attendance\":\"attended\",\"catalog_digest\":\"5dd4cb8676d39c003c90955b5953c3dd1d7bbfaffd147c0bde3b211b5b323fa9\",\"checkpoints\":[],\"deferrals\":[],\"finished\":{\"action_records\":[],\"cause\":null,\"deferred\":[],\"frame\":[\"w\"],\"id\":2,\"kind\":\"Completed\",\"outcome\":\"completed\",\"outputs\":{\"r\":{\"confidence\":1,\"data\":[1],\"evidence_anchors\":[]}}},\"frames\":[{\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":1,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":null,\"inputs\":{\"target\":\"x\"},\"output\":{\"confidence\":1,\"data\":[1],\"evidence_anchors\":[]},\"previous\":null,\"rebaseline\":null,\"record\":null,\"replaces\":null},\"deferred\":[],\"ended\":null,\"escalation\":null,\"inputs\":{\"topic\":\"x\"},\"loops\":{},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{\"r\":{\"target\":\"x\"}},\"recovery\":null,\"replaces\":[],\"stage\":{\"stage\":\"Begin\"},\"step\":1,\"stores\":{\"r\":{\"confidence\":1,\"data\":[1],\"evidence_anchors\":[]}},\"workflow\":\"w\"}],\"next_id\":3,\"now\":9,\"pending\":null,\"records\":[],\"root\":\"w\",\"run_id\":\"r1\",\"trace\":[{\"at\":5,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":5,\"detail\":{\"capability\":\"retrieve\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0},{\"at\":9,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":2,\"step\":0},{\"at\":9,\"detail\":{\"cause\":null,\"outcome\":\"completed\"},\"frame\":[\"w\"],\"kind\":\"run_finished\",\"seq\":3,\"step\":null}],\"used_decisions\":[],\"version\":1}"
+   }
+  },
+  {
+   "catalog": {
+    "w": {
+     "goal": "g",
+     "inputs": {
+      "topic": {
+       "required": true,
+       "type": "string"
+      }
+     },
+     "risk": "low",
+     "spec_version": "1.1",
+     "steps": [
+      {
+       "capability": "retrieve",
+       "input_bindings": {
+        "target": "${topic}"
+       },
+       "purpose": "p",
+       "store_as": "r"
+      }
+     ]
+    }
+   },
+   "header": null,
+   "name": "failed",
+   "next": {
+    "action_records": [],
+    "code": "R402",
+    "deferred": [],
+    "frame": [
+     "w"
+    ],
+    "id": 2,
+    "kind": "Failed",
+    "message": "no",
+    "step": 0
+   },
+   "snapshot": {
+    "hmac": null,
+    "sha256": "bb4784edce95e7127a4461c934f9e11adffec4d5237f4fbe308fbf88c8f148b6",
+    "state": "{\"actor_identity\":null,\"attendance\":\"attended\",\"catalog_digest\":\"5dd4cb8676d39c003c90955b5953c3dd1d7bbfaffd147c0bde3b211b5b323fa9\",\"checkpoints\":[],\"deferrals\":[],\"finished\":{\"action_records\":[],\"code\":\"R402\",\"deferred\":[],\"frame\":[\"w\"],\"id\":2,\"kind\":\"Failed\",\"message\":\"no\",\"step\":0},\"frames\":[{\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":1,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":{\"code\":\"R402\",\"message\":\"no\"},\"inputs\":{\"target\":\"x\"},\"output\":null,\"previous\":null,\"rebaseline\":null,\"record\":null,\"replaces\":null},\"deferred\":[],\"ended\":null,\"escalation\":null,\"inputs\":{\"topic\":\"x\"},\"loops\":{},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{},\"recovery\":null,\"replaces\":[],\"stage\":{\"stage\":\"Failure\"},\"step\":0,\"stores\":{},\"workflow\":\"w\"}],\"next_id\":3,\"now\":7,\"pending\":null,\"records\":[],\"root\":\"w\",\"run_id\":\"r2\",\"trace\":[{\"at\":5,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":5,\"detail\":{\"capability\":\"retrieve\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0},{\"at\":7,\"detail\":{\"code\":\"R402\",\"message\":\"no\"},\"frame\":[\"w\"],\"kind\":\"step_failed\",\"seq\":2,\"step\":0},{\"at\":7,\"detail\":{\"code\":\"R402\",\"message\":\"no\"},\"frame\":[\"w\"],\"kind\":\"run_failed\",\"seq\":3,\"step\":0}],\"used_decisions\":[],\"version\":1}"
+   }
+  },
+  {
+   "catalog": {
+    "w": {
+     "goal": "g",
+     "risk": "high",
+     "spec_version": "1.1",
+     "steps": [
+      {
+       "capability": "checkpoint",
+       "input_bindings": {
+        "scope": "repo"
+       },
+       "purpose": "checkpoint step",
+       "store_as": "cp"
+      },
+      {
+       "capability": "constrain",
+       "input_bindings": {
+        "constraints": [
+         "policy"
+        ],
+        "target": "config"
+       },
+       "purpose": "constrain step",
+       "store_as": "policy"
+      },
+      {
+       "approval": {
+        "approver": {
+         "kind": "human"
+        },
+        "when_unattended": "defer_to_queue"
+       },
+       "capability": "mutate",
+       "input_bindings": {
+        "operation": {
+         "set": 1
+        },
+        "target": "config"
+       },
+       "purpose": "mutate step",
+       "store_as": "m"
+      },
+      {
+       "capability": "observe",
+       "input_bindings": {
+        "target": "elsewhere"
+       },
+       "purpose": "observe step",
+       "store_as": "other"
+      },
+      {
+       "capability": "verify",
+       "input_bindings": {
+        "conditions": [
+         "applied"
+        ],
+        "target": "${m.success: boolean}"
+       },
+       "purpose": "verify step",
+       "store_as": "v"
+      },
+      {
+       "capability": "explain",
+       "input_bindings": {
+        "conclusion": "${v.passed}"
+       },
+       "purpose": "explain step",
+       "store_as": "e"
+      }
+     ],
+     "workflow_extensions": {
+      "requires": [
+       "approval@1"
+      ]
+     }
+    }
+   },
+   "header": null,
+   "name": "deferred",
+   "next": {
+    "action_records": [
+     {
+      "action_id": "run-1/w/2/0",
+      "actor": "agent",
+      "intent": "mutate step",
+      "reason": "the run is unattended (when_unattended: defer_to_queue)",
+      "status": "planned",
+      "timestamp": "1970-01-01T00:00:00.000Z"
+     }
+    ],
+    "cause": null,
+    "deferred": [
+     {
+      "action_id": "run-1/w/2/0",
+      "frame": [
+       "w"
+      ],
+      "reason": "the run is unattended",
+      "step": 2,
+      "store_as": "m"
+     },
+     {
+      "action_id": null,
+      "frame": [
+       "w"
+      ],
+      "reason": "it reads 'm', which was deferred",
+      "step": 4,
+      "store_as": "v"
+     },
+     {
+      "action_id": null,
+      "frame": [
+       "w"
+      ],
+      "reason": "it reads 'v', which was deferred",
+      "step": 5,
+      "store_as": "e"
+     }
+    ],
+    "frame": [
+     "w"
+    ],
+    "id": 4,
+    "kind": "Completed",
+    "outcome": "deferred",
+    "outputs": {
+     "cp": {
+      "checkpoint_id": "cp1",
+      "evidence_anchors": []
+     },
+     "other": {
+      "confidence": 1,
+      "evidence_anchors": [],
+      "observation": {}
+     },
+     "policy": {
+      "compliant": true,
+      "evidence_anchors": []
+     }
+    }
+   },
+   "snapshot": {
+    "hmac": null,
+    "sha256": "6fcb49a8bafff62282c1b98dfe8dfb0cbf53864418d87d3280a1b06912cf43b1",
+    "state": "{\"actor_identity\":null,\"attendance\":\"unattended\",\"catalog_digest\":\"0c0f3c1b4b800cc1bab90ca93ffba684e87d8a7440ad5012d0ba279bf9144d0d\",\"checkpoints\":[{\"id\":\"cp1\",\"valid\":true}],\"deferrals\":[{\"frame\":[\"w\"],\"path\":[2],\"reason\":\"the run is unattended\",\"record\":0,\"store_as\":\"m\"},{\"frame\":[\"w\"],\"path\":[4],\"reason\":\"it reads 'm', which was deferred\",\"record\":null,\"store_as\":\"v\"},{\"frame\":[\"w\"],\"path\":[5],\"reason\":\"it reads 'v', which was deferred\",\"record\":null,\"store_as\":\"e\"}],\"finished\":{\"action_records\":[{\"action_id\":\"run-1/w/2/0\",\"actor\":\"agent\",\"intent\":\"mutate step\",\"reason\":\"the run is unattended (when_unattended: defer_to_queue)\",\"status\":\"planned\",\"timestamp\":\"1970-01-01T00:00:00.000Z\"}],\"cause\":null,\"deferred\":[{\"action_id\":\"run-1/w/2/0\",\"frame\":[\"w\"],\"reason\":\"the run is unattended\",\"step\":2,\"store_as\":\"m\"},{\"action_id\":null,\"frame\":[\"w\"],\"reason\":\"it reads 'm', which was deferred\",\"step\":4,\"store_as\":\"v\"},{\"action_id\":null,\"frame\":[\"w\"],\"reason\":\"it reads 'v', which was deferred\",\"step\":5,\"store_as\":\"e\"}],\"frame\":[\"w\"],\"id\":4,\"kind\":\"Completed\",\"outcome\":\"deferred\",\"outputs\":{\"cp\":{\"checkpoint_id\":\"cp1\",\"evidence_anchors\":[]},\"other\":{\"confidence\":1,\"evidence_anchors\":[],\"observation\":{}},\"policy\":{\"compliant\":true,\"evidence_anchors\":[]}}},\"frames\":[{\"ahead\":[3],\"always_ask\":[],\"cur\":{\"always_ask\":false,\"attempt\":0,\"baseline\":null,\"deadline\":null,\"delegated\":null,\"dropped\":{},\"ending\":null,\"error\":null,\"inputs\":null,\"output\":null,\"previous\":null,\"rebaseline\":null,\"record\":null,\"replaces\":null},\"deferred\":[2,4,5],\"ended\":null,\"escalation\":null,\"inputs\":{},\"loops\":{},\"marked\":false,\"nested_caps\":{},\"ran_inputs\":{\"cp\":{\"scope\":\"repo\"},\"other\":{\"target\":\"elsewhere\"},\"policy\":{\"constraints\":[\"policy\"],\"target\":\"config\"}},\"recovery\":null,\"replaces\":[],\"stage\":{\"stage\":\"Begin\"},\"step\":6,\"stores\":{\"cp\":{\"checkpoint_id\":\"cp1\",\"evidence_anchors\":[]},\"other\":{\"confidence\":1,\"evidence_anchors\":[],\"observation\":{}},\"policy\":{\"compliant\":true,\"evidence_anchors\":[]}},\"workflow\":\"w\"}],\"next_id\":5,\"now\":0,\"pending\":null,\"records\":[{\"action_id\":\"run-1/w/2/0\",\"actor\":\"agent\",\"intent\":\"mutate step\",\"reason\":\"the run is unattended (when_unattended: defer_to_queue)\",\"status\":\"planned\",\"timestamp\":\"1970-01-01T00:00:00.000Z\"}],\"root\":\"w\",\"run_id\":\"run-1\",\"trace\":[{\"at\":0,\"detail\":{\"workflow\":\"w\"},\"frame\":[\"w\"],\"kind\":\"run_started\",\"seq\":0,\"step\":null},{\"at\":0,\"detail\":{\"capability\":\"checkpoint\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":1,\"step\":0},{\"at\":0,\"detail\":{\"checkpoint_id\":\"cp1\"},\"frame\":[\"w\"],\"kind\":\"checkpoint_created\",\"seq\":2,\"step\":0},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":3,\"step\":0},{\"at\":0,\"detail\":{\"capability\":\"constrain\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":4,\"step\":1},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":5,\"step\":1},{\"at\":0,\"detail\":{\"capability\":\"mutate\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":6,\"step\":2},{\"at\":0,\"detail\":{\"reason\":\"the run is unattended\",\"when_unattended\":\"defer_to_queue\"},\"frame\":[\"w\"],\"kind\":\"approval_unattended\",\"seq\":7,\"step\":2},{\"at\":0,\"detail\":{\"reason\":\"the run is unattended\"},\"frame\":[\"w\"],\"kind\":\"step_deferred\",\"seq\":8,\"step\":2},{\"at\":0,\"detail\":{\"capability\":\"observe\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":9,\"step\":3},{\"at\":0,\"detail\":{},\"frame\":[\"w\"],\"kind\":\"step_completed\",\"seq\":10,\"step\":3},{\"at\":0,\"detail\":{\"capability\":\"verify\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":11,\"step\":4},{\"at\":0,\"detail\":{\"reason\":\"it reads 'm', which was deferred\"},\"frame\":[\"w\"],\"kind\":\"step_deferred\",\"seq\":12,\"step\":4},{\"at\":0,\"detail\":{\"capability\":\"explain\"},\"frame\":[\"w\"],\"kind\":\"step_started\",\"seq\":13,\"step\":5},{\"at\":0,\"detail\":{\"reason\":\"it reads 'v', which was deferred\"},\"frame\":[\"w\"],\"kind\":\"step_deferred\",\"seq\":14,\"step\":5},{\"at\":0,\"detail\":{\"cause\":null,\"outcome\":\"deferred\"},\"frame\":[\"w\"],\"kind\":\"run_finished\",\"seq\":15,\"step\":null}],\"used_decisions\":[],\"version\":1}"
+   }
+  }
+ ],
+ "description": "Snapshots of version 1, recorded with the executor before Standard 1.2's snapshot version 2 (S2b), with the action next() returned then. Version-1 states must still restore (core/tests/host_protocol.rs)."
+}

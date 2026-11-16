@@ -1201,7 +1201,8 @@ class TestEvidenceToolInput:
 
         assert store.get_recent() == ["tool:Bash:b1", "command:b1"]
         assert SECRET not in json.dumps(store.to_list())
-        (command,) = store.get_by_kind("command")
+        with pytest.warns(DeprecationWarning):
+            (command,) = store.get_by_kind("command")
         assert command.metadata == {"exit_code": 0}
 
     @pytest.mark.asyncio
@@ -1211,10 +1212,17 @@ class TestEvidenceToolInput:
 
         await hook(_bash_call(), "b1", None)
 
-        (tool_output,) = store.get_by_kind("tool_output")
-        (command,) = store.get_by_kind("command")
-        assert SECRET in tool_output.metadata["tool_input"]["command"]
-        assert SECRET in command.metadata["command"]
+        # Kept, and redacted by the store (STANDARD v1.2 §6.7).
+        with pytest.warns(DeprecationWarning):
+            (tool_output,) = store.get_by_kind("tool_output")
+        with pytest.warns(DeprecationWarning):
+            (command,) = store.get_by_kind("command")
+        for text in (
+            tool_output.metadata["tool_input"]["command"],
+            command.metadata["command"],
+        ):
+            assert "https://api.example.com" in text
+            assert SECRET not in text and "[REDACTED]" in text
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("keep", [False, True])
@@ -1230,7 +1238,10 @@ class TestEvidenceToolInput:
             for hook in entry.hooks:
                 await hook(_bash_call(), "b1", None)
 
-        assert (SECRET in json.dumps(adapter.evidence_store.to_list())) is keep
+        kept = json.dumps(adapter.evidence_store.to_list())
+        assert ("https://api.example.com" in kept) is keep
+        # Kept only redacted (STANDARD v1.2 §6.7).
+        assert SECRET not in kept
 
     @pytest.mark.asyncio
     async def test_unclassified_tool_is_evidence_of_no_capability(

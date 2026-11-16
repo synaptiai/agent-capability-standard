@@ -13,7 +13,7 @@ import logging
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
-from ..state.evidence_store import EvidenceStore
+from ..state.evidence_store import EvidenceStoreProtocol
 
 if TYPE_CHECKING:
     from .._types import HookCallback, HookContext
@@ -24,7 +24,7 @@ logger = logging.getLogger("grounded_agency.hooks.discovery_injector")
 
 def create_discovery_injector(
     pipeline: DiscoveryPipeline,
-    store: EvidenceStore,
+    store: EvidenceStoreProtocol,
 ) -> HookCallback:
     """
     Create a PreToolUse hook that runs capability discovery on user prompts.
@@ -37,7 +37,7 @@ def create_discovery_injector(
 
     Args:
         pipeline: Configured DiscoveryPipeline instance.
-        store: EvidenceStore for recording discovery evidence.
+        store: The evidence store (§6.6) for recording discovery evidence.
 
     Returns:
         Async hook callback function.

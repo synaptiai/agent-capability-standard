@@ -559,6 +559,236 @@ Workstreams should run `npm run check:axe` (or at least
   core's canonical JSON in Python). `iJsonProblem` is the TypeScript
   package's one I-JSON check: S4 or S5 code that needs one should use it.
 
+## 2026-11-15 — S2a (approval, deferral and run identity), for the streams after it
+
+- **Saved state (C34).** S2a does not bump `SNAPSHOT_VERSION`; S2b does,
+  once. S2a's state members (`Frame.resume`, `.parked`,
+  `.pending_escalation`, `.ahead`, `.queued`) are optional and left
+  out while they have their defaults; `Frame.ahead` is `None` while nothing
+  of its frame is deferred. A state with deferrals saved before S2a has no
+  `ahead`, and `Run::resume` refuses it (`ResumeError::NotKept`). S2b's
+  `cancel` clears these members and must accept such a state (S2a part 10).
+- **`Program::build(ctx, catalog, root, header)`** takes the catalog
+  header's version, for `Workflow.targets_1_2` (§11.5 target 1.2 or later).
+  S6's profile policy on `Program` can come in beside it.
+- **Runtime fixture format.** The `resume` script entry and the
+  `"{{digest_upper}}"` placeholder are implemented in `core/tests/runtime.rs`
+  and `tests/runtime_replay.py` (`play()` returns the resumed run), and an
+  entry may expect a run's end before a resumption (`{"expect":
+  {"kind": "Completed", ...}}` without `respond`). The site's
+  `loadRuntimeFixture` reads both (`RuntimeFixture.resumedAt`).
+- **Standard 1.2.0 page figures.** S2a added five site figures (slots
+  `approval-unattended-replay`, `resume-replay`, `resume-skip-replay`,
+  `approver-count`, `digest-vectors`). `digest-vectors` sits after §10.3's
+  paragraph 2 (`after('paragraph', 2, 'The approval digest vectors (tests/confo')`):
+  a stream that adds a §10.3 paragraph before S2a's (S2b, S1 by D2's order)
+  moves that index. `approvalPlans` now finds §5.14's plans list by its
+  "plan → result" items, and `deferral-replay` names list 3 of §5.14.
+- **The queued link is a frame member (S2a review round 1).** The queued
+  action a re-entered step continues is `Frame.queued` (`Queued {step,
+  record}`), no longer `StepState.queued`: it lasts until the step goes on,
+  through a re-ask after a recheck and a retry, and every decision of the
+  step updates that record in place. S2b's `cancel` and `take_records`
+  (S2b design lines 2361 and 3754) read `Frame.queued` of each running frame
+  where they read `cur.queued`; a parked frame holds none. A recovery loop
+  during a resumption now prepends the steps it runs again to `Frame.resume`
+  instead of clearing it (§5.14.1 item 7).
+- **Review round 2.** `Frame.queued` also closes once the queued action is
+  carried out (`after`, status `executed`), so a loop back to the step asks
+  for a new action. During a resumption a loop's range (`Machine::rerun`)
+  leaves out handler steps: a deferred handler keeps its parked nested run,
+  its `nested_caps` entry and its deferrals. `State.resumed` (left out
+  while false) says the run was resumed: a queued record the resumed run
+  supersedes is written again with the time and actor of then
+  (`reject_queued`, `stamp`); a run never resumed leaves them, as 1.1
+  does. S2b's `cancel` of a resumed run may stamp its `cancelled` records
+  the same way. `exec::read_json` refuses a member name twice in one
+  object.
+
+## 2026-11-15 — S2b (host protocol, runs and audit records), for the streams after it
+
+- **Snapshot version 2 (C34).** `SNAPSHOT_VERSION` is 2. `restore` reads
+  version 1 too: its `finished` held the whole terminal action, which is
+  converted to the head and must equal the action derived from the state.
+  `State.finished` is now a `Terminal { id, frame, end: End }`, and
+  `State::terminal_action()` derives the records, outputs and deferrals;
+  `Run::next()` returns an owned `Action`, which carries `run_id`. New
+  optional state members: `StepState.checkpoint_id`, `StepState.started`,
+  `State.trace_base`, `records_base`, `records_taken_sha256`,
+  `trace_taken_sha256` (each left out while it has its default). A member a
+  later stream adds stays optional with a default that gives 1.1 behaviour.
+- **Record indices.** Records can be taken out of the state (`take_records`),
+  so read and write them through `st.rec(r)` / `st.rec_mut(r)`, count them
+  with `st.records_written()`, and write a new one with
+  `Machine::push_record(frame_index, status, approval)` (or `record()` for
+  the current step); every record carries `run_id`, `frame`, `step`,
+  `capability` and the step's `checkpoint_id`. S6's `person_required` on
+  records and S5's `idempotency_key` go there.
+- **Record mode `actions`** is implemented (`StartOptions::unimplemented`
+  no longer refuses it; both harnesses pass `records`). A failure-mode
+  checkpoint or a rollback gets its own record through
+  `Machine::side_record(capability, status, checkpoint_id, code)`: S5 adds
+  `details.not_covered` to the rollback record there (FOUNDATION F4).
+- **Runs end through `Machine::finish(End)`**: `End::Completed { outcome,
+  cause, ended }` or `End::Failed { code, step, message, reason,
+  checkpoint_id }`. `cancel` clears S2a's frame members (`parked`,
+  `resume`, `pending_escalation`, `queued`).
+- **`schemas/host_protocol.schema.json`** requires `run_id` in `head`, as
+  the notes above planned. `tests/test_host_protocol_schema.py` validates
+  every action, response (also against a strict copy: a new response member
+  goes in the schema), trace event, snapshot, record and run record of a
+  replay of all runtime fixtures, and checks `grounded_agency/workflows/
+  protocol.py`'s typed dicts key for key against the schema: a stream that
+  adds a member to an action or a response adds it to both.
+- **Pinned members.** `scripts/gen_runtime_fixtures.py` refuses a fixture
+  that pins a member outside `NORMATIVE_MEMBERS` (by action kind, plus
+  `action_records[]`, `approval`, `deferred[]`, `ended` and `run_record`);
+  below `outputs`, `inputs`, `shown`, `correlate`, `event`, `details`,
+  `approver`, `liveness`, `actor_identity` and `approver_identities` any
+  member is allowed. A stream whose fixtures pin a new member adds it there,
+  with the section that defines it (`idempotency_key` is already listed).
+- **Fixture script entries**: `{"tick": T, "changed": C}`, `{"wake_at": W}`
+  and `{"cancel": {"reason", "at"}}` (helpers `tick`, `wake`, `cancel`,
+  `err` in `scripts/runtime_fixtures/helpers.py`), and the fixture members
+  `records` and `run_record`. At every `tick` the harnesses check that it
+  changed the run exactly when it reached `run.wake_at()`; every fixture is
+  also replayed with the trace and records taken before every entry.
+- **The trace detail `reason`** (and `reason_ignored`) on `step_failed`,
+  `retry` and `run_failed`, and the kind `run_cancelled`, are documented in
+  `docs/guides/RUNNING_WORKFLOWS.md`, as the F1.8 note asked.
+- **W616's FEATURES** gains `the audit input 'require_record'` (C12). W618
+  and W619 live in `core/src/validate/groups.rs`, called once from
+  `validate/mod.rs` after the groups are built.
+- **Site.** §5.19 is written: its `unwritten` entry left `EXEMPT_RUNS`, and
+  four replay slots draw S2b fixtures (`protocol-replay` in §5.19.1,
+  `wake-replay` §5.19.3, `cancel-replay` §5.19.5, `reason-replay` §5.19.7).
+  The site's fixture reader (`loadRuntimeFixture`) skips `tick`, `wake_at`
+  and `cancel` entries, a `Sleep` expectation and the action pending at a
+  cancel. S2b split a §5.13 paragraph, which moved the `wait-replay` slot to
+  paragraph index 7.
+- **For S3 (`spec/EDGE_TYPES.md`).** S2b's review round 1 rewrote two
+  sentences outside S3's §5: "Runs before" now says the members of one
+  parallel group are not ordered (STANDARD §5.2.3) rather than that they
+  run concurrently, and the "Coexistence with `precedes`" example says a
+  mutation and its checkpoint in one group are not ordered. The V102
+  detail for a group mate (`semantics.rs`) now reads "shares
+  parallel_group 'g' with it, so it is not ordered before it", and the
+  S303 messages of `wait.rs` (delay in a group) and `exprs.rs` (`end` in a
+  group) no longer say the group runs concurrently.
+- **Attendance of `invoke` runs (§5.10, §5.10.2).** A run an `invoke`
+  step starts always has its invoker's attendance, whatever its `invoke`
+  trigger declares (the executor's 1.1 behaviour); `trigger_attendance`
+  and the vectors follow. The validator still counts an `invoke` trigger
+  that declares `unattended` as an unattended start for W606.
+
+## 2026-11-16 — S1 merged into the chain (round3/b), for the streams after it
+
+- **Records of calls (C14, S2b part 10).** The plugin's audit line is S2b's
+  action record with S1's `recorded_by` (`name: "agent-capability-standard
+  plugin hooks"`, `version`, `config_sha256`, `settings`). The SDK adapter's
+  call records gain `seq` (their number in the scope) and export as action
+  records with `adapter.export_action_records(scope)` (module function
+  `call_action_record`): `allowed` → `approved`, `asked` → `planned`,
+  `refused` → `rejected` with the diagnostic's `code`, `ran` → `executed`,
+  `failed` → `failed`, a boundary has none; an in-session approval becomes
+  `approval: {digest, decision: approved, mode: in_session}`; the layer's
+  other members go under `details`. The binding's `actionRecord(entry,
+  scope)` takes no third argument: it keeps the entry's own `recorded_by`
+  (else `RECORDED_BY`, now `@acs/standard-agents-binding`, the binding's
+  `LAYER_NAME`) and puts a nested call's `covered_by` under `details` as
+  the composite's `action_id`.
+- **Standard text.** §10.3's paragraphs are in D2's order (S2b, S1, S2a):
+  the `digest-vectors` slot is `after('paragraph', 3, ...)`; a stream that
+  adds a §10.3 paragraph before S2a's moves it again. §1 item 10 is one line
+  ("the ontology applied to the tool calls a model chooses"), so the run from
+  the page top to the first figure is 1781px; S6's item 12 should fit one
+  line too, or the top run needs a figure. §5.19.1's `InvokeCapability` row
+  cites §5.18.9 for an output a host gets as text (S1 part 10).
+- **Site.** §5.2.2 (S1) and §5.2.3 (S2b) together made a 1935px run; the
+  new replay `group-replay` (§5.2.3, after its paragraph 1, fixture
+  `parallel_group_member_fails`) splits it. The longest net run of
+  `/spec/1.2.0/` is now 1800px (§5.14.1, after `deferral-replay`, unchanged
+  by the merge): a stream that lengthens §5.14 or §5.14.1 needs a figure
+  there.
+
+## 2026-11-16 — S4 (evidence, grounding and secrets), for the streams after it
+
+- **Grounding in the executor (S6).** `Machine::grounding_check`
+  (`core/src/exec/machine.rs`) collects the policies that require the step's
+  capability as `wf.grounding.iter().chain(&self.st.grounding)`: the frame
+  workflow's own (`Workflow.grounding`, under `grounding@1`), then the run's
+  host policies (`StartOptions.grounding`, which apply in every frame). S6
+  appends the applied profiles' policies to that chain (built with the
+  public `grounding::Policy::new`, ids checked with `check_ids`), and puts
+  its minimum-confidence check right after the call in `output()`, before
+  the after-gates (C24). The check runs after the `require_record` R402
+  check, and a waiting delegate's acceptance returns before it. The
+  `grounding` trace event's `policies` counts the policies that applied.
+- **§11.5 (S6).** `semantics::FEATURES` gains two 1.2 entries: "extension
+  'grounding@1' and its field 'grounding'" (first use at
+  `workflow_extensions.requires[i]`) and "F505 in a failure mode's
+  'on_error'". S6's §11.5 list of 1.2 features should name them (S4.md
+  2.20's text).
+- **Profiles (S6).** `GroundingPolicy.from_profile` reads
+  `evidence_policy.require_grounding`/`required_anchor_types`, and also a
+  `{require, kinds}` entry; a `required_anchor_types` value that is not a
+  §6.5 kind is a `ValueError`, so a shipped profile is read only once S6
+  migrates its values (and the site's `domain-usage.ts` comparison).
+  `docs/domains/README.md` "Status of Domain Profiles" gained S4's row; the
+  section is S6's to rewrite.
+- **Skills (S5).** S4 rewrote the `persist` skill's PreToolUse command hook
+  (it reads the call once with `jq -c .`, refuses with `F504
+  CONSTRAINT_VIOLATED:`/`R407 SAFETY_CHECK_FAILED:`, and copies
+  `hooks/secret_scan.sh` between its BEGIN and END lines, which
+  `tests/test_skill_hooks.py` keeps equal), and added `record` anchors of
+  the action to the examples of `checkpoint` (`checkpoint:<id>`),
+  `rollback` (`rollback:<checkpoint id>`), `send` (`sent:<idempotency_key>`,
+  the example `sent:run-4f2a:7` in S5's `<run_id>:<n>` form) and `persist`
+  (`memory:<key>`). S5's rewrites of those bodies keep them (§3.1). The
+  skills' `confidence` glosses are pinned by `tests/test_evidence_schemas.py`
+  (probability and §4.1.1 in the table row; none of the old glosses).
+- **Secrets (S5).** `Redactor.holds_credential` (Python) and
+  `holdsCredential` (`@synaptiai/acs-core`) are the narrow rule a refusal
+  uses (registered values, key and token formats, credential-shaped
+  assignments), the same as the plugin's scan; `redact`/`redactJson` stay
+  the broad rule for what is written. The SDK adapter and the binding now
+  refuse `persist` and `audit` data holding a credential (F504) and redact
+  their records, so both statements dropped those `not_applied` lines; the
+  `send` line (S5) and the adapter's output-contract line remain.
+- **Fixture of S2b.** `pass_audit_require_record` bound `retention: P1Y`,
+  outside the §5.10.1 grammar and now W614; it binds `P365D`.
+- **Runner.** `WorkflowRunner` gains `evidence_store=` and `redactor=`;
+  `run()`/`start()` take `grounding=`. It redacts the message of every
+  `Error` it submits (`_redact_error`), and reads what a submit added with
+  `run.trace(since=run.trace_seq)` (`_core.Run.trace_seq` is new).
+
+## 2026-11-16 — S4 review round 1, for the streams after it
+
+- **§5.18.7 (S1's text, S5).** The changed-arguments bullet now ends "or if
+  a check of §5.18.10 fails with them (F504)". The SDK adapter's
+  permission callback runs `_secret_refusal` on changed arguments; S5's
+  `send` destination check belongs in the same branch, and the binding's
+  equivalent when it gains one.
+- **Adapter grants carry the call id (S5, S6).** `GroundedAgentAdapter._allowed`
+  maps `(tool, args digest)` to the call ids granted, oldest first;
+  `_allow_token(tool, args, delta, call)` and `_take_allowed(tool, args)`
+  (returns the id used). `take_allowed` keeps its signature. An outcome a
+  guarded tool records itself (`check_call_output`, F505, decision
+  `failed`) is not recorded again by the post-call hooks.
+- **Host grounding policies refuse unknown members** (`require`, `kinds`,
+  `attested`, `x-...`) in Rust (`Policy`'s `Deserialize`,
+  `grounding::unknown_member`), Python and TypeScript. S6's
+  profile-derived policies are built with `Policy::new`, not deserialized,
+  so they are unaffected; `GroundingPolicy.from_dict` is strict, while
+  `from_profile` reading `evidence_policy` is not.
+- **Validator.** `grounding` is in `WORKFLOW_KEYS` only for a workflow that
+  targets 1.2 or declares `grounding@1` (`validate/mod.rs` filters it), so
+  an undeclared 1.1 use gets 1.1's W604 from the unknown-field pass.
+  `extensions::declares(wf, name)` reads a declaration without reporting.
+- **Credential vectors.** `tests/conformance/secrets/credentials.json`
+  pins the refusal rule for Python, TypeScript and `hooks/secret_scan.sh`;
+  a stream that changes the scan re-syncs the skills' copies.
+
 ## 2026-11-16 — S6 review round 1 (affects S2b, S4, S5)
 
 - **A profile rule no check reads is refused, not ignored.**

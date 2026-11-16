@@ -11,6 +11,9 @@ import { placeSlots } from '../src/plugins/rehype-spec-slots';
 import { REPLAY_FIXTURES, replay } from '../src/lib/run-replay';
 import * as D from '../src/lib/spec-dsl-figures';
 import * as T from '../src/lib/spec-tail-figures';
+import * as H from '../src/lib/spec-host-figures';
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 import { loadOntology } from '../src/data/ontology';
 
 // The current Standard: the newest spec/STANDARD-v*.md, whose page draws SPEC_SLOTS.
@@ -49,7 +52,7 @@ describe('figure slots', () => {
 
   it('fails when a block a slot names no longer starts with its recorded words', async () => {
     const edited = text.replace('**Delays.** A step may declare', '**Pauses.** A step may declare');
-    await expect(renderRepoFile(STD, edited)).rejects.toThrow(/slot wait-replay: paragraph 6 of §5\.13 starts "Pauses\./);
+    await expect(renderRepoFile(STD, edited)).rejects.toThrow(/slot wait-replay: paragraph 8 of §5\.13 starts "Pauses\./);
   });
 
   it('lists the slots in page order', () => {
@@ -78,7 +81,12 @@ describe('run replay (RunReplay, F-S14b, F-S16b, F-S18)', () => {
     script: { expect: { kind: string; capability?: string; step?: number } }[];
     end: { kind: string; code?: string; outcome?: string; deferred?: { step: number; reason?: string }[] };
   };
-  const read = (name: string) => JSON.parse(repoText(`tests/conformance/runtime/${name}.json`)) as Fixture;
+  // The requests of a script: a `resume` entry (§5.14.1) and the end a run
+  // reached before it are not requests.
+  const read = (name: string) => {
+    const f = JSON.parse(repoText(`tests/conformance/runtime/${name}.json`)) as Fixture & { script: Record<string, unknown>[] };
+    return { ...f, script: f.script.filter((x) => 'respond' in x) } as Fixture;
+  };
 
   it.each(Object.values(REPLAY_FIXTURES))('marks %s as its script and end record it', (name) => {
     const f = read(name);
@@ -89,9 +97,12 @@ describe('run replay (RunReplay, F-S14b, F-S16b, F-S18)', () => {
     expect(r.steps.reduce((a, s) => a + s.requests, 0)).toBe(f.script.length);
     // A request that names its step lands on it (fixture steps are 0-based, the figure's 1-based).
     for (const e of f.script.filter((x) => typeof x.expect.step === 'number')) expect(r.steps[e.expect.step!]!.requests).toBeGreaterThan(0);
-    // A request for a capability lands on a step of that capability.
+    // A request for a capability lands on a step of that capability, as
+    // does one that names only its step (an approval, a checkpoint).
     for (const cap of new Set(f.script.map((x) => x.expect.capability).filter(Boolean))) {
-      const want = f.script.filter((x) => x.expect.capability === cap).length;
+      const own = (x: Fixture['script'][number]) =>
+        x.expect.capability === cap || (x.expect.capability === undefined && typeof x.expect.step === 'number' && steps[x.expect.step]!.capability === cap);
+      const want = f.script.filter(own).length;
       expect(r.steps.filter((s) => s.step.capability === cap).reduce((a, s) => a + s.requests, 0), cap).toBe(want);
     }
     // Deferred steps are exactly end.deferred, with its reasons.
@@ -107,6 +118,17 @@ describe('run replay (RunReplay, F-S14b, F-S16b, F-S18)', () => {
     const r = replay('recovery_loop_exhausted');
     expect(r.loops).toHaveLength(plan - 1);
     expect(r.loops[0]).toMatchObject({ from: 2, to: 1, maxLoops: 1 });
+  });
+
+  it('counts the requests after a resumption apart, and does not read the return to a deferred step as a loop', () => {
+    const r = replay('resume_reruns_read_ahead');
+    expect(r.resumes).toBe(1);
+    expect(r.loops).toEqual([]);
+    // retrieve ran ahead of the deferral and again when the run resumed;
+    // the queued mutate ran only then.
+    const byStore = (s: string) => r.steps.find((x) => x.step.store_as === s)!;
+    expect(byStore('r')).toMatchObject({ requests: 2, resumed: 1 });
+    expect(byStore('m')).toMatchObject({ requests: 3, resumed: 3 });
   });
 
   it('gives a step deferred without a reason the reason its own approval plan gives', () => {
@@ -357,6 +379,64 @@ describe('§12.5 pattern strips', () => {
     const strips = T.patternStrips(text, 'spec/STANDARD-v1.0.0.md');
     expect(strips.map((s) => [s.name, s.wf.id, s.wf.steps.map((x) => x.capability)])).toEqual([['Safe Mutation', 'safe_mutation', ['plan', 'verify']]]);
     expect(() => T.patternStrips(text, 'spec/STANDARD-v1.1.0.md')).toThrow(/^spec\/STANDARD-v1\.1\.0\.md: §12\.5's Safe Mutation fence is not valid YAML: /);
+  });
+});
+
+describe('host protocol figures (§2, §5.10.2, §5.19.1, §5.19.8, §10.5)', () => {
+  type Schema = { $defs: Record<string, { oneOf?: { $ref: string }[] }> };
+  const refs = (s: Schema, def: string) => s.$defs[def]!.oneOf!.map((x) => x.$ref.split('/').at(-1)!);
+
+  it('sorts the schema actions as §5.19.1 names the terminal ones, and takes the schema responses (§2)', () => {
+    const schema = JSON.parse(repoText('schemas/host_protocol.schema.json')) as Schema;
+    // Expected: §5.19.1's first paragraph names the terminal actions.
+    const lines = text.split('\n');
+    const at = lines.findIndex((l) => l.startsWith('#### 5.19.1 '));
+    const para = lines.slice(at, at + 4).join(' ');
+    const terminal = [...para.slice(para.indexOf('terminal action')).matchAll(/`(\w+)`/g)].map((m) => m[1]!);
+    const l = H.hostLoop(text, STD);
+    expect(l.terminal).toEqual(terminal);
+    expect([...l.requests, ...l.waits, ...l.terminal].sort()).toEqual(refs(schema, 'action').sort());
+    expect(l.waits).toEqual(['Sleep']);
+    expect(l.responses).toEqual(refs(schema, 'response'));
+  });
+
+  it('fails when §5.19.1 drops an action of the schema', () => {
+    const edited = text.replace(/^\| `RecheckSource` .*\n/m, '');
+    expect(edited).not.toBe(text);
+    expect(() => H.hostLoop(edited, STD)).toThrow(/the schema's action RecheckSource has no row/);
+  });
+
+  it('draws for each overlap policy the first vector case of fire times and run ends (§5.10.2)', () => {
+    const doc = JSON.parse(repoText('tests/conformance/triggers/overlap.json')) as { cases: Record<string, { overlap: string | null; events: string[]; expect: string[] }> };
+    const rows = H.overlapRows(text, STD);
+    expect(rows.map((r) => r.policy)).toEqual(['skip', 'buffer_one', 'allow_all']);
+    for (const r of rows) {
+      const [name, c] = Object.entries(doc.cases).find(([, c]) => c.overlap === r.policy && c.events.every((e) => e === 'fire' || e === 'end') && c.events.filter((e) => e === 'fire').length >= 2)!;
+      expect(r.name).toBe(name);
+      expect(r.events).toEqual(c.events.map((event, i) => ({ event, outcome: c.expect[i] })));
+    }
+    expect(rows.filter((r) => r.isDefault).map((r) => r.policy)).toEqual(['skip']);
+    expect(() => H.overlapRows(text.replace('- `skip` (default):', '- `skip`:'), STD)).toThrow(/marks 0 defaults/);
+  });
+
+  it('pins one run record per status, each from a fixture whose end gives it (§5.19.8)', () => {
+    const rows = H.runRecordRows(text, STD);
+    expect(rows.map((r) => r.status)).toEqual(['executed', 'planned', 'cancelled', 'failed']);
+    for (const r of rows) {
+      const f = JSON.parse(repoText(`tests/conformance/runtime/${r.fixture}.json`)) as { run_record: { status: string }; end: { kind: string } };
+      expect(f.run_record.status).toBe(r.status);
+      expect(f.end.kind).toBe(r.kind);
+    }
+  });
+
+  it('counts the fixtures with each script entry §10.5 lists, as a scan of the files does', () => {
+    const dir = 'tests/conformance/runtime';
+    const files = readdirSync(path.resolve(process.cwd(), '..', dir)).filter((f) => f.endsWith('.json'));
+    const scripts = files.map((f) => (JSON.parse(repoText(`${dir}/${f}`)) as { script: Record<string, unknown>[] }).script);
+    const f = H.fixtureEntries(text, STD);
+    expect(f.fixtures).toBe(files.length);
+    expect(f.entries.map((e) => e.key)).toEqual(['expect', 'tick', 'wake_at', 'cancel', 'resume']);
+    for (const e of f.entries) expect(e.count, e.key).toBe(scripts.filter((s) => s.some((x) => e.key in x)).length);
   });
 });
 

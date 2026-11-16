@@ -1,0 +1,19 @@
+# Standard version: 1.2.0
+# Negative fixture (STANDARD v1.2 §5.20): a grounding policy requires a
+# capability the ontology does not define. V101.
+grounding_unknown_capability:
+  goal: Require grounding of a capability that does not exist.
+  risk: low
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    require: [summarize]
+  steps:
+  - capability: retrieve
+    purpose: Read the report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  success:
+  - Never valid

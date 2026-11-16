@@ -1,7 +1,7 @@
 // agents/tools/checkpoint_config.ts
 import { z } from 'zod';
 import { groundedTool } from '../../src/acs/grounded.js';
-import { SETTINGS_PATH, fileAnchor, readSettings, writeText } from '../../src/example/settings.js';
+import { SETTINGS_PATH, checkpointAnchor, fileAnchor, readSettings, writeText } from '../../src/example/settings.js';
 
 /** The form of every restore point id this tool returns. */
 export const CHECKPOINT_ID = /^cp-\d+$/;
@@ -22,7 +22,13 @@ export default groundedTool({
     await writeText(state, checkpointPath(id), text);
     return {
       checkpoint_id: id,
-      evidence_anchors: [fileAnchor(SETTINGS_PATH, sha256), fileAnchor(checkpointPath(id), sha256)],
+      // The record of the checkpoint taken grounds the output (§3.1), beside
+      // the file it saved and the copy it wrote.
+      evidence_anchors: [
+        checkpointAnchor(id),
+        fileAnchor(SETTINGS_PATH, sha256),
+        fileAnchor(checkpointPath(id), sha256),
+      ],
     };
   },
 });

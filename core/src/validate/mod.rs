@@ -10,6 +10,8 @@ mod bindings;
 mod delegation;
 mod exprs;
 mod extensions;
+mod grounding;
+mod groups;
 pub(crate) mod identity;
 mod invoke;
 mod quorum;
@@ -617,7 +619,18 @@ impl WorkflowCheck<'_> {
         self.check_header();
         let name = self.name;
         let at_wf = |d: Diagnostic| d.at("workflow", name);
-        semantics::unknown_fields(self.wf, semantics::WORKFLOW_KEYS, "", &at_wf, self.report);
+        // `grounding` (grounding@1, §5.20) is a field of a workflow that
+        // targets 1.2 or declares the extension; in any other it is an
+        // unknown field, reported here with the others, as 1.1 reported it.
+        let target = semantics::target(self.wf, self.header);
+        let grounding_field =
+            target.is_some_and(|t| t >= (1, 2)) || extensions::declares(self.wf, "grounding@1");
+        let keys: Vec<&str> = semantics::WORKFLOW_KEYS
+            .iter()
+            .copied()
+            .filter(|k| grounding_field || *k != "grounding")
+            .collect();
+        semantics::unknown_fields(self.wf, &keys, "", &at_wf, self.report);
         semantics::spec_version(self.wf, self.header, &at_wf, self.report);
         if let Some(Value::Object(ext)) = self.wf.get("workflow_extensions") {
             semantics::unknown_fields(
@@ -630,6 +643,7 @@ impl WorkflowCheck<'_> {
         }
         let declared = extensions::Declared::read(self.wf, &at_wf, self.report);
         extensions::triggers(self.ctx, self.wf, &declared, &at_wf, self.report);
+        grounding::check(self.ctx, self.wf, &declared, target, &at_wf, self.report);
         let (inputs, maybe_absent) = self.resolve_inputs();
         let mut state = Scope {
             inputs,
@@ -668,6 +682,7 @@ impl WorkflowCheck<'_> {
                 groups.entry(g).or_default().push(i);
             }
         }
+        groups::check(self.name, steps, &groups, &plan.handlers, self.report);
         let mut independence = quorum::Independence::new(steps);
         // Steps whose items may be from an always-ask trust class (§5.17).
         let always_ask: HashSet<&str> = steps
@@ -724,6 +739,7 @@ impl WorkflowCheck<'_> {
             if !waits {
                 extensions::legacy_timeout(step, &|d| loc.locate(d), self.report);
             }
+            extensions::audit_retention(step, &|d| loc.locate(d), self.report);
             let (Some(node), Some(contracts)) =
                 (self.ctx.ontology.get(cap), self.ctx.contracts.get(cap))
             else {
@@ -871,6 +887,7 @@ impl WorkflowCheck<'_> {
                 step,
                 allows_approval,
                 &declared,
+                semantics::target(self.wf, self.header).is_some_and(|t| t >= (1, 2)),
                 &checker,
                 scope,
                 self.report,
@@ -1746,7 +1763,7 @@ pub(crate) mod tests {
             .collect();
         assert_eq!(v102.len(), 2, "{v102:?}");
         assert!(v102[0].contains("missing required prerequisite 'checkpoint'"));
-        assert!(v102[1].contains("runs concurrently in parallel_group 'g'"));
+        assert!(v102[1].contains("shares parallel_group 'g' with it"));
         // soft_requires likewise.
         let c = codes(wf(json!([
             grouped("observe", "o", "g"),

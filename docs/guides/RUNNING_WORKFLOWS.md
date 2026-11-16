@@ -23,7 +23,11 @@ flowchart LR
   host -->|response| exec
 ```
 
-The contract is [STANDARD-v1.1.0 §5](../../spec/STANDARD-v1.1.0.md#5-workflow-dsl).
+The contract is [STANDARD-v1.2.0 §5](../../spec/STANDARD-v1.2.0.md#5-workflow-dsl)
+and the host protocol of
+[§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol), whose actions and
+responses `schemas/host_protocol.schema.json` defines (and
+`grounded_agency.workflows.protocol` types for Python).
 The executor's source is in `core/src/exec/`, and Python reaches it as
 `grounded_agency._core.Run`.
 
@@ -82,14 +86,14 @@ flowchart TB
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, or `{"kind": "Error", "code": "R401"/"R402", "message": ...}` (any other code is read as R402) |
+| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
-| `RequestApproval` | asks `approver` about `shown` | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable` |
+| `RequestApproval` | asks `approver` about `shown`, in `mode`: `in_session`, whoever attends the run, in its session; `out_of_band`, a separate channel whose approvers need not attend the run (keep the run's snapshot while you wait). `queued_action_id` names the queued action a resumed run is asking about, on every such request ([Resuming a deferred run](#resuming-a-deferred-run)) | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable`; with `identity@1`, optionally `approver_identities` (each an `agent_identity`, one per principal; `approvers` then empty or their principals) |
 | `RecheckSource` | re-reads `source` now | `{"kind": "Current", "value": ...}` |
 | `AwaitEvent` | waits for a matching event until `deadline` (a waiting delegate whose host attested who took it names that principal as `delegate_principal`: only its results count) | `{"kind": "Event", "event": {...}, "principal": ..., "identity": {...}}` (the authenticated party that delivered it, §5.15, and its `agent_identity`, §5.17; both optional, and a `principal` beside an `identity` must be the identity's), `{"kind": "LivenessLost"}` (R406), or `{"kind": "Error", "code": "R401"/"R402"/"R406", "message": ...}` (any other code is read as R402) |
 | `Sleep` | waits until `until` (retry backoff, or a step's `delay`) | — (the runner calls `tick`) |
-| `Completed` / `Failed` | — | the run is over (`Completed` carries `ended` when a gate ended it) |
+| `Completed` / `Failed` | — | the run is over (`Completed` carries `ended` when a gate ended it; `Failed` carries the `reason` the failure came with, and, for a cancelled run, `checkpoint_id`) |
 
 `Host` has a method for each, plus `now_ms()` and `sleep_until()` (wall
 clock by default). A method may return `None` when there is nothing yet
@@ -115,19 +119,63 @@ Values you hand the run must be I-JSON: integers within ±2^53 and at most
 100 levels deep. Anything else is refused, so that snapshots and approval
 digests represent every value exactly.
 
-Every action carries `id` and `frame`: the workflows of the nested runs,
-root first. A capability's output must be an object with the fields its
-ontology contract requires, or the step fails (R402). When your host gets the
-output as a string (a model's reply, a sub-prompt's result, a tool's text),
-decode it by
+Every action carries `run_id`, `id` and `frame`: the run, the action's
+number in it (a restored run asks for its pending action again with the
+same `id`), and the workflows of the nested runs, root first. A
+capability's output must be an object with the fields its ontology
+contract requires, or the step fails (R402). A response member the protocol
+does not define is ignored, as in 1.1, and your host ignores an action
+member it does not know: later versions may add members to both.
+
+When your host gets the output as a string (a model's reply, a sub-prompt's
+result, a tool's text), decode it by
 [Standard 1.2.0 §5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)
 before you answer: it must be the I-JSON text of the object and nothing else.
 `grounded_agency.decode_capability_output(capability, text, registry)` does
 this and raises `CapabilityOutputError` (R402) otherwise; answer the action
 with an error then.
 
+An `Error` may say why, with a `reason`
+([§5.19.7](../../spec/STANDARD-v1.2.0.md#5197-error-reasons)):
+`unsupported_capability` (you do not perform the capability),
+`unsupported_domain` (not for the step's `domain`), `not_recorded` (a record
+that was required was not written), the other tokens §5.19.7 lists, or a
+vendor reason `x-...`. The code still decides what happens (an
+`unsupported_domain` R402 is retried like any R402); the reason travels to
+the step's trace event, to the run's `Failed` action and `RunResult.reason`,
+and to the step's record as `reason_code`. A `reason` outside that grammar
+is ignored and noted in the trace as `reason_ignored`. Raise
+`HostCannotServe(reason, message)` from `invoke_capability` or `await_event`
+and the runner answers the action with that `Error`.
+
+The executor computes some members of the actions it issues: `deadline` is
+the time the attempt's action was issued plus the step's `timeout`;
+`expires_at` the time of the approval request plus `expires`; `Sleep.until`
+the time an attempt failed plus the backoff, or the time a step reached its
+`delay` plus the delay. `Completed.outputs` is the root workflow's stores,
+and the executor composes the outputs of the steps it runs itself: waits,
+`invoke` steps and quorums
+([§5.19.1](../../spec/STANDARD-v1.2.0.md#5191-actions-and-responses)).
+
+What your host transmits to perform an approval request, a recheck, a wait
+or the run's end, such as the prompt it sends an approver or the result it
+returns to whoever started the run, is protocol traffic, not a `send` step
+([§5.19.6](../../spec/STANDARD-v1.2.0.md#5196-protocol-traffic)), provided
+it carries only the action's values: send the approver the `shown` values,
+the digest and the expiry, never other stores or inputs of the run.
+
 ## What the executor enforces
 
+- **Grounding.** Under a grounding policy (a workflow's `grounding`, with
+  `grounding@1`, or one the host gives when the run starts), each host
+  `Output` of a required capability is checked after the fields its
+  contract requires and before the after-gates: an `acs:` citation must be
+  of kind `record` and covered by a reference the step binds, an anchor
+  must be in `evidence_seen` when the host gives it, and an output with no
+  anchor that counts must be marked inferred; otherwise the step fails with
+  F505, which is not retried
+  ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)). The trace gets a
+  `grounding` event for each output that passes.
 - **Conditions and gates.** A false condition skips the step, unless
   `skip_if_false: false`, which makes it R403. Gate actions: `stop` → R403,
   `skip` → skip the step, `rollback` → roll back, then R403, `warn` → a trace
@@ -172,6 +220,24 @@ with an error then.
   `unavailable` is F502. The default `Host` holds no mandates: it answers
   `unavailable` for one. `recheck` re-reads a source before acting, then
   asks again (showing what changed), replans or stops if it changed.
+  A step with no `approval` field is asked of a person, in session, shown
+  its resolved inputs, with no expiry; a partial field takes the default of
+  each member it leaves out, and `expires` runs from the request. What is
+  shown is an array: the `shows` values in order (null for a reference that
+  resolves to nothing), or `[inputs]` without `shows`, plus a `recheck`
+  object when asked again; the digest is the SHA-256 of its RFC 8785 text in
+  lowercase hexadecimal, and a decision's digest is accepted in any case.
+  An integer, a number written without a fraction or an exponent, may not
+  exceed 2^53 in magnitude.
+  With `identity@1`, a decision that attests its approvers
+  (`approver_identities`) is counted by principal, and an identity counts
+  only if it meets the request: kind `human` for a human approver, the
+  requested `role`; the record lists the approvers that counted and their
+  identities, and a refused decision's `reason` names the others. In a
+  workflow that declares `spec_version: "1.2"`, the approver may also
+  require `sender_check` and `accept_trust_classes`, and a decision without
+  identities then counts no one. A run that ends `deferred` can be resumed:
+  see [Resuming a deferred run](#resuming-a-deferred-run).
   Every approval leaves an action record, with a `reason` when the action
   did not go ahead. A step that uses, directly or through other steps, an
   item from one of the `always_ask_trust_classes` of `identity@1` (or with
@@ -206,9 +272,18 @@ with an error then.
   the wait goes on. A lapse is R401;
   `LivenessLost` (or an `Error` with code R406) is R406, unless it comes
   after the deadline, which is R401.
+- **Parallel groups.** The members of a `parallel_group` are not ordered
+  relative to each other; the executor, with one action pending at a time,
+  runs them one after another in list order, and a step after the group
+  runs once every member has finished
+  ([§5.2.3](../../spec/STANDARD-v1.2.0.md#523-parallel-groups)). `join` has
+  one defined value, `all_complete`; any other, or a `join` without a group,
+  is W618 and ignored. A member that reads a group mate's store is W619:
+  another executor may run the mate after it.
 - **Retries, deadlines.** `retry.max` (at most 1000) extra attempts for
   R401/R402/R406, with `none`, `linear` (1 s × n) or `exponential`
-  (1 s × 2^(n−1)) backoff. A result after the step's deadline is R401. A
+  (1 s × 2^(n−1)) backoff, as
+  [§5.2](../../spec/STANDARD-v1.2.0.md#52-step-definition) states. A result after the step's deadline is R401. A
   step the executor itself refuses (an invocation whose inputs do not fit
   the workflow) is not retried: another attempt would be refused the same
   way. Times are milliseconds since the epoch, capped at the end of year
@@ -223,7 +298,7 @@ with an error then.
   `replaces`; a loop that runs an `invoke` again starts a new child run,
   whose delegations replace none of the old run's. It can also escalate to a handler (the run ends `escalated`), or end the run
   with the step's code — R402 when `when` fired on a step that did not fail
-  ([STANDARD §5.12](../../spec/STANDARD-v1.1.0.md#512-recovery-and-escalation)).
+  ([STANDARD §5.12](../../spec/STANDARD-v1.2.0.md#512-recovery-and-escalation)).
 
   ```mermaid
   ---
@@ -257,13 +332,247 @@ Start a run with `actor_identity=` (an `agent_identity`, such as
 every action record then carries it as `actor_identity`, and `actor` is its
 `kind`.
 
+A run keeps its actor: restore it with `actor_identity=` and the executor
+refuses another principal. When another agent takes over the conversation
+(a handoff), cancel the run if it has not ended, and start a new one under
+the new agent's identity; a run that ended `deferred` may instead be
+resumed under it.
+
 `RunResult` gives the `outcome` (`completed`, `escalated`, `deferred`,
-`replan_required`) or the failure `code`, `ended` when a gate ended the
-run early, plus the outputs, the action
-records (world state `ActionRecord`s for every step that required
-approval), the deferrals (`deferred`: each deferred step, why, and the
-`action_id` of its queued action) and the trace (every decision the
-executor took, see [The trace](#the-trace)).
+`replan_required`) or the failure `code` (and its `reason`), `ended` when a
+gate ended the run early, plus the outputs, the action records (see
+[Records](#records)), the run record, the deferrals (`deferred`: each
+deferred step, why, and the `action_id` of its queued action), the
+`run_id` and the trace (every decision the executor took, see
+[The trace](#the-trace)).
+
+### Records
+
+The executor writes world-state `ActionRecord`s, the audit records of
+[§6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records). In the default record
+mode, `approvals`, it records each step that requires approval, as 1.1 did.
+Start a run with `records="actions"` and it records every step that runs,
+once per pass (a retry is the same pass; a recovery loop starts another):
+`executed` when the step has its output, `failed` when it fails after it
+started (its first checkpoint, call or wait was issued) or its checkpoint
+cannot be taken (F501), and `cancelled` when the run is cancelled after it
+started; plus a record of each checkpoint a failure mode takes and each
+`Rollback`, with `capability` `checkpoint` or `rollback`. Every record
+carries `run_id`, `frame`, `step`, `capability`, the step's `purpose` as
+`intent`, the `checkpoint_id` the step used or took, `code` and
+`reason_code` when it failed or was refused, and, in its `approval`, the
+host's `decision_id`.
+
+An `audit` step that binds `require_record: true` fails (R402, reason
+`not_recorded`) when its output's `recorded` is not `true`, and retries
+apply; without it the step completes and a later gate may read `recorded`.
+
+Every run also has a **run record**
+([§5.19.8](../../spec/STANDARD-v1.2.0.md#5198-the-runs-record)), an
+`ActionRecord` derived from how it ended, so that a run that failed or was
+cancelled before any step wrote a record still leaves one: `action_id` and
+`run_id` the run's `run_id`, `intent` `run <workflow>`, `status`
+`executed`, `planned` (ended `deferred`), `cancelled` or `failed`, the
+`code`, `reason_code` and `checkpoint_id` of a failure, and in `details` how
+it ended and how many records it wrote. `RunResult.run_record` holds it
+(`run.run_record()` on a run you drive yourself). Every host keeps it, with
+the run's records, where it keeps its audit records:
+`WorkflowRunner(archive=...)` hands every ended run's result to your
+archive before `run`, `drive`, `advance` or `cancel` returns, and raises
+`RunArchiveError` (with the live run, so you can archive again) when the
+archive fails.
+
+### Evidence and grounding
+
+`WorkflowRunner(engine, evidence_store=store)` records the evidence anchors
+(STANDARD v1.2 §6.5) of each host `Output` the core kept, with the run's
+`run_id` and the step's `frame`, `step` and `capability`: the runner reads
+what the submit added (`run.trace(since=run.trace_seq)`), and records the
+anchors only when the step's next event is `step_completed`. An output
+refused (R402, F505), to be retried, or a waiting delegation's acceptance
+records nothing; items that are not evidence anchors (bare strings, the
+deprecated form) are skipped and logged. A store that raises never stops
+the run: the failure is logged and counted. `EvidenceStore` keeps records in
+memory (durability `memory`, bounded); `JsonlEvidenceStore(path)` appends
+them to a file (`durable`), so evidence outlives the process (§6.6).
+
+`run(..., grounding=GroundingPolicy(require={"retrieve"}, kinds={"file"}))`
+(one policy or a list) applies grounding policies to the run and its nested
+runs; each is checked against the ontology when it is made, so a misspelt
+capability is a `ValueError` naming V101. `WorkflowRunner(...,
+redactor=Redactor([...]))` registers the host's secrets: the runner redacts
+the message of every `Error` it submits (§6.7).
+
+## Hosting runs
+
+This part is the host's side of
+[§5.19](../../spec/STANDARD-v1.2.0.md#519-host-protocol): what a host that
+keeps runs across turns must do, how a run is cancelled, when to wake it,
+and how runs start from triggers.
+
+### Host obligations
+
+A host that saves runs and continues them later
+([§5.19.4](../../spec/STANDARD-v1.2.0.md#5194-saving-and-continuing-a-run)):
+
+- **One writer.** Only one party at a time submits to, ticks, cancels or
+  resumes a run, and only from its latest state: take a lock per run key
+  around a turn. Never continue two copies of one saved state.
+- **Save before acting.** Save the state after every operation that changed
+  it (start, submit, a tick that changed it, cancel, resume) and before you
+  perform the action it left pending. `drive`, `advance`, `run`, `resume`
+  and `cancel` take `save=` (and `key=`) and do that; after `start`, and
+  after `resume` or `cancel` without `save=`, you save yourself.
+- **At least once.** A restored run asks for its pending action again, with
+  the same `run_id` and `id`, though you may already have performed it.
+  Make what you do idempotent under that delivery key: keep the response you
+  gave for each key and give it again.
+
+  ```python
+  performed: dict[tuple[str, int], dict] = load_performed()
+
+  class Idempotent(MyHost):
+      def invoke_capability(self, action):
+          key = (action["run_id"], action["id"])
+          if key not in performed:
+              performed[key] = super().invoke_capability(action)
+              save_performed(performed)
+          return performed[key]
+  ```
+- **A fresh `run_id`.** The `run_id` keys the run's records, its run record
+  and these delivery keys ([§5.19.2](../../spec/STANDARD-v1.2.0.md#5192-run-operations)):
+  two runs under one id would share keys. The runner's default is a random
+  one, and it refuses a `run_id` it has already started; a restored run
+  keeps its own. Across restarts and processes, uniqueness is yours: pass
+  `WorkflowRunner(..., run_ids=store)`, a set-like store you persist and
+  prune as you drop runs' records and keys (the default, in memory, grows by
+  one per run).
+- **Interrupted turns.** When your process stops between performing an
+  action and submitting the answer, the run is unchanged: restore the latest
+  state on the next turn and go on as above, or cancel the run.
+- **Integrity.** The digest saved with a state shows it was not corrupted,
+  not who wrote it: anyone who can change the state can recompute it. Where
+  any party other than the run's writer can change stored states, snapshot
+  and restore with a `key` (HMAC-SHA-256), and keep the key from them.
+
+While your host waits on an action, the runner asks your method again each
+poll interval while it returns `None`. When the run times the action out
+(or is cancelled), the runner calls `Host.withdraw(action, why)`: stop
+performing it, since an answer would be refused.
+
+### Cancelling a run
+
+```python
+result = runner.cancel(run, "operator stop", host=host)
+result.cancelled        # True: Failed with R408
+result.checkpoint_id    # the latest checkpoint the run knew of, if any
+```
+
+Cancelling ends the run at once with `Failed` R408
+([§5.19.5](../../spec/STANDARD-v1.2.0.md#5195-cancelling-a-run)). No retry,
+failure mode, recovery loop, handler or rollback runs: the executor does not
+roll back, and a host that wants the effects undone restores
+`checkpoint_id` itself. Approved and queued records become `cancelled`; in
+record mode `actions`, so does a new record of every step, in every nested
+run, that had started (a step waiting out a retry's backoff, a waiting
+`delegate` whose delegation was sent), but not one still waiting for its
+approval or its delay. A run that ended `deferred` can be cancelled too; its
+queued actions will then never be carried out. An `Error` you answer to stop
+a run is a failure of the step instead, and its retries and recovery apply.
+
+### Time and wake-ups
+
+The executor has no clock: it acts only when you submit, tick, cancel or
+resume ([§5.19.3](../../spec/STANDARD-v1.2.0.md#5193-time)). A `Sleep` ends
+at a tick at or after its `until`; an action with a `deadline` or
+`expires_at` times out at a tick after it, and an answer submitted at the
+deadline is in time. `run.wake_at()` gives the earliest time a tick changes
+the run (the `until`, or the deadline plus 1 ms), or `None`; `run.tick(t)`
+returns whether it changed the run. Liveness is yours to watch: answer
+`LivenessLost` once the source has missed `failure_threshold` heartbeats or
+probes; it is never a wake-up time.
+
+### An event-driven host
+
+A host that runs one turn per event (a queue worker, a serverless handler,
+a Standard Agents thread) uses `runner.advance(run, host, save=...)`: it
+ticks the run, performs every action the host can answer now, and returns a
+`Turn` with the `result` when the run ended, else the `pending` action and
+its `wake_at`.
+
+```python
+with lock(run_key):
+    run = runner.restore(load(run_key), key=KEY)
+    turn = runner.advance(run, host, save=lambda s: store(run_key, s), key=KEY)
+    log.extend(run.take_trace())                # events carry seq: a repeat shows
+    if turn.result is None:
+        audit_store.extend(run.take_records())  # settled records, kept by you
+    store(run_key, run.snapshot(KEY))
+    if turn.result is not None:
+        archive(turn.result)  # the run record and the records not taken before
+    elif turn.wake_at is not None:
+        set_timer(run_key, turn.wake_at)
+```
+
+Treat an inbound message, an approval decision and a timer alike: each is a
+reason to run a turn. An ended run's `turn.result.action_records` are the
+records not taken out in earlier turns, so archive them with the run record
+rather than take them again: taking an ended run's records would give you
+the same records twice. When auditing, check what you took against
+`run.taken_sha256`: the state keeps, for records and for trace events, a
+SHA-256 chain head over everything taken, so a signed state still vouches
+for them.
+
+```mermaid
+---
+title: One turn of an event-driven host
+---
+flowchart TB
+  accDescr: A wake-up (an inbound message, a decision or a timer) leads to a turn under the run's lock: restore the state, advance the run and take the trace into the host's log; if the run has not ended, take its settled records into the host's store, save the state and set a timer for its wake-up time; if it ended, save the state and archive the result, whose records are those not taken before.
+  wake["Wake-up: message, decision or timer"] --> turn["Under the run's lock: restore, then advance"]
+  turn --> trace["take_trace into your log"]
+  trace --> done{Ended?}
+  done -->|no| timer["take_records, save, set a timer for wake_at"]
+  done -->|yes| arch["Save, archive the run record and the records not taken"]
+```
+
+`drive` is a loop of such turns that sleeps between them until the run's
+wake-up time or the next poll.
+
+### Snapshot size
+
+A snapshot holds a fixed part (about 0.5 kB), each stored step's output and
+the inputs it ran with, the action records (about 0.3 kB each, 0.6 kB with an
+approval), the trace (about 0.15 kB an event, three to six a step) and the
+pending action. Measured at the end of each of the 260 runtime fixtures, a
+snapshot is 1.2 kB to 35 kB (median 2.9 kB), of which the trace is about
+42%; the terminal action no longer stores copies of the records and outputs
+(in 1.1 that copy was a median 13%, up to 26%, of a finished run's state).
+With the trace and settled records taken out, the same states are 1.0 kB to
+12 kB (median 1.5 kB). For a store with a size cap, take the trace every turn,
+take the records into your audit store, and keep large values out of stores
+by passing references to them.
+
+### Triggers
+
+The executor never reads a workflow's triggers: the host evaluates them
+([§5.10.2](../../spec/STANDARD-v1.2.0.md#5102-evaluating-triggers)).
+`runner.start(workflow, trigger=i)` starts a run from trigger `i`, with its
+attendance (an `attendance` that differs is refused); for an event trigger
+pass `event=` (a canonical event): it must match, it is given as the input
+`delivers_to` names, and an `event_id` that already started a run of the
+trigger is refused, so a redelivered event starts nothing. Those ids are
+kept in memory unless you pass `WorkflowRunner(..., event_seen=factory)`,
+where `factory(workflow, index)` returns a set-like store you persist: with
+it, a redelivery after a restart starts nothing either. Apply your sender
+policy before you start the run (the runner does not see the sender).
+`grounded_agency.workflows.triggers` holds the rest: `next_fire(schedule,
+after_ms)` (fire times in the schedule's time zone, RFC 5545 for clock
+changes, `every` counted from the Unix epoch), `OverlapGate` (the `skip`,
+`buffer_one` and `allow_all` decisions, with `missed` fire times and
+`resumed` runs), `EventGate` (event acceptance, with a pluggable store of
+seen ids for deduplication across restarts) and `trigger_attendance` (an
+`invoke` trigger's run always has its invoker's attendance).
 
 ## Applying domain profiles
 
@@ -312,17 +621,21 @@ through the core.
 
 The trace is the executor's own record of a run: one event for each
 decision it took, in order. `RunResult.trace` holds it after a run and
-`run.trace()` at any point during one. It is part of the run's state, so a
+`run.trace()` at any point during one; `run.trace(since=n)` gives the
+events whose `seq` is at least `n`, and `run.trace_seq` is the `seq` the
+next event gets. It is part of the run's state, so a
 snapshot carries it and a restored run continues it.
 
-This section is informative. The Standard mentions a trace twice, for a
-`warn` gate ([§5.6](../../spec/STANDARD-v1.1.0.md#56-gate-semantics)) and
+This section is informative, and the trace is not an audit record
+([STANDARD §6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)): the
+action records and the run record are. The Standard mentions a trace twice, for a
+`warn` gate ([§5.6](../../spec/STANDARD-v1.2.0.md#56-gate-semantics)) and
 for an expression error
-([§5.8.2](../../spec/STANDARD-v1.1.0.md#582-evaluation)), and gives it no
+([§5.8.2](../../spec/STANDARD-v1.2.0.md#582-evaluation)), and gives it no
 form. The fields and kinds below are those of the reference executor
 (`core/src/exec/`), and another executor may record a run differently.
 They are executor trace kinds, not the event types of
-[§5.13](../../spec/STANDARD-v1.1.0.md#513-waiting-for-events): an
+[§5.13](../../spec/STANDARD-v1.2.0.md#513-waiting-for-events): an
 `event_type` names an event a step waits for (`approval.granted`), and a
 trace kind names something the executor did (`approval_requested`).
 
@@ -336,11 +649,11 @@ Every trace event is an object with these six fields:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `seq` | integer | Position of the event in the trace, from 0 |
+| `seq` | integer | Position of the event in the trace, from 0; it goes on after the host takes the trace out of the run's state (`take_trace`) |
 | `at` | integer | The run's clock when the event was recorded: the latest time the host passed, in milliseconds since the epoch |
 | `kind` | string | One of the kinds below |
 | `frame` | array of strings | The workflows of the nested runs, root first, as on an action |
-| `step` | integer or null | Index of the step in its workflow, from 0; null on `run_started` and `run_finished` |
+| `step` | integer or null | Index of the step in its workflow, from 0; null on `run_started`, `run_resumed` and `run_finished`, on `checkpoints_invalidated` when a resumption invalidates them, and on `run_cancelled` of a run that had ended (deferred) |
 | `detail` | object | Members that depend on the kind; an empty object for a kind that has none |
 
 ### Trace kinds
@@ -355,7 +668,7 @@ members of its `detail`.
 | `step_skipped` | The step does not run: its condition is false, a gate skipped it, or it needed approval and `when_unattended: skip` applied | `reason` |
 | `step_deferred` | The step is deferred (§5.14) | `reason` |
 | `step_completed` | The step has its output, before its after-gates are evaluated | none |
-| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the failure's reason (§5.19.7), when it has one | `code`, `message`, `reason` |
+| `step_failed` | The step fails with a code, after its retries and before its failure modes; `reason` is the host's reason token (§5.19.7), `reason_ignored` a `reason` the host gave that is not one | `code`, `message`, `reason`, `reason_ignored` |
 | `expression_error` | A condition, a gate's `when` or a failure mode's `when` did not evaluate (R405) | `site`, `code`, `message` |
 | `gate_fired` | A gate fires, whatever its action | `gate`, `action`, `message` |
 | `run_ended` | A gate with `action: end` ends the run, or the nested run it fired in | `message` |
@@ -370,7 +683,7 @@ members of its `detail`.
 | `recheck` | The source named by `approval.recheck` was read again after approval | `changed` |
 | `checkpoint_created` | A checkpoint is recorded: the host answered `CreateCheckpoint`, or a `checkpoint` step completed | `checkpoint_id` |
 | `checkpoint_consumed` | A step that requires a checkpoint uses the latest valid one | `checkpoint_id` |
-| `checkpoints_invalidated` | A completed wait or delay ends the validity of earlier checkpoints | `checkpoint_ids` |
+| `checkpoints_invalidated` | A completed wait or delay, or a resumption, ends the validity of earlier checkpoints | `checkpoint_ids` |
 | `rolled_back` | The host answered a `Rollback` that a gate or a failure mode asked for | none |
 | `event_dropped` | A wait receives an event that does not match; recorded once per reason for each wait | `reason` |
 | `event_received` | A wait receives its matching event; `dropped` counts the dropped events by reason | `event_type`, `dropped` |
@@ -378,13 +691,17 @@ members of its `detail`.
 | `invoke_started` | An `invoke` step starts a nested run | `workflow` |
 | `invoke_returned` | The nested run is over; `result` is its outcome or its failure code | `workflow`, `result`, `ended` |
 | `quorum` | A `constrain` step with a `quorum` counted the verdicts | `tally` |
-| `retry` | An attempt failed and the step will be tried again; `attempt` is the attempt that failed, from 1 | `code`, `message`, `attempt`, `backoff_ms` |
+| `grounding` | A host's output passed every grounding policy that requires the step's capability (§5.20), before `step_completed`: `status` is `grounded` or `inferred`; `counted` (the anchors that count), `legacy` (the items that are not evidence anchors) and `unattested` (the anchors whose availability is not established) are those of the last policy checked; `policies` is how many applied. An output that fails one is `step_failed` with F505 | `status`, `counted`, `legacy`, `unattested`, `policies` |
+| `retry` | An attempt failed and the step will be tried again; `attempt` is the attempt that failed, from 1; `reason` and `reason_ignored` as for `step_failed` | `code`, `message`, `attempt`, `backoff_ms`, `reason`, `reason_ignored` |
 | `failure_mode_fired` | A failure mode applies | `failure_mode`, `action` |
 | `loop` | A failure mode loops back; `to` is the index of the step it goes to and `loop` the count for this failure mode, from 1 | `failure_mode`, `to`, `loop` |
 | `recovery_exhausted` | A failure mode has no loops left | `failure_mode`, `loops` |
 | `escalated` | The run goes to a handler step; `cause` is the code that led there | `handler`, `cause` |
 | `run_finished` | The run ends with an outcome; `cause` is the code that led to an escalation, null without one, and absent when the run ends `replan_required` | `outcome`, `cause` |
-| `run_failed` | The run ends with a failure code; `reason` as for `step_failed` | `code`, `message`, `reason` |
+| `run_failed` | The run ends with a failure code, and the reason it came with, if any | `code`, `message`, `reason` |
+| `run_cancelled` | The host cancels the run (§5.19.5); `reason` is the host's words | `reason` |
+| `run_resumed` | A host resumes a run that ended `deferred` (§5.14.1); `actor` and `previous_actor` are principals or null | `attendance`, `actor`, `previous_actor` |
+| `invoke_resumed` | A resumed run continues the nested run of a deferred `invoke` step | `workflow` |
 
 `gate`, `failure_mode` and `handler` are indexes, from 0, into the step's
 `gates`, the step's `failure_modes` and the workflow's `steps`.
@@ -407,7 +724,10 @@ across days:
 run = runner.start("my_workflow", inputs, run_id="run-42")
 action = run.next()                  # same action until it is answered
 run.submit(action["id"], response, now_ms)
-run.tick(now_ms)                     # ends a due Sleep, times out a late action
+run.tick(now_ms)                     # True when it ended a Sleep or timed an action out
+run.wake_at()                        # when a tick next changes the run, or None
+run.cancel("operator stop", now_ms)  # Failed R408, no recovery
+run.take_trace(); run.take_records() # shed what the host keeps (§5.19.4)
 
 snapshot = run.snapshot(key=b"secret")       # canonical JSON + SHA-256 + HMAC
 run = runner.restore(snapshot, key=b"secret")  # refuses tampered snapshots
@@ -449,6 +769,75 @@ flowchart TB
   sb -.->|across processes or days| snap["run.snapshot(key), then runner.restore(): refuses a tampered one"]
 ```
 
+### Resuming a deferred run
+
+A run that ends `deferred` (`result.resumable`) has queued actions: steps
+that waited for an approval nobody could give at the time, and the steps
+that depend on them. Keep its snapshot with your queue entries, and resume
+it when the approvers can be asked
+([STANDARD §5.14.1](../../spec/STANDARD-v1.2.0.md#5141-resuming-a-deferred-run)):
+
+```python
+run = runner.start("nightly_sweep", inputs, attendance="unattended")
+result = runner.drive(run, host)
+if result.resumable:
+    store(result.run_id, run.snapshot(key=b"secret"))  # with the queue entries
+# ... later, when the approvers can be asked, once per saved state:
+save = lambda s: store(run_id, s)         # the resumed state replaces it
+run = runner.resume(load(run_id), key=b"secret", attendance="attended",
+                    actor_identity=operator_identity, save=save)
+result = runner.drive(run, host, save=save, key=b"secret")
+```
+
+The resumed run is the same run, with the same `run_id`, records and
+trace. What runs again, in step order:
+
+- the deferred steps, each from its beginning (condition, gates, inputs,
+  approval, checkpoint);
+- a step that ran ahead of them and that one of them reads, so a `verify`
+  after the `mutate` reads the world after the change;
+- a `checkpoint` step whose id a queued mutation binds, for a fresh restore
+  point.
+
+Every other step keeps its output. A nested run that ended deferred
+continues where it stopped, and a deferred handler runs last. Checkpoints
+taken before the resumption authorise nothing after it, so the host is
+asked for new ones. A queued step is asked afresh, of a person when the
+resumption is attended, even where its approver is a standing mandate, and
+the request names its queued action in `queued_action_id`; the `planned`
+record of that action is updated in place, under the same `action_id`, so
+the queue entry you hold closes on it. A request asked again after a
+recheck, or in a retry of the step, names the same action, and its decision
+lands on the same record; once the action is carried out, a loop back to
+the step asks for a new one. A record the resumption decides or supersedes
+takes the time and the actor of then. A recovery loop during the resumption
+runs again only the steps from its target to the step that looped, and the
+resumption then goes on: a step that ran ahead, such as an
+`after_deferral: run` delegation, is not repeated, and a deferred handler
+keeps its nested run.
+
+Resume a saved state once: each resumption could carry out the same queued
+action. A run that failed, escalated or needs a replan cannot be resumed:
+its `planned` records are abandoned, so close your queue entries for them,
+and start a new run if the work is still wanted. A state saved by an
+executor before this release cannot be resumed (it did not keep the nested
+runs of deferred `invoke` steps or which steps ran ahead): `resume` refuses
+it; cancel the run and start a new one.
+
+```mermaid
+---
+title: Resuming a deferred run
+---
+flowchart TB
+  accDescr: A run that ended deferred is saved; later it is resumed once, as the same run; its deferred steps run again with the steps they read, each queued step is asked afresh and its planned record is updated in place; a run that ended any other way cannot be resumed, and its queued actions are abandoned.
+  end1["Run ends deferred"] --> save["Save its snapshot"]
+  save --> res["runner.resume(), once"]
+  res --> again["Deferred steps run again, with what they read"]
+  again --> ask["Each queued step asked afresh"]
+  ask --> rec["Its planned record updated in place"]
+  other["Run ends otherwise"] --> gone["Not resumable: queued actions abandoned"]
+```
+
 ## Conformance
 
 `tests/conformance/runtime/*.json` are scripted runs. Each one has a
@@ -466,7 +855,11 @@ contributed): nested invocations, gate
 that loops, an escalation and unattended deferral, end to end. Fixtures
 an adopter wrote themselves (`gap*`) are the exception: edit them in
 `tests/conformance/contrib/`, where they are kept as sent; the generator
-checks their keys and copies them in.
+checks their keys and copies them in. A script entry
+`{"resume": {"attendance", "at", "actor_identity"}}` (each member optional)
+saves the run, restores it and resumes it, and a response may write
+`"{{digest_upper}}"` for the pending action's digest in uppercase, beside
+`"{{digest}}"`.
 
 
 ```mermaid
@@ -481,11 +874,32 @@ flowchart TB
   fx --> py["tests/test_runner.py: through Python"]
 ```
 
+The runtime fixtures are normative for an executor of class EX
+([STANDARD §10.5](../../spec/STANDARD-v1.2.0.md#105-executor-conformance)),
+except their `trace_kinds`. A fixture's format is
+`tests/conformance/runtime/schema/fixture.schema.json`; besides `expect` and
+`respond` entries and `resume`, a script holds `{"tick": T, "changed": C}`
+(the tick must change the run exactly when `C`), `{"wake_at": W}` and
+`{"cancel": {"reason", "at"}}`, and a fixture may state its `records` mode
+and the `run_record` its end must give. Matching is by subset; under class EX
+text the executor composes (a `message` other than a gate's, the `reason` of
+a record or a deferral, a quorum's violation texts) is not compared. Both
+replays (snapshot and restore before every entry, and taking the trace and
+records before every entry, checked against the state's chain heads) must
+give the same actions, and every harness checks at every tick that it
+changed the run exactly when it reached the wake-up time. The trigger vectors
+of `tests/conformance/triggers/` (`scripts/gen_trigger_vectors.py`) are
+normative for §5.10.2.
+
 A host that computes an approval digest itself, to check a decision before
-it submits it or to record what a person approved, can test that
-computation against `tests/conformance/approval/digests.json`. Each vector
-there is one `RequestApproval` of the reference executor: the `shown`
-values, their canonical JSON (RFC 8785) and the `digest`, including what
-the executor shows for a step that declares no `shows`. The file and the
-trust vectors beside it (`tests/conformance/trust/`) are described under
+it submits it or to record what a person approved, tests that computation
+against `tests/conformance/approval/digests.json`, which is normative
+([STANDARD §10.3](../../spec/STANDARD-v1.2.0.md#103-conformance-testing)).
+Each vector has a `kind`: a `step` vector is one `RequestApproval` of the
+reference executor (the step's `approval` field, its resolved `inputs` where
+it declares no `shows`, and the `shown` values), and a `tool_call` vector the
+approval of a tool call; each gives the canonical JSON (RFC 8785) of `shown`
+and the `digest`. The file is described under
+[Test suite requirements](../../spec/CONFORMANCE.md#test-suite-requirements),
+and the trust vectors beside it (`tests/conformance/trust/`) under
 [Informative vectors](../../spec/CONFORMANCE.md#informative-vectors).

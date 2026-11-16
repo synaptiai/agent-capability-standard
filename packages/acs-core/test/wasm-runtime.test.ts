@@ -1,9 +1,12 @@
 // Every runtime fixture (tests/conformance/runtime/*.json) through the core,
 // by the matching rules of section 10.5, started with the fixture's header
-// and start members: straight, and saved and restored before every entry.
+// and start members: straight, saved and restored before every entry, and
+// with the trace and the settled records taken out before every entry
+// (section 5.19.4). At every tick the run must change exactly when the time
+// reaches its wake-up time (section 5.19.3).
 import { describe, expect, it } from 'vitest';
 import type { Json } from '../src/canonical.js';
-import { CoreError, type CoreContext, type CoreRun, type StartArgs } from '../src/wasm.js';
+import { CoreError, type CoreContext, type CoreRun, type ResumeArgs, type StartArgs } from '../src/wasm.js';
 import { repositoryContext } from './core.js';
 
 const FIXTURES = import.meta.glob<Record<string, Json>>('../../../tests/conformance/runtime/*.json', {
@@ -33,8 +36,10 @@ function matches(expected: Json, actual: Json): boolean {
   return JSON.stringify(expected) === JSON.stringify(actual);
 }
 
+/** `response` with `"{{digest}}"` replaced by the action's digest, and `"{{digest_upper}}"` by it in uppercase. */
 function fill(response: Json, action: Record<string, Json>): Json {
   if (response === '{{digest}}') return action.digest ?? null;
+  if (response === '{{digest_upper}}') return String(action.digest).toUpperCase();
   if (Array.isArray(response)) return response.map((r) => fill(r, action));
   if (response !== null && typeof response === 'object') {
     return Object.fromEntries(Object.entries(response).map(([k, v]) => [k, fill(v, action)]));
@@ -60,22 +65,67 @@ function start(ctx: CoreContext, f: Record<string, Json>): CoreRun {
   return ctx.start(args);
 }
 
-function play(ctx: CoreContext, f: Record<string, Json>, restoreEach: boolean): CoreRun {
+type Replay = 'plain' | 'restore' | 'drain';
+
+/** What a replay saw: the run, and the records taken out of it (a drain replay). */
+interface Played {
+  run: CoreRun;
+  taken: Json[];
+}
+
+/** A terminal action of a run whose host took records holds the records not taken: with the taken ones before them, it is the action of a run that took none. */
+function withTaken(action: Record<string, Json>, taken: Json[]): Record<string, Json> {
+  if (!Array.isArray(action.action_records)) return action;
+  return { ...action, action_records: [...taken, ...action.action_records] };
+}
+
+function play(ctx: CoreContext, f: Record<string, Json>, mode: Replay): Played {
   let run = start(ctx, f);
   let now = f.start as number;
+  const taken: Json[] = [];
+  const restore = () => {
+    const snap = run.snapshot('00ff');
+    const restored = ctx.restore({ catalog: f.catalog as Json, snapshot: snap, keyHex: '00ff' });
+    run.dispose();
+    run = restored;
+  };
   (f.script as Record<string, Json>[]).forEach((entry, i) => {
-    if (restoreEach) {
-      const snap = run.snapshot('00ff');
-      const restored = ctx.restore({ catalog: f.catalog as Json, snapshot: snap, keyHex: '00ff' });
-      run.dispose();
-      run = restored;
+    if (mode === 'restore') restore();
+    if (mode === 'drain') {
+      run.takeTrace();
+      taken.push(...run.takeRecords());
     }
     if ('tick' in entry) {
       now = entry.tick as number;
-      run.tick(now);
+      const wake = run.wakeAt();
+      const changed = run.tick(now);
+      expect(changed, `entry ${i}: tick ${now} with wake-up time ${wake}`).toBe(wake !== null && now >= wake);
+      if ('changed' in entry) expect(changed, `entry ${i}: changed`).toBe(entry.changed);
       return;
     }
-    const action = run.next() as unknown as Record<string, Json>;
+    if ('wake_at' in entry) {
+      expect(run.wakeAt(), `entry ${i}: wake_at`).toBe(entry.wake_at);
+      return;
+    }
+    if ('cancel' in entry) {
+      const c = entry.cancel as Record<string, Json>;
+      now = (c.at as number | undefined) ?? now;
+      run.cancel(c.reason as string, now);
+      return;
+    }
+    if ('resume' in entry) {
+      // The host keeps the run's state while it waits, restores it and resumes it (section 5.14.1).
+      const r = entry.resume as Record<string, Json>;
+      now = (r.at as number | undefined) ?? now;
+      restore();
+      const args: ResumeArgs = { nowMs: now, attendance: (r.attendance as 'attended' | 'unattended' | undefined) ?? 'attended' };
+      if (r.actor_identity !== undefined) args.actorIdentity = r.actor_identity;
+      run.resume(args);
+      return;
+    }
+    let action = run.next() as unknown as Record<string, Json>;
+    expect(action.run_id, `entry ${i}: run_id`).toBe('run-1');
+    if (mode === 'drain') action = withTaken(action, taken);
     if ('expect' in entry) {
       expect(matches(entry.expect as Json, action as Json), `entry ${i}: ${JSON.stringify(action)}`).toBe(true);
       for (const path of (entry.absent as string[] | undefined) ?? []) {
@@ -87,7 +137,7 @@ function play(ctx: CoreContext, f: Record<string, Json>, restoreEach: boolean): 
       run.submit(action.id as number, fill(entry.respond as Json, action) as { kind: string }, now);
     }
   });
-  return run;
+  return { run, taken };
 }
 
 const SUPPORTED = (f: Record<string, Json>) => !('catalogs' in f) && !('agents' in f);
@@ -95,15 +145,25 @@ const SUPPORTED = (f: Record<string, Json>) => !('catalogs' in f) && !('agents' 
 describe('runtime fixtures through the core', () => {
   for (const [path, f] of Object.entries(FIXTURES)) {
     const name = path.split('/').pop() as string;
-    for (const restoreEach of [false, true]) {
-      it(`${name}${restoreEach ? ' (restored before every entry)' : ''}`, async () => {
+    const labels: Record<Replay, string> = {
+      plain: '',
+      restore: ' (restored before every entry)',
+      drain: ' (trace and records taken before every entry)',
+    };
+    for (const mode of ['plain', 'restore', 'drain'] as const) {
+      it(`${name}${labels[mode]}`, async () => {
         expect(SUPPORTED(f)).toBe(true);
         const ctx = await repositoryContext();
-        const run = play(ctx, f, restoreEach);
-        const end = run.next() as unknown as Json;
+        const { run, taken } = play(ctx, f, mode);
+        expect(run.runId()).toBe('run-1');
+        const end = withTaken(run.next() as unknown as Record<string, Json>, taken) as Json;
         expect(matches(f.end as Json, end), JSON.stringify(end)).toBe(true);
+        if (f.run_record !== undefined) {
+          const record = run.runRecord();
+          expect(matches(f.run_record as Json, record), JSON.stringify(record)).toBe(true);
+        }
         const kinds = new Set((run.trace() as Record<string, Json>[]).map((t) => t.kind));
-        if (!restoreEach) for (const k of f.trace_kinds as string[]) expect(kinds.has(k), k).toBe(true);
+        if (mode === 'plain') for (const k of f.trace_kinds as string[]) expect(kinds.has(k), k).toBe(true);
         run.dispose();
       });
     }

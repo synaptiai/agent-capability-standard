@@ -1,0 +1,61 @@
+{
+  "description": "A run with no approval step that fails still has a record: the run record derived from its Failed action (\u00a75.19.8).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          }
+        }
+      ]
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "action_records": []
+  },
+  "trace_kinds": [],
+  "run_record": {
+    "action_id": "run-1",
+    "run_id": "run-1",
+    "frame": [
+      "w"
+    ],
+    "intent": "run w",
+    "actor": "agent",
+    "status": "failed",
+    "code": "R402",
+    "step": 0,
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "details": {
+      "kind": "Failed",
+      "records": 0
+    }
+  }
+}

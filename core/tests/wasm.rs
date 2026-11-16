@@ -230,6 +230,57 @@ fn a_runtime_fixture_runs_through_the_interface() {
 }
 
 #[test]
+fn the_run_operations_through_the_interface() {
+    // STANDARD v1.2 §5.19.2: wake-up time, tick, cancel, records and the
+    // run record; resume refuses a run that did not end deferred.
+    let ctx = context();
+    let catalog = json!({"w": {"goal": "g", "risk": "low",
+        "workflow_extensions": {"requires": ["wait@1"]}, "steps": [
+        {"capability": "retrieve", "purpose": "p", "store_as": "r", "delay": "PT1M",
+         "input_bindings": {"target": "x"}}]}});
+    let run = ok(
+        json!({"op": "run.start", "context": ctx, "catalog": catalog, "workflow": "w",
+        "options": {"run_id": "run-9", "now_ms": 0, "header": "1.2.0"}}),
+    )["run"]
+        .clone();
+    assert_eq!(ok(json!({"op": "run.run_id", "run": run})), "run-9");
+    assert_eq!(ok(json!({"op": "run.next", "run": run}))["kind"], "Sleep");
+    assert_eq!(ok(json!({"op": "run.wake_at", "run": run})), json!(60_000));
+    let tick = ok(json!({"op": "run.tick", "run": run, "now_ms": 1}));
+    assert_eq!(tick, json!({"changed": false}));
+    let seq = ok(json!({"op": "run.trace_seq", "run": run}));
+    let resume = call(json!({"op": "run.resume", "run": run, "now_ms": 1}));
+    assert_eq!(kind(&resume), "run");
+    assert_eq!(ok(json!({"op": "run.run_record", "run": run})), Value::Null);
+    ok(json!({"op": "run.cancel", "run": run, "reason": "stop", "now_ms": 2}));
+    let end = ok(json!({"op": "run.next", "run": run}));
+    assert_eq!(
+        (end["kind"].as_str(), end["code"].as_str()),
+        (Some("Failed"), Some("R408"))
+    );
+    assert_eq!(ok(json!({"op": "run.wake_at", "run": run})), Value::Null);
+    let again = call(json!({"op": "run.cancel", "run": run, "reason": "x", "now_ms": 3}));
+    assert_eq!(kind(&again), "run");
+    // What the cancel added is read from the seq taken before it.
+    let added = ok(json!({"op": "run.trace", "run": run, "since": seq}));
+    assert!(
+        added
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["kind"] == "run_cancelled")
+    );
+    let record = ok(json!({"op": "run.run_record", "run": run}));
+    assert_eq!(record["run_id"], "run-9");
+    let trace = ok(json!({"op": "run.take_trace", "run": run}));
+    assert!(!trace.as_array().unwrap().is_empty());
+    assert_eq!(ok(json!({"op": "run.trace", "run": run})), json!([]));
+    let heads = ok(json!({"op": "run.taken_sha256", "run": run}));
+    assert!(heads["trace"].as_str().is_some_and(|h| !h.is_empty()));
+    ok(json!({"op": "run.take_records", "run": run}));
+}
+
+#[test]
 fn start_needs_the_header_member() {
     let ctx = context();
     let catalog = json!({"w": {"goal": "g", "risk": "low", "steps": [

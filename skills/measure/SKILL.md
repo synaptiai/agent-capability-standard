@@ -76,8 +76,8 @@ method: string  # How it was measured
 breakdown:  # Optional component breakdown
   - component: string
     value: number
-confidence: 0..1  # Confidence in measurement accuracy
-evidence_anchors: ["file:line", "data:source"]
+confidence: number  # probability that the measured value is correct within its reported uncertainty (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "data:source", kind: record}]
 assumptions: []
 ```
 
@@ -91,8 +91,8 @@ assumptions: []
 | `metric` | string | Name of measured property |
 | `method` | string | Measurement methodology used |
 | `breakdown` | array | Optional decomposition of measurement |
-| `confidence` | number | 0.0-1.0 confidence in measurement accuracy |
-| `evidence_anchors` | array | References to the data the measurement was taken from |
+| `confidence` | number | Probability, 0.0-1.0, that the measured value is correct within its reported uncertainty (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the data the measurement was taken from |
 | `assumptions` | array | Explicit assumptions |
 
 ## Examples
@@ -125,7 +125,7 @@ breakdown:
     value: 4
 confidence: 0.9
 evidence_anchors:
-  - "src/services/order_processor.rb:15-120"
+  - {ref: "file:src/services/order_processor.rb:15-120", kind: file}
 assumptions:
   - "Ruby control flow statements counted as decision points"
   - "Exception handling counted as branches"
@@ -160,8 +160,8 @@ breakdown:
     value: 0.4
 confidence: 0.7
 evidence_anchors:
-  - "migrations/20240115_add_preferences.rb:1-25"
-  - "tool:grep:similar_migrations"
+  - {ref: "file:migrations/20240115_add_preferences.rb:1-25", kind: file}
+  - {ref: "tool:grep:similar_migrations", kind: tool}
 assumptions:
   - "Table has ~1M rows based on user count"
   - "Migration will lock table during ALTER"

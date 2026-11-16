@@ -1,0 +1,31 @@
+# Standard version: 1.2.0
+# Positive fixture (STANDARD v1.2 §5.20): a workflow that declares
+# grounding@1 states a grounding policy (require, kinds with a vendor kind,
+# attested), and a failure mode fires on F505. Valid, with no warning.
+grounding_policy:
+  goal: Retrieve a lab report and classify it, each output grounded.
+  risk: low
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    require: [retrieve, classify]
+    kinds: [file, record, x-lab_result]
+    attested: true
+  steps:
+  - capability: retrieve
+    purpose: Read the lab report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  - capability: classify
+    purpose: Classify the report.
+    store_as: labels
+    input_bindings:
+      item: "${report.data: object}"
+    failure_modes:
+    - condition: The classification cites evidence it did not have.
+      on_error: F505
+      action: stop
+  success:
+  - The report is classified, every output grounded

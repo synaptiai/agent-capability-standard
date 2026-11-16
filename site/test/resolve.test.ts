@@ -39,10 +39,10 @@ describe('links to Markdown pages', () => {
   });
 
   it('keeps and checks the anchor of an anchored link', () => {
-    written('docs/guides/RUNNING_WORKFLOWS.md', '../../spec/STANDARD-v1.1.0.md#5-workflow-dsl');
-    expect(ok(resolve('docs/guides/RUNNING_WORKFLOWS.md', '../../spec/STANDARD-v1.1.0.md#5-workflow-dsl'))).toEqual({
+    written('docs/guides/RUNNING_WORKFLOWS.md', '../../spec/STANDARD-v1.2.0.md#5-workflow-dsl');
+    expect(ok(resolve('docs/guides/RUNNING_WORKFLOWS.md', '../../spec/STANDARD-v1.2.0.md#5-workflow-dsl'))).toEqual({
       kind: 'route',
-      url: '/spec/1.1.0/#5-workflow-dsl',
+      url: '/spec/1.2.0/#5-workflow-dsl',
       anchorChecked: true,
     });
     written('README.md', 'skills/README.md#composed-skills-6');

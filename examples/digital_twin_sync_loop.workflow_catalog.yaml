@@ -484,7 +484,7 @@ digital_twin_sync_loop:
     - condition: The mutation failed or timed out
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and no audit is recorded.
+      recovery: Roll back the twin to the checkpoint taken before the mutation; the run then ends with the mutate step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
     input_bindings:
       target: "twin_state"
       operation:
@@ -508,7 +508,7 @@ digital_twin_sync_loop:
     - condition: The verification suite failed or timed out
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and no audit is recorded.
+      recovery: Roll back the twin to the checkpoint so the unverified mutation does not stay in place; the run then ends with the execute step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
     input_bindings:
       code: "run_verification_suite"
     gates:
@@ -530,7 +530,7 @@ digital_twin_sync_loop:
     - condition: Verification could not run (timed out or failed after its retries)
       on_error: [R401, R402]
       action: rollback
-      recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and no audit is recorded.
+      recovery: Roll back the twin to the checkpoint so no unverified change stays in place; the run then ends with the verify step's error, and the audit step does not run; the run record the host keeps (STANDARD v1.2 §5.19.8) records the failure.
     input_bindings:
       target: "${execute_out: object}"
       conditions: ["drift_resolved", "no_policy_violation"]

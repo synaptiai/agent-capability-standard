@@ -178,7 +178,9 @@ class TestEvidenceStoreAPI:
     """Tests for clear(), to_list(), and search_by_metadata()."""
 
     def test_clear_empties_store(self) -> None:
-        """clear() should remove all anchors and reset seq counter."""
+        """clear() removes all anchors; the sequence goes on, so no record id
+        is reused, and the cleared records count as removed (STANDARD v1.2
+        §6.6)."""
         store = EvidenceStore(max_anchors=100)
         for i in range(10):
             store.add_anchor(
@@ -191,7 +193,9 @@ class TestEvidenceStoreAPI:
         store.clear()
 
         assert len(store) == 0
-        assert store._seq_counter == 0
+        assert store._seq_counter == 10
+        assert store.info().removed == 10
+        assert len(store._records) == 0
         assert len(store._anchor_to_seq) == 0
         assert len(store._seq_to_anchor) == 0
         assert len(store._priority_buckets) == 0

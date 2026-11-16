@@ -13,7 +13,7 @@ import { toString } from 'mdast-util-to-string';
 import { parse } from 'yaml';
 import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { loadOntology, type Capability, type EdgeType, type Ontology } from '../data/ontology';
-import { loadCatalogEnums, loadIdentitySchema, loadTrustModel, loadWorldStateSchema } from '../data/spec-sources';
+import { loadCatalogEnums, loadIdentitySchema, loadRuntimeFixture, loadTrustModel, loadWorldStateSchema } from '../data/spec-sources';
 import { chapterKey, principleKey } from '../pixel/keys';
 import { sectionBlocks, sectionFence, sectionTable, tableCodes, tableRows } from './md-sections';
 import { contractRows, tableOrder, type SchemaRow } from './views';
@@ -558,10 +558,16 @@ export interface ApprovalPlan {
   isDefault: boolean;
 }
 
-/** §5.14's list of `when_unattended` plans ("`fail` (default) → F502."), checked against the schema enum. */
+/**
+ * §5.14's list of `when_unattended` plans ("`fail` (default) → F502."),
+ * checked against the schema enum: the first list of the section whose first
+ * item reads "plan → result" (the section's other lists, such as the modes,
+ * come before it).
+ */
 export function approvalPlans(text: string, where: string): ApprovalPlan[] {
   const lists = sectionBlocks(text, '5.14 ', where).filter((n): n is List => n.type === 'list');
-  const items = (lists[0]?.children ?? []).map((i: ListItem) => toString(i).replace(/\s+/g, ' ').trim());
+  const itemsOf = (l: List | undefined) => (l?.children ?? []).map((i: ListItem) => toString(i).replace(/\s+/g, ' ').trim());
+  const items = itemsOf(lists.find((l) => /^\w+( \(default\))? → /.test(itemsOf(l)[0] ?? '')) ?? lists[0]);
   const plans = items.map((s) => {
     const m = /^(\w+)( \(default\))? → (.+?)\.?$/.exec(s);
     if (!m) throw new Error(`${where}: §5.14's plan "${s}" does not read "plan → result"`);
@@ -736,6 +742,72 @@ export function senderCaption(rows: { input: string; drops: boolean }[]): string
   const drop = rows.filter((r) => r.drops).map((r) => r.input);
   const mark = rows.filter((r) => !r.drops).map((r) => r.input);
   return `An item passes ${plural(rows.length, 'check', 'checks')} in turn: ${andList(drop)} can drop it, and ${andList(mark)} keeps it but may mark it always-ask.`;
+}
+
+// ------------------------------------------------ who counts as an approver (§5.17)
+
+export const APPROVER_FIXTURE = 'approver_identity_role';
+
+export interface ApproverRow {
+  principal: string;
+  kind: string;
+  role: string | null;
+  counts: boolean;
+  /** Why it counts, or why it does not, by §5.17's rules. */
+  why: string;
+}
+
+export interface ApproverCount {
+  fixture: string;
+  approver: { kind: string; role: string | null; min: number };
+  rows: ApproverRow[];
+  /** The approvers the run's record lists, which must be those that count. */
+  recorded: string[];
+  end: string;
+}
+
+/**
+ * §5.17's approver count applied to the decision of the conformance fixture
+ * APPROVER_FIXTURE: each attested identity counts only if its kind is
+ * `human` for a human approver and its role is the requested one. The
+ * principals that count must be the ones the fixture's record lists.
+ */
+export function approverCount(text: string, where: string): ApproverCount {
+  const prose = sectionBlocks(text, '5.17 ', where).map((b) => toString(b).replace(/\s+/g, ' ')).join(' ');
+  for (const k of ['approver_identities', 'counted by principal', 'its role equals it']) {
+    if (!prose.includes(k)) throw new Error(`${where}: §5.17 no longer says "${k}"`);
+  }
+  const f = loadRuntimeFixture(APPROVER_FIXTURE);
+  type Obj = Record<string, unknown>;
+  const steps = (f.catalog[f.workflow] as { steps: Obj[] }).steps;
+  const asked = steps.find((s) => typeof s.approval === 'object' && s.approval !== null);
+  const ap = ((asked?.approval as Obj | undefined)?.approver ?? {}) as Obj;
+  if (typeof ap.kind !== 'string') throw new Error(`${f.file}: no step names an approver`);
+  const approver = { kind: ap.kind, role: typeof ap.role === 'string' ? ap.role : null, min: typeof ap.min_approvers === 'number' ? ap.min_approvers : 1 };
+  const decision = f.script.find((e) => e.respond.kind === 'Decision')?.respond;
+  const ids = (decision?.approver_identities ?? []) as Obj[];
+  if (ids.length === 0) throw new Error(`${f.file}: its decision attests no approver`);
+  const rows = ids.map((id): ApproverRow => {
+    const principal = String(id.principal);
+    const kind = String(id.kind);
+    const role = typeof id.role === 'string' ? id.role : null;
+    if (approver.kind === 'human' && kind !== 'human') return { principal, kind, role, counts: false, why: `kind ${kind}, not human` };
+    if (approver.role !== null && role !== approver.role) return { principal, kind, role, counts: false, why: role ? `role ${role}, not ${approver.role}` : `no role, ${approver.role} requested` };
+    return { principal, kind, role, counts: true, why: approver.role ? `kind human, role ${approver.role}` : 'kind human' };
+  });
+  const records = (f.end.action_records ?? []) as Obj[];
+  const recorded = (((records[0]?.approval ?? {}) as Obj).approvers ?? []) as string[];
+  const counted = [...new Set(rows.filter((r) => r.counts).map((r) => r.principal))].sort();
+  if (counted.join() !== [...recorded].sort().join()) throw new Error(`${f.file}: §5.17 counts ${andList(counted)}, the record lists ${andList(recorded)}`);
+  const end = f.end.kind === 'Failed' ? `refused (${String(f.end.code)})` : 'carried out';
+  return { fixture: f.name, approver, rows, recorded, end };
+}
+
+export function approverCaption(c: ApproverCount): string {
+  const counted = c.rows.filter((r) => r.counts).map((r) => r.principal);
+  const not = c.rows.filter((r) => !r.counts).map((r) => r.principal);
+  const role = c.approver.role ? ` with role ${c.approver.role}` : '';
+  return `In the conformance fixture ${c.fixture}, ${plural(c.rows.length, 'attested approver', 'attested approvers')} decide for a ${c.approver.kind} approver${role}: ${andList(counted)} ${counted.length === 1 ? 'counts' : 'count'}${not.length > 0 ? ` and ${andList(not)} ${not.length === 1 ? 'does' : 'do'} not` : ''}, so ${counted.length} of the ${c.approver.min} needed approvers ${counted.length === 1 ? 'counts' : 'count'} and the action is ${c.end}.`;
 }
 
 // ------------------------------------------------ §3 design principles

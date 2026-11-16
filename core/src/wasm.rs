@@ -20,7 +20,9 @@ use std::ptr;
 use serde_json::{Map, Value, json};
 
 use crate::diag::Diagnostic;
-use crate::exec::{Attendance, RecordMode, Response, Run, Snapshot, StartOptions};
+use crate::exec::{
+    Attendance, RecordMode, Response, RestoreOptions, ResumeOptions, Run, Snapshot, StartOptions,
+};
 use crate::expr::check::{Checker, RootInfo, Scope};
 use crate::profile::Policy;
 use crate::validate::{self, Context, Report};
@@ -275,18 +277,26 @@ impl Scope for JsonScope<'_> {
     }
 }
 
+/// A request's `attendance`: `attended` (the default) or `unattended`.
+fn attendance(o: &Req) -> Result<Attendance, Fail> {
+    match o.get("attendance").and_then(Value::as_str) {
+        None | Some("attended") => Ok(Attendance::Attended),
+        Some("unattended") => Ok(Attendance::Unattended),
+        Some(other) => Err(Fail::new(
+            "bad_request",
+            format!("attendance must be 'attended' or 'unattended', not '{other}'"),
+        )),
+    }
+}
+
+/// A request's `actor_identity`, when it gives one (null is none).
+fn actor(o: &Req) -> Option<Value> {
+    o.get("actor_identity").filter(|v| !v.is_null()).cloned()
+}
+
 fn start_options(ctx: &Context, o: &Req) -> Result<StartOptions, Fail> {
     let header = header(o, "header", "options.")?;
-    let attendance = match o.get("attendance").and_then(Value::as_str) {
-        None | Some("attended") => Attendance::Attended,
-        Some("unattended") => Attendance::Unattended,
-        Some(other) => {
-            return Err(Fail::new(
-                "bad_request",
-                format!("attendance must be 'attended' or 'unattended', not '{other}'"),
-            ));
-        }
-    };
+    let attendance = attendance(o)?;
     let records = match o.get("records").and_then(Value::as_str) {
         None | Some("approvals") => RecordMode::Approvals,
         Some("actions") => RecordMode::Actions,
@@ -322,7 +332,7 @@ fn start_options(ctx: &Context, o: &Req) -> Result<StartOptions, Fail> {
         attendance,
         run_id: string(o, "run_id")?.to_string(),
         now_ms: time(member(o, "now_ms")?, "now_ms")?,
-        actor_identity: o.get("actor_identity").filter(|v| !v.is_null()).cloned(),
+        actor_identity: actor(o),
         header,
         records,
         profiles: list(o, "profiles")?,
@@ -491,8 +501,17 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
             let snapshot: Snapshot = serde_json::from_value(member(req, "snapshot")?.clone())
                 .map_err(|e| Fail::new("bad_request", format!("malformed snapshot: {e}")))?;
             let key = key(req)?;
-            let restored = Run::restore(ctx, member(req, "catalog")?, &snapshot, key.as_deref())
-                .map_err(|e| Fail::new("restore", e.to_string()))?;
+            let options = RestoreOptions {
+                actor_identity: actor(req),
+            };
+            let restored = Run::restore_with(
+                ctx,
+                member(req, "catalog")?,
+                &snapshot,
+                key.as_deref(),
+                options,
+            )
+            .map_err(|e| Fail::new("restore", e.to_string()))?;
             let id = h.issue();
             h.runs.insert(id, restored);
             Ok(json!({ "run": id }))
@@ -500,7 +519,19 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
         "run.next" => {
             serde_json::to_value(run(h, req)?.next()).map_err(|e| Fail::new("run", e.to_string()))
         }
-        "run.trace" => Ok(Value::Array(run(h, req)?.trace().to_vec())),
+        "run.trace" => {
+            // With `since`, the events whose `seq` is at least `since`.
+            let since = match req.get("since") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(time(v, "since")?),
+            };
+            let events = run(h, req)?.trace();
+            let from = since.map_or(0, |s| {
+                events.partition_point(|e| e["seq"].as_u64().is_some_and(|q| q < s))
+            });
+            Ok(Value::Array(events[from..].to_vec()))
+        }
+        "run.trace_seq" => Ok(json!(run(h, req)?.trace_seq())),
         "run.action_records" => Ok(Value::Array(run(h, req)?.action_records().to_vec())),
         "run.finished" => Ok(Value::Bool(run(h, req)?.is_finished())),
         "run.submit" => {
@@ -517,11 +548,37 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
         }
         "run.tick" => {
             let now = time(member(req, "now_ms")?, "now_ms")?;
-            let r = run(h, req)?;
-            let before = r.next().id;
-            r.tick(now);
-            Ok(json!({ "changed": r.next().id != before }))
+            Ok(json!({ "changed": run(h, req)?.tick(now) }))
         }
+        // The host protocol's run operations (STANDARD v1.2 §5.19.2).
+        "run.run_id" => Ok(json!(run(h, req)?.run_id())),
+        "run.wake_at" => Ok(json!(run(h, req)?.wake_at())),
+        "run.cancel" => {
+            let reason = string(req, "reason")?.to_string();
+            let now = time(member(req, "now_ms")?, "now_ms")?;
+            run(h, req)?
+                .cancel(&reason, now)
+                .map_err(|e| Fail::new("run", e.to_string()))?;
+            Ok(Value::Null)
+        }
+        "run.resume" => {
+            let options = ResumeOptions {
+                attendance: attendance(req)?,
+                now_ms: time(member(req, "now_ms")?, "now_ms")?,
+                actor_identity: actor(req),
+            };
+            run(h, req)?
+                .resume(options)
+                .map_err(|e| Fail::new("run", e.to_string()))?;
+            Ok(Value::Null)
+        }
+        "run.take_trace" => Ok(Value::Array(run(h, req)?.take_trace())),
+        "run.take_records" => Ok(Value::Array(run(h, req)?.take_records())),
+        "run.taken_sha256" => {
+            let (records, trace) = run(h, req)?.taken_heads();
+            Ok(json!({ "records": records, "trace": trace }))
+        }
+        "run.run_record" => Ok(run(h, req)?.run_record().unwrap_or(Value::Null)),
         "run.snapshot" => {
             let key = key(req)?;
             serde_json::to_value(run(h, req)?.snapshot(key.as_deref()))

@@ -1,0 +1,20 @@
+# Standard version: 1.2.0
+# Negative fixture (STANDARD v1.2 §5.20, §6.5): a grounding policy's kinds
+# are anchor kinds; the SDK's former tool_output is not one. S303.
+grounding_bad_kind:
+  goal: List a kind outside the vocabulary.
+  risk: low
+  spec_version: "1.2"
+  workflow_extensions:
+    requires: [grounding@1]
+  grounding:
+    require: [retrieve]
+    kinds: [tool_output]
+  steps:
+  - capability: retrieve
+    purpose: Read the report.
+    store_as: report
+    input_bindings:
+      target: reports/latest
+  success:
+  - Never valid

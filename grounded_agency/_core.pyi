@@ -50,6 +50,26 @@ def check_destination_pattern(pattern: str) -> None:
 def destination_allowed(policies: list[list[str]], destination: str) -> bool:
     """Whether every destination policy allows ``destination`` (§4.4.2)."""
 
+def next_fire(schedule: dict[str, Any], after_ms: int) -> int | None:
+    """The first fire time of a validated schedule trigger strictly after
+    ``after_ms``, or None (STANDARD v1.2 §5.10.2). ``ValueError`` when the
+    schedule cannot be read."""
+
+def check_grounding(
+    output: Any,
+    policy: dict[str, Any],
+    bound_refs: list[str] | None = None,
+    evidence_seen: list[str] | None = None,
+) -> dict[str, Any]:
+    """STANDARD v1.2 §5.20's check of one output against a grounding policy
+    (``{kinds?, attested?}``; ``require`` is not needed). ``bound_refs`` are
+    the reference bodies the step's ``input_bindings`` make (for a call, its
+    argument names); ``evidence_seen`` None is absent, an empty list attests
+    that nothing was seen. Returns ``{status: grounded|inferred|refused,
+    code: None|"F505", message, counted, legacy, unattested}`` (the counts
+    are 0 for a refused output). ``ValueError`` for a malformed policy or a
+    bound reference that is not a reference body."""
+
 @final
 class Validator:
     """Raises ``FileNotFoundError`` (or another ``OSError``) when the
@@ -108,15 +128,19 @@ class Run:
         agents: list[Any] | None = None,
     ) -> Run:
         """``header`` is required: the version the catalog's header declares,
-        or None for a catalog without one (§11.5). ``profiles``: the domain
-        profiles applied to every step of the run and its nested runs,
-        checked at start and saved with the run (§5.21); one with an error,
-        or one that sets a grounding policy (``require_grounding``) or a
-        destination policy (``allowed_destinations``), which no check of
-        this executor reads yet, refuses the start (``ValueError``), as a
-        restore of a state holding one is refused. ``records="actions"``,
-        ``grounding``, ``destinations``, ``catalogs`` and ``agents`` are
-        refused (``ValueError``) until the 1.2 workstreams implement them."""
+        or None for a catalog without one (§11.5). ``records`` is the record
+        mode (§6.4): ``approvals`` or ``actions``. ``grounding`` is a list of
+        grounding policies ``{require, kinds?, attested?}`` the host applies
+        to the run and its nested runs (§5.20): a malformed policy, or one
+        that requires a capability the ontology does not define (V101), is
+        a ``ValueError``. ``profiles``: the domain profiles applied to every
+        step of the run and its nested runs, checked at start and saved with
+        the run (§5.21); one with an error, or one that sets a destination
+        policy (``allowed_destinations``), which no check of this executor
+        reads yet, refuses the start (``ValueError``), as a restore of a
+        state holding one is refused. ``destinations``, ``catalogs`` and
+        ``agents`` are refused (``ValueError``) until the 1.2 workstreams
+        implement them."""
 
     @staticmethod
     def restore(
@@ -125,14 +149,54 @@ class Run:
         snapshot: dict[str, Any],
         key: bytes | None = None,
         *,
+        actor_identity: dict[str, Any] | None = None,
         catalogs: list[Any] | None = None,
         agents: list[Any] | None = None,
-    ) -> Run: ...
+    ) -> Run:
+        """With ``actor_identity``, the actor the host continues the run
+        for: another principal than the run's, or any actor for a run started
+        without one, is refused (``ValueError``; §5.17)."""
+
+    def resume(
+        self,
+        *,
+        attendance: str = "attended",
+        now_ms: int,
+        actor_identity: dict[str, Any] | None = None,
+    ) -> None:
+        """Resume a run that ended ``deferred`` (§5.14.1), as the same run,
+        under ``attendance`` and, with ``actor_identity``, a new actor.
+        ``ValueError`` when the run did not end deferred, the actor is not an
+        ``agent_identity``, or the state does not keep what resuming needs."""
+
     def next(self) -> dict[str, Any]: ...
     def submit(self, action_id: int, response: dict[str, Any], now_ms: int) -> None: ...
-    def tick(self, now_ms: int) -> None: ...
+    def tick(self, now_ms: int) -> bool:
+        """True when the tick changed the run (STANDARD v1.2 §5.19.2)."""
+    @property
+    def run_id(self) -> str: ...
+    def wake_at(self) -> int | None:
+        """The earliest time at which a tick changes the run, or None
+        (§5.19.3)."""
+    def cancel(self, reason: str, now_ms: int) -> None:
+        """End the run with ``Failed`` R408 (§5.19.5). ``ValueError`` when it
+        ended otherwise than ``deferred``."""
+    def take_trace(self) -> list[dict[str, Any]]:
+        """Take the trace out of the run's state (§5.19.4)."""
+    def take_records(self) -> list[dict[str, Any]]:
+        """Take the settled action records out of the run's state (§5.19.4)."""
+    @property
+    def taken_sha256(self) -> dict[str, str]:
+        """The chain heads over what was taken: ``{"records", "trace"}``."""
+    def run_record(self) -> dict[str, Any] | None:
+        """The run's record (§5.19.8), or None while the run goes on."""
     @property
     def finished(self) -> bool: ...
-    def trace(self) -> list[dict[str, Any]]: ...
+    @property
+    def trace_seq(self) -> int:
+        """The ``seq`` the run's next trace event gets."""
+    def trace(self, since: int | None = None) -> list[dict[str, Any]]:
+        """The trace events the run holds; with ``since``, those whose
+        ``seq`` is at least ``since``."""
     def action_records(self) -> list[dict[str, Any]]: ...
     def snapshot(self, key: bytes | None = None) -> dict[str, Any]: ...

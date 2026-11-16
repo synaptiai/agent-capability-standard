@@ -69,17 +69,62 @@ the Rust core in `core/`).
   diagnostics). `tools/cel_differential` runs them against cel-go to check
   CEL compatibility.
 - Runtime fixtures, language-neutral: `tests/conformance/runtime/*.json`,
-  scripted runs of the reference executor (catalog, inputs, the expected
-  actions and the responses to them, the expected end and trace). Run by
+  scripted runs (catalog, inputs, the expected actions and the responses to
+  them, the expected end and trace), normative for an executor of class EX
+  except their `trace_kinds` (§10.3, §10.5; see
+  [Executor conformance](#executor-conformance-class-ex)). Run by
   `cargo test --test runtime` (each also replayed through a snapshot and
-  restore before every step) and `tests/test_runner.py`. Fifteen of them
+  restore before every step, and with the trace and records taken out
+  before every step) and `tests/test_runner.py`. Fifteen of them
   (`orchestrator_*`) script runs of the workflows an adopter ported to the
   candidate (reduced from production, generic names; revision 1.1e), kept
   as contributed
   (`tests/fixtures/pass_orchestrator_port.workflow_catalog.yaml`). The
   `domain_*` ones run reference domain workflows. Twenty (`gap*`) are an
   adopter's own scripted runs, kept as contributed in
-  `tests/conformance/contrib/` and copied by the generator.
+  `tests/conformance/contrib/` and copied by the generator. The
+  `approval_*`, `approver_*` and `resume_*` ones pin the approval request
+  for a step with no or a partial `approval` field, the digest comparison,
+  approver identities, and the resumption of a deferred run (§5.14,
+  §5.14.1, §5.17); a script's `resume` entry resumes the run. The
+  `cancel_*`, `wake_at_*`, `records_*`, `run_record_*`, `parallel_group_*`,
+  `audit_*` and `error_reason_*` ones pin cancellation, the tick boundaries,
+  record mode `actions`, run records, parallel groups, `require_record` and
+  error reasons (§5.2.3, §5.19, §6.4).
+- Trigger vectors, normative (§10.3): `tests/conformance/triggers/`
+  (`fire_times.json`, `overlap.json`, `attendance.json`, `events.json`), the
+  §5.10.2 fire times, overlap decisions (resumed runs included), the
+  attendance of a run a trigger starts and which events start runs (a
+  redelivered event included). `scripts/gen_trigger_vectors.py` computes
+  them with Python's zoneinfo, independently of the core; `fire_times.json`
+  names the tzdata release it was computed with, and the vectors are
+  normative with it or any release that agrees on their dates.
+- Approval digest vectors, normative (§10.3):
+  `tests/conformance/approval/digests.json`. Each vector has a `kind`. A
+  `step` vector is one approval request of a workflow step (§5.14): the
+  step's `approval` field (or null), its resolved `inputs` where it declares
+  no `shows`, the values its references resolve against (`bindings`) where
+  it does, the value a recheck read (`recheck_read`) for a request asked
+  again, and the `shown` values; a `tool_call` vector is the approval
+  of a tool call (§5.18.7): the `call` (`{action, capability, args}`, with
+  `capability` null for an unbound tool) and `shown`, which is `[call]`. Every
+  vector gives the canonical JSON (RFC 8785) of `shown` and the SHA-256
+  digest of that text in lowercase hexadecimal. An implementation that
+  computes or checks approval digests MUST reproduce each vector's
+  `canonical` text and `digest`; an executor MUST show each `step` vector's
+  `shown` values, given its `inputs` or `bindings` and `recheck_read`, and a
+  safety layer each `tool_call` vector's. The vectors
+  cover member order, nesting, number forms (2^53, the largest integer
+  magnitude §5.14 allows, and `1e+21`, a binary64 value because it is
+  written with an exponent), text outside ASCII, an empty list, a reference
+  that resolves to nothing, a step that declares no `shows`, a step asked
+  again after a recheck, and the call of a bound and of an unbound tool.
+  `scripts/gen_standard_agents_binding.py`
+  writes the file from runs of the executor, and CI fails when it is out of
+  date. `tests/test_approval_vectors.py` replays each `step` vector on the
+  executor from the vector's own fields and recomputes the canonical JSON
+  and the digest with a serializer of its own; the TypeScript package
+  (`packages/acs-core/`) tests its digest against the file in place.
 
 ```mermaid
 ---
@@ -101,17 +146,67 @@ Running the suite:
 | Workflow fixtures (`tests/fixtures/`) | `python scripts/run_conformance.py` |
 | Runtime fixtures | `cargo test --test runtime` (in `core/`), `pytest tests/test_runner.py` |
 | Expression fixtures | `cargo test --test expressions` (in `core/`); `tools/cel_differential` against cel-go |
-| Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `examples/standard_agents/` |
+| Approval digest vectors | `pytest tests/test_approval_vectors.py`; `npm test` in `packages/acs-core/` |
+| Trigger vectors | `cargo test --test triggers` (in `core/`), `pytest tests/test_triggers.py` |
 | Trust vectors | `pytest tests/test_trust.py` |
 | Profile vectors | `cargo test --test profiles` (in `core/`), `pytest tests/test_profiles.py`, `npm test` in `packages/acs-core/` (through WebAssembly) |
 | Entity id vectors | `pytest tests/test_entities.py` |
+| Grounding vectors | `cargo test --test grounding` (in `core/`), `pytest tests/test_grounding.py`, `npm test` in `packages/acs-core/` |
+| Secret redaction vectors (informative) | `pytest tests/test_redaction.py`, `npm test` in `packages/acs-core/` |
 
 `scripts/run_conformance.py` runs only the workflow fixtures.
 
+## Executor conformance (class EX)
+
+An executor claims class EX (STANDARD-v1.2.0 §10.5) when it starts only
+catalogs that validate, implements the extensions it accepts, offers the run
+operations of §5.19.2, issues exactly the actions of
+`schemas/host_protocol.schema.json`, keeps time, saves, restores, cancels and
+records as §5.19.3 to §6.4 say, and passes every runtime fixture whose
+extensions it implements.
+
+A fixture (`tests/conformance/runtime/schema/fixture.schema.json`) gives the
+catalog, its header's version (`header`, or null), the workflow, its inputs
+and attendance and, optionally, the actor, the record mode (`records`) and
+the other start members, all passed to start with `run_id` `"run-1"`. Its
+`script` is a list of entries:
+
+| Entry | What the harness does |
+|-------|-----------------------|
+| `{"expect": A, "respond": R, "at": T}` | The pending action must match `A`; then `R`, when given, is submitted at `T` (`"{{digest}}"` and `"{{digest_upper}}"` stand for the action's digest) |
+| `{"tick": T, "changed": C}` | The time `T` is given; when `changed` is there, the tick must change the run exactly when `C` |
+| `{"wake_at": W}` | The run's wake-up time must be `W` (null: none) |
+| `{"cancel": {"reason": S, "at": T}}` | The run is cancelled |
+| `{"resume": {...}}` | The run is saved, restored and resumed (§5.14.1) |
+
+After the script the run's next action must match `end`, and its run record
+`run_record` when the fixture gives one. An actual value matches an expected
+one when they are equal, when it is an object with every member the expected
+one names, each matching, or when both are arrays of the same length whose
+elements match in order. Text the executor composes is not compared: a
+`message` (except `ended.message`), the `reason` of an action record or a
+deferral, and the `ignored`, `note` and `quorum` texts of a quorum's
+`violations`. A `Failed` action's `reason` is a token and is compared.
+
+An executor passes a fixture when every expectation matches, both when it
+plays the script as it is and when it saves and restores its state before
+every entry. The reference harnesses also replay each fixture with the trace
+and the settled records taken out before every entry, checking the state's
+chain heads against what was taken, and check at every `tick` that it
+changed the run exactly when its time reached the run's wake-up time.
+`scripts/gen_runtime_fixtures.py` refuses a fixture that pins a member the
+Standard does not define (its `NORMATIVE_MEMBERS` table names the section of
+each). Another executor runs the fixtures with a harness of its own built
+from the fixture schema; its conformance statement names its version, the
+Standard version it implements, the extensions it implements, how its
+binding names the run operations, and whether it restores states saved by
+its earlier versions.
+
 Coverage gaps: no conformance fixture yet exercises V103, S301, S302, W607
 or W612; the reference implementation's unit tests cover them. F505 is
-reserved and not checked by the reference implementation, so nothing
-tests it.
+checked under a grounding policy (STANDARD-v1.2.0 §5.20) and covered by the
+grounding vectors (`tests/conformance/grounding/check.json`, normative) and
+the runtime fixtures whose names start with `grounding_`.
 
 ## Safety-layer conformance (class SL)
 
@@ -140,10 +235,10 @@ normative for the class:
   atomic, the features it supports, its host gaps, and (`not_applied`) any
   check of §5.18.10 it does not apply yet; a layer that lists any does not
   conform to the class until it applies them. The two reference layers list
-  there the secret checks of `persist` and `audit` and the redaction of the
-  records and evidence they write and of a `transform` output (§6.7), and
-  the destination policy of `send` (§4.4.2); the Python adapter also lists
-  the output contract of a tool's result (§5.18.9). They meet §10.4 except
+  there the destination policy of `send` (§4.4.2); the Python adapter also
+  lists the output contract of a tool's result (§5.18.9). Both apply the
+  secret checks of `persist` and `audit` and redact the records and
+  evidence they write (§6.7). They meet §10.4 except
   those rows, and claim class SL once they apply them.
 
 Both kinds of fixture are generated by `scripts/gen_call_fixtures.py`
@@ -174,32 +269,10 @@ them but do not claim the class ([SECURITY.md §5.5](SECURITY.md#55-hooks-and-th
 
 ## Informative vectors
 
-These files are language-neutral and informative: STANDARD-v1.1.0 §10.3 does
+These files are language-neutral and informative: STANDARD-v1.2.0 §10.3 does
 not name them. Each is JSON, describes its own fields, and has one named
 entry per case.
 
-- Approval digests: `tests/conformance/approval/digests.json`. Each vector
-  is one approval request of the reference executor (§5.14): the shown
-  values, their canonical JSON (RFC 8785) and the SHA-256 digest of that
-  text in lowercase hexadecimal. The vectors cover member order, nesting,
-  number forms, text outside ASCII, an empty list, a step that declares no
-  `shows`, and a step asked again after a recheck. Three things the vectors
-  pin are the reference executor's behaviour and are not stated in the
-  Standard: a step with no `shows` shows its resolved inputs wrapped in an
-  array, a step asked again shows one more object, whose `recheck` member
-  holds the previous and the current value of the source, and the digest is
-  written in lowercase hexadecimal. The `numbers` vector holds 2^53
-  (9007199254740992), the bound §5.14 writes as "within ±2^53"; RFC 7493
-  §2.2 gives the range of integers a receiver can treat as exact as
-  ±(2^53 - 1).
-  `scripts/gen_standard_agents_binding.py` writes the file from runs of the
-  executor, and CI fails when it is out of date.
-  `tests/test_approval_vectors.py` replays each vector on the executor and
-  recomputes the canonical JSON and the digest with a serializer of its
-  own. The TypeScript package (`packages/acs-core`) reads the file in
-  place. The `tool_call` vectors pin the approval of a tool call (§5.18.7):
-  `shown` is `[{action, capability, args}]`, with `capability` null for an
-  unbound tool.
 - Capability outputs on a text-only channel (§5.18.9):
   `tests/conformance/output/vectors.json`. Each `decode` vector is the text
   a consumer received and whether it is accepted or refused with R402; each
@@ -238,11 +311,3 @@ entry per case.
   valid ids parsed into class, namespace and local id; invalid ones
   refused), run by `tests/test_entities.py` against
   `grounded_agency/entities.py`.
-
-Among the runtime fixtures, `checkpoint_per_mutation` pins what the
-reference executor asks for a step that needs approval and has no `approval`
-field: approver `{kind: human}`, mode `in_session`, the step's resolved
-inputs wrapped in an array, and no expiry. §5.14 does not state this
-request. A fixture's expectation matches by subset, so
-`tests/test_approval_vectors.py` also checks that the approver has no other
-member.

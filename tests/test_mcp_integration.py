@@ -345,6 +345,49 @@ class TestGroundedServerGuard:
         again = await handler({"q": "x"})
         assert again["is_error"] is True
 
+    @pytest.mark.asyncio
+    async def test_an_f505_output_is_the_failure_of_the_call_that_ran(
+        self, ontology_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An output a grounding policy refuses (section 5.20) is recorded
+        as the outcome of the call that ran: ``failed`` with F505 and the
+        call's id, after its ``allowed`` record; not a refusal of a call that
+        did not run, and not recorded twice by the post-call hook."""
+        from grounded_agency import GroundingPolicy
+        from grounded_agency.adapter import call_action_record
+
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+                grounding=GroundingPolicy(require={"search"}),
+            )
+        )
+        served = self._served(adapter, monkeypatch)
+        assert await self._pre(adapter, "mcp__srv__find", {"q": "x"}) == {}
+        result = await served["find"].handler({"q": "x"})  # type: ignore[attr-defined]
+        assert result["is_error"] is True
+        assert result["content"][0]["text"].startswith("F505 PROVENANCE_MISSING: ")
+        post = adapter._make_mutation_consumer()
+        await post(
+            {
+                "tool_name": "mcp__srv__find",
+                "tool_input": {"q": "x"},
+                "tool_response": result,
+            },
+            "c1",
+            None,
+        )
+        records = [r for r in adapter.call_records if r.get("call") == "c1"]
+        assert [r["decision"] for r in records] == ["allowed", "failed"]
+        assert records[1]["diagnostic"]["code"] == "F505"
+        exported = call_action_record(records[1], "s")
+        assert exported is not None
+        assert exported["status"] == "failed"
+        assert exported["code"] == "F505"
+        assert exported["call_id"] == "c1"
+        assert not [r for r in adapter.call_records if r["decision"] == "refused"]
+
 
 # =============================================================================
 # to_sdk_agents() Tests (Issue 8)

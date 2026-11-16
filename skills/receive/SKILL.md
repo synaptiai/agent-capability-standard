@@ -120,8 +120,8 @@ conflicts:
   - type: string  # Type of conflict/anomaly
     description: string
     affected_messages: array[string]
-confidence: number  # 0.0-1.0 based on parse success and validation
-evidence_anchors: array[string]  # Source references
+confidence: number  # probability that the parsed data is what was received (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # Source references; each {ref, kind} (STANDARD v1.2 §6.5)
 assumptions: array[string]  # Explicit assumptions
 ```
 
@@ -136,8 +136,8 @@ assumptions: array[string]  # Explicit assumptions
 | `validation.valid` | boolean | Whether validation passed |
 | `validation.errors` | array | Validation error details |
 | `conflicts` | array | Anomalies or conflicts in data |
-| `confidence` | number | Lower if parse errors or validation failures |
-| `evidence_anchors` | array | Source references |
+| `confidence` | number | Probability, 0.0-1.0, that the parsed data is what was received (§4.1.1); lower after parse or validation errors |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Source references |
 | `assumptions` | array | Explicit assumptions |
 
 ## Examples
@@ -188,8 +188,8 @@ validation:
 conflicts: []
 confidence: 1.0
 evidence_anchors:
-  - "url:https://api.example.com/events"
-  - "schema:schemas/event_v2.yaml"
+  - {ref: "https://api.example.com/events", kind: url}
+  - {ref: "file:schemas/event_v2.yaml", kind: file}
 assumptions:
   - "API response is authoritative source of truth"
   - "Timestamps are in UTC"
@@ -257,8 +257,8 @@ conflicts:
     affected_messages: ["msg_002"]
 confidence: 0.5
 evidence_anchors:
-  - "file:/var/log/sensor_data.json"
-  - "schema:schemas/sensor_reading.yaml"
+  - {ref: "file:/var/log/sensor_data.json", kind: file}
+  - {ref: "file:schemas/sensor_reading.yaml", kind: file}
 assumptions:
   - "File contains most recent sensor batch"
   - "'ERROR' string indicates sensor malfunction"
@@ -315,7 +315,7 @@ validation:
 conflicts: []
 confidence: 0.95
 evidence_anchors:
-  - "inline:xml:notification"
+  - {ref: "inline:xml:notification", kind: record}
 assumptions:
   - "XML is well-formed and complete"
   - "No schema validation requested"
@@ -327,7 +327,7 @@ assumptions:
 - [ ] Format detection matches actual data format
 - [ ] All messages parsed without critical errors
 - [ ] Validation errors logged with actionable detail
-- [ ] confidence reflects parse success rate
+- [ ] confidence is the probability of the reported result (§4.1.1)
 
 **Verification tools:** Read (to access file sources), Grep (to search for patterns in text data)
 

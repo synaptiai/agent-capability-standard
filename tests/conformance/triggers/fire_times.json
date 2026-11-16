@@ -1,0 +1,288 @@
+{
+  "description": "Fire times of schedule triggers (STANDARD 1.2.0 section 5.10.2), normative under section 10.3. Each case gives a schedule, an instant 'after' (exclusive) and the next fire times, as RFC 3339 UTC and as milliseconds since the epoch: the first is the first fire time after 'after', each later one the first after the one before. Computed by scripts/gen_trigger_vectors.py with Python zoneinfo, independently of the reference core.",
+  "standard": "1.2.0",
+  "status": "normative",
+  "tzdata": "2026e",
+  "cases": {
+    "utc_weekdays": {
+      "schedule": {
+        "cron": "0 6 * * MON-FRI",
+        "timezone": "UTC"
+      },
+      "after": "2026-11-13T07:00:00Z",
+      "after_ms": 1794553200000,
+      "next": [
+        "2026-11-16T06:00:00Z",
+        "2026-11-17T06:00:00Z"
+      ],
+      "next_ms": [
+        1794808800000,
+        1794895200000
+      ],
+      "note": "a weekday range; Friday's fire time has passed"
+    },
+    "strictly_after": {
+      "schedule": {
+        "cron": "0 6 * * *",
+        "timezone": "UTC"
+      },
+      "after": "2026-11-16T06:00:00Z",
+      "after_ms": 1794808800000,
+      "next": [
+        "2026-11-17T06:00:00Z"
+      ],
+      "next_ms": [
+        1794895200000
+      ],
+      "note": "'after' is exclusive"
+    },
+    "every_15m": {
+      "schedule": {
+        "every": "15m"
+      },
+      "after": "1970-01-01T00:00:01Z",
+      "after_ms": 1000,
+      "next": [
+        "1970-01-01T00:15:00Z",
+        "1970-01-01T00:30:00Z"
+      ],
+      "next_ms": [
+        900000,
+        1800000
+      ],
+      "note": "multiples of the interval since the Unix epoch"
+    },
+    "every_ignores_timezone": {
+      "schedule": {
+        "every": "1d",
+        "timezone": "America/New_York"
+      },
+      "after": "2026-11-15T12:00:00Z",
+      "after_ms": 1794744000000,
+      "next": [
+        "2026-11-16T00:00:00Z"
+      ],
+      "next_ms": [
+        1794787200000
+      ],
+      "note": "the timezone does not change an every schedule"
+    },
+    "every_rounds_up": {
+      "schedule": {
+        "every": "PT0.0005S"
+      },
+      "after": "1970-01-01T00:00:00.005Z",
+      "after_ms": 5,
+      "next": [
+        "1970-01-01T00:00:00.006Z",
+        "1970-01-01T00:00:00.007Z"
+      ],
+      "next_ms": [
+        6,
+        7
+      ],
+      "note": "a sub-millisecond interval is rounded up to 1 ms"
+    },
+    "every_7m": {
+      "schedule": {
+        "every": "7m"
+      },
+      "after": "1970-01-01T00:00:00Z",
+      "after_ms": 0,
+      "next": [
+        "1970-01-01T00:07:00Z",
+        "1970-01-01T00:14:00Z"
+      ],
+      "next_ms": [
+        420000,
+        840000
+      ],
+      "note": "an interval that does not divide an hour"
+    },
+    "step_list_range": {
+      "schedule": {
+        "cron": "5/20 0 1 jan,Jul *",
+        "timezone": "UTC"
+      },
+      "after": "2026-01-01T00:30:00Z",
+      "after_ms": 1767227400000,
+      "next": [
+        "2026-01-01T00:45:00Z",
+        "2026-07-01T00:05:00Z"
+      ],
+      "next_ms": [
+        1767228300000,
+        1782864300000
+      ],
+      "note": "a/step runs to the field's maximum; month names in any case"
+    },
+    "vixie_or": {
+      "schedule": {
+        "cron": "0 0 13 * FRI",
+        "timezone": "UTC"
+      },
+      "after": "2026-11-15T00:00:00Z",
+      "after_ms": 1794700800000,
+      "next": [
+        "2026-11-20T00:00:00Z",
+        "2026-11-27T00:00:00Z",
+        "2026-12-04T00:00:00Z"
+      ],
+      "next_ms": [
+        1795132800000,
+        1795737600000,
+        1796342400000
+      ],
+      "note": "both day fields restricted: the 13th or a Friday"
+    },
+    "leap_day": {
+      "schedule": {
+        "cron": "0 0 29 2 *",
+        "timezone": "UTC"
+      },
+      "after": "2026-03-01T00:00:00Z",
+      "after_ms": 1772323200000,
+      "next": [
+        "2028-02-29T00:00:00Z"
+      ],
+      "next_ms": [
+        1835395200000
+      ],
+      "note": "a sparse schedule"
+    },
+    "lisbon_spring": {
+      "schedule": {
+        "cron": "0 6 * * MON-FRI",
+        "timezone": "Europe/Lisbon"
+      },
+      "after": "2026-03-27T12:00:00Z",
+      "after_ms": 1774612800000,
+      "next": [
+        "2026-03-30T05:00:00Z",
+        "2026-03-31T05:00:00Z"
+      ],
+      "next_ms": [
+        1774846800000,
+        1774933200000
+      ],
+      "note": "the offset changes (+00:00 to +01:00) between two fire times"
+    },
+    "new_york_gap": {
+      "schedule": {
+        "cron": "30 2 * * *",
+        "timezone": "America/New_York"
+      },
+      "after": "2026-03-07T12:00:00Z",
+      "after_ms": 1772884800000,
+      "next": [
+        "2026-03-08T07:30:00Z",
+        "2026-03-09T06:30:00Z"
+      ],
+      "next_ms": [
+        1772955000000,
+        1773037800000
+      ],
+      "note": "02:30 does not occur on 8 March: read with the offset before the change (-05:00)"
+    },
+    "new_york_fold": {
+      "schedule": {
+        "cron": "30 1 * * *",
+        "timezone": "America/New_York"
+      },
+      "after": "2026-10-31T12:00:00Z",
+      "after_ms": 1793448000000,
+      "next": [
+        "2026-11-01T05:30:00Z",
+        "2026-11-02T06:30:00Z"
+      ],
+      "next_ms": [
+        1793511000000,
+        1793601000000
+      ],
+      "note": "01:30 occurs twice on 1 November: it fires once, at the first occurrence"
+    },
+    "new_york_gap_dedup": {
+      "schedule": {
+        "cron": "*/30 2-3 * * *",
+        "timezone": "America/New_York"
+      },
+      "after": "2026-03-08T06:00:00Z",
+      "after_ms": 1772949600000,
+      "next": [
+        "2026-03-08T07:00:00Z",
+        "2026-03-08T07:30:00Z",
+        "2026-03-09T06:00:00Z"
+      ],
+      "next_ms": [
+        1772953200000,
+        1772955000000,
+        1773036000000
+      ],
+      "note": "02:00 and 02:30 map to the instants of 03:00 and 03:30: each instant fires once"
+    },
+    "apia_skipped_day": {
+      "schedule": {
+        "cron": "0 12 * * *",
+        "timezone": "Pacific/Apia"
+      },
+      "after": "2011-12-28T00:00:00Z",
+      "after_ms": 1325030400000,
+      "next": [
+        "2011-12-28T22:00:00Z",
+        "2011-12-29T22:00:00Z",
+        "2011-12-30T22:00:00Z",
+        "2011-12-31T22:00:00Z"
+      ],
+      "next_ms": [
+        1325109600000,
+        1325196000000,
+        1325282400000,
+        1325368800000
+      ],
+      "note": "30 December 2011 did not occur in Samoa: its noon is read with the offset before (-10:00)"
+    },
+    "lord_howe_half_hour": {
+      "schedule": {
+        "cron": "15 2 * * *",
+        "timezone": "Australia/Lord_Howe"
+      },
+      "after": "2026-10-03T00:00:00Z",
+      "after_ms": 1790985600000,
+      "next": [
+        "2026-10-03T15:45:00Z",
+        "2026-10-04T15:15:00Z"
+      ],
+      "next_ms": [
+        1791042300000,
+        1791126900000
+      ],
+      "note": "a 30-minute clock change: 02:15 on 4 October does not occur"
+    },
+    "kolkata_offset": {
+      "schedule": {
+        "cron": "0 9 * * *",
+        "timezone": "Asia/Kolkata"
+      },
+      "after": "2026-11-15T00:00:00Z",
+      "after_ms": 1794700800000,
+      "next": [
+        "2026-11-15T03:30:00Z"
+      ],
+      "next_ms": [
+        1794713400000
+      ],
+      "note": "a half-hour offset"
+    },
+    "none_before_max": {
+      "schedule": {
+        "cron": "0 0 1 1 *",
+        "timezone": "UTC"
+      },
+      "after": "9999-12-31T23:59:59.999Z",
+      "after_ms": 253402300799999,
+      "next": [],
+      "next_ms": [],
+      "note": "nothing after the maximum time"
+    }
+  }
+}

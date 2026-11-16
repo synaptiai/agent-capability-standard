@@ -16,9 +16,22 @@ import { plural } from './words';
 
 /** The fixtures the site draws, by the figure that draws them (visual spec 3.9). */
 export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
+  'group-replay': 'parallel_group_member_fails',
   'recovery-replay': 'recovery_loop_exhausted',
   'wait-replay': 'wait_liveness_lost',
+  'approval-unattended-replay': 'approval_out_of_band_unattended',
   'deferral-replay': 'deferral_defers_effects',
+  'resume-replay': 'resume_reruns_read_ahead',
+  'resume-skip-replay': 'resume_skipped_supersedes',
+  'protocol-replay': 'records_actions_steps',
+  'wake-replay': 'wake_at_backoff',
+  'cancel-replay': 'cancel_after_checkpoint_names_it',
+  'reason-replay': 'error_reason_with_retry',
+  'response-replay': 'response_extra_members_ignored',
+  'grounding-replay': 'grounding_failure_mode_goes_back',
+  'citation-replay': 'grounding_acs_sibling_unbound',
+  'audit-replay': 'audit_require_record_fails',
+  'secret-replay': 'error_reason_secret_in_data',
 };
 
 export type ReplayStatus = 'ran' | 'deferred' | 'skipped' | 'not-reached';
@@ -30,9 +43,15 @@ export interface ReplayStep {
   status: ReplayStatus;
   /** How many requests the script made for this step. */
   requests: number;
+  /** How many of them came after the run was resumed (§5.14.1). */
+  resumed: number;
   /** What the host answered, in order (respond.kind of each request). */
   answers: string[];
-  /** Why the step was deferred, from the fixture's `end.deferred`, or what deferred it. */
+  /**
+   * Why the step was deferred, from the fixture's `end.deferred`, or what
+   * deferred it; or why a skipped step was skipped, where its own fields
+   * say (its approval plan, its condition).
+   */
   reason: string | null;
   /** How many times a failure mode of this step fired: once per loop back from it, plus once when its loops ran out. */
   fired: number;
@@ -66,6 +85,8 @@ export interface Replay {
   exhausted: ReplayExhausted | null;
   /** The run's end: `Failed` with a code, or `Completed` with an outcome. */
   end: { kind: string; code: string | null; outcome: string | null };
+  /** How many times the run was resumed after it ended deferred (§5.14.1). */
+  resumes: number;
 }
 
 type Obj = Record<string, unknown>;
@@ -117,6 +138,17 @@ function ownDeferral(step: Step, attendance: string): string | null {
   return null;
 }
 
+/** Why a step that made no request was skipped, where its own fields say so. */
+function ownSkip(step: Step, attendance: string): string | null {
+  const a = step.extra.approval;
+  if (isObj(a) && isObj(a.approver) && a.approver.kind === 'human' && a.when_unattended === 'skip' && attendance === 'unattended') {
+    return 'a human approver is not asked in an unattended run, whatever its mode, and its plan is skip';
+  }
+  const skipGate = (step.gates ?? []).some((g) => isObj(g) && g.action === 'skip');
+  if (typeof step.condition === 'string' && !skipGate) return 'its condition was false';
+  return null;
+}
+
 export function replay(name: string): Replay {
   const fixture = loadRuntimeFixture(name);
   const where = fixture.file;
@@ -129,12 +161,21 @@ export function replay(name: string): Replay {
   }
   const steps = wf.steps;
   const requests = steps.map(() => 0);
+  const resumed = steps.map(() => 0);
   const answers: string[][] = steps.map(() => []);
   const loops: ReplayLoop[] = [];
   let cursor = fixture.start;
   let last = -1;
-  for (const entry of fixture.script) {
+  let after = false;
+  for (const [k, entry] of fixture.script.entries()) {
+    // A resumption goes back to the deferred steps: not a loop.
+    if (fixture.resumedAt.includes(k)) {
+      cursor = 0;
+      last = -1;
+      after = true;
+    }
     const i = stepOf(entry, steps, cursor, last, where);
+    if (after) resumed[i]!++;
     if (last !== -1 && i < last) {
       const count = loops.filter((l) => l.from === last + 1 && l.to === i + 1).length + 1;
       loops.push({ from: last + 1, to: i + 1, count, maxLoops: maxLoopsOf(steps[last]!, steps[i]!) });
@@ -167,11 +208,14 @@ export function replay(name: string): Replay {
       if (!reason) throw new Error(`${where}: step ${i} is deferred with no reason the fixture gives`);
     } else if (requests[i]! > 0) status = 'ran';
     else if (failed && i > lastRan) status = 'not-reached';
-    else status = 'skipped';
+    else {
+      status = 'skipped';
+      reason = ownSkip(step, fixture.attendance);
+    }
     const fired = loops.filter((l) => l.from === i + 1).length + (exhausted?.from === i + 1 ? 1 : 0);
     const mode = fired > 0 ? loopingMode(step, steps[loops.find((l) => l.from === i + 1)!.to - 1]!) : null;
     const condition = mode && typeof mode.condition === 'string' ? mode.condition : null;
-    return { n: i + 1, step, status, requests: requests[i]!, answers: answers[i]!, reason, fired, condition };
+    return { n: i + 1, step, status, requests: requests[i]!, resumed: resumed[i]!, answers: answers[i]!, reason, fired, condition };
   });
   const end = {
     kind: fixture.end.kind,
@@ -179,13 +223,16 @@ export function replay(name: string): Replay {
     outcome: typeof fixture.end.outcome === 'string' ? fixture.end.outcome : null,
   };
   if (!end.code && !end.outcome) throw new Error(`${where}: end has neither a code nor an outcome`);
-  return { fixture, wf, steps: out, loops, exhausted, end };
+  return { fixture, wf, steps: out, loops, exhausted, end, resumes: fixture.resumedAt.length };
 }
 
 /** What the host answered, in words. */
 export const ANSWER_WORDS: Readonly<Record<string, string>> = {
   Output: 'returned an output',
   LivenessLost: 'the source stopped answering',
+  Decision: 'an approver decided',
+  Checkpoint: 'took a checkpoint',
+  Error: 'reported an error',
 };
 
 
@@ -199,8 +246,9 @@ export function replayCaption(r: Replay): string {
     ...(count('not-reached') > 0 ? [`${count('not-reached')} not reached`] : []),
   ];
   const loops = r.loops.length > 0 ? `, after ${plural(r.loops.length, 'loop', 'loops')} back` : '';
+  const resumed = r.resumes > 0 ? `, resumed ${r.resumes === 1 ? 'once' : `${r.resumes} times`} after it ended deferred,` : '';
   const end = r.end.code ? `fails with ${r.end.code}` : `ends ${r.end.outcome}`;
-  return `In the conformance fixture ${r.fixture.name}, ${parts.join(', ')}${loops}, and the run ${end}.`;
+  return `In the conformance fixture ${r.fixture.name}, ${parts.join(', ')}${loops}, and the run${resumed} ${end}.`;
 }
 
 /** Why a step's row reads as it does: its deferral reason, or what the host answered and how often its failure mode fired. */
@@ -208,7 +256,9 @@ export function stepWhy(s: ReplayStep): string {
   if (s.reason) return s.reason;
   const said = [...new Set(s.answers.map((a) => ANSWER_WORDS[a] ?? a))].join('; ');
   const fired = s.fired > 0 ? `its failure mode${s.condition ? ` "${s.condition}"` : ''} fired ${s.fired === 1 ? 'once' : `${s.fired} times`}` : '';
-  return [said, fired].filter(Boolean).join('; ');
+  // §5.14.1: a deferred step runs when the run resumes; one that ran ahead runs again.
+  const resumed = s.resumed === 0 ? '' : s.resumed < s.requests ? 'ran again when the run resumed' : 'deferred, then ran when the run resumed';
+  return [said, fired, resumed].filter(Boolean).join('; ');
 }
 
 /** The exit when a failure mode's loops ran out, in words. */

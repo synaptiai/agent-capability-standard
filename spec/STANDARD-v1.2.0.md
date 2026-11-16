@@ -10,7 +10,8 @@
 [RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
 validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); they check §3.1's grounding where a grounding policy applies
-(§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does;
+(§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does
+for the call outputs it sees;
 the Python SDK adapter and the Standard Agents binding implement §5.18 and
 meet §10.4 except the §5.18.10 rows their conformance statements list as not
 applied, and claim class SL once those are applied; `grounded_agency` implements §7.1's entity ids and
@@ -34,9 +35,11 @@ This standard specifies:
 8. **Versioning** and backward compatibility policy
 9. **Orchestration extensions** (triggers, recovery and escalation, waiting,
    approval, delegation, quorum, sender identity) that a workflow opts into
-10. **Tool-calling hosts**: how a safety layer applies the ontology's flags
-    and edges to tool calls that a model chooses (§5.18)
-11. **Domain profiles** that tighten the rules for one domain (§5.21)
+10. **Tool-calling hosts**: the ontology applied to the tool calls a model
+    chooses (§5.18)
+11. A **host protocol** between an executor and its host, the run operations,
+    audit records, and conformance for executors
+12. **Domain profiles** that tighten the rules for one domain (§5.21)
 
 Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 
@@ -78,7 +81,11 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Binding** | A reference from one step to another step's output |
 | **Gate** | A conditional check that can halt or redirect workflow execution |
 | **Checkpoint** | A saved state that enables rollback |
-| **Grounding** | Anchoring claims to evidence references |
+| **Grounding** | Anchoring a claim to evidence its producer had (§3.1) |
+| **Evidence anchor** | A reference to one piece of evidence: `ref`, `kind` and optional `timestamp`, `excerpt`, `digest` (§6.5) |
+| **Inferred** | Said of an output not grounded in evidence that carries `inference_method` and `confidence` (§3.1, §4.1.1) |
+| **Evidence store** | Where an implementation keeps evidence records, with a stated durability (§6.6) |
+| **Secret** | A value that grants access or proves identity, or that the host classifies as secret (§6.7) |
 | **Diagnostic** | An error or warning reported by a validator or executor (§9) |
 | **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and the ontology (§5.2.1) |
 | **Domain profile** | Rules for one domain that a host, a safety layer or a validator applies to tighten what steps and calls require (§5.21) |
@@ -91,6 +98,11 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Safety layer** | Code that decides, before a call's effect, whether the call may run under §5.18: a pre-call hook, a permission callback, or a wrapper around the tool's own code |
 | **Layer scope** | The sequence of calls a safety layer orders and keeps records for, such as one session or thread (§5.18.5); in §5.18, *scope* means a layer scope |
 | **Execution boundary** | A point where work stops and later resumes, after which earlier checkpoints authorise nothing: for a workflow, the end of a wait or delay (§5.13) and the resumption of a deferred run (§5.14.1), but not the restoring of a saved run (§5.19.4); on a tool-calling host, a point its safety layer names, such as a turn that ends while a person decides (§5.18.6) |
+| **Executor** | What runs a workflow step by step, with no input or output of its own (§5.19) |
+| **Host** | What performs the actions an executor asks for and gives it the time (§5.19) |
+| **Run** | One execution of a workflow, from its start to its terminal action (§5.19) |
+| **Action** | What a run asks its host to do next, or how it ended (§5.19.1) |
+| **Audit record** | An action record or a canonical event that says what happened (§6.4) |
 
 ---
 
@@ -99,12 +111,29 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 These principles are non-negotiable. An implementation that violates them is non-conformant.
 
 ### 3.1 Grounded Claims
-Every claim MUST be evidence-backed or explicitly marked as inferred. Ungrounded claims MUST include an `inference_method` and `confidence` score.
+
+Every claim MUST be evidence-backed or explicitly marked as inferred. The
+output of a capability is the claim its step or call makes:
+
+- It is **grounded** when its `evidence_anchors` (§4.1.1) holds an evidence
+  anchor to evidence its producer had (§6.5). An output that reports an
+  action its producer performed is grounded by the action's record.
+- It is **marked inferred** when it carries `inference_method` and
+  `confidence` (§4.1.1). An output that is not grounded MUST be marked
+  inferred.
+- An empty `evidence_anchors` grounds nothing.
+
+F505 (`PROVENANCE_MISSING`) reports an output that breaks this section.
+Checking is opt-in (§5.20); where no grounding policy applies, this section
+is its producer's obligation.
 
 ### 3.2 Auditable Transforms
 Every transformation MUST be either:
 - Deterministic (same input produces same output)
 - Documented with explicit loss (what information is discarded)
+
+Redacting a secret (§6.7) is a transform of the second kind: the marker it
+leaves documents the loss.
 
 ### 3.3 Safety by Construction
 - A `checkpoint` MUST run before every `mutate`, `send` and `rollback` (the
@@ -163,7 +192,47 @@ ontology's `edges` array as `{from, to, type, rationale?}`.
 
 #### 4.1.1 Common Output Fields
 
-<!-- owner: S4; text: S4.md part 2.5 -->
+Every capability's output contract declares these fields, with the same
+meaning in each:
+
+| Field | Type | In the contract | Meaning |
+|-------|------|-----------------|---------|
+| `evidence_anchors` | array of evidence anchors (§6.5) | Required | What the output is based on (§3.1) |
+| `confidence` | number from 0 to 1 | Required where the capability's contract requires it, optional elsewhere | The producer's probability that the output's claim is correct |
+| `inference_method` | string | Optional | How an output not grounded in evidence was reached (§3.1) |
+| `uncertainty` | `Uncertainty` (`event_schema.yaml#/types/Uncertainty`) | Required for `measure`, optional elsewhere | The uncertainty of the output's principal value |
+
+**`confidence`** is a probability, from 0 to 1, that the output's principal
+claim is correct: for `classify`, that its labels are right; for `predict`,
+that its prediction holds. A capability's contract MAY say what it is a
+probability of more precisely, as `inquire`'s does (that clarification is
+needed). It is self-reported: this Standard requires no calibration, and a
+host that calibrates the confidences it reports SHOULD document how. It is
+not a trust score; §8.1 uses it as one factor of one. This Standard sets no
+threshold on it: a workflow sets one in a gate or a condition (§5.6, §5.8),
+and a domain profile states one in `minimum_confidence`.
+
+**`inference_method`** says how an output not grounded in evidence was
+reached. A producer SHOULD use one of `model_knowledge` (from what the
+producer already knew, with no evidence consulted), `deduction`,
+`induction`, `abduction`, `analogy`, `statistical` (the estimate of a
+statistical or learned model), `simulation`, `assumption` (taken as given
+without evidence), or a vendor value: `x-` followed by a lower-case letter
+or digit, then lower-case letters, digits, `_`, `.` or `-`. With
+`confidence`, it marks the output inferred (§3.1); a grounded output MAY
+carry one too. The contracts declare it as a string; under a grounding policy (§5.20), an output that relies on
+being marked inferred MUST use a value of this vocabulary.
+
+**`uncertainty`**, when present, is an `Uncertainty` describing the output's
+principal value; when an output has both, `uncertainty.confidence` equals
+`confidence`. A `measure` output's `uncertainty` keeps the members `lower`
+and `upper` of 1.1, the bounds of the value, and MAY carry the members of an
+`Uncertainty` beside them; `interval.low` and `interval.high` then equal
+`lower` and `upper`.
+
+The ontology's `meta.principles` say the same: every output carries
+evidence anchors or is marked inferred, and a capability whose output
+contract requires a confidence returns one in every output.
 
 #### 4.1.2 Schema Dialect
 
@@ -234,8 +303,9 @@ The ontology supports 7 edge types:
 | `specializes` | Informational | Parent-child inheritance |
 
 A step *runs before* another when it comes earlier in the step list **and
-is not in the same `parallel_group`**: steps of one group run concurrently,
-so neither completes before the other starts.
+is not in the same `parallel_group`**: the steps of one group are not
+ordered relative to each other (§5.2.3), so neither is known to complete
+before the other starts.
 
 **Enforcement semantics:**
 
@@ -311,6 +381,7 @@ A workflow MAY define:
 | `spec_version` | string | Standard version targeted (§11.5) |
 | `workflow_extensions` | object | Extension declarations (§5.9) |
 | `triggers` | array | How runs start (§5.10) |
+| `grounding` | object | Grounding policy (`grounding@1`, §5.20) |
 | `domain`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
 | `profile` | string | The domain profile written for (its `domain` or a path); applies nothing (§5.21) |
 
@@ -346,9 +417,9 @@ Each step MAY define:
 | `gates` | array | Checks that can halt or redirect execution (§5.6) |
 | `failure_modes` | array | Failure scenarios with recovery (§5.7) |
 | `timeout` | string | Maximum execution time, a duration (§5.10.1) |
-| `retry` | object | `{max, backoff}`: up to `max` further attempts after R401, R402 or R406 (not after an R402 the executor raises itself before asking the host, such as an `invoke` input the target refuses: another attempt would be refused the same way); `max` an integer from 0 to 1000 and `backoff` one of `none` (also when absent or null), `linear`, `exponential` (else S303) |
-| `parallel_group` | string | Group ID; steps of one group run concurrently |
-| `join` | string | How to wait for parallel completion |
+| `retry` | object | `{max, backoff}`: up to `max` further attempts after R401, R402 or R406 (not after an R402 the executor raises itself before asking the host, such as an `invoke` input the target refuses or a `delegate` target it refuses (§5.15.2): another attempt would be refused the same way; nor after an accepted delegation whose host did not attest the `read_only` the step relied on (§5.15.2): another attempt would hand the delegate's host another unchecked delegation); `max` an integer from 0 to 1000 and `backoff` one of `none` (also when absent or null), `linear`, `exponential` (else S303). After attempt *n* fails, the next attempt starts once the run's clock (§5.19.3) has passed the time it failed by: nothing for `none`; *n* × 1000 ms for `linear`; 2^min(*n*−1, 32) × 1000 ms for `exponential`; the wait ends no later than the maximum time |
+| `parallel_group` | string | Group ID: the steps of one group are not ordered relative to each other (§5.2.3) |
+| `join` | string | When the group is complete: `all_complete` (the default and the one value defined, §5.2.3) |
 | `mapping_ref` | string | Transform mapping file (missing file: S301) |
 | `output_conforms_to` | string | `file#/pointer` the step's whole output must match (S301/S302) |
 | `domain` | string | Domain parameter for the capability |
@@ -422,7 +493,32 @@ to workflows of every version.
 
 #### 5.2.3 Parallel Groups
 
-<!-- owner: S2b; text: S2b.md part 2.6 -->
+The steps that declare one `parallel_group` form a group. Their order in the
+step list does not order them: no member runs before another (§4.3), and an
+executor MAY run them one at a time, in any order, or concurrently. An
+executor that speaks the host protocol (§5.19) has one action pending at a
+time, so it runs the members one after another, in list order.
+
+A group is complete when every member has finished: completed, been skipped
+or been deferred (§5.14). A step after the group runs only once it is
+complete. Each member's failure is handled by its own failure modes (§5.12).
+When a failure's recovery escalates or ends the run, the members that have
+not finished are abandoned: a member that has not started does not run, the
+result of one that has is discarded, and an action pending for one is
+withdrawn. When it loops, the current pass is abandoned and execution
+continues from the loop's target (§5.12): the members at or after the
+target run again, and an action pending for one is withdrawn.
+
+`join` says when the group is complete. This version defines one value,
+`all_complete`, the default: when every member has finished. A `join` with
+another value, or on a step that declares no `parallel_group`, is W618
+(`UNKNOWN_JOIN`) and is ignored: the group joins as `all_complete`.
+
+A member whose executable fields read a group mate's store (a reference
+whose root is the `store_as` of another member) is W619 (`GROUP_MATE_READ`):
+that value exists only when the executor has run the mate first, which this
+section does not promise. An executor that runs the group in list order
+resolves a reference to an earlier mate.
 
 #### 5.2.4 Domain Parameter
 
@@ -546,7 +642,7 @@ gates:
   `stop`, a failure, cannot express. In an invoked workflow it ends that
   run only: the `invoke` step completes with what that run stored. A step
   in a `parallel_group` cannot have an `end` gate (S303): its group mates
-  run at the same time and would be left half done.
+  may run at the same time (§5.2.3) and would be left half done.
 - Do not pair a `rollback` gate with a failure mode that rolls back on the
   same condition: the gate rolls back and raises R403, then the failure
   mode's `when` holds too and it rolls back again. To roll back and retry,
@@ -575,7 +671,7 @@ failure_modes:
 | `condition` | string | Yes | Prose description of the failure |
 | `action` | enum | Yes | `stop`, `rollback`, `request_more_context`, `pause_and_checkpoint`, `escalate` |
 | `when` | string | No | Expression (§5.8), evaluated after the step; it can read the step's own output |
-| `on_error` | code or list | No | Fires on a code the step failed with: R401, R402, R403, R406, F501, F502, F504 (§5.12) |
+| `on_error` | code or list | No | Fires on a code the step failed with: R401, R402, R403, R406, F501, F502, F504, F505 (§5.12) |
 | `recovery` | string or object | No | Prose, or a recovery loop (§5.12) |
 
 A failure mode fires when the step raised a matching `on_error` code or its
@@ -695,7 +791,8 @@ waiting or approval semantics.
 | `approval@1` | step `approval` and `after_deferral` (§5.14) |
 | `delegation@1` | bindings of `delegate.fresh_context`, `.model_family`, `.role`, `.read_only` and `receive`/`synchronize`/`delegate` `accept_from` (§5.15) |
 | `quorum@1` | step `quorum` (§5.16) |
-| `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes` (§5.17) |
+| `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes`; approver identities on approval decisions; in a workflow that targets 1.2, `approval.approver` `sender_check` and `accept_trust_classes` (§5.14, §5.17) |
+| `grounding@1` | workflow `grounding`; the check of host outputs (§5.20) |
 
 `failure_modes[].when` and `.on_error` are part of base 1.1, not an
 extension: a consumer that ignores them only loses an optional trigger.
@@ -719,7 +816,7 @@ triggers:
 | `kind` | `schedule`, `event`, `manual`, `invoke` |
 | `schedule` | Required iff `kind: schedule`: exactly one of `cron` (5 fields) or `every` (a duration); `timezone` (IANA name, default `UTC`); `overlap`: `skip` (default), `buffer_one`, `allow_all` |
 | `event` | Required iff `kind: event`: `event_type` and `delivers_to` (required; an input whose `ref` ends `event_schema.yaml#/event`, else V107), `source_kind` (an `event_schema` source kind; 1.1 adds `agent`) |
-| `attendance` | `attended` or `unattended`. Default: `manual` → attended, `invoke` → the invoker's, `schedule`/`event` → unattended |
+| `attendance` | `attended` or `unattended`: the attendance of the runs the trigger starts (§5.10.2); it has no effect on an `invoke` trigger, since a run an `invoke` step starts always has its invoker's. Default: `manual` → attended, `invoke` → the invoker's, `schedule`/`event` → unattended |
 
 **Cron:** minute 0–59, hour 0–23, day-of-month 1–31, month 1–12 or JAN–DEC,
 day-of-week 0–7 or SUN–SAT (0 and 7 are Sunday); `*`, lists, ranges and
@@ -731,6 +828,8 @@ A `triggers` that is not a list, a trigger without a valid `kind`, a
 kind, a malformed cron or one that can never fire (`0 0 31 2 *`), a
 malformed duration or time zone, and an unknown `overlap` or
 `attendance` are S303 or S304 (missing). Unknown trigger fields are W604.
+
+Who evaluates triggers, and when a schedule fires, is §5.10.2.
 
 An `invoke` step whose target declares triggers but none of kind `invoke`
 is V107. A step whose effective `requires_approval` is true, in a workflow
@@ -751,7 +850,58 @@ be enforced).
 
 #### 5.10.2 Evaluating Triggers
 
-<!-- owner: S2b; text: S2b.md part 2.9 -->
+The host evaluates triggers (§5.19); the executor neither reads nor
+evaluates them. A host that starts runs of a workflow from its triggers
+MUST:
+
+- start each run with the trigger's attendance: its `attendance`, else the
+  default of its kind (§5.10). A run that an `invoke` step starts has its
+  invoker's attendance, whatever its `invoke` trigger declares; the
+  executor applies that itself;
+- for an `event` trigger, start one run for each event it accepts, with the
+  event (a canonical event, §6.2) as the input that `delivers_to` names,
+  and at most one run per `event_id` for the trigger: an event delivered
+  again starts no other run. The host accepts an event whose `event_type`
+  equals the trigger's, whose `source.kind` equals the trigger's
+  `source_kind` when it names one, and whose sender its sender policy
+  admits: where the workflow declares `identity@1`, a sender it has
+  authenticated as §5.17 says;
+- for a `schedule` trigger, start runs at its fire times as its `overlap`
+  allows (below).
+
+A host MAY drop an event its sender policy does not admit, and SHOULD keep
+an audit record of the drop (§6.4). A host MAY also start a run by other
+means, such as a test or an operator's request; it then gives the run's
+attendance itself.
+
+**Fire times.** A `cron` schedule fires at each local time of its
+`timezone` whose minute, hour, day of month, month and day of week match
+(§5.10), at second 0. A local time maps to an instant as RFC 5545 §3.3.5
+says: a local time that occurs twice, because clocks were set back, is its
+first occurrence; one that does not occur, because clocks were set forward,
+is read with the UTC offset in effect before the change. Local times that map
+to the same instant fire once. An `every` schedule fires at each instant,
+counted in whole milliseconds from 1970-01-01T00:00:00Z, that is a multiple
+of its interval, the interval rounded up to a whole millisecond; its
+`timezone` does not change its fire times.
+
+**Overlap.** A run that a trigger started is *in progress* from its start
+until it ends (a run that ended `deferred` and is resumed, §5.14.1, is in
+progress again until it ends again). At a fire time when a run this trigger
+started is in progress:
+
+- `skip` (default): no run starts for that fire time;
+- `buffer_one`: a run starts as soon as no run this trigger started is in
+  progress; a fire time while one run is already waiting adds no other;
+- `allow_all`: a run starts at the fire time, beside those in progress.
+
+When no run this trigger started is in progress, a fire time starts a run.
+Fire times that pass while the host is not evaluating the trigger (it was
+stopped) count, together, as one fire time at the moment it resumes.
+
+The trigger vectors of §10.3 fix fire times, attendance, event acceptance
+and overlap decisions for representative cases, clock changes, resumed runs
+and redelivered events included.
 
 ### 5.11 Handler Steps
 
@@ -777,7 +927,7 @@ handler is listed.
 ### 5.12 Recovery and Escalation
 
 A failure mode fires when the step raised a code listed in `on_error` (one
-code or a list: R401, R402, R403, R406, F501, F502, F504; anything else is S303 —
+code or a list: R401, R402, R403, R406, F501, F502, F504, F505; anything else is S303 —
 an expression error, R405, is fail-safe at its site and never fails a step)
 or its
 `when` is true after the step. A structured recovery whose failure mode has
@@ -859,7 +1009,7 @@ the run with its code, and a step that did not fail goes on to the next.
 | `event_type` | Required (S304): the event type to wait for |
 | `source_kind` | Only events from this kind of source match: an `event_schema.yaml` `source.kind` (else S303) |
 | `correlate` | A mapping of event keys to references (each a `${...}` reference, else S303); the event's values must equal theirs |
-| `liveness` | `mode` (`push`: the source sends heartbeats; `probe`: the runtime polls it) and `interval` (a duration longer than zero), both required (S304); `failure_threshold` (integer ≥ 1, default 3) |
+| `liveness` | `mode` (`push`: the source sends heartbeats; `probe`: the host polls it (§5.19.3)) and `interval` (a duration longer than zero), both required (S304); `failure_threshold` (integer ≥ 1, default 3) |
 
 A `correlate` value that resolves to null when the step runs fails it
 (R402), before a waiting `delegate` delegates: an event that lacks the key
@@ -875,7 +1025,12 @@ output (`data`, under the capability's output contract); a lapse raises
 R401. Lost liveness (`failure_threshold` missed heartbeats or failed probes)
 raises R406 (`LIVENESS_LOST`), so failure modes can tell a silent source
 from an expired wait; lost liveness reported after the deadline is R401,
-since the wait had already lapsed. To re-check a silent source, loop back
+since the wait had already lapsed.
+
+The host watches liveness and reports a loss (§5.19.3); a result or event
+that arrives at the deadline is in time, one after it is late.
+
+To re-check a silent source, loop back
 to the wait itself (`goto_step` naming its own `store_as`, §5.12) with a
 bounded `max_loops`, and escalate on R401 or `on_exhausted`. A wait run
 again by a loop or a `retry` starts a new `timeout`. Loops are counted per
@@ -970,30 +1125,109 @@ approval:
 
 | Field | Description |
 |-------|-------------|
-| `approver` | Required (S304). `kind` (required): `human` or `standing_mandate`; `role`; `min_approvers` (integer ≥ 1, default 1); `mandate_ref`, required for and only for a standing mandate (S304 / S303) |
-| `mode` | `in_session` (default) or `out_of_band` |
-| `shows` | References whose values the approvers see (each a `${...}` reference, else S303) |
+| `approver` | Required (S304). `kind` (required): `human` or `standing_mandate`; `role`; `min_approvers` (integer ≥ 1, default 1); `mandate_ref`, required for and only for a standing mandate (S304 / S303); in a workflow that targets 1.2, with `identity@1`, `sender_check` and `accept_trust_classes` (§5.17) |
+| `mode` | Where the approver is asked: `in_session` (default) or `out_of_band` (see **Modes**) |
+| `shows` | References whose values the approvers see (each a `${...}` reference, else S303); absent, the step's resolved inputs (see **Shown values and digest**) |
 | `binds_to` | `digest` (default): the decision binds to the shown values |
 | `recheck` | `source` (required, a `${...}` reference re-read before acting, else S303), `compare`: `version` or `digest` (default), `on_change`: `reask` (default), `replan` or `stop` |
-| `expires` | How long a decision stays valid: a duration longer than zero |
+| `expires` | How long after the request a decision may arrive: a duration longer than zero; absent, no limit |
 | `when_unattended` | `fail` (default), `skip` or `defer_to_queue` |
 
 `approval` is allowed only where the effective `requires_approval` is true
 (S303); other values above are S303 when malformed, and unknown fields W604.
-The shown values MUST be I-JSON (RFC 7493: integers within ±2^53, no
-duplicate keys), so that every implementation computes the same canonical
-JSON (RFC 8785). A decision is valid only if the SHA-256 digest of the
-canonical JSON of the shown values matches, at least `min_approvers` distinct approvers agree, it
-has not expired, and it has not been used before. A decision is
-`approved`, `rejected`, or `unavailable`: no one could decide (no standing
-mandate covers the action). A mandate's approval names the approvers it
-stands for, and `min_approvers` counts them as for people. An
-`unavailable` decision is single-use too, and records no approvers.
 
-A `standing_mandate` approver needs no one present, so it is asked in an
-unattended run too (except for a step that uses an always-ask item,
-§5.17); `when_unattended` applies only when it answers
-`unavailable`. A `human` approver is not asked in an unattended run, and
+**The request.** A step whose effective `requires_approval` is true asks for
+approval once its inputs are resolved (after its condition, its gates and
+any delay, §5.13) and before it uses a checkpoint. The executor puts a
+request to the host (`RequestApproval`, §5.19.1) that names the approver (the
+step's `approver` as declared), the mode, the shown values, their digest and,
+when `expires` is set, `expires_at`: the time of the request plus `expires`.
+
+A step that requires approval and has no `approval` field, in a workflow that
+declares `approval@1` or not, is asked as if it declared
+`approval: {approver: {kind: human}}`: a person (one approver, no role), in
+session, shown its resolved inputs, with no expiry and no recheck, and with
+`when_unattended: fail` (W606, F502). A member that an `approval` field leaves
+out takes the default the table gives. Two steps are asked of a person even
+when their approver is a standing mandate: a step marked always-ask (§5.17)
+and a queued step that an attended resumption re-enters (§5.14.1).
+
+**Modes.** The mode tells the host where to ask:
+
+- `in_session`: the party attending the run is asked, through the session
+  the run is attended in (such as the host's own permission prompt or the
+  conversation), and answers while the run waits in that session.
+- `out_of_band`: the approvers are asked through a channel separate from the
+  run's session (such as a ticket, a message to an approver group or a review
+  queue). They need not attend the run, and the decision may arrive after the
+  session that asked has ended; a host that asks so keeps the run's state
+  while it waits (§5.19.4).
+
+The mode changes neither the shown values, nor the digest, nor which
+decisions are valid. A host that cannot ask in the declared mode SHOULD
+answer `unavailable` rather than ask elsewhere. A `human` approver is not
+asked in an unattended run, in either mode (see **Attendance**): to have an
+action of an unattended run approved out of band, declare
+`when_unattended: defer_to_queue` and resume the run once its approvers can
+be asked (§5.14.1).
+
+**Shown values and digest.** The shown values are a JSON array:
+
+1. With `shows`: one element per reference, in order, each the value the
+   reference resolves to when the request is made; a reference that resolves
+   to nothing gives `null`. An array value is one element: it is not spliced
+   into the array.
+2. Without `shows`: one element, the step's resolved inputs: its
+   `input_bindings` with every reference resolved, the value its capability
+   is invoked with (`{}` when the step binds none).
+3. Asked again because a recheck saw its source change (`on_change: reask`):
+   the array of item 1 or 2, then one more element,
+   `{"recheck": {"previous": P, "current": C}}`, where `P` is the value of the
+   source that the earlier decision was bound to and `C` the value the recheck
+   read.
+
+The shown values MUST be I-JSON (RFC 7493): no member name appears twice in
+one object, and every **integer**, a number written without a fraction or an
+exponent, has a magnitude of at most 2^53. An executor refuses an integer
+beyond that: a step whose resolved inputs hold one fails with R402, and a
+response that carries one is malformed and changes nothing (§5.19.1). A host
+(or an executor) that reads values from JSON text refuses a value with a
+member name twice in one object, or an integer too long for its parser,
+rather than keep one of the members or read the integer as a binary64
+value: once parsed, the value no longer shows either. Every other number is
+a finite binary64 value, written as RFC 8785 writes it, so `1e+21` (the
+`numbers` vector of §10.3) is valid although its value exceeds 2^53. (RFC
+7493 §2.2 recommends integers of magnitude at most 2^53 − 1; 2^53 is also
+exactly representable in binary64, and 1.1 executors accept it.)
+
+The **digest** is the SHA-256 of the UTF-8 encoding of the array's canonical
+JSON (RFC 8785), written as 64 lowercase hexadecimal digits. The request
+carries it and a decision repeats it; the two are compared without regard to
+the case of the hexadecimal letters. The digest vectors of §10.3 fix the
+canonical text and the digest for representative values.
+
+**Decisions.** A decision is `approved`, `rejected`, or `unavailable`: no one
+could decide (no standing mandate covers the action). An `approved` decision
+is valid only if:
+
+- its digest matches the request's;
+- at least `min_approvers` distinct approvers agree: the distinct strings of
+  its `approvers` or, with `identity@1` and attested approver identities, the
+  distinct principals whose identities meet the request (§5.17);
+- it arrives no later than the request's `expires_at`, where there is one;
+- its `decision_id` has not been used before in the run.
+
+A mandate's approval names the approvers it stands for, and `min_approvers`
+counts them as for people. Every decision is single-use; an `unavailable` one
+records no approvers. A `rejected` decision, and an `approved` one that is
+not valid, refuse the step (F502) with a `rejected` record (`expired` when
+the decision came too late). A request with no decision by its `expires_at`
+lapses: an `expired` record, and F502.
+
+**Attendance.** A `standing_mandate` approver needs no one present, so it is
+asked in an unattended run too (except for a step that uses an always-ask
+item, §5.17); `when_unattended` applies only when it answers `unavailable`. A
+`human` approver is not asked in an unattended run, whatever the mode, and
 `when_unattended` applies at once. In an attended run, `unavailable` is a
 refusal (F502). The plans:
 
@@ -1031,14 +1265,18 @@ on a missing value or an unchanged world; a deferred dependent is not
 asked for approval and does not follow its own `when_unattended`. Other
 steps, those that read, reason or record (`retrieve`, `observe`, `plan`,
 `audit`, `persist`, `checkpoint`, …) and depend on nothing deferred, still
-run. A deferred step that requires approval gets its own `planned` record.
-A nested run that ends `deferred` defers its `invoke` step; the
-invocation itself ran, so its record (if any) is `executed`, and the
-nested run's records are the queued actions. A recovery loop whose target
-is a deferred step, or one before it, runs the step again, and an invoke
-step that runs its workflow again (a retry) starts it afresh; either way
-the records of the earlier deferrals become `rejected` ("superseded"), so
-a queue never holds the same action twice.
+run: they **run ahead** of the deferred steps, and a resumption runs one
+again when a step it runs again reads it (§5.14.1). A deferred step that
+requires approval gets its own `planned` record. A nested run that ends
+`deferred` defers its `invoke` step; the invocation itself ran, so its
+record (if any) is `executed`, and the nested run's records are the queued
+actions. An invoke step that runs its workflow again (a retry) starts it
+afresh, and, outside a resumption, a recovery loop whose target is a
+deferred step, or one before it, runs the step again; either way the
+records of the earlier deferrals become `rejected` ("superseded"), so a
+queue never holds the same action twice. During a resumption, a loop runs
+again only the steps from its target to the one that looped, and supersedes
+as §5.14.1 item 7 says.
 
 A run with deferred steps ends `deferred`, unless it fails, escalates or
 needs a replan, which take precedence. Whatever the outcome, the terminal
@@ -1049,15 +1287,123 @@ deferred (or whose nested run deferred steps) has not finished handling,
 so that run ends `deferred`, keeping the escalation's cause; a nested run
 that ends so is, for its invoke step, an escalated nested run (R402).
 
+A queued action is put to its approvers, and carried out, by resuming its
+run (§5.14.1). The queued actions of a run that did not end `deferred` are
+never carried out (§5.14.1). A new run of the workflow is another run: it
+neither carries out nor closes an earlier run's queued actions.
+
 The decision is recorded on the action record (`world_state_schema.yaml`
-1.1.0: `approval` with the digest, decision and approvers; status
-`rejected` or `expired`, with a `reason`, when it was refused, invalid or
-lapsed, or when an unattended run did not ask; `planned`, with the reason,
-when it was deferred).
+1.2.0: `approval` with the digest, decision, the counted approvers and, with
+`identity@1`, their identities; status `rejected` or `expired`, with a
+`reason`, when it was refused, invalid or lapsed, or when an unattended run
+did not ask; `planned`, with the reason, when it was deferred). A resumed run
+updates the record of a queued action in place (§5.14.1).
 
 #### 5.14.1 Resuming a Deferred Run
 
-<!-- owner: S2a; text: S2a.md part 2.3 -->
+A run that ended with outcome `deferred` can be **resumed**: it continues, as
+the same run, with the steps it deferred. This is how its queued actions are
+put to their approvers and carried out. An executor that implements
+`approval@1` MUST support resumption. The host resumes a run from its state
+at the end (the `resume` operation, §5.19.2), names the run's attendance from then on (attended unless
+it says otherwise), and may name a new actor (§5.17). A host MUST NOT resume
+the same saved state twice: each resumption could carry out the same queued
+action.
+
+**Runs that did not end deferred.** A run that failed, escalated, needed a
+replan or was cancelled (§5.19.5) cannot be resumed, and the queued actions it
+lists are never carried out. Their records stay `planned` in its terminal
+action (a cancelled run's become `cancelled`): a host treats them as
+abandoned, closes whatever queue entries it keeps for them, and may start a
+new run of the workflow, which is another run (§5.14).
+
+When a run resumes:
+
+1. **What it keeps.** Its stores, inputs, injected recovery context, loop
+   counts, used decision ids, action records and trace are kept, and the
+   trace records the resumption. No checkpoint taken before the resumption
+   authorises a step after it, as after a wait (§5.13): a resumed step that
+   requires a checkpoint gets a new one.
+2. **What runs again.** These steps run again, in step order, each from its
+   beginning (its condition, gates, delay, inputs, approval and checkpoint):
+   - the deferred steps;
+   - each step that **ran ahead**: it began after a step of its run was
+     deferred and was not deferred itself (§5.14), and a later step that runs
+     again under this item reads its store. It runs again so that the step
+     that reads it sees what is there after the actions before it, as in a
+     run that never deferred. A handler, and a step that declares
+     `after_deferral: run`, keep their outputs;
+   - each `checkpoint` step whose checkpoint the resumption invalidated (no
+     step had used it) and whose store a later step that runs again under
+     this item, and that requires a checkpoint, reads: its new checkpoint is
+     then the one that step binds and uses (such as a `mutate` that binds
+     `checkpoint_id`, §12.5), as W608's remedy takes a new checkpoint after a
+     wait. A step that only binds the id, such as a `rollback`, does not
+     cause this: it returns to the restore point it named.
+   No other step runs again, except under a recovery loop (item 7): a step
+   that ran before the deferral, or ran ahead and is not read, keeps its
+   output. The deferral rules of §5.14
+   apply as in any run, so a step that depends on a step deferred again is
+   deferred again. A deferred handler runs last (item 4).
+3. **Nested runs.** A deferred `invoke` step whose nested run ended
+   `deferred` continues that nested run, which resumes as this subsection
+   says; when it ends, the step completes as any step whose nested run ended
+   does (§5.12). The step's condition, gates and inputs are not evaluated
+   again: they were when the invocation started. The queued actions of a
+   nested run that failed are not carried out: the resumption supersedes
+   them (`rejected`, "superseded").
+4. **A deferred handler.** In a run whose handler was deferred (it ended
+   `deferred` with an escalation's cause, §5.11), the steps of the normal
+   flow that item 2 lists run first, in step order, and then the handler,
+   with that cause; the run then ends as an escalation does.
+5. **The approval.** A re-entered step that requires approval is asked
+   afresh: its shown values and digest are computed now, a decision must
+   match them, `expires` runs from the new request, and `recheck` re-reads
+   its source after the decision. Every request for a re-entered queued step
+   names its queued action (`queued_action_id`: the `action_id` of the
+   record its deferral left), in either attendance, while the step continues
+   it (item 6), after a recheck or in a retry too. In an attended resumption
+   each such request is put to a person, a `human` approver keeping `role`,
+   `min_approvers`, `sender_check` and `accept_trust_classes` and dropping
+   `mandate_ref`. In an unattended resumption the step is asked as in any
+   unattended run, and its `when_unattended` applies again.
+6. **The record.** A re-entered step continues its queued action until it
+   goes on to another step, carries the action out, is deferred again, or
+   its run leaves it; a recovery loop that runs it again before then keeps
+   it (item 7). Meanwhile each decision and refusal of the step updates in
+   place the record its deferral left, keeping its `action_id`, with the
+   time and actor of then (carrying the action out sets only its status);
+   no other record is written for it, and the trace keeps every decision. A
+   step deferred again leaves the record `planned`. A queued action whose
+   step goes on, or is left, before reaching its approval (its condition is
+   false, a gate skips or stops it, or it fails first) is superseded
+   (`rejected`, "superseded"); any record the resumption supersedes takes
+   the time and actor of then.
+7. **Ending early.** A recovery loop during the resumption runs again the
+   steps from its target to the step that looped, as in normal flow (a
+   handler among them does not run); the resumption then goes on with the
+   rest of its list, a deferred handler last. Of the queued steps it runs
+   again, one still continuing its queued action keeps it (item 6), one that
+   had gone on or carried it out runs as a new action, and one deferred
+   again in the resumption has its queued action superseded (§5.14). The
+   steps after the one that looped keep their queued actions and outputs, so
+   nothing that ran ahead runs twice. A gate `end` ends the run before the
+   queued steps after it and the deferred handler, whose queued actions are
+   superseded. Another escalation takes precedence over the deferred
+   handler's: its queued actions are superseded, the queued steps not yet
+   re-entered stay deferred, and the new handler is judged against them
+   (§5.14). When the resumed run fails, or needs a replan, the queued steps
+   it did not reach stay deferred: listed among the run's deferrals, with
+   their records `planned`, abandoned as above.
+
+**Saved states.** An executor MUST refuse to resume a state that does not
+keep what this subsection needs: the nested run of each deferred `invoke`
+step, and which steps ran ahead. Such a run can be cancelled (§5.19.5). A host
+whose executor saved the state before it implemented this subsection
+cancels the run and starts a new one.
+
+A resumed run ends as any run does; one that ends `deferred` can be resumed
+again.
 
 ### 5.15 Delegation
 
@@ -1213,7 +1559,9 @@ type (§5.4), and a list holding anything but values of the vocabulary is
 S303; a reference
 that resolves to anything else (null, say) fails the step (R402), so a
 check is never silently off. A workflow that does not declare `identity@1`
-ignores any identity a host reports.
+ignores any identity a host reports. In a workflow that targets 1.2, the approver of an approval accepts two of
+them as fields, `sender_check` and `accept_trust_classes` (see
+**Approvers**).
 
 | Input | Effect on an item |
 |-------|-------------------|
@@ -1256,8 +1604,8 @@ has every step marked. Context a recovery loop injects from a marked
 value is marked (§5.12). A mark is never removed during a run. A
 marked step that requires approval is asked of a person even when its
 `approval` names a standing mandate (§5.14): the approval request names a
-`human` approver with `always_ask: true`, keeping the `role` and
-`min_approvers` and dropping the `mandate_ref`, and its action records
+`human` approver with `always_ask: true`, keeping the `role`, `min_approvers`, `sender_check` and
+`accept_trust_classes` and dropping the `mandate_ref`, and its action records
 carry `always_ask: true`. In an unattended run the step follows its
 `when_unattended` plan, and the action record's `reason` says why; a step whose only plan for an unattended run is a standing
 mandate and that uses, through bindings, a step that binds
@@ -1266,6 +1614,46 @@ approval runs as it would otherwise. The mark follows references only:
 content a host carries into a later step by other means is beyond what the
 executor can see.
 
+**Approvers.** With `identity@1` declared, a host may attest who decided an
+approval (§5.14): a decision's `approver_identities`, a list of
+`agent_identity`. Each MUST be one; two with the same principal MUST be
+identical (a repeat counts once); and `approvers`, when not empty, MUST list
+exactly their principals. A decision that breaks any of these is rejected as
+malformed and changes nothing, as an event is. The approvers are then
+counted by principal, and an identity counts toward `min_approvers` only if
+it meets the request:
+
+- for a `human` approver, including one asked in place of a standing mandate
+  (§5.14.1, and **Always ask** above), its `kind` is `human`;
+- when the request names a `role`, its `role` equals it;
+- in a workflow that targets 1.2, when the approver declares `sender_check`,
+  its `authenticated_by` is listed there;
+- in a workflow that targets 1.2, when the approver declares
+  `accept_trust_classes`, its `trust_class` is listed there.
+
+The action record lists the approvers that counted: their principals in
+`approval.approvers` and their identities in `approval.approver_identities`;
+when the decision is refused, its `reason` names the others and why they did
+not count. A layer that approves tool calls (§5.18.7) and can attest its
+approvers records them the same way.
+
+In a workflow that targets 1.2 (§11.5), `approval.approver` may declare
+`sender_check` and `accept_trust_classes`: each a non-empty list of values
+from the vocabularies above (else S303), with `identity@1` declared (else
+V106). They make attested identities required: a decision without
+`approver_identities` then counts no approvers. In a workflow that targets an
+earlier version they are unknown fields (W604, and W616, §11.5), and neither
+the validator nor the executor applies them; declare `spec_version: "1.2"` to
+have them enforced, and a consumer of an earlier version then refuses the
+workflow (V109) rather than ignore the requirement.
+
+Without identities, the approvers are the distinct strings of `approvers`,
+and the host vouches for them: it SHOULD accept a decision only from
+approvers who hold the requested `role`. A workflow that does not declare
+`identity@1` ignores `approver_identities`. As for a delegation, the
+identities are the host's attestation: the executor checks that they are
+consistent with the request, not that an approver is a person.
+
 **Actor.** A run may be started with the identity of the agent that runs
 it; every action record then carries it as `actor_identity`, and `actor`
 is its `kind`. `ActionRecord.actor_identity` and
@@ -1273,6 +1661,22 @@ is its `kind`. `ActionRecord.actor_identity` and
 `world_state_schema.yaml`. Two records denote the same party exactly when
 their identities' principals are equal; an implementation MUST NOT infer it
 from the `actor` or `agent` strings alone.
+
+A run keeps its actor while it continues. A host that saves a run and
+continues it later (§5.19.4) SHOULD name the actor it continues the run for; the
+executor MUST then refuse to restore the run when that actor's principal
+differs from the run's, or when the run was started without an actor.
+
+At a **handoff**, when another agent takes over the conversation or thread a
+run belongs to, the host MUST NOT continue the run under the agent that
+takes over. It cancels the run (§5.19.5) if the run has not ended, and the agent
+that takes over starts a new run under its own identity. A run that ended
+`deferred` may instead be resumed under the new agent, or cancelled. The one
+change of actor allowed is that resumption (§5.14.1): the host names the new
+actor, the trace records the change, and the action records written from
+then on, including the queued records the resumed run decides, refuses or
+supersedes (§5.14.1 item 6), carry the new actor; earlier records keep
+theirs.
 
 ### 5.18 Tool-Calling Hosts
 
@@ -1556,8 +1960,9 @@ decision; otherwise it is refused with F502.
   call again with the new arguments, and refuses it if the new
   classification requires approval (F502: the decision was on other
   arguments) or a checkpoint or prerequisite the call does not already hold
-  (F501, F503 or V102). Otherwise the call runs with the new arguments, and
-  the layer records their digest.
+  (F501, F503 or V102), or if a check of §5.18.10 fails with them (F504).
+  Otherwise the call runs with the new arguments, and the layer records
+  their digest.
 - **No one to ask.** With no one who can decide, the call is refused with
   F502, as under `when_unattended: fail`. Standing mandates, `skip` and
   `defer_to_queue` (§5.14) are not defined for calls.
@@ -1653,43 +2058,452 @@ required.
 
 ### 5.19 Host Protocol
 
-<!-- owner: S2b; text: S2b.md part 2.11, with S4.md part 2.10's and S5.md part 2.8's edits, the start item and the reasons merged (RECONCILIATION C3, C5) -->
+An **executor** runs a workflow and does no input or output of its own; a
+**host** performs what the run needs from the world. The executor says what
+it needs next (an **action**), the host performs it and answers (a
+**response**), and time enters only through the times the host gives. The
+same catalog, inputs, responses and times give the same actions.
+`schemas/host_protocol.schema.json` defines every action and response; an
+executor of class EX (§10.5) issues exactly those actions, and takes every
+response the schema allows as §5.19.1 says.
 
 #### 5.19.1 Actions and Responses
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+A run has, at any time, one **pending** action, or it has **ended** with a
+terminal action (`Completed` or `Failed`). Every action carries:
+
+- `run_id`: the run's identifier (§5.19.2);
+- `id`: an integer. A run's first action has id 1 and each later action,
+  the terminal one included, the next integer; a restored run issues its
+  pending action again with the same `id` (§5.19.4);
+- `frame`: the workflows of the nested runs (§5.12), root first;
+- `kind`, and the members of its kind:
+
+| Action | The host | Responses |
+|--------|----------|-----------|
+| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§5.20, §6.5); absent, it attests nothing), `Error` |
+| `CreateCheckpoint` | takes a checkpoint before `step` | `Checkpoint` (`checkpoint_id`), `Error` (the step fails F501) |
+| `Rollback` | restores `checkpoint_id` | `RolledBack`, `Error` (the run ends F503) |
+| `RequestApproval` | asks `approver`, in `mode`, about `shown`, by `expires_at` when it is not null (§5.14) | `Decision` (`decision_id`, `decision`, `approvers`, `digest`) |
+| `RecheckSource` | reads `source` again, to compare by `compare` (§5.14) | `Current` (`value`), `Error` (the step fails F502) |
+| `AwaitEvent` | waits for an event that matches `event_type`, `source_kind`, `correlate` and the sender checks (§5.13, §5.15, §5.17), by `deadline`, and watches `liveness` | `Event` (`event`, optional `principal` and `identity`), `LivenessLost` (R406), `Error` |
+| `Sleep` | lets time pass until `until` (a retry's backoff, §5.2; a delay, §5.13) | none: the host gives the run the time (§5.19.3) |
+| `Completed` | none: the run ended with `outcome` (`completed`, `escalated`, `deferred` or `replan_required`), `cause`, `ended` (§5.6), `outputs`, `action_records` and `deferred` (§5.14) | none |
+| `Failed` | none: the run ended with `code` (§9) at `step`, with `message`, `action_records` and `deferred`, and `reason` (§5.19.7) and `checkpoint_id` (§5.19.5) where they apply | none |
+
+The executor computes these members:
+
+- `inputs`: the step's `input_bindings` with every reference resolved
+  (§5.3, §5.4).
+- `attempt`: 1 for the first attempt of a pass of the step, one more for
+  each retry (§5.2); a recovery loop starts a new pass (§5.12).
+- `deadline`: when the step declares a `timeout`, the run's clock when the
+  attempt's action was issued plus the timeout; for the wait of a waiting
+  `delegate`, the deadline of its delegation (one timeout bounds both,
+  §5.13); else null.
+- `expires_at`: the run's clock when the approval was requested plus the
+  approval's `expires` (§5.14); else null.
+- `Sleep.until`: for a retry, the run's clock when the attempt failed plus
+  the backoff of §5.2; for a delay, the run's clock when the step reached it
+  plus `delay` (§5.13).
+- `correlate`: the step's `correlate`, and, for a waiting `delegate`, the
+  `task_id` its delegation returned (§5.13); `accept_from`, `sender_check`
+  and `accept_trust_classes`: the step's bound inputs of those names, or
+  null (§5.15, §5.17); `RecheckSource.source`: the `recheck.source`
+  reference as written (§5.14); `shown` and `digest`: as §5.14 says.
+- Every time is at most the maximum time (§5.19.3).
+
+The terminal action's members:
+
+- `outputs`: the root workflow's stores at the end: for each of its steps
+  whose output is current (it completed, and no skip, deferral or recovery
+  loop has since cleared it, §5.12, §5.14), that output under the step's
+  `store_as`.
+- `cause`: for `escalated`, and for `deferred` that kept an escalation, the
+  code that caused the escalation, or R404 (§5.11); else null.
+- `action_records`: the run's action records (§6.4), in the order first
+  written, less any the host has taken from the run's state (§5.19.4).
+- `deferred`: the deferred steps (§5.14), in the order deferred.
+
+A step's output is the `value` of the host's `Output`, except for the steps
+the executor runs itself, whose outputs it composes:
+
+| Step | Output |
+|------|--------|
+| a wait on `receive` (§5.13) | `data`: a one-item list, the event with `sender` and `sender_identity` added when the host gave them (§5.17); `source`: the event's `source.kind`, and `timestamp`: its `timestamp` (each null when the event lacks it); `evidence_anchors`: the event's `anchors` (`[]` when the event has no such member) |
+| a wait on `synchronize` | `synchronized: true`; `agreed_state`: the event's `canonical` (`{}` when absent); `participants`: the step's `agents`; `evidence_anchors` as above; `sender` and `sender_identity` when given |
+| a waiting `delegate` | the delegation's `Output`, with the matching event (as in `data` above) as `result` |
+| an `invoke` of a catalog workflow (§5.12) | `result`: the nested run's stores, as `outputs` above; `steps_executed`: the `store_as` names of its steps whose output is current, in step order; `evidence_anchors: []` |
+| a quorum (§5.16) | `compliant`; `tally`; `violations`: in verdict order, `{reviewer_id, ignored}` for each verdict not counted, `{reviewer_id, note}` for a counted verdict whose `scope` is neither `full` nor `delta`, then `{quorum}` for each requirement not met, where `ignored`, `note` and `quorum` are text; `evidence_anchors: []`. `tally.voters` lists the counted reviewers sorted |
+
+A response answers the pending action, named by its `id`. A response for
+another action, of a kind the pending action does not take, or holding a
+value that is not I-JSON (§5.14) is refused, and the run is unchanged. A run
+that has ended takes no response. A response member this protocol does not
+define is ignored, as in 1.1: a host may send members a later version
+defines. Likewise, a host MUST ignore an action member it does not know:
+later versions may add members to actions.
+
+An `Error` carries a `code` and a `message`, and may carry a `reason`
+(§5.19.7). Neither holds a secret (§6.7): both reach the run's diagnostics,
+trace and records. To `InvokeCapability`, an `Error` with code R401 keeps it and any
+other code is R402; to `AwaitEvent`, R401 and R406 keep theirs and any other
+is R402.
+
+The action records an executor writes (§6.4) have the `action_id`
+`<run_id>/<frame>/<step>/<n>`, where `<frame>` is the frame's workflows
+joined with `/` and `<n>` is the number of records the run wrote before
+this one, taken ones included.
 
 #### 5.19.2 Run Operations
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+An executor offers these operations on a run; each binding names them in
+its own way, and its conformance statement says how (§10.5):
+
+- **start**: with a catalog that validates (§10.5) and, for a catalog
+  set, its other catalogs (§5.1.1); for each catalog, the version its
+  header declares or none (§11.5: always given, and a host that loaded the
+  catalog from a file passes the version of the file's header); the
+  workflow, its inputs, the run's attendance (§5.10.2), its `run_id`, the
+  time and, optionally, its actor (§5.17), its record mode (§6.4), the
+  agent manifests it gives (§5.15.1), its destination policies (§4.4.2),
+  the grounding policies it applies to the run and its nested runs (§5.20)
+  and the domain profiles it applies (§5.21). The executor refuses to start
+  a run whose destination policies hold an invalid pattern (§4.4.2), whose
+  grounding policies name a capability the ontology lacks (V101, §5.20), or
+  whose profiles have an error (§5.21.2). The run then has its first
+  action.
+- **next**: the pending action, or the terminal one. It changes nothing.
+- **submit**: a response to the pending action, with the time.
+- **tick**: the time, with no response (§5.19.3). It says whether it changed
+  the run.
+- **wake at**: the earliest time at which a tick changes the run, or none
+  (§5.19.3). It changes nothing.
+- **cancel**: ends the run, with a reason and the time (§5.19.5).
+- **save** and **restore**: the run's state as a value the host keeps, and
+  a run continued from such a value (§5.19.4).
+- **resume**: continues a run that ended `deferred` (§5.14.1).
+
+An executor MAY also offer **take** (the settled records and the trace,
+§5.19.4) and **run record** (§5.19.8).
+
+The `run_id` is the host's choice. It MUST differ from the `run_id` of every
+other run whose action records, run record (§5.19.8), delivery keys
+(§5.19.4) or idempotency keys (§4.4.2) the host keeps: they are keyed by it, and two runs under one
+`run_id` would share keys, so a host would give one run a response it kept
+for the other. A run continued from a saved state, restored or resumed,
+keeps its `run_id`.
 
 #### 5.19.3 Time
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+Times are integers of milliseconds since 1970-01-01T00:00:00Z. A run's clock
+is the latest time the host has given it; an earlier time leaves the clock
+where it is, and a time after 253402300799999 (the last millisecond of the
+year 9999) counts as that time.
+
+- A `Sleep` ends at a tick whose time is at or after its `until` (when it
+  falls is §5.19.1).
+- An action with a `deadline` (`InvokeCapability`, `AwaitEvent`) or an
+  `expires_at` (`RequestApproval`) times out at a tick whose time is after
+  it. An answer submitted at the deadline is in time; one submitted after it
+  is late: a late output or event is R401, a late decision has lapsed
+  (F502).
+- So the **wake-up time** of a run is `until` for a pending `Sleep`, the
+  `deadline` or `expires_at` plus one millisecond for an action that has
+  one (none when that time would be after 253402300799999: no tick is ever
+  after it), and none for any other pending action or an ended run.
+- The executor has no clock of its own: it acts only when the host submits,
+  ticks, cancels or resumes. A host that waits on a run sets its own timer
+  for the wake-up time and ticks when it fires.
+- A time-out is not announced: the next action shows what followed (a
+  retry, a failure mode, the end). A host still performing the action
+  SHOULD stop, since a response to it is now refused.
+- Liveness (§5.13) is the host's to watch: the executor does not schedule
+  heartbeats or probes. The host answers `LivenessLost` once the source has
+  missed `failure_threshold` heartbeats or probes, `interval` apart.
 
 #### 5.19.4 Saving and Continuing a Run
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+A run's **state** is all an executor needs to continue it. A host that keeps
+a run across turns, processes or machines saves the state and restores it
+later. Such a host:
+
+1. **One writer.** MUST let only one party at a time submit to, tick,
+   cancel or resume a run, and only from the latest state: it serialises the
+   operations on one run, and MUST NOT continue two copies of one saved state
+   (each would perform the same pending action, and resuming a deferred run
+   twice could carry out a queued action twice, §5.14.1).
+2. **Save before acting.** MUST save the state after each operation that
+   changed it (start, submit, a tick that changed it, cancel, resume) and
+   before it performs the action that operation left pending; a host that
+   cannot save MUST NOT perform the action.
+3. **At least once.** A restored run's pending action is the one pending
+   when the state was saved, with the same `run_id` and `id`, though the host
+   may already have performed it (it acted, then stopped before it could
+   submit or save). The host MUST make what it does for an action idempotent
+   under its **delivery key** (`run_id`, `id`): it keeps the response it gave
+   for each delivery key it acted on and, given the key again, submits that
+   response instead of acting again. Where an effect cannot be made
+   idempotent, the host SHOULD record the key with the effect, so a repeat
+   can be found. (A delivery key names one action; the idempotency key of
+   §4.4.2 names a pass, every attempt of a step, and keeps a retry from
+   repeating an effect.)
+4. **Interrupted turns.** When the host's own execution stops between
+   performing an action and submitting the response (its process ends, a
+   client stops it), the run is unchanged: on its next turn the host
+   restores the latest state and goes on as item 3 says. To end the run
+   instead, it cancels it (§5.19.5).
+
+Every host, whether or not it saves states, keeps each run's record
+(§5.19.8).
+
+**Integrity.** An executor MUST detect, when it restores a state, that the
+state was corrupted (the reference executor saves a SHA-256 digest with it),
+and, when the host gives a key, MUST refuse a state whose MAC under that key
+does not verify (the reference executor: HMAC-SHA-256). A digest alone does
+not show who wrote a state: whoever can change the state can recompute it.
+So a host that keeps states where any party other than the run's writer can
+change them MUST have the executor use a key, and MUST keep the key from
+those parties. An executor SHOULD also refuse a state it could not have
+produced (the reference executor checks the state's consistency). Saving
+and restoring changes nothing: a restored run issues the same actions, and
+reaches the same end, as the run it was saved from (§10.5).
+
+**Taking records out.** An executor MAY let the host take settled action
+records, and its trace, out of a run's state, so the state stays small; the
+host then keeps what it takes (records as audit records, §6.4). An executor
+that does MUST keep in the state a commitment to everything taken, in
+order, so that a state that verifies also vouches for what was taken: the
+reference executor keeps, for records and for trace events, a chain head
+`h`, starting from the empty string and replaced, for each item taken, by
+the lowercase hexadecimal SHA-256 of `h` followed by the item's canonical
+JSON (RFC 8785).
 
 #### 5.19.5 Cancelling a Run
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+A host MAY **cancel** a run that has not ended, or one that ended
+`deferred`, with a reason. Cancelling:
+
+- ends the run at once with a `Failed` action of code R408 (`CANCELLED`):
+  its `message` is the reason, its `step` the step the run was at (null for
+  a run that had ended), and its `checkpoint_id` the latest checkpoint the
+  run knows of, if it knows of one;
+- runs no retry, failure mode, recovery loop, handler or rollback: they
+  answer failures of steps, and a host that stops a run may no longer be
+  able to perform them. The executor does not roll back; a host that wants
+  the run's effects undone restores `checkpoint_id` itself;
+- withdraws the pending action: a response to it is refused. A host
+  performing it SHOULD stop;
+- sets each of the run's action records that is `approved` or `planned` to
+  `cancelled`, with code R408 and the reason: an approved action may or may
+  not have been carried out, and a queued one will not be;
+- in record mode `actions` (§6.4), writes a `cancelled` record, with code
+  R408 and the reason, for each step, in any of the run's nested runs, that
+  has started its current pass and has no record of it. A step has
+  **started** its pass once the executor has issued, in that pass, a
+  `CreateCheckpoint`, `InvokeCapability` or `AwaitEvent` for it, or, for an
+  `invoke`, started its nested run, or, for a quorum (§5.16), evaluated it; so a step waiting out a retry's backoff
+  and a waiting `delegate` whose delegation was sent have started, and one
+  waiting for its approval, its recheck or its delay has not. A pending
+  `CreateCheckpoint` of a failure mode, or a pending `Rollback`, also gets
+  its own `cancelled` record (capability `checkpoint` or `rollback`), as it
+  would have had one had it completed;
+- ends the nested runs with it. A cancelled run cannot be resumed.
+
+A run that ended any other way cannot be cancelled. Nothing else ends a run
+early: an `Error` that a host gives to stop a run is a failure of the step,
+and the step's retries, failure modes and recovery apply.
 
 #### 5.19.6 Protocol Traffic
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+What a host transmits to perform an action that is not `InvokeCapability`
+(to the approvers for `RequestApproval`, to the source for `RecheckSource`
+and `AwaitEvent`, liveness probes included, and to whoever started the run
+for a terminal action) is **protocol traffic**, not a step. The safety flags
+of `send` (§4.4) do not apply to it, and it needs no checkpoint or approval,
+provided it carries only values the action holds: for `RequestApproval`, its
+approver, mode, shown values, digest and expiry; for a terminal action, its
+members. A host MUST NOT add other values of the run (stores, inputs,
+outputs) to it. Anything else a workflow means to transmit is a step: a
+`send`, or an `inquire` for a question to a person. A tool-calling host that
+delivers protocol traffic through a tool treats that tool as a host action
+(§5.18.3), not as a call of `send`.
 
 #### 5.19.7 Error Reasons
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+An `Error` response MAY carry a `reason`, a token that says why without a
+reader having to parse the message. The code still decides what the run
+does (§5.19.1). This version defines:
+
+| Reason | Meaning |
+|--------|---------|
+| `unsupported_capability` | The host does not perform the capability |
+| `unsupported_domain` | The host performs the capability, but not for the step's `domain` (§5.2.4) |
+| `not_recorded` | A record that was required was not written (§6.4) |
+| `outcome_unknown` | An earlier attempt under the same idempotency key may have taken effect, and the host cannot tell; it did not act again (§4.4.2) |
+| `key_conflict` | The idempotency key was first used with another capability or other inputs, so a `run_id` was reused; the host did not act (§4.4.2) |
+| `destination_not_allowed` | The destination is not one the destination policies in force allow (§4.4.2) |
+| `unsupported_scope` | The host does not provide the memory scope asked for, or did not use it (§4.5) |
+| `unsupported_ttl` | The host cannot parse the `ttl`, or cannot end entries (§4.5) |
+| `over_capacity` | The host refused to store for size or capacity; the message names the limit (§4.5) |
+| `secret_in_data` | The data or key a `persist` would store holds a secret the host recognises; nothing was stored (§4.5, §6.7) |
+| `below_minimum_confidence` | The output's `confidence` is below the minimum an applied domain profile sets (§5.21.3) |
+| `invalid_confidence` | A minimum confidence applies and the output's `confidence` is not a number from 0 to 1 (§5.21.3) |
+
+A host MAY also send a vendor reason: `x-`, then a lowercase letter or a
+digit, then at most 61 lowercase letters, digits, `_`, `.` or `-`. A
+`reason` that is neither (another string, or a value that is not a string)
+is ignored: the `Error` is taken as if it carried no `reason`, as 1.1 took
+any member it did not define, and the executor MAY note the ignored value
+in its trace. A step that fails with a reason keeps it: the run's `Failed`
+action carries it as `reason` when the run ends with that failure, and the
+step's action record as `reason_code` (§6.4). The executor raises
+`not_recorded` itself for an `audit` step (§6.4),
+`destination_not_allowed` with F504 for a `send` step (§4.4.2),
+`unsupported_scope` with R402 for a `persist` or `recall` step whose output
+does not echo its scope (§4.5), and `below_minimum_confidence` and
+`invalid_confidence` with F504 for an output an applied profile's minimum
+confidence covers (§5.21.3).
 
 #### 5.19.8 The Run's Record
 
-<!-- owner: S2b; text: S2b.md part 2.11 -->
+Every run has a **run record**: an action record (§6.4) derived from its
+terminal action, so that a run that failed or was cancelled before any step
+wrote a record still leaves one. Its members are:
+
+| Member | Value |
+|--------|-------|
+| `action_id`, `run_id` | the run's `run_id` |
+| `frame` | the terminal action's `frame` |
+| `step` | for `Failed`, its `step` when not null; absent otherwise |
+| `timestamp` | the run's clock (§5.19.3) when it ended, as an RFC 3339 UTC time with milliseconds |
+| `actor`, `actor_identity` | the run's actor when it ended (§5.17, §5.14.1): `actor` is its `kind`; without one, `actor` is `agent` and `actor_identity` is absent |
+| `intent` | `run ` followed by the root workflow's name |
+| `status` | `executed` for `Completed`, except `planned` when its outcome is `deferred` (the run can still be resumed or cancelled); `cancelled` for `Failed` with code R408; `failed` for any other `Failed` |
+| `code`, `reason_code`, `checkpoint_id` | the `Failed` action's `code`, `reason` and `checkpoint_id`, when it has them |
+| `details` | `kind`; `outcome`, `cause` and `ended` (for `Completed`); `message` (for `Failed`); `deferred`; and `records`, the number of action records the run wrote, taken ones included |
+
+Every host that runs workflows MUST keep, when a run ends, its run record
+and the run's action records (those in the terminal action and those it
+took, §5.19.4) where it keeps its audit records, before it discards the
+run's state. A run that ended `deferred` and is resumed (§5.14.1) or
+cancelled (§5.19.5) ends again; the host then replaces its run record, which
+keeps its `action_id`. An executor MAY derive the run record for the host.
 
 ### 5.20 Grounding
 
-<!-- owner: S4; text: S4.md part 2.9 -->
+```yaml
+spec_version: "1.2"
+workflow_extensions:
+  requires: [grounding@1]
+grounding:
+  require: [classify, predict, generate]
+  kinds: [file, record, x-lab_result]
+  attested: true
+```
+
+With `grounding@1` declared, a workflow MAY state a **grounding policy** in
+`grounding`:
+
+| Field | Description |
+|-------|-------------|
+| `require` | Required: the capabilities whose outputs are checked, a non-empty list of distinct ontology ids |
+| `kinds` | A non-empty list of distinct anchor kinds (§6.5): only anchors of these kinds count |
+| `attested` | Boolean, default false. When true, an anchor counts only when its availability is established: an `acs:` anchor (checked as below) or one whose `ref` the host lists in `evidence_seen` |
+
+In a workflow that targets 1.2 or later (§11.5), `grounding` without the
+declaration is V106; in one that targets an earlier version or declares
+none, it is an unknown field (W604), as in 1.1. With the declaration, a
+`grounding` that is not a mapping, a `require` or `kinds` that is not a
+non-empty list of distinct strings, a kind outside §6.5's vocabulary and an
+`attested` that is not a boolean are S303; a missing `require` is S304; an
+id in `require` that the ontology does not define is V101; unknown fields
+are W604. A workflow's policy applies to the workflow's own steps, not to
+the steps of a workflow it invokes.
+
+A host MAY also apply grounding policies, of the same three fields, to a
+run, by giving a list of them when it starts the run (§5.19.2), and a
+safety layer to the calls it covers (below). A policy a host applies to a
+run applies to the steps of the run's nested runs (§5.12) as well as its
+own. A host refuses a policy whose `require` names a capability the
+ontology does not define, as a validator does (V101), rather than apply it
+to nothing, and one with a member other than the three and extension
+members `x-...`, which a misspelt `kinds` or `attested` would be. A domain
+profile's `evidence_policy` states one:
+`require_grounding` is its `require` and `required_anchor_types` its
+`kinds`. Each policy that requires a step's capability applies on its own:
+the output must pass every one.
+
+**The check.** When a host answers a step's `InvokeCapability` with an
+`Output` (§5.19.1), and a policy requires the step's capability, the
+executor checks the output after the fields its contract requires (a
+missing one is R402) and before its after-gates. A `delegate` step that
+waits (§5.13) is not checked: its `Output` is the delegation's acceptance,
+not its claim, and its result is an output the executor composes; a policy
+that requires `delegate` covers the delegations that do not wait. The
+`Output` MAY carry `evidence_seen`: a list of the `ref`s of the evidence
+the host attests the output's producer had for this answer (§6.5): what it
+put in the request a model answered, the anchors inside the step's inputs,
+and what the step's tool calls returned. It lists nothing the producer did
+not receive for this answer, such as an item of a stored history that the
+request did not carry. An absent `evidence_seen` attests nothing; an empty
+one attests that the producer had no evidence.
+
+A reference (§5.3) B **covers** a reference C when they have the same root
+and each segment of B's path matches the segment of C at the same
+position: the same field name or the same index, or, where B's segment is
+a slice, an index within it or a slice within it (indices count, for both,
+from the start of the array the path names before the slice). C may go on
+past B's path. For instance, `search_out.results[0:3]` covers
+`search_out.results[1]` and `search_out.results[1].url`, but not
+`search_out.results[7]`, `search_out.total` or `search_out`.
+
+The executor reads `evidence_anchors`:
+
+1. A value that is not a list fails the step: F505.
+2. An item that is an object whose `ref` is a string starting with `acs:`
+   cites a workflow value (§6.5). Its `kind` MUST be `record`, and the rest
+   of its `ref` MUST be a reference body (§5.3, without `${`, `}` and a type
+   annotation) that one of the references in the step's `input_bindings`
+   covers; otherwise the step fails: F505. Its availability is established.
+3. Any other item that is an **evidence anchor** (an object whose `ref` is
+   a non-empty string and whose `kind` is in §6.5's vocabulary, with a
+   `digest`, when present, of §6.5's form): when the `Output` carries
+   `evidence_seen` and does not list its `ref`, the step fails: F505; when
+   it lists it, its availability is established.
+4. Any other item (a bare string, or an object that is not an evidence
+   anchor, the deprecated forms of §6.5) does not count, and is not itself
+   a failure.
+5. An anchor of items 2 and 3 **counts** when its kind is in the policy's
+   `kinds` (when the policy has them) and, under `attested`, its
+   availability is established.
+
+The output passes when at least one anchor counts: this Standard grounds an
+output as a whole, and does not say which anchor supports which field.
+Otherwise it MUST be marked inferred, with an `inference_method` of §4.1.1's vocabulary and a
+`confidence` from 0 to 1, or the step fails: F505. F505 is not retried
+(§5.2); a failure mode can fire on it (§5.12).
+
+Outputs the executor builds itself (an `invoke` step's, a quorum's, the
+output of a wait, and the result of a `delegate` step that waits; §5.12,
+§5.13, §5.16) are grounded in the run's own records and are not checked.
+With
+`grounding@1` declared by the workflow a completed `invoke` step belongs
+to, the step's `evidence_anchors` are the anchors of the outputs its nested
+run stored, in the order of its steps, each `ref` once, and without `acs:`
+anchors, which name the nested run's values; without the declaration they
+are empty, as in 1.1.
+
+**Hosts outside a workflow.** A safety layer (§5.18), or any host that runs
+capabilities as calls without a workflow, applies the grounding policies
+its configuration names to the output of each call whose capability one
+requires, as above. An `acs:` anchor names an argument of the call
+(`acs:<argument>`, or a path within it): each argument the call received
+counts as a reference the call binds. A layer that knows what was in the
+request the output answers gives that as `evidence_seen`; a layer that does
+not know the request gives none (absent, not an empty list). It refuses an
+output that fails with F505 (§5.18.8); the call has run, and the refusal is
+what its caller is told.
 
 ### 5.21 Domain Profiles
 
@@ -1872,7 +2686,8 @@ implementation: `review_verdict_schema.yaml` (§5.16),
 Field names in this section are those of the `event` object in
 `event_schema.yaml`. They belong to the **canonical-event namespace**, which is
 distinct from the capability-I/O namespace of §4.1 — a capability's
-`evidence_anchors` output and an event's `anchors` field are different things.
+`evidence_anchors` output and an event's `anchors` field are different
+fields; the items of both are evidence anchors (§6.5).
 
 All canonical events MUST record:
 
@@ -1882,10 +2697,14 @@ All canonical events MUST record:
 | `timestamp` | string | Yes | ISO-8601 time of observation |
 | `source` | object | Yes | Where observed (`kind`, `name`) |
 | `event_type` | string | Yes | Normalized event type |
-| `raw` | any | Yes | Original unmodified data |
+| `raw` | any | Yes | Original data, unmodified except that each secret is replaced (§6.7) |
 | `canonical` | object | Yes | Normalized data |
 | `anchors` | array | Yes | Links to original evidence |
 | `provenance` | object | Yes | Traceability record |
+
+An event MAY also record `redactions`: the JSON pointers (RFC 6901), from
+the event, of the members in which a secret was replaced by `[REDACTED]`
+(§6.7). Without it, a consumer still finds the marker where the loss is.
 
 Projecting a canonical event into `world_state.observations[]` narrows it to
 the `ObservationEvent` type, whose `payload` carries the event's `canonical`
@@ -1913,26 +2732,280 @@ World state snapshots MUST record:
 | `transition_rules` | array | Yes | Rules governing state transitions |
 | `actions` | array | Yes | Action records |
 | `indexes` | object | Yes | Lookup indexes |
-| `retention_policy` | object | No | How long to retain |
+| `retention_policy` | object | No | How long the store that holds them keeps observations, audit logs and snapshots; durations as §5.10.1 |
+
+Retention applies to the store the records are written to (§6.6). A store
+whose durability is `memory` or `session` cannot keep a record beyond its
+process or session, whatever a retention says; a host that must keep
+records longer exports each one, when it writes it, to a `durable` store.
+An `audit` step's `retention` is a duration (§5.10.1) asking how long the
+record it writes is kept; absent, the store's own policy applies, and a
+literal outside the grammar is W614. Its host SHOULD report where the
+record went in the output's `store`: the store's `name`, its `durability`
+and the `retention` it applies. A host whose store does not outlive the
+session MUST NOT report it as `durable`, so a workflow that needs a durable
+record can stop on `${a.store.durability} != 'durable'`.
 
 An action record or a provenance record may carry the identity of who
-acted (`actor_identity`, `agent_identity`; §5.17).
+acted (`actor_identity`, `agent_identity`; §5.17), and an action record's
+approval the identities of the approvers that counted
+(`approval.approver_identities`; §5.17). An action record is also an audit
+record (§6.4).
 
 ### 6.4 Audit Records
 
-<!-- owner: S2b; text: S2b.md part 2.14, with S5.md part 2.9's and S6.md part 2.10b's sentences -->
+An **audit record** says what happened. It is one of:
+
+- an **action record** (`world_state_schema.yaml#/types/ActionRecord`): an
+  action an agent took, was refused, or deferred, whether a step of a run or
+  a call on a tool-calling host (§5.18); or
+- a **canonical event** (`event_schema.yaml#/event`, §6.2): something
+  observed.
+
+An implementation that writes audit records (an executor's action records,
+a safety layer's records of calls, §5.18.8, the record an `audit` step
+writes, a run record, §5.19.8, a host's log of what it did) writes them in,
+or exports them as, one of these shapes: it may keep its own form
+internally, provided it can give each record in one of these shapes. An
+executor's trace of its own decisions is not an audit record; its form is
+the executor's own.
+
+**An executor's records.** An executor writes an action record for each step
+that requires approval (§5.14). Started in record mode `actions`, it also
+writes one for each pass of each step that runs, whatever its flags (a
+retry is the same pass; a recovery loop that runs the step again starts
+another): `executed` when the step has its output, `failed` when it fails
+after it started, or when the checkpoint it needs cannot be taken (F501),
+and `cancelled` when the run is cancelled after the step started (§5.19.5);
+and one for each checkpoint a failure mode takes (`pause_and_checkpoint`,
+`capability: checkpoint`) and each `Rollback` it asks for (`capability:
+rollback`), `executed`, `failed` (F501, F503) or `cancelled`. The default
+mode, `approvals`, writes only the first kind. An executor MUST offer both
+modes. Each record an executor writes carries `run_id`, `frame`, `step` and
+`capability`; as `intent`, the step's `purpose`; as `timestamp`, the run's
+clock when the record was first written; `checkpoint_id`, when the action
+used, took or restored a checkpoint; `code` (§9) and, where the failure had
+one, `reason_code` (§5.19.7), when the action failed or was refused or
+cancelled; and, in its `approval`, the `decision_id` of the decision.
+
+**The `audit` capability.** An `audit` step records its `event`. The
+implementation performing the step writes an action record of its own:
+`capability: audit`, status `executed`, `intent` the event's `intent` or
+`event_type` when it is a string, else `audit`, and the event, whatever its
+shape, as `details.event` (with the step's `context` and `retention`, when
+bound, as `details.context` and `details.retention`). When it performs the
+step for a run it SHOULD set `run_id`, `frame` and `step` from the action.
+It MUST set `recorded_by` to itself, replacing any value the event offers,
+and MUST compute any chain fields (below) itself; no member of the event
+becomes a member of the record. So an event that has the shape of an action
+record or a canonical event is kept as given, but under `details.event`: it
+is what the step reported, not a record the implementation vouches for, and
+it cannot claim another writer, an actor, an approval or a place in a
+chain. The step's output `record` is the record written, and `recorded`
+says whether it was written. A step that binds `require_record: true` fails
+with R402, reason `not_recorded`, unless its output's `recorded` is `true`.
+Without it the step completes when the record was not written, and a later
+gate or failure mode may read `recorded`.
+
+**Required and best-effort capture.** The records this Standard requires are
+required: an executor keeps its records in the run's state (§5.19.4), a host
+keeps each run's record (§5.19.8), and a safety layer that cannot write the
+record of a call refuses the call (§5.18.8). Any other capture a host makes,
+such as evidence anchors taken from tool results or a log of tool calls, is
+best-effort unless the host states that it is required. A host that
+requires a capture and cannot make it reports the failure where the
+action's result goes: for a step, R402 with reason `not_recorded`; for a
+call that has already run, in what the caller is told of the call. A
+best-effort capture that fails MUST still be reported where the host's
+operator sees it, such as an error the host shows: it may miss a record,
+but never silently.
+
+**Who wrote it.** A record MAY name the implementation that wrote it and the
+configuration it applied: `recorded_by`, with `name`, `version` and
+`config_sha256`. An implementation sets `recorded_by` only to itself.
+
+**Integrity.** A store that keeps audit records as an append-only log SHOULD
+chain them: each record carries `prev_hmac`, the `hmac` of the record before
+it (the empty string for the first), and `hmac`, the HMAC-SHA-256 under the
+store's key of the record without `hmac`, as 64 lowercase hexadecimal
+digits. The store computes both when it appends the record, whatever the
+record offered. The store documents how it serialises the record for the
+MAC.
 
 ### 6.5 Evidence Anchors
 
-<!-- owner: S4; text: S4.md part 2.14 -->
+An **evidence anchor** names one piece of evidence. It is the item of a
+capability output's `evidence_anchors` (§4.1.1), of a canonical event's
+`anchors` (§6.2) and of the `anchors` of world-state records (§6.3): one
+type, `event_schema.yaml#/types/Anchor`, which `world_state_schema.yaml`
+repeats.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ref` | string | Yes | Where the evidence is: a non-empty string |
+| `kind` | string | Yes | What kind of evidence it is (below) |
+| `timestamp` | string | No | ISO-8601 time at which the producer read or observed it |
+| `excerpt` | string | No | A short quotation of it, as the producer read it; never a secret (§6.7) |
+| `digest` | string | No | `sha256:` and the 64 lower-case hexadecimal digits of the SHA-256 of its content as the producer read it: the bytes `ref` names or, for a JSON value, its canonical JSON (RFC 8785) in UTF-8 |
+
+Other fields MAY appear; a producer's own SHOULD start with `x-`.
+
+**Kinds.** `file`; `url`; `tool` (the result of a tool call); `log`;
+`sensor`; `human_note` (something a person wrote); `api` (a response of a
+service's API); `record` (a record the agent system itself wrote or holds:
+an action or audit record, a checkpoint, a memory item, a workflow value);
+or a vendor kind: `x-` followed by a lower-case letter or digit, then
+lower-case letters, digits, `_`, `.` or `-`. A domain profile's
+`required_anchor_types` and a grounding policy's `kinds` (§5.20) list kinds
+of this vocabulary.
+
+**Refs.** A `ref` is opaque to this Standard: a URI, or `<scheme>:<rest>`
+with a scheme its producer documents (for instance `file:src/app.py#L10-L20`
+or `tool:Read:toolu_01`). The scheme `acs:` is reserved: `acs:` followed by
+a reference body as §5.3 writes it without `${` and `}` (for instance
+`acs:search_out.results[0]`), with no index above 2^53 − 1 (I-JSON), names
+a workflow value, the one a binding with that body would resolve to in the
+run, and its kind MUST be `record`.
+Outside a workflow, `acs:<argument>` names an argument of the call (§5.20).
+
+**Available evidence.** An anchor grounds a claim only if the evidence it
+names was available to the claim's producer (§3.1): obtained while the step
+or call ran (a tool's result, a file it read), received as input (a value
+the step's bindings pass, §5.3, including the anchors inside it), or put in
+the request a model answered. A host MUST NOT return an anchor it knows its
+producer did not have, such as a model's citation of a stored item the host
+did not put in the model's request; a host that assembles a model's context
+for each request SHOULD check each anchor a model cites against that
+request. An `acs:` anchor names a workflow value, which an executor can
+check; a host attests the availability of other evidence with
+`evidence_seen` (§5.20).
+
+**Anchors of actions.** An output that reports an action its producer
+performed (a checkpoint taken, a rollback, a mutation, a message sent, a
+command run, an audit or memory record written) has the evidence of that
+action because it performed it. It is grounded by an anchor to the action's
+record, of kind `record`, with a ref its producer documents (for instance
+`checkpoint:<checkpoint_id>`, `audit:<audit_id>`, `mutation:<target>`), or
+by an anchor to what the action read or wrote (the file it changed).
+
+**The legacy forms.** Before 1.2 an item of `evidence_anchors` was not
+specified: producers wrote bare strings, and objects of their own shape
+(without a `kind`, or with a kind outside this vocabulary, such as
+`tool_output`). Both are still accepted there: a string reads as an anchor
+with that `ref` and no kind, and an object that is not an evidence anchor as
+its producer's own citation. Neither counts toward a grounding policy
+(§5.20), and neither is refused for its shape: no implementation refuses an
+output because of the shape of its `evidence_anchors` items unless a
+grounding policy applies, and under one such an item only does not count.
+Both are deprecated, and the next major version removes them (§11.2). A
+producer SHOULD write evidence anchors. No validator can see an output, so
+this deprecation is announced here rather than by W603. The items of an
+event's or a record's `anchors` are evidence anchors.
 
 ### 6.6 Evidence Records and Stores
 
-<!-- owner: S4; text: S4.md part 2.15 -->
+An **evidence record** is an evidence anchor kept with the context it was
+recorded in. `schemas/interop/evidence.schema.json` defines it
+(`EvidenceRecord`); the optional fields are present where they apply.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `record_id` | string | Yes | Unique within its store |
+| `anchor` | object | Yes | The evidence anchor kept (§6.5) |
+| `recorded_at` | string | Yes | ISO-8601 time at which the store kept it |
+| `run_id` | string | No | The run (§5.19), or for a call the safety layer's scope (§5.18) |
+| `frame` | array of strings | No | For a step, the workflows of its nested runs, root first |
+| `step` | integer | No | For a step, its index in the last workflow of `frame` |
+| `capability` | string | No | The capability whose output cited the anchor |
+| `tool` | string | No | For a call, the name the host offers the tool under |
+| `call_id` | string | No | For a call, the host's identifier of the call |
+
+An **evidence store** keeps evidence records for later reading. This
+Standard requires none. An implementation that offers one:
+
+1. appends records, never changes or reorders a record it has kept, and
+   never gives a record the `record_id` of another, including one it has
+   removed;
+2. returns a record by its `record_id`, and the records whose `capability`,
+   `anchor.kind` or `run_id` match a given value, in the order they were
+   appended;
+3. exports its records as JSON Lines, one `EvidenceRecord` per line, in the
+   order they were appended;
+4. states its **durability**: `memory` (its records are lost when its
+   process ends), `session` (deleted with the session, conversation or
+   thread they belong to) or `durable` (kept until its retention removes
+   them, §6.3); and whether it is **bounded**, that is, removes records
+   before their retention ends to stay within a size. A store that removes
+   records other than by their retention (because it is bounded, or when it
+   is cleared) counts them and reports the count with what it exports
+   (`StoreInfo.removed`).
+
+A host whose evidence must outlive the session SHOULD NOT rely on a
+`memory` or `session` store: it exports each record, when it is written, to
+a `durable` one.
+
+Evidence records are not audit records (§6.4). A run's audit records go to
+whatever implements its `audit` steps and to where the host keeps the
+executor's records (§5.19.4); a host MAY keep evidence records and audit
+records in one store.
+
+**Notification.** When a host stores evidence records, a canonical event
+(§6.2) or audit records (§6.4), it MAY notify its clients with an
+`EvidenceRecorded` payload (`schemas/interop/evidence.schema.json`): `type`
+`acs.evidence_recorded`; what was stored: the evidence records'
+`record_ids`, the canonical event's `event_id`, or the audit records'
+`action_ids`; the `anchors` of what was stored, each as its `ref`, `kind`
+and `digest` (an audit record's own `anchors`, possibly none); and, where
+they apply, `capability`, `run_id`, `frame`, `step`, `tool`, `call_id`, and
+`recorded_at`. A notification is not a record: it MAY be delivered at most
+once, and a client that needs the evidence or the record reads the store.
+It carries no `excerpt` and no secret (§6.7).
 
 ### 6.7 Secrets in Records
 
-<!-- owner: S4; text: S4.md part 2.16 -->
+A **secret** is a value that grants access or proves identity (a password,
+an API key or token, a session cookie, a private or signing key, a
+credential inside a URL or a header), and any value the host or its
+operator classifies as secret. How a host recognises secrets is its own
+choice; it SHOULD at least recognise the credentials it holds itself.
+
+**Where secrets never go.** An implementation MUST NOT write a secret into:
+
+- an evidence anchor, an evidence record or a notification (§6.5, §6.6);
+- a canonical event (§6.2) or a world-state record (§6.3);
+- an audit record (§6.4) or a safety layer's record of a call (§5.18.8);
+- a diagnostic (§9.8), or the `message` or `reason` of an `Error` a host
+  returns (§5.19.1), which reach a run's diagnostics, trace and records;
+- an executor's trace;
+- the data a `persist` step or call stores.
+
+**Redaction.** An implementation that would write a value holding a secret
+into one of these redacts it: it replaces each secret, or the part of a
+string that is one, with the string `[REDACTED]`, or leaves out the member
+or the anchor that holds it. Redaction is a transform with documented loss
+(§3.2): the marker shows where the loss is, and a canonical event MAY list
+the members it changed in `redactions` (§6.2), its `raw` then being the
+original with its secrets replaced. A record MAY hold, in place of a value
+that contains a secret, the SHA-256 digest of the whole value (a tool's
+whole input, say), so that a reader who has the value can confirm it; it
+MUST NOT hold the digest of a secret alone, which guessing can invert. An
+implementation that cannot tell whether such a value is more than the
+secret it holds (a file's whole content, a tool's whole response) keeps no
+digest of it.
+
+Data a `persist` step or call would store that holds a secret the host
+recognises is refused, not redacted, since memory is read back as fact:
+a tool-calling host refuses the call with F504 (§5.18.8); a host answering
+a step returns an `Error` with reason `secret_in_data` (§5.19.7), and the
+step fails with R402.
+
+**Workflows carry no secrets.** A catalog MUST NOT contain a secret. A host
+SHOULD NOT pass one through a run's inputs or a step's output, since a
+run's values are kept in its state and snapshots and reach records through
+bindings: it adds a credential where it is used, to the request a
+capability makes. The values an approval request shows (§5.14) are what the
+approvers decide on; an approval channel MAY display them with secrets
+replaced, saying so, and the digest stays that of the values.
 
 ---
 
@@ -2088,7 +3161,20 @@ profiles, the lowest weight they give a key applies.
 
 ### 8.4 Manual Overrides
 
-<!-- owner: S2b; text: S2b.md part 2.15 -->
+A **manual override** replaces, by a person's or an agent's decision, what
+§8.1–§8.3 computed: a trust score, or which value won a conflict.
+`authority_trust_model.yaml` `overrides` governs it:
+
+- `allow_manual_override`: when false, an implementation refuses every
+  override;
+- `requires_anchors`: when true, an override MUST cite at least one evidence
+  anchor for the value it sets, and one that cites none is refused;
+- `audit_required`: when true, an override MUST be recorded as an audit
+  record (§6.4) before it takes effect: an action record whose `intent`
+  names the override, whose `actor_identity` (or `actor`) is who made it,
+  whose `details` hold what was overridden, the value it had and the value
+  set, and whose `anchors` are the anchors cited. An override whose record
+  cannot be written does not take effect.
 
 ---
 
@@ -2339,15 +3425,44 @@ empty, the fixture MUST produce no warnings. Expression fixtures
 (`tests/conformance/expressions/eval.json` and `check.json`) are
 language-neutral; the reference suite also runs them against cel-go to
 check §5.8.2's CEL compatibility. Runtime fixtures
-(`tests/conformance/runtime/*.json`) script runs of the reference executor
-— the actions it must request, the responses it gets, and the end and trace
-it must reach — for the runtime semantics of §5.6–§5.17; they are
-informative for implementations that execute workflows.
+(`tests/conformance/runtime/*.json`) script runs: the actions an executor
+must issue, the responses it gets, the ticks, cancellations and resumptions
+it is given, and the end it must reach, for the runtime semantics of
+§4.4–§4.5, §5.2, §5.6–§5.21 and §6.4. They are normative for class EX
+(§10.5), except their `trace_kinds`, which name kinds of the reference
+executor's trace and are informative. The trigger vectors
+(`tests/conformance/triggers/`) are normative for §5.10.2: an implementation
+that computes fire times, a trigger's attendance, which events start runs,
+or overlap decisions MUST give each vector's result. The fire-time vectors
+depend on the time zone database: each file names the tzdata release it was
+computed with, and the vectors are normative with that release, or with any
+release that agrees with it on the vectors' dates.
 
 Binding fixtures (`tests/conformance/bindings/*.json`) and call-sequence
 fixtures (`tests/conformance/calls/*.json`) are normative for class SL
 (§10.4).
 
+The approval digest vectors (`tests/conformance/approval/digests.json`) are
+normative for §5.14 and §5.18.7. Each vector has a `kind`. A `step` vector is
+one approval request of a workflow step: the step's `approval` field (or
+null for none); where the step declares no `shows`, its resolved `inputs`;
+where it does, the values its references resolve against (`bindings`, by
+root name); for a request asked again after a recheck, the value the recheck
+read (`recheck_read`); and the `shown` values. A `tool_call` vector is the
+approval of a tool call: the `call` (`action`, `capability`, `args`) and the
+`shown` values `[call]`. Every vector gives the RFC 8785 `canonical` text of
+`shown` and its `digest`. An implementation that computes or checks approval
+digests MUST produce each vector's `canonical` text and `digest` from its
+`shown` values. An executor MUST show, for each `step` vector's step, given
+that vector's `inputs` or `bindings` and its `recheck_read`, that vector's
+`shown` values, and a layer (§5.18) MUST show, for each `tool_call` vector's
+call, that vector's `shown` values.
+
+Grounding vectors (`tests/conformance/grounding/check.json`) state the check
+of §5.20 for one output at a time: an executor that accepts `grounding@1`,
+and a safety layer that applies grounding policies, MUST give the status and
+code each vector expects. The runtime fixtures whose names start with
+`grounding_` script the check inside runs.
 Trust vectors (`tests/conformance/trust/`), profile vectors
 (`tests/conformance/profiles/`) and entity id vectors
 (`tests/conformance/entities/ids.json`) are normative for §8, §5.21 and §7.1.
@@ -2426,7 +3541,67 @@ gaps.
 
 ### 10.5 Executor Conformance
 
-<!-- owner: S2b; text: S2b.md part 2.17 -->
+An executor conforms to class EX when it:
+
+- starts a run only when the catalog has no error under a validator that
+  conforms at L3 or above (its own or another), and refuses to start it
+  otherwise;
+- implements each extension a workflow it starts declares (§5.9), and
+  refuses a workflow that declares one it does not implement;
+- offers the run operations of §5.19.2 and issues exactly the actions of
+  `schemas/host_protocol.schema.json`;
+- takes every response that schema allows as §5.19.1 says: it refuses the
+  responses §5.19.1 refuses, and ignores the members the protocol does not
+  define and a `reason` outside §5.19.7;
+- keeps time, saves and restores, and cancels as §5.19.3–§5.19.5 say, and
+  writes action records as §6.4 says, in both record modes;
+- passes every runtime fixture whose declared extensions it implements.
+
+**Runtime fixtures.** A fixture
+(`tests/conformance/runtime/schema/fixture.schema.json`) holds a `catalog`,
+the version of its header or null (`header`), the `workflow` to run, its
+`inputs`, its `attendance`, optionally its `actor_identity`, `records` (the
+record mode, default `approvals`), further catalogs of its set with their
+headers (`catalogs`), agent manifests (`agents`), destination policies
+(`destinations`), grounding policies (`grounding`) and domain profiles
+(`profiles`), which the run is started with (§5.19.2), the `start` time, a
+`script`, the `end` and, optionally, the `run_record`. The
+run starts with `run_id` `"run-1"`. Each script entry is one of:
+
+- `{"expect": A, "respond": R, "at": T}`: the pending action matches `A`;
+  then `R`, when given, is submitted for it at time `T` (default: the
+  latest time used). In `R`, the string `"{{digest}}"` stands for the
+  pending action's `digest`, and `"{{digest_upper}}"` for the same in
+  uppercase;
+- `{"tick": T, "changed": C}`: the time `T` is given with no response; when
+  `changed` is given, the tick changed the run exactly when `C` is true;
+- `{"wake_at": W}`: the run's wake-up time is `W` (null: none);
+- `{"cancel": {"reason": S, "at": T}}`: the run is cancelled;
+- `{"resume": {"attendance": …, "at": T, "actor_identity": …}}`: the run is
+  resumed (§5.14.1).
+
+After the script, the run's next action matches `end`, and, when the
+fixture gives a `run_record`, the run record derived from that end
+(§5.19.8, with the run's clock and actor) matches it. An actual value
+**matches** an expected one when they are equal; when both are objects and
+the actual one has every member the expected one names, each matching; or
+when both are arrays of the same length whose elements match in order. Text
+the executor composes is not compared: a `message` member (except
+`ended.message`, a gate's message, §5.6, which the workflow wrote), the
+`reason` member of an action record or of a deferral, and the `ignored`,
+`note` and `quorum` members of an item of a quorum's `violations`
+(§5.19.1). (`reason` on a `Failed` action is a token, §5.19.7, and is
+compared.) An executor passes a fixture when every expectation matches,
+both when it runs the script as it is and when its state is saved and
+restored before every entry. `description` and `trace_kinds` are not part
+of the test. Every other member a fixture pins is one this Standard
+defines (§4.4.1, §4.4.2, §4.5, §5.2, §5.6, §5.11–§5.17, §5.19.1, §5.20,
+§5.21, §6.4).
+
+**Conformance statement.** An executor that claims class EX names its
+version, the Standard version it implements, the extensions it implements,
+how its binding names the operations of §5.19.2, and whether it restores
+states saved by its earlier versions.
 
 ---
 
@@ -2959,16 +4134,119 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
   V-code keeps its meaning when a safety layer uses it for a call (§9)
 
 ### D.2 Approval, deferral and run identity (RFC-0006, Part A)
-<!-- owner: S2a; entries: S2a.md part 2.8 -->
+
+**Clarifications of 1.1 semantics** (apply to 1.0, 1.1 and 1.2 workflows):
+
+| Area | 1.1.0 text | 1.2.0 |
+|------|------------|-------|
+| Default approval request | Not stated | A step that requires approval and has no `approval` field is asked as `approval: {approver: {kind: human}}`: in session, shown its resolved inputs, no expiry; omitted members take their defaults; `expires` runs from the request (§5.14) |
+| Approval digest input | "the canonical JSON of the shown values" | The array of resolved `shows` values in order (null when unresolved), `[inputs]` without `shows`, plus a `recheck` element on a re-ask; SHA-256 as lowercase hex, compared regardless of case (§5.14); normative vectors with a `kind` per vector (§10.3) |
+| I-JSON shown values | "integers within ±2^53" | An integer, a number written without a fraction or an exponent, has magnitude at most 2^53 and is refused otherwise; every other number is a binary64 value, so `1e+21` is valid; whatever reads values from JSON text refuses a member name twice in one object (§5.14) |
+| `approval.mode` | Listed values only | `in_session` and `out_of_band` defined; a human approver is still never asked in an unattended run (§5.14) |
+
+**New in 1.2.0:**
+- Resumption of a deferred run (§5.14.1): the deferred steps run again, with
+  the steps that ran ahead of them that they read and a checkpoint step whose
+  invalidated checkpoint a re-entered mutation binds; nested deferred runs
+  continue; a queued step is asked afresh (of a person when attended), the
+  request names `queued_action_id`, and its `planned` record is updated in
+  place, with the time and actor of each decision or supersession. The
+  queued actions of a run that did not end `deferred` are never carried out
+- With `identity@1`, approver identities on a decision
+  (`approver_identities`), approvers counted by principal and checked against
+  the requested kind and role, and, in a workflow that targets 1.2, the
+  approver fields `sender_check` and `accept_trust_classes` (§5.17)
+- A run keeps its actor while it continues: a restore for another actor is
+  refused, a handoff cancels the run unless it ended `deferred`, and
+  resumption may name a new actor (§5.17)
+- `world_state_schema.yaml` 1.2.0: `ActionRecord.approval.approver_identities`,
+  and descriptions of `approval.mode` and of `planned` records that a
+  resumption updates
 
 ### D.3 Host protocol, runs and audit records (RFC-0006, Part B)
-<!-- owner: S2b; entries: S2b.md part 2.18 -->
+
+**Clarifications of 1.1 semantics** (apply to 1.0, 1.1 and 1.2 workflows):
+
+| Area | 1.1.0 text | 1.2.0 |
+|------|------------|-------|
+| Parallel groups at run time | "steps of one group run concurrently" | Members are not ordered; an executor may run them in any order or concurrently, and a §5.19 executor runs them in list order; a group is complete when every member has finished; unfinished members are abandoned when a recovery escalates or ends the run, and a loop continues from its target (§5.2.3) |
+| `join` | Free string | One defined value, `all_complete`; any other is W618 and ignored (§5.2.3) |
+| Tick boundaries | Not stated | A `Sleep` ends at `until`; an action times out after its deadline, and an answer at the deadline is in time (§5.19.3) |
+| Liveness probes | "the runtime polls it" | The host polls and reports `LivenessLost` (§5.13, §5.19.3) |
+| Protocol traffic | Not stated | Not a `send` step, when it carries only the action's values (§5.19.6) |
+| Retry backoff | `none`, `linear`, `exponential` named, schedule not stated | `linear` waits attempt × 1 s, `exponential` 2^(attempt−1) s (exponent at most 32), from the failure (§5.2), as the reference executor did |
+| Executor-computed members | Not stated | `deadline`, `expires_at`, `Sleep.until`, `correlate`, `Completed.outputs`, `cause`, and the outputs the executor composes for waits, `invoke` and quorums (§5.19.1), as the reference executor did |
+| Unknown response members | Ignored by the reference executor, not stated | Ignored (§5.19.1); a host ignores unknown action members |
+
+**New in 1.2.0:**
+- The host protocol (§5.19): actions, responses, run operations, time,
+  saving and continuing a run (one writer, save before acting, at-least-once
+  delivery keyed by `run_id` and `id`, a unique `run_id`, state integrity
+  and a key where others can change stored states), cancellation (R408),
+  protocol traffic, error reasons, and the run record every host keeps
+  (§5.19.8); `schemas/host_protocol.schema.json`
+- Trigger evaluation (§5.10.2): the host's duties, event acceptance and one
+  run per `event_id`, fire times in the declared time zone (RFC 5545 for
+  clock changes), the `every` anchor, the meaning of `overlap`, missed fire
+  times
+- Audit records (§6.4): action records and canonical events, written or
+  exported; the executor's record mode `actions`; `audit` records its event
+  in a record of its own; `require_record`; required and best-effort
+  capture, and no silent capture failure
+- Manual trust overrides (§8.4)
+- Class EX (§10.5): the runtime fixtures are normative for executors; the
+  trigger vectors are normative (§10.3)
+- Codes R408, W618, W619
+- `world_state_schema.yaml` 1.2.0: `ActionRecord` `run_id`, `frame`,
+  `step`, `capability`, `tool`, `call_id`, `checkpoint_id`, `code`,
+  `reason_code`, `details`, `recorded_by`, `prev_hmac`, `hmac`; status
+  `cancelled`; `approval.decision_id`
+- Ontology 2.2.0: `audit` input `require_record` and output `record`
 
 ### D.4 Delegation, catalogs and diagnostics (RFC-0007)
 <!-- owner: S3; entries: S3.md part 2.24 -->
 
 ### D.5 Evidence, grounding and secrets (RFC-0008)
-<!-- owner: S4; entries: S4.md part 2.22 -->
+
+**Clarifications of 1.1 semantics** (apply to 1.0, 1.1 and 1.2 workflows):
+
+| Area | 1.1.0 text | 1.2.0 |
+|------|------------|-------|
+| Grounded and inferred outputs | "Every claim MUST be evidence-backed or explicitly marked as inferred" | An output is grounded by an anchor to evidence its producer had, or marked inferred by `inference_method` and `confidence`; an empty list grounds nothing; an output reporting an action is grounded by a `record` anchor to it (§3.1, §6.5) |
+| Available evidence | Not stated | An anchor grounds a claim only if its producer had the evidence; a host MUST NOT return an anchor it knows its producer did not have (§6.5) |
+| `confidence` | Undefined; `meta.principles` said every capability returns one | A self-reported probability that the output's claim is correct, with no threshold in the Standard; the principle matches the contracts (§4.1.1) |
+| `raw` of a canonical event | "Original unmodified data" | Unmodified except that each secret is replaced; `redactions` may list where (§6.2, §6.7) |
+| `retention_policy` | "How long to retain" | Applies to the store the records are written to; a session-scoped store cannot keep them longer (§6.3) |
+
+**New in 1.2.0:**
+- Grounding (§3.1, §5.20): the extension `grounding@1` and the policies a
+  host applies to a run (covering its nested runs) or to calls make the
+  executor or the layer check host outputs: `acs:` citations covered by a
+  bound reference, the host's `evidence_seen`, `attested`, legacy items
+  that do not count. F505, reserved since 1.0, is raised and can fire a
+  failure mode. Opt-in. In a workflow that targets 1.2, `grounding` without
+  `grounding@1` is V106; in a 1.0 or 1.1 workflow it stays W604. With
+  `grounding@1`, an `invoke` step carries its nested run's anchors
+- Common output fields (§4.1.1): `confidence`, `inference_method` and
+  `uncertainty` are defined; every output contract declares them (ontology
+  2.2.0); `inference_method` has a vocabulary a producer SHOULD use
+- Evidence anchors (§6.5): one anchor type for outputs, events and records,
+  with `digest`, the kind `record` and vendor kinds; the `acs:` ref scheme;
+  `evidence_anchors` items are anchors, a bare string or another object
+  being the deprecated legacy forms, accepted until 2.0
+- Evidence records and stores (§6.6): what an evidence store keeps and
+  states, and the optional `acs.evidence_recorded` notification for
+  evidence, canonical events and audit records
+  (`schemas/interop/evidence.schema.json`)
+- Secrets (§6.7): secrets never enter evidence, records, diagnostics,
+  traces or persisted memory; redaction and its marker; a `persist` of a
+  secret is refused
+- Retention (§6.3): `audit.retention` is a duration (W614 otherwise);
+  `audit` reports its `store`
+- The `Output` response's `evidence_seen` (§5.19.1); grounding vectors and
+  `grounding_` runtime fixtures (§10.3)
+- `event_schema.yaml` and `world_state_schema.yaml` 1.2.0 share one
+  `Anchor` and one `Uncertainty`; events MAY record `redactions`
 
 ### D.6 Checkpoint, rollback, send and memory (RFC-0009)
 <!-- owner: S5; entries: S5.md part 2.15 -->

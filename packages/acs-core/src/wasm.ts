@@ -207,6 +207,19 @@ export interface RestoreArgs {
   catalog: Json;
   snapshot: Snapshot;
   keyHex?: string;
+  /** The actor the host continues the run for (section 5.17): a principal
+   * other than the run's is refused, as is any actor for a run started
+   * without one. */
+  actorIdentity?: Json;
+}
+
+/** How a run that ended `deferred` is resumed (section 5.14.1). */
+export interface ResumeArgs {
+  /** The run's attendance from now on; attended by default. */
+  attendance?: 'attended' | 'unattended';
+  nowMs: number;
+  /** Who carries the run on (section 5.17); the run's actor when left out. */
+  actorIdentity?: Json;
 }
 
 /** A validation context: an ontology and its documents, loaded once. */
@@ -299,6 +312,7 @@ export class CoreContext {
       catalog: o.catalog,
       snapshot: o.snapshot,
       key_hex: o.keyHex ?? null,
+      actor_identity: o.actorIdentity ?? null,
     });
     return new CoreRun(this.core, run);
   }
@@ -329,17 +343,74 @@ export class CoreRun {
     this.core.call('run.submit', { run: this.handle, id, response, now_ms: nowMs });
   }
 
-  /** Tell the run the time; whether its pending action changed. */
+  /** Tell the run the time; whether it changed the run (section 5.19.2): a
+   * new action is pending, or the run ended. */
   tick(nowMs: number): boolean {
     return this.core.call<{ changed: boolean }>('run.tick', { run: this.handle, now_ms: nowMs }).changed;
+  }
+
+  /** The earliest time at which a tick changes the run, or null (section 5.19.3). */
+  wakeAt(): number | null {
+    return this.core.call<number | null>('run.wake_at', { run: this.handle });
+  }
+
+  /** The run's identifier (section 5.19.2). */
+  runId(): string {
+    return this.core.call<string>('run.run_id', { run: this.handle });
+  }
+
+  /** Cancel the run (section 5.19.5): it ends `Failed` with R408. Throws
+   * (kind `run`) when it has ended otherwise than `deferred`. */
+  cancel(reason: string, nowMs: number): void {
+    this.core.call('run.cancel', { run: this.handle, reason, now_ms: nowMs });
+  }
+
+  /** Resume a run that ended `deferred` (section 5.14.1), as the same run.
+   * Throws (kind `run`) when it did not end deferred, or its state does not
+   * keep what resuming needs. Resume one saved state once. */
+  resume(o: ResumeArgs): void {
+    this.core.call('run.resume', {
+      run: this.handle,
+      attendance: o.attendance ?? 'attended',
+      now_ms: o.nowMs,
+      actor_identity: o.actorIdentity ?? null,
+    });
   }
 
   finished(): boolean {
     return this.core.call<boolean>('run.finished', { run: this.handle });
   }
 
-  trace(): Json[] {
-    return this.core.call<Json[]>('run.trace', { run: this.handle });
+  /** The trace events the run holds; with `since`, those whose `seq` is at
+   * least `since`. */
+  trace(since?: number): Json[] {
+    return this.core.call<Json[]>('run.trace', { run: this.handle, since: since ?? null });
+  }
+
+  /** The `seq` the run's next trace event gets. */
+  traceSeq(): number {
+    return this.core.call<number>('run.trace_seq', { run: this.handle });
+  }
+
+  /** Take the trace out of the run's state (section 5.19.4); `seq` goes on. */
+  takeTrace(): Json[] {
+    return this.core.call<Json[]>('run.take_trace', { run: this.handle });
+  }
+
+  /** Take the settled action records out of the run's state (section 5.19.4). */
+  takeRecords(): Json[] {
+    return this.core.call<Json[]>('run.take_records', { run: this.handle });
+  }
+
+  /** The chain heads over what was taken (section 5.19.4), each empty while
+   * nothing was taken. */
+  takenSha256(): { records: string; trace: string } {
+    return this.core.call<{ records: string; trace: string }>('run.taken_sha256', { run: this.handle });
+  }
+
+  /** The run's record (section 5.19.8), or null while the run goes on. */
+  runRecord(): Json {
+    return this.core.call<Json>('run.run_record', { run: this.handle });
   }
 
   actionRecords(): Json[] {

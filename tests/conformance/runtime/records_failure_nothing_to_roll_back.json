@@ -1,0 +1,83 @@
+{
+  "description": "An approved step that fails, whose failure mode rolls back when the run has no checkpoint (F503), has a failed record with its own code (\u00a76.4).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "input_bindings": {
+            "target": "t"
+          },
+          "approval": {
+            "approver": {
+              "kind": "human"
+            }
+          },
+          "requires_approval": true,
+          "failure_modes": [
+            {
+              "condition": "it fails",
+              "on_error": "R402",
+              "action": "rollback"
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "alice"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve"
+      },
+      "respond": {
+        "kind": "Error",
+        "code": "R402",
+        "message": "m"
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "F503",
+    "action_records": [
+      {
+        "capability": "retrieve",
+        "status": "failed",
+        "code": "R402"
+      }
+    ]
+  },
+  "trace_kinds": []
+}
