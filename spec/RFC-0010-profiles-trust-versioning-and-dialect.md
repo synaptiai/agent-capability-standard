@@ -6,9 +6,9 @@
 ## Summary
 
 This RFC records the decisions of Standard 1.2.0 on domain profiles, the
-authority trust model, versioning, the schema dialect of capability contracts
-and entity ids, and the packaging decisions of the reference implementation
-that go with them. It answers findings ACS-05, ACS-25, ACS-28, ACS-42,
+scoring of evidence and the resolution of conflicts (§8), versioning, the
+schema dialect of capability contracts and entity ids, and the packaging
+decisions of the reference implementation that go with them. It answers findings ACS-05, ACS-25, ACS-28, ACS-42,
 ACS-56, ACS-59 and ACS-64 of the
 [Standard Agents mapping](../docs/research/analysis/standard_agents_mapping/findings_agent_capability_standard.yaml).
 It is Accepted by the maintainer's instruction that every remaining finding be
@@ -122,7 +122,7 @@ the pattern;
 `grounded_agency/entities.py` parses ids; `tests/conformance/entities/ids.json`
 is normative.
 
-### 4) The trust arithmetic is complete
+### 4) The arithmetic of §8 is complete
 
 `score = weight × confidence × decay`; confidence 1 when none is reported; an
 age below zero counts as zero; a floor above 0.5 applies; evidence without a

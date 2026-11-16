@@ -146,9 +146,9 @@ workflows:          # Recommended workflows (informative)
 
 3. **Set risk thresholds** appropriate for your domain
 
-4. **Define checkpoint policy**: its keys are capability ids (`mutate`, `execute`, `send`, …) or `"*"` (quoted) for every capability but `checkpoint`, with `always`, `high_risk`, `medium_risk` or `never`. An unknown id is an error (V101), and `risk_thresholds` and `evidence_policy` take only the members [§5.21.2](../../spec/STANDARD-v1.2.0.md#5212-loading-a-profile) lists. Check the profile with `python tools/validate_profiles.py`
+4. **Define checkpoint policy**: capability ids, or `"*"` (quoted) for every one but `checkpoint`, mapped to `always`, `high_risk`, `medium_risk` or `never`. Check the profile with `python tools/validate_profiles.py`: an unknown id or member is an error ([§5.21.2](../../spec/STANDARD-v1.2.0.md#5212-loading-a-profile))
 
-5. **Create workflow files** in `schemas/workflows/`. A workflow does not select its profile (its `profile` field is descriptive), so a workflow that needs a checkpoint or an approval wherever it runs declares it itself: a `checkpoint` step before a step that changes state, and `requires_approval: true` or `requires_checkpoint: true` on a step whose ontology flags are weaker than it needs. Validate the workflows with the profile applied (step 7)
+5. **Create workflow files** in `schemas/workflows/`. A workflow does not select its profile, so one that needs a checkpoint or an approval wherever it runs declares it: a `checkpoint` step, `requires_approval: true`
 
 6. **Document** in `docs/domains/<your-domain>/README.md`
 
@@ -186,35 +186,20 @@ This proves the atomic capability set is complete — different domains compose 
 ## Status of Domain Profiles
 
 A domain profile takes effect where it is **applied** (Standard 1.2.0
-[§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): a host gives it to
-a run when it starts the run, a safety layer applies the profiles its
-configuration names to every call it covers, and a validator may be given
-it. A workflow's `profile` field records the profile it was written for and
-applies nothing; a host may use it to choose. For flags, checks, evidence,
-confidence and destinations a profile only tightens: it raises a step's
-effective flags and adds checks, never lowers one, and never changes a
-step's `risk` or `mutation`. Its `trust_weights` replace weights, higher or
-lower ([§8.3](../../spec/STANDARD-v1.2.0.md#83-trust-classes-and-static-weights)).
-Several profiles apply together, the strictest result holding.
-
-| Member | Effect when applied | Applied by |
-|--------|---------------------|------------|
-| `risk_thresholds.auto_approve`, `require_review` | A step or call at a risk level above `auto_approve`, or at or above `require_review`, needs approval | The reference executor (`Run.start(profiles=…)`, `WorkflowRunner(profiles=…)`), the validator (`tools/validate_workflows.py --profile`), the Python adapter (`GroundedAgentConfig(profiles=…)`), and TypeScript through the WebAssembly core (`CoreContext.profileFlags`, the `profiles` start option) |
-| `risk_thresholds.require_human`, `block_autonomous` | A person approves the step or call each time: no standing mandate covers it, and an unattended run does not ask (its `when_unattended` applies). The requirement belongs to that step alone and marks no data; its records carry `person_required` | The same |
-| `checkpoint_policy` | A step of the capability (or of any capability, `"*"`) needs a checkpoint: `always`, at high risk, or at medium risk and above. A `checkpoint` step is exempt | The same |
-| `evidence_policy.require_grounding` with `required_anchor_types` | A grounding policy ([§5.20](../../spec/STANDARD-v1.2.0.md#520-grounding)) on the listed capabilities' outputs | The executor and the layers that check grounding |
-| `evidence_policy.minimum_confidence` | An output whose `confidence` is below it fails its step with F504 (`below_minimum_confidence`); one that is not a number from 0 to 1, F504 (`invalid_confidence`) | The reference executor |
-| `allowed_destinations` | A destination policy ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)) in force beside the host's own | The executor and the layers that check `send` destinations |
-| `trust_weights` | Source and trust-class weights where a host computes trust scores | `grounded_agency.trust` (`merge_trust_weights`, `resolve`) |
-| `domain_sources`, `workflows`, `compliance`, `description`, `trust_model_reviewed`, `trust_model_reviewed_at` | None: informative | — |
-
-A profile is checked before it is applied, and one with an error is refused
-(an executor does not start the run, a layer does not load, a validator
-reports it): a misspelled capability id or rule member is an error, not an
-ignored setting. `critical` as a threshold is deprecated and read as `none`
-(W603). The plugin hooks apply no profile; use the Python adapter or a
-host for that. The profiles shipped under `schemas/profiles/` are examples,
-version 2.0.0, and `tools/validate_profiles.py` checks them with the core.
+[§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)): by the reference
+executor (`Run.start(profiles=…)`, `WorkflowRunner(profiles=…)`), the
+validator (`tools/validate_workflows.py --profile`), the Python adapter
+(`GroundedAgentConfig(profiles=…)`) and TypeScript hosts through the
+WebAssembly core. A workflow's `profile` field applies nothing, and the
+plugin hooks apply no profile. Applied, a profile only tightens: its
+thresholds and `checkpoint_policy` raise the flags of steps and calls (under
+`require_human` and `block_autonomous` a person approves each one, and no
+standing mandate covers it), `require_grounding` is a grounding policy,
+`minimum_confidence` fails an output below it (F504) and
+`allowed_destinations` limits sends. Its `trust_weights` replace weights where
+a host computes trust scores (`grounded_agency.trust`). A profile with an
+error is refused, so a misspelled capability id is never an ignored setting.
+The profiles under `schemas/profiles/` are examples, version 2.0.0.
 
 Without a profile, what is enforced rests on the ontology's safety flags:
 

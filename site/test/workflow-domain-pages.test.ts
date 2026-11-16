@@ -72,7 +72,8 @@ describe('domain guide figures', () => {
 
   it('checks each required anchor type against the profile file', () => {
     const profile = loadProfiles().find((p) => p.key === 'audio')!;
-    const required = /required_anchor_types:\n((?: {4}- .+\n)+)/.exec(repoText(profile.profileFile))![1]!.match(/- ([a-z_]+)/g)!.map((s) => s.slice(2));
+    // The list's lines, comment lines among them (the 2.0.0 profiles say where each kind comes from).
+    const required = /required_anchor_types:\n((?: {4}(?:- |# ).+\n)+)/.exec(repoText(profile.profileFile))![1]!.match(/^ {4}- ([a-z_-]+)/gm)!.map((s) => s.trim().slice(2));
     const u = capabilityUsage(repoText('docs/domains/audio/README.md'), 'test')[0]!;
     const c = usageCheck(u, profile.profile);
     expect(c.required.map((r) => r.type)).toEqual(required);

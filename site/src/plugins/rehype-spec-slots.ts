@@ -172,12 +172,12 @@ export function diagnosticTiles(table: Element, byCode: Map<string, Diagnostic>,
 }
 
 /** The tables whose codes become tiles: the Code column of §5.8.3 and §9.2 to §9.7, and the codes in §5.16's field descriptions. */
-const TILE_SECTIONS: readonly { level: number; section: string; column?: string }[] = [
+const TILE_SECTIONS: readonly { level: number; section: string; column?: string; index?: number }[] = [
   { level: 4, section: '5.8.3 ' },
   { level: 3, section: '5.16 ', column: 'Description' },
   ...['9.2 ', '9.3 ', '9.4 ', '9.5 ', '9.6 ', '9.7 '].map((section) => ({ level: 3, section })),
-  // §5.18's code tables (CODE_TABLE_FIGURES).
-  ...Object.values(CODE_TABLE_FIGURES).map(({ level, section }) => ({ level, section })),
+  // The code tables of §5.18 and the other sections (CODE_TABLE_FIGURES).
+  ...Object.values(CODE_TABLE_FIGURES).map(({ level, section, index }) => ({ level, section, index: index ?? 0 })),
 ];
 
 export default function rehypeSpecSlots(options: RehypeSpecSlotsOptions) {
@@ -193,7 +193,7 @@ export default function rehypeSpecSlots(options: RehypeSpecSlotsOptions) {
     const byCode = new Map(loadDiagnostics().map((d) => [d.code, d]));
     for (const s of TILE_SECTIONS) {
       const sec = section(tree.children, { key: '', level: s.level, section: s.section, at: 'heading' });
-      const table = sec?.els.find((x) => x.el.tagName === 'table');
+      const table = sec?.els.filter((x) => x.el.tagName === 'table')[s.index ?? 0];
       if (!table) {
         problems.push(`§${s.section.trim()} has no table for diagnostic tiles`);
         continue;
