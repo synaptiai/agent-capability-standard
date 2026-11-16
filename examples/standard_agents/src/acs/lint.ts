@@ -1,113 +1,144 @@
 /**
- * Definition-time checks of the tools a prompt offers and an agent binds.
+ * Definition-time checks of the tools a prompt offers and an agent binds
+ * (STANDARD 1.2.0 §5.18.2).
  *
  * The workflow validator checks a workflow's steps against the ontology
  * before anything runs. A prompt has no steps, but it does have a fixed list
- * of tools, and two things can be checked from that list alone: every tool is
- * classified, and no tool needs a capability the prompt can never perform.
- * A third is the name: each tool states the name an approver is shown, which
- * must be the name the prompt offers it under. An agent definition adds a
- * fourth: no tool that can be refused is bound to a stop or session action.
+ * of tools, and each tool's `acs` annotation is a carrier of its tool binding
+ * record (§5.18.1). From that list alone a host can check that every tool is
+ * bound (W617), that each binding names the tool it is offered under (V111),
+ * and that no tool needs a capability the prompt can never perform (V102).
+ * An agent definition adds a fourth: no stop or session action is tied to a
+ * tool that can be refused (F506). The checks are the package's
+ * `checkBindings`, which the Python loader mirrors.
  */
 import type { AgentDefinition } from '@standardagents/spec';
-import { acsAnnotation, statedName } from './grounded.js';
-import { prerequisites, type CapabilityId } from './ontology.js';
+import { annotationRecord, checkBindings, type BindingDiagnostic } from '@synaptiai/acs-core';
+import { ANNOTATION_KEY, statedName } from './grounded.js';
+import type { CapabilityId } from './ontology.js';
 
 /** The prompt-side options that act when a named tool is called. */
 export type ToolBinding = 'stopTool' | 'sessionStop' | 'sessionFail' | 'sessionStatus';
 
 export interface LintDiagnostic {
   /**
-   * V102 (MISSING_PREREQUISITE, STANDARD v1.1.0 §9.2): a `requires` edge
-   * that cannot be met. `unclassified`, `misnamed_tool` and
-   * `bound_gated_tool` are this binding's own: the Standard has no code for a
-   * tool outside the ontology, for a tool that cannot see its own name, or
-   * for a host that acts on a call whatever its result.
+   * W617 (UNBOUND_TOOL): a tool with no binding, whose calls are the
+   * strictest case. V111 (TOOL_NAME_MISMATCH): a tool whose stated name is
+   * not the name the prompt offers it under. V102 (MISSING_PREREQUISITE): a
+   * tool that requires a capability no offered tool performs. F506
+   * (GATED_CONTROL_ACTION): a stop or session action tied to a tool that can
+   * be refused.
    */
-  code: 'V102' | 'unclassified' | 'misnamed_tool' | 'bound_gated_tool';
+  code: 'V102' | 'W617' | 'V111' | 'F506';
+  name: string;
   severity: 'error' | 'warning';
   message: string;
   location:
-    | { prompt: string; tool: string; capability?: CapabilityId }
-    | { agent: string; side: 'sideA' | 'sideB'; binding: ToolBinding; tool: string; capability: CapabilityId };
+    | { prompt: string; tool: string; capability?: CapabilityId; prerequisite?: CapabilityId }
+    | { agent: string; side: 'sideA' | 'sideB'; binding: ToolBinding; tool: string; capability?: CapabilityId };
+}
+
+type Tools = Record<string, { annotations?: Record<string, unknown> }>;
+
+/**
+ * The binding records the offered tools carry, and what each offered name
+ * carries: the record of the name the tool states (its `tool`), or null for
+ * a tool with no `acs` annotation.
+ */
+function recordsOf(tools: Tools): { records: Record<string, unknown>[]; offered: Record<string, string | null> } {
+  const records: Record<string, unknown>[] = [];
+  const offered: Record<string, string | null> = {};
+  const seen = new Set<string>();
+  for (const [name, tool] of Object.entries(tools)) {
+    const annotation = tool.annotations?.[ANNOTATION_KEY];
+    const stated =
+      (typeof annotation === 'object' && annotation !== null && typeof (annotation as { tool?: unknown }).tool === 'string'
+        ? (annotation as { tool: string }).tool
+        : undefined) ??
+      statedName(tool) ??
+      name;
+    const record = annotationRecord(stated, annotation);
+    if (!record) {
+      offered[name] = null;
+      continue;
+    }
+    offered[name] = stated;
+    if (!seen.has(stated)) {
+      seen.add(stated);
+      records.push(record);
+    }
+  }
+  return { records, offered };
+}
+
+function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
+  const annotation = tools[name]?.annotations?.[ANNOTATION_KEY] as { capability?: unknown } | undefined;
+  return typeof annotation?.capability === 'string' ? (annotation.capability as CapabilityId) : undefined;
 }
 
 /**
- * Check the tools of one prompt.
+ * Check the tools of one prompt (§5.18.2).
  *
- * - A tool with no `acs` annotation is reported (`unclassified`, warning): its calls
- *   are not classified, so no rule applies to them.
- * - A tool defined with `groundedTool` whose stated `name` is not the name
- *   the prompt offers it under is an error (`misnamed_tool`): an approver
- *   would be shown, and the trace would record, another tool's name.
+ * - A tool with no `acs` annotation is W617 (warning): its calls are
+ *   treated as the strictest case.
+ * - A tool whose stated name is not the name the prompt offers it under is
+ *   V111 (error): an approver would be shown, and the trace would record,
+ *   another tool's name.
  * - A tool whose capability `requires` another, or needs a checkpoint, when
- *   the prompt offers no tool of that capability, is an error (V102): the
- *   model could never get the call accepted.
+ *   the prompt offers no tool of that capability, is V102 (error): the model
+ *   could never get the call accepted. A host that takes checkpoints itself
+ *   (`hostTakesCheckpoints`), or an offered tool whose binding names a
+ *   `classifier`, counts as performing it.
  */
 export function lintPromptTools(
   prompt: string,
-  tools: Record<string, { annotations?: Record<string, unknown> }>,
+  tools: Tools,
+  options: { hostTakesCheckpoints?: boolean } = {},
 ): LintDiagnostic[] {
-  const diagnostics: LintDiagnostic[] = [];
-  const offered = new Set<CapabilityId>();
-  for (const tool of Object.values(tools)) {
-    const annotation = acsAnnotation(tool);
-    if (annotation) offered.add(annotation.capability);
-  }
-
-  for (const [name, tool] of Object.entries(tools)) {
-    const annotation = acsAnnotation(tool);
-    if (!annotation) {
-      diagnostics.push({
-        code: 'unclassified',
-        severity: 'warning',
-        message: `tool '${name}' has no capability classification, so no safety rule applies to its calls`,
-        location: { prompt, tool: name },
-      });
-      continue;
-    }
-    const stated = statedName(tool);
-    if (stated !== undefined && stated !== name) {
-      diagnostics.push({
-        code: 'misnamed_tool',
-        severity: 'error',
-        message: `tool '${name}' states the name '${stated}', which is what an approver is shown and the trace records`,
-        location: { prompt, tool: name, capability: annotation.capability },
-      });
-    }
-    const needed = new Set<CapabilityId>(prerequisites(annotation.capability));
-    if (annotation.requires_checkpoint) needed.add('checkpoint');
-    for (const capability of needed) {
-      if (!offered.has(capability)) {
-        diagnostics.push({
-          code: 'V102',
-          severity: 'error',
-          message: `tool '${name}' (${annotation.capability}) requires '${capability}', and the prompt offers no '${capability}' tool`,
-          location: { prompt, tool: name, capability: annotation.capability },
-        });
-      }
-    }
-  }
-  return diagnostics;
+  const { records, offered } = recordsOf(tools);
+  const { diagnostics } = checkBindings(records, {
+    offered,
+    hostActions: [],
+    hostTakesCheckpoints: options.hostTakesCheckpoints ?? false,
+  });
+  return diagnostics
+    .filter((d): d is BindingDiagnostic & { code: 'V102' | 'W617' | 'V111' } => ['V102', 'W617', 'V111'].includes(d.code))
+    .map((d) => {
+      const capability = capabilityOf(tools, d.location.tool);
+      return {
+        code: d.code,
+        name: d.name,
+        severity: d.severity,
+        message: d.message,
+        location: {
+          prompt,
+          tool: d.location.tool,
+          ...(capability !== undefined && d.code !== 'W617' ? { capability } : {}),
+          ...(d.location.prerequisite !== undefined ? { prerequisite: d.location.prerequisite as CapabilityId } : {}),
+        },
+      };
+    });
 }
 
 /**
- * Check the tools an agent's prompt sides bind to a stop or session action.
+ * Check the tools an agent's prompt sides bind to a stop or session action
+ * (§5.18.3, F506).
  *
  * `stopTool`, `sessionStop`, `sessionFail` and `sessionStatus` act when the
  * named tool is called. The Standard Agent Specification does not make any
  * of them depend on the call's result, so a grounded tool that is refused
  * could still end the turn or the session, and with `messageProperty` hand a
- * parent the model's text for an action that never ran. A tool that can be
- * refused (it needs approval, a checkpoint or a prerequisite) is therefore
- * an error when bound (`bound_gated_tool`). Bind a separate, ungated tool
- * that the model calls once the gated one has succeeded.
+ * parent the model's text for an action that never ran. Tying one to a tool
+ * that is unbound, has a prerequisite, or needs a checkpoint or approval is
+ * F506. Bind a `controlTool`, which is never refused, that the model calls
+ * once the gated one has succeeded.
  */
 export function lintAgentBindings(
   agent: Pick<AgentDefinition, 'name' | 'sideA' | 'sideB'>,
-  tools: Record<string, { annotations?: Record<string, unknown> }>,
+  tools: Tools,
 ): LintDiagnostic[] {
-  const diagnostics: LintDiagnostic[] = [];
+  const out: LintDiagnostic[] = [];
+  const { records, offered } = recordsOf(tools);
   for (const side of ['sideA', 'sideB'] as const) {
     const config = agent[side];
     if (config.prompt === undefined) continue;
@@ -117,23 +148,31 @@ export function lintAgentBindings(
       ['sessionFail', config.sessionFail?.name],
       ['sessionStatus', config.sessionStatus?.name],
     ];
-    for (const [binding, name] of bound) {
-      const tool = name === undefined ? undefined : tools[name];
-      const annotation = tool ? acsAnnotation(tool) : null;
-      if (name === undefined || !annotation) continue;
-      const needed = new Set<CapabilityId>(prerequisites(annotation.capability));
-      if (annotation.requires_checkpoint) needed.add('checkpoint');
-      const needs = [...(annotation.requires_approval ? ['approval'] : []), ...[...needed].map((c) => `a '${c}' call`)];
-      if (needs.length === 0) continue;
-      diagnostics.push({
-        code: 'bound_gated_tool',
+    const hostActions = bound
+      .filter((b): b is [ToolBinding, string] => b[1] !== undefined)
+      .map(([action, tool]) => ({ action, tool }));
+    if (hostActions.length === 0) continue;
+    const named: Record<string, string | null> = { ...offered };
+    for (const { tool } of hostActions) if (!Object.hasOwn(named, tool)) named[tool] = null;
+    const { diagnostics } = checkBindings(records, { offered: named, hostActions });
+    for (const d of diagnostics) {
+      if (d.code !== 'F506') continue;
+      const binding = d.location.action as ToolBinding;
+      const capability = capabilityOf(tools, d.location.tool);
+      out.push({
+        code: 'F506',
+        name: d.name,
         severity: 'error',
-        message:
-          `agent '${agent.name}' binds ${binding} to '${name}' (${annotation.capability}), which is refused without ` +
-          `${needs.join(' and ')}; the binding acts on the call, not on its result`,
-        location: { agent: agent.name, side, binding, tool: name, capability: annotation.capability },
+        message: `agent '${agent.name}' ties ${binding} to '${d.location.tool}'${capability ? ` (${capability})` : ''}: ${d.message}`,
+        location: {
+          agent: agent.name,
+          side,
+          binding,
+          tool: d.location.tool,
+          ...(capability !== undefined ? { capability } : {}),
+        },
       });
     }
   }
-  return diagnostics;
+  return out;
 }

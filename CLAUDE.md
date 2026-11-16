@@ -81,6 +81,17 @@ adds its fixtures in its own `scripts/runtime_fixtures/<workstream>.py`
 `null`) and is checked against
 `tests/conformance/runtime/schema/fixture.schema.json`.
 
+### Regenerate the call-sequence and binding conformance fixtures
+```bash
+python scripts/gen_call_fixtures.py          # after editing the fixtures there
+python scripts/gen_call_fixtures.py --check  # CI: fail on drift
+```
+These are the safety-layer fixtures of class SL (Standard 1.2.0 §10.4),
+`tests/conformance/bindings/*.json` and `tests/conformance/calls/*.json`;
+the Python runners (`tests/test_binding_fixtures.py`,
+`tests/test_call_fixtures.py`) and the Standard Agents binding's tests read
+them in place.
+
 ### Regenerate the trigger vectors
 ```bash
 python scripts/gen_trigger_vectors.py          # after editing the cases there
@@ -322,8 +333,10 @@ The 36-capability model uses **domain parameters** instead of domain-specific va
 ### Hooks
 
 The plugin enforces safety through Claude Code hooks:
-- **PreToolUse (Write|Edit|MultiEdit|NotebookEdit|Bash)**: Requires checkpoint marker before mutations
-- **PostToolUse and PostToolUseFailure (every tool)**: Log every tool call to `.claude/audit.log`: time, event, tool, the skill name on a `Skill` call, and a SHA-256 digest of the input in place of the input; each line is HMAC-chained (`tools/verify_audit_log.py` checks the chain)
+- **PreToolUse (Write|Edit|MultiEdit|NotebookEdit|Bash)**: reads Claude Code's JSON payload; classifies the call (Bash by command: read-only commands and `git stash list|show` need nothing, `git stash create` takes a checkpoint, `git stash pop|apply` needs a checkpoint taken earlier, F503); every other call uses up the checkpoint marker (one marker per call, F501) and is asked for approval (`ask`, F502) in permission modes default, acceptEdits and plan, and blocked F502 in the others unless `ACS_HOOK_APPROVAL=off`; a failure of the hook blocks with R407
+- **PostToolUse (Bash)**: a successful `git stash create` writes the checkpoint marker (expiry `ACS_CHECKPOINT_MAX_AGE`, at most 30 minutes)
+- **Stop**: removes the marker (the turn ended: an execution boundary)
+- **PostToolUse and PostToolUseFailure (every tool)**: Log every tool call to `.claude/audit.log`: time, event, tool, the skill name on a `Skill` call, and a SHA-256 digest of the input in place of the input; each line is HMAC-chained (`tools/verify_audit_log.py` checks the chain), and each line names the layer and its configuration (`recorded_by`: version, sha256 of `hooks/hooks.json`, effective settings)
 
 ### Ontology Edge Types
 
@@ -475,7 +488,8 @@ Other mutation capabilities (`checkpoint`, `audit`, `persist`) have:
 - `audit` also has `mutation_overridable: true`, so a step may declare `mutation: false`
 
 A checkpoint must run before `mutate`, `send` and `rollback` (`requires_checkpoint`
-or a `checkpoint` `requires` edge). Safety flags on workflow steps are optional and
+or a `checkpoint` `requires` edge); on a tool-calling host each gated call uses
+up one checkpoint (STANDARD 1.2.0 §5.18). Safety flags on workflow steps are optional and
 inherit from the ontology; a step value weaker than the ontology's is ignored with
 warning W602, and a stricter one takes effect (a step that raises
 `requires_checkpoint` with no checkpoint before it is F501).

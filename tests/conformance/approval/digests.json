@@ -609,6 +609,54 @@
       ],
       "canonical": "[{\"version\":1},{\"recheck\":{\"current\":{\"version\":2},\"previous\":{\"version\":1}}}]",
       "digest": "d9efbc9d6b1b077d74f38f9e2d3ef28f7d0990341300e363e46f2c3e8a88cc99"
+    },
+    {
+      "name": "tool_call",
+      "kind": "tool_call",
+      "about": "A tool call: shown is [{action, capability, args}] (STANDARD 1.2.0 section 5.18.7).",
+      "call": {
+        "action": "write_config",
+        "capability": "mutate",
+        "args": {
+          "key": "a",
+          "value": "b"
+        }
+      },
+      "shown": [
+        {
+          "action": "write_config",
+          "capability": "mutate",
+          "args": {
+            "key": "a",
+            "value": "b"
+          }
+        }
+      ],
+      "canonical": "[{\"action\":\"write_config\",\"args\":{\"key\":\"a\",\"value\":\"b\"},\"capability\":\"mutate\"}]",
+      "digest": "e3cf33cccce568634c5c6dab7d7988d66f94b8b9cc34ed4eec1006edfd88879b"
+    },
+    {
+      "name": "tool_call_unbound",
+      "kind": "tool_call",
+      "about": "A call of a tool with no binding: its capability is null (STANDARD 1.2.0 sections 5.18.2 and 5.18.7).",
+      "call": {
+        "action": "run_script",
+        "capability": null,
+        "args": {
+          "cmd": "x"
+        }
+      },
+      "shown": [
+        {
+          "action": "run_script",
+          "capability": null,
+          "args": {
+            "cmd": "x"
+          }
+        }
+      ],
+      "canonical": "[{\"action\":\"run_script\",\"args\":{\"cmd\":\"x\"},\"capability\":null}]",
+      "digest": "a99d0aa49499be4333be662351a46b3971a038db62e3fa9a631405b84a9ec354"
     }
   ]
 }

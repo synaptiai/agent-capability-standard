@@ -16,6 +16,7 @@ import type { SpecSlot } from '../lib/spec-slots';
 import { slotBlocks } from './spec-slot-blocks';
 
 const REPLAY_TITLES: Record<string, string> = {
+  'group-replay': 'A group member that fails, from §5.2.3',
   'recovery-replay': 'A recovery that runs out, from §5.12',
   'wait-replay': 'A wait that loses its source, from §5.13',
   'approval-unattended-replay': 'An approval no one is asked for, from §5.14',
@@ -42,7 +43,7 @@ function replayBlock(slot: string): string {
   );
 }
 
-/** The blocks for §1 to §5.2.1: F-S0, F-S1 and F-S6. */
+/** The blocks for §1 to §5.2.3: F-S0, F-S1, F-S6 and the parallel group replay. */
 export function specEarlyBlocks(): string[] {
   const { text } = currentStandardText();
   const o = loadOntology();
@@ -68,6 +69,7 @@ export function specEarlyBlocks(): string[] {
         D.safetyDefaults(o).flatMap((g) => g.caps.map((c) => [code(c.id), g.layer, c.risk, yes(c.mutation), D.checkpointViaEdge(c) ? 'Yes, via requires edge' : yes(c.requires_checkpoint), yes(c.requires_approval)])),
       ),
     ),
+    replayBlock('group-replay'),
   ];
 }
 

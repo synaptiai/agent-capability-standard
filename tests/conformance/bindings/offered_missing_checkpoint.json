@@ -1,0 +1,34 @@
+{
+  "description": "An offered tool that requires a checkpoint, with no offered tool that takes one, is V102: its calls could never run.",
+  "ontology": "2.2.0",
+  "needs": [
+    "offered_tools"
+  ],
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    }
+  ],
+  "offered": {
+    "write": "write"
+  },
+  "expect": {
+    "errors": [
+      {
+        "code": "V102",
+        "tool": "write"
+      }
+    ],
+    "warnings": [],
+    "effective": {
+      "write": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

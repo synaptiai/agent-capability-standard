@@ -1,0 +1,34 @@
+{
+  "description": "mutation: false is not honoured in a record that names another capability: W602, and the call is a mutation.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "log",
+      "ontology": "2.2.0",
+      "capability": "audit",
+      "additional_capabilities": [
+        "persist"
+      ],
+      "flags": {
+        "mutation": false
+      }
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [
+      {
+        "code": "W602",
+        "tool": "log"
+      }
+    ],
+    "effective": {
+      "log": {
+        "risk": "low",
+        "mutation": true,
+        "requires_checkpoint": false,
+        "requires_approval": false
+      }
+    }
+  }
+}

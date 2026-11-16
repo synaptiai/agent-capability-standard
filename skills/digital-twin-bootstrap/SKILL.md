@@ -39,8 +39,7 @@ A world model captures:
 
 ## Procedure
 
-0) **Create checkpoint marker** if mutation might occur:
-   - Create `.claude/checkpoint.ok` after confirming rollback strategy (the sync loop mutates the twin)
+0) **Take a checkpoint** if mutation might occur (the sync loop mutates the twin): invoke `/checkpoint` with the scope the later steps change; its state-saving command is what the safety layer counts (STANDARD 1.2.0 §5.18.6). Each gated call needs its own.
 
 1) **Invoke `/invoke`** with workflow `world_model_build` and input `user_input`, if `world_state_out` is null, and store output as `world_model_out`
    - Build the initial world model baseline. The invoked workflow's stores land in `world_model_out.result`:

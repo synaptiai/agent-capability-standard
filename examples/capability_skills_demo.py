@@ -5,13 +5,17 @@ Capability Skills Demo
 Demonstrates how Claude can autonomously invoke capability skills
 to satisfy safety requirements:
 
-1. Claude invokes the 'checkpoint' skill when needed
-2. The skill_tracker hook detects this and updates CheckpointTracker
-3. Subsequent mutations are now allowed
+1. Claude invokes the 'checkpoint' skill when needed; loading the skill's
+   instructions saves nothing, so it takes no checkpoint
+2. The skill has Claude save the state with one Bash call,
+   `git stash create "checkpoint:<id>"`; the checkpoint recorder sees that
+   call succeed and updates CheckpointTracker (STANDARD 1.2.0 section
+   5.18.6)
+3. The next gated call is allowed, and uses that checkpoint up
 
 This enables a conversational safety pattern:
   User: "Create a checkpoint then edit config.yaml"
-  Claude: [invokes checkpoint skill, then Edit tool]
+  Claude: [invokes checkpoint skill, runs git stash create, then Edit]
 
 Usage:
     python examples/capability_skills_demo.py
@@ -21,12 +25,14 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
-from grounded_agency.hooks.skill_tracker import create_skill_tracker
+from grounded_agency.hooks.skill_tracker import create_checkpoint_recorder
 
 
 async def approve(tool_name: str, tool_input: dict, context: object) -> object:
@@ -65,11 +71,13 @@ async def main():
             ontology_path=str(
                 Path(__file__).parent.parent / "schemas/capability_ontology.yaml"
             ),
+            # A fresh directory, so no checkpoint of an earlier run counts.
+            checkpoint_dir=tempfile.mkdtemp(prefix="acs-demo-"),
         )
     )
 
-    # Get the skill tracker hook
-    skill_hook = create_skill_tracker(adapter.checkpoint_tracker)
+    # The checkpoint recorder: a PostToolUse hook for every tool
+    recorder = create_checkpoint_recorder(adapter.checkpoint_tracker, adapter.mapper)
     # mutate requires approval as well as a checkpoint; approve stands in
     # for the host's can_use_tool callback.
     permission_callback = adapter._make_permission_callback(approve)
@@ -82,7 +90,7 @@ async def main():
     result = await permission_callback(
         "Write",
         {"file_path": "config.yaml", "content": "debug: true"},
-        None,
+        SimpleNamespace(tool_use_id="write_001"),
     )
     print(f"  Result: {'allowed' if is_allowed(result) else 'BLOCKED'}")
 
@@ -107,10 +115,23 @@ async def main():
         },
     }
 
-    # Invoke the skill tracker hook (as SDK would)
-    await skill_hook(skill_input_data, "skill_001", None)
-
+    # The recorder sees the Skill call: it takes no checkpoint.
+    await recorder(skill_input_data, "skill_001", None)
     print("\n--- After Skill Invocation ---")
+    print(f"Valid checkpoint: {adapter.has_valid_checkpoint()}")
+
+    # The skill's instructions have Claude save the state; that call, once
+    # it succeeded, is what takes the checkpoint.
+    print("\nClaude runs: Bash(git stash create \"checkpoint:config\")")
+    await recorder(
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": 'git stash create "checkpoint:config"'},
+            "tool_response": {"stdout": "0123456789abcdef0123456789abcdef01234567\n"},
+        },
+        "bash_001",
+        None,
+    )
     print(f"Valid checkpoint: {adapter.has_valid_checkpoint()}")
 
     checkpoint = adapter.checkpoint_tracker.get_active_checkpoint()
@@ -124,9 +145,10 @@ async def main():
     result = await permission_callback(
         "Write",
         {"file_path": "config.yaml", "content": "debug: true"},
-        None,
+        SimpleNamespace(tool_use_id="write_002"),
     )
     print(f"  Result: {'ALLOWED' if is_allowed(result) else 'blocked'}")
+    print(f"Valid checkpoint after the Write: {adapter.has_valid_checkpoint()}")
 
     print("\n--- Available Capability Skills ---")
     skills_path = Path(__file__).parent.parent / "skills"
@@ -153,16 +175,19 @@ How it works:
      "reason": "Before config changes"
    }
 
-3. The checkpoint skill executes (e.g., git stash, file copy)
+3. The skill's instructions have Claude save the state with one Bash
+   call: git stash create "checkpoint:<id>" (the Skill call itself
+   takes no checkpoint)
 
-4. PostToolUse hook (skill_tracker) detects the skill invocation
+4. The PostToolUse checkpoint recorder sees that call succeed
 
 5. CheckpointTracker is updated with a valid checkpoint
 
-6. Claude can now use Write/Edit tools on files in scope
+6. Claude can now make one gated call (Write, Edit, ...): the call
+   uses the checkpoint up when it is allowed
 
-7. After mutations complete, checkpoint can be consumed
-   or used for rollback if verification fails
+7. A further gated call needs a new checkpoint; a checkpoint, used
+   or not, can still be restored if verification fails
 """)
 
     print("\n" + "=" * 60)
@@ -172,8 +197,8 @@ How it works:
 Key Points:
 - Skills are SKILL.md files in skills/<name>/
 - Claude autonomously invokes skills based on context
-- skill_tracker hook updates CheckpointTracker when
-  the 'checkpoint' skill is invoked
+- the checkpoint recorder updates CheckpointTracker when a call
+  that saves the state (git stash create, a checkpoint tool) succeeds
 - This enables natural language safety: "checkpoint then edit"
 """)
 

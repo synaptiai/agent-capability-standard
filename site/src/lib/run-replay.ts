@@ -16,6 +16,7 @@ import { plural } from './words';
 
 /** The fixtures the site draws, by the figure that draws them (visual spec 3.9). */
 export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
+  'group-replay': 'parallel_group_member_fails',
   'recovery-replay': 'recovery_loop_exhausted',
   'wait-replay': 'wait_liveness_lost',
   'approval-unattended-replay': 'approval_out_of_band_unattended',

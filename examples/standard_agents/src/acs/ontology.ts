@@ -9,18 +9,19 @@ export {
   type CapabilityOutput,
   type DeclaredFlags,
   effectiveFlags,
+  effectiveFlagsOf,
   isCapability,
   type Layer,
   ONTOLOGY_VERSION,
   prerequisites,
+  prerequisitesOf,
   REQUIRES,
   type Risk,
   type SafetyFlags,
+  /**
+   * The version of the Agent Capability Standard this binding follows, which
+   * its annotations and records cite: the package's, 1.2.0, whose §5.18 the
+   * binding implements as a safety layer (class SL, §10.4).
+   */
+  STANDARD_VERSION,
 } from '@synaptiai/acs-core';
-
-/**
- * The version of the Agent Capability Standard this binding follows, which
- * its annotations and records cite. The package implements a later one
- * (its `STANDARD_VERSION`); the binding moves to it when it implements it.
- */
-export const STANDARD_VERSION = '1.1.0';

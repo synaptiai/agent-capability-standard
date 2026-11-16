@@ -13,16 +13,20 @@ hooks:
       hooks:
         - type: prompt
           prompt: |
+            Model-judged additions (STANDARD 1.2.0 §5.18.10): these may refuse
+            the call; the checks the Standard requires (approval, the checkpoint,
+            rollback history, the destination policy, secrets) are made by code,
+            not here.
+
             OUTBOUND COMMUNICATION SAFETY CHECK
 
             The tool call follows this prompt as JSON; the command is tool_input.command.
 
             This skill sends data to external systems. Verify:
-            1. Destination is in the approved allowlist
+            1. The destination is one the destination policy allows (checked by
+               code where a policy is in force, STANDARD 1.2.0 §4.4.2); judge it
+               here only when none is.
             2. No sensitive data (API keys, passwords, PII) in payload
-            3. User has explicitly approved this send operation
-            4. Checkpoint exists for state recovery
-            5. Rate limits are not being exceeded
 
             CRITICAL: External sends are IRREVERSIBLE.
 
@@ -31,16 +35,18 @@ hooks:
           once: false
         - type: command
           command: |
-            # Block a request to localhost or a private IPv4 address. Claude Code
-            # passes the tool call as JSON on stdin; exit 2 blocks the call and the
-            # reason on stderr is shown to Claude. A call that cannot be read is blocked.
-            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "BLOCK: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # Block a request to localhost or a private IPv4 address (a host-specific
+            # destination rule, STANDARD 1.2.0 §5.18.10, F504). Claude Code passes
+            # the tool call as JSON on stdin; exit 2 blocks the call and the reason
+            # on stderr is shown to Claude. A call that cannot be read is blocked
+            # (R407).
+            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             ADDR='(localhost|127\.0\.0\.1|10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]+\.[0-9]+)'
             # The address must stand where a host does: after a URL scheme, a user@,
             # a space or a quote, and before a port, a path, a query or the end.
             # Host names are case-insensitive, so the match is too.
             if printf '%s\n' "$CMD" | grep -qiE "(curl|wget|http)" && printf '%s\n' "$CMD" | grep -qiE "(^|[[:space:]\"']|://|@)${ADDR}([:/?#[:space:]\"']|\$)"; then
-              echo "BLOCK: Internal network access requires explicit approval" >&2
+              echo "F504 CONSTRAINT_VIOLATED: the send skill does not send to localhost or a private IPv4 address (internal network access)" >&2
               exit 2
             fi
             exit 0

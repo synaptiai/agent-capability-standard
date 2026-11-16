@@ -1,0 +1,81 @@
+{
+  "description": "A rollback call needs a checkpoint taken earlier in the scope (F503 otherwise) and uses none.",
+  "ontology": "2.2.0",
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    }
+  ],
+  "sequence": [
+    {
+      "call": "undo",
+      "expect": {
+        "refuse": "F503"
+      }
+    },
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "undo",
+      "expect": "run"
+    },
+    {
+      "call": "write",
+      "args": {
+        "path": "a"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": "run"
+    }
+  ]
+}

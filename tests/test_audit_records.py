@@ -110,6 +110,62 @@ def test_coordination_export() -> None:
         assert problems(record) == [], record
 
 
+def test_the_adapters_call_records_export(tmp_path: Path) -> None:
+    """The SDK adapter's call records export as action records (STANDARD
+    1.2.0 sections 5.18.8 and 6.4): a refusal is rejected with its code, a
+    call approved in session carries the digest it was shown, a call that ran
+    is executed, and each names the layer that decided it."""
+    from types import SimpleNamespace
+
+    from claude_agent_sdk import PermissionResultAllow
+
+    from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=str(ONTOLOGY), checkpoint_dir=str(tmp_path / ".cp")
+        )
+    )
+    pre = adapter._make_pretooluse_safety_hook()
+    write = {"tool_name": "Write", "tool_input": {"file_path": "a"}}
+
+    async def host(tool: str, args: dict[str, Any], context: Any) -> Any:
+        return PermissionResultAllow(updated_input=args)
+
+    async def calls() -> None:
+        await pre(write, "w0", None)  # no checkpoint: F501
+        adapter.create_checkpoint(["*"], "t")
+        await pre(write, "w1", None)  # asked
+        callback = adapter._make_permission_callback(host)
+        await callback("Write", {"file_path": "a"}, SimpleNamespace(tool_use_id="w1"))
+        await adapter._make_mutation_consumer()(
+            {**write, "tool_response": {}}, "w1", None
+        )
+
+    asyncio.run(calls())
+    records = adapter.export_action_records("session-1")
+    for record in records:
+        assert problems(record) == [], record
+    assert [(r["status"], r.get("code")) for r in records] == [
+        ("rejected", "F501"),
+        ("planned", None),
+        ("approved", None),
+        ("executed", None),
+    ]
+    assert [r["action_id"] for r in records] == [f"session-1/{n}" for n in range(1, 5)]
+    approved = records[2]
+    assert approved["call_id"] == "w1" and approved["checkpoint_id"]
+    assert approved["approval"] == {
+        "digest": _core.approval_digest(
+            [{"action": "Write", "capability": "mutate", "args": {"file_path": "a"}}]
+        ),
+        "decision": "approved",
+        "mode": "in_session",
+    }
+    assert all(r["recorded_by"] == adapter.recorded_by for r in records)
+    assert all(r["run_id"] == "session-1" and r["tool"] == "Write" for r in records)
+
+
 def test_the_orchestrators_audit_record() -> None:
     from grounded_agency.coordination.orchestrator import OrchestrationRuntime
     from grounded_agency.workflows.engine import WorkflowStep

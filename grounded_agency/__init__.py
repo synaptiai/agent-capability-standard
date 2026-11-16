@@ -25,7 +25,13 @@ from ._types import (
     HookContext,
 )
 from .adapter import GroundedAgentAdapter, GroundedAgentConfig
+from .capabilities.bindings import ToolBinding, check_offered, load_bindings
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
+from .capabilities.output import (
+    CapabilityOutputError,
+    decode_capability_output,
+    encode_capability_output,
+)
 from .capabilities.registry import CapabilityRegistry
 from .client import GroundedClient
 from .coordination import (
@@ -107,6 +113,13 @@ __all__ = [
     "ToolCapabilityMapper",
     "ToolMapping",
     "UNCLASSIFIED_TOOL",
+    # Tool bindings and text-only outputs (STANDARD 1.2.0 section 5.18)
+    "ToolBinding",
+    "load_bindings",
+    "check_offered",
+    "encode_capability_output",
+    "decode_capability_output",
+    "CapabilityOutputError",
     # State management
     "CheckpointTracker",
     "Checkpoint",

@@ -12,7 +12,8 @@ validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); they check §3.1's grounding where a grounding policy applies
 (§5.20, F505) and apply domain profiles (§5.21), as the Python adapter does;
 the Python SDK adapter and the Standard Agents binding implement §5.18 and
-claim class SL (§10.4); `grounded_agency` implements §7.1's entity ids and
+meet §10.4 except the §5.18.10 rows their conformance statements list as not
+applied, and claim class SL once those are applied; `grounded_agency` implements §7.1's entity ids and
 §8's arithmetic; §7.2 and §7.3 are not implemented
 **Date:** 2026-11-15
 **Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported; see §11.5)
@@ -33,6 +34,8 @@ This standard specifies:
 8. **Versioning** and backward compatibility policy
 9. **Orchestration extensions** (triggers, recovery and escalation, waiting,
    approval, delegation, quorum, sender identity) that a workflow opts into
+10. **Tool-calling hosts**: the ontology applied to the tool calls a model
+    chooses (§5.18)
 11. A **host protocol** between an executor and its host, the run operations,
     audit records, and conformance for executors
 
@@ -80,6 +83,12 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Diagnostic** | An error or warning reported by a validator or executor (§9) |
 | **Effective flag** | The safety flag a step is treated as: the stricter of its declaration and the ontology (§5.2.1) |
 | **Runs before** | Step A runs before step B when A comes earlier in the step list and is not in B's parallel group (§4.3) |
+| **Tool-calling host** | A runtime in which a model chooses each tool call and its arguments, and no workflow's step list determines the next action (§5.18) |
+| **Call** | One invocation of one tool on a tool-calling host |
+| **Tool binding** | A record that states which capability a tool performs and which safety flags it declares (§5.18.1) |
+| **Safety layer** | Code that decides, before a call's effect, whether the call may run under §5.18: a pre-call hook, a permission callback, or a wrapper around the tool's own code |
+| **Layer scope** | The sequence of calls a safety layer orders and keeps records for, such as one session or thread (§5.18.5); in §5.18, *scope* means a layer scope |
+| **Execution boundary** | A point where work stops and later resumes, after which earlier checkpoints authorise nothing: for a workflow, the end of a wait or delay (§5.13) and the resumption of a deferred run (§5.14.1), but not the restoring of a saved run (§5.19.4); on a tool-calling host, a point its safety layer names, such as a turn that ends while a person decides (§5.18.6) |
 | **Executor** | What runs a workflow step by step, with no input or output of its own (§5.19) |
 | **Host** | What performs the actions an executor asks for and gives it the time (§5.19) |
 | **Run** | One execution of a workflow, from its start to its terminal action (§5.19) |
@@ -110,6 +119,8 @@ Every transformation MUST be either:
   `mutate`, `send` and `generate` (`precedes`: ordering only, V102). A
   `constrain` before `execute`, `mutate` and `send` is recommended (W601)
 - A workflow cannot weaken a capability's safety flags (§5.2.1)
+- On a tool-calling host, a safety layer applies the same effective flags,
+  `requires` edges, checkpoint rule and approval to each call (§5.18)
 
 ### 3.4 Composable Atoms
 - Workflows orchestrate; capabilities do one thing
@@ -320,8 +331,8 @@ the higher level. A declaration weaker than the ontology has no effect and
 is reported as W602 (`SAFETY_FLAG_DOWNGRADE`), with one exception:
 `mutation: false` on a `mutation_overridable` capability (§4.4) is honoured.
 
-Validators, executors and safety layers MUST act on effective flags. A
-declaration stricter than the ontology (e.g. `requires_approval: true` on
+Validators, executors and safety layers (§5.18) MUST act on effective
+flags. A declaration stricter than the ontology (e.g. `requires_approval: true` on
 `observe`) is allowed and takes effect: a step whose effective
 `requires_checkpoint` is true needs a `checkpoint` step running before it
 (§4.3), else F501 — reported as V102 instead where the ontology's
@@ -329,7 +340,41 @@ declaration stricter than the ontology (e.g. `requires_approval: true` on
 
 #### 5.2.2 Checkpoint Use
 
-<!-- owner: S1; text: S1.md part 2.6 -->
+A checkpoint authorises one step whose effective `requires_checkpoint` is
+true; two such steps never share one. The same rule holds for calls
+(§5.18.6).
+
+- **When it is used up.** Once everything that can stop the step before it
+  acts has passed (its condition, before-gates, delay and approval),
+  immediately before the capability is called. A step that is skipped,
+  deferred, refused approval or stopped by a gate uses nothing. A step that
+  started uses it whatever its outcome; a `retry` of the step runs under the
+  checkpoint the step used.
+- **Which one.** The most recently taken of the run's valid checkpoints:
+  once the latest is used, an earlier one that is still valid authorises
+  the next step.
+- **None valid.** When a step that requires a checkpoint is about to act and
+  no valid checkpoint exists (each was used up, or a wait or delay ended
+  after it), the executor has its host take one and uses it; if the host
+  fails, the step fails with F501. The static rule still applies: a
+  `checkpoint` step must run before the step (§4.3, §5.2.1). A catalog with
+  one `checkpoint` step before two `mutate` steps is therefore valid, and at
+  run time a restore point is taken before the second.
+- **Validity.** A checkpoint stops authorising anything when a wait or delay
+  ends (§5.13) or its run is resumed (§5.14.1), and is never valid again.
+  Saving and restoring a run (§5.19.4) changes nothing.
+- **Rollback.** A gate action `rollback` (§5.6) or a failure-mode action
+  `rollback` (§5.7) restores the latest checkpoint taken in the run, valid
+  or not, and uses none up; with none, the run fails with F503, as when the
+  host fails the rollback. A `rollback` step is a capability call like any
+  other: it restores the checkpoint its `checkpoint_id` input names, valid,
+  expired or used, and uses none up; what happens when that checkpoint
+  cannot be restored is the capability's output and the host's error
+  (§5.19). Validity limits what a checkpoint authorises, not what it
+  restores.
+
+These rules state the reference executor's behaviour since 1.1.0 and apply
+to workflows of every version.
 
 #### 5.2.3 Parallel Groups
 
@@ -921,7 +966,8 @@ A step that requires a checkpoint (`mutate`, `send`, or a raised
 `requires_checkpoint`) whose latest checkpoint runs before a `wait` is
 W608: a wait can last hours and the run may resume elsewhere, so a
 checkpoint taken before it no longer authorises the step. Take a new
-checkpoint after the wait. "Runs before" is as in §4.3: a wait in the
+checkpoint after the wait; otherwise the executor has one taken when the
+step acts (§5.2.2). "Runs before" is as in §4.3: a wait in the
 checkpoint's parallel group counts (the checkpoint may finish first), one
 in the step's own group does not. A step that waits itself acts after its
 wait, so any earlier checkpoint is stale for it; a handler (§5.11) is
@@ -1518,47 +1564,380 @@ theirs.
 
 ### 5.18 Tool-Calling Hosts
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+On a tool-calling host (§2) a model chooses each call, and no step list is
+known in advance. This section states how the capability ontology applies
+to calls. §5.18.1–§5.18.8 and §5.18.10 bind a **safety layer**: a host that
+runs none has no obligation under them, and a layer's conformance is claimed
+under §10.4. §5.18.9 binds every producer and consumer of a capability
+output carried as a string, whether or not a safety layer runs, a host that
+answers an executor's capability call included. When a host performs a
+workflow step by making calls (the executor's capability call), those calls
+are part of the step: §5.2–§5.17 govern the step, and the step's approval
+and checkpoint cover its calls as a composite's cover its nested calls
+(§5.18.4).
 
 #### 5.18.1 Tool Bindings
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+A **tool binding** is a record (`schemas/interop/tool_binding.schema.json`):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tool` | string | Yes | The name the host offers the tool under |
+| `ontology` | string | Yes | The ontology version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
+| `standard` | string | No | The Standard version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
+| `capability` | string | No | The capability the tool performs; required unless `control` is true |
+| `domain` | string | No | The capability's domain parameter |
+| `flags` | object | No | Declared safety flags: `risk`, `mutation`, `requires_checkpoint`, `requires_approval` (§5.2.1) |
+| `additional_capabilities` | array | No | Other capabilities the same call performs (§5.18.3) |
+| `classifier` | string | No | Names the classifier a layer applies to each call (§5.18.3) |
+| `invokes` | array | No | Names of the bindings the tool may call while it runs (§5.18.4) |
+| `approval` | object | No | `min_approvers` (integer ≥ 1, default 1), `role` (a non-empty string), `expires` (a duration, §5.10.1, of at most 2^53 − 1 ms) for calls that require approval (§5.18.7) |
+| `control` | boolean | No | `true`: the tool only signals the host (§5.18.3) |
+| `destination` | string | No | For a tool that performs `send`: an RFC 6901 pointer to the argument that holds the destination, which a layer checks against the destination policies in force (§4.4.2) |
+
+Members whose name starts with `x-` are vendor data. A **carrier** is a
+host's own form of the record (tool metadata, an annotation): it states the
+same members under its own names and is read as the record.
+
+- A `capability`, or an entry of `additional_capabilities`, that the
+  ontology does not define is V101, and the record is not loaded. A member
+  of the wrong type or value, or an unknown member whose name does not
+  start with `x-`, is S303, a missing required one S304, and the record is
+  not loaded: a record a layer cannot read in full could declare something
+  stricter, so its tool is treated as unbound rather than read in part.
+- A record's **effective flags** are the strictest, flag by flag, of its
+  declared `flags` and the ontology's flags of `capability` and of each
+  entry of `additional_capabilities` (booleans OR-ed, `risk` the highest
+  level), and of each binding in `invokes` (§5.18.4). A declared flag
+  weaker than the ontology's has no effect and is W602, except
+  `mutation: false` on a `mutation_overridable` capability (§4.4) in a
+  record that names no other capability. A layer MAY refuse to load a
+  record with a W602, as strict validation treats a warning as an error.
+- A call's **prerequisites** are the `from` capabilities of the `requires`
+  edges (§4.3) of every capability its record names.
+- A record whose `ontology` major version the layer does not support, or
+  that cites a `standard` the layer does not support, is V109 and is not
+  loaded. Any other is read against the layer's own ontology.
+- Two records for one `tool` in one set are V110, and neither is loaded.
+- A record describes; it does not enforce. A layer computes effective flags
+  from its own ontology and the record's members, and ignores copies a
+  carrier holds (such as an annotation's `layer` or effective flags). A
+  record is not evidence that any layer enforces it.
+- A tool whose record is not loaded is unbound (§5.18.2).
 
 #### 5.18.2 Unbound Tools
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+A call of a tool with no loaded binding is treated as a call of no
+capability with `risk: high`, and `mutation`, `requires_checkpoint` and
+`requires_approval` true: a layer cannot know that an unknown tool only
+reads.
+
+A host that knows the tools it offers a model SHOULD check them before the
+model runs, and report each of these:
+
+| Offered tool or host action | Code |
+|-----------------------------|------|
+| An offered tool with no binding | W617 |
+| A binding whose `tool` is not the name the host offers it under | V111 |
+| A tool that requires a capability no offered tool can perform, through a prerequisite or through its effective `requires_checkpoint`: its calls could never run | V102 |
+| A host action tied to a tool that is not control-only and is unbound, has a prerequisite, or has an effective `requires_checkpoint` or `requires_approval` (§5.18.3) | F506 |
+
+An offered tool with a `classifier` counts as able to perform any
+capability, and a host that takes checkpoints itself (§5.18.6) counts as
+performing `checkpoint`.
 
 #### 5.18.3 Classification
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+A binding classifies a tool by its effect, not by its transport or its name:
+
+| What the call does | Capability |
+|--------------------|------------|
+| Reads, looks up or queries without changing anything, whatever the protocol (an HTTP POST that only queries included) | `retrieve`, `search` or `observe` |
+| Changes a resource that can be read back: a file, a database row, a configuration, an issue's state, a remote record through an API, a pushed branch | `mutate` (`domain`: the system changed) |
+| Delivers a message, notification or event to a recipient outside the scope: an e-mail, a chat or issue comment, a webhook, a published event; and any request to another system whose effect the binding does not know | `send` |
+| Both of the above in one call | `capability` the primary effect, the other in `additional_capabilities` |
+| Writes the store the host provides for the agent's own memory, which `recall` reads | `persist`; a write anywhere else is `mutate` |
+| Restores a checkpoint taken in the scope | `rollback`; restoring other state is `mutate` |
+| Gives an agent a task, or further instructions on a task already delegated to it | `delegate` |
+| Only signals the host (ends a turn or a session, reports a status) and has no other effect | Control-only (`control: true`) |
+| Carries only the values of an executor's host-protocol action to the party that performs or decides it (§5.19.6) | Not a `send`: protocol traffic, covered by the step whose action it performs |
+
+**Several capabilities.** A tool that performs several capabilities in one
+call names the others in `additional_capabilities`; its effective flags and
+prerequisites are those of all of them (§5.18.1). The same holds for one
+call a classifier reads as several actions (a shell line of several
+commands): its classification is the strictest flags and the union of the
+prerequisites of every action it recognises.
+
+**Classifiers.** A layer MAY classify each call of a tool from its
+arguments (`classifier` names how), as a shell command may only read. The
+record's `capability`, `additional_capabilities` and `flags` are then the
+tool's worst case, which applies to any argument the classifier does not
+recognise and whenever it fails. A classification it returns is a
+capability and declared flags, subject to §5.18.1: never weaker than that
+capability's ontology flags, though it may be weaker than the worst case.
+
+**Control-only tools.** A record with `control: true` has no member but
+`tool`, `ontology`, `standard`, `control` and `x-` members (else S303). Its
+calls return no capability output and are never refused: no check of this
+section, no host policy such as a rate limit, applies to them, and a layer
+that cannot write the record of one reports the failure and does not refuse
+the call (§5.18.8). They are recorded. A tool that signals the host and also
+has an effect is not control-only: bind it by its effect.
+
+A host action that takes effect whenever a tool is called, whatever the
+call's result (such as ending the turn or the session, or reporting a
+status), MUST NOT be tied to a tool that is not control-only and is
+unbound, has a prerequisite, or has an effective `requires_checkpoint` or
+`requires_approval`: the action would follow a call the layer refused
+(F506). A host SHOULD tie such an action to a control-only tool: a bound
+tool without those gates can still be refused by a host policy (F504) or a
+failure of the layer (R407).
 
 #### 5.18.4 Composite Tools
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+A tool that calls other tools while it runs (a **composite**) names the
+bindings it may call in `invokes`. Its effective flags include, transitively,
+those of each binding listed (§5.18.1).
+
+| Composite | Code |
+|-----------|------|
+| A name in `invokes` that no binding of the set has: the composite is not loaded | V107 |
+| A cycle through `invokes`: the composite is not loaded | V105 |
+| A nested call the layer attributes to the composite, to a binding it does not list: the call is refused | F504 |
+
+- A call the composite's own code makes while it runs, to a binding it
+  lists, is a **nested call**. The composite's approval and checkpoint
+  cover it: a layer that attributes it to the running composite applies no
+  further checkpoint or approval to it, and records it with the call that
+  covered it. Every other check still applies to it, its prerequisites
+  (§5.18.5) included. A layer that cannot attribute it checks it as a call
+  of its own.
+- A layer attributes a call to a composite only on evidence that the
+  composite's own code made it, such as an invocation the layer itself
+  passed to the composite. That a call comes from the same thread, session
+  or execution while the composite runs is not such evidence: other code
+  (an endpoint, an effect, a parallel call of the same step) can make the
+  call at the same moment. Each invocation covers at most one call.
+- A layer that attributes a nested call to a binding the composite does not
+  list refuses it with F504. A host that can enforce the list (a runtime
+  that rejects an invocation outside a declared list) SHOULD.
+- `invokes` bounds named invocation only. A composite's own code can still
+  write storage or reach the network directly, so the flags it takes from
+  `invokes` are a lower bound: declare `flags` or `additional_capabilities`
+  for what it does itself.
 
 #### 5.18.5 Scope, Order and Concurrency
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+- **Scope.** A layer keeps its records per scope, the sequence of calls it
+  orders, and names its scope in its conformance statement (§10.4). A
+  delegate's calls are another scope, unless the layer orders them with the
+  delegator's against one set of records, which it states. Records of one
+  scope never authorise a call of another.
+- **History.** A call ran before another only if it completed before the
+  other started. History counts over the scope's lifetime; a checkpoint's
+  power to authorise ends sooner (§5.18.6).
+
+The edge types (§4.3) apply to calls as follows:
+
+| Edge | Over calls | Code |
+|------|------------|------|
+| `requires` | A call is refused unless each of its prerequisites (§5.18.1) has run earlier in the scope: for `checkpoint`, a checkpoint was taken in the scope (§5.18.6); for any other capability, a call of it completed successfully | F501 for a missing checkpoint, F503 for a call of `rollback`; V102 (§9.1) for any other missing prerequisite |
+| `soft_requires` | Never refuses a call; a layer MAY report it | W601 |
+| `precedes` | Neither enforced nor reported. At a call the layer cannot know whether a call that must come first will follow, and when one does, the earlier call has had its effect | — |
+| `conflicts_with` | Not enforced: it forbids two capabilities only in one `parallel_group` (§4.3) | — |
+
+- **Concurrency.** A layer's check of a call and its use of a checkpoint or
+  a decision (§5.18.6, §5.18.7) MUST be one atomic step for the scope: two
+  calls that overlap never both pass on one checkpoint or one decision. A
+  layer achieves this with a lock or a reservation, or relies on its host
+  running the scope's calls one at a time, and states which (§10.4).
 
 #### 5.18.6 Checkpoints for Calls
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+- **Taking one.** A checkpoint is taken in the scope by a call classified
+  `checkpoint` that completed successfully, or by the host's own checkpoint
+  operation, which the layer records in the scope. A call that failed takes
+  none. A call that only leads to one, such as loading a skill's
+  instructions, takes none: the call that saves the state does. The layer
+  counts the call; it does not verify what the restore point holds.
+- **One per call.** A checkpoint authorises one call whose effective
+  `requires_checkpoint` is true (§5.2.2). The layer uses the most recently
+  taken of the valid checkpoints no other call holds, as the executor does
+  for steps.
+- **When it is used up.** When every check of this section has passed and
+  the call is allowed to start, before its effect. A call that started uses
+  it whatever its outcome: a layer may never learn the outcome, a call that
+  reports an error may still have changed something, and a failure between
+  the effect and the layer's record must not leave the checkpoint valid for
+  a second change.
+- **Holds.** A call the layer refuses uses nothing up. Where the host can
+  still refuse a call after the layer checked it (a permission prompt the
+  layer does not run), the layer holds the checkpoint for the call until the
+  call is allowed or refused, and releases it on a refusal it learns of. When
+  the call is allowed, the layer checks again, in one atomic step with its
+  use, that the hold is still the call's and the checkpoint still valid; if
+  not, the call is refused with F501. A hold lapses when its checkpoint
+  reaches the maximum age, or after a shorter time the layer states. A hold
+  the layer cannot resolve, because it never learns what became of the call
+  (the hold lapses, the layer restarts, the host does not report a
+  refusal), counts as used.
+- **Validity.** A checkpoint authorises a call only before the scope's next
+  execution boundary, and only within the layer's maximum age: a duration
+  the layer states, of at most 30 minutes. The layer names the boundaries
+  it observes (§10.4). A permission prompt answered while the call waits is
+  not a boundary, but the maximum age keeps running while it is open.
+- **None valid.** A call is refused when it lacks what the table below
+  names. A layer does not take a checkpoint on the call's behalf: it cannot
+  know what the call will change, and the model takes one with a
+  `checkpoint` call.
+
+| Call | Refused without | Code |
+|------|-----------------|------|
+| A call whose effective `requires_checkpoint` is true | A valid checkpoint for it alone | F501 |
+| A call of `rollback` | A checkpoint taken earlier in the scope, valid or not; it uses none up | F503 |
 
 #### 5.18.7 Approval for Calls
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+A call whose effective `requires_approval` is true runs only on a valid
+decision; otherwise it is refused with F502.
+
+- **Shown and hashed.** Approvers are shown, and a decision binds to, the
+  array `[{"action": <tool>, "capability": <capability>, "args": <the
+  arguments the call will run with>}]`: the shown values of §5.14, with its
+  digest (SHA-256 of the RFC 8785 canonical JSON). `capability` is null for
+  an unbound tool. The arguments MUST be I-JSON (§5.14); a call whose
+  arguments are not is refused with F502.
+- **Validity.** As in §5.14: the digest matches; at least `min_approvers`
+  (the binding's `approval`, default 1) distinct approvers, as the host
+  authenticated them (counted by principal when it attests their
+  identities, which the record then carries as
+  `approval.approver_identities`, §5.17), agree; it has not expired (the binding's
+  `approval.expires`, else the period the layer states); and it has not
+  been used. Once any approver rejects, the request is rejected: a
+  rejection is never lost to a concurrent approval.
+- **One decision per call.** The call that runs under a decision uses it
+  up when the call is allowed to start, as for a checkpoint (§5.18.6); an
+  identical later call needs a new decision. A call refused for another
+  reason uses no decision.
+- **Order.** A layer checks approval and the checkpoint in the order it
+  chooses, and reports the code of a check the call failed. *(Approval
+  first suits decisions recorded while the call waits: the restore point is
+  then taken after the wait for a person. The checkpoint first suits a
+  prompt answered within the call: a call that would be refused for want of
+  a checkpoint does not ask a person first.)*
+- **A host's own prompt.** A permission prompt that shows a person the tool
+  and the arguments the call will run with, and decides that call alone, is
+  a valid `in_session` decision with one approver, bound to the call in
+  place of the digest; the layer still records the digest (§5.18.8). Every
+  call that requires approval goes to the prompt, even one an allow-list or
+  a remembered choice would pass. A prompt that is skipped, cannot be shown,
+  is answered by anything but a person (the host itself, an automatic mode,
+  a classifier), or shows other arguments than those that run decides
+  nothing (F502). A layer relies on a host's prompt only in the host
+  configurations it knows to put the prompt to a person, names them in its
+  statement (§10.4), and refuses with F502 in any other. Such a prompt
+  cannot meet a `min_approvers` above 1, nor a `role` unless the host
+  authenticates the person's role to the layer (F502).
+- **Changed arguments.** Where the host can answer a prompt with arguments
+  other than those the call was checked with, the layer classifies the
+  call again with the new arguments, and refuses it if the new
+  classification requires approval (F502: the decision was on other
+  arguments) or a checkpoint or prerequisite the call does not already hold
+  (F501, F503 or V102). Otherwise the call runs with the new arguments, and
+  the layer records their digest.
+- **No one to ask.** With no one who can decide, the call is refused with
+  F502, as under `when_unattended: fail`. Standing mandates, `skip` and
+  `defer_to_queue` (§5.14) are not defined for calls.
 
 #### 5.18.8 Refusals, Records and Failure
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+- **Refusals.** A refusal is a §9.8 diagnostic. Its `location` holds `tool`
+  (the name the host offers the tool under), `capability` (absent for an
+  unbound tool) and, where the host gives calls an identifier, `call`; it
+  holds no `workflow` or `step`. Where the channel to the model or the host
+  carries only text, the text opens with the code and the name:
+  `F501 CHECKPOINT_REQUIRED: ...`. The codes a layer refuses a call with:
+
+| Code | The call is refused because |
+|------|-----------------------------|
+| F501 | It requires a checkpoint and has no valid one (§5.18.6), or no checkpoint was taken in the scope (§5.18.5) |
+| F502 | It requires approval and has no valid decision (§5.18.7) |
+| F503 | It is a call of `rollback` and no checkpoint was taken in the scope (§5.18.6) |
+| V102 | A prerequisite other than `checkpoint` has not run in the scope (§5.18.5) |
+| F504 | A host's own policy refuses it, such as a rate limit or a destination policy (§5.18.10), or a composite made it to a binding it does not list (§5.18.4) |
+| R407 | The layer cannot complete a check or write the call's record (below) |
+- **Records.** A layer records each call it allows or refuses: the tool,
+  its capability, the digest of its shown value (§5.18.7) when it requires
+  approval, the decision and its approvers, the checkpoint it used, any
+  nested call with the call that covered it, and, for a refusal, the
+  diagnostic. Each record names the layer and its configuration in its
+  `recorded_by` member (§6.4): a name, a version, and a digest of the
+  bindings and settings it applied (`config_sha256`), with the settings
+  themselves listed where they are few (`settings`), so a reader can tell
+  which rules a call was held to.
+- **Fail closed.** A layer that cannot classify a call applies §5.18.2 or
+  §5.18.3. A layer that cannot read its records, complete a check, or write
+  the record of a call it is about to allow refuses the call with R407; for
+  a control-only call it reports the failure and lets the call run
+  (§5.18.3). A host that claims a conforming layer MUST NOT run a call the
+  layer covers without the layer's decision: if the layer is missing, fails to load,
+  fails or does not answer, the call is refused, by the host or by the tool
+  itself (a tool that refuses to run, with R407, unless the layer allowed
+  this call). Where the host cannot guarantee this, the conformance
+  statement names the gap (§10.4). A mode that only logs, or that lets a
+  call run when a check fails, is outside class SL.
 
 #### 5.18.9 Text-Only Results
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+This rule binds every producer and consumer of a capability output that a
+host carries as a string, whether or not a safety layer runs: a tool's
+result, a sub-prompt's or a model's reply, and the string a host turns into
+the output of an executor's capability call.
+
+Where a host carries a capability output as a string, it travels as the
+I-JSON text (RFC 7493) of the output object, with nothing before or after
+it. A consumer parses the text and checks that it is an object with every
+field the capability's output contract requires; otherwise the output is
+refused with R402. A host that answers an executor's capability call from
+such a string decodes it by this rule before it answers; a string that
+fails is the step's failure (R402). A producer checks the I-JSON limits of
+§5.14 before it sends; a value outside them is R402. Where a host carries
+validated structure instead (a submit tool's arguments, a structured
+result), that structure is the output and this rule does not apply.
 
 #### 5.18.10 Capability Checks
 
-<!-- owner: S1; text: S1.md part 2.8 -->
+These checks belong to the capabilities, whatever implements them. A check
+this Standard requires MUST be decided by code, from the layer's records and
+the call's arguments. A model's judgement (a prompt-based hook, a classifier
+model) MAY add a refusal; it never satisfies or replaces a required check.
+
+| Capability | Check | Code |
+|------------|-------|------|
+| `checkpoint` | A checkpoint counts once the call that saves the state completed successfully; a call that only leads to one takes none (§5.18.6) | — |
+| `mutate`, `send` | A valid checkpoint for this call alone, and a valid decision (§5.18.6, §5.18.7) | F501, F502 |
+| `execute` | A valid decision (§5.18.7) | F502 |
+| `rollback` | A checkpoint taken earlier in the scope, valid or not, expired or used (§5.18.6) | F503 |
+| `persist` | Its target is the store the host provides for the agent's memory; a call that writes anywhere else is classified `mutate` (§5.18.3) | — |
+| `persist` | Its data holds no secret the layer recognises (§6.7) | F504 |
+| `audit` | It appends records and changes no other state (§4.4) | — |
+| `audit` | The record it appends holds no secret the layer recognises (§6.7) | F504 |
+| `send` | Its destination is one every destination policy in force allows (§4.4.2), checked before approval and the checkpoint; a layer that cannot tell a call's destination under a policy refuses it | F504 |
+| `transform` | Where its output is recorded or stored, a secret it read is not carried into the record: it is redacted (§6.7) | — |
+| every capability | Its output satisfies the output contract (§5.18.9) | R402 |
+| every capability | Records and evidence the layer writes carry no secret: it redacts them (§6.7) | — |
+
+A host-specific mechanism, such as a hook declared in a skill's
+frontmatter, is one implementation of these checks. A host that loads a
+skill's text as instructions without running its hooks applies these checks
+by other means, or its layer does not cover the skill's calls and its
+statement says so (§10.4). With §5.18.8's rule that a host claiming a
+conforming layer runs no covered call without the layer's decision, this
+makes each check above required of the host, whatever mechanism declares
+it. A condition a skill's hook adds that this table does not list is a
+model-judged or host-specific addition: it MAY refuse a call and is never
+required.
 
 ### 5.19 Host Protocol
 
@@ -1585,7 +1964,7 @@ terminal action (`Completed` or `Failed`). Every action carries:
 
 | Action | The host | Responses |
 |--------|----------|-----------|
-| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402), `Error` |
+| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says), `Error` |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `Checkpoint` (`checkpoint_id`), `Error` (the step fails F501) |
 | `Rollback` | restores `checkpoint_id` | `RolledBack`, `Error` (the run ends F503) |
 | `RequestApproval` | asks `approver`, in `mode`, about `shown`, by `expires_at` when it is not null (§5.14) | `Decision` (`decision_id`, `decision`, `approvers`, `digest`) |
@@ -2445,6 +2824,10 @@ depend on the time zone database: each file names the tzdata release it was
 computed with, and the vectors are normative with that release, or with any
 release that agrees with it on the vectors' dates.
 
+Binding fixtures (`tests/conformance/bindings/*.json`) and call-sequence
+fixtures (`tests/conformance/calls/*.json`) are normative for class SL
+(§10.4).
+
 The approval digest vectors (`tests/conformance/approval/digests.json`) are
 normative for §5.14 and §5.18.7. Each vector has a `kind`. A `step` vector is
 one approval request of a workflow step: the step's `approval` field (or
@@ -2463,7 +2846,69 @@ call, that vector's `shown` values.
 
 ### 10.4 Safety-Layer Conformance
 
-<!-- owner: S1; text: S1.md part 2.10 -->
+A safety layer conforms to class SL when, for every call it covers, it:
+
+- loads bindings and reports their diagnostics as §5.18.1–§5.18.4 state,
+  and passes every binding fixture whose `needs` it supports;
+- applies §5.18.5–§5.18.9 and passes every call-sequence fixture whose
+  `needs` it supports;
+- applies the capability checks of §5.18.10;
+- runs in a mode that fails closed (§5.18.8).
+
+Its **conformance statement** names: the host, and the layer's name and
+version; the calls it covers and those it cannot see; its scope, and
+whether a delegate's calls share it; the execution boundaries it observes;
+its checkpoint maximum age; how it obtains approval (a prompt, recorded
+decisions, or both), the host configurations in which it relies on a
+prompt, its decision expiry, the most approvers it can obtain for one call,
+and whether it can verify an approver's role; how it makes a check and its
+use atomic (a lock or reservation, or its host's order); the fixture
+features it supports; its host gaps, the cases in which its host can run
+a covered call without the layer's decision; and any check of §5.18.10 it
+does not apply, which a conforming layer has none of. The statements of the
+reference layers follow `tests/conformance/calls/schema/statement.schema.json`.
+
+**Binding fixtures.** Each fixture holds an `ontology` version, `records`,
+optionally `needs`, `offered` (each name the host offers a tool under,
+mapped to the `tool` of the record it carries, or null), `host_actions`
+(each an `action` and a `tool`) and `host_takes_checkpoints` (default
+false), and `expect`: the exact lists of error and warning codes, each
+with the tool it names, in any order, and the effective flags of each
+loaded record. A layer
+passes a fixture when it reports exactly those diagnostics and computes
+exactly those flags. Fixtures that check offered tools and host actions
+(§5.18.2, a SHOULD) have `needs: ["offered_tools"]`; a layer that does not
+check them skips those fixtures and says so in its statement.
+
+**Call-sequence fixtures.** Each fixture is one scope with a person
+present. Its `bindings` are records under its `ontology`; a tool not listed
+is unbound. A bound tool succeeds and returns what its output contract
+requires; a call of a tool classified `checkpoint` that runs takes a
+checkpoint. Its `sequence` is a list of calls and events:
+
+- A call names `call` (the tool), `args` (default `{}`), optionally
+  `approve` or `reject` (who decided on it beforehand: on its shown value
+  §5.18.7, or at the prompt), `fails` (its tool reports an error after it
+  started), `nested` (calls the tool makes while it runs), and `expect`:
+  `"run"` or `{"refuse": <code>}`. A call with neither `approve` nor
+  `reject` is undecided.
+- An event is `{"boundary": true}` (an execution boundary) or
+  `{"expire": "checkpoint"}` / `{"expire": "decision"}` (the layer's
+  checkpoint maximum age, or a decision's expiry, passes).
+
+`needs` names features a layer must have to run the fixture:
+`unbound_calls` (it sees calls of tools with no binding), `nested_calls`
+(it attributes nested calls), `recorded_approval` (decisions recorded apart
+from the call, from several approvers), and, for binding fixtures,
+`offered_tools` (it checks the tools a host offers, §5.18.2). A layer that
+lacks one says so in its statement and skips those fixtures; no expectation
+depends on the order in which a layer checks approval and the checkpoint.
+A runner gives the layer a fixture's values as its JSON text writes them:
+an integer literal beyond 2^53 is not rounded on the way.
+
+Not testable by fixture, and stated instead: that a prompt shows what runs
+(§5.18.7), that the layer sees every call it claims to cover, and its host
+gaps.
 
 ### 10.5 Executor Conformance
 
@@ -2672,6 +3117,10 @@ Does the step modify external state?
 | Send HTTP POST | Yes | May cause side effects |
 | Rename file | Yes | May overwrite existing file |
 | Append to log | Optional | Append-only, can ignore duplicate |
+
+On a tool-calling host the same question is answered by the call's
+classification (§5.18.3): a call is classified by its effect, and an HTTP
+POST whose effect is not known is a `send` call.
 
 ### 12.2 When to Require Typed Bindings
 
@@ -2955,7 +3404,31 @@ a change that would invalidate a 1.1 workflow is phased in as a warning.
 Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 
 ### D.1 Tool-calling hosts (RFC-0005)
-<!-- owner: S1; entries: S1.md part 2.13 -->
+
+**Clarification** (applies to workflows of every version):
+
+- Checkpoint use for steps stated (§5.2.2): one checkpoint per gated step,
+  used up just before the capability is called; the most recently taken
+  valid one first; with none valid, the executor has its host take one
+  (F501 if it fails); validity ends at the end of a wait or delay and at a
+  resumption; a gate or failure-mode rollback restores the latest
+  checkpoint (F503 with none), and a `rollback` step restores the one its
+  input names. This is the reference executor's behaviour since 1.1.0
+
+**New in 1.2.0:**
+
+- Tool-calling hosts (§5.18): tool bindings
+  (`schemas/interop/tool_binding.schema.json`), unbound tools,
+  classification by effect, composite tools, `requires`, checkpoints and
+  approval over calls, refusals, records and fail-closed loading, text-only
+  results (binding every host that carries an output as a string, workflow
+  hosts included) and capability checks; class SL, whose layers apply
+  §5.18.5–§5.18.10, with binding and call-sequence fixtures (§10.4)
+- The terms tool-calling host, call, tool binding, safety layer, layer
+  scope and execution boundary (§2)
+- Codes V110, V111, R407, F506, W617; V101, V102, V105, V107, V109, R402,
+  F501–F504, W601 and W602 cover bindings and calls too, and §9.1 says a
+  V-code keeps its meaning when a safety layer uses it for a call (§9)
 
 ### D.2 Approval, deferral and run identity (RFC-0006, Part A)
 

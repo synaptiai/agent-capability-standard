@@ -12,9 +12,10 @@ every field but ``hmac`` in the order recorded:
 
 - an action record (STANDARD v1.2 §6.4), with the chain fields: the hook
   writes action_id, timestamp, actor, intent, status, tool, call_id (when
-  the call has one), details, recorded_by, prev_hmac, hmac, and the audit
-  skill's own chain (.claude/audit/records.jsonl) holds records of the same
-  form;
+  the call has one), details, recorded_by (the layer and its configuration:
+  name, version, config_sha256 and settings; STANDARD 1.2.0 section 5.18.8),
+  prev_hmac, hmac, and the audit skill's own chain
+  (.claude/audit/records.jsonl) holds records of the same form;
 - before Standard 1.2: ts, event, tool, skill (on a Skill call),
   input_sha256, prev_hmac, hmac;
 - before the hook logged every tool call: ts, skill, args, prev_hmac, hmac,

@@ -32,6 +32,151 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   verifies old and new lines in one chain.
 - `schemas/interop/oasf_mapping.yaml`: `meta.grounded_agency_version` is
   replaced by `meta.agent_capability_standard.standard` and `.ontology`.
+- Python SDK, tool calls (Standard 1.2.0 §5.18):
+  - A checkpoint is used up when its call is allowed (at the permission
+    callback's allow, or at PostToolUse for a call that did not pass the
+    callback), and a call that fails uses it too. The newest valid checkpoint
+    no other call holds is used, the earlier ones included. A hold that
+    lapses, is found on reload or is unresolved when the turn ends counts as
+    used. The Stop of any session the adapter serves ends every checkpoint's
+    validity: take a checkpoint in the turn that needs it, and serve sessions
+    that must not share this with separate adapters.
+  - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
+    must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
+    set, at most the expiry. `GroundedAgentConfig` gains `call_record_limit`.
+  - `CheckpointTracker(max_age_minutes=...)` (default 30; the adapter passes
+    its `expiry_minutes`) bounds every checkpoint: one taken through
+    `adapter.checkpoint_tracker.create_checkpoint()` with a longer
+    `expiry_minutes` is stored with the maximum age as its expiry, and one
+    read back from a state file stops authorising a call at its
+    `created_at` plus the maximum age. A checkpoint dated after the clock
+    (a crafted state file, a clock that stepped back) authorises nothing,
+    counts as no checkpoint taken and names no restore point; one found
+    dated after the load is dropped from the state.
+  - `CheckpointTracker`: `can_reserve()` and `release_reservation_in_scope()`
+    are removed. `resolve_holds_in_scope(scope)` replaces the latter, and
+    counts the holds it ends as used instead of releasing them.
+    `DEFAULT_RESERVATION_SECONDS` is `None` (was 600.0): a hold lasts until
+    its checkpoint expires unless `reservation_seconds` is set.
+    `has_valid_checkpoint()` now counts every valid checkpoint, those in the
+    history included, whether or not a call holds it: use
+    `valid_checkpoint_id()` for the one a call would hold, or
+    `get_active_checkpoint_id()` for the active one.
+  - `WorkflowEngine.ensure_checkpoint_before_step()` returns the valid
+    checkpoint a step can use, one in the history included, and takes a new
+    one only when every valid checkpoint is held; before, it took a new one
+    whenever the active checkpoint had been used.
+  - Approval is asked only in the permission modes `default`, `acceptEdits`
+    and `plan`. In `bypassPermissions`, `auto`, `dontAsk` or any other mode,
+    a call that requires approval is refused (F502), since nothing puts it to
+    a person. A binding whose `approval` asks for more than one approver or a
+    `role` is refused F502. Arguments the permission callback changes are
+    classified again.
+  - Every refusal reason is the text form `CODE NAME: message` (F501, F502,
+    F503, F504, R407, V102), and the diagnostics are kept in
+    `adapter.call_records`. A rate limit is F504; a failure of the safety
+    check itself is R407.
+  - A `rollback` call is refused (F503) unless a checkpoint was taken since
+    the adapter started; it uses no checkpoint, and no longer invalidates
+    the others.
+  - `Skill` is always `invoke`, so `Skill(checkpoint)` takes no checkpoint:
+    the call that saves the state does. `create_checkpoint_recorder`
+    (`create_skill_tracker` stays as an alias) records one when a call
+    classified `checkpoint`, such as `git stash create`, succeeds.
+  - Bash: `git stash create` is `checkpoint`, `git stash list|show` only
+    read, and a line of several commands takes the strictest flags and every
+    prerequisite of all of them. `git stash pop|apply <commit>` is `rollback`
+    only when `<commit>` is the full id of a commit a checkpoint of the
+    adapter's scope recorded (`metadata["commit"]`); git applies any merge
+    commit as if it were a stash, so any other `pop` or `apply`, a bare one
+    included, is a gated mutation that needs a checkpoint and approval.
+  - MCP: a tool registered or served with no capability is no longer
+    `execute`: it is unbound, the strictest case, and reported as W617 in
+    `mapper.warnings`. Tool `metadata` may be a tool binding record
+    (`capability`, `flags`, `additional_capabilities`, `invokes`,
+    `approval`, `control`); the flat keys still work, and `capability` and
+    `capability_id` that disagree are S303.
+    `create_grounded_mcp_server()` now defaults to `require_layer=True`:
+    each tool it serves refuses (R407) a call the adapter's layer did not
+    allow, so a session whose options were not wrapped with
+    `adapter.wrap_options()` cannot run them. Pass `require_layer=False`
+    for the earlier behaviour (outside class SL). A control-only tool
+    (`control: true`) is served as it is: it is never refused.
+  - Tool binding records: a record with a member that has no I-JSON form
+    (an `x-` member holding an integer beyond 2^53, a lone surrogate or an
+    object that is not JSON) is S303 and not loaded, and its tool stays
+    unbound. A float that canonical JSON writes as an integer beyond ±2^53
+    (1.8e16) has no I-JSON form either: in a record it is S303, and in the
+    arguments of a call that requires approval F502, as in the TypeScript
+    package (`grounded_agency.capabilities.bindings.i_json_problem`).
+    `approval.min_approvers` written as `1.0` loads; `approval.role: null`
+    is S303, and `approval.expires` longer than 2^53 - 1 ms is S303. A
+    diagnostic's `location.field` is the member's path with keys joined by
+    a dot (`approval.min_approvers`, `flags.risk`); W602 names
+    `flags.<flag>`.
+  - `adapter.recorded_by["config_sha256"]` also digests the rate limits
+    (`config.rate_limit`), which decide F504 refusals, so its value differs
+    from one computed without them.
+- Plugin hooks (released with plugin 3.0.0): the PreToolUse hook reads only
+  Claude Code's JSON payload and needs `jq`; anything else is blocked with
+  R407, as is a failure of the hook. The checkpoint marker is used up by the
+  gated call it authorises, so each such call needs its own; a successful
+  `git stash create` writes the marker and the new Stop hook ends its
+  validity when the turn ends. A marker whose validity ended unused (it
+  expired, its turn ended, a newer one replaced it) is filed under
+  `.claude/checkpoints/ended/`, as a used one is under `used/`. A read-only
+  Bash command and `git stash list|show` need no marker, and `git stash
+  pop|apply <commit>` needs none when a marker, live or filed, recorded
+  `<commit>`; any other restore needs a marker like any write. The rollback
+  skill's command hook refuses (F503) a `git stash pop|apply` that does not
+  name such a commit, whatever `git stash list` holds; before, it refused a
+  restore only when `git stash list` was empty. The rollback and send skills'
+  command hooks open a refusal with its code and name (`F503
+  ROLLBACK_FAILED:`, `F504 CONSTRAINT_VIOLATED:`, `R407
+  SAFETY_CHECK_FAILED:`) in place of `BLOCK:`. The
+  marker's `created_at` and `expires_at` must be whole seconds of at most 12
+  digits, the first not in the future and the second at most 1800 seconds
+  after it; otherwise the call is blocked with F501 and the marker removed. A
+  gated call is answered `ask` with an F502 reason in the permission modes
+  default, acceptEdits and plan, and blocked with F502 in the others;
+  `ACS_HOOK_APPROVAL=off` leaves approval to Claude Code's permission rules.
+  `ACS_CHECKPOINT_MAX_AGE` (seconds, at most 1800) sets the marker's expiry.
+  Each audit line gains `recorded_by`. The composed skills take a checkpoint
+  with `/checkpoint` instead of writing `.claude/checkpoint.ok`.
+- Standard Agents binding: `STANDARD_VERSION` is 1.2.0 and the `acs`
+  annotation carries the tool binding record (`tool`, declared `flags`,
+  `additional_capabilities`, `invokes`, `approval`); the copies of the layer
+  and flags are informative. `lintPromptTools` and `lintAgentBindings` report
+  `W617`, `V111`, `V102` and `F506` in place of `unclassified`,
+  `misnamed_tool` and `bound_gated_tool`. A prerequisite other than a
+  checkpoint that has not run is refused with V102, and a check or record
+  the binding cannot complete with R407. A tool's success result is the
+  output's I-JSON text, and an output with an integer beyond 2^53, a
+  non-finite number or a lone surrogate is refused with R402. A composite
+  lists the tools it invokes in `invokes`, which also becomes its `uses`; an
+  invocation outside the list is refused (F504). A call that needs approval
+  whose arguments are not I-JSON is refused with F502 before anything is
+  asked or used. An approval policy's `min_approvers` is at most
+  `MAX_APPROVERS` (1000). A grounded tool's `recorded_by.config_sha256`
+  digests `{annotation, settings: {checkpoint_max_age_ms}}`, not the
+  annotation alone.
+- TypeScript package: `decodeCapabilityOutput` accepts a number written in
+  exponent form (1.8e16, 1e300), which it used to refuse, and checks integer
+  literals in the text itself; `encodeCapabilityOutput` accepts a value it
+  writes in exponent form (1e21 and above) and refuses one it would write as
+  an integer literal beyond ±2^53 (1.8e16). A tool binding record's
+  `location.field` follows the Python loader's dotted paths. `iJsonProblem`
+  refuses a `bigint`, and the new `parseJsonExact` reads JSON text with an
+  integer literal beyond ±2^53 as a `bigint` instead of rounding it (JSON.parse
+  reads 9007199254740993 as 2^53): read text that is then checked as I-JSON
+  with it.
+- Conformance statement schema: `approval.expires` is a duration or null;
+  the new `not_applied` lists the §5.18.10 checks a layer does not apply,
+  and a layer that lists any does not conform to class SL until it applies
+  them. The Python SDK adapter and the Standard Agents binding list theirs
+  (secrets and redaction, §6.7; the destination policy, §4.4.2; for the
+  adapter, the output contract of a tool's result): they meet class SL
+  except those checks, and claim it once they apply them.
 - Standard Agents binding: a trace entry's `approval.approvers` (and
   `GroundedCall.approvers`) are now the approvers' principals,
   `sa-user:<id>`, not bare `ThreadUser` ids, and the entry carries
@@ -146,8 +291,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `grounded_agency.trust.manual_override` and
     `TrustModel.manual_override`; the evidence collector's `required=True`
     reports a capture that failed; the audit skill writes a record of its own
-    with the event under `details.event`; the Standard Agents binding exports
-    its trace entries as action records (`actionRecord`).
+    with the event under `details.event`; the safety layers export their
+    records of calls as action records, each with the `recorded_by` of the
+    layer that decided the call: the Python SDK adapter's
+    `export_action_records(scope)` (each call record gains `seq`, its number
+    in the scope) and the Standard Agents binding's `actionRecord(entry,
+    scope)`.
   - 44 runtime fixtures (`cancel_*`, `wake_at_*`, `records_*`,
     `run_record_*`, `parallel_group_*`, `audit_*`, `error_reason_*`,
     `invoke_trigger_attendance_*`,
@@ -231,7 +380,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `tasks/standard-agents-upstream/`: nine issue texts for the Standard Agent
   Specification, and `file-issues.sh`, which files them in order with the
   GitHub CLI.
-- [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) (Draft, target Standard
+- [RFC-0005](spec/RFC-0005-tool-calling-hosts.md) (Accepted, Standard
   1.2.0): how the Standard applies to a host where a model chooses tool
   calls, with a tool binding record, checkpoint and approval rules for a
   sequence of calls, a conformance class and call-sequence fixtures.
@@ -248,6 +397,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `tests/test_version_lines.py` keeps them in agreement.
 - `docs/guides/RUNNING_WORKFLOWS.md` lists the executor's trace event fields
   and kinds, tested against the core.
+- Standard 1.2.0 §5.18, Tool-Calling Hosts: the tool binding record
+  (`schemas/interop/tool_binding.schema.json`), unbound tools, classification
+  by effect, composite and control-only tools, the scope, order and
+  concurrency of calls, one checkpoint and one decision per call, refusals as
+  §9.8 diagnostics, records that name the layer, and capability outputs on a
+  text-only channel; §5.2.2 states the executor's checkpoint use for steps.
+  §10.4 adds the safety-layer conformance class SL.
+- Safety-layer conformance fixtures: 33 binding fixtures in
+  `tests/conformance/bindings/` and 23 call-sequence fixtures in
+  `tests/conformance/calls/`, with their schemas and the statements of the
+  two reference layers, generated by `scripts/gen_call_fixtures.py`
+  (`--check` in CI). The Python SDK adapter and the Standard Agents binding
+  run them.
+- Python SDK: `load_bindings`, `check_offered` and `ToolBinding` (binding
+  records, W617, V111, V102, F506); `encode_capability_output`,
+  `decode_capability_output` and `CapabilityOutputError` (§5.18.9);
+  `grounded_agency.errors.text_form`.
+- TypeScript package: `checkBindings`, `annotationRecord`,
+  `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
+  `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
+  `additional_capabilities` and `invokes` with one-shot nesting tokens.
+- Approval digest vectors of kind `tool_call` for a call's shown values.
+- Capability output vectors (informative), `tests/conformance/output/vectors.json`,
+  which the Python and TypeScript codecs of §5.18.9 both pass. TypeScript
+  package: `iJsonProblem`. Python SDK: `CheckpointTracker.valid_checkpoint_id()`,
+  `has_commit()` and `max_age_minutes`.
 
 ### Changed
 - Direct dependencies are at their latest releases. Python: the dev ranges are
@@ -276,16 +451,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   high-risk mutation (rate-limited, needs a checkpoint) in both modes; any
   other error denies the call in strict mode and is logged in non-strict
   mode. Deny reasons are generic; the detail and traceback go to the log.
-- `wrap_options()` adds Stop and SubagentStop hooks that release a
-  checkpoint reservation left behind by a call another PreToolUse hook
-  denied. Such a call never runs, so its reservation used to block every
-  other mutation for up to 10 minutes; now it lasts until the end of the
-  turn. Only reservations taken in the finishing session, by the finishing
-  agent, are released.
+- `wrap_options()` adds Stop and SubagentStop hooks. A checkpoint hold left
+  behind by a call another PreToolUse hook denied used to block every other
+  mutation for up to 10 minutes; now it counts as used when the turn ends,
+  and the Stop of any session the adapter serves ends every checkpoint's
+  validity (Standard 1.2.0 §5.18.6).
 - `wrap_options()` no longer adds `Skill` to `allowed_tools`, so `Skill`
   calls reach the permission callback (the SDK warned that it was shadowed).
 - `SyncStrategy`, `Severity` and `StepStatus` are `StrEnum`s, so `str()` of
   a member is its value.
+- `schemas/interop/standard_agents_annotation.schema.json` describes the
+  annotation as a carrier of the tool binding record: `standard` and
+  `ontology` are required, the copies of the layer and flags optional, and a
+  copy that names another layer or a weaker flag than the capability's is
+  invalid.
+- `schemas/interop/standard_agents_mapping.yaml` cites Standard 1.2.0 and
+  ontology 2.2.0.
+- The `send`, `rollback`, `checkpoint`, `persist` and `transform` skills'
+  prompt hooks no longer judge what code decides (approval, a checkpoint,
+  rate limits, expiry); what they still judge is labelled a model-judged
+  addition (Standard 1.2.0 §5.18.10). `spec/SECURITY.md` §5.4 maps every
+  condition of the skills' hooks, and §5.5 says why the plugin's hooks do
+  not claim class SL.
 
 ### Fixed
 - Python SDK: `register_mcp_tool` accepted an unknown capability and a

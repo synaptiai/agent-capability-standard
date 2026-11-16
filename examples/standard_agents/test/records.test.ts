@@ -62,8 +62,16 @@ describe('actionRecord (STANDARD v1.2.0 §6.4)', () => {
       checkpoint_id: 'cp1',
       approval: { decision: 'approved', decision_id: 'd1', approvers: ['sa-user:1'] },
       details: { args_digest: 'a'.repeat(64), flow_id: 'flow-1', step: 2 },
-      recorded_by: { name: 'standardagent-acs-binding' },
+      recorded_by: { name: '@acs/standard-agents-binding' },
     });
+  });
+
+  it('keeps the layer configuration the entry names, and the composite that covered a nested call', () => {
+    const recorded_by = { name: '@acs/standard-agents-binding', version: '1.2.0', config_sha256: 'c'.repeat(64) };
+    const record = actionRecord({ ...base, recorded_by, covered_by: 2 }, 'thread-1');
+    expect(record.recorded_by).toEqual(recorded_by);
+    expect(record.recorded_by).not.toBe(recorded_by);
+    expect(record.details).toEqual({ covered_by: 'thread-1/2' });
   });
 
   it('leaves no member undefined, and omits a capability the call has none of', () => {

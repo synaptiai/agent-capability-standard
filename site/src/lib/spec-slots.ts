@@ -28,10 +28,13 @@ export interface SpecSlot {
 const after = (block: SlotBlock, index: number, startsWith: string) => ({ place: 'after' as const, block, index, startsWith });
 // A field table drawn as a Port column, the table folded under it (TABLE_FIGURES in spec-tail-figures).
 const fieldTable = (index = 0) => ({ place: 'wrap' as const, block: 'table' as const, index, startsWith: 'Field Type Required Description' });
+// A §5.18 table whose Code column is drawn as diagnostic tiles (CODE_TABLE_FIGURES in spec-tail-figures).
+const codeTable = (startsWith: string) => ({ place: 'wrap' as const, block: 'table' as const, index: 0, startsWith });
 
 export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'requirements', level: 3, section: '1.2 ', at: after('list', 0, 'MUST, MUST NOT, SHALL, SHALL NOT: Absolu') },
   { key: 'host-loop', level: 2, section: '2. ', at: after('table', 0, 'Term Definition') },
+  { key: 'principles', level: 2, section: '3. ', at: 'heading' },
   { key: 'safety-order', level: 3, section: '3.3 ', at: after('list', 0, 'A checkpoint MUST run before every mutat') },
   { key: 'table-4.1', level: 3, section: '4.1 ', at: fieldTable() },
   { key: 'layers', level: 3, section: '4.2 ', at: 'heading' },
@@ -39,6 +42,7 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'safety', level: 3, section: '4.4 ', at: 'heading' },
   { key: 'step', level: 3, section: '5.2 ', at: 'heading' },
   { key: 'safety-defaults', level: 4, section: '5.2.1 ', at: 'heading' },
+  { key: 'group-replay', level: 4, section: '5.2.3 ', at: after('paragraph', 1, 'A group is complete when every member ha') },
   { key: 'reference', level: 3, section: '5.3 ', at: 'heading' },
   { key: 'annotations', level: 3, section: '5.4 ', at: 'heading' },
   { key: 'gates', level: 3, section: '5.6 ', at: 'heading' },
@@ -64,6 +68,13 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'trust-classes', level: 3, section: '5.17 ', at: after('code', 0, '- capability: receive') },
   { key: 'sender-filter', level: 3, section: '5.17 ', at: after('table', 0, 'Input Effect on an item') },
   { key: 'approver-count', level: 3, section: '5.17 ', at: after('list', 0, 'for a human approver, including one aske') },
+  { key: 'table-5.18.1', level: 4, section: '5.18.1 ', at: fieldTable() },
+  { key: 'offered-tools', level: 4, section: '5.18.2 ', at: codeTable('Offered tool or host action Code') },
+  { key: 'composite-codes', level: 4, section: '5.18.4 ', at: codeTable('Composite Code') },
+  { key: 'edge-codes', level: 4, section: '5.18.5 ', at: codeTable('Edge Over calls Code') },
+  { key: 'checkpoint-refusals', level: 4, section: '5.18.6 ', at: codeTable('Call Refused without Code') },
+  { key: 'call-refusals', level: 4, section: '5.18.8 ', at: codeTable('Code The call is refused because') },
+  { key: 'capability-checks', level: 4, section: '5.18.10 ', at: codeTable('Capability Check Code') },
   { key: 'protocol-actions', level: 4, section: '5.19.1 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Action The host Responses' } },
   { key: 'protocol-replay', level: 4, section: '5.19.1 ', at: after('list', 2, "outputs: the root workflow's stores at t") },
   { key: 'response-replay', level: 4, section: '5.19.1 ', at: after('paragraph', 5, 'An Error carries a code and a message, a') },
@@ -86,7 +97,8 @@ export const SPEC_SLOTS: readonly SpecSlot[] = [
   { key: 'codes-9.7', level: 3, section: '9.7 ', at: { place: 'wrap', block: 'table', index: 0, startsWith: 'Code Name Description' } },
   { key: 'levels', level: 3, section: '10.1 ', at: 'heading' },
   { key: 'suite', level: 3, section: '10.3 ', at: 'heading' },
-  { key: 'digest-vectors', level: 3, section: '10.3 ', at: after('paragraph', 2, 'The approval digest vectors (tests/confo') },
+  { key: 'digest-vectors', level: 3, section: '10.3 ', at: after('paragraph', 3, 'The approval digest vectors (tests/confo') },
+  { key: 'sl-fixtures', level: 3, section: '10.4 ', at: after('list', 1, 'A call names call (the tool), args (defa') },
   { key: 'fixture-entries', level: 3, section: '10.5 ', at: after('list', 1, '{"expect": A, "respond": R, "at": T}: th') },
   { key: 'bumps', level: 3, section: '11.4 ', at: 'heading' },
   { key: 'checkpoint-tree', level: 3, section: '12.1 ', at: { place: 'wrap', block: 'code', index: 0, startsWith: 'Does the step modify external state?' } },

@@ -32,8 +32,7 @@ Run the composed workflow **capability_gap_analysis** (`reference/workflow_catal
 
 ## Procedure
 
-0) **Create checkpoint marker** if mutation might occur:
-   - Create `.claude/checkpoint.ok` after confirming rollback strategy
+0) **Take a checkpoint** if mutation might occur: invoke `/checkpoint` with the scope the later steps change; its state-saving command is what the safety layer counts (STANDARD 1.2.0 §5.18.6). Each gated call needs its own.
 
 1) **Invoke `/observe`** on `user_input.domain` and store output as `observe_out`
    - Read project docs and current skill coverage

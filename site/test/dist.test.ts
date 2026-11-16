@@ -17,6 +17,7 @@ import { checkDistDir } from '../scripts/check-dist.mjs';
 import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds, pageFile } from '../src/lib/check-dist';
 import { ROUTES, type Route } from '../src/lib/routes';
 import { EXEMPT_RUNS, pageMatches } from '../src/lib/runs';
+import { CODE_TABLE_FIGURES, codeTableCodes } from '../src/lib/spec-tail-figures';
 import {
   allCatalogSteps,
   claudeLayerTable,
@@ -520,6 +521,21 @@ describe('Standard, edge types and diagnostics figures on the built site', () =>
     const tables = figures(h).filter((x) => /data-fig-kind="code-table"/.test(x.attrs));
     const tiles = tables.flatMap((x) => [...x.body.matchAll(/<a\b[^>]*>/g)].map((m) => m[0]).filter((a) => /class="diag-tile/.test(a) && /href="\/spec\/diagnostics\/#[a-z]\d{3}"/.test(a)));
     expect(tiles).toHaveLength(want);
+  });
+
+  it("draws each of §5.18's code tables as a figure whose codes are tiles linking to the diagnostics page", () => {
+    const v = standardFileVersions()[0]!;
+    const h = page(`spec/${v}/index.html`);
+    const text = repoText(`spec/STANDARD-v${v}.md`);
+    const tables = figures(h).filter((x) => /data-fig-kind="call-codes"/.test(x.attrs));
+    expect(tables).toHaveLength(Object.keys(CODE_TABLE_FIGURES).length);
+    for (const [i, key] of Object.keys(CODE_TABLE_FIGURES).entries()) {
+      const linked = [...tables[i]!.body.matchAll(/<a\b[^>]*>/g)]
+        .map((m) => m[0])
+        .filter((a) => /class="diag-tile/.test(a))
+        .map((a) => /href="\/spec\/diagnostics\/#([a-z]\d{3})"/.exec(a)?.[1]?.toUpperCase());
+      expect(new Set(linked)).toEqual(new Set(codeTableCodes(key, text, 'spec').map((d) => d.code)));
+    }
   });
 });
 

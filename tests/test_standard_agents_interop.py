@@ -5,9 +5,10 @@ the Standard Agents binding: which ontology capability a Standard Agents
 construct is, the anchor reference forms, the timestamp rule and the identity
 field map. Its wording is a record of reviewed mapping rows and is not checked
 here. What is checked is what a binding loads and what would rot unnoticed:
-the pinned versions equal those of the row-level mapping, every capability id
-is in the ontology, every cited row exists, and the values it gives for schema
-fields fit the schemas that define those fields.
+the Standard Agents versions equal those of the row-level mapping, the
+Agent Capability Standard versions equal those the binding implements, every
+capability id is in the ontology, every cited row exists, and the values it
+gives for schema fields fit the schemas that define those fields.
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MAPPING = ROOT / "schemas" / "interop" / "standard_agents_mapping.yaml"
 ONTOLOGY = ROOT / "schemas" / "capability_ontology.yaml"
 WORLD_STATE = ROOT / "schemas" / "world_state_schema.yaml"
+# The versions the TypeScript package, and so the binding, implements.
+BINDING_VERSIONS = ROOT / "packages" / "acs-core" / "src" / "ontology.gen.ts"
 
 # What each ruling type must say (the file's header defines the four).
 RULINGS = {"is", "carrier", "by_effect", "audit_label"}
@@ -91,11 +94,40 @@ def test_pinned_versions_equal_the_row_level_mapping(
     package = theirs["types_package"]
     assert f"{package['name']} {package['version']}" == pinned["types_package"]
 
-    ours = index["meta"]["agent_capability_standard"]
-    assert meta["agent_capability_standard"] == {
-        "standard": ours["standard"],
-        "ontology": ours["ontology"],
+
+def test_pinned_acs_versions_are_those_the_binding_implements(
+    mapping: dict[str, Any], index: dict[str, Any]
+) -> None:
+    """The conventions name the Standard and ontology the binding implements.
+
+    The row-level mapping is a dated record of an analysis made against one
+    Standard and ontology at one commit, and is not redone at each version, so
+    its versions may be older. The conventions are what a binding loads, so
+    they name the versions the binding implements and records cite (Standard
+    1.2.0 §5.18.1 defines the tool binding record the annotation carries). The
+    rows stay valid for them only within one major version (§11.6).
+    """
+    text = BINDING_VERSIONS.read_text("utf-8")
+    implemented = {
+        key: re.search(rf'^export const {name} = "([^"]+)";$', text, re.MULTILINE)
+        for key, name in (
+            ("standard", "STANDARD_VERSION"),
+            ("ontology", "ONTOLOGY_VERSION"),
+        )
     }
+    assert all(implemented.values()), f"{BINDING_VERSIONS} declares no version"
+    assert mapping["meta"]["agent_capability_standard"] == {
+        key: match.group(1) for key, match in implemented.items() if match
+    }
+
+    rows = index["meta"]["agent_capability_standard"]
+    for key in ("standard", "ontology"):
+        pinned = mapping["meta"]["agent_capability_standard"][key]
+        made = str(rows[key])
+        assert made.split(".")[0] == pinned.split(".")[0], (
+            f"the rows were made against {key} {made}, another major than {pinned}"
+        )
+        assert tuple(map(int, made.split("."))) <= tuple(map(int, pinned.split(".")))
 
 
 def test_versions_are_strings(mapping: dict[str, Any]) -> None:

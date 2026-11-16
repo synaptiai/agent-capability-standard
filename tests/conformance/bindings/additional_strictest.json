@@ -1,0 +1,26 @@
+{
+  "description": "A record's effective flags are the strictest across its capability and its additional capabilities.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    }
+  ],
+  "expect": {
+    "errors": [],
+    "warnings": [],
+    "effective": {
+      "apply": {
+        "risk": "high",
+        "mutation": true,
+        "requires_checkpoint": true,
+        "requires_approval": true
+      }
+    }
+  }
+}

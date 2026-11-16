@@ -13,6 +13,11 @@ hooks:
       hooks:
         - type: prompt
           prompt: |
+            Model-judged additions (STANDARD 1.2.0 §5.18.10): these may refuse
+            the call; the checks the Standard requires (approval, the checkpoint,
+            rollback history, the destination policy, secrets) are made by code,
+            not here.
+
             PERSIST DATA VALIDATION CHECK
 
             The tool call follows this prompt as JSON; the target file is

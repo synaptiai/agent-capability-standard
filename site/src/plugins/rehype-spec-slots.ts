@@ -15,6 +15,7 @@ import type { VFile } from 'vfile';
 import { loadDiagnostics, type Diagnostic } from '../data/diagnostics';
 import { diagnosticHref } from '../lib/generated';
 import { SPEC_SLOTS, type SlotBlock, type SpecSlot } from '../lib/spec-slots';
+import { CODE_TABLE_FIGURES } from '../lib/spec-tail-figures';
 import { glyphElement } from '../pixel/hast';
 import { failWith, sourceOf } from './source';
 import { hastText, isEl } from './hast';
@@ -176,6 +177,8 @@ const TILE_SECTIONS: readonly { level: number; section: string; column?: string 
   { level: 3, section: '5.16 ', column: 'Description' },
   { level: 4, section: '5.19.1 ', column: 'Responses' },
   ...['9.2 ', '9.3 ', '9.4 ', '9.5 ', '9.6 ', '9.7 '].map((section) => ({ level: 3, section })),
+  // §5.18's code tables (CODE_TABLE_FIGURES).
+  ...Object.values(CODE_TABLE_FIGURES).map(({ level, section }) => ({ level, section })),
 ];
 
 export default function rehypeSpecSlots(options: RehypeSpecSlotsOptions) {

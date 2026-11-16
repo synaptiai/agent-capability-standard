@@ -2,7 +2,19 @@
 Checkpoint Tracker
 
 Manages checkpoint lifecycle for mutation safety in the Grounded Agency pattern.
-Tracks checkpoint creation, validity, consumption, and expiry.
+Tracks checkpoint creation, validity, consumption, and expiry, under the rules
+of STANDARD 1.2.0 section 5.18.6 (and section 5.2.2 for steps):
+
+- A checkpoint authorises one call whose effective ``requires_checkpoint`` is
+  true. The one used is the most recently taken of the valid checkpoints no
+  other call holds, active or in history.
+- It is used up when the call is allowed to start, whatever the call's
+  outcome. A call holds it (a reservation) while a host prompt is open; the
+  hold is re-checked and used in one atomic step (:meth:`consume_if_valid`).
+- A hold the layer cannot resolve (it lapses, the process restarts, the host
+  never reports a refusal) counts as used.
+- Validity ends at an execution boundary (:meth:`end_validity`) and at the
+  maximum age, at most 30 minutes.
 """
 
 from __future__ import annotations
@@ -14,7 +26,7 @@ import logging
 import os
 import tempfile
 import threading
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,13 +38,18 @@ _ELOOP_ERRNOS: set[int] = {getattr(_errno_mod, "ELOOP", 40), 62}
 logger = logging.getLogger(__name__)
 
 
+# STANDARD 1.2.0 section 5.18.6: a layer's maximum age is at most 30 minutes.
+MAX_AGE_MINUTES: int = 30
+
+
 @dataclass(frozen=True, slots=True)
 class _Reservation:
-    """The active checkpoint held for one in-flight mutation (SEC-007)."""
+    """A checkpoint held for one in-flight call (SEC-007): one holder per
+    checkpoint, one checkpoint per holder."""
 
     checkpoint_id: str
     holder: str  # the tool call's tool_use_id, or an anonymous token
-    reserved_at: float  # time.monotonic()
+    reserved_at: datetime  # the tracker's clock
     # (session_id, agent_id) of the call that took it, when known
     scope: tuple[str | None, str | None] | None = None
 
@@ -42,8 +59,9 @@ class Checkpoint:
     """
     Represents a single checkpoint in the safety lifecycle.
 
-    A checkpoint must be created before mutations and is consumed
-    after the mutation completes successfully.
+    A checkpoint must be created before mutations and is used up when the
+    call it authorises is allowed to start (STANDARD 1.2.0 section 5.18.6).
+    ``invalidated_at`` is set when an execution boundary ended its validity.
     """
 
     id: str
@@ -54,12 +72,16 @@ class Checkpoint:
     consumed: bool = False
     consumed_at: datetime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    invalidated_at: datetime | None = None
 
-    def is_valid(self) -> bool:
-        """Check if checkpoint is still valid (not consumed, not expired)."""
-        if self.consumed:
+    def is_valid(self, now: datetime | None = None) -> bool:
+        """Whether the checkpoint can authorise a call at ``now`` (default:
+        the current time): not consumed, not invalidated, not expired."""
+        if self.consumed or self.invalidated_at is not None:
             return False
-        if self.expires_at and datetime.now(UTC) > self.expires_at:
+        if now is None:
+            now = datetime.now(UTC)
+        if self.expires_at and now > self.expires_at:
             return False
         return True
 
@@ -74,6 +96,9 @@ class Checkpoint:
             "consumed": self.consumed,
             "consumed_at": self.consumed_at.isoformat() if self.consumed_at else None,
             "metadata": self.metadata,
+            "invalidated_at": (
+                self.invalidated_at.isoformat() if self.invalidated_at else None
+            ),
         }
 
     @classmethod
@@ -118,6 +143,11 @@ class Checkpoint:
                 else None
             ),
             metadata=meta,
+            invalidated_at=(
+                datetime.fromisoformat(data["invalidated_at"])
+                if data.get("invalidated_at")
+                else None
+            ),
         )
 
     def matches_scope(self, target: str) -> bool:
@@ -142,8 +172,15 @@ class CheckpointTracker:
 
     1. Checkpoint creation with scope and reason
     2. Checkpoint validity checking
-    3. Checkpoint consumption after successful mutation
-    4. Checkpoint history for audit trails
+    3. Holds (reservations) of a checkpoint by an in-flight call, and the
+       atomic re-check and use of a hold when the call is allowed
+    4. Checkpoint consumption: one checkpoint per gated call
+    5. Execution boundaries, after which earlier checkpoints authorise
+       nothing (:meth:`end_validity`)
+    6. Checkpoint history for audit trails
+
+    The rules are STANDARD 1.2.0 section 5.18.6's. Every time the tracker
+    reads goes through one clock (``clock``), so a test can advance it.
 
     Example:
         tracker = CheckpointTracker(checkpoint_dir=".checkpoints")
@@ -154,30 +191,31 @@ class CheckpointTracker:
             reason="Before refactoring"
         )
 
-        # Check before allowing mutation
-        if tracker.has_valid_checkpoint():
-            # Allow mutation
-            pass
-
-        # After successful mutation
-        tracker.consume_checkpoint()
+        # A call holds it, then uses it when it is allowed to start
+        ok, held = tracker.validate_and_reserve("call-1")
+        used = tracker.consume_if_valid("call-1")
 
     State file format (``checkpoint_dir/tracker_state.json``)::
 
         {
             "active": { <Checkpoint dict> } | null,
-            "history": [ { <Checkpoint dict> }, ... ]
+            "history": [ { <Checkpoint dict> }, ... ],
+            "reservations": [ {"checkpoint_id": ..., "holder": ...}, ... ],
+            "last_taken_at": <ISO time> | null
         }
 
     Each Checkpoint dict contains: id, scope, reason, created_at,
-    expires_at, consumed, consumed_at, metadata.
+    expires_at, consumed, consumed_at, metadata, invalidated_at. A hold
+    found in the state file belongs to a process that is gone, so it is
+    unresolved: its checkpoint counts as used.
     """
 
-    DEFAULT_EXPIRY_MINUTES: int = 30
+    MAX_AGE_MINUTES: int = MAX_AGE_MINUTES
+    DEFAULT_EXPIRY_MINUTES: int = MAX_AGE_MINUTES
     DEFAULT_MAX_HISTORY: int = 100
-    # How long a reservation holds if its holder never consumes or releases
-    # it (a permitted tool call that never ran, or never reported back).
-    DEFAULT_RESERVATION_SECONDS: float = 600.0
+    # A hold ends with its checkpoint's expiry unless reservation_seconds
+    # sets a shorter time.
+    DEFAULT_RESERVATION_SECONDS: float | None = None
     _MAX_STATE_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
     def __init__(
@@ -186,6 +224,8 @@ class CheckpointTracker:
         max_history: int | None = None,
         marker_dir: str | Path | None = None,
         reservation_seconds: float | None = None,
+        clock: Callable[[], datetime] | None = None,
+        max_age_minutes: float | None = None,
     ) -> None:
         """
         Initialize the tracker.
@@ -196,30 +236,77 @@ class CheckpointTracker:
                         Oldest checkpoints are pruned when limit is exceeded.
             marker_dir: Directory for the shell hook marker file (.claude/).
                        If provided, create_checkpoint() writes .claude/checkpoint.ok
-                       and consume_checkpoint() removes it, bridging the Python
-                       tracker with the shell PreToolUse hook (SEC-001).
-            reservation_seconds: How long validate_and_reserve() holds the
-                       active checkpoint for its caller if neither
-                       consume_checkpoint() nor release_reservation() follows
-                       (default: 600).
+                       and using the active checkpoint up removes it, bridging the
+                       Python tracker with the shell PreToolUse hook (SEC-001).
+            reservation_seconds: How long a hold lasts if the call never
+                       reports back, at most the checkpoint's own expiry.
+                       ``None`` (default): only the checkpoint's expiry ends
+                       it. A hold that lapses counts as used.
+            clock: Returns the current time (timezone-aware); defaults to
+                       ``datetime.now(UTC)``.
+            max_age_minutes: The layer's maximum age (section 5.18.6): no
+                       checkpoint authorises a call later than this after it
+                       was taken, whatever its own ``expires_at`` (one taken
+                       directly through this tracker, or read back from its
+                       state file, included). More than 0 and at most 30
+                       (default: 30); it is also the default expiry of
+                       :meth:`create_checkpoint`.
+
+        Raises:
+            ValueError: If ``reservation_seconds`` is not more than 0, or
+                ``max_age_minutes`` is not more than 0 or is more than 30.
         """
+        if reservation_seconds is not None and not reservation_seconds > 0:
+            raise ValueError(
+                f"reservation_seconds must be more than 0, got {reservation_seconds!r}"
+            )
+        max_age = self.MAX_AGE_MINUTES if max_age_minutes is None else max_age_minutes
+        if (
+            isinstance(max_age, bool)
+            or not isinstance(max_age, (int, float))
+            or not 0 < max_age <= self.MAX_AGE_MINUTES
+        ):
+            raise ValueError(
+                f"max_age_minutes must be more than 0 and at most "
+                f"{self.MAX_AGE_MINUTES}, got {max_age_minutes!r}: STANDARD "
+                f"1.2.0 §5.18.6 caps a checkpoint's maximum age at 30 minutes"
+            )
+        self._max_age_minutes: float = max_age
         self._checkpoint_dir = Path(checkpoint_dir)
         self._max_history = (
             max_history if max_history is not None else self.DEFAULT_MAX_HISTORY
         )
         self._marker_dir = Path(marker_dir) if marker_dir is not None else None
-        self._reservation_seconds = (
-            reservation_seconds
-            if reservation_seconds is not None
-            else self.DEFAULT_RESERVATION_SECONDS
-        )
+        self._reservation_seconds = reservation_seconds
+        self._clock: Callable[[], datetime] = clock or (lambda: datetime.now(UTC))
         self._lock = threading.Lock()
         self._active_checkpoint: Checkpoint | None = None
-        # In memory only: a reservation does not outlive the process that
-        # holds it.
-        self._reservation: _Reservation | None = None
+        # Holds by checkpoint id.
+        self._reservations: dict[str, _Reservation] = {}
         self._checkpoint_history: list[Checkpoint] = []
+        # When the newest checkpoint was taken: survives history pruning.
+        self._last_taken_at: datetime | None = None
         self._load_persisted_state()
+
+    def _now(self) -> datetime:
+        return self._clock()
+
+    @property
+    def max_age_minutes(self) -> float:
+        """The maximum age of a checkpoint, in minutes (section 5.18.6)."""
+        return self._max_age_minutes
+
+    def _valid(self, checkpoint: Checkpoint, now: datetime) -> bool:
+        """Whether ``checkpoint`` can authorise a call at ``now``: valid by
+        its own record, taken no later than ``now`` and no longer ago than
+        the maximum age. A checkpoint dated after ``now`` (a crafted state
+        file, or a clock that stepped back) authorises nothing: the maximum
+        age could not bound it."""
+        return (
+            checkpoint.is_valid(now)
+            and checkpoint.created_at <= now
+            and now <= checkpoint.created_at + timedelta(minutes=self._max_age_minutes)
+        )
 
     # ------------------------------------------------------------------
     # Persistence (TD-011)
@@ -246,6 +333,13 @@ class CheckpointTracker:
                 "history": [
                     c.to_dict() for c in self._checkpoint_history[-self._max_history :]
                 ],
+                "reservations": [
+                    {"checkpoint_id": r.checkpoint_id, "holder": r.holder}
+                    for r in self._reservations.values()
+                ],
+                "last_taken_at": (
+                    self._last_taken_at.isoformat() if self._last_taken_at else None
+                ),
             }
             state_path = self._state_file_path()
             fd, tmp_path = tempfile.mkstemp(
@@ -277,6 +371,10 @@ class CheckpointTracker:
         symlink check/existence check and read.  Falls back to is_symlink()
         on platforms without O_NOFOLLOW.
         Handles missing and corrupt files gracefully.
+
+        A hold in the file belongs to a call this process never saw finish:
+        it is unresolved, so its checkpoint counts as used (STANDARD 1.2.0
+        section 5.18.6).
         """
         state_path = self._state_file_path()
         o_nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -319,6 +417,7 @@ class CheckpointTracker:
                     return
                 raw = f.read()
             state = json.loads(raw)
+            loaded_at = self._now()
             if state.get("active"):
                 self._active_checkpoint = Checkpoint.from_dict(state["active"])
             # Cap loaded history to _max_history to prevent unbounded growth
@@ -327,6 +426,49 @@ class CheckpointTracker:
                 Checkpoint.from_dict(entry)
                 for entry in state.get("history", [])[: self._max_history]
             ]
+            # A checkpoint dated after the load was not taken by this layer
+            # as the clock now reads (a crafted file, or a clock that stepped
+            # back): it authorises nothing, counts as no checkpoint taken and
+            # names no restore point, so it is dropped (section 5.18.6).
+            future = [c.id for c in self._all() if c.created_at > loaded_at]
+            if future:
+                logger.warning(
+                    "Dropping %d checkpoint(s) dated after the load time: %s",
+                    len(future),
+                    ", ".join(future),
+                )
+                if (
+                    self._active_checkpoint is not None
+                    and self._active_checkpoint.created_at > loaded_at
+                ):
+                    self._active_checkpoint = None
+                self._checkpoint_history = [
+                    c for c in self._checkpoint_history if c.created_at <= loaded_at
+                ]
+            last = state.get("last_taken_at")
+            if isinstance(last, str) and datetime.fromisoformat(last) <= loaded_at:
+                self._last_taken_at = datetime.fromisoformat(last)
+            else:
+                created = [c.created_at for c in self._all()]
+                self._last_taken_at = max(created) if created else None
+            holds = state.get("reservations") or []
+            resolved = False
+            if isinstance(holds, list):
+                for hold in holds:
+                    if not isinstance(hold, dict):
+                        continue
+                    checkpoint = self._find(str(hold.get("checkpoint_id")))
+                    if checkpoint is not None and not checkpoint.consumed:
+                        logger.warning(
+                            "Checkpoint %s was held by %s when the tracker last "
+                            "stopped; the hold is unresolved, so it counts as used",
+                            checkpoint.id,
+                            hold.get("holder"),
+                        )
+                        self._mark_used(checkpoint, "unresolved hold")
+                        resolved = True
+            if resolved:
+                self._persist_state()
         except (
             json.JSONDecodeError,
             KeyError,
@@ -339,12 +481,91 @@ class CheckpointTracker:
             # Start fresh — don't propagate corrupt state
             self._active_checkpoint = None
             self._checkpoint_history = []
+            self._last_taken_at = None
+
+    # ------------------------------------------------------------------
+    # Internal helpers (caller holds the lock unless stated)
+    # ------------------------------------------------------------------
+
+    def _all(self) -> list[Checkpoint]:
+        """History then the active checkpoint: oldest to newest."""
+        checkpoints = list(self._checkpoint_history)
+        if self._active_checkpoint is not None:
+            checkpoints.append(self._active_checkpoint)
+        return checkpoints
+
+    def _find(self, checkpoint_id: str) -> Checkpoint | None:
+        if self._active_checkpoint and self._active_checkpoint.id == checkpoint_id:
+            return self._active_checkpoint
+        for checkpoint in self._checkpoint_history:
+            if checkpoint.id == checkpoint_id:
+                return checkpoint
+        return None
+
+    def _mark_used(self, checkpoint: Checkpoint, by: str | None = None) -> None:
+        """Mark a checkpoint consumed; the active one moves to history and
+        its shell marker is removed. Does not persist."""
+        if not checkpoint.consumed:
+            checkpoint.consumed = True
+            checkpoint.consumed_at = self._now()
+            if by is not None:
+                checkpoint.metadata["consumed_by"] = by
+        if self._active_checkpoint is checkpoint:
+            self._active_checkpoint = None
+            self._checkpoint_history.append(checkpoint)
+            self._prune_history_if_needed()
+            self._remove_marker()
+
+    def _hold_of(self, holder: str) -> _Reservation | None:
+        for r in self._reservations.values():
+            if r.holder == holder:
+                return r
+        return None
+
+    def _lapsed(self, r: _Reservation, now: datetime) -> bool:
+        checkpoint = self._find(r.checkpoint_id)
+        if checkpoint is None:
+            return True
+        if checkpoint.expires_at is not None and now > checkpoint.expires_at:
+            return True
+        if now > checkpoint.created_at + timedelta(minutes=self._max_age_minutes):
+            return True
+        return (
+            self._reservation_seconds is not None
+            and (now - r.reserved_at).total_seconds() > self._reservation_seconds
+        )
+
+    def _sweep_lapsed(self) -> None:
+        """Every hold that lapsed counts as used: the layer never learned
+        what became of its call (section 5.18.6)."""
+        now = self._now()
+        changed = False
+        for checkpoint_id, r in list(self._reservations.items()):
+            if not self._lapsed(r, now):
+                continue
+            del self._reservations[checkpoint_id]
+            checkpoint = self._find(checkpoint_id)
+            if checkpoint is not None:
+                logger.warning(
+                    "The hold of checkpoint %s by %s lapsed; the checkpoint "
+                    "counts as used",
+                    checkpoint_id,
+                    r.holder,
+                )
+                self._mark_used(checkpoint, f"lapsed hold of {r.holder}")
+            changed = True
+        if changed:
+            self._persist_state()
+
+    # ------------------------------------------------------------------
+    # Creation
+    # ------------------------------------------------------------------
 
     def create_checkpoint(
         self,
         scope: list[str],
         reason: str,
-        expiry_minutes: int | None = None,
+        expiry_minutes: int | float | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str:
         """
@@ -353,28 +574,38 @@ class CheckpointTracker:
         Args:
             scope: List of file patterns or "*" for all
             reason: Human-readable reason for checkpoint
-            expiry_minutes: Minutes until checkpoint expires (default: 30)
+            expiry_minutes: Minutes until checkpoint expires: more than 0
+                and at most 30 (default: the tracker's maximum age). The
+                expiry stored is never later than the maximum age allows.
             metadata: Additional metadata to attach
 
         Returns:
             Checkpoint ID
+
+        Raises:
+            ValueError: If ``expiry_minutes`` is not more than 0, or is more
+                than 30: STANDARD 1.2.0 section 5.18.6 caps a checkpoint's
+                maximum age at 30 minutes.
         """
-        checkpoint_id = self._generate_checkpoint_id()
-
-        expires_at = None
-        if expiry_minutes is not None:
-            expires_at = datetime.now(UTC) + timedelta(minutes=expiry_minutes)
-        elif self.DEFAULT_EXPIRY_MINUTES:
-            expires_at = datetime.now(UTC) + timedelta(
-                minutes=self.DEFAULT_EXPIRY_MINUTES
+        minutes = self._max_age_minutes if expiry_minutes is None else expiry_minutes
+        if (
+            isinstance(minutes, bool)
+            or not isinstance(minutes, (int, float))
+            or not 0 < minutes <= self.MAX_AGE_MINUTES
+        ):
+            raise ValueError(
+                f"expiry_minutes must be more than 0 and at most "
+                f"{self.MAX_AGE_MINUTES}, got {expiry_minutes!r}: STANDARD "
+                f"1.2.0 §5.18.6 caps a checkpoint's maximum age at 30 minutes"
             )
-
+        checkpoint_id = self._generate_checkpoint_id()
+        now = self._now()
         checkpoint = Checkpoint(
             id=checkpoint_id,
             scope=scope,
             reason=reason,
-            created_at=datetime.now(UTC),
-            expires_at=expires_at,
+            created_at=now,
+            expires_at=now + timedelta(minutes=min(minutes, self._max_age_minutes)),
             metadata=metadata or {},
         )
 
@@ -384,9 +615,9 @@ class CheckpointTracker:
                 self._checkpoint_history.append(self._active_checkpoint)
                 self._prune_history_if_needed()
 
-            # A reservation of the previous checkpoint stays with its
-            # holder (see consume_checkpoint); it does not cover this one.
+            # A hold of the previous checkpoint stays with its holder.
             self._active_checkpoint = checkpoint
+            self._last_taken_at = now
             self._write_marker(checkpoint)
             self._persist_state()
         return checkpoint_id
@@ -398,9 +629,35 @@ class CheckpointTracker:
         32 hex characters.  ``os.urandom`` is already cryptographically
         secure, so hashing adds no additional entropy.
         """
-        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        timestamp = self._now().strftime("%Y%m%d_%H%M%S")
         random_suffix = os.urandom(16).hex()
         return f"chk_{timestamp}_{random_suffix}"
+
+    def has_commit(self, commit: str, since: datetime | None = None) -> bool:
+        """Whether a checkpoint taken at or after ``since`` (any time when
+        omitted) and not after now, valid or not, recorded ``commit`` as its
+        restore point
+        (``metadata["commit"]``, as ``git stash create`` printed it): what
+        lets ``git stash pop|apply <commit>`` count as a rollback (section
+        5.18.3). A checkpoint pruned from the history is not found."""
+        with self._lock:
+            now = self._now()
+            return any(
+                c.metadata.get("commit") == commit
+                and (since is None or c.created_at >= since)
+                and c.created_at <= now
+                for c in self._all()
+            )
+
+    def has_taken_since(self, when: datetime) -> bool:
+        """Whether a checkpoint was taken at or after ``when``, and not
+        after now: what a ``checkpoint`` prerequisite reads (section
+        5.18.5). History pruning does not hide one."""
+        with self._lock:
+            return (
+                self._last_taken_at is not None
+                and when <= self._last_taken_at <= self._now()
+            )
 
     def _prune_history_if_needed(self) -> None:
         """Prune oldest checkpoints if history exceeds max_history.
@@ -526,132 +783,235 @@ class CheckpointTracker:
         except OSError as e:
             logger.warning("Failed to remove checkpoint marker: %s", e)
 
-    def has_valid_checkpoint(self) -> bool:
-        """Check if there's a valid (unexpired, unconsumed) checkpoint."""
-        with self._lock:
-            if self._active_checkpoint is None:
-                return False
-            return self._active_checkpoint.is_valid()
+    # ------------------------------------------------------------------
+    # Validity, holds and use (section 5.18.6)
+    # ------------------------------------------------------------------
 
-    def _reserved(self) -> bool:
-        """Whether another holder can be refused the active checkpoint.
-        Caller holds the lock."""
-        r = self._reservation
-        return (
-            r is not None
-            and self._active_checkpoint is not None
-            and r.checkpoint_id == self._active_checkpoint.id
-            and time.monotonic() - r.reserved_at < self._reservation_seconds
-        )
+    def has_valid_checkpoint(self) -> bool:
+        """Whether any checkpoint, active or in history, can still authorise
+        a call (unconsumed, not invalidated, unexpired, within the maximum
+        age), whether or not a call holds it."""
+        with self._lock:
+            now = self._now()
+            return any(self._valid(c, now) for c in self._all())
+
+    def valid_checkpoint_id(self) -> str | None:
+        """The checkpoint :meth:`validate_and_reserve` would hold now, without
+        holding it: the newest valid one, active or in history, that no call
+        holds. ``None`` when there is none."""
+        with self._lock:
+            self._sweep_lapsed()
+            now = self._now()
+            free = [
+                c
+                for c in self._all()
+                if self._valid(c, now) and c.id not in self._reservations
+            ]
+            if not free:
+                return None
+            # validate_and_reserve's order: by time taken, later first among
+            # equals.
+            return sorted(free, key=lambda c: c.created_at)[-1].id
 
     def validate_and_reserve(
         self,
         holder: str | None = None,
         scope: tuple[str | None, str | None] | None = None,
     ) -> tuple[bool, str | None]:
-        """Atomically check the active checkpoint and reserve it for one
-        mutation.
+        """Atomically find a valid checkpoint and hold it for one call.
 
-        SEC-007: Prevents the TOCTOU race between has_valid_checkpoint() and
-        the mutation that relies on it. A checkpoint covers one mutation, so
-        only one holder at a time may hold it: concurrent tool calls cannot
-        both proceed on the same checkpoint. Reserving again with the same
-        ``holder`` (e.g. from both the PreToolUse hook and the permission
-        callback of one tool call) succeeds. The holder ends the reservation
-        with ``consume_checkpoint(holder)`` after the mutation succeeds, or
-        ``release_reservation(holder)`` if it fails or does not run. A
-        reservation nobody ends lapses after ``reservation_seconds``.
+        SEC-007: Prevents the TOCTOU race between a validity check and the
+        call that relies on it. A checkpoint covers one call, so it has at
+        most one holder: concurrent calls cannot both proceed on it. The
+        checkpoint held is the most recently created one, active or in
+        history, that is valid and that no other call holds (the reference
+        executor's rule, STANDARD 1.2.0 sections 5.2.2 and 5.18.6). Holding
+        again with the same ``holder`` (from both the PreToolUse hook and
+        the permission callback of one call) returns the same hold.
+
+        The holder ends the hold with :meth:`consume_if_valid` when the call
+        is allowed, :meth:`consume_checkpoint` once it ran, or
+        :meth:`release_reservation` when the layer learns the call was
+        refused. A hold that lapses (its checkpoint expires, or
+        ``reservation_seconds`` passes) counts as used.
 
         Args:
-            holder: Who holds the reservation, normally the tool call's
-                ``tool_use_id``. Omitted, an anonymous holder is used that
-                only ``release_reservation()`` / ``consume_checkpoint()``
+            holder: Who holds it, normally the tool call's ``tool_use_id``.
+                Omitted, an anonymous holder is used that only
+                :meth:`release_reservation` / :meth:`consume_checkpoint`
                 without a holder can end.
-            scope: ``(session_id, agent_id)`` of the call, recorded on a new
-                reservation for ``release_reservation_in_scope()``.
+            scope: ``(session_id, agent_id)`` of the call, for
+                :meth:`resolve_holds_in_scope`.
 
         Returns:
-            ``(True, checkpoint_id)``: reserved for ``holder``.
-            ``(False, checkpoint_id)``: valid, but reserved by another holder.
-            ``(False, None)``: no valid checkpoint.
+            ``(True, checkpoint_id)``: held for ``holder``.
+            ``(False, checkpoint_id)``: every valid checkpoint is held by
+            another call (the newest of them is named).
+            ``(False, None)``: no valid checkpoint (or the holder's hold is
+            on one that is no longer valid).
         """
         with self._lock:
-            checkpoint = self._active_checkpoint
-            if checkpoint is None or not checkpoint.is_valid():
+            self._sweep_lapsed()
+            now = self._now()
+            if holder is not None:
+                existing = self._hold_of(holder)
+                if existing is not None:
+                    checkpoint = self._find(existing.checkpoint_id)
+                    if checkpoint is not None and self._valid(checkpoint, now):
+                        return True, checkpoint.id
+                    return False, None
+            valid = [c for c in self._all() if self._valid(c, now)]
+            if not valid:
                 return False, None
-            r = self._reservation
-            if (
-                holder is not None
-                and r is not None
-                and r.holder == holder
-                and r.checkpoint_id == checkpoint.id
-            ):
-                return True, checkpoint.id
-            if self._reserved():
-                return False, checkpoint.id
-            self._reservation = _Reservation(
-                checkpoint_id=checkpoint.id,
+            valid.sort(key=lambda c: c.created_at)
+            free = [c for c in valid if c.id not in self._reservations]
+            if not free:
+                return False, valid[-1].id
+            chosen = free[-1]
+            self._reservations[chosen.id] = _Reservation(
+                checkpoint_id=chosen.id,
                 holder=holder if holder is not None else f"anon_{os.urandom(8).hex()}",
-                reserved_at=time.monotonic(),
+                reserved_at=now,
                 scope=scope,
             )
-            return True, checkpoint.id
+            self._persist_state()
+            return True, chosen.id
 
-    def can_reserve(self, holder: str | None = None) -> tuple[bool, str | None]:
-        """What ``validate_and_reserve(holder)`` would return, without
-        reserving: whether there is a valid checkpoint that no other holder
-        has reserved.
-
-        For a caller that cannot learn whether the call it checks for runs,
-        so that a reservation it took could be left behind; it takes the
-        checkpoint once the call has run.
-        """
+    def held_by(self, holder: str) -> str | None:
+        """The id of the checkpoint ``holder`` holds, or None."""
         with self._lock:
-            checkpoint = self._active_checkpoint
-            if checkpoint is None or not checkpoint.is_valid():
-                return False, None
-            r = self._reservation
-            if (
-                holder is not None
-                and r is not None
-                and r.holder == holder
-                and r.checkpoint_id == checkpoint.id
-            ):
-                return True, checkpoint.id
-            return (not self._reserved()), checkpoint.id
+            r = self._hold_of(holder)
+            return r.checkpoint_id if r is not None else None
 
     def release_reservation(self, holder: str | None = None) -> bool:
-        """End a reservation without consuming the checkpoint, e.g. after the
-        mutation failed. With ``holder``, only that holder's reservation is
-        released; without, any.
+        """End a hold and leave its checkpoint valid: only where the layer
+        learns that the call was refused, so it never ran. With ``holder``,
+        only that holder's hold is released; without, every hold.
 
         Returns:
-            True if a reservation was released
+            True if a hold was released
         """
         with self._lock:
-            r = self._reservation
-            if r is None or (holder is not None and r.holder != holder):
-                return False
-            self._reservation = None
+            if holder is None:
+                if not self._reservations:
+                    return False
+                self._reservations.clear()
+            else:
+                r = self._hold_of(holder)
+                if r is None:
+                    return False
+                del self._reservations[r.checkpoint_id]
+            self._persist_state()
             return True
 
-    def release_reservation_in_scope(
-        self, scope: tuple[str | None, str | None]
-    ) -> str | None:
-        """Release the reservation if a call in ``scope`` (``(session_id,
-        agent_id)``) took it. For when that session's turn, or that agent,
-        has ended: none of its calls is in flight, so a reservation it still
-        holds belongs to a call that never ran.
+    def resolve_holds_in_scope(self, scope: tuple[str | None, str | None]) -> list[str]:
+        """Resolve the holds of calls in ``scope`` (``(session_id,
+        agent_id)``), for when that session's turn, or that agent, has
+        ended: a call still holding a checkpoint then never reported back,
+        so the layer cannot know it did not run, and its checkpoint counts
+        as used (section 5.18.6).
 
         Returns:
-            The released holder, or None
+            The holders whose holds were resolved
         """
         with self._lock:
-            r = self._reservation
-            if r is None or r.scope != scope:
+            holders: list[str] = []
+            for checkpoint_id, r in list(self._reservations.items()):
+                if r.scope != scope:
+                    continue
+                del self._reservations[checkpoint_id]
+                checkpoint = self._find(checkpoint_id)
+                if checkpoint is not None:
+                    self._mark_used(checkpoint, "unresolved hold at turn end")
+                holders.append(r.holder)
+            if holders:
+                self._persist_state()
+            return holders
+
+    def consume_if_valid(self, holder: str) -> str | None:
+        """Use the checkpoint ``holder`` holds, if it is still valid: the
+        atomic re-check and use of section 5.18.6, for when the call is
+        allowed to start.
+
+        Returns:
+            The checkpoint's id. ``None`` when the holder holds none, or its
+            checkpoint is no longer valid (it expired, or an execution
+            boundary passed): the hold then ends and its checkpoint counts as
+            used all the same.
+        """
+        with self._lock:
+            self._sweep_lapsed()
+            r = self._hold_of(holder)
+            if r is None:
                 return None
-            self._reservation = None
-            return r.holder
+            del self._reservations[r.checkpoint_id]
+            checkpoint = self._find(r.checkpoint_id)
+            if checkpoint is None:
+                self._persist_state()
+                return None
+            valid = self._valid(checkpoint, self._now())
+            self._mark_used(checkpoint, None if valid else f"ended hold of {holder}")
+            self._persist_state()
+            return checkpoint.id if valid else None
+
+    def consume_checkpoint(self, holder: str | None = None) -> str | None:
+        """
+        Mark a checkpoint used. Thread-safe via self._lock (SEC-007).
+
+        With ``holder``: the call that holds a checkpoint ran, so its
+        checkpoint is used whatever its validity now; nothing happens for a
+        call that holds none. Without ``holder`` (the host's own API): the
+        active checkpoint is used, and any hold on it ends.
+
+        Returns:
+            ID of the consumed checkpoint, or None if nothing was consumed
+        """
+        with self._lock:
+            self._sweep_lapsed()
+            if holder is None:
+                checkpoint = self._active_checkpoint
+                if checkpoint is None:
+                    return None
+                self._reservations.pop(checkpoint.id, None)
+            else:
+                r = self._hold_of(holder)
+                if r is None:
+                    return None
+                del self._reservations[r.checkpoint_id]
+                found = self._find(r.checkpoint_id)
+                if found is None:
+                    self._persist_state()
+                    return None
+                checkpoint = found
+            self._mark_used(checkpoint)
+            self._persist_state()
+            return checkpoint.id
+
+    def end_validity(self, reason: str) -> list[str]:
+        """An execution boundary (section 5.18.6): every checkpoint that is
+        still valid stops authorising anything, for good. The active one
+        moves to history and the shell marker is removed. Holds stay with
+        their holders: a call that already ran uses its checkpoint when it
+        reports back, and one still waiting fails :meth:`consume_if_valid`.
+
+        Returns:
+            The ids of the checkpoints whose validity ended
+        """
+        with self._lock:
+            now = self._now()
+            ended: list[str] = []
+            for checkpoint in self._all():
+                if self._valid(checkpoint, now):
+                    checkpoint.invalidated_at = now
+                    checkpoint.metadata["invalidated_by"] = reason
+                    ended.append(checkpoint.id)
+            if self._active_checkpoint is not None:
+                self._checkpoint_history.append(self._active_checkpoint)
+                self._active_checkpoint = None
+                self._prune_history_if_needed()
+                self._remove_marker()
+            self._persist_state()
+            return ended
 
     def has_checkpoint_for_scope(self, target: str) -> bool:
         """
@@ -666,14 +1026,16 @@ class CheckpointTracker:
         with self._lock:
             if self._active_checkpoint is None:
                 return False
-            if not self._active_checkpoint.is_valid():
+            if not self._valid(self._active_checkpoint, self._now()):
                 return False
             return self._active_checkpoint.matches_scope(target)
 
     def get_active_checkpoint(self) -> Checkpoint | None:
         """Get the currently active checkpoint, if any."""
         with self._lock:
-            if self._active_checkpoint and self._active_checkpoint.is_valid():
+            if self._active_checkpoint and self._valid(
+                self._active_checkpoint, self._now()
+            ):
                 return self._active_checkpoint
             return None
 
@@ -681,64 +1043,6 @@ class CheckpointTracker:
         """Get the ID of the active checkpoint, or None."""
         checkpoint = self.get_active_checkpoint()
         return checkpoint.id if checkpoint else None
-
-    def consume_checkpoint(self, holder: str | None = None) -> str | None:
-        """
-        Mark a checkpoint as consumed after a successful mutation, so a new
-        one is needed for further mutations. Thread-safe via self._lock
-        (SEC-007).
-
-        Without ``holder``, the active checkpoint is consumed (and any
-        reservation ends). With ``holder``, only the checkpoint that holder
-        reserved is consumed: nothing happens for a tool call that holds no
-        reservation, and if a newer checkpoint was created meanwhile, the
-        reserved one is marked consumed in history and the newer one stays
-        active.
-
-        Returns:
-            ID of the consumed checkpoint, or None if nothing was consumed
-        """
-        with self._lock:
-            if holder is None:
-                if self._active_checkpoint is None:
-                    return None
-                consumed = self._active_checkpoint
-            else:
-                r = self._reservation
-                if r is None or r.holder != holder:
-                    return None
-                active = self._active_checkpoint
-                if active is not None and active.id == r.checkpoint_id:
-                    consumed = active
-                else:
-                    self._reservation = None
-                    return self._consume_from_history(r.checkpoint_id)
-
-            # Capture reference and clear active first to avoid intermediate
-            # invalid state where active still points to consumed checkpoint.
-            self._active_checkpoint = None
-            self._reservation = None
-
-            consumed.consumed = True
-            consumed.consumed_at = datetime.now(UTC)
-            checkpoint_id = consumed.id
-
-            # Move to history
-            self._checkpoint_history.append(consumed)
-            self._remove_marker()
-            self._persist_state()
-
-            return checkpoint_id
-
-    def _consume_from_history(self, checkpoint_id: str) -> str | None:
-        """Mark a superseded checkpoint consumed. Caller holds the lock."""
-        for checkpoint in self._checkpoint_history:
-            if checkpoint.id == checkpoint_id and not checkpoint.consumed:
-                checkpoint.consumed = True
-                checkpoint.consumed_at = datetime.now(UTC)
-                self._persist_state()
-                return checkpoint_id
-        return None
 
     def get_checkpoint_by_id(self, checkpoint_id: str) -> Checkpoint | None:
         """
@@ -753,14 +1057,7 @@ class CheckpointTracker:
             Checkpoint or None if not found
         """
         with self._lock:
-            if self._active_checkpoint and self._active_checkpoint.id == checkpoint_id:
-                return self._active_checkpoint
-
-            for checkpoint in self._checkpoint_history:
-                if checkpoint.id == checkpoint_id:
-                    return checkpoint
-
-            return None
+            return self._find(checkpoint_id)
 
     def get_history(self, limit: int = 10) -> list[Checkpoint]:
         """
@@ -773,9 +1070,7 @@ class CheckpointTracker:
             List of checkpoints, most recent first
         """
         with self._lock:
-            history = list(self._checkpoint_history)
-            if self._active_checkpoint:
-                history.append(self._active_checkpoint)
+            history = self._all()
             return sorted(history, key=lambda c: c.created_at, reverse=True)[:limit]
 
     def clear_expired(self) -> int:
@@ -785,12 +1080,14 @@ class CheckpointTracker:
         If the active checkpoint has expired, it is moved to history and
         then filtered out along with any other expired history entries.
         The returned count includes the active checkpoint if it was expired.
+        A checkpoint a call holds is kept until the hold ends.
 
         Returns:
             Number of expired checkpoints removed (active + history)
         """
         with self._lock:
-            now = datetime.now(UTC)
+            self._sweep_lapsed()
+            now = self._now()
             active_cleared = False
 
             # Move expired active checkpoint to history FIRST so it gets
@@ -811,7 +1108,9 @@ class CheckpointTracker:
             self._checkpoint_history = [
                 c
                 for c in self._checkpoint_history
-                if c.expires_at is None or c.expires_at > now
+                if c.expires_at is None
+                or c.expires_at > now
+                or c.id in self._reservations
             ]
             # Includes the expired active (appended above) that was then filtered out.
             total_cleared = original_count - len(self._checkpoint_history)
@@ -822,22 +1121,21 @@ class CheckpointTracker:
             return total_cleared
 
     def invalidate_all(self) -> None:
-        """Invalidate all checkpoints (used for rollback scenarios)."""
+        """Use up the active checkpoint and drop every hold.
+
+        Kept for API compatibility; nothing in this package calls it. For
+        an execution boundary use :meth:`end_validity`, which ends the
+        validity of every checkpoint, history included, and leaves holds
+        with their holders.
+        """
         with self._lock:
-            self._reservation = None
+            self._reservations.clear()
             if self._active_checkpoint:
-                self._active_checkpoint.consumed = True
-                self._active_checkpoint.consumed_at = datetime.now(UTC)
-                self._checkpoint_history.append(self._active_checkpoint)
-                self._active_checkpoint = None
-                self._remove_marker()
-                self._persist_state()
+                self._mark_used(self._active_checkpoint)
+            self._persist_state()
 
     @property
     def checkpoint_count(self) -> int:
         """Get total number of checkpoints (active + history)."""
         with self._lock:
-            count = len(self._checkpoint_history)
-            if self._active_checkpoint:
-                count += 1
-            return count
+            return len(self._all())

@@ -1,0 +1,24 @@
+{
+  "description": "An approval.expires that is not a duration (section 5.10.1) is S303, and the record is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "approval": {
+        "expires": "1w"
+      }
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "write"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

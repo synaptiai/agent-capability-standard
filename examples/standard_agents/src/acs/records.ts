@@ -41,23 +41,51 @@ export const KEYS = {
   pendingApprovals: 'acs:approvals:pending',
 } as const;
 
-/** The ACS safety codes a grounded tool reports (STANDARD v1.1.0 §9.6). */
-export type RefusalCode = 'F501' | 'F502' | 'F503';
+/**
+ * The codes a grounded tool refuses or fails a call with (STANDARD 1.2.0
+ * §5.18.8, §9): a missing checkpoint (F501), approval (F502), rollback
+ * history (F503) or other prerequisite (V102); a binding it does not list
+ * (F504); an output that breaks its contract (R402); a failure of the
+ * layer itself (R407).
+ */
+export type RefusalCode = 'F501' | 'F502' | 'F503' | 'F504' | 'R402' | 'R407' | 'V102';
 
 export const CODE_NAMES: Record<RefusalCode, string> = {
   F501: 'CHECKPOINT_REQUIRED',
   F502: 'APPROVAL_REQUIRED',
   F503: 'ROLLBACK_FAILED',
+  F504: 'CONSTRAINT_VIOLATED',
+  R402: 'EXECUTION_FAILED',
+  R407: 'SAFETY_CHECK_FAILED',
+  V102: 'MISSING_PREREQUISITE',
 };
 
-/** A diagnostic in the format of STANDARD v1.1.0 §9.8. */
+/**
+ * A diagnostic in the format of STANDARD 1.2.0 §9.8: a refusal of a call
+ * names the tool, its capability (absent for an unbound or control-only
+ * tool) and, where the runtime gives calls an id, the call; never a
+ * workflow or a step.
+ */
 export interface Diagnostic {
   code: RefusalCode;
   name: string;
   severity: 'error';
   message: string;
-  location: { tool: string; capability: CapabilityId };
+  location: { tool: string; capability?: CapabilityId; call?: string };
   suggestion?: string;
+}
+
+/**
+ * The layer and the configuration that decided a call (STANDARD 1.2.0
+ * §5.18.8): the binding, its version, and the SHA-256 of the canonical JSON
+ * of what decides the tool's calls: `{annotation, settings:
+ * {checkpoint_max_age_ms}}` for a grounded tool, the annotation for a
+ * control tool.
+ */
+export interface RecordedBy {
+  name: string;
+  version: string;
+  config_sha256: string;
 }
 
 /** One checkpoint. `valid` turns false when a step that requires one uses it. */
@@ -165,8 +193,13 @@ export interface TraceEntry {
   step?: number;
   /** The tool's name. */
   action: string;
-  /** `null` for a tool call the audit hook saw that no grounded tool recorded. */
+  /**
+   * `null` for a tool call the audit hook saw that no grounded tool
+   * recorded, and for a control-only tool's call (`control`).
+   */
   capability: CapabilityId | null;
+  /** A call of a control-only tool (`controlTool`): never refused. */
+  control?: true;
   domain?: string;
   /**
    * `started` is written before the tool's own code runs and replaced when
@@ -181,6 +214,20 @@ export interface TraceEntry {
   args_digest?: string;
   /** Why the call was refused. */
   code?: RefusalCode;
+  /**
+   * The `seq` of the composite whose invocation covered this call
+   * (STANDARD 1.2.0 §5.18.4): a nested call skips the approval and the
+   * checkpoint, which the composite's call used.
+   */
+  covered_by?: number;
+  /**
+   * The layer and configuration that decided the call (§5.18.8): on every
+   * entry a grounded or control tool writes, refusals and failures of the
+   * layer's own checks included. Absent only on an entry the audit hook
+   * writes for a call no grounded tool recorded, which the layer did not
+   * decide.
+   */
+  recorded_by?: RecordedBy;
   /** The checkpoint this call used (`requires_checkpoint`) or took (`checkpoint`). */
   checkpoint_id?: string;
   /**
@@ -233,7 +280,7 @@ export async function appendTrace(store: Store, entry: Omit<TraceEntry, 'seq'>):
   const stored: TraceEntry = { seq, ...entry };
   await store.setValue(KEYS.traceCount, seq);
   await store.setValue(KEYS.trace(seq), stored);
-  if (stored.capability !== null && stored.tool_call_id === undefined) {
+  if ((stored.capability !== null || stored.control) && stored.tool_call_id === undefined) {
     const waiting: Unlinked = { seq, action: stored.action, flow_id: stored.flow_id ?? null, step: stored.step ?? null };
     // An entry of an earlier step can no longer be linked (see audit.ts).
     const unlinked = ((await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? []).filter(
@@ -308,12 +355,17 @@ export interface ActionRecord {
     decision_id?: string;
     approver_identities?: AgentIdentity[];
   };
-  details?: { args_digest?: string; flow_id?: string; step?: number; error?: string };
+  details?: { args_digest?: string; flow_id?: string; step?: number; error?: string; covered_by?: string };
   recorded_by: { name: string; version?: string; config_sha256?: string };
 }
 
-/** Who writes the binding's audit records (§6.4 `recorded_by`). */
-export const RECORDED_BY = { name: 'standardagent-acs-binding' } as const;
+/**
+ * Who writes the binding's audit records (§6.4 `recorded_by`) when the entry
+ * names no layer configuration: an entry the audit hook wrote for a call no
+ * grounded tool recorded. Every other entry carries its own `recorded_by`
+ * (§5.18.8), which the record keeps.
+ */
+export const RECORDED_BY = { name: '@acs/standard-agents-binding' } as const;
 
 const STATUS: Record<TraceEntry['status'], ActionRecord['status']> = {
   executed: 'executed',
@@ -328,13 +380,13 @@ const STATUS: Record<TraceEntry['status'], ActionRecord['status']> = {
  * A trace entry as an audit record (STANDARD v1.2.0 §6.4). The binding keeps
  * `TraceEntry` in the thread's store; this is the export the Standard allows
  * ("written in, or exported as"). `scope` names the records' scope, the
- * thread, as `run_id`, and prefixes `action_id`.
+ * thread, as `run_id`, and prefixes `action_id`. `recorded_by` is the
+ * entry's own (the layer, its version and `config_sha256`, §5.18.8), else
+ * `RECORDED_BY`; a nested call's `details.covered_by` is the `action_id` of
+ * the composite call that covered it (§5.18.4).
  */
-export function actionRecord(
-  entry: TraceEntry,
-  scope: string,
-  recordedBy: ActionRecord['recorded_by'] = RECORDED_BY,
-): ActionRecord {
+export function actionRecord(entry: TraceEntry, scope: string): ActionRecord {
+  const recordedBy: ActionRecord['recorded_by'] = entry.recorded_by ?? RECORDED_BY;
   const record: ActionRecord = {
     action_id: `${scope}/${entry.seq}`,
     run_id: scope,
@@ -360,6 +412,7 @@ export function actionRecord(
   if (entry.flow_id !== undefined) details.flow_id = entry.flow_id;
   if (entry.step !== undefined) details.step = entry.step;
   if (entry.error !== undefined) details.error = entry.error;
+  if (entry.covered_by !== undefined) details.covered_by = `${scope}/${entry.covered_by}`;
   if (Object.keys(details).length > 0) record.details = details;
   return record;
 }

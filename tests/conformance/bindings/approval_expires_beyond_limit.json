@@ -1,0 +1,24 @@
+{
+  "description": "approval.expires longer than 2^53 - 1 milliseconds is S303, and the record is not loaded.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate",
+      "approval": {
+        "expires": "PT9007199254740.992S"
+      }
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "write"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

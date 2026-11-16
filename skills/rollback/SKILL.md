@@ -13,16 +13,27 @@ hooks:
       hooks:
         - type: prompt
           prompt: |
+            Model-judged additions (STANDARD 1.2.0 §5.18.10): these may refuse
+            the call; the checks the Standard requires (approval, the checkpoint,
+            rollback history, the destination policy, secrets) are made by code,
+            not here.
+
             ROLLBACK SAFETY VALIDATION
 
             The tool call follows this prompt as JSON; the rollback command is tool_input.command.
 
+            The safety layer checks the restore command: `git stash apply <sha>`,
+            with the full id of the commit a checkpoint recorded, is a
+            `rollback` call (a checkpoint taken earlier, F503); applying any
+            other commit, and the skill's own restore, a `git restore
+            --source=<sha> ...` line, is a `mutate` call (a fresh checkpoint,
+            F501, and approval, F502). An expired or used checkpoint can still
+            be restored (STANDARD 1.2.0 §5.2.2).
+
             Before executing rollback, verify:
-            1. Target checkpoint ID exists and is valid
-            2. Checkpoint has not expired
-            3. Current state has been captured (for audit)
-            4. Rollback scope matches intended restore scope
-            5. No ongoing operations that would conflict
+            1. Current state has been captured (for audit)
+            2. Rollback scope matches intended restore scope
+            3. No ongoing operations that would conflict
 
             CRITICAL CHECKS:
             - Is checkpoint integrity verified (hash match)?
@@ -37,17 +48,34 @@ hooks:
           once: false
         - type: command
           command: |
-            # Verify checkpoint exists before rollback. Claude Code passes the tool
+            # A restore in this skill restores a checkpoint taken in the project
+            # (STANDARD 1.2.0 §5.18.6, F503): each `git stash pop` or `git stash
+            # apply` must name, as its one argument, the full id of a commit a
+            # checkpoint marker recorded (.claude/checkpoint.ok, or one filed under
+            # .claude/checkpoints/used/ or ended/), as the plugin's pre-tool-use
+            # hook reads it; valid or not, used or not. Claude Code passes the tool
             # call as JSON on stdin; exit 2 blocks the call and the reason on stderr
-            # is shown to Claude. A call that cannot be read is blocked.
-            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "BLOCK: cannot read the tool call (jq is required)" >&2; exit 2; }
-            if printf '%s\n' "$CMD" | grep -qE "git stash (pop|apply)"; then
-              # Check if there are stashes to pop
-              if ! git stash list 2>/dev/null | head -1 | grep -q .; then
-                echo "BLOCK: No git stash found to restore" >&2
+            # is shown to Claude. A call that cannot be read is blocked (R407).
+            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then DIR="$CLAUDE_PROJECT_DIR/.claude"
+            elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DIR="$CLAUDE_PLUGIN_ROOT/.claude"
+            else DIR="$(pwd)/.claude"; fi
+            while IFS= read -r RESTORE; do
+              [ -n "$RESTORE" ] || continue
+              ARG="$(printf '%s\n' "$RESTORE" | sed -E 's/^git[[:space:]]+stash[[:space:]]+(pop|apply)//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+              FOUND=""
+              if printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
+                for F in "$DIR/checkpoint.ok" "$DIR"/checkpoints/used/* "$DIR"/checkpoints/ended/*; do
+                  if [ -f "$F" ] && [ ! -L "$F" ] && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$F" 2>/dev/null)" = "$ARG" ]; then FOUND=1; break; fi
+                done
+              fi
+              if [ -z "$FOUND" ]; then
+                printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded.\n" "$RESTORE" >&2
                 exit 2
               fi
-            fi
+            done <<EOF
+            $(printf '%s\n' "$CMD" | grep -oE 'git[[:space:]]+stash[[:space:]]+(pop|apply)([[:space:]][^;&|<>()]*)?' || true)
+            EOF
             exit 0
   PostToolUse:
     - matcher: "Bash"
@@ -90,7 +118,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 1) **Validate checkpoint**: Confirm checkpoint exists and is valid
    - Look up checkpoint by ID in `.checkpoints/` or git stash
    - Verify checkpoint integrity (hash check)
-   - Confirm checkpoint has not expired
+   - An expired or used checkpoint can still be restored: validity limits what a checkpoint authorises, not what it restores (STANDARD 1.2.0 §5.2.2)
    - If checkpoint missing: FAIL immediately with clear error
 
 2) **Capture current state**: Record what will be reverted
@@ -99,7 +127,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Document changes that will be undone
 
 3) **Execute restoration**: Apply the restore command
-   - For git_stash: `git stash pop` or `git stash apply`
+   - For a git checkpoint: `git stash apply <sha>`, with the full commit id the checkpoint recorded; a bare `git stash pop` or `git stash apply`, or any other revision, restores no checkpoint and is refused (F503)
    - For file_backup: Copy from `.checkpoints/<id>/` to original locations
    - For state_snapshot: Restore state variables
    - Handle any conflicts or errors gracefully
@@ -275,10 +303,10 @@ Apply the following verification patterns:
 - `risk`: medium
 
 **Capability-specific rules:**
-- CRITICAL: Never rollback without valid checkpoint_id
+- CRITICAL: Never rollback without a checkpoint_id that exists
 - CRITICAL: Always verify state hash matches after restore
 - Clean up orphaned files created by failed mutation
-- Do not rollback if checkpoint has expired
+- An expired or used checkpoint can be restored (STANDARD 1.2.0 §5.2.2); the safety layer refuses a restore only when no checkpoint was ever taken (F503)
 - Preserve audit trail of what was reverted
 - If verification fails, STOP and alert - do not proceed
 
