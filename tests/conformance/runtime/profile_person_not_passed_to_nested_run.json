@@ -1,0 +1,162 @@
+{
+  "description": "A profile requires a person for the invoke step, not for the nested run it starts: the invoke is asked of a person, the child's retrieve of its own approver, a standing mandate, whose decision keeps its mandate_ref.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "invoke",
+          "purpose": "invoke step",
+          "store_as": "i",
+          "workflow_id": "child",
+          "input_bindings": {
+            "workflow": "child"
+          }
+        }
+      ]
+    },
+    "child": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "retrieve",
+          "purpose": "retrieve step",
+          "store_as": "r",
+          "requires_approval": true,
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "m1"
+            }
+          },
+          "input_bindings": {
+            "target": "x"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0,
+        "frame": [
+          "w"
+        ],
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "absent": [
+        "approver.mandate_ref"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0,
+        "frame": [
+          "w",
+          "child"
+        ],
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "m1"
+        }
+      },
+      "absent": [
+        "approver.always_ask"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "retrieve",
+        "frame": [
+          "w",
+          "child"
+        ]
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "data": 1,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "intent": "invoke step",
+        "person_required": true,
+        "approval": {
+          "mandate_ref": null,
+          "approvers": [
+            "dana"
+          ]
+        }
+      },
+      {
+        "intent": "retrieve step",
+        "approval": {
+          "mandate_ref": "m1"
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "person_required",
+    "approval_requested",
+    "invoke_started"
+  ],
+  "profiles": [
+    {
+      "domain": "person-invoke",
+      "version": "1.0.0",
+      "risk_thresholds": {
+        "block_autonomous": [
+          "invoke"
+        ]
+      }
+    }
+  ]
+}

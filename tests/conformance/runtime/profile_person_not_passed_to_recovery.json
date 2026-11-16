@@ -1,0 +1,262 @@
+{
+  "description": "A profile requires a person for the verify step; the context its failure mode injects for recovery is not marked, so the step the loop returns to is asked of its own approver, a standing mandate, both times.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.1",
+      "steps": [
+        {
+          "capability": "plan",
+          "purpose": "plan step",
+          "store_as": "p",
+          "requires_approval": true,
+          "approval": {
+            "approver": {
+              "kind": "standing_mandate",
+              "mandate_ref": "m1"
+            }
+          },
+          "input_bindings": {
+            "goal": "g",
+            "constraints": {
+              "why": "${_recovery.why: boolean}"
+            }
+          }
+        },
+        {
+          "capability": "verify",
+          "purpose": "verify step",
+          "store_as": "v",
+          "input_bindings": {
+            "conditions": [
+              "ok"
+            ]
+          },
+          "failure_modes": [
+            {
+              "condition": "verification failed",
+              "action": "request_more_context",
+              "when": "${v.passed} == false",
+              "recovery": {
+                "goto_step": "p",
+                "inject_context": {
+                  "why": "${v.passed}"
+                },
+                "max_loops": 1
+              }
+            }
+          ]
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "approval@1"
+        ]
+      }
+    }
+  },
+  "header": null,
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0,
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "m1"
+        }
+      },
+      "absent": [
+        "approver.always_ask"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "absent": [
+        "approver.mandate_ref"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d2",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": false,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 0,
+        "approver": {
+          "kind": "standing_mandate",
+          "mandate_ref": "m1"
+        }
+      },
+      "absent": [
+        "approver.always_ask"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d3",
+        "decision": "approved",
+        "approvers": [
+          "mandate"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "plan",
+        "step": 0,
+        "inputs": {
+          "goal": "g",
+          "constraints": {
+            "why": false
+          }
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "steps": [],
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "absent": [
+        "approver.mandate_ref"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d4",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "verify",
+        "step": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "passed": true,
+          "confidence": 1,
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "intent": "plan step",
+        "approval": {
+          "mandate_ref": "m1"
+        }
+      },
+      {
+        "intent": "verify step",
+        "person_required": true
+      },
+      {
+        "intent": "plan step",
+        "approval": {
+          "mandate_ref": "m1"
+        }
+      },
+      {
+        "intent": "verify step",
+        "person_required": true
+      }
+    ]
+  },
+  "trace_kinds": [
+    "person_required",
+    "failure_mode_fired",
+    "loop"
+  ],
+  "profiles": [
+    {
+      "domain": "person-verify",
+      "version": "1.0.0",
+      "risk_thresholds": {
+        "block_autonomous": [
+          "verify"
+        ]
+      }
+    }
+  ]
+}

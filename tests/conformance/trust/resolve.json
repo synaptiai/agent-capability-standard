@@ -89,6 +89,36 @@
       }
     },
     {
+      "name": "single_candidate_escalate",
+      "about": "One candidate is chosen whatever the strategy: escalate_to_human does not escalate it.",
+      "strategy": "escalate_to_human",
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 10
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 0
+      }
+    },
+    {
+      "name": "single_candidate_merge",
+      "about": "One candidate is chosen whatever the strategy: merge_with_uncertainty does not merge it.",
+      "strategy": "merge_with_uncertainty",
+      "candidates": [
+        {
+          "source_type": "human_note",
+          "age_hours": 10
+        }
+      ],
+      "expect": {
+        "outcome": "chosen",
+        "winner": 0
+      }
+    },
+    {
       "name": "default_highest_score",
       "about": "No strategy named: highest_score. A fresh human note (0.55 * 0.5 ** (1/240)) beats a system-of-record value two half-lives old (0.92 * 0.25).",
       "strategy": null,

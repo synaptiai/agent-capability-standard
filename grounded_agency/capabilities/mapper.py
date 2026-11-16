@@ -936,14 +936,31 @@ class ToolCapabilityMapper:
         # case instead of a read.
         return UNCLASSIFIED_TOOL
 
+    def person_required(self, mapping: ToolMapping) -> bool:
+        """Whether the applied profiles require a person for a call with
+        ``mapping`` (section 5.21.3): what its record's ``person_required``
+        and its approval request say. :data:`UNCLASSIFIED_TOOL` keeps its
+        identity under profiles (see :meth:`_apply_profiles`), so for an
+        unbound tool the requirement is computed here, for the ``mutate``
+        it is treated as (section 5.18.2)."""
+        if mapping is UNCLASSIFIED_TOOL:
+            return (
+                self._profiles is not None
+                and self._profiles.flags(
+                    mapping.capability_id, {"risk": mapping.risk}
+                ).person
+            )
+        return mapping.person_required
+
     def _apply_profiles(self, mapping: ToolMapping) -> ToolMapping:
         """``mapping`` with the flags the applied profiles raise for each of
         its capabilities at its risk, and ``person_required`` when one of
         them requires a person (section 5.21.3). The core computes them, as
         it does for the executor. A control-only tool has no capability, and
-        :data:`UNCLASSIFIED_TOOL` already needs a checkpoint and approval
-        (this adapter's approvals are a person's), so both stay as they are
-        and keep their identity."""
+        :data:`UNCLASSIFIED_TOOL` already needs a checkpoint and approval,
+        so both stay as they are and keep their identity; whether a profile
+        requires a person for an unbound tool is :meth:`person_required`'s
+        answer."""
         if self._profiles is None or mapping.control or mapping is UNCLASSIFIED_TOOL:
             return mapping
         hit = self._profiled.get(mapping)

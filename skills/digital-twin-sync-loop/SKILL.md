@@ -272,7 +272,7 @@ steps:
       timestamp: "2024-01-15T16:00:00Z"
       source: {kind: "sensor", name: "gateway-floor-3", channel: "floor-3/hvac-unit-3a"}
       event_type: "hvac_telemetry"
-      entity_refs: [{entity_id: "sensor-temp-301"}, {entity_id: "hvac-unit-3a"}]
+      entity_refs: [{entity_id: "sensor:acme/floor-3/temp-301"}, {entity_id: "asset:acme/floor-3/hvac-unit-3a"}]
       raw:
         sensor-temp-301: 24.1
         hvac-unit-3a: {temperature: 23.5, setpoint: 22.0, status: "cooling"}

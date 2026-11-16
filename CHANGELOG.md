@@ -200,8 +200,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   with `require_grounding` or `allowed_destinations`, every shipped profile
   included, and `GroundedAgentAdapter` refuses those and
   `minimum_confidence` (`ProfileError`), since it checks no call output or
-  send. An unknown top-level profile member stays a warning (W604) and is
-  now logged at WARNING with the member meant.
+  send, and, with `strict_mode=False` (which only logs a missing
+  checkpoint), a `checkpoint_policy` that raises `requires_checkpoint`. A
+  member without an exact JSON form (an integer beyond 2^53) is S303. An
+  unknown top-level profile member stays a warning (W604) and is now logged
+  at WARNING with the member meant.
+- Python SDK: `OASFAdapter.translate` raises `UnknownCapabilityError` (V101,
+  with the closest id) for an entry that names a capability the ontology
+  does not define; it logged a warning and translated the entry without it,
+  so its `max_risk` and `requires_checkpoint` could be too low. Catch it
+  where a mapping written against a later ontology may be loaded.
 - Python SDK: `grounded_agency.trust.decay_factor` counts an age below zero
   as zero (it raised `ValueError`), and `TrustModel` reads its field
   authorities from `field_authority.fields`, refusing a malformed entry or
@@ -308,13 +316,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `GroundedAgentConfig(profiles=...)`, `WorkflowRunner(profiles=...)`,
   `_core.Validator.check_profiles`, `profile_flags`, `profile_policy`;
   `tools/validate_workflows.py --profile`. Normative profile vectors
-  (`tests/conformance/profiles/`), 15 runtime fixtures and validator
+  (`tests/conformance/profiles/`), 17 runtime fixtures and validator
   fixtures with profiles (`EXPECTATIONS.json` gains `profiles`). A runtime
   fixture's script entry may list `absent` members, which the pending
   action must not hold. The adapter's records digest (`config_sha256`)
-  covers the applied profiles; `GroundedAgentConfig(schema_root=...)`.
+  covers the applied profiles; `GroundedAgentConfig(schema_root=...)`. When
+  a profile requires a person for a call, the adapter's ask reason says
+  `requires approval by a person`, and an unbound tool's record carries
+  `person_required` when a profile requires one for `mutate`
+  (`ToolCapabilityMapper.person_required`).
 - Trust (§8): `grounded_agency.trust.resolve` with the six strategies of
-  §8.2 and tie-breaking, `Candidate`, `Resolution`, `merge_trust_weights`;
+  §8.2 and tie-breaking (a single candidate is chosen whatever the
+  strategy), `Candidate`, `Resolution`, `merge_trust_weights`;
   the trust vectors are normative, with `resolve.json`. The
   conflicting-sources benchmark resolves with `resolve` (same results).
 - Entity ids (§7.1): `grounded_agency.entities.parse_entity_id`,

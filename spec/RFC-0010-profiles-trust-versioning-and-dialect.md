@@ -91,7 +91,8 @@ minimum confidence (F504, `below_minimum_confidence`, and
 of §8.3. Keys are capability ids or `*`, anchor kinds, trust classes.
 Loading uses S303 (malformed members, any member of the closed
 `risk_thresholds` and `evidence_policy` mappings this version does not
-define, the key `checkpoint`), S304, V101 (any unknown capability id,
+define, the key `checkpoint`, a repeated anchor kind or grounding id, a
+member that is not I-JSON), S304, V101 (any unknown capability id,
 `checkpoint_policy` keys included), V109, W602, W603 and W604 (unknown
 top-level members only); no misspelled rule is ignored. `critical` is
 deprecated and read as `none`. The shipped profiles are migrated to 2.0.0.
@@ -100,9 +101,11 @@ implement it, and TypeScript reaches the same implementation through the
 WebAssembly core; `tests/conformance/profiles/load.json` and
 `tests/conformance/profiles/effective.json` are normative.
 
-An implementation that does not put one of these rules in force refuses a
-profile that sets it, as it refuses a profile with an error (§5.21.4),
-rather than apply the rest and act as if the rule were absent. The
+An executor or safety layer that does not put one of these rules in force
+refuses a profile that sets it, as it refuses a profile with an error
+(§5.21.4), rather than apply the rest and act as if the rule were absent. A
+validator applies only the flags (§5.21.1), so it refuses no profile for
+the other rules: it reports what a run under the profile would need. The
 reference executor checks a profile's grounding policy once the grounding
 check of §5.20 (RFC-0008) reads it, and its destination policy once the
 destination check of §4.4.2 does; both checks land with their own
@@ -110,9 +113,10 @@ workstreams, and the profiles' policies are wired to them when those merge.
 Until then the executor refuses to start or restore a run under a profile
 that sets `require_grounding` or `allowed_destinations`, and the Python
 adapter, which checks no call output or send, refuses those and
-`minimum_confidence`. Every shipped profile sets `require_grounding`, so
-until then the validator is the one component that applies them as they
-are.
+`minimum_confidence`, and, with `strict_mode=False` (which only logs a
+missing checkpoint), a `checkpoint_policy` that raises a flag. Every shipped
+profile sets `require_grounding`, so until then the validator is the one
+component that applies them as they are.
 
 ### 2) The schema dialect is defined, with a normative rendering
 
@@ -160,7 +164,10 @@ Standard MAJOR, a MINOR with the Standard version that names it, a PATCH
 alone. A document outside a workflow that names capabilities cites
 `standard` and `ontology` where its format puts them; another ontology major
 or an unsupported standard is V109, checked by the profile loader and the
-OASF adapter through one core function. §11.7 lists the artifacts of 1.2.0
+OASF adapter through one core function; an id the consumer's ontology lacks
+(one a later MINOR added) is V101 where the document uses it, so the OASF
+adapter refuses to translate an entry that names one rather than compute
+its risk without it. §11.7 lists the artifacts of 1.2.0
 with their versions. §11.5 adds 1.2, generalises W616 to any feature newer
 than a workflow's target, and makes the catalog's header an explicit value
 of the start operation (a version or an explicit none), so the executor and
@@ -244,7 +251,9 @@ affected.
   normative, open cases decided), `resolve.json` (new).
 - `tests/conformance/entities/ids.json` (new, normative).
 - Runtime fixtures `profile_*` with a `profiles` member, among them
-  `profile_person_does_not_mark_readers`, `profile_star_always_starts`,
+  `profile_person_does_not_mark_readers`,
+  `profile_person_not_passed_to_nested_run`,
+  `profile_person_not_passed_to_recovery`, `profile_star_always_starts`,
   `profile_minimum_confidence_not_a_number` and
   `profile_minimum_confidence_waited_delegate`. With the workstreams whose
   checks they exercise: `profile_grounding_required` (§5.20),
@@ -263,7 +272,9 @@ affected.
   `continues`); each workstream adds its features' rows to the table W616
   reads.
 - The TypeScript package replays the validator, runtime and expression
-  fixtures and the profile vectors through the WebAssembly core.
+  fixtures and the profile vectors through the WebAssembly core; its
+  interface takes only I-JSON requests, so the profile vector whose member
+  is not I-JSON is refused there before the loader reports S303.
 
 ## Alternatives considered
 

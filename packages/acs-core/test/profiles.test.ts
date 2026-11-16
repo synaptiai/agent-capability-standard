@@ -11,10 +11,24 @@ import { repositoryContext } from './core.js';
 type Found = string[];
 const key = (d: { code: string; profile: string; field: string }) => `${d.code} ${d.profile} ${d.field}`;
 
+/** Whether `value` holds a number with no exact JSON form (I-JSON): an
+ * integer beyond 2^53, which the core's loader reports as S303. */
+const inexact = (value: unknown): boolean =>
+  typeof value === 'number'
+    ? Number.isInteger(value) && Math.abs(value) > 2 ** 53
+    : typeof value === 'object' && value !== null && Object.values(value).some(inexact);
+
 describe('profile load vectors', () => {
   for (const v of load.vectors) {
     it(v.name, async () => {
       const ctx = await repositoryContext();
+      if (inexact(v.profiles)) {
+        // The WebAssembly interface takes only I-JSON requests, so such a
+        // profile is refused before the loader reports it: refused either way.
+        expect(v.expect.errors.map((e) => e.code)).toEqual(['S303']);
+        expect(() => ctx.checkProfiles(v.profiles as Json[])).toThrow(/bad_request: .*I-JSON/);
+        return;
+      }
       const report = ctx.checkProfiles(v.profiles as Json[]);
       const of = (severity: string): Found =>
         report.diagnostics

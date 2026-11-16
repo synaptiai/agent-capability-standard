@@ -77,3 +77,29 @@ def test_the_standard_examples_are_ids_the_taxonomy_lists() -> None:
     for example in examples:
         parse_entity_id(example, CLASSES)
         assert example in TAXONOMY["id_convention"]["examples"], example
+
+
+# A literal entity id the repository's own examples write, quoted on the
+# line of its key: `entity_id: "..."` (YAML) or `"entity_id": "..."` (JSON).
+# An unquoted value is a schema's type (`entity_id: string`), not an id.
+LITERAL_ENTITY_ID = re.compile(r"""["']?entity_id["']?:[ \t]*(["'])(.*?)\1""")
+
+
+def test_every_literal_entity_id_in_the_examples_parses() -> None:
+    """The skills, templates, docs, examples and schemas teach the §7.1 form:
+    each literal ``entity_id`` they write is an id of a taxonomy class."""
+    found: list[tuple[str, str]] = []
+    for top in ("skills", "templates", "docs", "examples", "schemas"):
+        for path in sorted((ROOT / top).rglob("*")):
+            if path.suffix not in {".md", ".yaml", ".yml", ".json"}:
+                continue
+            if "node_modules" in path.parts:
+                continue
+            for _, value in LITERAL_ENTITY_ID.findall(path.read_text("utf-8")):
+                found.append((str(path.relative_to(ROOT)), value))
+    assert found, "the skills write entity ids in their examples"
+    for where, value in found:
+        try:
+            parse_entity_id(value, CLASSES)
+        except ValueError as e:
+            raise AssertionError(f"{where}: {value!r}: {e}") from e

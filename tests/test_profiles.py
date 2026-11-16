@@ -171,6 +171,141 @@ async def test_the_adapter_asks_a_person_for_every_call_under_healthcare(
     assert (record["decision"], record["person_required"]) == ("asked", True)
 
 
+@pytest.mark.asyncio
+async def test_the_ask_reason_says_a_person_must_decide(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """The reason is all a host's can_use_tool callback sees: under a
+    profile that requires a person it says so (§5.21.3); otherwise it does
+    not."""
+    hook_input = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "a", "content": "x"},
+        "permission_mode": "default",
+    }
+
+    async def reason(profiles: list[dict[str, Any]]) -> str:
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                profiles=profiles,
+            )
+        )
+        adapter.create_checkpoint(["a"], "before")
+        result = await adapter._make_pretooluse_safety_hook()(hook_input, "w1", None)
+        output = result["hookSpecificOutput"]
+        assert output["permissionDecision"] == "ask"
+        return str(output["permissionDecisionReason"])
+
+    person = await reason(
+        [
+            {
+                "domain": "d",
+                "version": "1.0.0",
+                "risk_thresholds": {"block_autonomous": ["mutate"]},
+            }
+        ]
+    )
+    assert person.startswith("F502 ")
+    assert "requires approval by a person" in person
+    assert "§5.21.3" in person
+    plain = await reason([{"domain": "d", "version": "1.0.0"}])
+    assert "by a person" not in plain
+    assert "requires approval" in plain
+
+
+@pytest.mark.asyncio
+async def test_an_unbound_tool_records_person_required_under_a_mutate_rule(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """An unbound tool is treated as mutate (§5.18.2): a profile that
+    requires a person for mutate puts person_required on its record and in
+    its ask reason, though its mapping keeps its identity."""
+    from grounded_agency.capabilities.mapper import UNCLASSIFIED_TOOL
+
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[
+                {
+                    "domain": "d",
+                    "version": "1.0.0",
+                    "risk_thresholds": {"block_autonomous": ["mutate"]},
+                }
+            ],
+        )
+    )
+    mapping = adapter.mapper.map_tool("SomeUnknownTool", {})
+    assert mapping is UNCLASSIFIED_TOOL
+    assert adapter.mapper.person_required(mapping) is True
+    adapter.create_checkpoint(["a"], "before")
+    result = await adapter._make_pretooluse_safety_hook()(
+        {
+            "tool_name": "SomeUnknownTool",
+            "tool_input": {},
+            "permission_mode": "default",
+        },
+        "u1",
+        None,
+    )
+    output = result["hookSpecificOutput"]
+    assert output["permissionDecision"] == "ask"
+    assert "by a person" in output["permissionDecisionReason"]
+    record = adapter.call_records[-1]
+    assert (record["decision"], record["capability"], record["person_required"]) == (
+        "asked",
+        None,
+        True,
+    )
+    # Without a rule that covers mutate, the unbound tool's record has none.
+    plain = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp2"),
+            profiles=[{"domain": "d", "version": "1.0.0"}],
+        )
+    )
+    assert plain.mapper.person_required(UNCLASSIFIED_TOOL) is False
+
+
+@pytest.mark.parametrize(
+    ("policy", "refused"),
+    [
+        ({"*": "always"}, True),
+        ({"mutate": "high_risk", "retrieve": "never"}, True),
+        ({"retrieve": "never"}, False),
+    ],
+)
+def test_strict_mode_off_refuses_a_raised_checkpoint(
+    ontology_path: str, tmp_path: Path, policy: dict[str, str], refused: bool
+) -> None:
+    """strict_mode=False only logs a missing checkpoint, so a profile whose
+    checkpoint_policy raises requires_checkpoint is refused (§5.21.4), as
+    approval='off' refuses profiles; strict_mode=True applies it, and a
+    policy of never alone raises nothing."""
+    profile = {"domain": "d", "version": "1.0.0", "checkpoint_policy": policy}
+
+    def adapter(strict: bool) -> GroundedAgentAdapter:
+        return GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                strict_mode=strict,
+                profiles=[profile],
+            )
+        )
+
+    assert adapter(True).profiles
+    if refused:
+        with pytest.raises(ProfileError, match="strict_mode=False") as caught:
+            adapter(False)
+        assert "checkpoint_policy" in str(caught.value)
+    else:
+        assert adapter(False).profiles
+
+
 @pytest.mark.parametrize(
     ("rule", "member"),
     [
@@ -431,3 +566,92 @@ def test_a_person_overrides_a_mandate_without_always_ask_on_the_record(
     (record,) = run.action_records()
     assert "always_ask" not in record
     assert record["approval"]["mandate_ref"] is None
+
+
+@pytest.mark.parametrize(
+    ("name", "person", "profile"),
+    [
+        ("profile_person_not_passed_to_nested_run", "invoke step", "person-invoke"),
+        ("profile_person_not_passed_to_recovery", "verify step", "person-verify"),
+    ],
+)
+def test_the_person_requirement_reaches_no_nested_run_or_recovery_context(
+    validator: _core.Validator, name: str, person: str, profile: str
+) -> None:
+    """§5.21.3: the requirement is not a mark, so it reaches neither the
+    nested run an invoke starts nor the context a failure mode injects. The
+    trace has person_required once per ask of the step the profile names and
+    no always_ask; every other step's request names its standing mandate,
+    and its record carries neither member."""
+    run, asked = replay(validator, name)
+    assert run.next()["kind"] == "Completed"
+    records = run.action_records()
+    traced = [t for t in run.trace() if t["kind"] == "person_required"]
+    kinds = [t["kind"] for t in run.trace()]
+    assert "always_ask" not in kinds
+    assert all(t["detail"] == {"profiles": [profile]} for t in traced)
+    assert len(traced) == sum(r["intent"] == person for r in records)
+    for action, record in zip(asked, records, strict=True):
+        assert "always_ask" not in record
+        if record["intent"] == person:
+            assert action["approver"] == {"kind": "human", "always_ask": True}
+            assert record["person_required"] is True
+            assert record["approval"]["mandate_ref"] is None
+        else:
+            assert action["approver"] == {
+                "kind": "standing_mandate",
+                "mandate_ref": "m1",
+            }
+            assert "person_required" not in record
+            assert record["approval"]["mandate_ref"] == "m1"
+
+
+def test_a_profile_without_an_exact_json_form_is_refused_everywhere(
+    validator: _core.Validator, ontology_path: str, tmp_path: Path
+) -> None:
+    """A run saves its profiles as given and a record digest covers them, so
+    a member beyond I-JSON (an integer above 2^53) is S303 when the profile
+    loads: the executor, the validator and the adapter refuse it alike,
+    rather than save a profile other than the one given."""
+    big = {"domain": "d", "version": "1.0.0", "x-n": 2**60 + 1}
+    report = validator.check_profiles([big])
+    assert found(report, "error") == {("S303", "d", "x-n")}
+    catalog = {
+        "w": {
+            "goal": "g",
+            "risk": "low",
+            "spec_version": "1.1",
+            "steps": [
+                {
+                    "capability": "retrieve",
+                    "purpose": "p",
+                    "store_as": "r",
+                    "input_bindings": {"target": "x"},
+                }
+            ],
+        }
+    }
+    with pytest.raises(ValueError, match="S303"):
+        _core.Run.start(
+            validator,
+            catalog,
+            "w",
+            {},
+            header=None,
+            run_id="r",
+            now_ms=0,
+            profiles=[big],
+        )
+    with pytest.raises(ProfileError, match="S303"):
+        GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                profiles=[big],
+            )
+        )
+    exact = {"domain": "d", "version": "1.0.0", "x-n": 2**53}
+    run = _core.Run.start(
+        validator, catalog, "w", {}, header=None, run_id="r", now_ms=0, profiles=[exact]
+    )
+    assert run.snapshot()["state"].count("9007199254740992") == 1

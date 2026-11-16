@@ -271,7 +271,7 @@ integration_report:
     warnings:
       - "Service has no APIs defined"
 conflicts:
-  - entity_id: "api-gateway"
+  - entity_id: "svc:acme/platform/prod/api-gateway"
     field: "status"
     values:
       - source: "kubernetes"
@@ -363,7 +363,7 @@ integration_report:
     merged: 1
   information_loss: []
 conflicts:
-  - entity_id: "endpoint_process_order"
+  - entity_id: "endpoint:acme/orders/process_order"
     field: "parameters[0].name"
     values:
       - source: "code_analysis"

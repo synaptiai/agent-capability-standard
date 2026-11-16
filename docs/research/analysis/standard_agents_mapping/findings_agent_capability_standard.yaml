@@ -245,7 +245,8 @@ findings:
     `checkpoint` steps exempt from `checkpoint_policy`, a minimum confidence (F504
     `below_minimum_confidence`/`invalid_confidence`); key grammars are capability ids or `*`, anchor kinds and
     trust classes; loading diagnostics S303, S304, V101, V109, W602-W604, `critical` deprecated; an
-    implementation refuses a profile whose rule it does not put in force (§5.21.4). Implemented once in
+    executor or safety layer refuses a profile whose rule it does not put in force, and a validator applies
+    only the flags (§5.21.4). Implemented once in
     core/src/profile.rs for the validator (`--profile`, `Options.profiles`) and the executor
     (`StartOptions.profiles`: thresholds, checkpoint policy, the person, minimum confidence, waited
     delegations included), exposed to Python (`AppliedProfiles`, `GroundedAgentConfig(profiles=)` for flags
@@ -256,7 +257,8 @@ findings:
     `allowed_destinations` (`Policy::unenforced`, core/tests/profiles.rs) until S4''s grounding check (§5.20)
     and S5''s destination check (§4.4.2) read `Policy::grounding` and `Policy::destinations`, with the
     fixtures profile_grounding_required and profile_destinations_refuse; the Python adapter, which checks no
-    call output or send, refuses those rules and `minimum_confidence` (tests/test_profiles.py). Every shipped
+    call output or send, refuses those rules and `minimum_confidence`, and with `strict_mode=False` a raised
+    checkpoint (tests/test_profiles.py). Every shipped
     profile sets `require_grounding`, so only the validator applies one as it is until then.'
   concerns:
   - checkpoint-rollback-state
@@ -1053,8 +1055,10 @@ findings:
     feature''s row of that table, and the S303 for `agents` before 1.2, land with the workstream that adds the
     feature (S2a, S2b, S3, S4, S5). The consumers implement the citation rule through one core function
     (`_core.check_cited_versions`): the profile loader and the OASF adapter (`grounded_agency.versions`,
-    CitedVersionError); the ROADMAP Versions table has five lines and site/src/data/versions.ts reads the
-    TypeScript package''s version.'
+    CitedVersionError); an id a cited document names that the ontology lacks is V101 where it is used (the
+    profile loader; the OASF adapter''s translate, UnknownCapabilityError, tests/test_oasf_adapter.py); the
+    ROADMAP Versions table has five lines and site/src/data/versions.ts reads the TypeScript package''s
+    version.'
   concerns:
   - packaging-conformance-governance
 - id: ACS-26
@@ -2273,8 +2277,8 @@ findings:
   resolution: 'Standard 1.2.0 §8.1-§8.3: score = weight × confidence × decay in binary64; confidence 1 when none
     is reported; an age below zero counts as zero; a `min_trust` above 0.5 applies; evidence without a
     static weight has no score; field authority ranks sources in §8.2 through the trust model''s new
-    `field_authority.fields`. §8.2 defines six strategies (default `highest_score`) and tie-breaking by
-    `tie_breakers`. grounded_agency/trust.py gains `resolve`, `Candidate`, `Resolution` and
+    `field_authority.fields`. §8.2 defines six strategies (default `highest_score`), tie-breaking by
+    `tie_breakers`, and chooses a single candidate whatever the strategy. grounded_agency/trust.py gains `resolve`, `Candidate`, `Resolution` and
     `merge_trust_weights`; the trust vectors are normative with resolve.json added
     (tests/test_trust.py); the conflicting-sources benchmark resolves with `resolve`, with unchanged
     results.'
@@ -2580,7 +2584,8 @@ findings:
     it means the same in every regular expression dialect, and that example; grounded_agency/entities.py
     parses ids; tests/conformance/entities/ids.json (normative) pins the grammar, U+00A0, U+2028, U+3000,
     U+FEFF and U+0085 included (tests/test_entities.py), and tools/validate_canonical_schemas.py checks every
-    taxonomy example against the pattern and the class list.'
+    taxonomy example against the pattern and the class list; the skills'' examples write ids in the form, and
+    tests/test_entities.py parses every quoted `entity_id` in the repository''s examples.'
   concerns:
   - evidence-audit-observability
 questions:

@@ -231,7 +231,9 @@ entry per case.
   and `effective.json` (the effective flags and the rules of §5.21.3). The
   core runs them (`core/tests/profiles.rs`), and so do the Python package
   (`tests/test_profiles.py`, through `_core`) and the TypeScript package
-  (through WebAssembly): one loader.
+  (through WebAssembly, whose interface refuses a request that is not
+  I-JSON, so `not_i_json` is refused before the loader sees it): one
+  loader.
 - Entity ids: `tests/conformance/entities/ids.json` (the grammar of §7.1:
   valid ids parsed into class, namespace and local id; invalid ones
   refused), run by `tests/test_entities.py` against

@@ -461,7 +461,8 @@ class Resolution:
     """``merged``: every candidate, highest score first."""
     tied: tuple[int, ...] = ()
     """``escalated``: the candidates left tied (every one for
-    ``escalate_to_human``)."""
+    ``escalate_to_human``). A single candidate is ``chosen`` whatever the
+    strategy."""
     scores: tuple[float, ...] = ()
     """Every candidate's trust score (§8.1), in the order given."""
 
@@ -533,6 +534,9 @@ def resolve(
     authority = [
         c.source_type is not None and c.source_type in authorities for c in candidates
     ]
+    if len(candidates) == 1:
+        # One candidate is no conflict: it is chosen, whatever the strategy.
+        return Resolution("chosen", winner=0, scores=scores)
     every = list(range(len(candidates)))
     if strategy == "escalate_to_human":
         return Resolution("escalated", tied=tuple(every), scores=scores)
@@ -548,8 +552,6 @@ def resolve(
             order=tuple(sorted(every, key=cmp_to_key(by_score))),
             scores=scores,
         )
-    if len(candidates) == 1:
-        return Resolution("chosen", winner=0, scores=scores)
     competing = every
     if strategy == "highest_score":
         best = _best(competing, scores)

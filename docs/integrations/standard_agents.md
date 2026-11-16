@@ -1013,9 +1013,12 @@ requires for normative changes.
   executor's approval digests and the trust score arithmetic of §8, listed in
   [CONFORMANCE.md](../../spec/CONFORMANCE.md).
 - **Documents that say what is enforced.** Domain profiles take effect where
-  a host or safety layer applies them (§5.21): the reference executor and the
-  Python adapter do; this binding applies none yet. The executor's trace
-  kinds are listed and tested.
+  a host or safety layer applies them, and §5.21 says what each rule changes:
+  the reference executor and the Python adapter apply their flags and person
+  requirements, and refuse a profile whose grounding or destination policy
+  they do not check yet (every shipped profile sets `require_grounding`); the
+  validator given a profile reports the flags it raises; this binding
+  applies none yet. The executor's trace kinds are listed and tested.
 
 ### Accepted from RFC-0005
 
@@ -1056,8 +1059,8 @@ requires for normative changes.
   an agent manifest would let a validator derive a `delegate` step's flags
   from its target. Until then a workflow author raises the step's flags
   ([How a delegate step maps to a host](#how-a-delegate-step-maps-to-a-host)).
-- **What applying a domain profile changes**, and **a rule that keeps
-  secrets out of evidence, audit records and stored data**, both normative.
+- **A rule that keeps secrets out of evidence, audit records and stored
+  data**, normative.
 - **The host protocol as a published schema**, with a conformance class for
   executors; today it is described in a guide and defined in Rust types.
 

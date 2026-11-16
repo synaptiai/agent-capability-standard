@@ -682,12 +682,19 @@ raise the flags of the call's capability (`checkpoint_policy` a checkpoint,
 `require_review` and `auto_approve` an approval), and `require_human` and
 `block_autonomous` require a person's approval, which the adapter asks
 through the host's permission prompt; such a call's records carry
-`person_required: true`. The core computes the raised flags
-(`AppliedProfiles`, `adapter.profiles`), as it does for the executor. A
-profile with an error raises `ProfileError` when the adapter is built, and
-profiles need `approval="ask"` (with approvals off, the approvals they
-require would be skipped). The applied profiles are part of every record's
-`config_sha256`.
+`person_required: true`, an unbound tool's too when a profile requires a
+person for `mutate` (§5.18.2 treats it as `mutate`). The ask's reason, which
+your `can_use_tool` callback reads as `context.decision_reason`, then says
+`requires approval by a person`: only a person's decision counts for that
+call (§5.21.3), so a callback that approves some calls automatically (an
+allowlist, say) puts such a call to a person instead. The core computes the
+raised flags (`AppliedProfiles`, `adapter.profiles`), as it does for the
+executor. A profile with an error raises `ProfileError` when the adapter is
+built, and profiles need `approval="ask"` (with approvals off, the approvals
+they require would be skipped). With `strict_mode=False`, which only logs a
+missing checkpoint, a profile whose `checkpoint_policy` raises
+`requires_checkpoint` (any value but `never`) raises `ProfileError` as well.
+The applied profiles are part of every record's `config_sha256`.
 
 The adapter checks no call's output and no send's destination yet, so it
 does not put a profile's grounding policy (`require_grounding`), minimum

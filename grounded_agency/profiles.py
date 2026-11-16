@@ -55,6 +55,11 @@ _RULES: dict[str, tuple[str, str, str | None]] = {
         "allowed_destinations",
         None,
     ),
+    "checkpoints": (
+        "a checkpoint policy that raises requires_checkpoint (§5.21.3)",
+        "checkpoint_policy",
+        None,
+    ),
 }
 
 
@@ -101,11 +106,16 @@ class EffectiveFlags:
 def _sets(document: Mapping[str, Any], rule: str) -> bool:
     """Whether a loaded profile puts ``rule`` (a key of ``_RULES``) in
     force: an empty ``require_grounding`` sets no grounding policy, an empty
-    ``allowed_destinations`` allows no send (§5.21.3)."""
+    ``allowed_destinations`` allows no send, and a ``checkpoint_policy``
+    raises a flag only with a value other than ``never`` (§5.21.3)."""
     _, member, under = _RULES[rule]
     holder = document.get(under) if under else document
     value = holder.get(member) if isinstance(holder, Mapping) else None
-    return bool(value) if rule == "grounding" else value is not None
+    if rule == "grounding":
+        return bool(value)
+    if rule == "checkpoints":
+        return isinstance(value, Mapping) and any(v != "never" for v in value.values())
+    return value is not None
 
 
 @cache
@@ -195,15 +205,17 @@ class AppliedProfiles:
     def refuse_unapplied(self, rules: Iterable[str], applier: str) -> None:
         """Refuse these profiles where one puts in force a rule of
         ``rules`` that ``applier`` does not apply: ``"grounding"`` (a
-        grounding policy, §5.20), ``"minimum_confidence"`` or
-        ``"destinations"`` (a destination policy, §4.4.2). Applied without
-        the rule, a run or a call would go ahead as if it were absent.
+        grounding policy, §5.20), ``"minimum_confidence"``,
+        ``"destinations"`` (a destination policy, §4.4.2) or
+        ``"checkpoints"`` (a ``checkpoint_policy`` that raises
+        ``requires_checkpoint``). Applied without the rule, a run or a call
+        would go ahead as if it were absent.
 
         Raises:
             ProfileError: a profile sets one of ``rules``; its
                 ``diagnostics`` is empty (the profiles load, ``applier``
                 cannot apply them).
-            KeyError: a name in ``rules`` is not one of the three.
+            KeyError: a name in ``rules`` is not one of the four.
         """
         for rule in rules:
             what, member, under = _RULES[rule]

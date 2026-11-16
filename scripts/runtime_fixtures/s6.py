@@ -27,6 +27,12 @@ CHECKPOINT_EXECUTE = profile(
     "checkpoint-execute", checkpoint_policy={"execute": "always"}
 )
 CONFIDENT = profile("confident", evidence_policy={"minimum_confidence": 0.9})
+PERSON_INVOKE = profile(
+    "person-invoke", risk_thresholds={"block_autonomous": ["invoke"]}
+)
+PERSON_VERIFY = profile(
+    "person-verify", risk_thresholds={"block_autonomous": ["verify"]}
+)
 
 M1 = {"kind": "standing_mandate", "mandate_ref": "m1"}
 PERSON = {"kind": "human", "always_ask": True}
@@ -391,6 +397,150 @@ def register(add):
         {"kind": "Completed", "outcome": "completed"},
         ["approval_requested", "invoke_started"],
         profiles=[REVIEW_LOW],
+    )
+
+    add(
+        "profile_person_not_passed_to_nested_run",
+        "A profile requires a person for the invoke step, not for the nested run it"
+        " starts: the invoke is asked of a person, the child's retrieve of its own"
+        " approver, a standing mandate, whose decision keeps its mandate_ref.",
+        {
+            "w": wf([invoke_child()]),
+            "child": wf(
+                [retrieve(requires_approval=True, approval={"approver": M1})],
+                requires=["approval@1"],
+            ),
+        },
+        [
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "step": 0,
+                    "frame": ["w"],
+                    "approver": PERSON,
+                },
+                "absent": NO_MANDATE,
+                "respond": approve("d1", who=("dana",)),
+            },
+            {
+                "expect": {
+                    "kind": "RequestApproval",
+                    "step": 0,
+                    "frame": ["w", "child"],
+                    "approver": M1,
+                },
+                "absent": ["approver.always_ask"],
+                "respond": approve("d2", who=("mandate",)),
+            },
+            {
+                "expect": inv("retrieve", frame=["w", "child"]),
+                "respond": out(data=1, confidence=1),
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {
+                    "intent": "invoke step",
+                    "person_required": True,
+                    "approval": {"mandate_ref": None, "approvers": ["dana"]},
+                },
+                {"intent": "retrieve step", "approval": {"mandate_ref": "m1"}},
+            ],
+        },
+        ["person_required", "approval_requested", "invoke_started"],
+        profiles=[PERSON_INVOKE],
+    )
+
+    add(
+        "profile_person_not_passed_to_recovery",
+        "A profile requires a person for the verify step; the context its failure"
+        " mode injects for recovery is not marked, so the step the loop returns to"
+        " is asked of its own approver, a standing mandate, both times.",
+        {
+            "w": wf(
+                [
+                    st(
+                        "plan",
+                        "p",
+                        requires_approval=True,
+                        approval={"approver": M1},
+                        input_bindings={
+                            "goal": "g",
+                            "constraints": {"why": "${_recovery.why: boolean}"},
+                        },
+                    ),
+                    st(
+                        "verify",
+                        "v",
+                        input_bindings={"conditions": ["ok"]},
+                        failure_modes=[
+                            {
+                                "condition": "verification failed",
+                                "action": "request_more_context",
+                                "when": "${v.passed} == false",
+                                "recovery": {
+                                    "goto_step": "p",
+                                    "inject_context": {"why": "${v.passed}"},
+                                    "max_loops": 1,
+                                },
+                            }
+                        ],
+                    ),
+                ],
+                requires=["approval@1"],
+            )
+        },
+        [
+            {
+                "expect": {"kind": "RequestApproval", "step": 0, "approver": M1},
+                "absent": ["approver.always_ask"],
+                "respond": approve("d1", who=("mandate",)),
+            },
+            {"expect": inv("plan", step=0), "respond": out(steps=[], confidence=1)},
+            {
+                "expect": {"kind": "RequestApproval", "step": 1, "approver": PERSON},
+                "absent": NO_MANDATE,
+                "respond": approve("d2", who=("dana",)),
+            },
+            {
+                "expect": inv("verify", step=1),
+                "respond": out(passed=False, confidence=1),
+            },
+            {
+                "expect": {"kind": "RequestApproval", "step": 0, "approver": M1},
+                "absent": ["approver.always_ask"],
+                "respond": approve("d3", who=("mandate",)),
+            },
+            {
+                "expect": inv(
+                    "plan", step=0, inputs={"goal": "g", "constraints": {"why": False}}
+                ),
+                "respond": out(steps=[], confidence=1),
+            },
+            {
+                "expect": {"kind": "RequestApproval", "step": 1, "approver": PERSON},
+                "absent": NO_MANDATE,
+                "respond": approve("d4", who=("dana",)),
+            },
+            {
+                "expect": inv("verify", step=1),
+                "respond": out(passed=True, confidence=1),
+            },
+        ],
+        {
+            "kind": "Completed",
+            "outcome": "completed",
+            "action_records": [
+                {"intent": "plan step", "approval": {"mandate_ref": "m1"}},
+                {"intent": "verify step", "person_required": True},
+                {"intent": "plan step", "approval": {"mandate_ref": "m1"}},
+                {"intent": "verify step", "person_required": True},
+            ],
+        },
+        ["person_required", "failure_mode_fired", "loop"],
+        profiles=[PERSON_VERIFY],
     )
 
     add(

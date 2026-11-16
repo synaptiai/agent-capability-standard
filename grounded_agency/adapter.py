@@ -243,7 +243,10 @@ class GroundedAgentConfig:
             be applied without them, as does a profile with an error
             (:class:`~grounded_agency.profiles.ProfileError`). Profiles need
             ``approval="ask"``: with approvals off, the approvals they
-            require would be skipped.
+            require would be skipped. With ``strict_mode=False``, which
+            only logs a missing checkpoint, a profile whose
+            ``checkpoint_policy`` raises ``requires_checkpoint`` (a value
+            other than ``never``) refuses the configuration too.
         schema_root: The directory the ontology's ``$ref`` paths are
             relative to (STANDARD 1.2.0 section 4.1.2). Default: the
             directory above the ontology's (the repository root for
@@ -344,8 +347,22 @@ def _checkpoint_message(
     )
 
 
-def _approval_request(mapping: ToolMapping, tool_name: str) -> str:
-    """Why a tool call is put to the host's permission flow (F502)."""
+def _approval_request(mapping: ToolMapping, tool_name: str, person: bool) -> str:
+    """Why a tool call is put to the host's permission flow (F502). When an
+    applied profile requires a person (``person``), the reason says so: a
+    host's ``can_use_tool`` callback reads it, and only a person's decision
+    counts for such a call (STANDARD 1.2.0 section 5.21.3)."""
+    if person:
+        return text_form(
+            _error(
+                ErrorCode.APPROVAL_REQUIRED,
+                f"{_subject(mapping, tool_name)} requires approval by a person: "
+                f"an applied domain profile requires one (require_human or "
+                f"block_autonomous, STANDARD 1.2.0 §5.21.3), so no automatic "
+                f"decision counts. It runs only if a person approves this call.",
+                {},
+            )
+        )
     return text_form(
         _error(
             ErrorCode.APPROVAL_REQUIRED,
@@ -456,11 +473,17 @@ class GroundedAgentAdapter:
         core = _core.Validator(str(self.config.ontology_path), str(self._schema_root))
         # Domain profiles (STANDARD 1.2.0 section 5.21), checked against the
         # adapter's ontology; an error refuses the configuration, and so
-        # does a rule on outputs or sends, which this adapter does not check.
+        # does a rule on outputs or sends, which this adapter does not check,
+        # and (strict_mode=False only logs a missing checkpoint) a raised
+        # checkpoint requirement (section 5.21.4).
         self.profiles = AppliedProfiles(self.config.profiles, validator=core)
         self.profiles.refuse_unapplied(
             ("grounding", "minimum_confidence", "destinations"), "this adapter"
         )
+        if not self.config.strict_mode:
+            self.profiles.refuse_unapplied(
+                ("checkpoints",), "this adapter with strict_mode=False"
+            )
         self.mapper = ToolCapabilityMapper(self.registry, profiles=self.profiles)
         now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
         self._now = now
@@ -575,11 +598,12 @@ class GroundedAgentAdapter:
             entry["capability"] = mapping.capability_id or None
             if mapping.control:
                 entry["control"] = True
-            # An applied profile required a person (section 5.21.3).
-            if mapping.person_required:
-                entry["person_required"] = True
         else:
             entry["capability"] = None
+        # An applied profile required a person (section 5.21.3), for an
+        # unbound tool too: it is treated as mutate (section 5.18.2).
+        if mapping is not None and self.mapper.person_required(mapping):
+            entry["person_required"] = True
         if call is not None:
             entry["call"] = call
         entry["decision"] = decision
@@ -1258,7 +1282,9 @@ class GroundedAgentAdapter:
                                 f"so no decision can bind to them: {e}",
                             )
                         )
-                    message = _approval_request(mapping, tool_name)
+                    message = _approval_request(
+                        mapping, tool_name, self.mapper.person_required(mapping)
+                    )
                     self._allow_token(tool_name, tool_input)
                     self._record(
                         "asked",
@@ -1308,7 +1334,12 @@ class GroundedAgentAdapter:
             # Non-strict, after an error: approval is a rule of its own and
             # still applies.
             if asks and mapping.requires_approval:
-                return decide("ask", _approval_request(mapping, tool_name))
+                try:
+                    person = self.mapper.person_required(mapping)
+                except Exception:
+                    # The request must still go out: say a person decides.
+                    person = True
+                return decide("ask", _approval_request(mapping, tool_name, person))
             return {}
 
         return check_before_tool

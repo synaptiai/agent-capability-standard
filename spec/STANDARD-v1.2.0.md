@@ -1763,7 +1763,7 @@ its zero-based position among the profiles given, when it has no valid
 
 | Code | A profile is reported when |
 |------|----------------------------|
-| S303 | It is not a mapping, or a member is of the wrong type or outside its grammar: a `trust_class:` key whose class is not a trust class, a kind outside §6.5, an invalid destination pattern, the `checkpoint_policy` key `checkpoint`, or a member of `risk_thresholds` or `evidence_policy` that the table does not list, whatever its name (both mappings are closed) |
+| S303 | It is not a mapping, or a member is of the wrong type or outside its grammar: a `trust_class:` key whose class is not a trust class, a kind outside §6.5, an invalid destination pattern, the `checkpoint_policy` key `checkpoint`, a member of `risk_thresholds` or `evidence_policy` that the table does not list, whatever its name (both mappings are closed), or a member, `x-` ones included, that is not I-JSON (RFC 7493), such as an integer beyond 2^53 |
 | S304 | Its `domain` or `version` is missing |
 | V101 | A capability id in `block_autonomous`, in `require_grounding` or as a `checkpoint_policy` key other than `*` is not one the ontology defines |
 | V109 | Its `standard` is not one the implementation supports, or its `ontology`'s major differs from the implementation's ontology's (§11.6) |
@@ -1839,10 +1839,11 @@ calls it covers, as §5.20 says for hosts outside a workflow.
 
 An implementation that applies profiles (an executor, a safety layer, or a
 validator given them) MUST report each profile vector's diagnostics and
-compute each one's effective flags and rules (§10.3). One that does not put
-a rule of §5.21.3 in force (a safety layer that checks no output, say)
-refuses a profile that sets it, as it refuses a profile with an error,
-rather than apply the profile without it.
+compute each one's effective flags and rules (§10.3). An executor or a
+safety layer that does not put a rule of §5.21.3 in force (a safety layer
+that checks no output, say) refuses a profile that sets it, as it refuses a
+profile with an error, rather than apply the profile without it. A validator
+applies only the flags (§5.21.1) and refuses no profile for the other rules.
 
 ---
 
@@ -2053,9 +2054,9 @@ candidates are best by the strategy, the model's
 `prefer_authoritative_source` keeps those whose source type is an authority
 for the field, if any is; `prefer_high_confidence` those with the highest
 confidence; `prefer_recent` those with the lowest age; `escalate_to_human`
-stops. If more than one candidate remains, the conflict is `escalated`. A
-conflict with one candidate chooses it. A conflict in which a candidate has
-no static weight is refused, whatever the strategy: it is not resolved by
+stops. If more than one candidate remains, the conflict is `escalated`.
+Whatever the strategy, a conflict with one candidate chooses it, and one in
+which a candidate has no static weight is refused: it is not resolved by
 leaving the candidate out.
 
 A capability that resolves conflicts names its strategy (`integrate`'s

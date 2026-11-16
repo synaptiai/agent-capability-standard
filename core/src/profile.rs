@@ -227,6 +227,18 @@ fn shown(v: &Value) -> String {
     }
 }
 
+/// What a list member of a profile requires of its entries beyond their
+/// type (§5.21.2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Entries {
+    /// Any entries: a repeated one has no further effect.
+    Any,
+    /// Distinct entries: a repeated one is S303.
+    Distinct,
+    /// At least one entry, each distinct.
+    DistinctNonEmpty,
+}
+
 /// Loads one profile, reporting its diagnostics.
 struct Loader<'a> {
     ontology: &'a Ontology,
@@ -270,12 +282,14 @@ impl Loader<'_> {
         false
     }
 
-    /// A list of distinct strings, each kept when `item` accepts it.
+    /// A list of strings, each kept when `item` accepts it. `entries` says
+    /// what §5.21.2 requires of the entries beyond their type: a list whose
+    /// row does not say "distinct" may repeat one, to no further effect.
     fn strings(
         &mut self,
         field: &str,
         v: &Value,
-        non_empty: bool,
+        entries: Entries,
         mut item: impl FnMut(&mut Self, &str, &str) -> bool,
     ) -> Vec<String> {
         let Value::Array(items) = v else {
@@ -286,7 +300,7 @@ impl Loader<'_> {
             );
             return Vec::new();
         };
-        if non_empty && items.is_empty() {
+        if entries == Entries::DistinctNonEmpty && items.is_empty() {
             self.push(
                 Code::SchemaValidationFailed,
                 field,
@@ -305,7 +319,7 @@ impl Loader<'_> {
                 );
                 continue;
             };
-            if seen.contains(&s) {
+            if entries != Entries::Any && seen.contains(&s) {
                 self.push(
                     Code::SchemaValidationFailed,
                     &at,
@@ -445,6 +459,18 @@ impl Loader<'_> {
                 ),
             ),
         }
+        // A run saves its profiles as given (§5.19.4) and every record's
+        // digest covers them (§5.18.8): each member must have an exact JSON
+        // form, as a run's inputs must (§5.14).
+        for (key, v) in m {
+            if let Err(e) = crate::exec::ijson(v) {
+                self.push(
+                    Code::SchemaValidationFailed,
+                    key,
+                    format!("'{key}' has no exact JSON (I-JSON, RFC 7493) form: {e}"),
+                );
+            }
+        }
         let label = self.label.clone();
         let loaded = self.ontology.version.clone().unwrap_or_default();
         for d in semantics::check_cited(
@@ -505,10 +531,12 @@ impl Loader<'_> {
                 p.require_human = self.level("risk_thresholds.require_human", v, true);
             }
             if let Some(v) = t.get("block_autonomous") {
-                let ids =
-                    self.strings("risk_thresholds.block_autonomous", v, false, |l, at, id| {
-                        l.capability(at, id, "block_autonomous names")
-                    });
+                let ids = self.strings(
+                    "risk_thresholds.block_autonomous",
+                    v,
+                    Entries::Any,
+                    |l, at, id| l.capability(at, id, "block_autonomous names"),
+                );
                 p.block_autonomous = ids.into_iter().collect();
             }
             self.closed("risk_thresholds", t, THRESHOLD_KEYS);
@@ -574,7 +602,7 @@ impl Loader<'_> {
                 let kinds = self.strings(
                     "evidence_policy.required_anchor_types",
                     v,
-                    true,
+                    Entries::DistinctNonEmpty,
                     |l, at, k| {
                         let ok = crate::grounding::is_kind(k);
                         if !ok {
@@ -599,26 +627,27 @@ impl Loader<'_> {
                 p.require_grounding = self.strings(
                     "evidence_policy.require_grounding",
                     v,
-                    false,
+                    Entries::Distinct,
                     |l, at, id| l.capability(at, id, "require_grounding names"),
                 );
             }
             self.closed("evidence_policy", e, EVIDENCE_KEYS);
         }
         if let Some(v) = m.get("allowed_destinations") {
-            let patterns = self.strings("allowed_destinations", v, false, |l, at, pattern| {
-                match crate::destination::check_pattern(pattern) {
-                    Ok(_) => true,
-                    Err(e) => {
-                        l.push(
-                            Code::SchemaValidationFailed,
-                            at,
-                            format!("'{pattern}' is not a destination pattern (§4.4.2): {e}"),
-                        );
-                        false
+            let patterns =
+                self.strings("allowed_destinations", v, Entries::Any, |l, at, pattern| {
+                    match crate::destination::check_pattern(pattern) {
+                        Ok(_) => true,
+                        Err(e) => {
+                            l.push(
+                                Code::SchemaValidationFailed,
+                                at,
+                                format!("'{pattern}' is not a destination pattern (§4.4.2): {e}"),
+                            );
+                            false
+                        }
                     }
-                }
-            });
+                });
             if v.is_array() {
                 p.allowed_destinations = Some(patterns);
             }
@@ -682,7 +711,7 @@ impl Loader<'_> {
             }
         }
         if let Some(v) = m.get("workflows") {
-            self.strings("workflows", v, false, |_, _, _| true);
+            self.strings("workflows", v, Entries::Any, |_, _, _| true);
         }
         if let Some(v) = m.get("trust_model_reviewed")
             && !v.is_boolean()

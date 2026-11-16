@@ -321,6 +321,26 @@
       }
     },
     {
+      "name": "block_duplicate",
+      "about": "block_autonomous need not list distinct ids: a repeated one has no further effect",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "risk_thresholds": {
+            "block_autonomous": [
+              "mutate",
+              "mutate"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
       "name": "checkpoint_label_key",
       "about": "checkpoint_policy keys are capability ids or *, not labels",
       "profiles": [
@@ -696,6 +716,32 @@
       }
     },
     {
+      "name": "grounding_duplicate",
+      "about": "require_grounding lists distinct capability ids",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "evidence_policy": {
+            "require_grounding": [
+              "classify",
+              "classify"
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "evidence_policy.require_grounding[1]"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
       "name": "grounding_unknown_capability",
       "about": "require_grounding lists capability ids",
       "profiles": [
@@ -816,6 +862,45 @@
       }
     },
     {
+      "name": "workflows_duplicate",
+      "about": "workflows is informative: a repeated id is not reported",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "workflows": [
+            "a",
+            "a"
+          ]
+        }
+      ],
+      "expect": {
+        "errors": [],
+        "warnings": []
+      }
+    },
+    {
+      "name": "not_i_json",
+      "about": "every member has an exact JSON form (I-JSON): an integer beyond 2^53 is refused, in a vendor member too",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "x-n": 1152921504606846977
+        }
+      ],
+      "expect": {
+        "errors": [
+          {
+            "code": "S303",
+            "profile": "d",
+            "field": "x-n"
+          }
+        ],
+        "warnings": []
+      }
+    },
+    {
       "name": "standard_current",
       "about": "the Standard and ontology the profile is written for",
       "profiles": [
@@ -929,6 +1014,24 @@
             "field": "allowed_destinations[0]"
           }
         ],
+        "warnings": []
+      }
+    },
+    {
+      "name": "destinations_duplicate",
+      "about": "a destination policy may repeat a pattern, to no further effect",
+      "profiles": [
+        {
+          "domain": "d",
+          "version": "1.0.0",
+          "allowed_destinations": [
+            "mailto:*",
+            "mailto:*"
+          ]
+        }
+      ],
+      "expect": {
+        "errors": [],
         "warnings": []
       }
     },

@@ -216,6 +216,27 @@ fn a_snapshot_keeps_the_profiles_and_one_without_them_restores_with_none() {
 }
 
 #[test]
+fn a_run_refuses_a_profile_without_an_exact_json_form() {
+    // The run would save a profile other than the one given: its snapshot
+    // and every record digest need I-JSON (§5.19.4, §5.18.8).
+    let ctx = ctx();
+    let cat = catalog(
+        json!([{"capability": "retrieve", "purpose": "p", "store_as": "r",
+        "input_bindings": {"target": "x"}}]),
+    );
+    let big = json!({"domain": "d", "version": "1.0.0", "x-n": (1u64 << 60) + 1});
+    match Run::start(&ctx, &cat, "w", Map::new(), options(vec![big])) {
+        Err(StartError::Invalid(d)) => {
+            assert_eq!(d[0].code.as_str(), "S303");
+            assert_eq!(d[0].location["field"], "x-n");
+        }
+        other => panic!("{:?}", other.err()),
+    }
+    let exact = json!({"domain": "d", "version": "1.0.0", "x-n": 1u64 << 53});
+    Run::start(&ctx, &cat, "w", Map::new(), options(vec![exact])).unwrap();
+}
+
+#[test]
 fn a_header_that_is_not_supported_refuses_the_start() {
     let ctx = ctx();
     let cat = json!({"w": {"goal": "g", "risk": "low", "steps": [
