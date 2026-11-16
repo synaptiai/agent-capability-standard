@@ -100,7 +100,10 @@ const REPLAY_TITLES: Record<string, string> = {
   'cancel-replay': 'A run cancelled while its mutation is pending',
   'reason-replay': 'An error that says why, retried',
   'response-replay': 'Responses with members this version does not define',
+  'grounding-replay': 'An ungrounded output, sent back for evidence',
+  'citation-replay': 'A citation of a value the step does not bind',
   'audit-replay': 'An audit step whose record was not written',
+  'secret-replay': 'A persist refused for a secret in its data',
 };
 // A link to a numbered section of this page's own Standard (1.0.0's links stay on 1.0.0).
 const sectionLink = (sec: string) => {

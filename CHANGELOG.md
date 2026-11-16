@@ -459,12 +459,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Standard 1.2.0, evidence, grounding and secrets
   ([RFC-0008](spec/RFC-0008-evidence-grounding-and-secrets.md); findings
   ACS-06, ACS-21, ACS-22, ACS-23, ACS-40, ACS-51, ACS-53, ACS-58):
-  - §3.1 defines grounded and inferred outputs, how an output reporting an
-    action is grounded (a `record` anchor), and the evidence available to a
-    producer; §4.1.1 defines `confidence`, `inference_method` and
-    `uncertainty`; §6.5 one evidence anchor (`ref`, `kind`, `timestamp`,
-    `excerpt`, `digest`; kinds with `record` and `x-...`; the `acs:` ref
-    scheme; bare strings and other objects deprecated); §6.6 evidence
+  - §3.1 defines grounded and inferred outputs; §4.1.1 defines
+    `confidence`, `inference_method` and `uncertainty`; §6.5 one evidence
+    anchor (`ref`, `kind`, `timestamp`, `excerpt`, `digest`; kinds with
+    `record` and `x-...`; the `acs:` ref scheme; bare strings and other
+    objects deprecated), the evidence available to a producer, and how an
+    output reporting an action is grounded (a `record` anchor); §6.6 evidence
     records, stores and the `acs.evidence_recorded` notification; §6.7
     secrets in records; §6.3 retention follows the store, and `audit`
     reports its `store`.
@@ -482,8 +482,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     `holdsCredential`; the binding's `grounding`, `seen` and `secrets`
     options.
   - Vectors: `tests/conformance/grounding/check.json` (normative, run in
-    Rust, Python and TypeScript); 22 `grounding_*` runtime fixtures; seven
-    workflow fixtures.
+    Rust, Python and TypeScript); 23 `grounding_*` runtime fixtures and
+    `error_reason_secret_in_data`; seven workflow fixtures.
   - Evidence stores: `EvidenceStoreProtocol`, `EvidenceRecord`, `StoreInfo`,
     a durable `JsonlEvidenceStore` (repairs a torn last line),
     `subscribe()`, `record_capture_failure()`; the runner's

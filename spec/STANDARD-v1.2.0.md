@@ -111,49 +111,16 @@ Every claim MUST be evidence-backed or explicitly marked as inferred. The
 output of a capability is the claim its step or call makes:
 
 - It is **grounded** when its `evidence_anchors` (§4.1.1) holds an evidence
-  anchor (§6.5) to evidence its producer had.
+  anchor to evidence its producer had (§6.5). An output that reports an
+  action its producer performed is grounded by the action's record.
 - It is **marked inferred** when it carries `inference_method` and
   `confidence` (§4.1.1). An output that is not grounded MUST be marked
-  inferred; one that is grounded MAY carry an `inference_method` too.
-- An empty `evidence_anchors` grounds nothing. An item that is not an
-  evidence anchor (a bare string or another object, the deprecated forms of
-  §6.5) is its producer's citation but cannot be checked, and grounds
-  nothing under a grounding policy.
-
-An output that reports an action its producer performed (a checkpoint
-taken, a rollback, a mutation, a message sent, a command run, an audit or
-memory record written) is a claim too: it is grounded by an anchor to the
-evidence of that action, which its producer has because it performed it:
-the action's own record, of kind `record` (for instance
-`{ref: "checkpoint:cp-1", kind: record}` or `{ref: "audit:a-17", kind:
-record}`), or what the action read or wrote (the file it changed).
-
-This Standard grounds an output as a whole; it does not say which anchor
-supports which field.
-
-**Available evidence.** An anchor grounds a claim only if the evidence it
-names was available to the claim's producer: obtained while the step or
-call ran (a tool's result, a file it read), received as input (a value the
-step's bindings pass, §5.3, including the anchors inside it), or put in the
-request a model answered. A host MUST NOT return an anchor it knows its
-producer did not have, such as a model's citation of a stored item the host
-did not put in the model's request; a host that assembles a model's context
-for each request SHOULD check each anchor a model cites against that
-request. An anchor that cites a workflow value uses the `acs:` scheme
-(§6.5), which an executor can check; a host attests the availability of
-other evidence with `evidence_seen` (§5.20).
-
-Outputs an executor builds itself (an `invoke` step's, a quorum's, the
-output of a wait, and the output of a `delegate` step that waits, which it
-composes from the delegation's acceptance and the result event; §5.12,
-§5.13, §5.16) are grounded in the run's own records and are not checked;
-nor is that acceptance, which is not the step's claim.
+  inferred.
+- An empty `evidence_anchors` grounds nothing.
 
 F505 (`PROVENANCE_MISSING`) reports an output that breaks this section.
-Checking is opt-in: a workflow declares a grounding policy (`grounding@1`,
-§5.20), or a host applies one to a run or to the calls it covers. Where no
-policy applies, this section is its producer's obligation, and no
-implementation is required to check it.
+Checking is opt-in (§5.20); where no grounding policy applies, this section
+is its producer's obligation.
 
 ### 3.2 Auditable Transforms
 Every transformation MUST be either:
@@ -239,8 +206,8 @@ producer already knew, with no evidence consulted), `deduction`,
 statistical or learned model), `simulation`, `assumption` (taken as given
 without evidence), or a vendor value: `x-` followed by a lower-case letter
 or digit, then lower-case letters, digits, `_`, `.` or `-`. With
-`confidence`, it marks the output inferred (§3.1). The contracts declare it
-as a string; under a grounding policy (§5.20), an output that relies on
+`confidence`, it marks the output inferred (§3.1); a grounded output MAY
+carry one too. The contracts declare it as a string; under a grounding policy (§5.20), an output that relies on
 being marked inferred MUST use a value of this vocabulary.
 
 **`uncertainty`**, when present, is an `Uncertainty` describing the output's
@@ -2060,7 +2027,7 @@ terminal action (`Completed` or `Failed`). Every action carries:
 
 | Action | The host | Responses |
 |--------|----------|-----------|
-| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§3.1, §5.20); absent, it attests nothing), `Error` |
+| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§5.20, §6.5); absent, it attests nothing), `Error` |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `Checkpoint` (`checkpoint_id`), `Error` (the step fails F501) |
 | `Rollback` | restores `checkpoint_id` | `RolledBack`, `Error` (the run ends F503) |
 | `RequestApproval` | asks `approver`, in `mode`, about `shown`, by `expires_at` when it is not null (§5.14) | `Decision` (`decision_id`, `decision`, `approvers`, `digest`) |
@@ -2419,7 +2386,7 @@ waits (§5.13) is not checked: its `Output` is the delegation's acceptance,
 not its claim, and its result is an output the executor composes; a policy
 that requires `delegate` covers the delegations that do not wait. The
 `Output` MAY carry `evidence_seen`: a list of the `ref`s of the evidence
-the host attests the output's producer had for this answer (§3.1): what it
+the host attests the output's producer had for this answer (§6.5): what it
 put in the request a model answered, the anchors inside the step's inputs,
 and what the step's tool calls returned. It lists nothing the producer did
 not receive for this answer, such as an item of a stored history that the
@@ -2455,12 +2422,16 @@ The executor reads `evidence_anchors`:
    `kinds` (when the policy has them) and, under `attested`, its
    availability is established.
 
-The output passes when at least one anchor counts. Otherwise it MUST be
-marked inferred, with an `inference_method` of §4.1.1's vocabulary and a
+The output passes when at least one anchor counts: this Standard grounds an
+output as a whole, and does not say which anchor supports which field.
+Otherwise it MUST be marked inferred, with an `inference_method` of §4.1.1's vocabulary and a
 `confidence` from 0 to 1, or the step fails: F505. F505 is not retried
 (§5.2); a failure mode can fire on it (§5.12).
 
-Outputs the executor builds itself are not checked (§3.1). With
+Outputs the executor builds itself (an `invoke` step's, a quorum's, the
+output of a wait, and the result of a `delegate` step that waits; §5.12,
+§5.13, §5.16) are grounded in the run's own records and are not checked.
+With
 `grounding@1` declared by the workflow a completed `invoke` step belongs
 to, the step's `evidence_anchors` are the anchors of the outputs its nested
 run stored, in the order of its steps, each `ref` once, and without `acs:`
@@ -2679,15 +2650,15 @@ capability output's `evidence_anchors` (§4.1.1), of a canonical event's
 type, `event_schema.yaml#/types/Anchor`, which `world_state_schema.yaml`
 repeats.
 
-| Member | Required | Description |
-|--------|----------|-------------|
-| `ref` | Yes | Where the evidence is: a non-empty string |
-| `kind` | Yes | What kind of evidence it is (below) |
-| `timestamp` | No | ISO-8601 time at which the producer read or observed it |
-| `excerpt` | No | A short quotation of it, as the producer read it; never a secret (§6.7) |
-| `digest` | No | `sha256:` and the 64 lower-case hexadecimal digits of the SHA-256 of its content as the producer read it: the bytes `ref` names or, for a JSON value, its canonical JSON (RFC 8785) in UTF-8 |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ref` | string | Yes | Where the evidence is: a non-empty string |
+| `kind` | string | Yes | What kind of evidence it is (below) |
+| `timestamp` | string | No | ISO-8601 time at which the producer read or observed it |
+| `excerpt` | string | No | A short quotation of it, as the producer read it; never a secret (§6.7) |
+| `digest` | string | No | `sha256:` and the 64 lower-case hexadecimal digits of the SHA-256 of its content as the producer read it: the bytes `ref` names or, for a JSON value, its canonical JSON (RFC 8785) in UTF-8 |
 
-Other members MAY appear; a producer's own SHOULD start with `x-`.
+Other fields MAY appear; a producer's own SHOULD start with `x-`.
 
 **Kinds.** `file`; `url`; `tool` (the result of a tool call); `log`;
 `sensor`; `human_note` (something a person wrote); `api` (a response of a
@@ -2706,11 +2677,25 @@ a reference body as §5.3 writes it without `${` and `}` (for instance
 that body would resolve to in the run, and its kind MUST be `record`.
 Outside a workflow, `acs:<argument>` names an argument of the call (§5.20).
 
+**Available evidence.** An anchor grounds a claim only if the evidence it
+names was available to the claim's producer (§3.1): obtained while the step
+or call ran (a tool's result, a file it read), received as input (a value
+the step's bindings pass, §5.3, including the anchors inside it), or put in
+the request a model answered. A host MUST NOT return an anchor it knows its
+producer did not have, such as a model's citation of a stored item the host
+did not put in the model's request; a host that assembles a model's context
+for each request SHOULD check each anchor a model cites against that
+request. An `acs:` anchor names a workflow value, which an executor can
+check; a host attests the availability of other evidence with
+`evidence_seen` (§5.20).
+
 **Anchors of actions.** An output that reports an action its producer
-performed is grounded by an anchor to the action's record, of kind
-`record`, with a ref its producer documents (for instance
+performed (a checkpoint taken, a rollback, a mutation, a message sent, a
+command run, an audit or memory record written) has the evidence of that
+action because it performed it. It is grounded by an anchor to the action's
+record, of kind `record`, with a ref its producer documents (for instance
 `checkpoint:<checkpoint_id>`, `audit:<audit_id>`, `mutation:<target>`), or
-by an anchor to what the action read or wrote (§3.1).
+by an anchor to what the action read or wrote (the file it changed).
 
 **The legacy forms.** Before 1.2 an item of `evidence_anchors` was not
 specified: producers wrote bare strings, and objects of their own shape
@@ -2729,11 +2714,20 @@ event's or a record's `anchors` are evidence anchors.
 ### 6.6 Evidence Records and Stores
 
 An **evidence record** is an evidence anchor kept with the context it was
-recorded in: `record_id` (unique within its store), `anchor` and
-`recorded_at` (ISO-8601), and, where they apply, the run's `run_id`,
-`frame` and `step` (§5.19), the `capability`, and a call's `tool` and
-`call_id` (§5.18). `schemas/interop/evidence.schema.json` defines it
-(`EvidenceRecord`).
+recorded in. `schemas/interop/evidence.schema.json` defines it
+(`EvidenceRecord`); the optional fields are present where they apply.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `record_id` | string | Yes | Unique within its store |
+| `anchor` | object | Yes | The evidence anchor kept (§6.5) |
+| `recorded_at` | string | Yes | ISO-8601 time at which the store kept it |
+| `run_id` | string | No | The run (§5.19), or for a call the safety layer's scope (§5.18) |
+| `frame` | array of strings | No | For a step, the workflows of its nested runs, root first |
+| `step` | integer | No | For a step, its index in the last workflow of `frame` |
+| `capability` | string | No | The capability whose output cited the anchor |
+| `tool` | string | No | For a call, the name the host offers the tool under |
+| `call_id` | string | No | For a call, the host's identifier of the call |
 
 An **evidence store** keeps evidence records for later reading. This
 Standard requires none. An implementation that offers one:
@@ -3873,8 +3867,8 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 
 | Area | 1.1.0 text | 1.2.0 |
 |------|------------|-------|
-| Grounded and inferred outputs | "Every claim MUST be evidence-backed or explicitly marked as inferred" | An output is grounded by an anchor to evidence its producer had, or marked inferred by `inference_method` and `confidence`; an empty list grounds nothing; an output reporting an action is grounded by a `record` anchor to it (§3.1) |
-| Available evidence | Not stated | An anchor grounds a claim only if its producer had the evidence; a host MUST NOT return an anchor it knows its producer did not have (§3.1) |
+| Grounded and inferred outputs | "Every claim MUST be evidence-backed or explicitly marked as inferred" | An output is grounded by an anchor to evidence its producer had, or marked inferred by `inference_method` and `confidence`; an empty list grounds nothing; an output reporting an action is grounded by a `record` anchor to it (§3.1, §6.5) |
+| Available evidence | Not stated | An anchor grounds a claim only if its producer had the evidence; a host MUST NOT return an anchor it knows its producer did not have (§6.5) |
 | `confidence` | Undefined; `meta.principles` said every capability returns one | A self-reported probability that the output's claim is correct, with no threshold in the Standard; the principle matches the contracts (§4.1.1) |
 | `raw` of a canonical event | "Original unmodified data" | Unmodified except that each secret is replaced; `redactions` may list where (§6.2, §6.7) |
 | `retention_policy` | "How long to retain" | Applies to the store the records are written to; a session-scoped store cannot keep them longer (§6.3) |

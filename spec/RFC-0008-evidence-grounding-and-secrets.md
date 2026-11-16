@@ -116,9 +116,9 @@ grounds nothing.
 ### 3) Grounded, inferred, and the evidence a producer had (ACS-21, ACS-22)
 
 §3.1: an output is grounded when it holds an anchor to evidence its
-producer had (obtained while it ran, received as input, or in the request a
-model answered); otherwise it MUST carry `inference_method` and
-`confidence`. An output that reports an action its producer performed is a
+producer had; otherwise it MUST carry `inference_method` and `confidence`.
+§6.5 says what a producer had: what it obtained while it ran, received as
+input, or was given in the request a model answered. An output that reports an action its producer performed is a
 claim too, grounded by a `record` anchor to the action's record
 (`checkpoint:<id>`, `audit:<id>`) or by what the action read or wrote; the
 reference producers emit one. A host MUST NOT return an anchor it knows its

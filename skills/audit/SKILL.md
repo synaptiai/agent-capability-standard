@@ -127,19 +127,17 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Document transformations applied
    - List dependencies between artifacts
 
-5) **Ground claims**: Attach evidence for all audit entries (STANDARD v1.2 §6.5)
-   - Each an evidence anchor `{ref, kind}`: `{ref: "file:src/app.py:45", kind: file}`, `{ref: "tool:git:<commit>", kind: tool}`
-   - Cite command outputs by reference or by SHA-256 digest; never copy an output that may hold a credential into the record (§6.7)
-   - The output's own anchor is the record written: `{ref: "audit:<audit_id>", kind: record}` (§3.1)
+5) **Ground claims**: Attach evidence anchors to all audit entries (STANDARD v1.2 §6.5)
+   - `{ref: "file:src/app.py:45", kind: file}`, `{ref: "tool:git:<commit>", kind: tool}`; the output's own is the record written, `{ref: "audit:<audit_id>", kind: record}` (§3.1)
+   - Cite command outputs by reference or digest, never by copying them (§6.7)
 
 6) **Write the record (append-only)**: Persist the audit record before returning
    - Build one compact JSON line, the output's `record` (Field Definitions): an action record of this skill's own (STANDARD v1.2 §6.4). Redact credentials and PII first, and never copy a member of `event` to the line's top level: an event shaped as a record stays under `details.event`
-   - Append it with Bash as a literal in that one command, `printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` (after `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"`), never through an intermediate file, so that the skill's command hook sees what is written; the record lands in the same project `.claude/` directory the plugin's hooks use rather than under whatever the working directory is; refuse if the file is a symlink, and never rewrite, truncate or reorder existing lines
-   - The skill's PreToolUse command hook blocks an append whose record holds what looks like a credential (`F504 CONSTRAINT_VIOLATED:`, STANDARD v1.2 §6.7, §5.18.10): rewrite the line to cite the value by reference or digest, then append again
+   - Append it with Bash as a literal (`printf '%s\n' '<json>' >>`, no intermediate file, so the skill's hook sees it) to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`, after `mkdir -p` of its directory: the project's `.claude/`, which the plugin's hooks use; refuse a symlink, and never rewrite, truncate or reorder lines
    - Do not write to `.claude/audit.log`: the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself: cite earlier lines (the calls being audited) as evidence, not these
    - The plugin's PreToolUse hook treats this append as a `mutate` call, since a `>>` redirect writes a file: it is blocked without a valid checkpoint (F501), uses that checkpoint up, and asks for approval (F502). If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
 
-7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line, and `record` is that line; `store` says where it went: `{name: ".claude/audit/records.jsonl", durability: durable}` (a file in the project, kept until removed by hand: no `retention` of its own, §6.3, §6.6)
+7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line, `record` is that line, and `store` is where it went (Field Definitions)
 
 ## Output Contract
 
@@ -186,7 +184,7 @@ assumptions: []
 |-------|------|-------------|
 | `recorded` | boolean | Whether the record was appended to `.claude/audit/records.jsonl` (false when the write was blocked or failed) |
 | `record` | object | The action record of step 6: `action_id` (the `audit_id`), `timestamp`, `actor: agent`, `intent` (the event's `intent`, else its `event_type`, when a string; else `audit`), `status: executed`, `capability: audit`, `details` (`event`, `context` and `retention` when given, and the collected `audit_record`, `changes` and `provenance`), `recorded_by: {"name": "audit skill"}`, then `prev_hmac` (the `hmac` of the file's last line, empty for the first) and `hmac` (HMAC-SHA-256, as lowercase hex, of the line without `hmac` as `jq -c` prints it, with `openssl dgst -sha256 -hmac` under `AUDIT_HMAC_KEY`, else the default key the plugin's hook and `tools/verify_audit_log.py` use: `grounded-agency-audit-` then the short host name, `hostname -s`, or `default` when there is none). When the last line has no readable `hmac` (a line written before Standard 1.2, which does not verify), do not chain onto it: move the file aside (`records.<UTC time>.jsonl`, same directory) and start a new one, whose first line has `prev_hmac` empty. Each member of `event` stays under `details.event`: it is what the step reported, and cannot claim another writer, an actor, an approval or a place in the chain |
-| `store` | object | Where the record was written: the store's `name`, its `durability` (`memory`, `session` or `durable`; a store that does not outlive the session is never reported `durable`) and the `retention` it applies, so a workflow can stop on `${a.store.durability} != 'durable'` (STANDARD v1.2 §6.3, §6.6) |
+| `store` | object | Where the record was written: the store's `name`, its `durability` (`memory`, `session` or `durable`; a store that does not outlive the session is never reported `durable`) and the `retention` it applies, so a workflow can stop on `${a.store.durability} != 'durable'` (STANDARD v1.2 §6.3, §6.6). This skill's is `{name: ".claude/audit/records.jsonl", durability: durable}`, a file in the project kept until removed by hand, with no `retention` |
 | `audit_id` | string | Unique identifier for this audit record |
 | `timestamp` | string | ISO 8601 date-time the audit record was generated |
 | `audit_record.actor` | string | Who performed the actions |
@@ -373,6 +371,7 @@ Apply the following verification patterns:
 - Include failed actions, not just successes
 - Redact sensitive information (credentials, PII) from audit output
 - Store audit records append-only: only ever append to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"`; never edit or delete earlier lines, and never write to the hook-maintained `.claude/audit.log`
+- No credential in a record (STANDARD v1.2 §6.7): the skill's PreToolUse command hook blocks an append whose line holds what looks like one (`F504 CONSTRAINT_VIOLATED:`, §5.18.10); rewrite the line to cite the value by reference or digest, then append again
 
 ## Composition Patterns
 

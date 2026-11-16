@@ -28,7 +28,10 @@ const REPLAY_TITLES: Record<string, string> = {
   'cancel-replay': 'A run cancelled while its mutation is pending, from §5.19.5',
   'reason-replay': 'An error that says why, retried, from §5.19.7',
   'response-replay': 'Responses with members this version does not define, from §5.19.1',
+  'grounding-replay': 'An ungrounded output, sent back for evidence, from §5.20',
+  'citation-replay': 'A citation of a value the step does not bind, from §5.20',
   'audit-replay': 'An audit step whose record was not written, from §6.4',
+  'secret-replay': 'A persist refused for a secret in its data, from §6.7',
 };
 
 function replayBlock(slot: string): string {
@@ -125,6 +128,8 @@ export function specLateBlocks(): string[] {
     replayBlock('wake-replay'),
     replayBlock('cancel-replay'),
     replayBlock('reason-replay'),
+    replayBlock('grounding-replay'),
+    replayBlock('citation-replay'),
   ];
 }
 
@@ -138,6 +143,7 @@ export function specTailBlocks(): string[] {
   const digests = T.digestVectors(text, source);
   return [
     replayBlock('audit-replay'),
+    replayBlock('secret-replay'),
     figure(
       'Merge thresholds, from §7.3',
       T.thresholdsCaption(),

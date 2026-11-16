@@ -574,6 +574,45 @@ what it returned before, by ref prefix, with the warning.
 `get_for_capability_output()` still returns bare refs, the deprecated form,
 and warns; use `evidence_anchors_for()`.
 
+### What an Anchor Keeps
+
+A tool-output anchor's metadata holds the tool name and whether there was a response. A command anchor holds the exit code. A file anchor holds the path. An anchor for an unclassified tool is associated with no capability.
+
+The tool's input, and a Bash command's text, are not kept: an input can hold a credential (a token in a command or a header), and anchors are stored and exported (`EvidenceStore.to_list()`). To keep them, opt in:
+
+```python
+adapter = GroundedAgentAdapter(GroundedAgentConfig(evidence_include_tool_input=True))
+```
+
+The same switch exists where anchors are built directly: `EvidenceAnchor.from_tool_output(..., include_tool_input=True)`, `create_evidence_collector(store, mapper, include_tool_input=True)` and `DiscoveryPipeline(..., evidence_include_tool_input=True)`, which then keeps the task description. `EvidenceAnchor.from_command(None, exit_code)` records a command without its text. With the switch on, inputs are kept redacted, and in a metadata object over 1 KB the largest values are replaced with `[truncated]`.
+
+Evidence capture is best-effort by default
+([STANDARD v1.2 §6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)): an
+anchor that cannot be stored is logged as a warning, and the call goes on. A
+host that requires the capture builds the hook with
+`create_evidence_collector(store, mapper, required=True)`: a call whose
+evidence was not recorded is then reported to the model in the hook's result
+(`R402 EXECUTION_FAILED: the call ran, but its evidence was not recorded
+(not_recorded): ...`), logged at error level and handed to the store's
+`record_capture_failure(tool_use_id, error)` when it has one. Either way no
+capture fails silently.
+
+## Evidence Stores, Secrets and Grounding
+
+What happens to a call's evidence, from the hook to the store's readers:
+
+```mermaid
+---
+title: Where a tool call's evidence goes
+---
+flowchart TB
+  accDescr: For each covered tool call the evidence collector builds an anchor, with a digest of the response unless the response holds a secret. The store passes the anchor through its redactor, so that each secret becomes [REDACTED], and keeps a frozen record under a new id. Its listeners then get one acs.evidence_recorded payload, and export gives every record as JSON Lines.
+  call["A covered tool call"] --> col["The collector: an anchor, with a digest unless the response holds a secret"]
+  col --> red["The store's redactor: each secret becomes [REDACTED]"]
+  red --> rec["A frozen record under a new id"]
+  rec --> out["Listeners get one acs.evidence_recorded payload; export() gives JSON Lines"]
+```
+
 ### Evidence Stores
 
 Every store implements `EvidenceStoreProtocol` (§6.6): `append` and
@@ -601,18 +640,6 @@ listener `subscribe`d to a store receives one `acs.evidence_recorded`
 payload per append (§6.6: record ids, each anchor's `ref`, `kind` and
 `digest`, never an excerpt), called after the append, outside the store's
 lock; a listener that raises is logged and does not reach the others.
-
-### What an Anchor Keeps
-
-A tool-output anchor's metadata holds the tool name and whether there was a response. A command anchor holds the exit code. A file anchor holds the path. An anchor for an unclassified tool is associated with no capability.
-
-The tool's input, and a Bash command's text, are not kept: an input can hold a credential (a token in a command or a header), and anchors are stored and exported (`EvidenceStore.to_list()`). To keep them, opt in:
-
-```python
-adapter = GroundedAgentAdapter(GroundedAgentConfig(evidence_include_tool_input=True))
-```
-
-The same switch exists where anchors are built directly: `EvidenceAnchor.from_tool_output(..., include_tool_input=True)`, `create_evidence_collector(store, mapper, include_tool_input=True)` and `DiscoveryPipeline(..., evidence_include_tool_input=True)`, which then keeps the task description. `EvidenceAnchor.from_command(None, exit_code)` records a command without its text. With the switch on, inputs are kept redacted, and in a metadata object over 1 KB the largest values are replaced with `[truncated]`.
 
 ### Secrets
 
@@ -645,17 +672,6 @@ serves (their `structuredContent`, else the capability output their text
 carries, §5.18.9); Claude Code's own tools return no capability output.
 `check_grounding_output(output, policy, bound_refs=..., evidence_seen=...)`
 is the check of one output.
-
-Evidence capture is best-effort by default
-([STANDARD v1.2 §6.4](../../spec/STANDARD-v1.2.0.md#64-audit-records)): an
-anchor that cannot be stored is logged as a warning, and the call goes on. A
-host that requires the capture builds the hook with
-`create_evidence_collector(store, mapper, required=True)`: a call whose
-evidence was not recorded is then reported to the model in the hook's result
-(`R402 EXECUTION_FAILED: the call ran, but its evidence was not recorded
-(not_recorded): ...`), logged at error level and handed to the store's
-`record_capture_failure(tool_use_id, error)` when it has one. Either way no
-capture fails silently.
 
 ## Multi-Agent Coordination
 

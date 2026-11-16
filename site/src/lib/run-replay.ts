@@ -28,7 +28,10 @@ export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
   'cancel-replay': 'cancel_after_checkpoint_names_it',
   'reason-replay': 'error_reason_with_retry',
   'response-replay': 'response_extra_members_ignored',
+  'grounding-replay': 'grounding_failure_mode_goes_back',
+  'citation-replay': 'grounding_acs_sibling_unbound',
   'audit-replay': 'audit_require_record_fails',
+  'secret-replay': 'error_reason_secret_in_data',
 };
 
 export type ReplayStatus = 'ran' | 'deferred' | 'skipped' | 'not-reached';

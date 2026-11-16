@@ -90,8 +90,11 @@ export function fieldGroupsCaption(rows: FieldRow[], what: string): string {
  */
 export const TABLE_FIGURES: Readonly<Record<string, { section: string; name: string; what: string }>> = {
   'table-4.1': { section: '4.1 ', name: 'Capability fields', what: 'A capability' },
+  'table-5.1': { section: '5.1 ', name: 'Fields every workflow defines', what: 'The part every workflow defines' },
   'table-5.18.1': { section: '5.18.1 ', name: 'Tool binding fields', what: 'A tool binding' },
   'table-6.3': { section: '6.3 ', name: 'World-state fields', what: 'A world state snapshot' },
+  'table-6.5': { section: '6.5 ', name: 'Evidence anchor fields', what: 'An evidence anchor' },
+  'table-6.6': { section: '6.6 ', name: 'Evidence record fields', what: 'An evidence record' },
 };
 
 // ---------------------------------------------- §5.18 code tables

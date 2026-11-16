@@ -1,8 +1,9 @@
 """Runtime fixtures of workstream S4 (evidence, grounding and secrets; RFC-0008):
 the grounding check of host outputs (STANDARD v1.2 §5.20, F505).
 
-Every fixture's name starts with `grounding_` (§10.3). A fixture's host
-outputs are scripted inputs to the executor: outside these fixtures no
+Every fixture's name starts with `grounding_` (§10.3), but
+`error_reason_secret_in_data`, the refusal of §6.7 (reason `secret_in_data`,
+§5.19.7). A fixture's host outputs are scripted inputs to the executor: outside these fixtures no
 grounding policy applies, and the `evidence_anchors: []` of other fixtures
 is not a claim of a conforming producer.
 
@@ -12,7 +13,7 @@ runtime_fixtures.helpers. Executor prose (a `Failed` action's `message`) is
 not pinned.
 """
 
-from runtime_fixtures.helpers import inv, out, st, wf
+from runtime_fixtures.helpers import err, inv, out, st, wf
 
 FILE_A = {"ref": "file:a.txt", "kind": "file"}
 FILE_B = {"ref": "file:b.txt", "kind": "file"}
@@ -72,6 +73,7 @@ def register(add):
     _attestation(add)
     _exemptions(add)
     _nested(add)
+    _secrets(add)
 
 
 def _outputs(add):
@@ -173,7 +175,52 @@ def _outputs(add):
     )
 
 
+def _sent_back(add):
+    """F505 on a later step fires its failure mode, which goes back to the
+    step that gathers the evidence (§5.12); drawn on the Standard's page."""
+    cite = {"ref": "acs:r.data", "kind": "record"}
+    add(
+        "grounding_failure_mode_goes_back",
+        "An ungrounded transform output fails with F505, and its failure mode "
+        "goes back to the retrieve step; the second transform output cites the "
+        "value it binds (acs:r.data) and is grounded (§5.12, §5.20).",
+        {
+            "w": grounded(
+                TRANSFORM,
+                [
+                    retrieve(),
+                    st(
+                        "transform",
+                        "t",
+                        input_bindings={
+                            "input": "${r.data: object}",
+                            "target_format": "json",
+                        },
+                        failure_modes=[
+                            {
+                                "condition": "the output is not grounded",
+                                "on_error": "F505",
+                                "action": "request_more_context",
+                                "recovery": {"goto_step": "r", "max_loops": 1},
+                            }
+                        ],
+                    ),
+                ],
+            )
+        },
+        [
+            {"expect": inv("retrieve", step=0), "respond": found([FILE_A])},
+            {"expect": inv("transform", step=1), "respond": transformed([])},
+            {"expect": inv("retrieve", step=0), "respond": found([FILE_A, FILE_B])},
+            {"expect": inv("transform", step=1), "respond": transformed([cite])},
+        ],
+        {"kind": "Completed", "outcome": "completed"},
+        ["step_failed", "failure_mode_fired", "loop", "grounding"],
+    )
+
+
 def _citations(add):
+    _sent_back(add)
     catalog, script = reads(
         "${r.data: object}", TRANSFORM, {"ref": "acs:r.data.items[0]", "kind": "record"}
     )
@@ -192,7 +239,7 @@ def _citations(add):
     add(
         "grounding_acs_unbound",
         "An acs: citation of a value the step does not bind: its producer did not "
-        "have it (§3.1), F505.",
+        "have it (§6.5), F505.",
         catalog,
         script,
         {"kind": "Failed", "code": "F505", "step": 1},
@@ -229,7 +276,7 @@ def _attestation(add):
     add(
         "grounding_evidence_seen_mismatch",
         "An Output whose evidence_seen does not list an anchor: its producer did "
-        "not have that evidence (§3.1), F505.",
+        "not have that evidence (§6.5), F505.",
         {"w": grounded(RETRIEVE, [retrieve()])},
         [
             {
@@ -498,4 +545,34 @@ def _nested(add):
         parent(EMPTY_CHILD, requires=EXT, policy=RETRIEVE),
         EMPTY_CHILD_SCRIPT,
         {"kind": "Completed", "outcome": "completed"},
+    )
+
+
+def _secrets(add):
+    add(
+        "error_reason_secret_in_data",
+        "A host that recognises a secret in the data a persist step would store "
+        "refuses the step, not redacts it: an Error with reason secret_in_data, "
+        "and the step fails with R402 (§5.19.7, §6.7).",
+        {
+            "w": wf(
+                [
+                    st("generate", "g", input_bindings={"specification": "s"}),
+                    st("persist", "p", input_bindings={"data": "${g.content: string}"}),
+                ],
+                spec_version="1.2",
+            )
+        },
+        [
+            {
+                "expect": inv("generate", step=0),
+                "respond": out(content="c", confidence=1, evidence_anchors=[]),
+            },
+            {
+                "expect": inv("persist", step=1),
+                "respond": err("R402", reason="secret_in_data"),
+            },
+        ],
+        {"kind": "Failed", "code": "R402", "reason": "secret_in_data"},
+        run_record={"reason_code": "secret_in_data", "code": "R402"},
     )

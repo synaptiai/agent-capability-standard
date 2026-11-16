@@ -961,7 +961,7 @@ findings:
   verified: 'Read the cited lines of the Standard and of the two SA pages. Listed every line of spec/STANDARD-v1.1.0.md
     that contains ''anchor'' (58, 65, 1126, 1138): none relates an anchor to what a step read.'
   status: fixed
-  resolution: 'Standard 1.2.0 §3.1 (Available evidence) and §5.20, accepted from RFC-0008: an anchor grounds a
+  resolution: 'Standard 1.2.0 §3.1, §6.5 (Available evidence) and §5.20, accepted from RFC-0008: an anchor grounds a
     claim only if its producer had the evidence, and a host MUST NOT return one it knows its producer
     did not have. Under a grounding policy the executor requires an `acs:` citation to be of kind
     `record` and covered by a reference the step''s `input_bindings` make (same root, the bound path a
