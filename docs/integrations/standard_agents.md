@@ -819,7 +819,7 @@ capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 27
+the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 28
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). The one fixture it skips needs a call of an unbound
@@ -1080,8 +1080,8 @@ Three things a consumer of such a package cannot yet do:
   effects, endpoints and required parent hooks, and says nothing about its
   tools.
 - **Claim conformance for the agent.** The safety-layer class of Standard
-  1.2.0, which the binding meets except the checks its statement lists as not
-  applied ([Conformance](#conformance-class-sl)), covers its tools' calls.
+  1.2.0, which the binding claims ([Conformance](#conformance-class-sl)),
+  covers its tools' calls.
   Nothing in either standard says what it means for an agent, or a runtime,
   to be grounded.
 - **Rely on a version pair.** The specification is 0.2.0; the types package

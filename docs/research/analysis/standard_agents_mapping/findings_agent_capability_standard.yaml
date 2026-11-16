@@ -43,8 +43,10 @@ findings:
     any §5.18.10 check it does not apply; both reference layers apply every
     row (the secret checks and redaction of §6.7, the destination policies of §4.4.2, and the output
     contract of each result they receive as a capability output, which in the Python adapter is a
-    result of a tool create_grounded_mcp_server serves, R402) and claim the class. Fixtures:
-    tests/conformance/bindings/ (33) and tests/conformance/calls/ (27, four of them on refused
+    result of an MCP tool bound to a capability, R402: a tool create_grounded_mcp_server serves
+    checks its own, and PostToolUse checks another server''s) and claim the class. A call whose
+    output is refused has failed: it takes no checkpoint and is no prerequisite that ran. Fixtures:
+    tests/conformance/bindings/ (33) and tests/conformance/calls/ (28, five of them on refused
     outputs), from scripts/gen_call_fixtures.py, with the statements in
     tests/conformance/calls/statements/; the Python adapter runs them in tests/test_binding_fixtures.py
     and tests/test_call_fixtures.py, the Standard Agents binding in
@@ -1005,8 +1007,9 @@ findings:
     action is grounded by a `record` anchor. Implemented by `core/src/grounding.rs` (`check`) and
     `core/src/exec/machine.rs`, `validate/grounding.rs` (V106 in a 1.2 target, W604 otherwise, S303,
     S304, V101), `grounded_agency/grounding.py`, the SDK adapter''s `GroundedAgentConfig.grounding`
-    (applied to the outputs of the MCP tools `create_grounded_mcp_server` serves; Claude Code''s own
-    tools return none, calls its statement names in `calls_without_output`), the binding''s `grounding`
+    (applied to the outputs of the MCP tools bound to a capability, those `create_grounded_mcp_server`
+    serves and other servers'' at PostToolUse; Claude Code''s own tools return none, calls its
+    statement names in `calls_without_output`), the binding''s `grounding`
     option, and `record`
     anchors on the reference producers'' action outputs (the SDK''s checkpoint and coordination step
     outputs, `tests/test_coordination.py`); pinned by `tests/conformance/grounding/check.json`
@@ -1954,11 +1957,13 @@ findings:
     consumer, a host answering an executor''s capability call included.
     grounded_agency/capabilities/output.py (`encode_capability_output`, `decode_capability_output`) and
     packages/acs-core/src/output.ts (`encodeCapabilityOutput`, `decodeCapabilityOutput`); `groundedTool`
-    returns the encoded text, and the Python adapter checks the result of each tool
-    `create_grounded_mcp_server` serves by the same rule (`tool_result_output`: the text of its one text
-    item, which is what the SDK''s server delivers to the session; `GroundedAgentAdapter.check_call_result`,
-    R402, the output-contract row of §5.18.10; call fixtures output_breaks_contract, output_not_i_json,
-    nested_output_breaks_contract and refused_output_uses_checkpoint).
+    returns the encoded text, and the Python adapter checks the result of each MCP tool bound to a
+    capability by the same rule (`tool_result_output`: the text of its one text item, which is what the
+    session reads; `GroundedAgentAdapter.check_call_result`, R402, the output-contract row of §5.18.10),
+    a tool `create_grounded_mcp_server` serves as it returns and another server''s at PostToolUse, which
+    replaces a refused result; call fixtures output_breaks_contract, output_not_i_json,
+    nested_output_breaks_contract, refused_output_uses_checkpoint and
+    refused_checkpoint_output_takes_none, played on both routes.
     docs/guides/RUNNING_WORKFLOWS.md and docs/integrations/standard_agents.md
     tell a host to decode before it answers. The I-JSON limits apply to the text, so the two codecs
     agree: both pass tests/conformance/output/vectors.json. Tests: tests/test_capability_output.py,

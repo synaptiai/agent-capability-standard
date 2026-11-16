@@ -2507,7 +2507,7 @@ The edge types (§4.3) apply to calls as follows:
 - **Taking one.** A checkpoint is taken in the scope by a call classified
   `checkpoint` that completed successfully, or by the host's own checkpoint
   operation, which the layer records in the scope. A call that failed takes
-  none. A call that only leads to one, such as loading a skill's
+  none, a call whose output the layer refused included (§5.18.10). A call that only leads to one, such as loading a skill's
   instructions, takes none: the call that saves the state does. The layer
   counts the call; it does not verify what the restore point holds.
 - **One per call.** A checkpoint authorises one call whose effective
@@ -2683,7 +2683,11 @@ model) MAY add a refusal; it never satisfies or replaces a required check.
 
 The output-contract row applies to each covered call's result that the
 layer receives as a capability output: validated structure, or text as
-§5.18.9 says, checked as §5.18.9's consumer checks the output. The layer
+§5.18.9 says, checked as §5.18.9's consumer checks the output. A call
+whose output the layer refuses (R402 here; F505 under a grounding policy,
+§5.20; F504 under a minimum confidence, §5.21.3) has run and failed: it
+used the checkpoint and the decision it held (§5.18.6, §5.18.7), takes no
+checkpoint (§5.18.6), and is not a prerequisite that ran (§5.18.5). The layer
 checks the output in the form its host delivers the result: a member its
 host drops before the model or the caller reads the result, such as
 structure beside a text the host passes on alone, is not the output. A
@@ -4217,7 +4221,8 @@ check them skips those fixtures and says so in its statement.
 present. Its `bindings` are records under its `ontology`; a tool not listed
 is unbound. A bound tool succeeds and returns what its output contract
 requires, or what the call `returns`; a call of a tool classified
-`checkpoint` that runs takes a checkpoint. Its `sequence` is a list of
+`checkpoint` that runs, and whose output is not refused, takes a
+checkpoint. Its `sequence` is a list of
 calls and events:
 
 - A call names `call` (the tool), `args` (default `{}`), optionally

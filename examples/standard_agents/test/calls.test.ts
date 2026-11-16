@@ -225,7 +225,7 @@ describe("the binding's conformance statement", () => {
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(27);
+    expect(CASES).toHaveLength(28);
   });
 
   it.for(CASES)('%s', async ([_name, fixture], { skip }) => {

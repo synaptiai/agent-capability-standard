@@ -6,6 +6,7 @@ tested with a test ontology that adds `observe -> generate`."""
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -60,13 +61,53 @@ async def test_a_missing_prerequisite_is_v102_until_it_runs(
 
     assert await pre({"tool_name": "mcp__s__look", "tool_input": {}}, "o1", None) == {}
     await post(
-        {"tool_name": "mcp__s__look", "tool_input": {}, "tool_response": {}}, "o1", None
+        {
+            "tool_name": "mcp__s__look",
+            "tool_input": {},
+            "tool_response": _observed(adapter),
+        },
+        "o1",
+        None,
     )
 
     assert (
         await pre({"tool_name": "mcp__s__write_text", "tool_input": {}}, "g2", None)
         == {}
     )
+
+
+def _observed(adapter: GroundedAgentAdapter) -> list[dict[str, str]]:
+    """An observe output with every field its contract requires, as the
+    content items Claude Code passes to PostToolUse for an MCP tool."""
+    node = adapter.registry.get_capability("observe")
+    assert node is not None
+    output = {
+        field: {"evidence_anchors": [], "confidence": 1}.get(field, True)
+        for field in node.output_schema.get("required") or []
+    }
+    return [{"type": "text", "text": json.dumps(output)}]
+
+
+@pytest.mark.asyncio
+async def test_a_call_whose_output_is_refused_does_not_count(
+    adapter: GroundedAgentAdapter,
+) -> None:
+    """A call whose output the layer refuses (R402) has failed: it is not a
+    prerequisite that ran (sections 5.18.5, 5.18.10)."""
+    pre = adapter._make_pretooluse_safety_hook()
+    post = adapter._make_mutation_consumer()
+    assert await pre({"tool_name": "mcp__s__look", "tool_input": {}}, "o1", None) == {}
+    replaced = await post(
+        {"tool_name": "mcp__s__look", "tool_input": {}, "tool_response": {}},
+        "o1",
+        None,
+    )
+    (item,) = replaced["hookSpecificOutput"]["updatedMCPToolOutput"]
+    assert item["text"].startswith("R402 ")
+    refused = await pre(
+        {"tool_name": "mcp__s__write_text", "tool_input": {}}, "g1", None
+    )
+    assert refused["hookSpecificOutput"]["permissionDecisionReason"].startswith("V102 ")
 
 
 @pytest.mark.asyncio

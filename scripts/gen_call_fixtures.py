@@ -734,6 +734,18 @@ calls(
         call("write", RUN, B, approve=ALICE),
     ],
 )
+calls(
+    "refused_checkpoint_output_takes_none",
+    "A call of a checkpoint tool whose output is refused has failed: it takes no checkpoint (section 5.18.6), so the next call that requires one is F501 and a rollback is F503, until a checkpoint call whose output passes.",
+    [
+        call("save", refuse_output("R402"), returns="saved"),
+        call("write", refuse("F501"), A, approve=ALICE),
+        call("undo", refuse("F503")),
+        call("save", RUN),
+        call("write", RUN, A, approve=ALICE),
+        call("undo", RUN),
+    ],
+)
 
 
 # ---------------------------------------------------------------------------

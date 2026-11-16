@@ -23,6 +23,7 @@ Branch `round3/a`, worktree `/home/user/acs-a`.
   accurate resolution
 - [x] Full F6 set green (including check-axe over the whole site), commit
 - [x] Review round 1: eleven issues verified and fixed, full F6 set, commit
+- [x] Review round 2: seven issues verified and fixed, full F6 set, commit
 
 ## 1. Class SL: the adapter's output-contract row
 
@@ -299,4 +300,141 @@ All green on the final tree:
 The site counts the call fixtures from the git index (`trackedIn`): a new
 fixture is counted once it is added, so `npm test` and the build run after
 `git add`.
+
+## Review round 2
+
+Seven issues, numbered in the order given. Each verified real, fixed at its
+root, with a test that fails on the code before the fix (checked by running
+the new tests with `grounded_agency/` stashed: 24 of them fail there).
+
+1. **Bound tools of other MCP servers listed as `calls_without_output`
+   (medium).** Real. Reproduced: `mcp__ext__find` bound to `search` with
+   `register_mcp_tool`, PreToolUse then PostToolUse with
+   `{content: [{type: text, text: "3 results, trust me"}]}` gave no
+   diagnostic and a `ran` record. Such a tool returns the same MCP result a
+   served tool does; it reaches PostToolUse as `tool_response`, and the
+   host lets the hook replace it (`updatedMCPToolOutput`, in the SDK's
+   types and the bundled CLI, which applies it as the MCP tool's output).
+   Fix (the reviewers' option a): the adapter's output checks become pure
+   decisions (`_output_fault`, `_result_fault`, a `_Fault` tuple) recorded
+   by `_fail_call`; `_checks_host_result` selects an `mcp__` tool with a
+   capability that `create_grounded_mcp_server` does not serve (another
+   server, or one served with `require_layer=False`), and
+   `_host_result_fault` checks its `tool_response` (the content items, a
+   result that holds them, or a text: `_mcp_tool_result`) as
+   `check_call_result` checks a served tool's. The post-call recorder
+   records the refusal against the call (`failed`, with the checkpoint it
+   used), counts no prerequisite, and returns `updatedMCPToolOutput` with
+   the refusal text; a check that raises is R407 and replaces the result
+   too (fail closed). Claude Code runs PostToolUse hooks side by side on
+   the original result, so the checkpoint recorder takes the same decision
+   itself (`create_checkpoint_recorder(refuses_output=...)`): a refused
+   checkpoint output takes no checkpoint in either order. The
+   once-per-tool warning is now only for tools whose results carry no
+   output (Claude Code's own). Tests: `TestOtherServersOutputs` in
+   `tests/test_mcp_integration.py` (five R402 forms, recorded once,
+   `failed`, no prerequisite; four passing forms, an error included;
+   grounding with `check_outputs` on and off; the checkpoint recorder in
+   both hook orders; Read, Grep, an unbound and a control-only tool not
+   checked; R407 on a check that raises; a tool served with
+   `require_layer=False` checked at PostToolUse; no warning for a checked
+   tool), and `tests/test_call_fixtures.py` now plays every call fixture on
+   two routes, `served` and `host` (each tool `mcp__ext__<tool>`, its
+   content passed to PostToolUse, the outcome read from
+   `updatedMCPToolOutput`): the four output fixtures fail on the `host`
+   route before the fix. `tests/test_v102_runtime.py`'s `look` call now
+   returns an observe output (its `{}` result is R402 now), and a new test
+   checks that its refused output is no prerequisite. Texts: the statement
+   (`calls_without_output` names only Claude Code's own tools and says the
+   PostToolUse hook checks any other MCP tool's result), the SDK guide (the
+   `register_mcp_tool` example, the output-contract paragraph, grounding,
+   Conformance), the CHANGELOG (statement-schema, Upgrading, Added and
+   grounding entries), SECURITY.md §5.5, CONFORMANCE.md, RFC-0005 9.1,
+   findings ACS-01, the grounding finding and ACS-41, the adapter and
+   `mcp.py` docstrings, FOUNDATION-notes (the departure no longer lists
+   other servers' tools).
+2. **The Standard was silent on a refused checkpoint output (medium).**
+   Real: §5.18.6 says a failed call takes none but nothing said a refused
+   output is a failure; §10.4 read literally gave a checkpoint. Both layers
+   already took none for the tools they serve. Fix: §5.18.10's paragraph
+   says a call whose output the layer refuses (R402; F505, §5.20; F504,
+   §5.21.3) has run and failed: it used what it held, takes no checkpoint
+   (§5.18.6) and is not a prerequisite that ran (§5.18.5); §5.18.6 says a
+   failed call's case includes it; §10.4 says "a call of a tool classified
+   `checkpoint` that runs, and whose output is not refused, takes a
+   checkpoint". New generated fixture `refused_checkpoint_output_takes_none`
+   (save returns "saved", R402; write F501; undo F503; save; write; undo);
+   on the `host` route it fails without the recorder's `refuses_output`.
+   Counts 27 to 28 (CONFORMANCE.md, RFC-0005, CHANGELOG, Standard Agents
+   guide, ACS-01, both runners' count tests). The binding passes it as is.
+3. **Standard Agents guide "except the checks ... not applied" (low).**
+   Real. Now "which the binding claims". No other "not applied" in the
+   documentation (CONFORMANCE.md's mention defines the member).
+4. **`require_layer=False` missing from the statement's outside-SL gap
+   (low).** Real. The host gap reads "strict_mode=False, approval='off',
+   check_outputs=False or create_grounded_mcp_server(require_layer=False)
+   is outside class SL"; `test_the_statement_matches_the_adapter` checks
+   each setting there and that `require_layer` defaults to True. (With
+   item 1, such a tool's output is checked at PostToolUse; it stays outside
+   the class because it runs without the layer's decision.)
+5. **A non-boolean `is_error` skipped the checks (medium).** Real:
+   reproduced with the reviewers' script (`is_error: "false"` and `"no"`
+   delivered prose as no error, no diagnostic). Fix: `_result_fault`
+   passes a result on only when `is_error is True`; any other value is
+   checked (fail closed), on the `check_outputs=False` path too.
+   `test_the_session_receives_the_output_that_was_checked` (through the
+   SDK's `run_tool`) gains `is_error` "false", "no" and 0 with prose (R402),
+   and a new test checks that `is_error: True` is passed on.
+6. **`check_outputs=False` read a `structuredContent` the session never
+   receives (medium).** Real: reproduced (prose beside a grounded
+   structure, no F505). "As before 1.2.0" was wrong: `main` has no
+   grounding policies. Fix: `_unchecked_output` reads only the output the
+   one text item carries. The first case of the renamed
+   `test_check_outputs_off_reads_the_delivered_text` now expects F505, and
+   the `run_tool` test has `check_outputs=False` cases (prose beside
+   grounded structure F505; the output text passes). Docstrings, the SDK
+   guide and the CHANGELOG say `check_outputs=False` skips only R402 and
+   grounding and the minimum confidence read the delivered text.
+7. **A served tool that is not an `SdkMcpTool` ran unguarded (low).** Real:
+   reproduced (a `SimpleNamespace` tool ran with no decision and its prose
+   was delivered). Fix: every tool with a callable `handler` is guarded
+   (`_guarded` builds an `SdkMcpTool` from its members, `annotations`
+   optional); with `require_layer`, a tool without one (not control-only)
+   is a `ValueError` opening with R407, raised before anything is
+   registered. Tests: a duck-typed tool gets R407 without a decision and
+   R402 for prose through `run_tool`; a tool with no handler raises and
+   registers nothing. The SDK guide's `require_layer` paragraph and the
+   CHANGELOG say so.
+
+The SDK guide's longer output-contract text put a prose run of 1979px on
+`/guides/claude-agent-sdk/` (limit 1800px): it now has a figure, "Where the
+adapter checks an MCP tool's output" (served tool or PostToolUse, then
+R402, then grounding and the minimum confidence), and the rest of the
+paragraph is four short items.
+
+### Checks (F6) after review round 2
+
+All green on the final tree:
+
+- Python: every `tools/validate_*.py` of CLAUDE.md (benchmark deps
+  included), `validate_workflows.py --strict`, every domain catalog and
+  example `--strict`; every generator with `--check` (`sync_skill_schemas`
+  107, `gen_runtime_fixtures` 350, `gen_call_fixtures` 33 + 28,
+  `gen_trigger_vectors`, `gen_standard_agents_binding`,
+  `gen_capability_json_schemas`); ruff check and format (CI's list); mypy;
+  `pytest tests/` (4327 passed, 16 skipped: the call fixtures now run on
+  two routes); `pytest benchmarks/tests/` (69) and `benchmarks/runner.py
+  --report`; `scripts/run_conformance.py`.
+- Rust (`core/`, 1.99.1; no Rust changed): fmt; clippy plain, `python`,
+  `wasm`; `cargo test --locked`; `--features wasm --test wasm` (12); MSRV
+  `cargo +1.88.0 check --locked --all-targets --features python`; the CEL
+  differential (155 cases, 92 expressions, 0 failures).
+- TypeScript: `packages/acs-core` `build:wasm`, build, check, test (1784);
+  the binding check and test (184, 1 skipped).
+- Site: `npm run check`, `npm test` (1169), `npm run build` (check-dist),
+  `scripts/check-runs.mjs` (0 enforced runs over 1800px), and
+  `scripts/check-axe.mjs` over the pages this round changed
+  (`/guides/claude-agent-sdk/`, `/guides/standard-agents/`, `/spec/`,
+  `/spec/1.2.0/`, `/spec/conformance/`, `/spec/security/`, `/rfcs/0005/`,
+  `/community/release-notes/`: 32 runs, no violations, no sideways scroll).
 

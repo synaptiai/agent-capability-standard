@@ -1047,14 +1047,27 @@ merged into `round3/a`. For phase 4 and any later stream:
 - **Departure: §5.18.10 gained a paragraph.** The output-contract row
   applies to the results a layer receives as capability outputs; a covered
   call whose result its host returns in another form (Claude Code's own
-  tools, other MCP servers' tools) carries none, and the statement names
-  those calls, as §5.21.4 already said for the profiles' output rules.
+  tools) carries none, and the statement names those calls, as §5.21.4
+  already said for the profiles' output rules. (Review round 2: a bound
+  tool of another MCP server returns the same MCP result a served tool
+  does, which reaches PostToolUse and which the hook can replace, so the
+  adapter checks it there; it is not among those calls.)
 - **Call fixture format:** a call may give `returns` (its tool's output,
   null included) and expect `{"refuse_output": "R402"}` (the call ran; its
-  output was refused). 27 call fixtures.
+  output was refused). 28 call fixtures (review round 2 added
+  `refused_checkpoint_output_takes_none`).
 - **Departure (review round 1): §10.4 and the statement schema** gain
   `calls_without_output`, the covered calls whose results carry no
   capability output (§5.18.10, §5.21.4), apart from the host gaps; §5.18.9
   states every check a consumer makes (I-JSON, required fields, an
   `evidence_anchors` array, a required `confidence` from 0 to 1), and
   §5.18.10 says a layer checks the output in the form its host delivers.
+- **Departure (review round 2): a refused output is a failed call.**
+  §5.18.10 says a call whose output the layer refuses (R402; F505, §5.20;
+  F504 for a minimum confidence, §5.21.3) has run and failed: it used what
+  it held, takes no checkpoint and is not a prerequisite that ran; §5.18.6
+  and §10.4's fixture paragraph say the same. Both layers already behaved
+  so for the tools they serve; the adapter's PostToolUse output check for
+  other MCP servers' bound tools shares its decision with the checkpoint
+  recorder (`create_checkpoint_recorder(refuses_output=...)`), since
+  Claude Code runs the hooks side by side on the original result.

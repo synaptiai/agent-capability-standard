@@ -1,0 +1,100 @@
+{
+  "description": "A call of a checkpoint tool whose output is refused has failed: it takes no checkpoint (section 5.18.6), so the next call that requires one is F501 and a rollback is F503, until a checkpoint call whose output passes.",
+  "ontology": "2.2.0",
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    }
+  ],
+  "sequence": [
+    {
+      "call": "save",
+      "returns": "saved",
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "write",
+      "args": {
+        "path": "a"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": {
+        "refuse": "F501"
+      }
+    },
+    {
+      "call": "undo",
+      "expect": {
+        "refuse": "F503"
+      }
+    },
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "write",
+      "args": {
+        "path": "a"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": "run"
+    },
+    {
+      "call": "undo",
+      "expect": "run"
+    }
+  ]
+}

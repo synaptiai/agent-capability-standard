@@ -275,9 +275,31 @@ for w in adapter.mapper.warnings:
 # the tool declares risk=low; the ontology value applies
 ```
 
-**`require_layer`** (default `True`): each tool of the server refuses to run, with `R407 SAFETY_CHECK_FAILED`, unless the adapter's layer allowed this exact call (its tool name and arguments), so a session whose options were not wrapped with `wrap_options()` cannot run it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)). `require_layer=False` restores the earlier behaviour and is outside class SL.
+A tool of another MCP server bound this way performs its capability, so its result must carry that capability's output, as a served tool's must (the output contract, below): the adapter checks it at PostToolUse.
 
-**The output contract** ([§5.18.10](../../spec/STANDARD-v1.2.0.md#51810-capability-checks)): a tool with a capability returns that capability's output as the I-JSON text of the output object, its one text content item ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)). The SDK's server passes a result's `content` and `is_error` to the session and drops every other member, `structuredContent` included, so the text is what the model reads and what the adapter checks; a tool may still return `structuredContent` beside the text, and it is not read. A result that carries no output in its text, or whose output fails the contract (a missing field, an `evidence_anchors` that is not an array, a required `confidence` outside 0 to 1, a value that is not I-JSON), fails the call that ran with `R402 EXECUTION_FAILED`: the call's record is `failed` with R402 and the call's id, and it used its checkpoint and its decision. An error result (`is_error`) is passed on. `GroundedAgentConfig(check_outputs=False)` passes results on unchecked and reads outputs for grounding as before 1.2.0, and is outside class SL.
+**`require_layer`** (default `True`): each tool of the server refuses to run, with `R407 SAFETY_CHECK_FAILED`, unless the adapter's layer allowed this exact call (its tool name and arguments), so a session whose options were not wrapped with `wrap_options()` cannot run it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)). Every tool with a callable `handler` is guarded, whatever its class; one without is refused with a `ValueError` that opens with R407, and nothing is registered. `require_layer=False` restores the earlier behaviour and is outside class SL.
+
+**The output contract** ([§5.18.10](../../spec/STANDARD-v1.2.0.md#51810-capability-checks)): a tool with a capability returns that capability's output as the I-JSON text of the output object, its one text content item ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)). The SDK's server passes a result's `content` and `is_error` to the session and drops every other member, `structuredContent` included, so the text is what the model reads and what the adapter checks; a tool may still return `structuredContent` beside the text, and it is not read.
+
+```mermaid
+---
+title: Where the adapter checks an MCP tool's output
+---
+flowchart TB
+  accDescr: A call of an MCP tool bound to a capability has run. A tool that create_grounded_mcp_server serves checks its own result; the result of another server's tool, or of one served with require_layer=False, is checked at PostToolUse on the content Claude Code passes. A result that is not the output's I-JSON text as its one text item, meeting the output contract, is R402: the call failed, and the session reads the refusal. An output that passes then meets the grounding policies (F505) and a minimum confidence (F504).
+  ran["A bound MCP tool's call ran"] --> served{"Served by create_grounded_mcp_server?"}
+  served -->|yes| own["The tool checks its result"]
+  served -->|no| post["PostToolUse checks the content Claude Code passes"]
+  own --> text{"One text item: the output's I-JSON text, meeting the contract?"}
+  post --> text
+  text -->|no| r402["R402: the call failed; the session reads the refusal"]
+  text -->|yes| rules["Grounding (F505), then a minimum confidence (F504)"]
+```
+
+- **A refused output fails the call that ran.** A result that carries no output in its text, or whose output fails the contract (a missing field, an `evidence_anchors` that is not an array, a required `confidence` outside 0 to 1, a value that is not I-JSON), is `R402 EXECUTION_FAILED`: the call's record is `failed` with R402 and the call's id, and the call used its checkpoint and its decision. A `checkpoint` tool's call takes no checkpoint, and no call counts as a prerequisite that ran.
+- **Where it is checked.** A served tool checks its own result. A tool of another MCP server bound to a capability (`register_mcp_tool`, `load_bindings`), or one served with `require_layer=False`, is checked at PostToolUse, and the hook replaces a refused result with the refusal (`updatedMCPToolOutput`), so the model reads the refusal and not the output.
+- **Errors.** A result whose `is_error` is `True` is passed on; any other value is checked, since the session receives the result as no error.
+- **`GroundedAgentConfig(check_outputs=False)`** skips only the R402 check, and is outside class SL: the grounding policies and a minimum confidence still read the output the one text item carries, the text the session reads.
 
 ## Checkpoint Lifecycle
 
@@ -485,7 +507,7 @@ except CapabilityOutputError as e:
 
 ## Conformance (class SL)
 
-The adapter claims the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it applies every check of §5.18.10. The output-contract row applies to the results it receives as capability outputs, those of the tools `create_grounded_mcp_server` serves, in the form the session reads them (R402); Claude Code's own tools and other MCP servers' tools return results in their own forms, which carry no capability output, and the statement names those calls (`calls_without_output`). It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False`, `approval="off"` and `check_outputs=False` are outside the class.
+The adapter claims the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it applies every check of §5.18.10. The output-contract row applies to the results it receives as capability outputs, those of every MCP tool bound to a capability, in the form the session reads them (R402): a tool `create_grounded_mcp_server` serves checks its own, and the PostToolUse hook checks another server's. Claude Code's own tools return results in their own forms, which carry no capability output, and the statement names those calls (`calls_without_output`). It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`, which plays each fixture with the tools served and again as another server's tools); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False`, `approval="off"`, `check_outputs=False` and `create_grounded_mcp_server(require_layer=False)` are outside the class.
 
 ## Structured Output
 
@@ -675,11 +697,11 @@ V101. The call's argument names are what its `acs:` anchors may cite, and
 the adapter gives no `evidence_seen`: a hook sees the tool call, not the
 model's request.
 
-The adapter sees only the outputs of the MCP tools
-`create_grounded_mcp_server` serves (the capability output their text
-carries, §5.18.9, the form the session reads), and checks each against its
-output contract first (R402, above). Claude Code's own tools
-(Read, Grep, WebFetch, ...) and the tools of other MCP servers return no
+The adapter sees the outputs of the MCP tools bound to a capability (the
+capability output their text carries, §5.18.9, the form the session reads):
+those `create_grounded_mcp_server` serves, and other servers' at
+PostToolUse. It checks each against its output contract first (R402,
+above). Claude Code's own tools (Read, Grep, WebFetch, ...) return no
 capability output, so a policy that requires `retrieve` or `search` checks
 nothing for their calls: the adapter logs a warning once per such tool, and
 its conformance statement names those calls (`calls_without_output`). A refused output

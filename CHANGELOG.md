@@ -177,11 +177,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   results carry no capability output, to which no output check applies
   (§10.4). Both reference layers list nothing in `not_applied` and claim
   class SL: the Python SDK adapter checks the output contract of the
-  results it receives as capability outputs, those of the tools
-  `create_grounded_mcp_server` serves, in the form the session reads them
-  (R402), and its statement names the calls whose results come in other
-  forms in `calls_without_output`; the Standard Agents binding checks every
-  grounded tool's output.
+  results it receives as capability outputs, those of every MCP tool bound
+  to a capability, in the form the session reads them (R402), and its
+  statement names the calls whose results come in other forms (Claude
+  Code's own tools) in `calls_without_output`; the Standard Agents binding
+  checks every grounded tool's output.
 - **Breaking (plugin):** two composed skills take their directory names
   (Agent Skills requires `name` to equal the directory): the slash commands
   `/gap-analysis-workflow` and `/digital-twin-sync-workflow` become
@@ -468,25 +468,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     push`, which the safety layers count as a gated `mutate`; the
     `rollback` skill restores with `git restore`.
 - Python SDK, the output contract of a tool's result (Standard 1.2.0
-  §5.18.9, §5.18.10): a tool that `create_grounded_mcp_server` serves with a
-  capability must return that capability's output as the I-JSON text of the
-  output object, its one text content item, with every field the
-  capability's output contract requires. The SDK's server delivers a
-  result's content and `is_error` to the session, not its
-  `structuredContent`, so the text is what is checked: a result that carries
-  its output only as `structuredContent` is refused, and a
+  §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
+  `create_grounded_mcp_server` serves or one of another server bound with
+  `register_mcp_tool` or `load_bindings`, must return that capability's
+  output as the I-JSON text of the output object, its one text content
+  item, with every field the capability's output contract requires. The
+  SDK's server delivers a result's content and `is_error` to the session,
+  not its `structuredContent`, so the text is what is checked: a result
+  that carries its output only as `structuredContent` is refused, and a
   `structuredContent` beside the text is not read. A result that does not
   carry the output (prose, a partial object, an integer beyond ±2^53, a
-  confidence outside 0 to 1) fails the call that ran with R402: the tool
-  returns an error result whose text opens with `R402 EXECUTION_FAILED:`,
-  and the call's record is `failed` with R402. Return the output's JSON
-  text, or set `GroundedAgentConfig(check_outputs=False)` for the earlier
-  behaviour (outside class SL; the configuration's `config_sha256` then
-  records it), in which the grounding policies and a minimum confidence
-  read a `structuredContent` object, else the output the text carries.
-  An error result is passed on as before. The check runs before the
-  grounding policies and the profiles' minimum confidence, as the
-  executor's does, and those apply to the output it read.
+  confidence outside 0 to 1) fails the call that ran with R402, and the
+  call's record is `failed` with R402: a served tool returns an error
+  result whose text opens with `R402 EXECUTION_FAILED:`, and for another
+  server's tool the PostToolUse hook replaces the result the session reads
+  with that text (`updatedMCPToolOutput`). Such a call has failed: a
+  `checkpoint` tool's call takes no checkpoint, and no call counts as a
+  prerequisite that ran. A result is an error, passed on as before, only
+  when its `is_error` is `True`; any other value is checked. Return the
+  output's JSON text, or set `GroundedAgentConfig(check_outputs=False)`
+  (outside class SL; the configuration's `config_sha256` then records it),
+  which skips only this check: the grounding policies and a minimum
+  confidence read the output the one text item carries. The check runs
+  before the grounding policies and the profiles' minimum confidence, as
+  the executor's does, and those apply to the output it read.
+  `create_grounded_mcp_server` guards every tool with a callable `handler`,
+  whatever its class, and refuses one without (`ValueError`, R407) unless
+  `require_layer=False`.
 
 ### Added
 - Standard 1.2.0, host protocol, runs and audit records
@@ -649,7 +657,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
 - Safety-layer conformance fixtures: 33 binding fixtures in
-  `tests/conformance/bindings/` and 27 call-sequence fixtures in
+  `tests/conformance/bindings/` and 28 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
   two reference layers, generated by `scripts/gen_call_fixtures.py`
   (`--check` in CI). The Python SDK adapter and the Standard Agents binding
@@ -659,11 +667,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `decode_capability_output` and `CapabilityOutputError` (§5.18.9);
   `grounded_agency.errors.text_form`.
 - Python SDK: `GroundedAgentAdapter.check_call_result` checks the result of
-  a call of a tool `create_grounded_mcp_server` serves (the output contract,
-  R402; then grounding, F505, and a minimum confidence, F504);
-  `GroundedAgentConfig.check_outputs`; `tool_result_output` in
-  `grounded_agency.capabilities`, the output a result of the SDK's server
-  carries (§5.18.10).
+  a call of an MCP tool bound to a capability (the output contract, R402;
+  then grounding, F505, and a minimum confidence, F504): a tool
+  `create_grounded_mcp_server` serves calls it with its result, and the
+  PostToolUse hook with another server's; `GroundedAgentConfig.check_outputs`;
+  `tool_result_output` in `grounded_agency.capabilities`, the output an MCP
+  result carries (§5.18.10); `create_checkpoint_recorder(refuses_output=...)`.
 - TypeScript package: `checkBindings`, `annotationRecord`,
   `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
   `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
@@ -689,11 +698,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     Python: `_core.check_grounding`, `Run.trace(since=...)`,
     `Run.trace_seq`, `grounded_agency.grounding` (`GroundingPolicy`,
     `check_grounding_output`), `WorkflowRunner.run(grounding=...)`,
-    `GroundedAgentConfig.grounding` (applied to the outputs of the tools
-    `create_grounded_mcp_server` serves; a refused output's call record is
+    `GroundedAgentConfig.grounding` (applied to the outputs of the MCP
+    tools bound to a capability; a refused output's call record is
     `failed` with F505 and the call id, and a policy that requires the
-    capability of a call whose output the adapter cannot see, such as
-    Claude Code's own tools, is warned about once per tool). TypeScript
+    capability of a call whose output the adapter cannot see, Claude
+    Code's own tools, is warned about once per tool). TypeScript
     package: `evidence.ts` (`checkGrounding`, `groundingPolicies`, `covers`,
     `refsIn`) and `holdsCredential`; the binding's `grounding`, `seen` and
     `secrets` options. A host policy with a member other than `require`,

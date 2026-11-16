@@ -150,13 +150,17 @@ def create_grounded_mcp_server(
     5.18.9, 5.18.10) as the I-JSON text of the output object, its one text
     content item: the SDK's server delivers a result's ``content`` and
     ``is_error`` to the session, not its ``structuredContent``, so the text
-    is what the session reads and what is checked. With ``require_layer``,
-    a result that carries none, or one that lacks a field the capability's
-    output contract requires, fails the call that ran with ``R402
-    EXECUTION_FAILED`` (unless the adapter's ``check_outputs`` is off,
-    outside class SL); then the adapter's grounding policies (F505) and the
-    profiles' minimum confidence (F504) apply to the output. An error result
-    (``is_error``) is passed on.
+    is what the session reads and what is checked. A result that carries
+    none, or one that lacks a field the capability's output contract
+    requires, fails the call that ran with ``R402 EXECUTION_FAILED``
+    (unless the adapter's ``check_outputs`` is off, outside class SL); then
+    the adapter's grounding policies (F505) and the profiles' minimum
+    confidence (F504) apply to the output. With ``require_layer`` the tool
+    checks its own result; without it, the PostToolUse hook of options
+    wrapped by :meth:`GroundedAgentAdapter.wrap_options` checks it, as it
+    checks the result of a bound tool of any other MCP server. A result
+    whose ``is_error`` is ``True`` is an error and is passed on; any other
+    value is checked.
 
     Args:
         name: MCP server name.
@@ -174,7 +178,9 @@ def create_grounded_mcp_server(
             does not define (V101 UNKNOWN_CAPABILITY), a member of the wrong
             type (S303), an ``invokes`` name that does not resolve (V107) or
             forms a cycle (V105). The message lists every error; no server is
-            created.
+            created. Also, with ``require_layer``, R407 for a tool that is
+            not control-only and has no callable ``handler``, which cannot be
+            guarded; nothing is registered.
 
     Example::
 
@@ -220,6 +226,15 @@ def create_grounded_mcp_server(
             unbound.append(full_name)
         else:
             records.append(record)
+        control = record is not None and record.get("control") is True
+        if require_layer and not control and not callable(getattr(t, "handler", None)):
+            raise ValueError(
+                f"R407 SAFETY_CHECK_FAILED: MCP tool '{full_name}' has no "
+                f"callable handler, so it cannot be guarded: a call that "
+                f"reached it would run without the safety layer's decision "
+                f"and its output unchecked (STANDARD 1.2.0 sections 5.18.8, "
+                f"5.18.10); pass tools made with @tool"
+            )
 
     from .capabilities.bindings import load_bindings
 
@@ -257,16 +272,10 @@ def create_grounded_mcp_server(
                 # A control-only tool is never refused (section 5.18.3): no
                 # check applies, so there is no decision to wait for.
                 served.append(t)
-            elif isinstance(t, SdkMcpTool):
-                served.append(_guarded(t, full_name, adapter, SdkMcpTool))
             else:
-                logger.warning(
-                    "MCP tool %r is not an SdkMcpTool and cannot be guarded; a "
-                    "call that reaches it without the safety layer's decision "
-                    "will run",
-                    t,
-                )
-                served.append(t)
+                # Any tool the SDK's server can run (an SdkMcpTool, or an
+                # object with its members) is served guarded.
+                served.append(_guarded(t, full_name, adapter, SdkMcpTool))
     return create_sdk_mcp_server(name=name, version=version, tools=served)
 
 
@@ -306,7 +315,7 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
         description=tool.description,
         input_schema=tool.input_schema,
         handler=guarded,
-        annotations=tool.annotations,
+        annotations=getattr(tool, "annotations", None),
     )
     metadata = getattr(tool, "metadata", None)
     if metadata is not None:
