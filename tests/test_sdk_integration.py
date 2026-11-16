@@ -438,8 +438,11 @@ class TestEvidenceStore:
         evidence_store.add_anchor(EvidenceAnchor.from_file("test.py"))
         evidence_store.add_anchor(EvidenceAnchor.from_mutation("config.yaml", "write"))
 
-        tool_outputs = evidence_store.get_by_kind("tool_output")
+        # A legacy kind returns what it returned in 1.1, by ref prefix.
+        with pytest.warns(DeprecationWarning):
+            tool_outputs = evidence_store.get_by_kind("tool_output")
         assert len(tool_outputs) == 1
+        assert len(evidence_store.get_by_kind("tool")) == 1
 
         files = evidence_store.get_by_kind("file")
         assert len(files) == 1
@@ -463,7 +466,8 @@ class TestEvidenceStore:
             tool_use_id="cmd_123",
         )
         assert anchor.ref.startswith("command:")
-        assert anchor.kind == "command"
+        # A command's result is a tool's result (STANDARD v1.2 §6.5).
+        assert anchor.kind == "tool"
         assert anchor.metadata["exit_code"] == 0
 
 

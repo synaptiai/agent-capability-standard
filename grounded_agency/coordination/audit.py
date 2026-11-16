@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ..state.redaction import DEFAULT_REDACTOR, Redactor
+
 logger = logging.getLogger(__name__)
 
 # Default maximum events retained in memory
@@ -115,9 +117,18 @@ class CoordinationAuditLog:
     Thread-safe via ``threading.Lock()``.  Uses ``collections.deque``
     with a max length so memory stays bounded — oldest events are
     silently dropped when the limit is reached.
+
+    Every event's ``details`` pass through ``redactor`` before the event is
+    kept: a secret never enters an audit record (STANDARD v1.2 §6.7).
     """
 
-    def __init__(self, max_events: int = DEFAULT_MAX_EVENTS) -> None:
+    def __init__(
+        self,
+        max_events: int = DEFAULT_MAX_EVENTS,
+        *,
+        redactor: Redactor | None = None,
+    ) -> None:
+        self.redactor: Redactor = redactor or DEFAULT_REDACTOR
         self._max_events = max_events
         self._events: deque[CoordinationEvent] = deque(maxlen=max_events)
         self._total_recorded: int = 0
@@ -138,11 +149,16 @@ class CoordinationAuditLog:
         intent: str = "",
     ) -> CoordinationEvent:
         """Create and append a new audit event. ``intent`` is its audit
-        record's ``intent``, when not the event type.
+        record's ``intent``, when not the event type. ``details`` are
+        redacted (§6.7) before the event is kept.
 
         Returns the recorded ``CoordinationEvent`` so callers can
         reference its ``event_id`` if needed.
         """
+        kept_details: Any = (
+            json.loads(json.dumps(details, default=str)) if details else {}
+        )
+        kept_details, _ = self.redactor.redact(kept_details)
         event = CoordinationEvent(
             event_id=os.urandom(16).hex(),
             event_type=event_type,
@@ -150,9 +166,7 @@ class CoordinationAuditLog:
             target_agent_ids=tuple(target_agent_ids),
             capability_id=capability_id,
             timestamp=datetime.now(UTC).isoformat(),
-            details=types.MappingProxyType(
-                json.loads(json.dumps(details, default=str)) if details else {}
-            ),
+            details=types.MappingProxyType(kept_details),
             evidence_refs=tuple(evidence_refs) if evidence_refs else (),
             intent=intent,
         )

@@ -345,7 +345,8 @@ class TestDelegationProtocol:
         assert result.agent_id == "worker"
         assert len(result.evidence_anchors) >= 1
         assert result.evidence_anchors[0].ref.startswith("delegation:")
-        assert result.evidence_anchors[0].kind == "coordination"
+        # The record of the delegation (STANDARD v1.2 §3.1, §6.5).
+        assert result.evidence_anchors[0].kind == "record"
 
     def test_delegate_rejects_incapable_agent(
         self,
@@ -502,7 +503,9 @@ class TestDelegationProtocol:
             required_capabilities={"retrieve"},
             target_agent_id="worker",
         )
-        coordination_evidence = evidence_store.get_by_kind("coordination")
+        # A legacy kind is answered by ref prefix, as in 1.1 (§6.5).
+        with pytest.warns(DeprecationWarning):
+            coordination_evidence = evidence_store.get_by_kind("coordination")
         assert len(coordination_evidence) >= 1
         assert coordination_evidence[0].ref.startswith("delegation:")
 
@@ -1267,7 +1270,8 @@ class TestSyncPrimitive:
         assert len(result.evidence_anchors) >= 1
         assert result.evidence_anchors[0].ref.startswith("sync:")
 
-        coordination_evidence = evidence_store.get_by_kind("coordination")
+        with pytest.warns(DeprecationWarning):
+            coordination_evidence = evidence_store.get_by_kind("coordination")
         assert len(coordination_evidence) >= 1
 
     def test_invalid_strategy_raises(self, sync: SyncPrimitive) -> None:
@@ -1713,7 +1717,7 @@ class TestConcurrency:
             for i in range(n_per_thread):
                 anchor = EvidenceAnchor(
                     ref=f"thread:{thread_id}:item:{i}",
-                    kind="tool_output",
+                    kind="tool",
                     timestamp="2025-01-01T00:00:00+00:00",
                 )
                 evidence_store.add_anchor(anchor)
@@ -1827,7 +1831,7 @@ class TestSerialization:
         """DelegationResult.to_dict serializes evidence anchors inline."""
         anchor = EvidenceAnchor(
             ref="delegation:abc",
-            kind="coordination",
+            kind="record",
             timestamp="2025-01-01T00:00:00+00:00",
         )
         result = DelegationResult(
@@ -1842,14 +1846,14 @@ class TestSerialization:
         assert d["accepted"] is True
         assert len(d["evidence_anchors"]) == 1
         assert d["evidence_anchors"][0]["ref"] == "delegation:abc"
-        assert d["evidence_anchors"][0]["kind"] == "coordination"
+        assert d["evidence_anchors"][0]["kind"] == "record"
         assert d["output_data"] == {"result": "ok"}
 
     def test_shared_evidence_to_dict(self) -> None:
         """SharedEvidence.to_dict inlines the anchor."""
         anchor = EvidenceAnchor(
             ref="test:ev",
-            kind="tool_output",
+            kind="tool",
             timestamp="2025-01-01T00:00:00+00:00",
         )
         se = SharedEvidence(

@@ -588,6 +588,13 @@ impl PyRun {
         self.run.is_finished()
     }
 
+    /// The `seq` the run's next trace event gets: read it before a submit,
+    /// and `trace(since=...)` gives what the submit added.
+    #[getter]
+    fn trace_seq(&self) -> u64 {
+        self.run.trace_seq()
+    }
+
     /// The trace events the run holds; with `since`, those whose `seq` is
     /// at least `since` (a runner reads what one submit added).
     #[pyo3(signature = (since = None))]

@@ -166,6 +166,9 @@ class Run:
         """The run's record (§5.19.8), or None while the run goes on."""
     @property
     def finished(self) -> bool: ...
+    @property
+    def trace_seq(self) -> int:
+        """The ``seq`` the run's next trace event gets."""
     def trace(self, since: int | None = None) -> list[dict[str, Any]]:
         """The trace events the run holds; with ``since``, those whose
         ``seq`` is at least ``since``."""

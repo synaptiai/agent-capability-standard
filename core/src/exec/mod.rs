@@ -1263,6 +1263,12 @@ impl Run {
         &self.state.trace
     }
 
+    /// The `seq` the run's next trace event gets: the events taken
+    /// (§5.19.4) and those it holds, counted.
+    pub fn trace_seq(&self) -> u64 {
+        self.state.trace_base + self.state.trace.len() as u64
+    }
+
     /// The run's action records not taken yet (§5.19.4).
     pub fn action_records(&self) -> &[Value] {
         &self.state.records

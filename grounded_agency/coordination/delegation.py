@@ -143,7 +143,7 @@ class DelegationProtocol:
             metadata["rejection_reason"] = rejection_reason
         anchor = EvidenceAnchor(
             ref=f"delegation:{task_id}",
-            kind="coordination",
+            kind="record",
             timestamp=datetime.now(UTC).isoformat(),
             metadata=metadata,
         )

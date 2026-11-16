@@ -14,7 +14,7 @@
  * per entry.
  */
 import type { ThreadState } from '@standardagents/spec';
-import type { Json, TRUST_CLASSES } from '@synaptiai/acs-core';
+import { redactJson, redactText, type EvidenceAnchor, type Json, type TRUST_CLASSES } from '@synaptiai/acs-core';
 import type { CapabilityId } from './ontology.js';
 
 /** The part of `ThreadState` the binding uses. */
@@ -45,16 +45,18 @@ export const KEYS = {
  * The codes a grounded tool refuses or fails a call with (STANDARD 1.2.0
  * §5.18.8, §9): a missing checkpoint (F501), approval (F502), rollback
  * history (F503) or other prerequisite (V102); a binding it does not list
- * (F504); an output that breaks its contract (R402); a failure of the
- * layer itself (R407).
+ * (F504) or `persist` data or an `audit` record that holds a secret
+ * (F504, §6.7); an output that breaks its contract (R402) or a grounding
+ * policy (F505, §5.20); a failure of the layer itself (R407).
  */
-export type RefusalCode = 'F501' | 'F502' | 'F503' | 'F504' | 'R402' | 'R407' | 'V102';
+export type RefusalCode = 'F501' | 'F502' | 'F503' | 'F504' | 'F505' | 'R402' | 'R407' | 'V102';
 
 export const CODE_NAMES: Record<RefusalCode, string> = {
   F501: 'CHECKPOINT_REQUIRED',
   F502: 'APPROVAL_REQUIRED',
   F503: 'ROLLBACK_FAILED',
   F504: 'CONSTRAINT_VIOLATED',
+  F505: 'PROVENANCE_MISSING',
   R402: 'EXECUTION_FAILED',
   R407: 'SAFETY_CHECK_FAILED',
   V102: 'MISSING_PREREQUISITE',
@@ -237,7 +239,11 @@ export interface TraceEntry {
    * absent when a decision was stored without one.
    */
   approval?: { digest: string; approvers: string[]; approver_identities?: AgentIdentity[]; decision_ids: string[] };
-  evidence_anchors?: Json[];
+  /**
+   * The output's evidence anchors (§6.5), redacted (§6.7); a bare string or
+   * another object is a deprecated legacy form, kept as given.
+   */
+  evidence_anchors?: Array<EvidenceAnchor | string | Json>;
   /** Filled in by the `tool_call_done` hook: a tool cannot see its own call id. */
   tool_call_id?: string;
   error?: string;
@@ -270,14 +276,36 @@ export function stale(waiting: Unlinked, flow: string | null, step: number | nul
 }
 
 /**
+ * An entry's `error` and `evidence_anchors` with every secret replaced
+ * (STANDARD v1.2.0 §6.7): always the default patterns, plus the registered
+ * `secrets`. Nothing else in an entry holds a value a call received.
+ */
+function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>>(
+  entry: T,
+  secrets: readonly string[],
+): T {
+  const out = { ...entry };
+  if (typeof out.error === 'string') out.error = redactText(out.error, secrets);
+  if (Array.isArray(out.evidence_anchors)) {
+    out.evidence_anchors = redactJson(out.evidence_anchors as Json, secrets).value as Json[];
+  }
+  return out;
+}
+
+/**
  * Append an entry to the thread's trace and return it with its sequence
  * number. The count is advanced before the entry is written, so a write that
  * fails part-way leaves a gap in the numbering, never an entry that the next
- * one overwrites.
+ * one overwrites. The entry is redacted first (§6.7), always: `secrets` adds
+ * the host's own values to the default patterns.
  */
-export async function appendTrace(store: Store, entry: Omit<TraceEntry, 'seq'>): Promise<TraceEntry> {
+export async function appendTrace(
+  store: Store,
+  entry: Omit<TraceEntry, 'seq'>,
+  secrets: readonly string[] = [],
+): Promise<TraceEntry> {
   const seq = ((await store.getValue<number>(KEYS.traceCount)) ?? 0) + 1;
-  const stored: TraceEntry = { seq, ...entry };
+  const stored: TraceEntry = { seq, ...redacted(entry, secrets) };
   await store.setValue(KEYS.traceCount, seq);
   await store.setValue(KEYS.trace(seq), stored);
   if ((stored.capability !== null || stored.control) && stored.tool_call_id === undefined) {
@@ -292,13 +320,14 @@ export async function appendTrace(store: Store, entry: Omit<TraceEntry, 'seq'>):
   return stored;
 }
 
-/** Replace a `started` entry with what became of the call. */
+/** Replace a `started` entry with what became of the call, redacted as {@link appendTrace} redacts. */
 export async function completeTrace(
   store: Store,
   started: TraceEntry,
-  outcome: Pick<TraceEntry, 'at' | 'status'> & Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>,
+  outcome: Pick<TraceEntry, 'at' | 'status' | 'code'> & Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>,
+  secrets: readonly string[] = [],
 ): Promise<TraceEntry> {
-  const stored: TraceEntry = { ...started, ...outcome };
+  const stored: TraceEntry = { ...started, ...redacted(outcome, secrets) };
   await store.setValue(KEYS.trace(stored.seq), stored);
   await countExecuted(store, stored);
   return stored;

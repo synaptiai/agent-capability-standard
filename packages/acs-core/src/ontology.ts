@@ -3,6 +3,7 @@
  * (`ontology.gen.ts`, from `schemas/capability_ontology.yaml`).
  */
 import type { Json } from './canonical.js';
+import type { EvidenceAnchor } from './evidence.js';
 import {
   CAPABILITIES,
   ONTOLOGY_VERSION,
@@ -43,7 +44,11 @@ export interface DeclaredFlags {
  * way wherever it declares them. Every other required field is any JSON.
  */
 interface FieldTypes {
-  evidence_anchors: Json[];
+  /**
+   * Evidence anchors (§6.5); a bare string or another object is a
+   * deprecated legacy form, accepted until 2.0.
+   */
+  evidence_anchors: Array<EvidenceAnchor | string | Json>;
   /** A number from 0 to 1, which the wrapper checks at run time. */
   confidence: number;
 }

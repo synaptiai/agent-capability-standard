@@ -40,6 +40,7 @@ import hmac
 import inspect
 import json
 import logging
+import re
 import threading
 from collections import Counter, deque
 from collections.abc import Callable
@@ -52,11 +53,17 @@ from ._types import FallbackPermissionAllow, FallbackPermissionDeny, HookContext
 from .capabilities.mapper import UNCLASSIFIED_TOOL, ToolCapabilityMapper, ToolMapping
 from .capabilities.registry import CapabilityRegistry
 from .errors import ErrorCode, ValidationError, text_form
+from .grounding import GroundingPolicy, as_policies, check_output
 from .hooks.evidence_collector import create_evidence_collector
 from .hooks.skill_tracker import create_checkpoint_recorder
 from .state.checkpoint_tracker import MAX_AGE_MINUTES, CheckpointTracker
-from .state.evidence_store import EvidenceAnchor, EvidenceStore
+from .state.evidence_store import (
+    EvidenceAnchor,
+    EvidenceStore,
+    EvidenceStoreProtocol,
+)
 from .state.rate_limiter import RateLimitConfig, RateLimiter
+from .state.redaction import DEFAULT_REDACTOR, Redactor
 
 if TYPE_CHECKING:
     from .coordination.orchestrator import OrchestrationRuntime
@@ -75,6 +82,9 @@ logger = logging.getLogger("grounded_agency.adapter")
 PROMPTING_PERMISSION_MODES: frozenset[str] = frozenset(
     {"default", "acceptEdits", "plan"}
 )
+
+# A call argument an `acs:` anchor can cite (a §5.3 identifier).
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 
 
 def _find_ontology_path() -> str:
@@ -223,7 +233,21 @@ class GroundedAgentConfig:
             ``"off"``: the adapter asks for no approval (outside class SL).
         evidence_include_tool_input: If True, evidence anchors keep each
             tool call's input, and a Bash command's text, in their
-            metadata. Off by default: inputs can hold credentials.
+            metadata, redacted by the store (STANDARD v1.2 §6.7). Off by
+            default: inputs can hold credentials.
+        evidence_store: The evidence store the adapter writes to (§6.6):
+            any :class:`EvidenceStoreProtocol`, such as a durable
+            ``JsonlEvidenceStore``. None: a new in-memory ``EvidenceStore``.
+        secret_values: The host's own secrets (§6.7), registered with the
+            evidence store's and the coordination audit log's redactor so
+            they never reach an anchor or a record. Never part of
+            ``recorded_by``.
+        grounding: Grounding policies the layer applies to the output of
+            each call whose capability one requires (§5.20): one
+            :class:`GroundingPolicy` or several. A call's argument names are
+            what its ``acs:`` anchors may cite; the layer gives no
+            ``evidence_seen`` (a hook does not see the model's request). An
+            output that fails is refused with F505.
         call_record_limit: How many call records (and refusals) the adapter
             keeps in memory (``call_records``, ``diagnostics``).
     """
@@ -244,6 +268,9 @@ class GroundedAgentConfig:
     approval: Literal["ask", "off"] = "ask"
     evidence_include_tool_input: bool = False
     call_record_limit: int = 10000
+    evidence_store: EvidenceStoreProtocol | None = None
+    secret_values: tuple[str, ...] = ()
+    grounding: tuple[GroundingPolicy, ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
@@ -271,6 +298,14 @@ class GroundedAgentConfig:
                 f"call_record_limit must be a positive integer, got "
                 f"{self.call_record_limit!r}"
             )
+        # One policy or several; each was checked against the ontology when
+        # it was made (an unknown id is a ValueError naming V101).
+        self.grounding = as_policies(self.grounding)  # type: ignore[arg-type]
+        if isinstance(self.secret_values, str) or not all(
+            isinstance(v, str) for v in self.secret_values
+        ):
+            raise ValueError("secret_values must be a sequence of strings")
+        self.secret_values = tuple(self.secret_values)
 
 
 def _error(code: ErrorCode, message: str, location: dict[str, Any]) -> ValidationError:
@@ -464,7 +499,7 @@ class GroundedAgentAdapter:
     registry: CapabilityRegistry = field(init=False)
     mapper: ToolCapabilityMapper = field(init=False)
     checkpoint_tracker: CheckpointTracker = field(init=False)
-    evidence_store: EvidenceStore = field(init=False)
+    evidence_store: EvidenceStoreProtocol = field(init=False)
     rate_limiter: RateLimiter = field(init=False)
     cost_summary: CostSummary = field(init=False)
 
@@ -494,7 +529,15 @@ class GroundedAgentAdapter:
             clock=now,
             max_age_minutes=self.config.expiry_minutes,
         )
-        self.evidence_store = EvidenceStore()
+        # The layer's redactor (STANDARD v1.2 §6.7): what it recognises as a
+        # secret, the host's own values included. Its records, refusals and
+        # evidence are redacted with it, and persist and audit calls whose
+        # data holds a credential are refused (§5.18.10).
+        self.redactor = Redactor(self.config.secret_values)
+        self.evidence_store = self.config.evidence_store or EvidenceStore(
+            redactor=self.redactor
+        )
+        self._register_secrets()
         self.rate_limiter = RateLimiter(self.config.rate_limit)
         # The layer's records (STANDARD 1.2.0 section 5.18.8). History
         # counts from the adapter's start: one adapter is one scope.
@@ -531,6 +574,110 @@ class GroundedAgentAdapter:
 
         self.cost_summary = CostSummary()
 
+    def _register_secrets(self) -> None:
+        """Register ``config.secret_values`` with the evidence store's and
+        the coordination audit log's redactor (§6.7). A component that uses
+        the shared default redactor gets the layer's, so the values never
+        reach a redactor other adapters share."""
+        values = self.config.secret_values
+        if not values:
+            return
+        components: list[Any] = [self.evidence_store]
+        if self.orchestrator is not None:
+            components.append(self.orchestrator.audit_log)
+        for component in components:
+            redactor = getattr(component, "redactor", None)
+            if redactor is None:
+                logger.warning(
+                    "%s has no redactor; the registered secrets do not reach it",
+                    type(component).__name__,
+                )
+                continue
+            if redactor is DEFAULT_REDACTOR:
+                component.redactor = self.redactor
+            elif redactor is not self.redactor:
+                for v in values:
+                    redactor.add_secret(v)
+
+    def _secret_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None, args: Any
+    ) -> str | None:
+        """The F504 refusal of a ``persist`` call whose data, or an
+        ``audit`` call whose record, holds a secret the layer recognises
+        (§5.18.10, §6.7): refused, not redacted, since memory is read back
+        as fact. None for any other call."""
+        capabilities = set(mapping.capabilities) & {"persist", "audit"}
+        if not capabilities or not self.redactor.holds_credential(args):
+            return None
+        what = (
+            "the data it would store"
+            if "persist" in capabilities
+            else "the record it would append"
+        )
+        return self._refuse(
+            ErrorCode.CONSTRAINT_VIOLATED,
+            mapping,
+            tool,
+            call,
+            f"{what} holds what looks like a credential; persist where the "
+            f"secret is kept, or cite it by reference, not the secret "
+            f"(STANDARD v1.2 §6.7)",
+        )
+
+    # ------------------------------------------------------------------
+    # Grounding of call outputs (STANDARD v1.2 section 5.20)
+    # ------------------------------------------------------------------
+
+    def check_call_output(
+        self,
+        tool: str,
+        args: Any,
+        output: Any,
+        call: str | None = None,
+    ) -> str | None:
+        """Apply ``config.grounding`` to a call's output (§5.20 *Hosts
+        outside a workflow*). The call's argument names are the references
+        it binds (an ``acs:<argument>`` anchor may cite one), and no
+        ``evidence_seen`` is given. Returns the refusal's text form (F505,
+        kept in ``diagnostics`` and a call record) when the output fails a
+        policy that requires the call's capability, else None. ``output``
+        that is not an object fails as an output with no anchors."""
+        if not self.config.grounding:
+            return None
+        mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+        capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
+        policies = [
+            p for p in self.config.grounding if capability and p.requires(capability)
+        ]
+        if not policies:
+            return None
+        bound = [
+            k
+            for k in (args if isinstance(args, dict) else {})
+            if isinstance(k, str) and _IDENTIFIER.fullmatch(k)
+        ]
+        if not isinstance(output, dict):
+            return self._refuse(
+                ErrorCode.PROVENANCE_MISSING,
+                mapping,
+                tool,
+                call,
+                f"{tool}'s result holds no {capability} output (section 5.18.9), "
+                "so nothing grounds it, and a grounding policy requires "
+                f"{capability} (section 5.20)",
+            )
+        for policy in policies:
+            result = check_output(output, policy, bound_refs=bound)
+            if not result.ok:
+                return self._refuse(
+                    ErrorCode.PROVENANCE_MISSING,
+                    mapping,
+                    tool,
+                    call,
+                    f"{tool}'s output: {result.message}",
+                )
+        return None
+
     # ------------------------------------------------------------------
     # Records (STANDARD 1.2.0 section 5.18.8)
     # ------------------------------------------------------------------
@@ -560,6 +707,10 @@ class GroundedAgentAdapter:
             "ontology_version": self.registry.version,
             "prompting_modes": sorted(PROMPTING_PERMISSION_MODES),
         }
+        if self.config.grounding:
+            # The policies behind F505 refusals (section 5.20); no secret
+            # value is ever part of the configuration's digest.
+            settings["grounding"] = [p.to_dict() for p in self.config.grounding]
         key = (self.mapper.records_revision, _core.canonical_json(settings))
         cached = self._config_digest
         if cached is not None and cached[0] == key:
@@ -597,7 +748,10 @@ class GroundedAgentAdapter:
         if call is not None:
             entry["call"] = call
         entry["decision"] = decision
-        entry.update({k: v for k, v in details.items() if v is not None})
+        kept = {k: v for k, v in details.items() if v is not None}
+        # A record of a call carries no secret (§6.7).
+        kept, _ = self.redactor.redact(kept)
+        entry.update(kept)
         entry["recorded_by"] = self.recorded_by
         with self._state_lock:
             self._record_seq += 1
@@ -623,7 +777,9 @@ class GroundedAgentAdapter:
         **details: Any,
     ) -> str:
         """A refusal (section 5.18.8): the §9.8 diagnostic, kept in
-        ``diagnostics`` and a call record; returns its text form."""
+        ``diagnostics`` and a call record; returns its text form. Its message
+        is redacted (§6.7): a diagnostic carries no secret."""
+        message, _ = self.redactor.redact_text(message)
         location: dict[str, Any] = {"tool": tool}
         if mapping is not UNCLASSIFIED_TOOL and mapping.capability_id:
             location["capability"] = mapping.capability_id
@@ -1184,6 +1340,10 @@ class GroundedAgentAdapter:
                         )
                     )
 
+                refusal = self._secret_refusal(mapping, tool_name, call, tool_input)
+                if refusal is not None:
+                    return deny(refusal)
+
                 refusal = self._prerequisite_refusal(mapping, tool_name, call)
                 if refusal is not None:
                     if strict:
@@ -1737,11 +1897,22 @@ class GroundedAgentAdapter:
         """
         if isinstance(scope, str):
             scope = [scope]
-        return self.checkpoint_tracker.create_checkpoint(
+        checkpoint_id = self.checkpoint_tracker.create_checkpoint(
             scope=scope,
             reason=reason,
             expiry_minutes=self.config.expiry_minutes,
         )
+        # The record of the action grounds the checkpoint's output (§3.1).
+        try:
+            self.evidence_store.append(
+                EvidenceAnchor.from_checkpoint(checkpoint_id), capability="checkpoint"
+            )
+        except Exception as e:  # noqa: BLE001 - best-effort capture (§6.4)
+            logger.warning("Could not record the checkpoint's evidence: %s", e)
+            report = getattr(self.evidence_store, "record_capture_failure", None)
+            if callable(report):
+                report(None, str(e))
+        return checkpoint_id
 
     def consume_checkpoint(self) -> str | None:
         """
@@ -1766,11 +1937,19 @@ class GroundedAgentAdapter:
         Returns:
             List of evidence reference strings
         """
-        return self.evidence_store.get_recent(n)
+        recent = getattr(self.evidence_store, "get_recent", None)
+        if callable(recent):
+            return list(recent(n))
+        records = self.evidence_store.records()
+        return [r.anchor.ref for r in records[max(0, len(records) - n) :]]
 
     def get_mutations(self) -> list[EvidenceAnchor]:
-        """Get all mutation evidence anchors."""
-        return self.evidence_store.get_mutations()
+        """Get all mutation evidence anchors (refs ``mutation:``)."""
+        return [
+            r.anchor
+            for r in self.evidence_store.records()
+            if r.anchor.ref.startswith("mutation:")
+        ]
 
     @property
     def ontology_version(self) -> str:

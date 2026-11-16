@@ -77,11 +77,21 @@ from .errors import (
     format_error,
     format_errors_response,
 )
+from .grounding import GroundingPolicy, GroundingResult
+from .grounding import check_output as check_grounding_output
 from .mcp import create_grounded_mcp_server
 from .query import CostSummary, grounded_query
 from .state.checkpoint_tracker import Checkpoint, CheckpointTracker
-from .state.evidence_store import EvidenceAnchor, EvidenceStore
+from .state.evidence_store import (
+    EvidenceAnchor,
+    EvidenceRecord,
+    EvidenceStore,
+    EvidenceStoreProtocol,
+    StoreInfo,
+)
+from .state.jsonl_evidence_store import JsonlEvidenceStore
 from .state.rate_limiter import RateLimitConfig, RateLimiter
+from .state.redaction import Redactor
 from .workflows.engine import (
     BindingError,
     StepStatus,
@@ -125,6 +135,16 @@ __all__ = [
     "Checkpoint",
     "EvidenceStore",
     "EvidenceAnchor",
+    # Evidence records, stores and redaction (STANDARD v1.2 §6.5-§6.7)
+    "EvidenceRecord",
+    "EvidenceStoreProtocol",
+    "JsonlEvidenceStore",
+    "StoreInfo",
+    "Redactor",
+    # Grounding (STANDARD v1.2 §3.1, §5.20)
+    "GroundingPolicy",
+    "GroundingResult",
+    "check_grounding_output",
     "RateLimiter",
     "RateLimitConfig",
     # Types

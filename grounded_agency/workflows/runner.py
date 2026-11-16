@@ -25,6 +25,7 @@ Example::
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, MutableSet
@@ -32,10 +33,20 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .. import _core
+from ..grounding import Policies, as_policies
 from ..state.checkpoint_tracker import CheckpointTracker
+from ..state.evidence_store import EvidenceAnchor, EvidenceStoreProtocol
+from ..state.redaction import DEFAULT_REDACTOR, Redactor
 from .engine import WorkflowEngine
 from .protocol import RECORD_MODES
 from .triggers import EventGate, trigger_attendance
+
+logger = logging.getLogger(__name__)
+
+# The trace kinds that say what became of a host's Output for a step: kept
+# (step_completed), refused (step_failed: R402, F505), to be retried
+# (retry), or a waiting delegation's acceptance (delegated).
+_OUTCOME_KINDS = frozenset({"step_completed", "step_failed", "retry", "delegated"})
 
 # An action or a response of the host protocol (STANDARD v1.2 §5.19.1;
 # their typed shapes are in .protocol). At run time both are plain dicts.
@@ -107,7 +118,18 @@ class Host:
         "R402", "message": ..., "reason": ...}``. ``reason`` is optional
         (STANDARD v1.2 §5.19.7): ``unsupported_capability`` or
         ``unsupported_domain`` when you cannot serve the step (or raise
-        :class:`HostCannotServe`), or an ``x-`` vendor reason."""
+        :class:`HostCannotServe`), or an ``x-`` vendor reason. Neither the
+        message nor the reason holds a secret (§6.7); the runner redacts the
+        message.
+
+        An ``Output`` may carry ``evidence_seen`` (§3.1, §5.20): the refs of
+        the evidence its producer had for this answer, and nothing else:
+        what you put in the request a model answered, the anchors inside
+        the step's inputs, what the step's tool calls returned. Not a stored
+        trace or history: a ref there was seen by some earlier request, not
+        necessarily by this one. Leave it out when you do not know the
+        request: absent attests nothing, while an empty list attests that
+        the producer saw no evidence."""
         raise NotImplementedError(f"no implementation for {action['capability']}")
 
     def create_checkpoint(self, action: Action) -> Response:
@@ -316,6 +338,8 @@ class WorkflowRunner:
         archive: Callable[[RunResult], None] | None = None,
         run_ids: MutableSet[str] | None = None,
         event_seen: Callable[[str, int], MutableSet[str]] | None = None,
+        evidence_store: EvidenceStoreProtocol | None = None,
+        redactor: Redactor | None = None,
     ) -> None:
         """
         Args:
@@ -356,6 +380,19 @@ class WorkflowRunner:
                 stores you persist, so an event delivered again after a
                 restart starts no other run (§5.10.2); the default is an
                 in-memory set per trigger.
+            evidence_store: Where the runner records the evidence anchors
+                of each host ``Output`` the core kept (STANDARD v1.2 §6.6),
+                with the run's ``run_id`` and the step's ``frame``,
+                ``step`` and ``capability``: only once the core accepted the
+                output (its next trace event for the step is
+                ``step_completed``), so an output refused (R402, F505), to
+                be retried, or a waiting delegation's acceptance records
+                nothing. Items that are not evidence anchors are skipped
+                (and logged). A store that raises never stops the run: the
+                failure is logged and counted (``record_capture_failure``).
+            redactor: Applied to the ``Error`` messages the runner builds
+                from a host's exceptions and to the message of every
+                ``Error`` it submits (§6.7). The default patterns when None.
         """
         self._engine = engine
         self._max_actions = max_actions
@@ -368,6 +405,8 @@ class WorkflowRunner:
         # One gate per event trigger, (workflow, trigger index): it starts
         # at most one run per event_id (§5.10.2).
         self._event_gates: dict[tuple[str, int], EventGate] = {}
+        self._evidence_store = evidence_store
+        self._redactor: Redactor = redactor or DEFAULT_REDACTOR
 
     def catalog(self) -> dict[str, Any]:
         """The catalog the engine holds, as the executor sees it."""
@@ -385,6 +424,7 @@ class WorkflowRunner:
         records: str = "approvals",
         trigger: int | None = None,
         event: Mapping[str, Any] | None = None,
+        grounding: Policies = None,
     ) -> _core.Run:
         """Start a run without driving it (drive it with :meth:`drive`, or
         step it yourself; save it before you act on its first action,
@@ -407,6 +447,13 @@ class WorkflowRunner:
         ``delivers_to`` names. The runner applies no sender policy: apply
         yours before you start the run. Without ``trigger`` the run is
         attended unless ``attendance`` says otherwise.
+
+        ``grounding`` is one :class:`GroundingPolicy` or a list of them
+        (STANDARD v1.2 §5.20): the core checks each host ``Output`` of a
+        step whose capability one requires, in the run and its nested runs,
+        and fails the step with F505 when it is neither grounded nor marked
+        inferred. Each policy was checked against the ontology when it was
+        made, and the core checks it again.
 
         The executor is given no catalog header (``header=None``, STANDARD
         v1.2 §11.5), and loses nothing by it: the engine writes the header
@@ -457,6 +504,7 @@ class WorkflowRunner:
                 now_ms=now,
                 actor_identity=None if actor_identity is None else dict(actor_identity),
                 records=records,
+                grounding=[p.to_dict() for p in as_policies(grounding)] or None,
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None
@@ -637,6 +685,7 @@ class WorkflowRunner:
         event: Mapping[str, Any] | None = None,
         save: Callable[[dict[str, Any]], None] | None = None,
         key: bytes | None = None,
+        grounding: Policies = None,
     ) -> RunResult:
         """Start ``workflow`` (as :meth:`start`) and drive it to its end with
         ``host``. With ``save``, the run's state is saved after it starts and
@@ -653,6 +702,7 @@ class WorkflowRunner:
             records=records,
             trigger=trigger,
             event=event,
+            grounding=grounding,
         )
         if save is not None:
             save(run.snapshot(key))
@@ -720,7 +770,10 @@ class WorkflowRunner:
             response = self._dispatch(host, action)
             if response is None:
                 return Turn(None, run.wake_at(), action), answered
+            seq = run.trace_seq
+            response = self._redact_error(response)
             self._submit(run, action, response, host.now_ms())
+            self._record_evidence(run, action, response, seq)
             answered += 1
             if save is not None:
                 save(run.snapshot(key))
@@ -837,6 +890,79 @@ class WorkflowRunner:
                 ) from e
         return result
 
+    def _redact_error(self, response: Any) -> Any:
+        """An ``Error`` response with its message redacted (§6.7); any
+        other response as it is."""
+        if (
+            isinstance(response, dict)
+            and response.get("kind") == "Error"
+            and isinstance(response.get("message"), str)
+        ):
+            text, changed = self._redactor.redact_text(response["message"])
+            if changed:
+                return {**response, "message": text}
+        return response
+
+    def _record_evidence(
+        self, run: _core.Run, action: Action, response: Any, seq: int
+    ) -> None:
+        """Record the evidence anchors of an ``Output`` the core kept
+        (§6.6): its next trace event for the step is ``step_completed``."""
+        store = self._evidence_store
+        if (
+            store is None
+            or action["kind"] != "InvokeCapability"
+            or not isinstance(response, dict)
+            or response.get("kind") != "Output"
+            or not isinstance(response.get("value"), dict)
+        ):
+            return
+        outcome = next(
+            (
+                e["kind"]
+                for e in run.trace(since=seq)
+                if e.get("kind") in _OUTCOME_KINDS
+                and e.get("frame") == action["frame"]
+                and e.get("step") == action["step"]
+            ),
+            None,
+        )
+        if outcome != "step_completed":
+            return
+        items = response["value"].get("evidence_anchors")
+        anchors: list[EvidenceAnchor] = []
+        skipped = 0
+        for item in items if isinstance(items, list) else []:
+            try:
+                anchors.append(EvidenceAnchor.from_dict(item))
+            except ValueError:
+                skipped += 1
+        if skipped:
+            logger.info(
+                "run %s, step %s of %s: %d evidence_anchors items are not evidence "
+                "anchors (STANDARD v1.2 §6.5) and were not recorded",
+                run.run_id,
+                action["step"],
+                "/".join(action["frame"]),
+                skipped,
+            )
+        if not anchors:
+            return
+        try:
+            store.append_many(
+                anchors,
+                run_id=run.run_id,
+                frame=list(action["frame"]),
+                step=action["step"],
+                capability=action["capability"],
+            )
+        except Exception as e:  # noqa: BLE001 - a store never stops the run
+            logger.warning("could not record the evidence of a step: %s", e)
+            try:
+                store.record_capture_failure(None, str(e))
+            except Exception:  # noqa: BLE001
+                logger.warning("could not count the capture failure", exc_info=True)
+
     @staticmethod
     def _submit(run: _core.Run, action: Action, response: Any, now: int) -> None:
         """Submit ``response`` at ``now``. One the run refuses (it changes
@@ -878,6 +1004,7 @@ class WorkflowRunner:
             except HostCannotServe as e:
                 return _cannot_serve(e)
             except Exception as e:  # the step failed, not the runner
+                # Its message is redacted before it is submitted (§6.7).
                 return {
                     "kind": "Error",
                     "code": "R402",

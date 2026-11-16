@@ -62,12 +62,17 @@ import {
   annotationRecord,
   CapabilityOutputError,
   checkBindings,
+  checkGrounding,
   digest as digestOf,
   encodeCapabilityOutput,
+  groundingPolicies,
+  holdsCredential,
   iJsonProblem,
   joinFlags,
+  type GroundingPolicy,
   type Json,
 } from '@synaptiai/acs-core';
+import { notifyEvidence } from './evidence.js';
 import {
   CAPABILITIES,
   ONTOLOGY_VERSION,
@@ -195,6 +200,33 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   checkpoint_max_age_ms?: number;
   /** Milliseconds since the Unix epoch; defaults to `Date.now`. */
   now?: () => number;
+  /**
+   * Grounding policies (STANDARD 1.2.0 §5.20) this layer applies to the
+   * tool's outputs: when a policy requires the tool's capability, an output
+   * that is neither grounded nor marked inferred is refused with F505 (the
+   * call has run; its trace entry is `failed`). Checked when the tool is
+   * defined: a capability the ontology does not define throws (V101).
+   * Without this option the output check is 1.1's: the contract's required
+   * fields, `evidence_anchors` an array, and a required `confidence` from 0
+   * to 1.
+   */
+  grounding?: GroundingPolicy | readonly GroundingPolicy[];
+  /**
+   * What the call's producer had (`evidence_seen`, §5.20): only what this
+   * call received (`refsIn(args)`) and what the tool's own code read during
+   * `execute` (the file it read and cites). Never a stored trace or history:
+   * a ref there was seen by an earlier request, not by this one. Without it,
+   * the layer attests nothing.
+   */
+  seen?: (call: { state: ThreadState; args: z.infer<Args>; output: CapabilityOutput<C> }) =>
+    | readonly string[]
+    | Promise<readonly string[]>;
+  /**
+   * The host's own secrets (§6.7), registered with the redactor that every
+   * trace entry this tool writes passes through. The default patterns
+   * apply whether or not this is given.
+   */
+  secrets?: readonly string[] | ((state: ThreadState) => Promise<readonly string[]>);
   /**
    * Do the work and return the capability's output: every field the
    * ontology requires, including `evidence_anchors`. Throw to fail.
@@ -427,6 +459,16 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   }
   const now = options.now ?? (() => Date.now());
   const prerequisites = prerequisitesOf(capabilities);
+  // Grounding policies, checked once (§5.20): an unknown id throws here.
+  const policies = (options.grounding === undefined ? [] : groundingPolicies(options.grounding)).filter((p) =>
+    p.require.includes(capability),
+  );
+  const secretsOf = async (state: ThreadState): Promise<readonly string[]> => {
+    const given = options.secrets;
+    return typeof given === 'function' ? await given(state) : (given ?? []);
+  };
+  // persist data and audit records holding a secret are refused (§5.18.10).
+  const holdsRecords = capabilities.includes('persist') || capabilities.includes('audit');
 
   const annotation: AcsAnnotation = {
     standard: STANDARD_VERSION,
@@ -467,7 +509,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
    * so two calls in this realm cannot both pass on one approval or one
    * checkpoint, and taking a nesting token is atomic with the other checks.
    */
-  const check = async (state: ThreadState, argsJson: Json): Promise<Claim> => {
+  const check = async (state: ThreadState, argsJson: Json, secrets: readonly string[]): Promise<Claim> => {
     const flow = flowOf(state);
     const step = stepOf(state);
     const position = { ...(flow !== null ? { flow_id: flow } : {}), ...(step !== null ? { step } : {}) };
@@ -493,16 +535,36 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         recorded_by,
       };
       const refuse = async (result: ToolResult, code: RefusalCode): Promise<Claim> => {
-        await appendTrace(state, {
-          ...base,
-          ...(used.covered_by !== undefined ? { covered_by: used.covered_by } : {}),
-          at: now(),
-          status: 'refused',
-          code,
-          error: result.error ?? code,
-        });
+        await appendTrace(
+          state,
+          {
+            ...base,
+            ...(used.covered_by !== undefined ? { covered_by: used.covered_by } : {}),
+            at: now(),
+            status: 'refused',
+            code,
+            error: result.error ?? code,
+          },
+          secrets,
+        );
         return { outcome: result };
       };
+
+      // Data a persist call would store, or a record an audit call would
+      // append, that holds a secret is refused, not redacted: memory is read
+      // back as fact (§5.18.10, §6.7).
+      if (holdsRecords && holdsCredential(argsJson, secrets)) {
+        return await refuse(
+          refusal(
+            'F504',
+            name,
+            capability,
+            `The ${capabilities.includes('persist') ? 'data this call would store' : 'record this call would append'} holds what looks like a credential (STANDARD 1.2.0 §6.7).`,
+            'Store where the secret is kept, or cite it by reference or digest, not the secret itself.',
+          ),
+          'F504',
+        );
+      }
 
       // A nested call the running composite's own code made, with these
       // exact arguments in this execution, is covered by the composite's
@@ -661,7 +723,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // 4. Record that the call is starting. The entry is written before the
       // tool's own code runs, so that a call cut off while it runs still
       // leaves a record of what it used.
-      const started = await appendTrace(state, { ...base, ...used, at: now(), status: 'started' });
+      const started = await appendTrace(state, { ...base, ...used, at: now(), status: 'started' }, secrets);
       return {
         started,
         flow,
@@ -680,15 +742,19 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // no approval or checkpoint is spent without a trace entry; if the
       // store refuses that too, there is nothing more to do.
       const message = cause instanceof Error ? cause.message : String(cause);
-      await appendTrace(state, {
-        ...identity,
-        ...used,
-        ...(layerRecord !== undefined ? { recorded_by: layerRecord } : {}),
-        at: now(),
-        status: 'failed',
-        code: 'R407',
-        error: message,
-      }).catch(() => undefined);
+      await appendTrace(
+        state,
+        {
+          ...identity,
+          ...used,
+          ...(layerRecord !== undefined ? { recorded_by: layerRecord } : {}),
+          at: now(),
+          status: 'failed',
+          code: 'R407',
+          error: message,
+        },
+        secrets,
+      ).catch(() => undefined);
       return {
         outcome: refusal(
           'R407',
@@ -702,7 +768,14 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   };
 
   const execute = async (state: ThreadState, args: z.infer<Args>): Promise<ToolResult> => {
-    const claim = await serially(state.threadId, () => check(state, args as Json));
+    let secrets: readonly string[];
+    try {
+      secrets = await secretsOf(state);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return refusal('R407', name, capability, `The host's secrets could not be read: ${message}.`, 'The call did not run.');
+    }
+    const claim = await serially(state.threadId, () => check(state, args as Json, secrets));
     if (claim.outcome) return claim.outcome;
     const { started, call, flow, recorded_by } = claim;
 
@@ -714,7 +787,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       const composite = nestingState(
         state,
         { name, seq: call.seq, flow, invokes: invokeNames, recorded_by, now },
-        (entry) => serially(state.threadId, () => appendTrace(state, entry)),
+        (entry) => serially(state.threadId, () => appendTrace(state, entry, secrets)),
       );
       output = await options.execute(composite, args, call);
       text = encodeCapabilityOutput(capability, output);
@@ -723,12 +796,17 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       const contract = cause instanceof CapabilityOutputError;
       try {
         await serially(state.threadId, () =>
-          completeTrace(state, started, {
-            at: now(),
-            status: 'failed',
-            error: message,
-            ...(contract ? { code: 'R402' as const } : {}),
-          }),
+          completeTrace(
+            state,
+            started,
+            {
+              at: now(),
+              status: 'failed',
+              error: message,
+              ...(contract ? { code: 'R402' as const } : {}),
+            },
+            secrets,
+          ),
         );
       } catch (recordFailure) {
         const why = recordFailure instanceof Error ? recordFailure.message : String(recordFailure);
@@ -745,14 +823,63 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       return { status: 'error', error: message };
     }
 
+    // Grounding (§5.20), after the contract check: each policy that
+    // requires the tool's capability applies on its own. The call's argument
+    // names are what an `acs:` anchor may cite.
+    if (policies.length > 0) {
+      let problem: string | null = null;
+      try {
+        const bound = Object.keys(args as object).filter((k) => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(k));
+        const seen = options.seen ? await options.seen({ state, args, output }) : null;
+        for (const policy of policies) {
+          const result = checkGrounding(output, policy, { bound, seen });
+          if (result.code !== null) {
+            problem = result.message;
+            break;
+          }
+        }
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        await serially(state.threadId, () =>
+          completeTrace(state, started, { at: now(), status: 'failed', code: 'R407', error: message }, secrets),
+        ).catch(() => undefined);
+        return refusal('R407', name, capability, `The grounding check could not be completed: ${message}.`, 'It ran.');
+      }
+      if (problem !== null) {
+        const result = refusal(
+          'F505',
+          name,
+          capability,
+          `The output of ${name} is not grounded: ${problem}.`,
+          'Return evidence anchors to what the call read, or mark the output inferred with an inference_method and a confidence.',
+        );
+        try {
+          await serially(state.threadId, () =>
+            completeTrace(state, started, { at: now(), status: 'failed', code: 'F505', error: result.error ?? 'F505' }, secrets),
+          );
+        } catch (recordFailure) {
+          const why = recordFailure instanceof Error ? recordFailure.message : String(recordFailure);
+          return refusal('R407', name, capability, `The call's outcome could not be recorded: ${why}.`, 'It ran.');
+        }
+        return result;
+      }
+    }
+
     const anchors = output['evidence_anchors'];
+    let completed: TraceEntry | undefined;
     try {
       await serially(state.threadId, async () => {
-        const entry = await completeTrace(state, started, {
-          at: now(),
-          status: 'executed',
-          ...(Array.isArray(anchors) ? { evidence_anchors: anchors } : {}),
-        });
+        const entry = await completeTrace(
+          state,
+          started,
+          {
+            at: now(),
+            status: 'executed',
+            ...(Array.isArray(anchors) ? { evidence_anchors: anchors } : {}),
+          },
+          secrets,
+        );
+        completed = entry;
         if (capabilities.includes('checkpoint')) {
           const id = typeof output['checkpoint_id'] === 'string' ? output['checkpoint_id'] : `checkpoint-${entry.seq}`;
           const checkpoints = await readCheckpoints(state);
@@ -775,6 +902,8 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       );
     }
 
+    // A notification of the evidence recorded (§6.6), at most once.
+    if (completed !== undefined) notifyEvidence(state, completed);
     return { status: 'success', result: text };
   };
 
