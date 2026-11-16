@@ -271,15 +271,24 @@ class TestGroundedServerGuard:
     call (R407 otherwise), except a control-only tool, which is never
     refused."""
 
+    # A search output with every field its contract requires.
+    FOUND: dict[str, object] = {
+        "results": [],
+        "evidence_anchors": [],
+        "confidence": 1,
+    }
+
     @staticmethod
     def _served(
         adapter: GroundedAgentAdapter,
         monkeypatch: pytest.MonkeyPatch,
         output: dict[str, object] | None = None,
+        result: object = None,
     ) -> dict[str, object]:
         """The served tools: ``done`` (control-only) and ``find``
-        (search), which returns ``output`` as its structured content when
-        given, else the text ``found``."""
+        (search), which returns ``result`` as it is when given, else
+        ``output`` as its structured content when given, else
+        :attr:`FOUND` as the JSON text of its one content item."""
         import claude_agent_sdk
         from claude_agent_sdk import tool
 
@@ -290,13 +299,19 @@ class TestGroundedServerGuard:
             return {"content": [{"type": "text", "text": "ok"}]}
 
         @tool("find", "Searches.", {"q": str})
-        async def find(args: dict[str, object]) -> dict[str, object]:
+        async def find(args: dict[str, object]) -> object:
+            if result is not None:
+                return result
             if output is not None:
                 return {
                     "content": [{"type": "text", "text": json.dumps(output)}],
                     "structuredContent": output,
                 }
-            return {"content": [{"type": "text", "text": "found"}]}
+            return {
+                "content": [
+                    {"type": "text", "text": json.dumps(TestGroundedServerGuard.FOUND)}
+                ]
+            }
 
         done.metadata = {"control": True}  # type: ignore[attr-defined]
         find.metadata = {"capability": "search"}  # type: ignore[attr-defined]
@@ -350,7 +365,7 @@ class TestGroundedServerGuard:
 
         assert await self._pre(asking_adapter, "mcp__srv__find", {"q": "x"}) == {}
         assert await handler({"q": "x"}) == {
-            "content": [{"type": "text", "text": "found"}]
+            "content": [{"type": "text", "text": json.dumps(self.FOUND)}]
         }
         # The decision was for one call: a second needs its own.
         again = await handler({"q": "x"})
@@ -443,6 +458,192 @@ class TestGroundedServerGuard:
         assert [r["decision"] for r in records] == ["allowed", "failed"]
         assert records[1]["diagnostic"]["code"] == code
         assert records[1].get("reason") == reason
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("result", "problem"),
+        [
+            # Prose, not the capability output (section 5.18.9).
+            (
+                {"content": [{"type": "text", "text": "found"}]},
+                "is not the JSON text of one object",
+            ),
+            # Text around the JSON.
+            (
+                {"content": [{"type": "text", "text": 'Here: {"results": []}'}]},
+                "is not the JSON text of one object",
+            ),
+            # Structured content without the contract's required fields.
+            ({"structuredContent": {"results": []}}, "is missing evidence_anchors"),
+            # Structured content that is not an object.
+            ({"structuredContent": ["a"]}, "is not a JSON object"),
+            # Two content items: not one output object.
+            (
+                {
+                    "content": [
+                        {"type": "text", "text": "{}"},
+                        {"type": "text", "text": "{}"},
+                    ]
+                },
+                "carries 2 content item(s)",
+            ),
+            # An integer no I-JSON reader holds exactly.
+            (
+                {
+                    "structuredContent": {
+                        "results": [9007199254740993],
+                        "evidence_anchors": [],
+                        "confidence": 1,
+                    }
+                },
+                "outside ±2^53",
+            ),
+            # A confidence outside 0 to 1.
+            (
+                {
+                    "structuredContent": {
+                        "results": [],
+                        "evidence_anchors": [],
+                        "confidence": 2,
+                    }
+                },
+                "confidence is not a number from 0 to 1",
+            ),
+        ],
+    )
+    async def test_a_result_that_breaks_the_output_contract_is_r402(
+        self,
+        asking_adapter: GroundedAgentAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+        result: dict[str, object],
+        problem: str,
+    ) -> None:
+        """The output-contract row of section 5.18.10: the result of a call
+        of a served tool with a capability carries that capability's output
+        (its structured content, or the I-JSON text of the object as its one
+        text item, section 5.18.9) with every field the contract requires;
+        otherwise the call that ran fails with R402, recorded against it once
+        (the post-call hook does not record it again)."""
+        served = self._served(asking_adapter, monkeypatch, result=result)
+        assert await self._pre(asking_adapter, "mcp__srv__find", {"q": "x"}) == {}
+        got = await served["find"].handler({"q": "x"})  # type: ignore[attr-defined]
+        assert got["is_error"] is True
+        text = got["content"][0]["text"]
+        assert text.startswith("R402 EXECUTION_FAILED: mcp__srv__find's result: ")
+        assert problem in text
+        post = asking_adapter._make_mutation_consumer()
+        await post(
+            {
+                "tool_name": "mcp__srv__find",
+                "tool_input": {"q": "x"},
+                "tool_response": got,
+            },
+            "c1",
+            None,
+        )
+        records = [r for r in asking_adapter.call_records if r.get("call") == "c1"]
+        assert [r["decision"] for r in records] == ["allowed", "failed"]
+        assert records[1]["diagnostic"]["code"] == "R402"
+        assert records[1]["diagnostic"]["location"] == {
+            "tool": "mcp__srv__find",
+            "capability": "search",
+            "call": "c1",
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "result",
+        [
+            {"structuredContent": FOUND},
+            {"content": [{"type": "text", "text": json.dumps(FOUND)}]},
+            # Structured content is the output whatever the text says.
+            {
+                "content": [{"type": "text", "text": "3 results"}],
+                "structuredContent": FOUND,
+            },
+        ],
+    )
+    async def test_a_result_that_carries_the_output_passes(
+        self,
+        asking_adapter: GroundedAgentAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+        result: dict[str, object],
+    ) -> None:
+        served = self._served(asking_adapter, monkeypatch, result=result)
+        assert await self._pre(asking_adapter, "mcp__srv__find", {"q": "x"}) == {}
+        assert await served["find"].handler({"q": "x"}) == result  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_an_error_result_is_passed_on(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A tool that reports an error returns no output: its result is
+        passed on, and the post-call hook records the failure."""
+        failed = {"content": [{"type": "text", "text": "no index"}], "is_error": True}
+        served = self._served(asking_adapter, monkeypatch, result=failed)
+        assert await self._pre(asking_adapter, "mcp__srv__find", {"q": "x"}) == {}
+        assert await served["find"].handler({"q": "x"}) == failed  # type: ignore[attr-defined]
+        assert list(asking_adapter.diagnostics) == []
+
+    def test_an_unbound_tool_has_no_output_contract(
+        self, asking_adapter: GroundedAgentAdapter
+    ) -> None:
+        """An unbound tool (section 5.18.2) performs no capability the layer
+        knows, so its result has no contract to satisfy: it is passed on."""
+        asking_adapter.mapper.register_mcp_tool("mcp__srv__other")
+        prose = {"content": [{"type": "text", "text": "done"}]}
+        assert asking_adapter.check_call_result("mcp__srv__other", {}, prose) is None
+        assert list(asking_adapter.diagnostics) == []
+
+    @pytest.mark.asyncio
+    async def test_the_contract_is_checked_before_grounding(
+        self, ontology_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R402 comes before F505, as the executor checks them."""
+        from grounded_agency import GroundingPolicy
+
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+                grounding=GroundingPolicy(require={"search"}),
+            )
+        )
+        served = self._served(
+            adapter,
+            monkeypatch,
+            result={"content": [{"type": "text", "text": "found"}]},
+        )
+        assert await self._pre(adapter, "mcp__srv__find", {"q": "x"}) == {}
+        got = await served["find"].handler({"q": "x"})  # type: ignore[attr-defined]
+        assert got["content"][0]["text"].startswith("R402 ")
+        assert [d.code_str for d in adapter.diagnostics] == ["R402"]
+
+    @pytest.mark.asyncio
+    async def test_check_outputs_off_passes_results_on(
+        self, ontology_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``check_outputs=False`` (outside class SL) passes a result on as
+        it is, as before 1.2.0, and the layer's configuration says so."""
+        on = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".on"),
+            )
+        )
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+                check_outputs=False,
+            )
+        )
+        prose = {"content": [{"type": "text", "text": "found"}]}
+        served = self._served(adapter, monkeypatch, result=prose)
+        assert await self._pre(adapter, "mcp__srv__find", {"q": "x"}) == {}
+        assert await served["find"].handler({"q": "x"}) == prose  # type: ignore[attr-defined]
+        assert list(adapter.diagnostics) == []
+        assert adapter.recorded_by["config_sha256"] != on.recorded_by["config_sha256"]
 
 
 # =============================================================================

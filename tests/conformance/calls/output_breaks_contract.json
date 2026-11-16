@@ -1,0 +1,102 @@
+{
+  "description": "An output that is not an object, or lacks a field its capability's output contract requires, is refused with R402.",
+  "ontology": "2.2.0",
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    },
+    {
+      "tool": "find",
+      "ontology": "2.2.0",
+      "capability": "search"
+    }
+  ],
+  "sequence": [
+    {
+      "call": "find",
+      "returns": "found",
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "find",
+      "returns": {
+        "results": []
+      },
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "find",
+      "returns": {
+        "results": [],
+        "evidence_anchors": [],
+        "confidence": 2
+      },
+      "expect": {
+        "refuse_output": "R402"
+      }
+    },
+    {
+      "call": "find",
+      "returns": {
+        "results": [],
+        "evidence_anchors": [],
+        "confidence": 1
+      },
+      "expect": "run"
+    },
+    {
+      "call": "find",
+      "expect": "run"
+    }
+  ]
+}

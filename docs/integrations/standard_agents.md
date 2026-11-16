@@ -812,12 +812,13 @@ runtime's order, and `serially` within a realm). It lists its host gaps, the
 rows of the table above that rest on SA behaviour the text does not state,
 and no check of §5.18.10 it does not apply: it applies the destination
 policies in force to every `send` tool (`configureLayer`, §4.4.2) and the
-secret checks of `persist` and `audit`, and redacts every trace entry it
-writes (§6.7).
+secret checks of `persist` and `audit`, redacts every trace entry it
+writes (§6.7), and checks every grounded tool's output against its
+capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 23
+the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 26
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). The one fixture it skips needs a call of an unbound

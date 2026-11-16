@@ -146,6 +146,16 @@ def create_grounded_mcp_server(
     ``require_layer=False`` restores the earlier behaviour and is outside
     class SL.
 
+    A tool with a capability returns that capability's output (sections
+    5.18.9, 5.18.10): as ``structuredContent``, or as the I-JSON text of the
+    output object, its one text content item. With ``require_layer``, a
+    result that carries none, or one that lacks a field the capability's
+    output contract requires, fails the call that ran with ``R402
+    EXECUTION_FAILED`` (unless the adapter's ``check_outputs`` is off,
+    outside class SL); then the adapter's grounding policies (F505) and the
+    profiles' minimum confidence (F504) apply to the output. An error result
+    (``is_error``) is passed on.
+
     Args:
         name: MCP server name.
         version: MCP server version string.
@@ -170,7 +180,8 @@ def create_grounded_mcp_server(
 
         @tool("search_docs", "Search documentation.", {"query": str})
         async def search_docs(args):
-            return {"content": [{"type": "text", "text": "results..."}]}
+            output = {"results": [...], "evidence_anchors": [...], "confidence": 0.9}
+            return {"content": [{"type": "text", "text": json.dumps(output)}]}
 
         search_docs.metadata = {"capability": "search"}
 
@@ -259,7 +270,9 @@ def create_grounded_mcp_server(
 
 def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any) -> Any:
     """``tool`` with a handler that refuses (R407) a call the adapter's
-    layer did not allow."""
+    layer did not allow, and checks the result of a call that ran
+    (:meth:`GroundedAgentAdapter.check_call_result`: the output contract,
+    R402; grounding, F505; a minimum confidence, F504)."""
     handler = tool.handler
     adapter._register_grounded_tool(full_name)
 
@@ -281,7 +294,7 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
                 "is_error": True,
             }
         result: dict[str, Any] = await handler(args)
-        refusal = _grounding_refusal(adapter, full_name, args, result, call)
+        refusal = adapter.check_call_result(full_name, args, result, call)
         if refusal is not None:
             return {"content": [{"type": "text", "text": refusal}], "is_error": True}
         return result
@@ -300,53 +313,6 @@ def _guarded(tool: Any, full_name: str, adapter: GroundedAgentAdapter, cls: Any)
         except AttributeError:
             pass
     return wrapped
-
-
-def _grounding_refusal(
-    adapter: GroundedAgentAdapter,
-    full_name: str,
-    args: Any,
-    result: Any,
-    call: str | None = None,
-) -> str | None:
-    """The F505 refusal of a call's output under the adapter's grounding
-    policies (STANDARD v1.2 section 5.20), or its F504 under a minimum
-    confidence, or None. The output is the result's ``structuredContent``
-    when it is an object, else the capability output its text carries
-    (section 5.18.9); an error result is no output and is passed on. ``call`` is the call's id (the decision it used), so
-    the failure is recorded against the call that ran. The rules are the
-    adapter's: its configuration's grounding policies and those of the
-    domain profiles it applies, and their minimum confidence (section
-    5.21.3)."""
-    if not adapter._checks_call_outputs or not isinstance(result, dict):
-        return None
-    if result.get("is_error"):
-        return None
-    output: Any = result.get("structuredContent")
-    if not isinstance(output, dict):
-        output = None
-        texts = [
-            c.get("text")
-            for c in result.get("content") or []
-            if isinstance(c, dict) and c.get("type") == "text"
-        ]
-        mapping = adapter.mapper.map_tool(
-            full_name, args if isinstance(args, dict) else {}
-        )
-        capability = getattr(mapping, "capability_id", None)
-        if len(texts) == 1 and isinstance(texts[0], str) and capability:
-            from .capabilities.output import (
-                CapabilityOutputError,
-                decode_capability_output,
-            )
-
-            try:
-                output = decode_capability_output(
-                    capability, texts[0], adapter.registry
-                )
-            except CapabilityOutputError:
-                output = None
-    return adapter.check_call_output(full_name, args, output, call)
 
 
 def _get_tool_name(tool: Any) -> str:

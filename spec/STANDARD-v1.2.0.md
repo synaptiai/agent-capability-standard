@@ -10,11 +10,10 @@
 [RFC-0010](RFC-0010-profiles-trust-versioning-and-dialect.md); the reference
 validator and executor implement §4, §5 and §9–§11 and claim class EX
 (§10.5); the Python SDK adapter and the Standard Agents binding implement
-§5.18, and the binding claims class SL (§10.4), the adapter once the
-§5.18.10 row its statement lists as not applied is applied; the
-executor and both layers check grounding (§5.20) and apply domain profiles
-(§5.21); `grounded_agency` implements §7.1's entity ids and §8's
-arithmetic; §7.2 and §7.3 are not implemented
+§5.18 and claim class SL (§10.4); the executor and both layers check
+grounding (§5.20) and apply domain profiles (§5.21); `grounded_agency`
+implements §7.1's entity ids and §8's arithmetic; §7.2 and §7.3 are not
+implemented
 **Date:** 2026-11-15
 **Supersedes:** [STANDARD-v1.1.0](STANDARD-v1.1.0.md) (still supported; see §11.5)
 
@@ -2679,6 +2678,13 @@ model) MAY add a refusal; it never satisfies or replaces a required check.
 | every capability | Its output satisfies the output contract (§5.18.9) | R402 |
 | every capability | Records and evidence the layer writes carry no secret: it redacts them (§6.7) | — |
 
+The output-contract row applies to each covered call's result that the
+layer receives as a capability output: validated structure, or text as
+§5.18.9 says. A result its host returns in another form, such as a host
+tool's file text or command output, carries no capability output to check;
+the layer's conformance statement names those calls (§10.4), as §5.21.4
+says for the output rules of profiles.
+
 A host-specific mechanism, such as a hook declared in a skill's
 frontmatter, is one implementation of these checks. A host that loads a
 skill's text as instructions without running its hooks applies these checks
@@ -4201,15 +4207,19 @@ check them skips those fixtures and says so in its statement.
 **Call-sequence fixtures.** Each fixture is one scope with a person
 present. Its `bindings` are records under its `ontology`; a tool not listed
 is unbound. A bound tool succeeds and returns what its output contract
-requires; a call of a tool classified `checkpoint` that runs takes a
-checkpoint. Its `sequence` is a list of calls and events:
+requires, or what the call `returns`; a call of a tool classified
+`checkpoint` that runs takes a checkpoint. Its `sequence` is a list of
+calls and events:
 
 - A call names `call` (the tool), `args` (default `{}`), optionally
   `approve` or `reject` (who decided on it beforehand: on its shown value
   §5.18.7, or at the prompt), `fails` (its tool reports an error after it
-  started), `nested` (calls the tool makes while it runs), and `expect`:
-  `"run"` or `{"refuse": <code>}`. A call with neither `approve` nor
-  `reject` is undecided.
+  started), `returns` (its tool's output, which the layer receives as its
+  host carries a capability output), `nested` (calls the tool makes while it
+  runs), and `expect`: `"run"`, `{"refuse": <code>}`, or
+  `{"refuse_output": <code>}` (the call ran, and the layer refused its
+  output, §5.18.10). A call with neither `approve` nor `reject` is
+  undecided.
 - An event is `{"boundary": true}` (an execution boundary) or
   `{"expire": "checkpoint"}` / `{"expire": "decision"}` (the layer's
   checkpoint maximum age, or a decision's expiry, passes).

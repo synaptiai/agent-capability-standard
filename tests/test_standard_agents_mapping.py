@@ -232,6 +232,12 @@ def test_findings_match_the_index_and_have_the_documented_fields(
                 assert other in ids and other != finding["id"], where
             counted[finding["priority"]] = counted.get(finding["priority"], 0) + 1
         assert counted == entry["priorities"], about
+        if "status" in entry:
+            statuses: dict[str, int] = {}
+            for finding in items:
+                statuses[finding["status"]] = statuses.get(finding["status"], 0) + 1
+            stated = {k: v for k, v in entry["status"].items() if v}
+            assert statuses == stated, about
         for q in doc.get("questions", []):
             assert q["question"].strip() and q["refs"], q["id"]
             if "finding" in q:

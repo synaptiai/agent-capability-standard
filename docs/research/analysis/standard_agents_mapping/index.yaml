@@ -170,10 +170,10 @@ findings:
       minor: 21
     questions: 15
     status:
-      fixed: 5
-      partly_fixed: 14
-      proposed: 7
-      open: 38
+      fixed: 64
+      partly_fixed: 0
+      proposed: 0
+      open: 0
 not_mapped:
 - standard: acs
   ref: schemas/capability_ontology.yaml nodes[id=predict] (lines 406-448), nodes[id=discover] (lines 493-533),

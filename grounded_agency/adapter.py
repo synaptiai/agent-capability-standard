@@ -302,6 +302,18 @@ class GroundedAgentConfig:
             ``schemas/capability_ontology.yaml``). A contract whose ``$ref``
             names nothing there, is cyclic or nests too deep refuses the
             configuration (``ValueError``).
+        check_outputs: Whether the result of a call of a tool that
+            ``create_grounded_mcp_server`` serves with a capability must carry
+            that capability's output and satisfy its output contract
+            (STANDARD 1.2.0 sections 5.18.9 and 5.18.10): its
+            ``structuredContent``, or the I-JSON text of the output object as
+            its one text content item, with every field the contract
+            requires. A result that does not is the failure of the call that
+            ran, R402, recorded against the call. On (default). ``False``
+            passes such results on unchecked, as before 1.2.0 (outside class
+            SL). Claude Code's own tools and the tools of other MCP servers
+            return results in their own forms, which carry no capability
+            output, and are never checked.
     """
 
     ontology_path: str = field(default_factory=get_default_ontology_path)
@@ -327,6 +339,7 @@ class GroundedAgentConfig:
     grounding: tuple[GroundingPolicy, ...] = ()
     allowed_destinations: Sequence[str] | None = None
     snapshots: FileSnapshotStore | None = None
+    check_outputs: bool = True
 
     def __post_init__(self) -> None:
         """Refuse a setting this adapter cannot honour."""
@@ -960,9 +973,71 @@ class GroundedAgentAdapter:
                 reason = fault["reason"]
         if message is None:
             return None
-        # The call has run (section 5.20): its outcome is a failure with the
-        # code, recorded against the call, not a refusal of a call that did
-        # not run. The post-call hooks do not record it again.
+        return self._fail_call(code, mapping, tool, call, message, reason)
+
+    def check_call_result(
+        self,
+        tool: str,
+        args: Any,
+        result: Any,
+        call: str | None = None,
+    ) -> str | None:
+        """Check the result of a call of a tool ``create_grounded_mcp_server``
+        serves, which has run: its capability output and the output rules
+        (STANDARD 1.2.0 sections 5.18.9, 5.18.10, 5.20, 5.21.3), in the
+        executor's order.
+
+        1. With ``config.check_outputs``, the result must carry the
+           capability's output (:func:`~grounded_agency.capabilities.output.tool_result_output`:
+           its ``structuredContent``, or the I-JSON text of the output object
+           as its one text item) and satisfy the capability's output
+           contract; otherwise R402.
+        2. Then :meth:`check_call_output`: the grounding policies (F505) and
+           the profiles' minimum confidence (F504).
+
+        An error result (``is_error``) carries no output and is passed on: the
+        call failed, and the post-call hooks record it. A tool with no
+        capability (unbound) has no output contract. Returns the refusal's
+        text form, recorded against ``call`` as the failure of the call that
+        ran (decision ``failed``), or None."""
+        if isinstance(result, dict) and result.get("is_error"):
+            return None
+        if not self.config.check_outputs and not self._checks_call_outputs:
+            return None
+        mapping = self.mapper.map_tool(tool, args if isinstance(args, dict) else {})
+        capability = mapping.capability_id if mapping is not UNCLASSIFIED_TOOL else None
+        if not capability:
+            return None
+        from .capabilities.output import CapabilityOutputError, tool_result_output
+
+        output: Any
+        try:
+            output = tool_result_output(capability, result, self.registry)
+        except CapabilityOutputError as e:
+            if self.config.check_outputs:
+                return self._fail_call(
+                    ErrorCode.EXECUTION_FAILED,
+                    mapping,
+                    tool,
+                    call,
+                    f"{tool}'s result: {e.error.message} (section 5.18.9)",
+                )
+            output = None
+        return self.check_call_output(tool, args, output, call)
+
+    def _fail_call(
+        self,
+        code: ErrorCode,
+        mapping: ToolMapping,
+        tool: str,
+        call: str | None,
+        message: str,
+        reason: str | None = None,
+    ) -> str:
+        """Refuse the output of a call that has run (sections 5.18.10,
+        5.20): its outcome is a failure with the code, recorded against the
+        call, not a refusal of a call that did not run. The post-call hooks
+        do not record it again."""
         text = self._refuse(
             code,
             mapping,
@@ -1027,6 +1102,10 @@ class GroundedAgentAdapter:
         if self.config.allowed_destinations is not None:
             # The host policy behind F504 refusals of sends (section 4.4.2).
             settings["allowed_destinations"] = list(self.config.allowed_destinations)
+        if not self.config.check_outputs:
+            # Results pass on unchecked (no R402, section 5.18.10); the
+            # default, checked, leaves the digest as it was.
+            settings["check_outputs"] = False
         key = (self.mapper.records_revision, _core.canonical_json(settings))
         cached = self._config_digest
         if cached is not None and cached[0] == key:
@@ -1102,7 +1181,8 @@ class GroundedAgentAdapter:
         ``diagnostics`` and a call record; returns its text form. Its message
         is redacted (§6.7): a diagnostic carries no secret. ``outcome`` is
         the record's decision: ``refused`` for a call that does not run,
-        ``failed`` for one that ran and whose result is refused (F505)."""
+        ``failed`` for one that ran and whose result is refused (R402, F505,
+        F504)."""
         message, _ = self.redactor.redact_text(message)
         location: dict[str, Any] = {"tool": tool}
         if mapping is not UNCLASSIFIED_TOOL and mapping.capability_id:

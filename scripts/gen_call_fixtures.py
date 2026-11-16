@@ -362,7 +362,8 @@ binding(
 
 
 # ---------------------------------------------------------------------------
-# Call-sequence fixtures (sections 5.18.5 to 5.18.7)
+# Call-sequence fixtures (sections 5.18.5 to 5.18.7, and the output-contract
+# row of section 5.18.10)
 # ---------------------------------------------------------------------------
 
 ALICE = ["alice"]
@@ -373,6 +374,11 @@ def refuse(code: str) -> dict[str, str]:
     return {"refuse": code}
 
 
+def refuse_output(code: str) -> dict[str, str]:
+    """The call ran, and the layer refused its output."""
+    return {"refuse_output": code}
+
+
 def call(
     tool: str,
     expect: Any,
@@ -381,6 +387,7 @@ def call(
     approve: list[str] | None = None,
     reject: list[str] | None = None,
     fails: bool = False,
+    returns: Any = None,
     nested: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     step: dict[str, Any] = {"call": tool}
@@ -392,6 +399,8 @@ def call(
         step["reject"] = reject
     if fails:
         step["fails"] = True
+    if returns is not None:
+        step["returns"] = returns
     if nested is not None:
         step["nested"] = nested
     step["expect"] = expect
@@ -425,11 +434,12 @@ def calls(
     *,
     needs: list[str] | None = None,
     write: dict[str, Any] | None = None,
+    extra: list[dict[str, Any]] | None = None,
 ) -> None:
     fixture: dict[str, Any] = {"description": description, "ontology": ONTOLOGY}
     if needs:
         fixture["needs"] = needs
-    fixture["bindings"] = standard_bindings(write)
+    fixture["bindings"] = standard_bindings(write) + (extra or [])
     fixture["sequence"] = sequence
     if name in call_fixtures:
         raise ValueError(f"call fixture {name!r} defined twice")
@@ -638,6 +648,66 @@ calls(
     "A covered call skips only the checkpoint and the approval: its prerequisites are still checked.",
     [call("fix", RUN, nested=[call("undo", refuse("F503"))])],
     needs=["nested_calls"],
+)
+
+# The output-contract row of section 5.18.10: a call's output satisfies its
+# capability's output contract (section 5.18.9), else the call that ran fails
+# with R402.
+FIND = [rec("find", "search")]
+FOUND = {"results": [], "evidence_anchors": [], "confidence": 1}
+calls(
+    "output_breaks_contract",
+    "An output that is not an object, or lacks a field its capability's output contract requires, is refused with R402.",
+    [
+        call("find", refuse_output("R402"), returns="found"),
+        call("find", refuse_output("R402"), returns={"results": []}),
+        call(
+            "find",
+            refuse_output("R402"),
+            returns={"results": [], "evidence_anchors": [], "confidence": 2},
+        ),
+        call("find", RUN, returns=FOUND),
+        call("find", RUN),
+    ],
+    extra=FIND,
+)
+calls(
+    "output_not_i_json",
+    "An output holding an integer beyond 2^53, which has no exact I-JSON form, is refused with R402.",
+    [
+        call(
+            "find",
+            refuse_output("R402"),
+            returns={
+                "results": [9007199254740993],
+                "evidence_anchors": [],
+                "confidence": 1,
+            },
+        ),
+        call(
+            "find",
+            RUN,
+            returns={
+                "results": [9007199254740992],
+                "evidence_anchors": [],
+                "confidence": 1,
+            },
+        ),
+    ],
+    extra=FIND,
+)
+calls(
+    "refused_output_uses_checkpoint",
+    "A call whose output is refused has run: it used its checkpoint, and the next call needs a new one.",
+    [
+        call("save", RUN),
+        call(
+            "write", refuse_output("R402"), A, approve=ALICE, returns={"success": True}
+        ),
+        call("write", refuse("F501"), B, approve=ALICE),
+        call("save", RUN),
+        call("write", RUN, B, approve=ALICE),
+    ],
 )
 
 
