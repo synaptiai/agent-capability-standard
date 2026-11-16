@@ -1,0 +1,14 @@
+# Standard version: 1.2.0
+# A literal agent the workflow's agents does not list (STANDARD v1.2
+# §5.15.2): V107. The reviewer's low maxima need no checkpoint.
+review:
+  goal: Have a reviewer critique the draft.
+  risk: low
+  agents: [db-writer]
+  steps:
+  - capability: delegate
+    purpose: Ask the reviewer.
+    store_as: review_a
+    input_bindings:
+      agent: reviewer-a
+      task: {draft: d}

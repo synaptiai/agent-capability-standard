@@ -28,12 +28,13 @@ Delegate a complex task to one or more subagents by defining clear contracts, in
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `task` | Yes | object | The overall task to delegate |
-| `agent` | Yes | string | Target agent |
+| `agent` | Yes | string | Target agent, by the name its agent manifest and the workflow's `agents` use: a target name, not a principal (Standard v1.2 §5.15.1, §5.15.2) |
 | `constraints` | No | object | Global constraints (timeout, resource limits) |
 | `fresh_context` | No | boolean | Start the delegate without this agent's context, e.g. for an independent review (Standard v1.1 `delegation@1`) |
-| `model_family` | No | string | Model family the delegate should run on (`delegation@1`) |
+| `model_family` | No | string | Model family the delegate should run on, lowercase, compared exactly (`delegation@1`, Standard v1.2 §5.15) |
 | `role` | No | string | Role the delegate takes, e.g. `reviewer` (`delegation@1`) |
-| `read_only` | No | boolean | The delegate may read but must not change anything (`delegation@1`); the host attests it in `effective.read_only` |
+| `read_only` | No | boolean | The delegate may read but must not change anything (`delegation@1`); the host attests it in `effective.read_only`, and a host that cannot enforce it refuses the delegation |
+| `continues` | No | string | The `task_id` of an earlier delegation whose delegate the host continues; never with `fresh_context: true`, and null delegates anew (Standard v1.2 §5.15.3) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
 
@@ -152,9 +153,9 @@ assumptions: []
 | Field | Type | Description |
 |-------|------|-------------|
 | `accepted` | boolean | Whether the target agent accepted the task |
-| `task_id` | string | Identifier of the delegated task |
+| `task_id` | string | Identifier of this delegation call, its own also when it continues another (Standard v1.2 §5.15.3) |
 | `agent` | string | The agent the task was assigned to |
-| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `role`, `read_only`), and `checkpointed`, which attests the delegate's checkpoint before each change (§5.15.4); a review quorum relies on them |
+| `effective` | object | Settings the host actually used (`fresh_context`, `model_family`, `model_id`, `role`, `read_only`), and `checkpointed`, which attests the delegate's checkpoint before each change (§5.15.4); a review quorum relies on them. `model_family` is derived from `model_id` by the rule of Standard v1.2 §5.15 |
 | `result` | object | The delegate's result, with its `sender` (and `sender_identity` under identity@1), when the step waits for it; otherwise null |
 | `delegation` | object | Overall delegation summary |
 | `subtasks` | array | Individual subtask definitions with contracts |
@@ -419,6 +420,12 @@ assumptions:
 - Define failure handling before delegation
 - Validate interface compatibility
 - Do not delegate tasks requiring approval without noting it
+- In a workflow that declares `agents` (Standard v1.2 §5.15.2), the step
+  takes its target's flags from the agent's manifest: a delegation to an
+  agent that may mutate needs a checkpoint before it and an approval, and
+  without the manifest it is not delegated
+- In a 1.2 workflow, a `read_only` delegation the host does not attest
+  fails the step, not retried
 
 ## Composition Patterns
 

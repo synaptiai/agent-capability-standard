@@ -18,6 +18,7 @@ from typing import Any
 
 from ..state.evidence_store import EvidenceAnchor, EvidenceStore
 from .audit import CoordinationAuditLog
+from .manifest import check_task
 from .registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
@@ -239,6 +240,23 @@ class DelegationProtocol:
                 agent_id=target_agent_id,
                 accepted=False,
                 rejection_reason=(f"Agent lacks capabilities: {sorted(missing)}"),
+                status="rejected",
+            )
+        elif agent.task_inputs is not None and any(
+            problems := check_task({"task": dict(agent.task_inputs)}, input_data or {})
+        ):
+            # The agent's manifest declares its task (STANDARD v1.2 §5.15.2):
+            # an undeclared or missing input is refused, as the executor
+            # refuses it (R402) and Standard Agents does with
+            # subagent_arguments_required.
+            undeclared, missing_inputs = problems
+            result = DelegationResult(
+                task_id=task_id,
+                agent_id=target_agent_id,
+                accepted=False,
+                rejection_reason=(
+                    f"task inputs: undeclared {undeclared}, missing {missing_inputs}"
+                ),
                 status="rejected",
             )
         else:

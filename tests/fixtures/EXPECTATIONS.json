@@ -76,6 +76,12 @@
     "category": "structural",
     "expected_error_codes": [
       "V101"
+    ],
+    "expected_locations": [
+      {
+        "code": "V101",
+        "path": "/unknown_capability/steps/0/capability"
+      }
     ]
   },
   "fail_empty_steps": {
@@ -368,6 +374,12 @@
     "category": "extensions",
     "expected_error_codes": [
       "S303"
+    ],
+    "expected_locations": [
+      {
+        "code": "S303",
+        "path": "/bad_schedules/triggers/0/schedule/cron"
+      }
     ]
   },
   "fail_event_delivers_to": {
@@ -818,6 +830,486 @@
       "W614"
     ]
   },
+  "pass_location_paths_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W604"
+    ],
+    "expected_locations": [
+      {
+        "code": "W604",
+        "path": "/w/steps/0/input_bindings/a"
+      },
+      {
+        "code": "W604",
+        "path": "/w/steps/0/input_bindings/a.b"
+      },
+      {
+        "code": "W604",
+        "path": "/w/steps/1/requires_aproval"
+      },
+      {
+        "code": "W604",
+        "path": "/w/owner"
+      }
+    ]
+  },
+  "pass_domain_grammar_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W620"
+    ],
+    "expected_locations": [
+      {
+        "code": "W620",
+        "path": "/domains/steps/0/domain"
+      },
+      {
+        "code": "W620",
+        "path": "/domains/steps/1/domain"
+      }
+    ]
+  },
+  "pass_names_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W620"
+    ],
+    "expected_locations": [
+      {
+        "code": "W620",
+        "path": "/My Workflow"
+      },
+      {
+        "code": "W620",
+        "path": "/catalog"
+      }
+    ]
+  },
+  "pass_model_family_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": [
+      "W620"
+    ],
+    "expected_locations": [
+      {
+        "code": "W620",
+        "path": "/review/steps/0/input_bindings/model_family"
+      }
+    ]
+  },
+  "pass_concurrent_conflict_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "edges",
+    "expected_warning_codes": [
+      "W623"
+    ],
+    "expected_locations": [
+      {
+        "code": "W623",
+        "path": "/nightly/triggers/0/schedule/overlap"
+      }
+    ]
+  },
+  "pass_concurrent_conflict_invoked_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "edges",
+    "expected_warning_codes": [
+      "W623"
+    ],
+    "expected_locations": [
+      {
+        "code": "W623",
+        "path": "/nightly/triggers/0/schedule/overlap"
+      }
+    ]
+  },
+  "pass_concurrent_conflict_action_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "edges",
+    "expected_warning_codes": [
+      "W623"
+    ]
+  },
+  "pass_agents_v11_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": [
+      "W616"
+    ],
+    "expected_locations": [
+      {
+        "code": "W616",
+        "path": "/review/agents"
+      }
+    ],
+    "note": "The workflow field agents in a workflow that targets 1.1 (Standard v1.2 \u00a75.15.2, \u00a711.5): ignored there, as by a 1.1 consumer"
+  },
+  "pass_agents_declared": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": [],
+    "agents": [
+      "agents/reviewer.agent.yaml"
+    ]
+  },
+  "fail_agents_flags_raised": {
+    "should_pass": false,
+    "level": "L4",
+    "category": "delegation",
+    "expected_error_codes": [
+      "F501"
+    ],
+    "agents": [
+      "agents/db_writer.agent.yaml"
+    ]
+  },
+  "pass_agents_read_only": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "delegation",
+    "expected_warning_codes": [],
+    "agents": [
+      "agents/db_writer.agent.yaml"
+    ]
+  },
+  "pass_agents_flags_downgrade_warn": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "delegation",
+    "expected_warning_codes": [
+      "W602"
+    ],
+    "agents": [
+      "agents/db_writer.agent.yaml"
+    ]
+  },
+  "fail_agents_undeclared_target": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "delegation",
+    "expected_error_codes": [
+      "V107"
+    ],
+    "agents": [
+      "agents/reviewer.agent.yaml",
+      "agents/db_writer.agent.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "V107",
+        "path": "/review/steps/0/input_bindings/agent"
+      }
+    ]
+  },
+  "fail_agents_task": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "delegation",
+    "expected_error_codes": [
+      "S303",
+      "S304"
+    ],
+    "agents": [
+      "agents/db_writer.agent.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "S303",
+        "path": "/write/steps/1/input_bindings/task/colour"
+      },
+      {
+        "code": "S304",
+        "path": "/write/steps/1/input_bindings/task"
+      }
+    ]
+  },
+  "fail_agents_shape": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "delegation",
+    "expected_error_codes": [
+      "S303"
+    ],
+    "expected_locations": [
+      {
+        "code": "S303",
+        "path": "/empty/agents"
+      },
+      {
+        "code": "S303",
+        "path": "/repeated/agents/1"
+      }
+    ]
+  },
+  "pass_agents_manifest_missing_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": [
+      "W621"
+    ],
+    "agents": [
+      "agents/reviewer.agent.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "W621",
+        "path": "/review/steps/1/input_bindings/agent"
+      }
+    ]
+  },
+  "fail_agents_unknown_capability": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "delegation",
+    "expected_error_codes": [
+      "V101"
+    ],
+    "expected_warning_codes": [
+      "W621"
+    ],
+    "agents": [
+      "agents/oracle.agent.yaml"
+    ]
+  },
+  "pass_agents_approval_block": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "delegation",
+    "expected_warning_codes": [],
+    "agents": [
+      "agents/db_writer.agent.yaml"
+    ]
+  },
+  "pass_agents_approval_block_unmanifested_warn": {
+    "should_pass": true,
+    "level": "L4",
+    "category": "delegation",
+    "expected_warning_codes": [
+      "W621"
+    ]
+  },
+  "pass_unbounded_delegation_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": [
+      "W621",
+      "W622"
+    ]
+  },
+  "pass_unbounded_delegation_v11": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": []
+  },
+  "pass_unbounded_delegation_cleared": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": []
+  },
+  "pass_continues_v11_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": [
+      "W616"
+    ]
+  },
+  "fail_delegation_continues": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "delegation",
+    "expected_error_codes": [
+      "S303"
+    ],
+    "expected_locations": [
+      {
+        "code": "S303",
+        "path": "/review/steps/0/input_bindings/continues"
+      }
+    ]
+  },
+  "pass_delegation_continues": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "delegation",
+    "expected_warning_codes": [],
+    "agents": [
+      "agents/reviewer.agent.yaml"
+    ]
+  },
+  "pass_qualified_invoke": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_warning_codes": [],
+    "catalogs": [
+      "catalogs/lib.workflow_catalog.yaml"
+    ]
+  },
+  "fail_qualified_invoke_hidden": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "V107"
+    ],
+    "catalogs": [
+      "catalogs/lib.workflow_catalog.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "V107",
+        "path": "/check/steps/0/workflow_id"
+      },
+      {
+        "code": "V107",
+        "path": "/check/steps/1/workflow_id"
+      }
+    ]
+  },
+  "fail_qualified_invoke_names": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "V107"
+    ],
+    "expected_warning_codes": [
+      "W620"
+    ],
+    "catalogs": [
+      "catalogs/names_lib.workflow_catalog.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "V107",
+        "path": "/check/steps/2/workflow_id"
+      }
+    ],
+    "note": "Qualified ids whose workflow names are not identifiers resolve; a missing one is V107 (Standard v1.2 \u00a75.1.1)"
+  },
+  "pass_qualified_invoke_unloaded_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_warning_codes": [
+      "W607"
+    ]
+  },
+  "fail_qualified_invoke_inputs": {
+    "should_pass": false,
+    "level": "L2",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "S303",
+      "S304"
+    ],
+    "catalogs": [
+      "catalogs/lib.workflow_catalog.yaml"
+    ]
+  },
+  "fail_qualified_cycle": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "V105"
+    ],
+    "catalogs": [
+      "catalogs/cycle_lib.workflow_catalog.yaml"
+    ]
+  },
+  "fail_library_header_version": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "V109"
+    ],
+    "catalogs": [
+      "catalogs/future_lib.workflow_catalog.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "V109",
+        "catalog": "acs.fixtures.future",
+        "workflow": "shared",
+        "field": "# Standard version"
+      }
+    ],
+    "note": "A library's header declares an unsupported version: V109 names the library and its workflow's own name, with no path (Standard v1.2 \u00a79.8, \u00a711.5)"
+  },
+  "pass_catalog_manifest": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_warning_codes": []
+  },
+  "fail_catalog_manifest": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "S303",
+      "V107"
+    ],
+    "expected_locations": [
+      {
+        "code": "S303",
+        "path": "/catalog/id"
+      },
+      {
+        "code": "V107",
+        "path": "/catalog/exports/0"
+      }
+    ]
+  },
+  "fail_catalog_manifest_ontology": {
+    "should_pass": false,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_error_codes": [
+      "V109"
+    ]
+  },
+  "pass_catalog_manifest_v11_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_warning_codes": [
+      "W616"
+    ],
+    "expected_locations": [
+      {
+        "code": "W616",
+        "path": "/catalog"
+      }
+    ]
+  },
+  "pass_inquiry_correlate": {
+    "should_pass": true,
+    "level": "L2",
+    "category": "extensions",
+    "expected_warning_codes": []
+  },
   "warn_version_feature_1_2": {
     "should_pass": true,
     "level": "L2",
@@ -881,5 +1373,38 @@
       "W603"
     ],
     "note": "A reference to persist's deprecated timestamp; stored_at is the same instant (Standard v1.2 \u00a74.5)"
+  },
+  "pass_memory_scope_v11_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "structural",
+    "expected_warning_codes": [
+      "W616"
+    ],
+    "expected_locations": [
+      {
+        "code": "W616",
+        "path": "/remember/steps/0/input_bindings/scope"
+      }
+    ],
+    "note": "The persist and recall input scope in a workflow that targets 1.1: one W616, at the first step that binds it (Standard v1.2 \u00a74.5, \u00a711.5)"
+  },
+  "pass_qualified_invoke_v11_warn": {
+    "should_pass": true,
+    "level": "L1",
+    "category": "catalogs",
+    "expected_warning_codes": [
+      "W616"
+    ],
+    "catalogs": [
+      "catalogs/lib.workflow_catalog.yaml"
+    ],
+    "expected_locations": [
+      {
+        "code": "W616",
+        "path": "/check/steps/0/workflow_id"
+      }
+    ],
+    "note": "A qualified invoke target in a workflow that targets 1.1 (Standard v1.2 \u00a75.1.1, \u00a711.5)"
   }
 }

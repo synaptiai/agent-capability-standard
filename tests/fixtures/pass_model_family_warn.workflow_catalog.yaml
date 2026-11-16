@@ -1,0 +1,16 @@
+# Standard version: 1.1.0
+# A literal model family outside [a-z][a-z0-9_-]* (STANDARD v1.2 §5.15):
+# W620. A 1.1 workflow gets no W621.
+review:
+  goal: Have a reviewer critique the draft.
+  risk: low
+  workflow_extensions:
+    requires: [delegation@1]
+  steps:
+  - capability: delegate
+    purpose: Ask a reviewer.
+    store_as: review_out
+    input_bindings:
+      agent: reviewer-a
+      task: {draft: d}
+      model_family: Acme

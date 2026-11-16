@@ -361,6 +361,46 @@ mod tests {
     }
 
     #[test]
+    fn memory_scope_below_1_2_is_w616_at_its_step() {
+        // §11.5: the persist and recall input `scope` is new in 1.2; a 1.1
+        // workflow that binds it gets one W616, located at its first such
+        // step with the step's capability and a step-relative field.
+        let steps = json!([
+            {"capability": "observe", "store_as": "o", "input_bindings": {"target": "t"}},
+            {"capability": "recall", "store_as": "r", "input_bindings": {"key": "k", "scope": "user"}},
+            {"capability": "persist", "store_as": "p",
+             "input_bindings": {"data": "${r}", "key": "k", "scope": "user"}}
+        ]);
+        let report = crate::validate::validate_catalog(
+            &crate::validate::tests::ctx(),
+            &catalog("1.1", &[], steps.clone()),
+            None,
+        );
+        let w616: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code.as_str() == "W616")
+            .collect();
+        assert_eq!(w616.len(), 1, "{w616:?}");
+        let loc = &w616[0].location;
+        assert_eq!(loc["step"], json!(1));
+        assert_eq!(loc["capability"], json!("recall"));
+        assert_eq!(loc["field"], json!("input_bindings.scope"));
+        assert!(
+            w616[0]
+                .message
+                .contains("the persist and recall input 'scope'")
+        );
+        // From 1.2 it is a base member.
+        let report = crate::validate::validate_catalog(
+            &crate::validate::tests::ctx(),
+            &catalog("1.2", &[], steps),
+            None,
+        );
+        assert!(report.diagnostics.iter().all(|d| d.code.as_str() != "W616"));
+    }
+
+    #[test]
     fn w603_persist_timestamp() {
         let steps = |field: &str| {
             json!([

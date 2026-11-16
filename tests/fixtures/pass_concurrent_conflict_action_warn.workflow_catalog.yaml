@@ -1,0 +1,23 @@
+# Standard version: 1.1.0
+# W623 for a gate's rollback action (STANDARD v1.2 §4.3).
+nightly:
+  goal: Persist the state, rolling back when it is wrong.
+  risk: medium
+  workflow_extensions:
+    requires: [triggers@1]
+  triggers:
+  - kind: schedule
+    schedule: {every: 1h, overlap: allow_all}
+  steps:
+  - capability: checkpoint
+    purpose: Save the state.
+    store_as: cp
+    input_bindings: {scope: state}
+  - capability: persist
+    purpose: Persist the summary.
+    store_as: saved
+    input_bindings: {data: summary}
+    gates:
+    - when: "${saved.stored} == false"
+      action: rollback
+      phase: after

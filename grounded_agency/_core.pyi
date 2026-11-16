@@ -3,6 +3,7 @@
 Keep in sync with the ``#[pyfunction]``/``#[pyclass]`` items in that file.
 """
 
+from collections.abc import Sequence
 from os import PathLike
 from typing import Any, final
 
@@ -25,7 +26,20 @@ def validate_catalog(
     ontology_path: str | PathLike[str],
     schema_root: str | PathLike[str],
     profiles: list[Any] | None = None,
-) -> dict[str, Any]: ...
+    *,
+    catalogs: Sequence[Any] | None = None,
+    agents: Sequence[Any] | None = None,
+) -> dict[str, Any]:
+    """``profiles``: domain profiles to apply (§5.21), their diagnostics
+    first. ``catalogs``: the other catalogs of the catalog set (§5.1.1),
+    each a path, a mapping or a ``(mapping, header)`` pair; ``agents``:
+    agent manifests (§5.15.1), each a path or a mapping. A refused set or
+    manifest raises ``ValueError``."""
+
+def model_family(model_id: str) -> str | None:
+    """The model family a host derives from a model identifier (§5.15), or
+    None when the rule gives none."""
+
 def canonical_json(value: Any) -> str:
     """The canonical JSON (RFC 8785) of an I-JSON value; ``ValueError``
     outside I-JSON. Any digest of a value is the SHA-256 of this text."""
@@ -86,13 +100,25 @@ class Validator:
         cls, ontology_path: str | PathLike[str], schema_root: str | PathLike[str]
     ) -> Validator: ...
     def validate_file(
-        self, path: str | PathLike[str], profiles: list[Any] | None = None
+        self,
+        path: str | PathLike[str],
+        profiles: list[Any] | None = None,
+        *,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
     ) -> dict[str, Any]: ...
     def validate(
-        self, catalog: Any, header: str | None = None, profiles: list[Any] | None = None
+        self,
+        catalog: Any,
+        header: str | None = None,
+        profiles: list[Any] | None = None,
+        *,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
     ) -> dict[str, Any]:
         """``profiles``: domain profiles to apply (Standard v1.2 §5.21); their
-        diagnostics come first."""
+        diagnostics come first. ``catalogs`` and ``agents`` as for
+        ``validate_catalog``."""
     def check_profiles(self, profiles: list[Any]) -> dict[str, Any]:
         """The diagnostics of loading ``profiles`` (Standard v1.2 §5.21.2)."""
     def profile_flags(
@@ -131,8 +157,8 @@ class Run:
         profiles: list[dict[str, Any]] | None = None,
         grounding: list[dict[str, Any]] | None = None,
         destinations: list[list[str]] | None = None,
-        catalogs: list[Any] | None = None,
-        agents: list[Any] | None = None,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
     ) -> Run:
         """``header`` is required: the version the catalog's header declares,
         or None for a catalog without one (§11.5). ``records`` is the record
@@ -147,8 +173,9 @@ class Run:
         list of patterns; with the profiles' ``allowed_destinations`` they are
         the policies a ``send`` step's destination must meet (F504
         ``destination_not_allowed`` otherwise); a policy with an invalid
-        pattern is a ``ValueError``. ``catalogs`` and ``agents`` are refused
-        (``ValueError``) until the 1.2 workstreams implement them."""
+        pattern is a ``ValueError``. ``catalogs`` and ``agents`` are the
+        other catalogs of the catalog set (§5.1.1) and agent manifests
+        (§5.15.1), as for ``validate_catalog``."""
 
     @staticmethod
     def restore(
@@ -158,12 +185,13 @@ class Run:
         key: bytes | None = None,
         *,
         actor_identity: dict[str, Any] | None = None,
-        catalogs: list[Any] | None = None,
-        agents: list[Any] | None = None,
+        catalogs: Sequence[Any] | None = None,
+        agents: Sequence[Any] | None = None,
     ) -> Run:
         """With ``actor_identity``, the actor the host continues the run
         for: another principal than the run's, or any actor for a run started
-        without one, is refused (``ValueError``; §5.17)."""
+        without one, is refused (``ValueError``; §5.17). ``catalogs`` and
+        ``agents`` must be the ones the run started with."""
 
     def resume(
         self,

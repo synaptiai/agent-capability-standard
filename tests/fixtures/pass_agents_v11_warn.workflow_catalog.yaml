@@ -1,0 +1,15 @@
+# Standard version: 1.1.0
+# The workflow field agents in a workflow that targets 1.1 (STANDARD v1.2
+# §5.15.2, §11.5): W616. The field is ignored below 1.2, by a 1.1 consumer
+# and by this executor alike, so the delegate keeps the delegate node's flags.
+review:
+  goal: Have a reviewer critique the draft.
+  risk: low
+  agents: [reviewer-a]
+  steps:
+  - capability: delegate
+    purpose: Ask the reviewer.
+    store_as: review_a
+    input_bindings:
+      agent: reviewer-a
+      task: {draft: d}

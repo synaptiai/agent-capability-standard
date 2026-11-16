@@ -1,0 +1,22 @@
+# Standard version: 1.1.0
+# The persist and recall input scope in a 1.1 workflow (STANDARD v1.2 §4.5,
+# §11.5): W616 at the first step that binds it.
+remember:
+  goal: Remember a preference for the user.
+  risk: low
+  inputs:
+    preference: {type: string, required: true}
+  steps:
+  - capability: persist
+    purpose: Store the preference for this user.
+    store_as: stored
+    input_bindings:
+      data: "${preference}"
+      key: preference
+      scope: user
+  - capability: recall
+    purpose: Read it back.
+    store_as: recalled
+    input_bindings:
+      key: preference
+      scope: user

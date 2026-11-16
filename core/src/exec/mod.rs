@@ -239,6 +239,17 @@ pub struct StartOptions {
     pub destinations: Vec<Vec<String>>,
 }
 
+/// What a run is given besides its catalog: the other catalogs of its
+/// catalog set, each with its header's version (§5.1.1), and the agent
+/// manifests of the agents it may delegate to (§5.15.1). A snapshot restores
+/// only against the same set and manifests (the digest covers them when
+/// given).
+#[derive(Debug, Clone, Default)]
+pub struct SetOptions {
+    pub catalogs: Vec<(Value, Option<String>)>,
+    pub agents: Vec<Value>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
@@ -1116,6 +1127,28 @@ impl Run {
         inputs: Map<String, Value>,
         options: StartOptions,
     ) -> Result<Run, StartError> {
+        Self::start_set(
+            ctx,
+            catalog,
+            &SetOptions::default(),
+            workflow,
+            inputs,
+            options,
+        )
+    }
+
+    /// [`Run::start`] with the other catalogs of the catalog's set and agent
+    /// manifests (`set`): `workflow` is one of the primary catalog's. A set
+    /// or a manifest that is refused refuses the start
+    /// (`StartError::Program`).
+    pub fn start_set(
+        ctx: &Context,
+        catalog: &Value,
+        set: &SetOptions,
+        workflow: &str,
+        inputs: Map<String, Value>,
+        options: StartOptions,
+    ) -> Result<Run, StartError> {
         if let Some(h) = options
             .header
             .as_deref()
@@ -1129,6 +1162,7 @@ impl Run {
         let program = Self::prepare(
             ctx,
             catalog,
+            set,
             workflow,
             options.header.as_deref(),
             &options.profiles,
@@ -1137,7 +1171,8 @@ impl Run {
         ijson(&Value::Object(inputs.clone())).map_err(StartError::Inputs)?;
         if let Some(identity) = &options.actor_identity {
             ijson(identity).map_err(StartError::Identity)?;
-            identity_error(identity).map_or(Ok(()), |e| Err(StartError::Identity(e)))?;
+            identity_error(identity, program.workflows[workflow].targets_1_2)
+                .map_or(Ok(()), |e| Err(StartError::Identity(e)))?;
         }
         let state = State {
             version: SNAPSHOT_VERSION,
@@ -1179,17 +1214,25 @@ impl Run {
     fn prepare(
         ctx: &Context,
         catalog: &Value,
+        set: &SetOptions,
         workflow: &str,
         header: Option<&str>,
         profiles: &[Value],
     ) -> Result<Program, StartError> {
-        let options = validate::Options {
-            header: header.map(str::to_string),
-            profiles: profiles.to_vec(),
-            ..validate::Options::default()
+        let agents =
+            crate::agents::Agents::load(&set.agents, &ctx.ontology).map_err(StartError::Program)?;
+        let others: Vec<crate::catalogs::Member<'_>> = set
+            .catalogs
+            .iter()
+            .map(|(doc, h)| (doc, h.as_deref()))
+            .collect();
+        let catalog_set = crate::catalogs::CatalogSet {
+            primary: catalog,
+            header,
+            others: &others,
         };
-        let (report, policy) = validate::validate_options(ctx, catalog, &options)
-            .map_err(|e| StartError::Unsupported(e.to_string()))?;
+        let (report, policy) = validate::validate_profiled(ctx, catalog_set, &agents, profiles)
+            .map_err(|e| StartError::Program(e.to_string()))?;
         let errors: Vec<Diagnostic> = report
             .diagnostics
             .into_iter()
@@ -1198,7 +1241,7 @@ impl Run {
         if !errors.is_empty() {
             return Err(StartError::Invalid(errors));
         }
-        Program::build(ctx, catalog, workflow, header, policy).map_err(StartError::Program)
+        Program::build_set(ctx, catalog_set, &agents, workflow, policy).map_err(StartError::Program)
     }
 
     fn machine(&mut self) -> Machine<'_> {
@@ -1449,9 +1492,23 @@ impl Run {
         key: Option<&[u8]>,
         options: RestoreOptions,
     ) -> Result<Run, RestoreError> {
+        Self::restore_set(ctx, catalog, &SetOptions::default(), snapshot, key, options)
+    }
+
+    /// [`Run::restore_with`] for a run started with [`Run::start_set`]:
+    /// `set` must be the catalogs and manifests it started with.
+    pub fn restore_set(
+        ctx: &Context,
+        catalog: &Value,
+        set: &SetOptions,
+        snapshot: &Snapshot,
+        key: Option<&[u8]>,
+        options: RestoreOptions,
+    ) -> Result<Run, RestoreError> {
         if let Some(actor) = &options.actor_identity {
             ijson(actor).map_err(RestoreError::Actor)?;
-            if let Some(e) = identity_error(actor) {
+            // Checked again once the root workflow's version is known.
+            if let Some(e) = identity_error(actor, false) {
                 return Err(RestoreError::Actor(e));
             }
         }
@@ -1514,6 +1571,7 @@ impl Run {
         let program = Self::prepare(
             ctx,
             catalog,
+            set,
             &state.root,
             state.header.as_deref(),
             &state.profiles,
@@ -1535,6 +1593,9 @@ impl Run {
             }
         }
         if let Some(actor) = &options.actor_identity {
+            if let Some(e) = identity_error(actor, program.workflows[&state.root].targets_1_2) {
+                return Err(RestoreError::Actor(e));
+            }
             let principal = |v: &Value| {
                 v.get("principal")
                     .and_then(Value::as_str)
@@ -1585,7 +1646,8 @@ impl Run {
         }
         if let Some(actor) = &options.actor_identity {
             ijson(actor).map_err(ResumeError::Identity)?;
-            if let Some(e) = identity_error(actor) {
+            let v12 = self.program.workflows[&self.state.root].targets_1_2;
+            if let Some(e) = identity_error(actor, v12) {
                 return Err(ResumeError::Identity(e));
             }
         }
@@ -1696,7 +1758,12 @@ fn check_state(program: &Program, st: &State) -> Result<(), String> {
     {
         return Err("the pending action is for another run".into());
     }
-    if let Some(e) = st.actor_identity.as_ref().and_then(identity_error) {
+    let v12 = program.workflows[&st.root].targets_1_2;
+    if let Some(e) = st
+        .actor_identity
+        .as_ref()
+        .and_then(|a| identity_error(a, v12))
+    {
         return Err(format!("actor_identity: {e}"));
     }
     if st
@@ -1944,14 +2011,21 @@ impl Frame {
 /// What is wrong with a delegation's attested identity
 /// (`effective.identity`, `identity@1`, §5.17), if anything: it must be an
 /// `agent_identity`, and its `model_family` and `role` must agree with the
-/// ones `effective` attests beside it.
-pub(crate) fn delegate_identity_error(delegation: &Value) -> Option<String> {
+/// ones `effective` attests beside it. When the delegating workflow targets
+/// 1.2 or later (`v12`), its `model_id` must agree too; below 1.2 the
+/// executor does not read `model_id`, as 1.1 did not.
+pub(crate) fn delegate_identity_error(delegation: &Value, v12: bool) -> Option<String> {
     let effective = delegation.get("effective")?;
     let identity = effective.get("identity").filter(|v| !v.is_null())?;
-    if let Some(e) = identity_error(identity) {
+    if let Some(e) = identity_error(identity, v12) {
         return Some(format!("effective.identity: {e}"));
     }
-    for key in ["model_family", "role"] {
+    let keys: &[&str] = if v12 {
+        &["model_family", "model_id", "role"]
+    } else {
+        &["model_family", "role"]
+    };
+    for &key in keys {
         if let (Some(a), Some(b)) = (identity.get(key), effective.get(key))
             && a != b
         {
@@ -2042,8 +2116,11 @@ pub(crate) fn not_covered_ok(items: &[Value]) -> Result<(), String> {
 /// Why `v` is not an `agent_identity` (`schemas/agent_identity_schema.yaml`),
 /// if it is not: an object with a string `principal`, a `kind`, string
 /// optional fields, and `authenticated_by` and `trust_class` from their
-/// vocabularies. Unknown fields are allowed.
-pub(crate) fn identity_error(v: &Value) -> Option<String> {
+/// vocabularies. Unknown fields are allowed. `v12`: the workflow the
+/// identity is reported to targets 1.2 or later, whose `agent_identity`
+/// (1.1.0) types `model_id`; below 1.2 (1.0.0) `model_id` is an unknown
+/// field, allowed with any value.
+pub(crate) fn identity_error(v: &Value, v12: bool) -> Option<String> {
     use crate::validate::identity::{TRUST_CLASSES, known_mechanism};
     let Value::Object(m) = v else {
         return Some("an identity must be an object".into());
@@ -2060,11 +2137,12 @@ pub(crate) fn identity_error(v: &Value) -> Option<String> {
     for key in [
         "role",
         "model_family",
+        "model_id",
         "owner",
         "authenticated_by",
         "trust_class",
     ] {
-        if m.get(key).is_some_and(|x| !x.is_string()) {
+        if (v12 || key != "model_id") && m.get(key).is_some_and(|x| !x.is_string()) {
             return Some(format!("an identity's {key} must be a string"));
         }
     }

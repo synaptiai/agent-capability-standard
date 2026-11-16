@@ -1,0 +1,36 @@
+# Standard version: 1.2.0
+# A library catalog for the S3 fixtures (STANDARD v1.2 §5.1.1): it exports
+# shared_check, which invokes its own unexported inner by a bare name.
+catalog:
+  id: acs.fixtures.lib
+  version: 1.0.0
+  exports: [shared_check]
+shared_check:
+  goal: Check a target with the library's inner workflow.
+  risk: low
+  inputs:
+    target: {type: string, required: true}
+  triggers:
+  - kind: invoke
+  workflow_extensions:
+    requires: [triggers@1]
+  steps:
+  - capability: invoke
+    purpose: Run the library's inner check.
+    store_as: inner_out
+    workflow_id: inner
+    input_bindings:
+      workflow: inner
+inner:
+  goal: Retrieve a record.
+  risk: low
+  triggers:
+  - kind: invoke
+  workflow_extensions:
+    requires: [triggers@1]
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: record_out
+    input_bindings:
+      target: records

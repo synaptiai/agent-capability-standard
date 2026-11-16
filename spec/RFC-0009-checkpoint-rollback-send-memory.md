@@ -187,7 +187,8 @@ destination to its `send` step's `approval.shows`.
   by a gate), `RolledBack` with `not_covered` (transmitted, delegated),
   memory scope echo and its absence, `stored: false`.
 - Validator fixtures for W624, W625, W626, the W614 `ttl` case and the W603
-  `timestamp` case, and their exemptions.
+  `timestamp` case, and their exemptions; and the W616 for `scope` in a 1.1
+  workflow, located at its first step.
 - `tests/conformance/destinations/match.json` (normative for any destination
   policy) and `tests/conformance/memory/store.json` (normative for a host that
   states it implements §4.5), run by the Rust core, the Python package and

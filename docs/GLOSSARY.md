@@ -357,6 +357,27 @@ flowchart TB
   b --> j
 ```
 
+### Catalog Manifest
+A catalog's `catalog` entry, when it is a mapping without `steps`: its `id` (dot-separated lowercase segments), its own `version`, optionally the `ontology` it is written against and the workflows other catalogs may invoke (`exports`). Its Standard version is the file's header (STANDARD v1.2 §5.1.1).
+
+### Catalog Set
+A catalog given to a validator or executor together with other catalogs, each of which has a manifest with a unique `id`. Its workflows can invoke each other's exported workflows by qualified id (STANDARD v1.2 §5.1.1).
+
+### Qualified Workflow Id
+A catalog id, `/` and a workflow name (`acs.reference/world_model_build`): a workflow of a given catalog of the set. A bare name always means the invoking workflow's own catalog (STANDARD v1.2 §5.1.1).
+
+### Domain Id
+The value of a step's `domain`: lowercase segments joined by `.`, each `[a-z0-9][a-z0-9_]*` (`image.object`). A host selects the implementation for it exactly, else for its longest prefix at a dot, else the one for no domain (STANDARD v1.2 §5.2.4).
+
+### Agent Manifest
+What an agent that a `delegate` step names may do: the ontology capabilities it may exercise, directly or through its own delegates and invoked workflows, and the task inputs it accepts (`schemas/agent_manifest_schema.yaml`, STANDARD v1.2 §5.15.1).
+
+### Target Maxima
+What a `delegate` step's target may do, from its agent manifest: the highest risk and the OR of `mutation`, `requires_checkpoint` and `requires_approval` over its capabilities (over the non-mutating ones for a `read_only` delegation). In a workflow that declares `agents`, the step's flags are raised to them, and the executor does not delegate when they are unknown (STANDARD v1.2 §5.15.2).
+
+### Model Family
+The lowercase name of a provider's line of models, without version, size, date or variant, compared exactly. A host derives it from the model's identifier by one rule (STANDARD v1.2 §5.15).
+
 ---
 
 ## Runs and Hosts

@@ -213,7 +213,10 @@ class WorkflowTracer:
         capability: str,
         domain: str | None,
     ) -> bool:
-        """Check if a workflow step matches a capability invocation."""
+        """Check if a workflow step matches a capability invocation. A
+        step's domain is compared exactly (STANDARD v1.2 §5.2.4): the host
+        receives the step's own domain, and selects an implementation for
+        it by the rule of §5.2.4."""
         if step.capability != capability:
             return False
         # If step has domain constraint, the action must satisfy it
@@ -300,7 +303,9 @@ class WorkflowTracer:
         # the step declares) executed without checkpoint coverage
         for i in matched:
             step = self._workflow.steps[i]
-            if self._engine.effective_flags(step)["requires_checkpoint"]:
+            if self._engine.effective_flags(step, self._workflow)[
+                "requires_checkpoint"
+            ]:
                 # Check if a checkpoint step preceded this
                 checkpoint_found = False
                 for j in matched:

@@ -1,0 +1,92 @@
+{
+  "description": "A read-only delegation takes the read-only maxima; its host accepts it but does not attest read_only: R402 after one delegation, not retried though the step has retry (\u00a75.15.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "read",
+          "input_bindings": {
+            "agent": "db-writer",
+            "task": {
+              "table": "t"
+            },
+            "read_only": true
+          },
+          "retry": {
+            "max": 2,
+            "backoff": "none"
+          }
+        }
+      ],
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1"
+        ]
+      },
+      "agents": [
+        "db-writer"
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "attempt": 1
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {
+            "read_only": false
+          },
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed",
+    "run_failed"
+  ],
+  "agents": [
+    {
+      "agent": "db-writer",
+      "standard": "1.2",
+      "ontology": "2.2",
+      "capabilities": [
+        "retrieve",
+        "checkpoint",
+        "mutate"
+      ],
+      "task": {
+        "table": {
+          "type": "string",
+          "required": true
+        },
+        "rows": {
+          "type": "array"
+        }
+      }
+    }
+  ]
+}

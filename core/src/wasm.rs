@@ -21,7 +21,8 @@ use serde_json::{Map, Value, json};
 
 use crate::diag::Diagnostic;
 use crate::exec::{
-    Attendance, RecordMode, Response, RestoreOptions, ResumeOptions, Run, Snapshot, StartOptions,
+    Attendance, RecordMode, Response, RestoreOptions, ResumeOptions, Run, SetOptions, Snapshot,
+    StartOptions,
 };
 use crate::expr::check::{Checker, RootInfo, Scope};
 use crate::profile::Policy;
@@ -294,6 +295,35 @@ fn actor(o: &Req) -> Option<Value> {
     o.get("actor_identity").filter(|v| !v.is_null()).cloned()
 }
 
+/// The members of a catalog set a request gives (STANDARD v1.2 §5.1.1,
+/// §5.15.1): `catalogs`, the other catalogs, each `{catalog, header}` with
+/// `header` its header's version or `null` (required, as for `validate`),
+/// and `agents`, agent manifests. Absent or `null`, none.
+fn set_options(o: &Req) -> Result<SetOptions, Fail> {
+    let catalogs = list(o, "catalogs")?
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let Value::Object(m) = c else {
+                return Err(Fail::new(
+                    "bad_request",
+                    format!("catalogs[{i}] must be an object {{catalog, header}}"),
+                ));
+            };
+            let catalog = member(&m, "catalog")
+                .map_err(|_| {
+                    Fail::new("bad_request", format!("catalogs[{i}].catalog is required"))
+                })?
+                .clone();
+            Ok((catalog, header(&m, "header", &format!("catalogs[{i}]."))?))
+        })
+        .collect::<Result<Vec<_>, Fail>>()?;
+    Ok(SetOptions {
+        catalogs,
+        agents: list(o, "agents")?,
+    })
+}
+
 fn start_options(ctx: &Context, o: &Req) -> Result<StartOptions, Fail> {
     let header = header(o, "header", "options.")?;
     let attendance = attendance(o)?;
@@ -400,10 +430,12 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
         "context.contracts" => Ok(context(h, req)?.contracts_json()),
         "validate" => {
             let ctx = context(h, req)?;
+            let set = set_options(req)?;
             let options = validate::Options {
                 header: header(req, "header", "")?,
                 profiles: list(req, "profiles")?,
-                ..validate::Options::default()
+                catalogs: set.catalogs,
+                agents: set.agents,
             };
             let catalog = member(req, "catalog")?;
             validate::validate_with(ctx, catalog, &options)
@@ -477,6 +509,7 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
                 Some(Value::Object(o)) => o,
                 _ => return Err(Fail::new("bad_request", "'options' must be an object")),
             };
+            let set = set_options(options)?;
             let options = start_options(ctx, options)?;
             // A run reports its profiles' warnings (W602-W604), as the
             // validator and `profile.check` do (§5.21.4): a host applying
@@ -492,13 +525,14 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
             };
             let catalog = member(req, "catalog")?;
             let workflow = string(req, "workflow")?;
-            let started = Run::start(ctx, catalog, workflow, inputs, options).map_err(|e| {
-                let message = e.to_string();
-                match e {
-                    crate::exec::StartError::Invalid(d) => Fail::with("start", message, &d),
-                    _ => Fail::new("start", message),
-                }
-            })?;
+            let started =
+                Run::start_set(ctx, catalog, &set, workflow, inputs, options).map_err(|e| {
+                    let message = e.to_string();
+                    match e {
+                        crate::exec::StartError::Invalid(d) => Fail::with("start", message, &d),
+                        _ => Fail::new("start", message),
+                    }
+                })?;
             let id = h.issue();
             h.runs.insert(id, started);
             Ok(json!({ "run": id, "warnings": loaded.diagnostics }))
@@ -511,9 +545,10 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
             let options = RestoreOptions {
                 actor_identity: actor(req),
             };
-            let restored = Run::restore_with(
+            let restored = Run::restore_set(
                 ctx,
                 member(req, "catalog")?,
+                &set_options(req)?,
                 &snapshot,
                 key.as_deref(),
                 options,

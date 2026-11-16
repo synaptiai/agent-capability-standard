@@ -17,15 +17,21 @@ impl check::Scope for Scope {
     }
 }
 
-/// Report a parse result, or type-check the parsed expression.
+/// Report a parse result, or type-check the parsed expression. `src` is
+/// the expression's text: a `column` counts its Unicode code points
+/// (§9.8), while the parser's positions are byte offsets.
 pub(crate) fn check_parsed(
     parsed: &Result<Expr, SyntaxError>,
+    src: &str,
     scope: &Scope,
     loc: &StepLoc<'_>,
     field: &str,
     report: &mut Report,
 ) {
-    let at = |d: crate::diag::Diagnostic, pos: usize| d.at("field", field).at("column", pos + 1);
+    let at = |d: crate::diag::Diagnostic, pos: usize| {
+        let column = src.get(..pos).map_or(pos, |p| p.chars().count()) + 1;
+        d.at("field", field).at("column", column)
+    };
     match parsed {
         Err(e) => {
             report.push(at(
@@ -51,7 +57,7 @@ pub(crate) fn check_expression(
     field: &str,
     report: &mut Report,
 ) {
-    check_parsed(&expr::parse(src), scope, loc, field, report);
+    check_parsed(&expr::parse(src), src, scope, loc, field, report);
 }
 
 /// When a gate is evaluated relative to its step.
@@ -68,6 +74,8 @@ pub(crate) struct Gate<'a> {
     pub action: Option<&'a str>,
     /// `None` when `when` is missing or not a string (reported elsewhere).
     pub when: Option<Result<Expr, SyntaxError>>,
+    /// The text of `when`, when it is a string.
+    pub src: &'a str,
 }
 
 /// The gates of a step, each parsed and with its effective phase. Reports
@@ -113,6 +121,7 @@ pub(crate) fn gates<'a>(
                 .at("field", format!("{field}.action")),
             );
         }
+        let src = gate.get("when").and_then(Value::as_str).unwrap_or_default();
         let when = gate.get("when").and_then(Value::as_str).map(expr::parse);
         let reads_own = matches!((&when, store), (Some(Ok(e)), Some(s)) if e.refs().iter().any(|r| r.r.root == s));
         let phase = match gate.get("phase") {
@@ -158,6 +167,7 @@ pub(crate) fn gates<'a>(
             phase,
             action,
             when,
+            src,
         });
     }
     out

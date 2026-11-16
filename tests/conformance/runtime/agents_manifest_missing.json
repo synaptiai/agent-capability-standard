@@ -1,0 +1,86 @@
+{
+  "description": "A listed agent the host gave no manifest for has unknown target maxima: the executor does not delegate (R402, fail-closed; \u00a75.15.2), and the failure names the missing manifest.",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "ask",
+          "input_bindings": {
+            "agent": "ghost",
+            "task": {
+              "q": "x"
+            }
+          }
+        }
+      ],
+      "agents": [
+        "db-writer",
+        "ghost"
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "c1",
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 1
+  },
+  "trace_kinds": [
+    "step_failed",
+    "run_failed"
+  ],
+  "agents": [
+    {
+      "agent": "db-writer",
+      "standard": "1.2",
+      "ontology": "2.2",
+      "capabilities": [
+        "retrieve",
+        "checkpoint",
+        "mutate"
+      ],
+      "task": {
+        "table": {
+          "type": "string",
+          "required": true
+        },
+        "rows": {
+          "type": "array"
+        }
+      }
+    }
+  ]
+}

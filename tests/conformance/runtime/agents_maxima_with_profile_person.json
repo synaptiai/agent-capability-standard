@@ -1,0 +1,149 @@
+{
+  "description": "A delegation to an agent that may mutate takes its manifest's maxima (a checkpoint before it, approval), and a profile that blocks autonomous delegation requires a person for that approval: it is asked of a human with always_ask and no mandate, and its record carries person_required (\u00a75.15.2, \u00a75.21.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "high",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "checkpoint",
+          "purpose": "checkpoint step",
+          "store_as": "cp",
+          "input_bindings": {
+            "scope": "repo"
+          }
+        },
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "write",
+          "input_bindings": {
+            "agent": "db-writer",
+            "task": {
+              "table": "t"
+            }
+          }
+        }
+      ],
+      "agents": [
+        "db-writer"
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {},
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "checkpoint",
+        "step": 0
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "checkpoint_id": "c1",
+          "evidence_anchors": []
+        }
+      }
+    },
+    {
+      "expect": {
+        "kind": "RequestApproval",
+        "step": 1,
+        "approver": {
+          "kind": "human",
+          "always_ask": true
+        }
+      },
+      "absent": [
+        "approver.mandate_ref"
+      ],
+      "respond": {
+        "kind": "Decision",
+        "decision_id": "d1",
+        "decision": "approved",
+        "approvers": [
+          "dana"
+        ],
+        "digest": "{{digest}}"
+      }
+    },
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 1,
+        "inputs": {
+          "agent": "db-writer"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {},
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Completed",
+    "outcome": "completed",
+    "action_records": [
+      {
+        "capability": "delegate",
+        "status": "executed",
+        "person_required": true,
+        "approval": {
+          "approvers": [
+            "dana"
+          ]
+        }
+      }
+    ]
+  },
+  "trace_kinds": [
+    "person_required",
+    "approval_requested",
+    "approval_decided"
+  ],
+  "agents": [
+    {
+      "agent": "db-writer",
+      "standard": "1.2",
+      "ontology": "2.2",
+      "capabilities": [
+        "retrieve",
+        "checkpoint",
+        "mutate"
+      ],
+      "task": {
+        "table": {
+          "type": "string",
+          "required": true
+        },
+        "rows": {
+          "type": "array"
+        }
+      }
+    }
+  ],
+  "profiles": [
+    {
+      "domain": "person-delegate",
+      "version": "1.0.0",
+      "risk_thresholds": {
+        "block_autonomous": [
+          "delegate"
+        ]
+      }
+    }
+  ]
+}

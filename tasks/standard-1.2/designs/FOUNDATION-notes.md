@@ -884,6 +884,101 @@ Workstreams should run `npm run check:axe` (or at least
   reports them to `StartArgs.onWarning`. **S3**: keep `warnings` when
   `start_options` gains `catalogs` and `agents`.
 
+## 2026-11-16 — S3 (delegation, catalogs and diagnostics), for the streams after it
+
+S3 is merged after S6 (`round3/S3sync-base`, then the integration branch
+into `round3/b`); what S5 needs:
+
+- **§2 Terms is three tables**: general and run terms (the `host-loop`
+  figure follows it); S6's "Terms of domain profiles, contracts, entities
+  and ordering"; "Terms of tool-calling hosts, catalogs and delegation"
+  (S1's tool-calling rows, then S3's four). S5's rows go in the third
+  table, before S3's four. The site reads §2's run terms from every table.
+- **§5.15 figures**: `family-replay`, `manifest-replay`, `agents-replay`,
+  `read-only-replay` and `continue-replay` draw S3's runtime fixtures;
+  §5.15.4 follows `continue-replay`. A long §5.15.4 needs a figure of its
+  own.
+- **§10.3's last run is close to the limit**: from the digest-vector figure
+  to §10.4's safety-layer figure it is about 1690px at 1440px wide (S3's
+  vector sentence, S4's grounding paragraph, S6's trust and profile
+  paragraph, §10.4's first paragraphs). Text S5 adds there needs a figure or
+  a tighter paragraph; the fixture keys (`catalogs`, `agents`,
+  `expected_locations`) are in §10.3's first paragraph, the runtime ones in
+  §10.5's fixture paragraph.
+- **Validator entry points**: `Options::unimplemented()` is gone.
+  `validate::validate_with` builds the catalog set and loads the agent
+  manifests; `validate_profiled(ctx, set, agents, profiles)` loads the
+  profiles (diagnostics first) and calls `validate_set(ctx, set, agents,
+  &policy)`. `Run::prepare` uses `validate_profiled`, refuses
+  `Policy::unenforced()` (the destination line is S5's to delete) and calls
+  `Program::build_set(ctx, set, agents, root, policy)`.
+- **Effective flags**: `semantics::effective(node, step, target_maxima,
+  policy)` everywhere: a delegate step is the stricter of its target's
+  maxima and the profiles. Diagnostics carrying `profile` or `tool` get no
+  `path` (`validate/location.rs`).
+- **W616**: `FEATURES` holds S3's `continues`; the catalog manifest's W616
+  is in `validate/catalog.rs` and a qualified `invoke` target's in
+  `validate/invoke.rs` (they need the catalog set). S5 appends its
+  `persist`/`recall` `scope` row to `FEATURES`.
+- **Catalog sets everywhere**: runtime fixtures' `catalogs`
+  (`[{catalog, header}]`) and `agents` are passed by the Rust
+  (`core/tests/runtime.rs`), Python (`tests/runtime_replay.py`) and
+  WebAssembly (`packages/acs-core/test/wasm-runtime.test.ts`) harnesses, to
+  start and restore. WebAssembly: `validate` and `run.restore` take
+  `catalogs` and `agents`, `run.start` takes them in `options`; TypeScript
+  `SetArgs` on `CoreContext.validate`, `start`, `restore`.
+  `_core.validate_catalog`/`Validator.validate(_file)` take `profiles`
+  positionally and `catalogs`, `agents` keyword-only.
+
+## After S3 review round 1
+
+- **W616 is located at its step** (§9.8, §11.5). `semantics::Feature`'s
+  `first_use` now returns `Option<Use>`: `Use::workflow(field)` for a
+  workflow field, `Use::step(i, field)` for a member of step `i`, with
+  `field` relative to the step (`input_bindings.scope`, not
+  `steps[0].input_bindings.scope`); `newer_features` adds `step` and the
+  step's `capability`. **S5**: write the `persist`/`recall` `scope` row that
+  way. `tests/test_validators.py::test_every_fixture_diagnostic_has_an_exact_path`
+  now checks, on every fixture, that a finding whose `path` is inside a step
+  carries that `step` and the step's `capability`, and a step-relative
+  `field`.
+- **`agents` below 1.2 is W616, not S303** (a `FEATURES` row, field
+  `agents`), and its shape is checked only from 1.2; `continues`'s S303 and
+  R402 apply only from 1.2 (runtime fixture
+  `delegate_continues_v11_unchecked`). Fixture `fail_agents_without_1_2` is
+  now `pass_agents_v11_warn`. Two sentences outside S3's files still say
+  the S303: `spec/RFC-0010-profiles-trust-versioning-and-dialect.md` ("and
+  S3 the S303 for `agents` before 1.2") and the resolution of S6's finding
+  in `findings_agent_capability_standard.yaml` ("and the S303 for `agents`
+  before 1.2"). Their owner (or phase 4) should say W616 instead.
+- **A qualified `invoke` target is W616 whatever the set**: any target that
+  `names::split_qualified` accepts and that names no workflow of the
+  caller's catalog (`Resolver::is_qualified`, which replaced
+  `resolves_qualified`).
+
+## After S3 review round 2
+
+- **`identity_error(v, v12)` and `delegate_identity_error(delegation,
+  v12)`** (`core/src/exec/mod.rs`) take whether the workflow the identity is
+  reported to targets 1.2: an identity's `model_id` is typed, and compared
+  with `effective.model_id`, only then (`agent_identity` 1.0.0, which 1.1
+  uses, does not define it). **S5** and any later caller: pass the
+  workflow's `targets_1_2` (the root's for the actor identity; the frame's
+  for an event, approver or delegation identity). Runtime fixture
+  `delegate_identity_model_id_v11_unchecked`.
+- **A qualified id's name is any non-empty workflow name** after the first
+  `/` (`names::split_qualified`), as §5.1.1 says.
+- **`expected_locations`** entries (`tests/fixtures/EXPECTATIONS.json`) may
+  give, for a finding with no `path` (one about a version header), the
+  `catalog`, `workflow` and `field` it must carry instead of a `path`: every
+  member an entry gives must equal the diagnostic location's. The three
+  harnesses match that way.
+- **Header findings in another catalog of a set** carry `catalog` and the
+  workflow's own name (`location::finish`), like every other finding there.
+- **TypeScript package**: `workflowTarget(workflow, header)` and
+  `agentsApply(workflow, header)` (`src/agents.ts`); the binding's
+  `declaredAgents` and `lintDelegationTargets` take the header.
+
 ## 2026-11-16 — S5 (checkpoint, rollback, send and memory), for the merge with S3
 
 - **Pre-call point.** S5's send check is `Machine::destination_refusal()`,
@@ -906,3 +1001,33 @@ Workstreams should run `npm run check:axe` (or at least
 - **SL claims.** The binding's statement has no `not_applied` and the
   binding claims class SL; the adapter keeps the output-contract row. Every
   text that states the claims says so (FOUNDATION-notes, S1 review rounds).
+
+## 2026-11-16 — after the S5 sync (S3 merged into `round3/a`)
+
+`round3/S5sync-base` tagged, then `claude/gallant-hypatia-wbucn3` (with S3)
+merged into `round3/a`. For phase 4 and any later stream:
+
+- **Pre-call point** (`Machine::ready()`): inputs resolved, then S5's send
+  destination check (F504 `destination_not_allowed`), then S3's delegate
+  refusals (R402), then `Stage::Approval`. Neither asks an approver or uses a
+  checkpoint.
+- **No refusal of an unimplemented option is left.** `StartOptions::
+  unimplemented`, `Policy::unenforced` and the call in `Run::prepare` are
+  gone; `Run::start` goes through `start_set`, and every restore through
+  `restore_set`, which fills a missing `idempotency_key`. `StartError::
+  Unsupported` is kept for the API (the Python binding maps it) but nothing
+  in the core constructs it now.
+- **W616 for `persist`/`recall` `scope`** is the last `FEATURES` row (after
+  S3's `agents` and `continues`, as §11.5's table orders them), located at
+  its step (`Use::step`); validator fixture `pass_memory_scope_v11_warn`.
+- **§2**: S5's four rows stay in the first table, right after S2b's run
+  terms (FOUNDATION D2's order S2b, S5), not in the third table S3's note
+  proposed: **Pass** and **Idempotency key** are run terms.
+- **Site.** The merge put two enforced runs over 1800px: §10.3 (S3's, S4's,
+  S5's and S6's vector paragraphs, 1877px) and the home page's design
+  principles (S3's and S5's §3.3 bullets, 1815px). §10.3 now has a figure,
+  `effect-vectors` (the destination and memory vectors, from the two files),
+  after S5's paragraph; S5's §3.3 bullet is shorter. The longest enforced
+  run of the Standard page is now §5.14's, between `deferral-replay` and
+  `resume-replay`: 1800px at 1440 (S2b's text, unchanged by this merge).
+  Any text added there needs a figure.

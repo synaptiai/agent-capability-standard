@@ -1,0 +1,80 @@
+{
+  "description": "A computed agent that the workflow's agents does not list is refused before the host is asked (R402, not retried; \u00a75.15.2).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "pick",
+          "input_bindings": {
+            "agent": "${who}",
+            "task": {
+              "draft": "d"
+            },
+            "read_only": true
+          },
+          "retry": {
+            "max": 2,
+            "backoff": "none"
+          }
+        }
+      ],
+      "inputs": {
+        "who": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1"
+        ]
+      },
+      "agents": [
+        "a",
+        "b"
+      ]
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {
+    "who": "c"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed",
+    "run_failed"
+  ],
+  "agents": [
+    {
+      "agent": "a",
+      "standard": "1.2",
+      "ontology": "2.2",
+      "capabilities": [
+        "retrieve",
+        "critique"
+      ]
+    },
+    {
+      "agent": "b",
+      "standard": "1.2",
+      "ontology": "2.2",
+      "capabilities": [
+        "retrieve",
+        "critique"
+      ]
+    }
+  ]
+}

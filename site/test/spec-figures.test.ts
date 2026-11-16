@@ -440,6 +440,22 @@ describe('host protocol figures (§2, §5.10.2, §5.19.1, §5.19.8, §10.5)', ()
   });
 });
 
+describe('§10.3 destination and memory vectors', () => {
+  it('counts every pattern, destination and memory case once, from the files §10.3 names', () => {
+    const dest = JSON.parse(repoText('tests/conformance/destinations/match.json')) as { patterns: { valid: boolean }[]; matches: { allowed: boolean }[] };
+    const mem = JSON.parse(repoText('tests/conformance/memory/store.json')) as { cases: unknown[] };
+    const groups = Object.fromEntries(T.effectVectors(text, STD).map((g) => [g.label, g.count]));
+    expect(groups).toEqual({
+      'Valid patterns': dest.patterns.filter((p) => p.valid).length,
+      'Invalid patterns': dest.patterns.filter((p) => !p.valid).length,
+      'Destinations allowed': dest.matches.filter((m) => m.allowed).length,
+      'Destinations refused': dest.matches.filter((m) => !m.allowed).length,
+      'Memory store cases': mem.cases.length,
+    });
+    expect(() => T.effectVectors(text.replace(/tests\/conformance\/memory\/store\.json/g, 'elsewhere'), STD)).toThrow(/no longer names/);
+  });
+});
+
 describe('§3 design principles and §10.4 safety-layer fixtures', () => {
   it('lists each §3 principle, in order, with a glyph the site has', async () => {
     const { CONCEPT_GLYPHS } = await import('../src/pixel/glyphs');

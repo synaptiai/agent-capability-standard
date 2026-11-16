@@ -39,6 +39,12 @@ export const REPLAY_FIXTURES: Readonly<Record<string, string>> = {
   'scope-replay': 'persist_scope_mismatch',
   'stored-replay': 'persist_stored_false_completes',
   'delegate-rollback-replay': 'delegate_rollback_own_state',
+  'export-replay': 'invoke_computed_not_exported',
+  'family-replay': 'quorum_family_exact',
+  'manifest-replay': 'agents_manifest_missing',
+  'agents-replay': 'agents_raise_checkpoint_approval',
+  'read-only-replay': 'agents_read_only_not_attested',
+  'continue-replay': 'delegate_continues_own_task_id',
 };
 
 export type ReplayStatus = 'ran' | 'deferred' | 'skipped' | 'not-reached';

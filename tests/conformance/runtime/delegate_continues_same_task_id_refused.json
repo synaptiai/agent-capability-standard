@@ -1,0 +1,77 @@
+{
+  "description": "Every delegation call returns its own task_id: a continuation that returns the one it continues fails (R402; \u00a75.15.3).",
+  "catalog": {
+    "w": {
+      "goal": "g",
+      "risk": "low",
+      "spec_version": "1.2",
+      "steps": [
+        {
+          "capability": "delegate",
+          "purpose": "delegate step",
+          "store_as": "rb",
+          "input_bindings": {
+            "agent": "x",
+            "task": {
+              "q": "d"
+            },
+            "continues": "${prior}",
+            "read_only": true
+          }
+        }
+      ],
+      "inputs": {
+        "prior": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "workflow_extensions": {
+        "requires": [
+          "delegation@1"
+        ]
+      }
+    }
+  },
+  "header": "1.2.0",
+  "workflow": "w",
+  "inputs": {
+    "prior": "t1"
+  },
+  "attendance": "attended",
+  "start": 0,
+  "script": [
+    {
+      "expect": {
+        "kind": "InvokeCapability",
+        "capability": "delegate",
+        "step": 0,
+        "inputs": {
+          "continues": "t1"
+        }
+      },
+      "respond": {
+        "kind": "Output",
+        "value": {
+          "accepted": true,
+          "task_id": "t1",
+          "effective": {
+            "read_only": true
+          },
+          "evidence_anchors": []
+        }
+      }
+    }
+  ],
+  "end": {
+    "kind": "Failed",
+    "code": "R402",
+    "step": 0
+  },
+  "trace_kinds": [
+    "step_failed",
+    "run_failed"
+  ]
+}

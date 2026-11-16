@@ -650,11 +650,19 @@ class WorkflowRunner:
         refuses the start.
 
         The executor is given no catalog header (``header=None``, STANDARD
-        v1.2 §11.5), and loses nothing by it: the engine writes the header
-        of each file it loads into that file's workflows as their
+        v1.2 §11.5) unless the catalog carries a manifest (§5.1.1; then its
+        file's header), and loses nothing by it: the engine writes the
+        header of each file it loads into that file's workflows as their
         ``spec_version`` (:meth:`WorkflowEngine.load_catalog`), which takes
         precedence over a header. One engine may hold workflows from files
         with different headers, which one ``header`` could not state.
+
+        The run is given the engine's libraries (other catalogs of the
+        catalog set, :meth:`WorkflowEngine.load_library`) and agent manifests
+        (:meth:`WorkflowEngine.load_agents`): a workflow that declares
+        ``agents`` delegates only where the host gave their manifests
+        (§5.15.2), and a snapshot restores only against the same catalogs
+        and manifests.
 
         Raises:
             RunStartError: the catalog does not validate, ``inputs`` or
@@ -692,7 +700,7 @@ class WorkflowRunner:
                 self.catalog(),
                 workflow,
                 values,
-                header=None,
+                header=self._engine.catalog_header(),
                 attendance=attendance or "attended",
                 run_id=rid,
                 now_ms=now,
@@ -701,6 +709,8 @@ class WorkflowRunner:
                 records=records,
                 grounding=[p.to_dict() for p in as_policies(grounding)] or None,
                 destinations=[list(p) for p in destinations or ()] or None,
+                catalogs=self._engine.libraries() or None,
+                agents=self._engine.agent_manifests() or None,
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None
@@ -801,6 +811,8 @@ class WorkflowRunner:
                 dict(snapshot),
                 key,
                 actor_identity=None if actor_identity is None else dict(actor_identity),
+                catalogs=self._engine.libraries() or None,
+                agents=self._engine.agent_manifests() or None,
             )
         except (TypeError, ValueError) as e:
             raise _start_error(e) from None

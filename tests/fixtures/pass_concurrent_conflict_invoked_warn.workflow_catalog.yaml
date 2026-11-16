@@ -1,0 +1,37 @@
+# Standard version: 1.1.0
+# W623 through an invoked workflow (STANDARD v1.2 §4.3): nightly persists and
+# invokes restore_state, which rolls back.
+nightly:
+  goal: Persist the state, then restore it with another workflow.
+  risk: medium
+  workflow_extensions:
+    requires: [triggers@1]
+  triggers:
+  - kind: schedule
+    schedule: {every: 1h, overlap: allow_all}
+  steps:
+  - capability: checkpoint
+    purpose: Save the state.
+    store_as: cp
+    input_bindings: {scope: state}
+  - capability: persist
+    purpose: Persist the summary.
+    store_as: saved
+    input_bindings: {data: summary}
+  - capability: invoke
+    purpose: Restore the state.
+    store_as: restored
+    workflow_id: restore_state
+    input_bindings: {workflow: restore_state}
+restore_state:
+  goal: Roll the state back.
+  risk: medium
+  steps:
+  - capability: checkpoint
+    purpose: Save the state.
+    store_as: cp
+    input_bindings: {scope: state}
+  - capability: rollback
+    purpose: Restore the state.
+    store_as: restored
+    input_bindings: {checkpoint_id: "${cp.checkpoint_id}"}

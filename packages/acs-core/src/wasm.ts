@@ -184,8 +184,34 @@ export async function loadDocuments(url?: URL): Promise<Documents> {
   return JSON.parse(new TextDecoder().decode(view)) as Documents;
 }
 
+/** Another catalog of a catalog set (section 5.1.1), with the version its
+ * header declares, or null (`parseCatalog` returns both). */
+export interface SetCatalog {
+  catalog: Json;
+  header: string | null;
+}
+
+/** The members of a catalog set besides the catalog (sections 5.1.1 and
+ * 5.15.1): a run is restored with the ones it started with. */
+export interface SetArgs {
+  /** The other catalogs of the catalog's set: qualified `invoke` targets
+   * resolve over them. */
+  catalogs?: SetCatalog[];
+  /** Agent manifests: a `delegate` step's targets are checked against them
+   * (section 5.15.2). */
+  agents?: Json[];
+}
+
+/** The `catalogs` and `agents` members of a request, when given. */
+function setMembers(o: SetArgs): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (o.catalogs !== undefined) out.catalogs = o.catalogs;
+  if (o.agents !== undefined) out.agents = o.agents;
+  return out;
+}
+
 /** How a run starts (section 5.19.2). */
-export interface StartArgs {
+export interface StartArgs extends SetArgs {
   catalog: Json;
   workflow: string;
   inputs?: Record<string, Json>;
@@ -213,7 +239,7 @@ function warningText(d: Diagnostic): string {
 }
 
 /** How a saved run continues (section 5.19.4). */
-export interface RestoreArgs {
+export interface RestoreArgs extends SetArgs {
   catalog: Json;
   snapshot: Snapshot;
   keyHex?: string;
@@ -242,8 +268,8 @@ export class CoreContext {
   }
 
   /** Validate a catalog (section 10). `header` is required: the version its
-   * header declares, or null. */
-  validate(catalog: Json, opts: { header: string | null; profiles?: Json[] }): Report {
+   * header declares, or null. `catalogs` and `agents` as for `start`. */
+  validate(catalog: Json, opts: { header: string | null; profiles?: Json[] } & SetArgs): Report {
     if (!opts || !('header' in opts)) {
       throw new CoreError('bad_request', 'header is required: the version the catalog header declares, or null');
     }
@@ -252,6 +278,7 @@ export class CoreContext {
       catalog,
       header: opts.header,
       profiles: opts.profiles ?? [],
+      ...setMembers(opts),
     });
   }
 
@@ -306,6 +333,7 @@ export class CoreContext {
     if (o.profiles !== undefined) options.profiles = o.profiles;
     if (o.grounding !== undefined) options.grounding = o.grounding;
     if (o.destinations !== undefined) options.destinations = o.destinations;
+    Object.assign(options, setMembers(o));
     const { run, warnings } = this.core.call<{ run: number; warnings: Diagnostic[] }>('run.start', {
       context: this.handle,
       catalog: o.catalog,
@@ -327,6 +355,7 @@ export class CoreContext {
       snapshot: o.snapshot,
       key_hex: o.keyHex ?? null,
       actor_identity: o.actorIdentity ?? null,
+      ...setMembers(o),
     });
     return new CoreRun(this.core, run);
   }

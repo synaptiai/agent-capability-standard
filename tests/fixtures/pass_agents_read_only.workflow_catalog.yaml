@@ -1,0 +1,17 @@
+# Standard version: 1.2.0
+# A read-only delegation takes the read-only maxima (STANDARD v1.2 §5.15.2):
+# no checkpoint is needed.
+write:
+  goal: Have the writer read a table.
+  risk: low
+  agents: [db-writer]
+  workflow_extensions:
+    requires: [delegation@1]
+  steps:
+  - capability: delegate
+    purpose: Ask the writer to read the table.
+    store_as: read_out
+    input_bindings:
+      agent: db-writer
+      task: {table: t}
+      read_only: true

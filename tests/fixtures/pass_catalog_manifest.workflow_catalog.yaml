@@ -1,0 +1,16 @@
+# Standard version: 1.2.0
+# A catalog manifest (STANDARD v1.2 §5.1.1): the catalog entry is not a
+# workflow.
+catalog:
+  id: acs.fixtures.solo
+  version: 1.0.0
+  ontology: "2.2"
+  exports: [w]
+w:
+  goal: Read a record.
+  risk: low
+  steps:
+  - capability: retrieve
+    purpose: Read the record.
+    store_as: r
+    input_bindings: {target: records}

@@ -1,0 +1,7 @@
+# An agent manifest (STANDARD v1.2 §5.15.1) for the S3 fixtures that lists a
+# capability the ontology does not define: V101 where it is used, and no
+# maxima.
+agent: oracle
+standard: "1.2"
+ontology: "2.2"
+capabilities: [retrieve, divine]

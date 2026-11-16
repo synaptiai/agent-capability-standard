@@ -6,7 +6,15 @@
 // reaches its wake-up time (section 5.19.3).
 import { describe, expect, it } from 'vitest';
 import type { Json } from '../src/canonical.js';
-import { CoreError, type CoreContext, type CoreRun, type ResumeArgs, type StartArgs } from '../src/wasm.js';
+import {
+  CoreError,
+  type CoreContext,
+  type CoreRun,
+  type ResumeArgs,
+  type SetArgs,
+  type SetCatalog,
+  type StartArgs,
+} from '../src/wasm.js';
 import { repositoryContext } from './core.js';
 
 const FIXTURES = import.meta.glob<Record<string, Json>>('../../../tests/conformance/runtime/*.json', {
@@ -62,7 +70,16 @@ function start(ctx: CoreContext, f: Record<string, Json>): CoreRun {
   if (f.profiles !== undefined) args.profiles = f.profiles as Json[];
   if (f.grounding !== undefined) args.grounding = f.grounding as Json[];
   if (f.destinations !== undefined) args.destinations = f.destinations as string[][];
+  Object.assign(args, setArgs(f));
   return ctx.start(args);
+}
+
+/** The fixture's other catalogs and agent manifests (section 10.5), for start and restore alike. */
+function setArgs(f: Record<string, Json>): SetArgs {
+  const args: SetArgs = {};
+  if (f.catalogs !== undefined) args.catalogs = f.catalogs as unknown as SetCatalog[];
+  if (f.agents !== undefined) args.agents = f.agents as Json[];
+  return args;
 }
 
 type Replay = 'plain' | 'restore' | 'drain';
@@ -85,7 +102,7 @@ function play(ctx: CoreContext, f: Record<string, Json>, mode: Replay): Played {
   const taken: Json[] = [];
   const restore = () => {
     const snap = run.snapshot('00ff');
-    const restored = ctx.restore({ catalog: f.catalog as Json, snapshot: snap, keyHex: '00ff' });
+    const restored = ctx.restore({ catalog: f.catalog as Json, snapshot: snap, keyHex: '00ff', ...setArgs(f) });
     run.dispose();
     run = restored;
   };
@@ -140,8 +157,6 @@ function play(ctx: CoreContext, f: Record<string, Json>, mode: Replay): Played {
   return { run, taken };
 }
 
-const SUPPORTED = (f: Record<string, Json>) => !('catalogs' in f) && !('agents' in f);
-
 describe('runtime fixtures through the core', () => {
   for (const [path, f] of Object.entries(FIXTURES)) {
     const name = path.split('/').pop() as string;
@@ -152,7 +167,6 @@ describe('runtime fixtures through the core', () => {
     };
     for (const mode of ['plain', 'restore', 'drain'] as const) {
       it(`${name}${labels[mode]}`, async () => {
-        expect(SUPPORTED(f)).toBe(true);
         const ctx = await repositoryContext();
         const { run, taken } = play(ctx, f, mode);
         expect(run.runId()).toBe('run-1');
