@@ -357,6 +357,50 @@ def test_bounds_and_open_objects(document: dict[str, Any]) -> None:
     assert validator.is_valid({**output, "retrieved_by": "cache"})
 
 
+@pytest.mark.parametrize(
+    "items",
+    [
+        [{"ref": "file:a.txt", "kind": "file"}],
+        [{"ref": "file:a.txt", "kind": "file", "digest": "sha256:" + "0" * 64}],
+        # The deprecated legacy forms (STANDARD v1.2 §6.5) are accepted.
+        ["file:a.txt"],
+        [{"ref": "file:a.txt"}],
+        [{"ref": "tool:Read:1", "kind": "tool_output"}],
+    ],
+)
+def test_anchor_items_and_the_legacy_forms(
+    document: dict[str, Any], items: list[Any]
+) -> None:
+    output = {**EXAMPLE_OUTPUTS["retrieve"], "evidence_anchors": items}
+    assert contract(document, "retrieve.output").is_valid(output)
+
+
+@pytest.mark.parametrize("item", [1, True, None, ["file:a"]])
+def test_an_item_that_names_no_evidence_is_outside_the_contract(
+    document: dict[str, Any], item: Any
+) -> None:
+    output = {**EXAMPLE_OUTPUTS["retrieve"], "evidence_anchors": [item]}
+    assert not contract(document, "retrieve.output").is_valid(output)
+
+
+def test_common_output_fields(document: dict[str, Any]) -> None:
+    """Any string inference_method is valid against the contract (the
+    vocabulary is enforced only under a grounding policy); an uncertainty
+    must have its type (STANDARD v1.2 §4.1.1)."""
+    validator = contract(document, "mutate.output")
+    output = EXAMPLE_OUTPUTS["mutate"]
+    assert validator.is_valid({**output, "inference_method": "llm-reasoning"})
+    assert validator.is_valid(
+        {
+            **output,
+            "confidence": 0.4,
+            "uncertainty": {"type": "epistemic", "confidence": 0.4},
+        }
+    )
+    assert not validator.is_valid({**output, "uncertainty": {"confidence": 0.4}})
+    assert not validator.is_valid({**output, "confidence": 1.5})
+
+
 # --- The reference validator's reading -------------------------------------
 
 

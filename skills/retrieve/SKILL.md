@@ -110,8 +110,8 @@ extraction:
   original_size: integer | null
   returned_size: integer | null
   truncated: boolean
-confidence: number  # 0.0-1.0
-evidence_anchors: array[string]
+confidence: number  # probability that the retrieved data is accurate and complete (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 ```
 
@@ -124,8 +124,8 @@ assumptions: array[string]
 | `citation` | object | Verifiable reference to re-fetch |
 | `provenance` | object | Source reliability and freshness |
 | `extraction` | object | Filtering/processing applied |
-| `confidence` | number | 0.0-1.0 confidence the data is accurate and complete |
-| `evidence_anchors` | array | References to the exact source locations |
+| `confidence` | number | Probability, 0.0-1.0, that the retrieved data is accurate and complete (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the exact source locations |
 | `assumptions` | array | Explicit assumptions |
 
 ## Examples
@@ -172,7 +172,7 @@ extraction:
   truncated: false
 confidence: 1.0
 evidence_anchors:
-  - "config/database.yml:1-15"
+  - {ref: "file:config/database.yml:1-15", kind: file}
 assumptions:
   - "File contents reflect deployed configuration"
 ```
@@ -223,7 +223,7 @@ extraction:
   truncated: false
 confidence: 0.95
 evidence_anchors:
-  - "url:https://api.example.com/docs/v2/endpoints"
+  - {ref: "https://api.example.com/docs/v2/endpoints", kind: url}
 assumptions:
   - "API documentation reflects actual API behavior"
 ```
@@ -285,8 +285,8 @@ extraction:
   truncated: true
 confidence: 0.95
 evidence_anchors:
-  - "src/models/user.ts:1-20"
-  - "src/models/user.ts:22-35"
+  - {ref: "file:src/models/user.ts:1-20", kind: file}
+  - {ref: "file:src/models/user.ts:22-35", kind: file}
 assumptions:
   - "Extracted sections are complete within specified lines"
 ```

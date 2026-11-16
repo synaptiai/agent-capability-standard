@@ -8,6 +8,40 @@ allowed-tools: Read, Grep, Bash
 context: fork
 agent: general-purpose
 hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: |
+            # Code-decided check (STANDARD 1.2.0 §5.18.10): an audit record appended
+            # to .claude/audit/records.jsonl holds no credential (§6.7). Claude Code
+            # passes the tool call as JSON on stdin, read once here; exit 2 blocks
+            # the call and the reason on stderr is shown to Claude. A call that
+            # cannot be read is blocked. Other commands are other hooks' business.
+            INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            case "$CMD" in
+              *audit/records.jsonl*) ;;
+              *) exit 0 ;;
+            esac
+            # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
+            # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
+            SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+            SECRET_KEY='(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
+            secret_in() {
+              printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
+              # A quoted value with no whitespace, 8 or more characters
+              printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^[:space:]\"']{8,}[\"']" && return 0
+              # An unquoted value of 12 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eio -- "$SECRET_KEY[\"']?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
+                sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
+            }
+            # END secret-scan
+            if secret_in "$CMD"; then
+              echo "F504 CONSTRAINT_VIOLATED: the audit record holds what looks like a credential; cite it by reference or digest (STANDARD 1.2.0 §6.7)" >&2
+              exit 2
+            fi
+            exit 0
   PostToolUse:
     - matcher: "Read"
       hooks:
@@ -64,7 +98,7 @@ Execute **audit** to create a structured record of actions taken, tools invoked,
 |-----------|----------|------|-------------|
 | `event` | Yes | object | Event to record |
 | `context` | No | object | Event context |
-| `retention` | No | string | How long to retain |
+| `retention` | No | string | How long the record is to be kept in the store it is written to: a duration (STANDARD v1.2 §5.10.1, e.g. `2555d` or `P30D`); absent, the store's own policy applies (§6.3). A literal outside the grammar is W614 |
 | `require_record` | No | boolean | The step fails (R402, reason `not_recorded`) unless the record was written (STANDARD v1.2 §6.4) |
 
 Inputs not listed here are outside the capability's contract: a workflow step that binds them gets W604 (STANDARD v1.1 §5.5).
@@ -93,17 +127,19 @@ Inputs not listed here are outside the capability's contract: a workflow step th
    - Document transformations applied
    - List dependencies between artifacts
 
-5) **Ground claims**: Attach evidence for all audit entries
-   - Format: `file:line`, `tool:git:commit_hash`, `timestamp`
-   - Include actual command outputs where relevant
+5) **Ground claims**: Attach evidence for all audit entries (STANDARD v1.2 §6.5)
+   - Each an evidence anchor `{ref, kind}`: `{ref: "file:src/app.py:45", kind: file}`, `{ref: "tool:git:<commit>", kind: tool}`
+   - Cite command outputs by reference or by SHA-256 digest; never copy an output that may hold a credential into the record (§6.7)
+   - The output's own anchor is the record written: `{ref: "audit:<audit_id>", kind: record}` (§3.1)
 
 6) **Write the record (append-only)**: Persist the audit record before returning
    - Build one compact JSON line, the output's `record` (Field Definitions): an action record of this skill's own (STANDARD v1.2 §6.4). Redact credentials and PII first, and never copy a member of `event` to the line's top level: an event shaped as a record stays under `details.event`
-   - Append it with Bash to `"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` (`mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"`, then `>>`), so the record lands in the same project `.claude/` directory the plugin's hooks use rather than under whatever the working directory is; refuse if the file is a symlink, and never rewrite, truncate or reorder existing lines
+   - Append it with Bash as a literal in that one command, `printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` (after `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.claude/audit"`), never through an intermediate file, so that the skill's command hook sees what is written; the record lands in the same project `.claude/` directory the plugin's hooks use rather than under whatever the working directory is; refuse if the file is a symlink, and never rewrite, truncate or reorder existing lines
+   - The skill's PreToolUse command hook blocks an append whose record holds what looks like a credential (`F504 CONSTRAINT_VIOLATED:`, STANDARD v1.2 §6.7, §5.18.10): rewrite the line to cite the value by reference or digest, then append again
    - Do not write to `.claude/audit.log`: the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself: cite earlier lines (the calls being audited) as evidence, not these
    - The plugin's PreToolUse hook treats this append as a `mutate` call, since a `>>` redirect writes a file: it is blocked without a valid checkpoint (F501), uses that checkpoint up, and asks for approval (F502). If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
 
-7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line, and `record` is that line
+7) **Format output**: Structure per audit contract; `recorded` is true only when step 6 appended the line, and `record` is that line; `store` says where it went: `{name: ".claude/audit/records.jsonl", durability: durable}` (a file in the project, kept until removed by hand: no `retention` of its own, §6.3, §6.6)
 
 ## Output Contract
 
@@ -112,6 +148,10 @@ Return a structured object:
 ```yaml
 recorded: boolean  # Whether the record was appended to .claude/audit/records.jsonl
 record: object  # The action record written (STANDARD v1.2 §6.4)
+store:  # Where the record was written (STANDARD v1.2 §6.3, §6.6)
+  name: string  # e.g. .claude/audit/records.jsonl
+  durability: memory | session | durable  # never durable for a store that does not outlive the session
+  retention: string | null  # the duration the store applies (§5.10.1); absent when it keeps records until removed by hand
 audit_id: string  # Unique audit record ID
 timestamp: string  # ISO 8601 date-time the audit record was generated
 audit_record:
@@ -135,8 +175,8 @@ provenance:
   inputs: array[string]  # Source data/files
   outputs: array[string]  # Produced artifacts
   dependencies: array[string]  # External dependencies used
-confidence: number  # 0.0-1.0 (completeness of audit)
-evidence_anchors: ["tool:git:...", "file:..."]
+confidence: number  # probability that the record was appended as reported (§4.1.1)
+evidence_anchors: [{ref: "audit:<audit_id>", kind: record}, {ref: "tool:git:...", kind: tool}, {ref: "file:...", kind: file}]  # the record written grounds the output (STANDARD v1.2 §3.1)
 assumptions: []
 ```
 
@@ -146,6 +186,7 @@ assumptions: []
 |-------|------|-------------|
 | `recorded` | boolean | Whether the record was appended to `.claude/audit/records.jsonl` (false when the write was blocked or failed) |
 | `record` | object | The action record of step 6: `action_id` (the `audit_id`), `timestamp`, `actor: agent`, `intent` (the event's `intent`, else its `event_type`, when a string; else `audit`), `status: executed`, `capability: audit`, `details` (`event`, `context` and `retention` when given, and the collected `audit_record`, `changes` and `provenance`), `recorded_by: {"name": "audit skill"}`, then `prev_hmac` (the `hmac` of the file's last line, empty for the first) and `hmac` (HMAC-SHA-256, as lowercase hex, of the line without `hmac` as `jq -c` prints it, with `openssl dgst -sha256 -hmac` under `AUDIT_HMAC_KEY`, else the default key the plugin's hook and `tools/verify_audit_log.py` use: `grounded-agency-audit-` then the short host name, `hostname -s`, or `default` when there is none). When the last line has no readable `hmac` (a line written before Standard 1.2, which does not verify), do not chain onto it: move the file aside (`records.<UTC time>.jsonl`, same directory) and start a new one, whose first line has `prev_hmac` empty. Each member of `event` stays under `details.event`: it is what the step reported, and cannot claim another writer, an actor, an approval or a place in the chain |
+| `store` | object | Where the record was written: the store's `name`, its `durability` (`memory`, `session` or `durable`; a store that does not outlive the session is never reported `durable`) and the `retention` it applies, so a workflow can stop on `${a.store.durability} != 'durable'` (STANDARD v1.2 §6.3, §6.6) |
 | `audit_id` | string | Unique identifier for this audit record |
 | `timestamp` | string | ISO 8601 date-time the audit record was generated |
 | `audit_record.actor` | string | Who performed the actions |
@@ -154,8 +195,8 @@ assumptions: []
 | `tool_usage` | array | Summary of tools invoked |
 | `decision_rationale` | string | Explanation of why actions were taken |
 | `provenance` | object | Input/output/dependency lineage |
-| `confidence` | number | 0.0-1.0 completeness of audit trail |
-| `evidence_anchors` | array | References to source evidence |
+| `confidence` | number | Probability, 0.0-1.0, that the record was appended as reported (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to source evidence |
 | `assumptions` | array | What was assumed during audit collection |
 
 ## Examples
@@ -225,10 +266,11 @@ provenance:
     - "psycopg2"
 confidence: 0.95
 evidence_anchors:
-  - "file:.claude/audit/records.jsonl"
-  - "tool:git:abc123def456"
-  - "tool:bash:pytest tests/ - 7 passed"
-  - "file:src/api/handlers/user.py:45"
+  - {ref: "audit:audit_20240115_160000_session", kind: record}
+  - {ref: "file:.claude/audit/records.jsonl", kind: file}
+  - {ref: "tool:git:abc123def456", kind: tool}
+  - {ref: "tool:bash:pytest tests/ - 7 passed", kind: tool}
+  - {ref: "file:src/api/handlers/user.py:45", kind: file}
 assumptions:
   - "Git log accurately reflects all changes"
   - "No manual edits outside of tracked session"
@@ -300,9 +342,10 @@ provenance:
   dependencies: []
 confidence: 1.0
 evidence_anchors:
-  - "file:.claude/audit/records.jsonl"
-  - "file:.checkpoints/chk_20240115_150000_config/manifest.json"
-  - "tool:bash:rollback command output"
+  - {ref: "audit:audit_20240115_config", kind: record}
+  - {ref: "file:.claude/audit/records.jsonl", kind: file}
+  - {ref: "file:.checkpoints/chk_20240115_150000_config/manifest.json", kind: file}
+  - {ref: "tool:bash:rollback command output", kind: tool}
 assumptions: []
 ```
 

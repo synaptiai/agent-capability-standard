@@ -89,8 +89,8 @@ alternatives_considered: array[string]  # Other approaches evaluated
 quality_signals:
   - metric: string  # Quality dimension
     value: number | string  # Assessment
-confidence: number  # 0.0-1.0 in artifact quality
-evidence_anchors: array[string]  # References to source material
+confidence: number  # probability that the artifact meets its specification (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # References to source material; each {ref, kind} (STANDARD v1.2 §6.5)
 assumptions: array[string]  # Conditions affecting the artifact
 safety_notes: array[string]  # Security/reliability considerations
 next_actions: array[string]  # Suggested follow-ups
@@ -106,8 +106,8 @@ next_actions: array[string]  # Suggested follow-ups
 | `rationale` | string | Design decision explanation |
 | `alternatives_considered` | array | Other approaches that were rejected |
 | `quality_signals` | array | Quality metrics and assessments |
-| `confidence` | number | 0.0-1.0 in artifact fitness |
-| `evidence_anchors` | array[string] | Sources that informed generation |
+| `confidence` | number | Probability, 0.0-1.0, that the artifact meets its specification (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Sources that informed generation |
 | `safety_notes` | array[string] | Security/reliability concerns |
 | `next_actions` | array[string] | Recommended follow-up steps |
 
@@ -199,8 +199,8 @@ quality_signals:
     value: "high"
 confidence: 0.9
 evidence_anchors:
-  - "zod:docs:safeParse"
-  - "express:docs:error-handling"
+  - {ref: "zod:docs:safeParse", kind: x-doc}
+  - {ref: "express:docs:error-handling", kind: x-doc}
 assumptions:
   - "userService exists and is imported"
   - "Error middleware handles uncaught exceptions"
@@ -298,7 +298,7 @@ quality_signals:
     value: "descriptions and examples included"
 confidence: 0.95
 evidence_anchors:
-  - "json-schema:draft-07:spec"
+  - {ref: "json-schema:draft-07:spec", kind: x-doc}
 assumptions:
   - "PostgreSQL is the target database"
   - "Production deployment expects SSL"

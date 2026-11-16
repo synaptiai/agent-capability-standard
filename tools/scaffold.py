@@ -131,14 +131,67 @@ def scaffold_capability(args: argparse.Namespace) -> None:
                 "result": {
                     "description": "Primary output",
                 },
+                # The common output fields every contract declares
+                # (STANDARD v1.2 §4.1.1, ontology 2.2.0 templates A, B, D, E).
                 "evidence_anchors": {
                     "type": "array",
-                    "description": "Source references",
+                    "description": (
+                        "What the output is based on, as evidence anchors "
+                        "(Standard v1.2 §6.5). An empty list grounds nothing, "
+                        "and the output is then marked inferred (§3.1)."
+                    ),
+                    "items": {
+                        "anyOf": [
+                            {"$ref": "schemas/event_schema.yaml#/types/Anchor"},
+                            {
+                                "type": "string",
+                                "description": (
+                                    "Deprecated legacy form (Standard v1.2 §6.5) - "
+                                    "an anchor given by its ref alone, with no kind; "
+                                    "accepted, never counted toward grounding, "
+                                    "removed in 2.0"
+                                ),
+                            },
+                            {
+                                "type": "object",
+                                "description": (
+                                    "Deprecated legacy form (Standard v1.2 §6.5) - an "
+                                    "object that is not an evidence anchor (no kind, "
+                                    "or a kind outside the vocabulary); accepted, "
+                                    "never counted toward grounding, removed in 2.0"
+                                ),
+                            },
+                        ]
+                    },
                 },
                 "confidence": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
+                    "description": (
+                        "The producer's probability that the output's claim is "
+                        "correct, self-reported unless the host documents a "
+                        "calibration (Standard v1.2 §4.1.1)"
+                    ),
+                },
+                "inference_method": {
+                    "type": "string",
+                    "description": (
+                        "How the output was reached when it is not grounded in "
+                        "evidence; with confidence it marks the output inferred "
+                        "(Standard v1.2 §3.1, §4.1.1). A producer should use "
+                        "model_knowledge, deduction, induction, abduction, analogy, "
+                        "statistical, simulation, assumption or an x- vendor value; "
+                        "a grounding policy (§5.20) requires one of them."
+                    ),
+                },
+                "uncertainty": {
+                    "$ref": "schemas/event_schema.yaml#/types/Uncertainty",
+                    "description": (
+                        "The uncertainty of the output's principal value; its "
+                        "confidence equals the output's confidence (Standard v1.2 "
+                        "§4.1.1)"
+                    ),
                 },
             },
         },

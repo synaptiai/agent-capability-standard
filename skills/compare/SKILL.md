@@ -98,8 +98,8 @@ tradeoffs:
   - option: string
     pros: array[string]
     cons: array[string]
-confidence: number  # 0.0-1.0 overall comparison confidence
-evidence_anchors: array[string]  # References to data sources
+confidence: number  # probability that the comparison's conclusion is right (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # References to data sources; each {ref, kind} (STANDARD v1.2 §6.5)
 assumptions: array[string]  # Conditions affecting comparison
 ```
 
@@ -116,8 +116,8 @@ assumptions: array[string]  # Conditions affecting comparison
 | `recommendation_rationale` | string | Why the recommended option was chosen |
 | `recommendation_confidence` | number | 0.0-1.0 confidence in the recommendation |
 | `tradeoffs` | array | Pros/cons for each option |
-| `confidence` | number | 0.0-1.0 overall analysis confidence |
-| `evidence_anchors` | array[string] | References supporting scores |
+| `confidence` | number | Probability, 0.0-1.0, that the comparison's conclusion is right (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References supporting scores |
 | `assumptions` | array[string] | Conditions that could change outcome |
 
 ## Examples
@@ -247,9 +247,9 @@ tradeoffs:
       - "Query pattern limitations"
 confidence: 0.85
 evidence_anchors:
-  - "aws:pricing-calculator:dynamodb"
-  - "mongodb:atlas-pricing:m30"
-  - "team_survey:db_experience:2024"
+  - {ref: "aws:pricing-calculator:dynamodb", kind: x-doc}
+  - {ref: "mongodb:atlas-pricing:m30", kind: x-doc}
+  - {ref: "team_survey:db_experience:2024", kind: human_note}
 assumptions:
   - "Workload remains mixed read/write"
   - "No need for global distribution initially"
@@ -354,8 +354,8 @@ tradeoffs:
       - "Longer total timeline than rewrite"
 confidence: 0.8
 evidence_anchors:
-  - "fowler:strangler-fig-pattern"
-  - "internal:outage-report:2024-q3"
+  - {ref: "fowler:strangler-fig-pattern", kind: x-doc}
+  - {ref: "internal:outage-report:2024-q3", kind: x-doc}
 assumptions:
   - "Team can maintain abstraction discipline"
   - "System is decomposable into components"

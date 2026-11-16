@@ -94,8 +94,8 @@ returned_matches: integer  # After relevance filtering
 consistency_check:
   consistent: boolean
   contradictions: array[object] | null
-confidence: number  # 0.0-1.0 based on match quality
-evidence_anchors: array[string]  # Sources for recalled items
+confidence: number  # probability that the returned memories are correct for the query (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # Sources for recalled items; each {ref, kind} (STANDARD v1.2 §6.5)
 assumptions: array[string]  # Assumptions about memory validity
 ```
 
@@ -110,8 +110,8 @@ assumptions: array[string]  # Assumptions about memory validity
 | `data[].rationale` | string | Explanation for why decision was made |
 | `data[].relevance_score` | number | How well this matches the query |
 | `consistency_check` | object | Whether recalled items contradict each other |
-| `confidence` | number | Overall confidence in recall quality |
-| `evidence_anchors` | array | Sources for recalled items |
+| `confidence` | number | Probability, 0.0-1.0, that the returned memories are correct for the query (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Sources for recalled items |
 | `assumptions` | array | Assumptions about memory validity |
 
 ## Examples
@@ -161,8 +161,8 @@ consistency_check:
   contradictions: null
 confidence: 0.92
 evidence_anchors:
-  - "CLAUDE.md:127"
-  - "CLAUDE.md:134"
+  - {ref: "file:CLAUDE.md:127", kind: file}
+  - {ref: "file:CLAUDE.md:134", kind: file}
 assumptions:
   - "CLAUDE.md reflects current project decisions"
   - "No conflicting decisions recorded elsewhere"
@@ -210,7 +210,7 @@ consistency_check:
   contradictions: null
 confidence: 0.97
 evidence_anchors:
-  - "session:message_42"
+  - {ref: "session:message_42", kind: human_note}
 assumptions:
   - "User preference still valid within session"
   - "No subsequent preference change"
@@ -266,8 +266,8 @@ consistency_check:
       resolution_hint: "Different contexts: production vs development"
 confidence: 0.75
 evidence_anchors:
-  - "CLAUDE.md:45"
-  - "docs/dev-setup.md:23"
+  - {ref: "file:CLAUDE.md:45", kind: file}
+  - {ref: "file:docs/dev-setup.md:23", kind: file}
 assumptions:
   - "Both decisions are currently valid"
   - "Context difference (prod vs dev) resolves contradiction"

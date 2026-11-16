@@ -112,8 +112,8 @@ patterns_identified:
   - pattern: string  # Recurring issue pattern
     affected_issues: array[string]
     systemic_fix: string  # How to address pattern
-confidence: number  # 0.0-1.0
-evidence_anchors: ["file:line", "section:name"]
+confidence: number  # probability that the findings are right (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "section:name", kind: record}]
 assumptions: []
 ```
 
@@ -126,8 +126,8 @@ assumptions: []
 | `risk_summary` | object | Overall risk assessment |
 | `suggestions` | array\<object\> | Prioritized improvement suggestions, each referencing an issue |
 | `patterns_identified` | array | Recurring issues with systemic fixes |
-| `confidence` | number | 0.0-1.0 based on analysis completeness |
-| `evidence_anchors` | array | References to target locations |
+| `confidence` | number | Probability, 0.0-1.0, that the findings are right (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to target locations |
 | `assumptions` | array | Assumptions made during analysis |
 
 ## Examples
@@ -221,8 +221,8 @@ patterns_identified:
     systemic_fix: "Adopt CAVR pattern: checkpoint before each mutation, verify after each step"
 confidence: 0.9
 evidence_anchors:
-  - "plan:step-1:stops-service"
-  - "plan:steps:no-rollback"
+  - {ref: "plan:step-1:stops-service", kind: record}
+  - {ref: "plan:steps:no-rollback", kind: record}
 assumptions:
   - "Auth service is critical for all user operations"
   - "Downtime of auth service blocks all authenticated requests"
@@ -321,8 +321,8 @@ patterns_identified:
     systemic_fix: "Security code review and SAST integration in CI"
 confidence: 0.95
 evidence_anchors:
-  - "auth.py:2:sql-injection"
-  - "auth.py:3:plaintext-password"
+  - {ref: "file:auth.py:2:sql-injection", kind: file}
+  - {ref: "file:auth.py:3:plaintext-password", kind: file}
 assumptions:
   - "This code handles real user authentication"
   - "Database contains actual user credentials"

@@ -131,8 +131,8 @@ failure_handling:
 handoff_context:
   - key: string  # Context key
     value: object  # Shared context data
-confidence: 0..1
-evidence_anchors: ["task:analysis", "agent:capability"]
+confidence: number  # probability that the delegation was accepted as reported (§4.1.1)
+evidence_anchors: [{ref: "task:analysis", kind: record}, {ref: "agent:capability", kind: record}]
 assumptions: []
 ```
 
@@ -151,8 +151,8 @@ assumptions: []
 | `merge_plan` | object | Strategy for combining results |
 | `failure_handling` | object | Recovery policies |
 | `handoff_context` | array | Shared context for all subtasks |
-| `confidence` | number | 0.0-1.0 based on delegation clarity |
-| `evidence_anchors` | array | References supporting delegation design |
+| `confidence` | number | Probability, 0.0-1.0, that the delegation was accepted as reported (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References supporting delegation design |
 | `assumptions` | array | Explicit assumptions about agents/capabilities |
 
 ## Examples
@@ -272,8 +272,8 @@ handoff_context:
     value: "main"
 confidence: 0.9
 evidence_anchors:
-  - "task:pr-review-decomposition"
-  - "agent:security-agent:has-security-analysis"
+  - {ref: "task:pr-review-decomposition", kind: record}
+  - {ref: "agent:security-agent:has-security-analysis", kind: record}
 assumptions:
   - "All agents have access to repository"
   - "PR #123 exists and is accessible"
@@ -379,7 +379,7 @@ handoff_context:
     value: "batch-2024-01-15"
 confidence: 0.85
 evidence_anchors:
-  - "task:pipeline-stages"
+  - {ref: "task:pipeline-stages", kind: record}
 assumptions:
   - "Enrichment service is available"
   - "Database has capacity for new records"

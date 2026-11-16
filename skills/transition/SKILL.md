@@ -90,8 +90,8 @@ analysis:
   reachability: object  # Which states are reachable
   completeness: number  # Coverage estimate
   non_determinism: array  # Ambiguous transitions
-confidence: 0..1
-evidence_anchors: ["file:line", "doc:section"]
+confidence: number  # probability that the rules are complete and correct (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "doc:section", kind: x-doc}]
 assumptions: []
 ```
 
@@ -108,8 +108,8 @@ assumptions: []
 | `preconditions` | array\<object\> | Conditions required by the rules that apply from `from_state`, each tagged with its rule |
 | `effects` | array\<object\> | State changes those rules make, each tagged with its rule |
 | `analysis` | object | State machine analysis results |
-| `confidence` | number | 0.0-1.0 confidence the rules are complete and correct |
-| `evidence_anchors` | array | References to where each rule is defined |
+| `confidence` | number | Probability, 0.0-1.0, that the rules are complete and correct (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to where each rule is defined |
 | `assumptions` | array | Assumptions about the state machine |
 
 ## Examples
@@ -214,8 +214,8 @@ analysis:
   non_determinism: []
 confidence: 0.85
 evidence_anchors:
-  - "app/models/order.rb:45-120"
-  - "app/services/order_service.rb:15-80"
+  - {ref: "file:app/models/order.rb:45-120", kind: file}
+  - {ref: "file:app/services/order_service.rb:15-80", kind: file}
 assumptions:
   - "State machine defined in Order model"
   - "All transitions go through OrderService"
@@ -303,8 +303,8 @@ analysis:
   non_determinism: []
 confidence: 0.9
 evidence_anchors:
-  - "app/controllers/sessions_controller.rb:10-50"
-  - "app/models/user.rb:80-95"
+  - {ref: "file:app/controllers/sessions_controller.rb:10-50", kind: file}
+  - {ref: "file:app/models/user.rb:80-95", kind: file}
 assumptions:
   - "Session timeout handled by middleware"
   - "Lock mechanism implemented in User model"

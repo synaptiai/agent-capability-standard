@@ -124,8 +124,8 @@ search_strategy:
   method: string  # How search was conducted
   queries_executed: array[string]  # Actual queries run
   filters_applied: object
-confidence: number  # 0.0-1.0
-evidence_anchors: array[string]
+confidence: number  # probability that the results answer the query (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # each {ref, kind, digest?} (STANDARD v1.2 §6.5)
 assumptions: array[string]
 next_searches: array[string]  # Suggested follow-up searches
 ```
@@ -141,8 +141,8 @@ next_searches: array[string]  # Suggested follow-up searches
 | `coverage` | object | Assessment of search completeness |
 | `blind_spots` | array | Known areas not searched |
 | `next_searches` | array | Suggested follow-up queries |
-| `confidence` | number | 0.0-1.0 confidence the results answer the query |
-| `evidence_anchors` | array | References to where each result was found |
+| `confidence` | number | Probability, 0.0-1.0, that the results answer the query (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to where each result was found |
 | `assumptions` | array | Explicit assumptions |
 
 ## Examples
@@ -224,9 +224,9 @@ search_strategy:
     excluded: ["node_modules", "test"]
 confidence: 0.9
 evidence_anchors:
-  - "src/middleware/auth.ts:45-48"
-  - "src/services/user-service.ts:23"
-  - "src/utils/jwt-helpers.ts:1-5"
+  - {ref: "file:src/middleware/auth.ts:45-48", kind: file}
+  - {ref: "file:src/services/user-service.ts:23", kind: file}
+  - {ref: "file:src/utils/jwt-helpers.ts:1-5", kind: file}
 assumptions:
   - "All JWT logic is in TypeScript files"
   - "No JWT validation in excluded test files matters"
@@ -294,7 +294,7 @@ search_strategy:
     recency: "2025"
 confidence: 0.85
 evidence_anchors:
-  - "url:https://platform.openai.com/docs/guides/rate-limits"
+  - {ref: "https://platform.openai.com/docs/guides/rate-limits", kind: url}
 assumptions:
   - "Official documentation is current"
 next_searches:

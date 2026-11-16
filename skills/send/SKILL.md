@@ -163,8 +163,8 @@ approval:
   token: string  # Approval token used
   timestamp: string  # When approval was given
   scope: string  # What was approved
-confidence: 0..1  # Confidence in successful delivery
-evidence_anchors: ["log:timestamp", "api:response"]
+confidence: number  # probability that the message was delivered as reported (§4.1.1)
+evidence_anchors: [{ref: "sent:<idempotency_key>", kind: record}, {ref: "log:timestamp", kind: log}, {ref: "api:response", kind: api}]  # a message sent is grounded by its record, under the pass's idempotency key (STANDARD v1.2 §3.1)
 assumptions: []  # Explicit assumptions
 ```
 
@@ -179,8 +179,8 @@ assumptions: []  # Explicit assumptions
 | `delivery` | object | Outcome of send operation |
 | `constraints_applied` | array | Policy checks performed |
 | `approval` | object | Approval gate information |
-| `confidence` | number | 0.0-1.0 based on delivery confirmation |
-| `evidence_anchors` | array | Logs, responses, confirmations |
+| `confidence` | number | Probability, 0.0-1.0, that the message was delivered as reported (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Logs, responses, confirmations |
 | `assumptions` | array | Explicit assumptions (e.g., "network stable") |
 
 ## Examples
@@ -229,8 +229,9 @@ approval:
   scope: "Send order notification to partner API"
 confidence: 0.95
 evidence_anchors:
-  - "log:2024-01-15T10:30:15Z:send-success"
-  - "api:response:200-OK"
+  - {ref: "sent:run-4f2a:7", kind: record}
+  - {ref: "log:2024-01-15T10:30:15Z:send-success", kind: log}
+  - {ref: "api:response:200-OK", kind: api}
 assumptions:
   - "Partner API is available and processing webhooks"
 ```
@@ -276,8 +277,8 @@ approval:
   scope: "Send review notification email"
 confidence: 0.0
 evidence_anchors:
-  - "log:2024-01-15T11:00:05Z:smtp-timeout"
-  - "error:connection-refused"
+  - {ref: "log:2024-01-15T11:00:05Z:smtp-timeout", kind: log}
+  - {ref: "error:connection-refused", kind: tool}
 assumptions:
   - "SMTP server should be available on port 587"
 next_actions:

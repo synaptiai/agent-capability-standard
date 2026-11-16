@@ -102,7 +102,7 @@ workflow:
   steps: array          # ordered workflow steps
   confidence: number    # overall workflow confidence
 confidence: number      # overall discovery confidence 0.0-1.0
-evidence_anchors: array # provenance trail
+evidence_anchors: array[EvidenceAnchor]  # provenance trail; each {ref, kind} (STANDARD v1.2 §6.5)
 ```
 
 ### Field Definitions
@@ -113,7 +113,7 @@ evidence_anchors: array # provenance trail
 | `gaps` | array | Unmatched requirements with proposals |
 | `workflow` | object | Synthesized or matched existing workflow |
 | `confidence` | number | Overall confidence (0.0-1.0) |
-| `evidence_anchors` | array | Discovery provenance trail |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Discovery provenance trail |
 
 ## Examples
 

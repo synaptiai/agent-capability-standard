@@ -94,8 +94,8 @@ conflicts:
 summary:
   entities_affected: integer  # Count of entities changed
   unresolved_conflicts: integer  # Count of conflicts needing human review
-confidence: number  # 0.0-1.0 based on conflict count and resolution quality
-evidence_anchors: array[string]  # Source references for each claim
+confidence: number  # probability that the agreed state is what the participants hold (§4.1.1)
+evidence_anchors: array[EvidenceAnchor]  # Source references for each claim; each {ref, kind} (STANDARD v1.2 §6.5)
 assumptions: array[string]  # Explicit assumptions made during sync
 ```
 
@@ -110,8 +110,8 @@ assumptions: array[string]  # Explicit assumptions made during sync
 | `changes` | array[object] | Detailed log of every change made |
 | `conflicts` | array[object] | All detected conflicts and their resolution |
 | `summary` | object | Counts of entities affected and unresolved conflicts |
-| `confidence` | number | Lower if many conflicts; higher if clean merge |
-| `evidence_anchors` | array | Source references for each claim |
+| `confidence` | number | Probability, 0.0-1.0, that the agreed state is what the participants hold (§4.1.1); lower when many fields conflicted |
+| `evidence_anchors` | array of evidence anchors (§6.5) | Source references for each claim |
 | `assumptions` | array | Explicit assumptions made during sync |
 
 ## Examples
@@ -186,10 +186,10 @@ summary:
   unresolved_conflicts: 0
 confidence: 0.95
 evidence_anchors:
-  - "source:agent_output_1:role"
-  - "source:agent_output_2:department"
-  - "conflict:name:prefer_longer"
-  - "conflict:last_seen:prefer_newer"
+  - {ref: "source:agent_output_1:role", kind: record}
+  - {ref: "source:agent_output_2:department", kind: record}
+  - {ref: "conflict:name:prefer_longer", kind: record}
+  - {ref: "conflict:last_seen:prefer_newer", kind: record}
 assumptions:
   - "Both sources refer to same user_123 entity"
   - "Longer name is more complete (not a different person)"
@@ -231,8 +231,8 @@ summary:
   unresolved_conflicts: 1
 confidence: 0.3
 evidence_anchors:
-  - "source:system_a:price"
-  - "source:system_b:price"
+  - {ref: "source:system_a:price", kind: record}
+  - {ref: "source:system_b:price", kind: record}
 assumptions:
   - "Both prices refer to same product"
   - "50% price discrepancy exceeds auto-resolve threshold"
@@ -243,7 +243,7 @@ assumptions:
 - [ ] All source data accounted for in changes or conflicts
 - [ ] Every conflict has resolution or is flagged unresolved
 - [ ] agreed_state passes target schema validation (if one applies)
-- [ ] confidence reflects conflict severity and resolution quality
+- [ ] confidence is the probability of the reported result (§4.1.1)
 - [ ] evidence_anchors trace every merged field to source
 
 **Verification tools:** Read (to validate source accessibility), Grep (to search for schema definitions)

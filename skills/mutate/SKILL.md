@@ -86,7 +86,7 @@ diff:
   content: string  # The actual diff
 checkpoint_id: string  # For rollback reference
 rollback_command: string  # How to undo this change
-evidence_anchors: ["file:line", "command:output"]
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "command:output", kind: tool}]
 ```
 
 ### Field Definitions
@@ -101,7 +101,7 @@ evidence_anchors: ["file:line", "command:output"]
 | `diff` | object | Difference between states |
 | `checkpoint_id` | string | Reference for rollback |
 | `rollback_command` | string | How to undo the change |
-| `evidence_anchors` | array | References to the changed location and the command output |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to the changed location and the command output |
 
 ## Examples
 
@@ -140,7 +140,7 @@ diff:
 checkpoint_id: "chk-20240115-001"
 rollback_command: "git checkout src/services/user_service.rb"
 evidence_anchors:
-  - "src/services/user_service.rb:42"
+  - {ref: "file:src/services/user_service.rb:42", kind: file}
 ```
 
 ### Example 2: Database Mutation
@@ -174,7 +174,7 @@ diff:
 checkpoint_id: "chk-20240115-002"
 rollback_command: "ALTER TABLE users DROP COLUMN status"
 evidence_anchors:
-  - "command:psql:schema_after"
+  - {ref: "command:psql:schema_after", kind: tool}
 ```
 
 ### Example 3: Mutation Failure
@@ -205,7 +205,7 @@ diff:
 checkpoint_id: "chk-20240115-003"
 rollback_command: "N/A - mutation did not complete"
 evidence_anchors:
-  - "error:file_locked"
+  - {ref: "error:file_locked", kind: tool}
 error:
   message: "File locked by another process"
   recoverable: true

@@ -88,8 +88,8 @@ causal_chain:
 alternatives_ruled_out:
   - cause: string
     reason: string  # Why ruled out
-confidence: 0..1
-evidence_anchors: ["file:line", "log:entry"]
+confidence: number  # probability that the attributed cause is right (§4.1.1)
+evidence_anchors: [{ref: "file:line", kind: file}, {ref: "log:entry", kind: log}]
 assumptions: []
 ```
 
@@ -105,8 +105,8 @@ assumptions: []
 | `causal_chain` | array | Steps from cause to effect |
 | `alternatives_ruled_out` | array | Rejected alternatives with reasons |
 | `strengths` | object | Causal strength per cause, for comparison |
-| `confidence` | number | 0.0-1.0 confidence in the attribution |
-| `evidence_anchors` | array | References to logs, code, or data supporting each cause |
+| `confidence` | number | Probability, 0.0-1.0, that the attributed cause is right (§4.1.1) |
+| `evidence_anchors` | array of evidence anchors (§6.5) | References to logs, code, or data supporting each cause |
 | `assumptions` | array | Assumptions the attribution depends on |
 
 ## Examples
@@ -168,10 +168,10 @@ alternatives_ruled_out:
     reason: "No external calls in affected endpoint"
 confidence: 0.85
 evidence_anchors:
-  - "git log --since='2024-01-15 14:00'"
-  - "app/models/user.rb:45 (diff)"
-  - "monitoring:query_count"
-  - "monitoring:db_cpu"
+  - {ref: "command:git log --since='2024-01-15 14:00'", kind: tool}
+  - {ref: "file:app/models/user.rb:45 (diff)", kind: file}
+  - {ref: "monitoring:query_count", kind: log}
+  - {ref: "monitoring:db_cpu", kind: log}
 assumptions:
   - "Monitoring data is accurate"
   - "No other deployments in window"
@@ -218,9 +218,9 @@ alternatives_ruled_out:
     reason: "Test doesn't use fixtures"
 confidence: 0.90
 evidence_anchors:
-  - "spec/services/user_service_spec.rb:45"
-  - "spec/rails_helper.rb (no database_cleaner)"
-  - "command:rspec spec/services/user_service_spec.rb:45 --order defined"
+  - {ref: "file:spec/services/user_service_spec.rb:45", kind: file}
+  - {ref: "file:spec/rails_helper.rb (no database_cleaner)", kind: file}
+  - {ref: "command:rspec spec/services/user_service_spec.rb:45 --order defined", kind: tool}
 assumptions:
   - "Test failure is deterministic with this order"
   - "No parallel test execution"

@@ -125,12 +125,15 @@ def assert_blocked(
 
 
 # A refusal on a text channel opens with the Standard's code and name
-# (STANDARD 1.2.0 §5.18.8); the rollback and send hooks' do (persist's is
-# S4's to change).
+# (STANDARD 1.2.0 §5.18.8): a call a command hook cannot read is R407.
 OPENS = {
+    "audit": "R407 SAFETY_CHECK_FAILED: ",
+    "persist": "R407 SAFETY_CHECK_FAILED: ",
     "rollback": "R407 SAFETY_CHECK_FAILED: ",
     "send": "R407 SAFETY_CHECK_FAILED: ",
 }
+F504 = "F504 CONSTRAINT_VIOLATED: "
+SECRET_SCAN = ROOT / "hooks" / "secret_scan.sh"
 
 
 # ---------------------------------------------------------------------------
@@ -228,18 +231,36 @@ class TestFrontmatterHooks:
                     text = hook.get("command") or hook.get("prompt") or ""
                     assert "{{" not in text, f"{skill}: placeholder in {hook['type']}"
 
-    def test_pretooluse_command_hooks_are_the_three(self) -> None:
+    def test_pretooluse_command_hooks_are_the_four(self) -> None:
         declared = [
             skill
             for skill in SKILLS_WITH_HOOKS
             if hooks_of(skill, "PreToolUse", "command")
         ]
-        assert declared == ["persist", "rollback", "send"]
+        assert declared == ["audit", "persist", "rollback", "send"]
+
+    @pytest.mark.parametrize("skill", ["audit", "persist"])
+    def test_secret_scan_copies_are_equal(self, skill: str) -> None:
+        """The persist and audit hooks run one scan (STANDARD 1.2.0 §6.7):
+        each copies hooks/secret_scan.sh verbatim, from its BEGIN line to
+        its END line, as tools/validate_yaml_util_sync.py keeps two copies
+        of one utility equal."""
+        matcher = "Edit" if skill == "persist" else "Bash"
+        command = command_hook(skill, "PreToolUse", matcher)
+        source = SECRET_SCAN.read_text(encoding="utf-8").strip()
+        start = command.index("# BEGIN secret-scan")
+        end = command.index("# END secret-scan") + len("# END secret-scan")
+        assert command[start:end] == source
 
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
         ("skill", "matcher"),
-        [("persist", "Edit"), ("rollback", "Bash"), ("send", "Bash")],
+        [
+            ("audit", "Bash"),
+            ("persist", "Edit"),
+            ("rollback", "Bash"),
+            ("send", "Bash"),
+        ],
     )
     def test_unreadable_tool_call_is_blocked(
         self, tmp_path: Path, shell: str, skill: str, matcher: str
@@ -253,6 +274,7 @@ class TestFrontmatterHooks:
     @pytest.mark.parametrize(
         ("skill", "matcher", "tool_call"),
         [
+            ("audit", "Bash", bash_call("wc -l .claude/audit/records.jsonl")),
             ("persist", "Edit", edit_call("/work/app/CLAUDE.md")),
             ("rollback", "Bash", bash_call("git status")),
             ("send", "Bash", bash_call("ls -la")),
@@ -366,7 +388,9 @@ class TestPersistCommandHook:
             shell,
             {"HOME": str(home)},
         )
-        assert_blocked(result, "Cannot persist to system or credential directories")
+        assert_blocked(
+            result, "Cannot persist to system or credential directories", F504
+        )
 
     @pytest.mark.parametrize(
         "file_path",
@@ -395,7 +419,7 @@ class TestPersistCommandHook:
             shell,
             {"HOME": str(home)},
         )
-        assert_blocked(result, "Cannot persist to a path with")
+        assert_blocked(result, "Cannot persist to a path with", F504)
 
     @pytest.mark.parametrize(
         "file_path",
@@ -406,7 +430,7 @@ class TestPersistCommandHook:
     ) -> None:
         hook = command_hook("persist", "PreToolUse", "Edit")
         result = run_command(hook, edit_call(file_path), tmp_path, shell)
-        assert_blocked(result, "Cannot persist to credential files")
+        assert_blocked(result, "Cannot persist to credential files", F504)
 
     @pytest.mark.parametrize(
         "file_path",
@@ -423,6 +447,103 @@ class TestPersistCommandHook:
     ) -> None:
         hook = command_hook("persist", "PreToolUse", "Edit")
         result = run_command(hook, edit_call(file_path), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "the deploy key is AKIAABCDEFGHIJKLMNOP",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA==\n",
+            'password = "hunter22x"',
+            "api_key=abc123def456ghi",
+            "use ghp_" + "a" * 36 + " for the bot",
+        ],
+    )
+    def test_blocks_content_that_holds_a_credential(
+        self, tmp_path: Path, shell: str, content: str
+    ) -> None:
+        """Memory is read back as fact, so a credential is refused, not
+        redacted (STANDARD 1.2.0 §6.7). The target is an allowed path, so
+        only the content scan can block the call: stdin was read once, and
+        the content scanned."""
+        hook = command_hook("persist", "PreToolUse", "Edit")
+        call = edit_call("/work/app/CLAUDE.md")
+        call["tool_input"]["new_string"] = content
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    def test_blocks_a_credential_in_a_whole_files_content(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", "Edit")
+        call = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "/work/app/CLAUDE.md",
+                "content": "token: AKIAABCDEFGHIJKLMNOP",
+            },
+        }
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "token: rotate monthly",
+            "secret: never commit it",
+            "Bearer tokens are short-lived",
+            "password: see the vault",
+            "the tokenizer lives in src/tokens.py",
+        ],
+    )
+    def test_allows_prose_about_credentials(
+        self, tmp_path: Path, shell: str, content: str
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", "Edit")
+        call = edit_call("/work/app/CLAUDE.md")
+        call["tool_input"]["new_string"] = content
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+
+# ---------------------------------------------------------------------------
+# audit: a record appended to .claude/audit/records.jsonl holds no credential
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestAuditCommandHook:
+    def test_blocks_a_record_that_holds_a_credential(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = (
+            'printf \'%s\\n\' \'{"event":"x","token":"ghp_'
+            + "b" * 36
+            + "\"}' >> .claude/audit/records.jsonl"
+        )
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "cite it by reference or digest", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'printf \'%s\\n\' \'{"event":"deploy","output_sha256":"ab12"}\' '
+            ">> .claude/audit/records.jsonl",
+            "wc -l .claude/audit/records.jsonl",
+            # A secret in a command that does not touch the records file is
+            # other hooks' business.
+            "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz' https://x",
+        ],
+    )
+    def test_allows_other_commands(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
         assert result.returncode == 0, result.stderr
         assert result.stderr == ""
 
