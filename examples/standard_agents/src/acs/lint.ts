@@ -27,15 +27,17 @@ export interface LintDiagnostic {
    * not the name the prompt offers it under. V102 (MISSING_PREREQUISITE): a
    * tool that requires a capability no offered tool performs. F506
    * (GATED_CONTROL_ACTION): a stop or session action tied to a tool that can
-   * be refused.
+   * be refused. V107 (UNRESOLVED_TARGET): an agent a workflow's `agents`
+   * lists that the parent agent has no relationship to (§5.15.2).
    */
-  code: 'V102' | 'W617' | 'V111' | 'F506';
+  code: 'V102' | 'W617' | 'V111' | 'F506' | 'V107';
   name: string;
   severity: 'error' | 'warning';
   message: string;
   location:
     | { prompt: string; tool: string; capability?: CapabilityId; prerequisite?: CapabilityId }
-    | { agent: string; side: 'sideA' | 'sideB'; binding: ToolBinding; tool: string; capability?: CapabilityId };
+    | { agent: string; side: 'sideA' | 'sideB'; binding: ToolBinding; tool: string; capability?: CapabilityId }
+    | { workflow: string; field: string; path: string; tool?: undefined };
 }
 
 type Tools = Record<string, { annotations?: Record<string, unknown> }>;
@@ -174,5 +176,39 @@ export function lintAgentBindings(
       });
     }
   }
+  return out;
+}
+
+/** One RFC 6901 reference token. */
+function pointerToken(token: string): string {
+  return token.replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+/**
+ * Check a workflow's declared agents against the relationships of the
+ * agent that runs it (STANDARD 1.2.0 §5.15.2): Standard Agents composes
+ * agents statically, so each agent the workflow's `agents` lists must be a
+ * subagent the parent has a relationship to. A listed agent with none is
+ * V107 at `agents[i]`, with its `path` (§9.8).
+ */
+export function lintDelegationTargets(
+  workflowName: string,
+  workflow: Record<string, unknown>,
+  relationships: Iterable<string>,
+): LintDiagnostic[] {
+  const listed = workflow['agents'];
+  if (!Array.isArray(listed)) return [];
+  const known = new Set(relationships);
+  const out: LintDiagnostic[] = [];
+  listed.forEach((agent, i) => {
+    if (typeof agent !== 'string' || known.has(agent)) return;
+    out.push({
+      code: 'V107',
+      name: 'UNRESOLVED_TARGET',
+      severity: 'error',
+      message: `the workflow lists agent '${agent}', but the agent that runs it has no relationship to it`,
+      location: { workflow: workflowName, field: `agents[${i}]`, path: `/${pointerToken(workflowName)}/agents/${i}` },
+    });
+  });
   return out;
 }
