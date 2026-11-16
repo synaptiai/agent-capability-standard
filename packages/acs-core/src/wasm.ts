@@ -17,6 +17,7 @@ import type {
   Action,
   CoreResponse,
   CoreVersion,
+  Diagnostic,
   ProfileFlags,
   ProfilePolicy,
   Report,
@@ -198,8 +199,17 @@ export interface StartArgs {
   records?: 'approvals' | 'actions';
   /** Domain profiles the host applies (section 5.21). */
   profiles?: Json[];
+  /** Where each of their loading warnings goes (a misspelled top-level
+   * member is W604, and ignored; section 5.21.4): `console.warn` by
+   * default, one line with the code, the message and the suggestion. */
+  onWarning?: (warning: Diagnostic) => void;
   grounding?: Json[];
   destinations?: string[][];
+}
+
+/** One line for a profile's loading warning. */
+function warningText(d: Diagnostic): string {
+  return `acs-core start: ${d.code} ${d.severity}: ${d.message}${d.suggestion !== undefined ? ` (${d.suggestion})` : ''}`;
 }
 
 /** How a saved run continues (section 5.19.4). */
@@ -276,7 +286,8 @@ export class CoreContext {
     return this.core.call<Json>('context.contracts', { context: this.handle });
   }
 
-  /** Start a run (section 5.19.2). */
+  /** Start a run (section 5.19.2). Each warning of loading its profiles
+   * goes to `o.onWarning` (section 5.21.4). */
   start(o: StartArgs): CoreRun {
     if (!('header' in o) || (o.header !== null && typeof o.header !== 'string')) {
       throw new CoreError(
@@ -295,14 +306,17 @@ export class CoreContext {
     if (o.profiles !== undefined) options.profiles = o.profiles;
     if (o.grounding !== undefined) options.grounding = o.grounding;
     if (o.destinations !== undefined) options.destinations = o.destinations;
-    const { run } = this.core.call<{ run: number }>('run.start', {
+    const { run, warnings } = this.core.call<{ run: number; warnings: Diagnostic[] }>('run.start', {
       context: this.handle,
       catalog: o.catalog,
       workflow: o.workflow,
       inputs: o.inputs ?? {},
       options,
     });
-    return new CoreRun(this.core, run);
+    const started = new CoreRun(this.core, run);
+    const report = o.onWarning ?? ((d: Diagnostic) => console.warn(warningText(d)));
+    for (const w of warnings) report(w);
+    return started;
   }
 
   /** Continue a saved run against the same catalog (section 5.19.4). */

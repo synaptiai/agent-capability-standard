@@ -400,9 +400,10 @@ def _approval_request(mapping: ToolMapping, tool_name: str, person: bool) -> str
             _error(
                 ErrorCode.APPROVAL_REQUIRED,
                 f"{_subject(mapping, tool_name)} requires approval by a person: "
-                f"an applied domain profile requires one (require_human or "
-                f"block_autonomous, STANDARD 1.2.0 §5.21.3), so no automatic "
-                f"decision counts. It runs only if a person approves this call.",
+                f"an applied domain profile requires one for it or for a "
+                f"binding it invokes (require_human or block_autonomous, "
+                f"STANDARD 1.2.0 §5.21.3), so no automatic decision counts. "
+                f"It runs only if a person approves this call.",
                 {},
             )
         )
@@ -600,7 +601,10 @@ class GroundedAgentAdapter:
         # adapter's ontology; an error refuses the configuration, and so
         # does a rule on sends, which this adapter does not check, and
         # (strict_mode=False only logs a missing checkpoint) a raised
-        # checkpoint requirement (section 5.21.4).
+        # checkpoint requirement (section 5.21.4). A grounding policy and a
+        # minimum confidence are in force on the outputs the layer receives
+        # (the served tools'), and reported for each other tool whose calls
+        # they would check (_warn_unchecked_output, section 5.21.4).
         self.profiles = AppliedProfiles(self.config.profiles, validator=core)
         self.profiles.refuse_unapplied(("destinations",), "this adapter")
         if not self.config.strict_mode:
@@ -1821,10 +1825,21 @@ class GroundedAgentAdapter:
                         checkpoint_id,
                     )
                 if not self._take_outcome_recorded(holder):
+                    # Mapped as the PostToolUse recorder maps it: the record
+                    # names the capability and keeps the call's
+                    # person_required (section 5.21.3). A mapping that fails
+                    # loses neither the record nor the failure.
+                    try:
+                        mapping: ToolMapping | None = self.mapper.map_tool(
+                            tool_name, input_data.get("tool_input", {})
+                        )
+                    except Exception as e:
+                        logger.warning("Failure recorder cannot map: %s", e)
+                        mapping = None
                     self._record(
                         "failed",
                         tool_name,
-                        None,
+                        mapping,
                         holder,
                         checkpoint_id=checkpoint_id,
                     )

@@ -866,3 +866,20 @@ Workstreams should run `npm run check:axe` (or at least
   a minimum confidence), used by `mcp.py`'s served tools;
   `call_action_record` exports `person_required` as the top-level
   `ActionRecord` member.
+
+## 2026-11-16 — S6 integration review round 2 (for S3 and S5)
+
+- **Composites under profiles.** The Python adapter's
+  `ToolCapabilityMapper._apply_profiles` ORs in the raised flags and person
+  requirement of each binding a composite `invokes`, transitively (its cache
+  clears when `records_revision` moves). The binding keeps `PERFORMS`
+  (capability, effective risk) pairs beside `EFFECTIVE` and `PERSON`, and a
+  composite's profiles raise its flags for what its nested calls perform at
+  their own R. **S5**: if `configureLayer` takes the profiles for the layer,
+  keep both.
+- **§5.21.4** says how a safety layer puts output rules in force (§5.20's
+  hosts outside a workflow, on the capability outputs it receives; the rest
+  named in its statement and reported per tool).
+- **WebAssembly `run.start`** answers `{run, warnings}`; `CoreContext.start`
+  reports them to `StartArgs.onWarning`. **S3**: keep `warnings` when
+  `start_options` gains `catalogs` and `agents`.

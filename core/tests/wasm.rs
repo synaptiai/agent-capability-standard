@@ -323,6 +323,34 @@ fn profiles_through_the_interface() {
 }
 
 #[test]
+fn a_run_reports_its_profiles_warnings() {
+    // STANDARD v1.2 §5.21.4: a host that applies profiles only through
+    // `run.start` sees their warnings (a misspelled member is W604, and
+    // ignored); a run without profiles reports none.
+    let ctx = context();
+    let catalog = json!({"w": {"goal": "g", "risk": "low", "steps": [
+        {"capability": "retrieve", "purpose": "p", "store_as": "r",
+         "input_bindings": {"target": "x"}}]}});
+    let start = |profiles: Value| {
+        ok(
+            json!({"op": "run.start", "context": ctx, "catalog": catalog,
+            "workflow": "w", "options": {"run_id": "r", "now_ms": 0,
+            "header": "1.2.0", "profiles": profiles}}),
+        )
+    };
+    let started = start(json!([{"domain": "d", "version": "1.0.0",
+        "risk_threshold": {"require_human": "low"}}]));
+    assert!(started["run"].is_u64());
+    let warnings = started["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(
+        (&warnings[0]["code"], &warnings[0]["severity"]),
+        (&json!("W604"), &json!("warning"))
+    );
+    assert_eq!(start(json!([]))["warnings"], json!([]));
+}
+
+#[test]
 fn unknown_handles_and_dropped_contexts() {
     assert_eq!(
         kind(&call(json!({"op": "run.next", "run": 999_999}))),

@@ -1,11 +1,11 @@
 // The domain profile vectors (Standard 1.2.0 section 5.21, section 10.3)
 // through the core, run from TypeScript: one implementation of the loader.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import load from '../../../tests/conformance/profiles/load.json' with { type: 'json' };
 import effective from '../../../tests/conformance/profiles/effective.json' with { type: 'json' };
 import type { Json } from '../src/canonical.js';
 import type { CapabilityId, DeclaredFlags } from '../src/ontology.js';
-import { CoreError } from '../src/wasm.js';
+import { CoreError, type Diagnostic } from '../src/wasm.js';
 import { repositoryContext } from './core.js';
 
 type Found = string[];
@@ -84,6 +84,27 @@ describe('a run under a profile rule no executor check reads yet', () => {
     expect(caught).toBeInstanceOf(CoreError);
     expect((caught as CoreError).kind).toBe('start');
     expect((caught as CoreError).message).toContain('allowed_destinations');
+  });
+  it("reports each of the profiles' loading warnings at start (section 5.21.4)", async () => {
+    const ctx = await repositoryContext();
+    // A misspelled member is W604, and ignored: the person it meant to
+    // require is absent, which the host must be told.
+    const profiles = [{ domain: 'd', version: '1.0.0', risk_threshold: { require_human: 'low' } }] as Json[];
+    const seen: Diagnostic[] = [];
+    const run = ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles, onWarning: (d) => seen.push(d) });
+    expect(seen.map((d) => [d.code, d.severity])).toEqual([['W604', 'warning']]);
+    run.dispose();
+    // By default each goes to console.warn, one line; none without profiles.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0, profiles }).dispose();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toMatch(/^acs-core start: W604 warning: /);
+      ctx.start({ catalog, workflow: 'w', header: null, runId: 'r', nowMs: 0 }).dispose();
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
   it('starts under the rules it applies', async () => {
     const ctx = await repositoryContext();

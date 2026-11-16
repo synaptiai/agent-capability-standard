@@ -364,7 +364,8 @@ class ToolMapping:
             argument that holds the destination (section 4.4.2)
         person_required: An applied domain profile requires a person's
             approval for the call (``require_human`` or
-            ``block_autonomous``, section 5.21.3)
+            ``block_autonomous``, section 5.21.3), or for a binding it
+            invokes, transitively
     """
 
     capability_id: str
@@ -564,6 +565,7 @@ class ToolCapabilityMapper:
             self._raw_version = str(meta.get("version", "unknown"))
         self._profiles = profiles if profiles else None
         self._profiled: dict[ToolMapping, ToolMapping] = {}
+        self._profiled_revision = 0
         self._dynamic_mappings: dict[str, ToolMapping] = {}
         # Effective mappings of the static and Bash classifications, built
         # on first use (ToolMapping is immutable, so they can be shared).
@@ -960,9 +962,21 @@ class ToolCapabilityMapper:
         :data:`UNCLASSIFIED_TOOL` already needs a checkpoint and approval,
         so both stay as they are and keep their identity; whether a profile
         requires a person for an unbound tool is :meth:`person_required`'s
-        answer."""
+        answer.
+
+        A composite also takes the raised flags and the person requirement
+        of each binding it ``invokes``, transitively: those are effective
+        flags (section 5.21.3), a composite's effective flags include those
+        of every binding it lists (section 5.18.4), and its checkpoint and
+        approval are the only gate on its nested calls, which this layer
+        does not see. ``invokes`` has no cycle (V105 at load)."""
         if self._profiles is None or mapping.control or mapping is UNCLASSIFIED_TOOL:
             return mapping
+        if self._profiled_revision != self.records_revision:
+            # A binding registered again changes what the composites that
+            # invoke it take from it: no cached mapping is current.
+            self._profiled.clear()
+            self._profiled_revision = self.records_revision
         hit = self._profiled.get(mapping)
         if hit is not None:
             return hit
@@ -974,6 +988,13 @@ class ToolCapabilityMapper:
             checkpoint |= flags.requires_checkpoint
             approval |= flags.requires_approval
             person |= flags.person
+        for name in mapping.invokes:
+            invoked = self._apply_profiles(
+                self._dynamic_mappings.get(name, UNCLASSIFIED_TOOL)
+            )
+            checkpoint |= invoked.requires_checkpoint
+            approval |= invoked.requires_approval
+            person |= self.person_required(invoked)
         raised = mapping
         if (checkpoint, approval, person) != (
             mapping.requires_checkpoint,

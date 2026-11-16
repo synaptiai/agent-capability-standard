@@ -203,8 +203,9 @@ describe('a composite under domain profiles (§5.18.4, §5.21.3)', () => {
    * `write` (mutate) and `batch` (invoke, `invokes: {write}`) under
    * `documents`, registered in a thread. `composite-only`: the profiles are
    * given to `batch` alone. `unprofiled-listed`: `batch` lists a definition
-   * of `write` the profiles were not given to, while the thread runs the
-   * one they were.
+   * of `write` the profiles were not given to, and is not given them itself
+   * (they would reach the `write` it lists), while the thread runs the
+   * `write` they were given to.
    */
   function setup(documents: Json[], mode?: 'composite-only' | 'unprofiled-listed') {
     const profiles = bindingProfiles(THRESHOLDS, documents);
@@ -225,7 +226,7 @@ describe('a composite under domain profiles (§5.18.4, §5.21.3)', () => {
       invokes: { write: mode === 'unprofiled-listed' ? writeTool() : write } as never,
       description: 'batch',
       args,
-      profiles,
+      ...(mode === 'unprofiled-listed' ? {} : { profiles }),
       execute: async (state) => {
         nested.push(await state.invokeTool('write', {}));
         return { result: true, evidence_anchors: [] } as never;
@@ -291,6 +292,28 @@ describe('a composite under domain profiles (§5.18.4, §5.21.3)', () => {
     const trace = await readTrace(t2.state);
     expect(trace.find((e) => e.action === 'batch' && e.status === 'executed')).toMatchObject({ person_required: true });
     expect(trace.find((e) => e.action === 'write')).toMatchObject({ status: 'executed', person_required: true });
+  });
+
+  it('applies profiles given to the composite alone to the capabilities of the tools it invokes (block_autonomous)', async () => {
+    // Only `batch` (invoke) is given `block_autonomous: [mutate]`; the
+    // `write` it lists is not. Its approval would cover the nested mutate,
+    // so the composite's profiles reach it: an agent's approval is not
+    // enough, and nothing nested runs.
+    const documents = [{ domain: 'd', version: '1.0.0', risk_thresholds: { block_autonomous: ['mutate'] } }];
+    const { t, nested } = setup(documents, 'composite-only');
+    const refused = await batchApprovedBy(t, 'agent');
+    expect(refused.error_code).toBe('F502');
+    expect(refused.error).toMatch(/person's approval/);
+    expect(nested).toEqual([]);
+    expect((await readTrace(t.state)).filter((e) => e.action === 'write')).toEqual([]);
+
+    const { t: t2, nested: nested2 } = setup(documents, 'composite-only');
+    expect((await batchApprovedBy(t2, 'person')).status).toBe('success');
+    expect(nested2.map((r) => r.status)).toEqual(['success']);
+    const trace = await readTrace(t2.state);
+    const composite = trace.find((e) => e.action === 'batch' && e.status === 'executed')!;
+    expect(composite).toMatchObject({ person_required: true });
+    expect(trace.find((e) => e.action === 'write')).toMatchObject({ status: 'executed', covered_by: composite.seq });
   });
 
   it('passes the requirement on through a composite of composites', async () => {

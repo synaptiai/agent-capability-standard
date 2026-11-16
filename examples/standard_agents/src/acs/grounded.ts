@@ -216,7 +216,9 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
    * Domain profiles (STANDARD 1.2.0 §5.21) this layer applies to the tool's
    * calls, as the core computed them (`bindingProfiles`): they raise the
    * flags of each of the tool's capabilities at the call's effective risk
-   * (with `invokes`); a call they require a person for counts only
+   * (with `invokes`), and of each capability the tools it invokes perform,
+   * transitively, at theirs (its approval covers their nested calls); a
+   * call they require a person for counts only
    * approvals the deployment attests as a person's
    * (`approver_identity.kind: human`), and its trace entries carry
    * `person_required`. A composite that invokes such a tool needs a
@@ -296,6 +298,21 @@ const EFFECTIVE = new WeakMap<object, SafetyFlags>();
  */
 const PERSON = new WeakSet<object>();
 
+/** A capability a call performs, at the call's effective risk R (§5.21.3). */
+interface Performed {
+  capability: CapabilityId;
+  risk: SafetyFlags['risk'];
+}
+
+/**
+ * What each tool defined here performs: its capabilities at its effective
+ * risk, and what the tools it invokes perform, transitively. Profiles given
+ * to a composite govern the nested calls its approval covers (§5.21.3,
+ * §5.18.4), so they raise its flags for each of these as they would raise
+ * the nested call's own.
+ */
+const PERFORMS = new WeakMap<object, readonly Performed[]>();
+
 /**
  * What each name a tool defined here states for itself is bound to: its
  * capability, or `control`; `null` once two definitions of the name
@@ -340,6 +357,25 @@ function invokedFlags(name: string, tool: object & { annotations?: Record<string
         requires_approval: loaded.requires_approval,
       }
     : STRICTEST;
+}
+
+/**
+ * What a tool another tool invokes performs (§5.18.4): what a grounded or
+ * control tool noted for itself, else the capabilities of its `acs`
+ * annotation read as a binding record, at its effective risk, else, for a
+ * tool with no annotation or one that does not load, `mutate` at high risk,
+ * as which an unbound tool is treated (§5.18.2).
+ */
+function invokedPerforms(
+  name: string,
+  tool: object & { annotations?: Record<string, unknown> },
+): readonly Performed[] {
+  const computed = PERFORMS.get(tool);
+  if (computed) return computed;
+  const record = annotationRecord(name, tool.annotations?.[ANNOTATION_KEY]);
+  const loaded = record ? checkBindings([record]).effective[name] : undefined;
+  if (!loaded) return [{ capability: 'mutate', risk: 'high' }];
+  return (loaded.capabilities as CapabilityId[]).map((capability) => ({ capability, risk: loaded.risk }));
 }
 
 /**
@@ -479,19 +515,25 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   // A composite needs one when a tool it invokes does: its approval covers
   // that tool's nested calls (§5.18.4).
   let person = false;
+  // What the nested calls the composite's approval covers perform.
+  const nested: Performed[] = [];
   for (const [invoked, tool] of Object.entries(invokes)) {
     flags = joinFlags(flags, invokedFlags(invoked, tool));
     person ||= PERSON.has(tool);
+    nested.push(...invokedPerforms(invoked, tool));
   }
-  // Domain profiles (§5.21.3): each capability's flags as they raise them
-  // at the call's effective risk R before profiles, which includes its
-  // other capabilities and the tools it invokes (§5.18.3, §5.18.4).
+  const risk = flags.risk;
+  // Domain profiles (§5.21.3): the flags they raise for each capability at
+  // the call's effective risk R before profiles, which includes its other
+  // capabilities and the tools it invokes (§5.18.3, §5.18.4); and, since a
+  // composite's effective flags include those of each tool it lists, those
+  // they raise for what its nested calls perform, at their own R (so
+  // `block_autonomous` given to a composite alone reaches them).
   const profiles = options.profiles;
   if (profiles !== undefined) {
     const problem = unappliedRule(profiles.policy);
     if (problem !== null) throw new Error(`groundedTool '${name}': ${problem}`);
-    const declared: DeclaredFlags = { ...options.flags, risk: flags.risk };
-    for (const c of capabilities) {
+    const raise = (c: CapabilityId, declared: DeclaredFlags): void => {
       const raised = profiles.flags(c, declared);
       flags = joinFlags(flags, {
         risk: raised.risk,
@@ -500,7 +542,9 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         requires_approval: raised.requires_approval,
       });
       person ||= raised.person;
-    }
+    };
+    for (const c of capabilities) raise(c, { ...options.flags, risk });
+    for (const performed of nested) raise(performed.capability, { risk: performed.risk });
   }
   const minimumConfidence = profiles?.policy.minimum_confidence ?? null;
   const policy = options.approval ?? {};
@@ -1038,6 +1082,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
   });
   STATED_NAMES.set(definition, name);
   EFFECTIVE.set(definition, flags);
+  PERFORMS.set(definition, [...capabilities.map((capability) => ({ capability, risk })), ...nested]);
   if (person) PERSON.add(definition);
   noteBound(name, capability);
   return definition;
@@ -1113,6 +1158,7 @@ export function controlTool<Args extends ToolArgs>(options: ControlToolOptions<A
   });
   STATED_NAMES.set(definition, name);
   EFFECTIVE.set(definition, { risk: 'low', mutation: false, requires_checkpoint: false, requires_approval: false });
+  PERFORMS.set(definition, []);
   noteBound(name, 'control');
   return definition;
 }

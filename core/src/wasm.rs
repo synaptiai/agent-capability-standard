@@ -478,6 +478,13 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
                 _ => return Err(Fail::new("bad_request", "'options' must be an object")),
             };
             let options = start_options(ctx, options)?;
+            // A run reports its profiles' warnings (W602-W604), as the
+            // validator and `profile.check` do (§5.21.4): a host applying
+            // profiles only through `run.start` sees them here.
+            let mut loaded = Report::default();
+            if !options.profiles.is_empty() {
+                Policy::load(&options.profiles, &ctx.ontology, &mut loaded);
+            }
             let inputs = match req.get("inputs") {
                 None | Some(Value::Null) => Map::new(),
                 Some(Value::Object(m)) => m.clone(),
@@ -494,7 +501,7 @@ fn answer(op: &str, req: &Req, h: &mut Handles) -> Result<Value, Fail> {
             })?;
             let id = h.issue();
             h.runs.insert(id, started);
-            Ok(json!({ "run": id }))
+            Ok(json!({ "run": id, "warnings": loaded.diagnostics }))
         }
         "run.restore" => {
             let ctx = context(h, req)?;

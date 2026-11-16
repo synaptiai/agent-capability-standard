@@ -269,6 +269,160 @@ async def test_an_unbound_tool_records_person_required_under_a_mutate_rule(
     assert plain.mapper.person_required(UNCLASSIFIED_TOOL) is False
 
 
+def _profiled_adapter(
+    ontology_path: str, tmp_path: Path, profile: dict[str, Any]
+) -> GroundedAgentAdapter:
+    return GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[{"domain": "d", "version": "1.0.0", **profile}],
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_composite_is_asked_of_a_person_for_a_binding_it_invokes(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """A composite's approval covers its nested calls (§5.18.4), which this
+    layer does not see: a composite that lists a binding a profile requires
+    a person for, directly or through another composite, is itself asked of
+    a person (§5.21.3), its ask reason says so and its records carry
+    person_required, whatever its own capability."""
+    adapter = _profiled_adapter(
+        ontology_path, tmp_path, {"risk_thresholds": {"block_autonomous": ["mutate"]}}
+    )
+    mapper = adapter.mapper
+    mapper.register_mcp_tool("mcp__srv__write", "mutate")
+    mapper.register_mcp_tool("mcp__srv__batch", "plan", invokes=["mcp__srv__write"])
+    mapper.register_mcp_tool("mcp__srv__outer", "plan", invokes=["mcp__srv__batch"])
+    mapper.register_mcp_tool("mcp__srv__alone", "plan")
+    person = {
+        name: mapper.person_required(mapper.map_tool(f"mcp__srv__{name}", {}))
+        for name in ("write", "batch", "outer", "alone")
+    }
+    assert person == {"write": True, "batch": True, "outer": True, "alone": False}
+
+    pre = adapter._make_pretooluse_safety_hook()
+    for name in ("batch", "outer"):
+        adapter.create_checkpoint(["a"], "before")
+        result = await pre(
+            {
+                "tool_name": f"mcp__srv__{name}",
+                "tool_input": {},
+                "permission_mode": "default",
+            },
+            f"c-{name}",
+            None,
+        )
+        output = result["hookSpecificOutput"]
+        assert output["permissionDecision"] == "ask"
+        assert "requires approval by a person" in output["permissionDecisionReason"]
+        assert "a binding it invokes" in output["permissionDecisionReason"]
+        record = adapter.call_records[-1]
+        assert (
+            record["decision"],
+            record["capability"],
+            record["person_required"],
+        ) == (
+            "asked",
+            "plan",
+            True,
+        )
+
+
+def test_a_composite_takes_the_raised_flags_of_the_bindings_it_invokes(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """The flags a profile raises for an invoked binding are effective flags
+    (§5.21.3), and a composite's effective flags include those of each
+    binding it lists, transitively (§5.18.4): a composite of a low-risk
+    read needs the checkpoint and the approval the profile raised for it."""
+    adapter = _profiled_adapter(
+        ontology_path,
+        tmp_path,
+        {
+            "checkpoint_policy": {"retrieve": "always"},
+            "risk_thresholds": {"block_autonomous": ["retrieve"]},
+        },
+    )
+    mapper = adapter.mapper
+    mapper.register_mcp_tool("mcp__srv__fetch", "retrieve")
+    mapper.register_mcp_tool(
+        "mcp__srv__summarize", "explain", invokes=["mcp__srv__fetch"]
+    )
+    mapper.register_mcp_tool(
+        "mcp__srv__report", "explain", invokes=["mcp__srv__summarize"]
+    )
+    mapper.register_mcp_tool("mcp__srv__alone", "explain")
+    for name in ("fetch", "summarize", "report"):
+        mapping = mapper.map_tool(f"mcp__srv__{name}", {})
+        assert (
+            mapping.risk,
+            mapping.requires_checkpoint,
+            mapping.requires_approval,
+            mapper.person_required(mapping),
+        ) == ("low", True, True, True), name
+    alone = mapper.map_tool("mcp__srv__alone", {})
+    assert (alone.requires_checkpoint, alone.requires_approval) == (False, False)
+
+
+def test_a_composite_reads_the_bindings_it_invokes_as_registered_now(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """A binding registered again changes what a composite that invokes it
+    takes from it: the composite mapped before is not served from a cache."""
+    adapter = _profiled_adapter(
+        ontology_path, tmp_path, {"risk_thresholds": {"block_autonomous": ["mutate"]}}
+    )
+    mapper = adapter.mapper
+    mapper.register_mcp_tool("mcp__srv__write", "retrieve")
+    mapper.register_mcp_tool("mcp__srv__batch", "plan", invokes=["mcp__srv__write"])
+    assert mapper.person_required(mapper.map_tool("mcp__srv__batch", {})) is False
+    mapper.register_mcp_tool("mcp__srv__write", "mutate")
+    assert mapper.person_required(mapper.map_tool("mcp__srv__batch", {})) is True
+
+
+@pytest.mark.asyncio
+async def test_a_failed_call_keeps_its_person_required(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """Every record of a call a profile requires a person for carries
+    person_required (§5.21.3), the failed one written by PostToolUseFailure
+    included, and its exported ActionRecord too."""
+    adapter = _profiled_adapter(
+        ontology_path, tmp_path, {"risk_thresholds": {"block_autonomous": ["mutate"]}}
+    )
+    adapter.create_checkpoint(["a"], "before")
+    call = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "a", "content": "x"},
+        "permission_mode": "default",
+    }
+    await adapter._make_pretooluse_safety_hook()(call, "c1", None)
+    await adapter._make_failure_recorder()(
+        {**call, "tool_use_id": "c1", "error": "the tool failed"}, "c1", None
+    )
+    asked, failed = list(adapter.call_records)[-2:]
+    assert (asked["decision"], asked["person_required"]) == ("asked", True)
+    assert (failed["decision"], failed["capability"], failed["person_required"]) == (
+        "failed",
+        "mutate",
+        True,
+    )
+    exported = adapter.export_action_records("scope")[-1]
+    assert (
+        exported["status"],
+        exported["capability"],
+        exported["person_required"],
+    ) == (
+        "failed",
+        "mutate",
+        True,
+    )
+
+
 @pytest.mark.parametrize(
     ("policy", "refused"),
     [
@@ -428,6 +582,50 @@ def test_anchor_kinds_alone_are_applied_by_the_adapter(
         )
     )
     assert adapter.profiles.grounding == []
+
+
+@pytest.mark.asyncio
+async def test_an_output_rule_reports_each_tool_whose_results_it_cannot_check(
+    ontology_path: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Claude Code's own tools return results in their own forms, which are
+    not capability outputs (§5.18.9): the adapter puts a profile's grounding
+    policy and minimum confidence in force on the outputs it receives, and
+    reports, once for each tool whose calls they would check, that they
+    check nothing for its calls (§5.21.4); the conformance statement names
+    those calls."""
+    import logging
+
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[ROOT / "schemas" / "profiles" / "personal_assistant.yaml"],
+        )
+    )
+    pre = adapter._make_pretooluse_safety_hook()
+    task = {
+        "tool_name": "Task",
+        "tool_input": {"description": "d", "prompt": "p"},
+        "permission_mode": "default",
+    }
+    with caplog.at_level(logging.WARNING, logger="grounded_agency.adapter"):
+        for i in range(2):
+            await pre(task, f"t{i}", None)
+    reports = [r.getMessage() for r in caplog.records if "5.21.3" in r.getMessage()]
+    assert len(reports) == 1, reports
+    assert "Task" in reports[0]
+    assert "a grounding policy requires delegate" in reports[0]
+    assert "minimum confidence" in reports[0]
+    statement = json.loads(
+        (
+            ROOT / "tests/conformance/calls/statements/grounded_agency_adapter.json"
+        ).read_text("utf-8")
+    )
+    assert any(
+        "applied profiles' grounding policies" in gap and "minimum confidence" in gap
+        for gap in statement["host_gaps"]
+    )
 
 
 def test_the_profiles_are_in_every_record_digest(

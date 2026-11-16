@@ -640,11 +640,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   profiles' minimum confidence (`_core.check_confidence`) to the outputs of
   the tools `create_grounded_mcp_server` serves, with or without
   `config.grounding`; an exported call record carries `reason_code` and
-  `person_required`. The Standard Agents binding applies profiles through
-  `groundedTool({profiles})` and `bindingProfiles` (raised flags at the
-  call's effective risk with its `invokes`, a person's approval, also for a
-  composite whose approval covers a call needing one, grounding, minimum
-  confidence; loading warnings such as W604 reported to `onWarning`).
+  `person_required` (a failed call's record too). A composite tool takes
+  the flags a profile raises for each binding it `invokes`, and its person
+  requirement, transitively (§5.18.4), in the adapter
+  (`ToolCapabilityMapper.map_tool`) as in the binding, so no profile rule
+  is bypassed through a composite. The Standard Agents binding applies
+  profiles through `groundedTool({profiles})` and `bindingProfiles` (raised
+  flags at the call's effective risk with its `invokes`, and for what the
+  tools it invokes perform; a person's approval, also for a composite whose
+  approval covers a call needing one; grounding; minimum confidence;
+  loading warnings such as W604 reported to `onWarning`), and a TypeScript
+  host's `CoreContext.start` reports those warnings likewise (the
+  WebAssembly interface's `run.start` answers them as `warnings`).
   Runtime fixtures `profile_grounding_*` and the header fixtures
   `header_1_2_sender_check_needs_identities` and
   `header_null_sender_check_not_read`; validator fixture

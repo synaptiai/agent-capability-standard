@@ -2664,10 +2664,17 @@ calls it covers, as §5.20 says for hosts outside a workflow.
 An implementation that applies profiles (an executor, a safety layer, or a
 validator given them) MUST report each profile vector's diagnostics and
 compute each one's effective flags and rules (§10.3). An executor or a
-safety layer that does not put a rule of §5.21.3 in force (a safety layer
-that checks no output, say) refuses a profile that sets it, as it refuses a
-profile with an error, rather than apply the profile without it. A validator
-applies only the flags (§5.21.1) and refuses no profile for the other rules.
+safety layer that does not put a rule of §5.21.3 in force refuses a profile
+that sets it, as it refuses a profile with an error, rather than apply the
+profile without it. A safety layer puts a grounding policy and a minimum
+confidence in force as §5.20 says for hosts outside a workflow, on each
+covered call's output that it receives as a capability output (§5.18.9).
+Where its host returns some covered calls' results in other forms, its
+conformance statement names those calls (§10.4), and it reports, for each
+tool whose calls such a rule would check, that the rule checks nothing for
+them; a safety layer that receives no capability output refuses a profile
+that sets either rule. A validator applies only the flags (§5.21.1) and
+refuses no profile for the other rules.
 
 ---
 

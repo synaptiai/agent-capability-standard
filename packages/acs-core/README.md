@@ -79,11 +79,14 @@ const saved = run.snapshot(); // restore with ctx.restore({ catalog, snapshot: s
 `header` is required on `validate` and `start`: the version the catalog's
 `# Standard version:` header declares, or `null` for a catalog without one
 (section 11.5). `ctx.checkProfiles`, `profileFlags` and `profilePolicy`
-answer what domain profiles change (section 5.21.3). The executor does not
-check a profile's grounding policy (`require_grounding`) or destination
-policy (`allowed_destinations`) yet, so `start` refuses a profile that sets
-one (`CoreError` kind `start`), every shipped profile included, rather than
-run without the rule (section 5.21.4). A refused request
+answer what domain profiles change (section 5.21.3). `start` reports each
+warning of loading its profiles (a misspelled member is W604, and ignored)
+to `onWarning`, `console.warn` by default. The executor checks a profile's
+grounding policy (`require_grounding`) with its grounding check (section
+5.20) and its minimum confidence; it does not check a destination policy
+(`allowed_destinations`) yet, so `start` refuses a profile that sets one
+(`CoreError` kind `start`) rather than run without the rule (section
+5.21.4); no shipped profile does. A refused request
 throws `CoreError` with its `kind` and, where the core gives them, its
 diagnostics. A WebAssembly trap marks the instance broken; load a new one.
 Release contexts and runs with `dispose()` (a `FinalizationRegistry` is the

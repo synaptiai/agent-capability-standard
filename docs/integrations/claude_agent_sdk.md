@@ -799,7 +799,11 @@ raise the flags of the call's capability (`checkpoint_policy` a checkpoint,
 `block_autonomous` require a person's approval, which the adapter asks
 through the host's permission prompt; such a call's records carry
 `person_required: true`, an unbound tool's too when a profile requires a
-person for `mutate` (§5.18.2 treats it as `mutate`). The ask's reason, which
+person for `mutate` (§5.18.2 treats it as `mutate`). A composite tool (a
+binding with `invokes`) takes the flags a profile raises for each binding it
+invokes, and its person requirement, transitively: its approval and
+checkpoint cover the nested calls, which the adapter does not see (§5.18.4).
+The ask's reason, which
 your `can_use_tool` callback reads as `context.decision_reason`, then says
 `requires approval by a person`: only a person's decision counts for that
 call (§5.21.3), so a callback that approves some calls automatically (an
@@ -819,7 +823,8 @@ and its `minimum_confidence` fails an output below it with F504 (reason
 is not a number from 0 to 1), after the grounding check: both apply to the
 outputs the layer sees, those of the tools `create_grounded_mcp_server`
 serves, and a warning is logged once for any other tool they would cover
-(Claude Code's own tools return no capability output). The adapter checks
+(Claude Code's own tools return no capability output), whose calls the
+conformance statement names among its host gaps (§5.21.4). The adapter checks
 no send's destination yet, so a profile that sets `allowed_destinations`
 raises `ProfileError` when the adapter is built, rather than be applied
 without the rule (§5.21.4); no shipped profile sets it. A profile that

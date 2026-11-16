@@ -713,7 +713,9 @@ A grounded tool takes four more options:
   computes them: `bindingProfiles(context, documents)` with a `CoreContext`
   of `@synaptiai/acs-core/wasm`, once, passed to every tool. They raise
   each capability's flags at the call's effective risk, with the tools it
-  `invokes`; a call they require a person for counts only approvals the
+  `invokes`, and a composite's flags for what the tools it invokes perform,
+  transitively, so profiles given to a composite alone reach its nested
+  calls; a call they require a person for counts only approvals the
   deployment attests as a person's (`kind: human`) and its entries carry
   `person_required`. A composite that invokes such a tool needs a person's
   approval too, since its approval covers the nested call (§5.18.4); a

@@ -114,8 +114,14 @@ reference executor checks a profile's grounding policy with the grounding
 check of §5.20 (RFC-0008), as a host's policy, in every frame and before
 the minimum confidence; the Python adapter and the Standard Agents binding
 apply it, and the minimum confidence, to the call outputs they see (§5.20's
-hosts outside a workflow). A profile's destination policy is checked once
-the destination check of §4.4.2 lands with its own workstream (S5); until
+hosts outside a workflow). That puts both rules in force for a safety layer
+(§5.21.4): one whose host returns some covered calls' results in forms of
+its own (Claude Code's tools, for the Python adapter) names those calls in
+its conformance statement and reports, for each tool whose calls a rule
+would check, that the rule checks nothing for them; one that receives no
+capability output refuses a profile with either rule. A profile's
+destination policy is checked once the destination check of §4.4.2 lands
+with its own workstream (S5); until
 then the executor refuses to start or restore a run under a profile that
 sets `allowed_destinations`, the Python adapter and the Standard Agents
 binding refuse it too, and the Python adapter, with `strict_mode=False`

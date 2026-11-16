@@ -252,10 +252,11 @@ findings:
     the validator (`--profile`, `Options.profiles`) and the executor (`StartOptions.profiles`: thresholds,
     checkpoint policy, the person, grounding through S4''s check in every frame, minimum confidence, waited
     delegations included), exposed to Python (`AppliedProfiles`, `WorkflowRunner(profiles=)`,
-    `GroundedAgentConfig(profiles=)` for flags, the person, grounding and minimum confidence on the outputs
-    of the tools it serves, `_core.check_confidence`), to TypeScript through the WebAssembly
+    `GroundedAgentConfig(profiles=)` for flags, the person, a composite taking the raised flags and person of
+    the bindings it invokes, grounding and minimum confidence on the outputs of the tools it serves and a
+    report for the rest, `_core.check_confidence`), to TypeScript through the WebAssembly
     core, and in the Standard Agents binding (`groundedTool({profiles})` at the call''s effective risk with
-    its `invokes`, a composite whose approval covers a call needing a person asked of a person,
+    its `invokes`, a composite listing a binding a profile requires a person for asked of a person,
     `bindingProfiles` reporting loading warnings). Normative vectors
     tests/conformance/profiles/load.json and effective.json; runtime fixtures profile_* (profile_grounding_*
     among them); validator fixtures with `profiles`; the shipped profiles migrated to 2.0.0, each applied as
