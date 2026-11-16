@@ -119,7 +119,10 @@ The open items are listed below.
   `acs.evidence_recorded` notification (STANDARD-v1.2.0 §6.6), which the
   Python evidence stores and the Standard Agents binding send
 - [Trust calibration tooling](https://github.com/synaptiai/agent-capability-standard/issues/78)
-- [Domain profile marketplace](https://github.com/synaptiai/agent-capability-standard/issues/79)
+- [Domain profile marketplace](https://github.com/synaptiai/agent-capability-standard/issues/79):
+  catalog manifests, catalog sets and qualified workflow ids landed in the
+  Standard 1.2.0 Candidate (STANDARD-v1.2.0 §5.1.1); dependency declarations
+  between catalogs remain open (RFC-0007, open question 1)
 - [Automated compliance reporting](https://github.com/synaptiai/agent-capability-standard/issues/80)
 - [Plugin SDK for third-party extensions](https://github.com/synaptiai/agent-capability-standard/issues/81)
 

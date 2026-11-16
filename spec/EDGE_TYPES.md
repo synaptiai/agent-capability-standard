@@ -141,11 +141,20 @@ absent, nothing orders A and C.
 **Purpose:** Express that two capabilities cannot run at the same time.
 
 **Semantics:**
-- The `from` and `to` capabilities MUST NOT share a `parallel_group`
+- The `from` and `to` capabilities MUST NOT share a `parallel_group` of one
+  workflow
 - In sequence they are allowed: a `rollback` after a `mutate` is the normal
   recovery pattern
 - Validators MUST reject concurrent pairs (F504, once per group and pair)
 - Represents state that two operations would race on
+- The rule does not reach across runs or agents: runs a host executes at the
+  same time (`overlap: allow_all`, event-triggered runs, or runs it starts
+  itself) and a delegate the workflow does not wait for. A host that lets them
+  act on the same state SHOULD serialise a `rollback` with every `mutate` and
+  `persist` on the state it restores (STANDARD v1.2.0 §4.3); W623 flags an
+  `allow_all` trigger on a workflow that exercises both capabilities of a
+  pair, counting the workflows it invokes and `rollback` gate and
+  failure-mode actions
 
 **Example:**
 ```json
@@ -220,7 +229,7 @@ This means: `classify` is a specialized form of `detect` that assigns categories
 | `soft_requires` | SHOULD (any-of per target) | No | No | Best practice recommendations |
 | `enables` | Informational | No | No | Workflow composition patterns |
 | `precedes` | MUST, when both present | Via present steps | No | Temporal ordering |
-| `conflicts_with` | MUST, within a parallel group | No | Yes | No concurrency |
+| `conflicts_with` | MUST, within a parallel group | No | Yes | No concurrency within a workflow (§4.3) |
 | `alternative_to` | Informational | No | Yes | Substitutability |
 | `specializes` | Informational | Yes | No | Inheritance hierarchy |
 

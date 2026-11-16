@@ -302,6 +302,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Validator: an `audit` step's literal `retention` outside the duration
   grammar is W614 (`P1Y` is not a duration: write `P365D` or `365d`); a
   1.1 workflow that uses `grounding@1` or F505 in `on_error` gets W616.
+- Validator (every Standard version): W620 for a workflow name that is not
+  an identifier or is `catalog`, a step `domain` that is not a domain id
+  (`schemas/workflow_catalog.yaml`'s `plan-invalidation` is now
+  `plan_invalidation`; rename yours the same way) and a literal model family
+  outside `[a-z][a-z0-9_-]*`; W623 for a schedule trigger with `overlap:
+  allow_all` on a workflow that exercises both capabilities of a
+  `conflicts_with` pair. A top-level `catalog` mapping without `steps` is
+  now the catalog's manifest, no longer a malformed workflow (S304).
+  Diagnostics gain `location.path` (RFC 6901) and, in a catalog set,
+  `location.catalog`; `column` counts code points (it counted bytes).
+- Validator and executor, workflows that target 1.2: a `delegate` step
+  that may act on the world unchecked is W621 and one with a computed agent
+  and no `agents` is W622; an accepted `read_only` delegation whose host
+  does not attest `effective.read_only` fails the step (R402), not retried.
+  The field `agents` is S303 in a workflow that does not target 1.2. A
+  delegation that binds `continues` and attests a fresh context, or returns
+  the `task_id` it continues, fails (R402). An attested identity's
+  `model_id` must equal `effective.model_id` (R402).
+- Python SDK: `AgentDescriptor.identity()` refuses a `model_family` not
+  written `[a-z][a-z0-9_-]*` (`ValueError`) and derives one from a
+  `model_id` in its metadata; `DelegationProtocol.delegate()` refuses a task
+  that does not fit the agent's declared `task_inputs`;
+  `WorkflowEngine.effective_flags(step, workflow)` raises
+  `UnboundedDelegation` for a delegate step of a 1.2 workflow that declares
+  `agents` whose target manifests were not added. The orchestrator's
+  `inquire` output gives questions as objects with `id`, `parameter` and
+  `answer_type`, `inquiry_id`, and `ambiguity_analysis` as an object (it
+  gave strings, against the contract). `_core.Run.start`/`restore` accept
+  `catalogs` and `agents` (they were refused as not implemented).
+- Standard Agents binding: `LintDiagnostic.code` gains `V107` and
+  `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
 
 ### Added
 - Standard 1.2.0, host protocol, runs and audit records
@@ -529,6 +560,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
     skills' hooks copy; every skill's `evidence_anchors` examples are §6.5
     anchors, and the capability skills gloss `confidence` as §4.1.1 defines
     it.
+- Standard 1.2.0, delegation, catalogs and validator diagnostics
+  ([RFC-0007](spec/RFC-0007-delegation-catalogs-and-diagnostics.md);
+  findings ACS-04, ACS-09, ACS-16, ACS-17, ACS-24, ACS-29, ACS-46, ACS-47,
+  ACS-49, ACS-50, ACS-54):
+  - §5.1.1 catalog manifests (`id`, `version`, `ontology`, `exports`),
+    catalog sets and qualified workflow ids `<catalog id>/<name>` for
+    `invoke`, resolved by one resolver in the validator and the executor
+    (`core/src/catalogs.rs`); V107 for a hidden or missing workflow of a
+    loaded catalog, W607 otherwise, V105 across catalogs.
+  - §5.15.1 agent manifests (`schemas/agent_manifest_schema.yaml` 1.0.0) with
+    derived maxima; §5.15.2 the workflow field `agents` (1.2 only): a
+    literal unlisted agent is V107, a delegate step takes its target maxima
+    (F501, approval, W602), the executor refuses an unlisted, unmanifested
+    or task-refused delegation before approval or a checkpoint (R402, not
+    retried), a literal task is checked (S303/S304); §5.15.3 `continues`.
+  - §5.15 model families compared exactly and derived from a model
+    identifier by one rule; `model_id` on identities and `effective`.
+  - §5.2.4 domain ids and the host's selection rule; §5.13.1 typed,
+    correlatable answers to `inquire`; §4.3 the scope of `conflicts_with`;
+    §9.8 every location key, `path` and `catalog`.
+  - Rust: `names`, `agents` and `catalogs` modules; `validate::validate_set`,
+    `validate_with` takes `catalogs` and `agents`; `Run::start_set`,
+    `Run::restore_set` and `SetOptions`; `_core.model_family`. CLI:
+    `tools/validate_workflows.py --with-catalog PATH --agents PATH`.
+  - Python SDK: `WorkflowEngine.load_library`, `libraries`,
+    `add_agent_manifest`, `load_agents`, `agent_manifests`; the runner
+    passes them to the executor; `coordination.manifest`
+    (`check_agent_manifest`, `manifest_maxima`, `join_maxima`,
+    `target_maxima`, `check_task`), `coordination.families`
+    (`model_family`), `coordination.inquiry` (`match_answers`),
+    `workflows.domains` (`select_implementation`, `UnsupportedDomain`);
+    `AgentDescriptor.from_manifest`, `.manifest()`, `.maxima()`,
+    `AgentRegistry.register_manifest`.
+  - TypeScript package: `manifestMaxima`, `joinMaxima`, `checkTask`,
+    `modelFamily`, `isModelFamily`, `selectImplementation`,
+    `UnsupportedDomainError`, `isDomainId`, `issuePath`. Binding:
+    `deriveAgentManifest` (refuses unannotated tools and missing subagent
+    manifests), `taskRefusal`, `declaredAgents`, `lintDelegationTargets`;
+    `AgentIdentity.model_id`.
+  - Conformance: 35 workflow fixtures with `catalogs`, `agents` and
+    `expected_locations`; 15 runtime fixtures; normative vectors
+    `tests/conformance/domains/match.json`, `agents/maxima.json`,
+    `families/derive.json` and `inquiry/answers.json`.
 - Approval digest vectors of kind `tool_call` for a call's shown values.
 - Capability output vectors (informative), `tests/conformance/output/vectors.json`,
   which the Python and TypeScript codecs of §5.18.9 both pass. TypeScript

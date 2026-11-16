@@ -126,6 +126,16 @@ flowchart LR
   fire -->|allow_all| s3[Runs start concurrently]
 ```
 
+With `allow_all`, runs of one workflow can overlap, and `conflicts_with`
+does not reach across runs (STANDARD v1.2 §4.3): it keeps conflicting steps
+out of one `parallel_group`, nothing more. The validator warns (W623) when
+an `allow_all` trigger is on a workflow that, with the workflows it invokes,
+exercises both capabilities of a conflicting pair, such as `persist` and
+`rollback` (a gate's or failure mode's `action: rollback` counts). Use
+`skip` or `buffer_one`, or have your host serialise each `rollback` with the
+`mutate` and `persist` steps on the state it restores. Event triggers have
+no `overlap`: whether their runs overlap is your host's choice.
+
 ### Events
 
 ```yaml
@@ -327,6 +337,31 @@ twice, a minute apart:
 ```
 
 A delay ends like a wait: checkpoints taken before it no longer count.
+
+### Answers to an inquiry
+
+`inquire` gives its output an `inquiry_id` and each question an `id` and an
+`answer_type` (`text`, `choice`, `boolean`, `number`; STANDARD v1.2
+§5.13.1). The answers come back through `receive`, keyed by question id and
+typed, so a wait can correlate on the inquiry:
+
+```yaml
+- capability: inquire
+  purpose: Ask the owner what to do.
+  store_as: questions_out
+  input_bindings: {ambiguous_input: "${request}"}
+- capability: receive
+  purpose: Wait for the owner's answers.
+  store_as: answers_out
+  timeout: 2h
+  wait:
+    event_type: inquiry.answered
+    correlate: {inquiry_id: "${questions_out.inquiry_id}"}
+```
+
+A host never delivers an answer to a question the inquiry did not ask, of
+the wrong type, or twice; `grounded_agency.coordination.inquiry.match_answers`
+is that check, held to `tests/conformance/inquiry/answers.json`.
 
 ## Approval (`approval@1`)
 
@@ -531,6 +566,121 @@ flowchart TB
   step --> dropped["Dropped and counted"]
 ```
 
+### Model families
+
+A model family is the lowercase name of a provider's line of models, with no
+version, size, date or variant, and families compare exactly (STANDARD v1.2
+§5.15): `Acme` does not cover `acme`, and a literal outside
+`[a-z][a-z0-9_-]*` is W620. A host that attests a family derives it from the
+identifier of the model the delegate ran on:
+
+1. keep the part after the identifier's last `/`;
+2. of that, keep the part after the last `.` or `:` that comes before its
+   first digit or `-`;
+3. the family is the leading run of ASCII letters, lowercased.
+
+| Model identifier (fictional) | Family |
+|---|---|
+| `acme-large-2` | `acme` |
+| `us.acme.acme-large-2-20260101-v1:0` (a platform prefix) | `acme` |
+| `ft:acme-mini-1:org::abc` (a fine-tune) | `acme` |
+| `Zephyr/Zephyr-3.1-8B-Instruct` (an organisation path) | `zephyr` |
+| `z3-mini` (a one-letter line) | `z` |
+| `3d-model` | none |
+
+The rule needs no list of model lines, so two hosts that know one model id
+attest one family. `tests/conformance/families/derive.json` pins it, and
+`grounded_agency.coordination.families.model_family` and the TypeScript
+package's `modelFamily` implement it. A host may attest the exact model as
+`effective.model_id` too; an attested identity's `model_id` must then match
+(R402).
+
+### Declaring the agents you delegate to (1.2)
+
+A workflow that declares `spec_version: "1.2"` may list the agents its
+`delegate` steps may delegate to (§5.15.2). In an older workflow `agents` is
+S303, so an older consumer refuses the workflow instead of ignoring it:
+
+```yaml
+# Standard version: 1.2.0
+update_orders:
+  goal: Have the writer update the orders table.
+  risk: high
+  agents: [db-writer]
+  steps:
+  - capability: checkpoint
+    purpose: Save the state the writer may change.
+    store_as: cp
+    input_bindings: {scope: orders}
+  - capability: delegate
+    purpose: Update the table.
+    store_as: write_out
+    input_bindings:
+      agent: db-writer
+      task: {table: orders}
+```
+
+The host describes each agent with an agent manifest
+(`schemas/agent_manifest_schema.yaml`), which the validator and the executor
+are given beside the catalog:
+
+```yaml
+agent: db-writer
+standard: "1.2"
+ontology: "2.2"
+capabilities: [retrieve, checkpoint, mutate]
+task:
+  table: {type: string, required: true}
+```
+
+What declaring `agents` changes:
+
+- a literal `agent` the list leaves out is V107; a computed one is refused
+  at run time (R402);
+- the step takes its target's maxima: an agent that may `mutate` needs a
+  checkpoint before the delegation (F501) and an approval, and a declaration
+  weaker than the manifest is W602. An `approval` block is allowed on any
+  of the workflow's delegate steps;
+- without the target's manifest, the executor does not delegate (R402), and
+  the validator warns (W621);
+- a literal task is checked against the manifest's `task` (S303 for an
+  undeclared name, S304 for a missing required input), and any task is
+  checked again before delegating (R402).
+
+In a 1.2 workflow without `agents`, a delegation that may act on the world
+unchecked is W621 (bind `read_only: true`, require approval, or declare
+`agents`), and a computed `agent` is W622. Validate with the manifests:
+`python tools/validate_workflows.py --catalog c.yaml --agents agents/`.
+
+### Read-only delegations
+
+A host that cannot keep a delegate read-only refuses the delegation instead
+of running it. In a 1.2 workflow, an accepted delegation with `read_only:
+true` whose host does not attest `effective.read_only: true` fails the step,
+and `retry` does not repeat it: the delegate has already run.
+
+### Continuing a delegation (1.2)
+
+`continues` names the `task_id` of an earlier delegation whose delegate the
+host continues instead of starting a new one (§5.15.3):
+
+```yaml
+  - capability: delegate
+    purpose: Ask the same reviewer to check the fix.
+    store_as: review_b
+    input_bindings:
+      agent: reviewer-a
+      task: {review: "${fix_out.data: object}"}
+      continues: "${review_a.task_id}"
+```
+
+A continued delegate keeps what it did before, so `continues` with a literal
+`fresh_context: true` is S303, and a host that attests a fresh context for a
+continuation fails the step (R402). `continues` that resolves to null
+delegates anew, which is Standard Agents' create-or-continue. Every call
+returns a `task_id` of its own, never the one it continues, so a waiting
+delegate matches only its own result and `replaces` names one call.
+
 ## Sender identity (`identity@1`)
 
 A principal says *who* delivered an item; an **identity** also says how the
@@ -694,7 +844,9 @@ before the run goes on:
   reviewer that reads a forbidden input, directly, through other steps or
   through context a recovery loop injects,
   one without `fresh_context: true` when it is required, or literal model
-  families that cannot cover `require_model_families` are F504.
+  families that cannot cover `require_model_families` are F504. Families
+  compare exactly (`Acme` does not cover `acme`), and a reviewer that binds
+  `continues` cannot satisfy `require_fresh_context`: it is not fresh.
 - At run time the step is compliant when no counted verdict blocks, at
   least `min_pass` pass, and at least `min_full` of the passes have scope
   `full`; its output gains a `tally` (with `full_passes`).
@@ -903,4 +1055,12 @@ enforced, and is reported as W614.
 ```bash
 python tools/validate_workflows.py --catalog my_catalog.yaml
 python tools/validate_workflows.py --catalog my_catalog.yaml --strict  # warnings fail too
+python tools/validate_workflows.py --catalog my_catalog.yaml \
+  --with-catalog library.yaml --agents agents/   # a catalog set and agent manifests
 ```
+
+`--with-catalog` gives another catalog of the catalog set, whose exported
+workflows `invoke` can name by qualified id (`acme.lib/check`, STANDARD v1.2
+§5.1.1); `--agents` gives agent manifests, a file or a directory of
+`*.agent.yaml` files (§5.15.1). Both repeat. A finding in another catalog of
+the set is shown as `[<catalog id>:<workflow>]`.

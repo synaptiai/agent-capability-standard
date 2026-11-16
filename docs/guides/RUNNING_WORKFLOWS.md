@@ -86,7 +86,7 @@ flowchart TB
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
+| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; select the implementation for it with `select_implementation`, [§5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter); a waiting `delegate` that delegates again names the delegation it replaces in `replaces`) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` |
 | `RequestApproval` | asks `approver` about `shown`, in `mode`: `in_session`, whoever attends the run, in its session; `out_of_band`, a separate channel whose approvers need not attend the run (keep the run's snapshot while you wait). `queued_action_id` names the queued action a resumed run is asking about, on every such request ([Resuming a deferred run](#resuming-a-deferred-run)) | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable`; with `identity@1`, optionally `approver_identities` (each an `agent_identity`, one per principal; `approvers` then empty or their principals) |
@@ -279,7 +279,26 @@ the digest and the expiry, never other stores or inputs of the run.
   ([§5.2.3](../../spec/STANDARD-v1.2.0.md#523-parallel-groups)). `join` has
   one defined value, `all_complete`; any other, or a `join` without a group,
   is W618 and ignored. A member that reads a group mate's store is W619:
-  another executor may run the mate after it.
+  another executor may run the mate after it. F504 for a `conflicts_with`
+  pair in one group is a static check: it says nothing about two runs, or a
+  run and a delegate, at once
+  ([§4.3](../../spec/STANDARD-v1.2.0.md#43-edge-types-and-dependency-semantics)).
+- **Delegation targets.** In a 1.2 workflow that declares `agents`, the
+  executor refuses, before approval or a checkpoint and without retrying, a
+  computed agent that is not listed, a target whose manifest it was not
+  given, and a task the agent's manifest does not accept (R402); it raises
+  the step's flags to the target's maxima. In any 1.2 workflow, an accepted
+  `read_only` delegation the host does not attest fails, not retried, and a
+  continuation (`continues`) attested fresh or returning the `task_id` it
+  continues fails (R402)
+  ([§5.15.2](../../spec/STANDARD-v1.2.0.md#5152-delegation-targets),
+  [§5.15.3](../../spec/STANDARD-v1.2.0.md#5153-continuing-a-delegation)).
+- **Catalog sets.** An `invoke` target resolves over the catalog and the
+  other catalogs it was started with: a qualified id `<catalog id>/<name>`
+  names another catalog's exported workflow, and a bare name always the
+  invoker's own catalog's; a computed target that resolves to nothing, or to
+  an unexported workflow, is refused (R402)
+  ([§5.1.1](../../spec/STANDARD-v1.2.0.md#511-catalog-manifests-and-qualified-names)).
 - **Retries, deadlines.** `retry.max` (at most 1000) extra attempts for
   R401/R402/R406, with `none`, `linear` (1 s × n) or `exponential`
   (1 s × 2^(n−1)) backoff, as
@@ -685,6 +704,8 @@ run.wake_at()                        # when a tick next changes the run, or None
 run.cancel("operator stop", now_ms)  # Failed R408, no recovery
 run.take_trace(); run.take_records() # shed what the host keeps (§5.19.4)
 
+engine.load_library("library.yaml")  # another catalog of the set (§5.1.1)
+engine.load_agents("agents/")        # agent manifests (§5.15.1)
 snapshot = run.snapshot(key=b"secret")       # canonical JSON + SHA-256 + HMAC
 run = runner.restore(snapshot, key=b"secret")  # refuses tampered snapshots
 result = runner.drive(run, host)
@@ -822,6 +843,12 @@ flowchart TB
   fx --> cargo["cargo test --test runtime: snapshot and restore before every step"]
   fx --> py["tests/test_runner.py: through Python"]
 ```
+
+A fixture may give `catalogs` (the other catalogs of its catalog set, each
+with its `header`) and `agents` (agent manifests); both harnesses start and
+restore the run with them. Validator fixtures may give the same keys in
+`tests/fixtures/EXPECTATIONS.json`, and `expected_locations`: each a `code`
+and the `path` (§9.8) it must be reported at.
 
 The runtime fixtures are normative for an executor of class EX
 ([STANDARD §10.5](../../spec/STANDARD-v1.2.0.md#105-executor-conformance)),

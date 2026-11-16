@@ -1,7 +1,7 @@
 # Modality Handling via Domain Parameters
 
-**Version:** 1.2.0
-**Date:** 2026-11-15
+**Version:** 1.3.0
+**Date:** 2026-11-16
 **Status:** Guide
 
 ---
@@ -48,9 +48,9 @@ Concrete examples:
 
 Note that `transform` uses its native `source_format`/`target_format` input parameters rather than the `domain` step field, since the modality is inherent to the transformation definition itself.
 
-**A note on the `domain` parameter:** `domain` is a step field of the workflow DSL, defined in [STANDARD-v1.1.0 §5.2](../../spec/STANDARD-v1.1.0.md#52-step-definition) as a string, the "Domain parameter for the capability". It is written on the step, beside `capability`, not among the capability's inputs: the capability ontology declares no `domain` input and no list of domain values. The validator checks that the value is a string (S303 otherwise) and nothing more. The reference executor hands it to the host on the `InvokeCapability` action ([Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)), and the host chooses the processing pipeline that serves it. The values used in this guide (`image.object`, `audio.genre` and the like) are this guide's convention; the Standard defines none. Workflow authors use `domain` to specialize generic capabilities (e.g., `detect` with `domain: image.object` vs `domain: audio.event`) without requiring separate ontology entries per modality.
+**A note on the `domain` parameter:** `domain` is a step field of the workflow DSL, defined in [STANDARD-v1.2.0 §5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter). It is written on the step, beside `capability`, not among the capability's inputs: the capability ontology declares no `domain` input and no list of domain values. Its value is a *domain id*: lowercase segments joined by `.`, each `[a-z0-9][a-z0-9_]*` (`image.object`, `image.3d`, `multimodal.text_to_image`); a value of another form is W620, and is still passed to the host unchanged. The reference executor hands it to the host on the `InvokeCapability` action ([Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)), and the host selects the implementation that serves it by the rule of §1.3. The values used in this guide (`image.object`, `audio.genre` and the like) are this guide's convention. Workflow authors use `domain` to specialize generic capabilities (e.g., `detect` with `domain: image.object` vs `domain: audio.event`) without requiring separate ontology entries per modality.
 
-**Cross-reference:** Domain profiles (e.g., `schemas/profiles/vision.yaml`) use profile-level domain names (e.g., `domain: vision`) that differ from the capability-level domain parameters used in this guide (e.g., `domain: image.object`). Profile domain names identify the agent specialization; capability domain parameters specify the processing pipeline.
+**Cross-reference:** Domain profiles (e.g., `schemas/profiles/vision.yaml`) use profile-level domain names (e.g., `domain: vision`) that differ from the capability-level domain parameters used in this guide (e.g., `domain: image.object`). Profile domain names identify the agent specialization; capability domain parameters specify the processing pipeline. A workflow's own `domain` field is descriptive: it names the domain of the profile the workflow is written for, changes no validation or execution, and is not a default for its steps ([STANDARD-v1.2.0 §5.1](../../spec/STANDARD-v1.2.0.md#51-catalog-and-workflow-definition)).
 
 ### 1.2 Benefits
 
@@ -63,6 +63,22 @@ Note that `transform` uses its native `source_format`/`target_format` input para
 4. **Reduced cognitive load.** Developers learn 36 capabilities once, then apply them to any modality. There is no need to discover and memorize separate APIs for each modality.
 
 ### 1.3 Handling Unsupported Modalities
+
+A host that serves a capability through implementations each for one domain id, or for none, selects the one for a step by exact comparison ([STANDARD-v1.2.0 §5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter)): the implementation for the step's domain; else the one for the longest proper prefix of it that ends before a `.` (for `image.object.face`: `image.object`, then `image`); else its implementation for no domain; else none. A step without a `domain` takes the implementation for no domain. `tests/conformance/domains/match.json` pins these choices, and `grounded_agency.workflows.domains.select_implementation` and the TypeScript package's `selectImplementation` implement them; both raise an error whose `reason` is `unsupported_domain` when none serves.
+
+```mermaid
+---
+title: Selecting an implementation for a domain
+---
+flowchart TB
+  accDescr: A host looks for the implementation for the step's exact domain, then for its longest prefix ending at a dot, then for the implementation for no domain, and fails the step with reason unsupported_domain when none serves.
+  exact{"Exact domain?"} -->|yes| use1["Use it"]
+  exact -->|no| prefix{"Longest prefix at a dot?"}
+  prefix -->|yes| use2["Use it"]
+  prefix -->|no| none{"Implementation for no domain?"}
+  none -->|yes| use3["Use it"]
+  none -->|no| fail["R402, reason unsupported_domain"]
+```
 
 A host that has no processing pipeline for a step's `domain` cannot run the step. It says so by answering the `InvokeCapability` action with an `Error` whose `reason` is `unsupported_domain` ([STANDARD-v1.2.0 §5.19.7](../../spec/STANDARD-v1.2.0.md#5197-error-reasons); [Running workflows](RUNNING_WORKFLOWS.md#actions-and-responses)). A host that does not perform the capability at all says `unsupported_capability`. The step then fails with R402 (`EXECUTION_FAILED`, [STANDARD-v1.2.0 §9.5](../../spec/STANDARD-v1.2.0.md#95-runtime-errors)), and its `retry` and failure modes apply as for any failed step:
 
@@ -93,7 +109,7 @@ Domain parameters do not erase modality -- they parameterize it. The modality af
 
 - **Input encoding.** An image domain expects a pixel buffer or URI reference; a text domain expects a string or document reference.
 - **Evidence anchors.** Image evidence uses bounding boxes and pixel coordinates; audio evidence uses time segments; text evidence uses character offsets or line numbers. See [Section 4](#4-evidence-grounding-for-modalities) for details.
-- **Tool selection.** The runtime maps `detect` with `domain: image.object` to a vision model or API, while `detect` with `domain: text.entity` maps to an NER model. This mapping is an implementation concern, not an ontology concern.
+- **Tool selection.** The runtime maps `detect` with `domain: image.object` to a vision model or API, while `detect` with `domain: text.entity` maps to an NER model. Which implementation serves which domain is the host's; how it chooses among them is the selection rule of [§1.3](#13-handling-unsupported-modalities).
 - **Confidence calibration.** Different modalities have different uncertainty profiles. Image classification confidence may be calibrated differently from text classification confidence.
 
 ---
@@ -784,10 +800,14 @@ When no specialization is needed, the modality alone suffices:
 
 ### Naming Rules
 
+A domain id is lowercase segments joined by `.`, each `[a-z0-9][a-z0-9_]*` ([STANDARD-v1.2.0 §5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter)); another form is W620.
+
 1. Use lowercase for all domain parameter values.
 2. Use dot notation for hierarchy (e.g., `image.object`, not `image-object` or `image/object`).
-3. Keep specializations to two levels maximum (e.g., `audio.speech` not `audio.speech.en.formal`). Use the `options` field for deeper configuration.
-4. Use the capability's native parameters for non-domain concerns. For example, use `threshold` for detection sensitivity, not `domain: image.object.high_sensitivity`.
+3. Join words inside a segment with underscores, never hyphens (`plan_invalidation`), so a domain has one spelling.
+4. A segment may start with a digit (`3d.mesh`, `image.3d`).
+5. Keep specializations to two levels where you can (e.g., `audio.speech` not `audio.speech.en.formal`); a host serves a deeper id by its longest prefix. Use the `options` field for deeper configuration.
+6. Use the capability's native parameters for non-domain concerns. For example, use `threshold` for detection sensitivity, not `domain: image.object.high_sensitivity`.
 
 ## Appendix B: Complete Workflow -- Multi-Modal Content Moderation
 

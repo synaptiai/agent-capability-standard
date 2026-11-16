@@ -99,6 +99,10 @@ Changes from 1.1.0 are listed in [Appendix D](#appendix-d-changes-from-110).
 | **Run** | One execution of a workflow, from its start to its terminal action (§5.19) |
 | **Action** | What a run asks its host to do next, or how it ended (§5.19.1) |
 | **Audit record** | An action record or a canonical event that says what happened (§6.4) |
+| **Agent manifest** | What an agent that a `delegate` step names may do: the capabilities it may exercise and the task it accepts (§5.15.1) |
+| **Catalog manifest** | A catalog's id, version and exported workflows, under its `catalog` key (§5.1.1) |
+| **Qualified workflow id** | A catalog id, `/` and a workflow name: a workflow of a given catalog (§5.1.1) |
+| **Domain id** | The value of a step's `domain`: lowercase segments joined by `.` (§5.2.4) |
 
 ---
 
@@ -141,6 +145,9 @@ leaves documents the loss.
   `mutate`, `send` and `generate` (`precedes`: ordering only, V102). A
   `constrain` before `execute`, `mutate` and `send` is recommended (W601)
 - A workflow cannot weaken a capability's safety flags (§5.2.1)
+- A delegation carries what its target may do: in a workflow that declares
+  its `agents`, a delegation takes the safety flags of the agents it may
+  delegate to, and is not made when their manifests are missing (§5.15.2)
 - On a tool-calling host, a safety layer applies the same effective flags,
   `requires` edges, checkpoint rule and approval to each call (§5.18)
 
@@ -252,7 +259,7 @@ The ontology supports 7 edge types:
 | `soft_requires` | SHOULD | Recommended prerequisite |
 | `enables` | Informational | Capability flow: `from` makes `to` useful afterwards |
 | `precedes` | MUST | Temporal ordering when both are present |
-| `conflicts_with` | MUST | May not run concurrently (symmetric) |
+| `conflicts_with` | MUST | Never in one `parallel_group` of a workflow (symmetric) |
 | `alternative_to` | Informational | Substitutable capabilities (symmetric) |
 | `specializes` | Informational | Parent-child inheritance |
 
@@ -272,6 +279,31 @@ before the other starts.
 | `enables`, `alternative_to`, `specializes` | None | — |
 
 Validators SHOULD implement these checks in time linear in the number of steps.
+
+**Scope of `conflicts_with`.** The rule applies within one workflow's step
+list: two steps whose capabilities conflict never share a `parallel_group`.
+It does not apply across runs or across agents, which neither a validator
+nor the executor can see:
+
+- runs a host executes at the same time: those a schedule trigger starts
+  with `overlap: allow_all` (§5.10), those event triggers start, and those
+  the host starts on its own;
+- a `delegate` the workflow does not wait for (§5.13), which works beside its
+  delegator.
+
+A `rollback` in one may then overlap a `mutate` or `persist` in another on the
+same state. A host that lets runs or delegates act on the same state at the
+same time SHOULD serialise each `rollback` with every `mutate` and `persist` on
+the state it restores, or fail the later step (R402).
+
+A workflow *exercises* the capabilities of its steps (handlers included),
+`rollback` when a gate or failure mode has `action: rollback`, and those the
+workflows it invokes exercise, transitively (§5.12). A workflow that has a
+trigger with `overlap: allow_all` and exercises both capabilities of a
+`conflicts_with` pair is W623 (`CONCURRENT_RUN_CONFLICT`). Event triggers do
+not count: they declare no overlap policy, so whether their runs overlap is
+the host's, under the SHOULD above; W623 reports only overlap the workflow
+itself allows.
 
 A check before a mutation is expressed with `constrain`, which the
 ontology orders before `execute`, `mutate`, `send` and `generate`. `verify`
@@ -314,8 +346,14 @@ it elsewhere MUST be rejected when loaded.
 ### 5.1 Catalog and Workflow Definition
 
 A catalog is a YAML mapping of workflow name to workflow. A top-level key
-starting with `x-` is vendor data and is not a workflow. Any other
-top-level value that is not a mapping is S303.
+starting with `x-` is vendor data and is not a workflow. The top-level key
+`catalog`, when its value is a mapping without `steps`, is the catalog's
+manifest (§5.1.1) and is not a workflow. Any other top-level value that is
+not a mapping is S303.
+
+A workflow's name SHOULD be an identifier (`[A-Za-z_][A-Za-z0-9_-]*`) other
+than `catalog`; another name is W620 (`NONCANONICAL_NAME`). A `catalog` mapping
+that has `steps` is a workflow, as in 1.1, and is W620.
 
 A workflow MUST define:
 
@@ -336,7 +374,9 @@ A workflow MAY define:
 | `workflow_extensions` | object | Extension declarations (§5.9) |
 | `triggers` | array | How runs start (§5.10) |
 | `grounding` | object | Grounding policy (`grounding@1`, §5.20) |
-| `domain`, `profile`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
+| `agents` | array of strings | The agents its `delegate` steps may delegate to; only in a workflow that targets 1.2 or later (§5.15.2) |
+| `domain` | string | The domain of the profile the workflow is written for (a domain profile's `domain`). Descriptive: it changes no validation or execution, and it is neither the step field `domain` (§5.2.4) nor a default for it |
+| `profile`, `risk_propagation`, `data_flow` | — | Recognised descriptive fields |
 
 A missing required field is S304; `goal`, `risk`, `success` or
 `description` of another type is S303. An unrecognised field is W604 and is
@@ -345,7 +385,77 @@ and are never reported (§11.3).
 
 #### 5.1.1 Catalog Manifests and Qualified Names
 
-<!-- owner: S3; text: S3.md part 2.5 -->
+A catalog MAY carry a manifest, its `catalog` entry:
+
+```yaml
+# Standard version: 1.2.0
+catalog:
+  id: acme.twin
+  version: 1.4.0
+  ontology: "2.2"
+  exports: [digital_twin_sync_loop]
+digital_twin_sync_loop:
+  goal: Keep the twin in step with the plant.
+  risk: medium
+  steps:
+  - capability: invoke
+    purpose: Build the world model with the reference workflow.
+    store_as: model_out
+    workflow_id: acs.reference/world_model_build
+  # ...
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | The catalog's id: one or more segments joined by `.`, each `[a-z0-9][a-z0-9_-]*` (`acme.twin`) |
+| `version` | Yes | The catalog's own version (Semantic Versioning 2.0.0) |
+| `ontology` | No | The ontology version the catalog is written against, `major.minor[.patch]`; a major version other than the validator's ontology's is V109 |
+| `exports` | No | Names of its workflows that other catalogs may invoke; default none. Each MUST name a workflow of the catalog, else V107 |
+| `description` | No | For people |
+
+A missing `id` or `version` is S304; a malformed one, or an `exports` that is
+not a list of distinct strings, is S303. Unknown fields are W604 (`x-` fields
+are vendor data). The manifest cites no Standard version: the version a
+catalog targets is its header (§11.5), which serves as the manifest's
+`standard` under §11.6; a manifest in a catalog whose header targets 1.0 or
+1.1 is W616.
+
+**Catalog sets.** A validator or executor is given a catalog and, optionally,
+other catalogs: together, a *catalog set*. Each of the others MUST have a
+manifest, and no two catalogs of a set may have the same `id`; an
+implementation refuses such a set instead of validating or running it. How a
+host finds the catalogs of a set is outside this standard. In a catalog
+validated or run with others, a workflow name containing `/` is S303.
+
+**Qualified ids.** A *qualified workflow id* is a catalog id, `/` and a
+workflow name (`acs.reference/world_model_build`). An `invoke` target
+(§5.12) resolves to:
+
+1. the workflow of that name in the invoking workflow's own catalog;
+2. otherwise, for a qualified id whose catalog id is the invoking catalog's
+   own, its workflow of that name; a name the catalog does not have is V107;
+3. otherwise, for a qualified id of another catalog of the set, that
+   catalog's workflow of that name, if the catalog exports it. A workflow the
+   catalog has but does not export is V107, and a name it does not have is
+   V107.
+
+Any other target resolves to nothing and is W607: a bare name the invoking
+catalog does not have (as in 1.1), and a qualified id whose catalog is not in
+the set, which may be present where the workflow runs and so cannot be
+checked. V107 is only for a qualified id whose catalog is the invoking
+catalog or another catalog of the set. A bare name never resolves in another
+catalog, also inside a workflow of a catalog loaded beside another. The rules
+of §5.10 and §5.12 for an `invoke` (V105 for cycles, now across the catalogs
+of the set; V107 for a target whose triggers include no `invoke`; S303 and
+S304 for a literal input) apply to every resolved target, and an invoked
+workflow of another catalog is a nested run like any other (§5.13, §5.14,
+§5.17). The executor resolves a target computed at run time the same way,
+and refuses one that resolves to nothing, or to a workflow its catalog does
+not export, before the nested run starts (R402).
+
+A diagnostic about a catalog of the set other than the one being validated
+carries that catalog's id as `location.catalog` (§9.8). A domain profile's
+`workflows` may list qualified ids.
 
 ### 5.2 Step Definition
 
@@ -375,8 +485,8 @@ Each step MAY define:
 | `join` | string | When the group is complete: `all_complete` (the default and the one value defined, §5.2.3) |
 | `mapping_ref` | string | Transform mapping file (missing file: S301) |
 | `output_conforms_to` | string | `file#/pointer` the step's whole output must match (S301/S302) |
-| `domain` | string | Domain parameter for the capability |
-| `workflow_id` | string | For `invoke`: the workflow to run |
+| `domain` | string | The variant of the capability to run: a domain id (§5.2.4) |
+| `workflow_id` | string | For `invoke`: the workflow to run, a name or a qualified id (§5.1.1) |
 | `risk`, `mutation`, `requires_checkpoint`, `requires_approval` | — | Safety flags (§5.2.1) |
 | `handler` | boolean | Escalation target only (§5.11) |
 | `wait` | object | Wait for an event (§5.13) |
@@ -470,7 +580,33 @@ resolves a reference to an earlier mate.
 
 #### 5.2.4 Domain Parameter
 
-<!-- owner: S3; text: S3.md part 2.7 -->
+A step's `domain` names the variant of its capability the host runs (`detect`
+with `domain: image.object`). It is a *domain id*: one or more segments
+joined by `.`, each `[a-z0-9][a-z0-9_]*` (`text`, `image.object`, `image.3d`,
+`multimodal.text_to_image`). A value of another form is W620; it is still
+passed to the host unchanged. The executor passes `domain` to the host with
+the capability call (`InvokeCapability`, §5.19.1) and gives it no other meaning;
+the ontology declares no domain values.
+
+A host that serves a capability through implementations each for one domain
+id, or for none, selects the one for a step, comparing domain ids by exact
+(code-point) equality:
+
+1. the implementation for the step's domain;
+2. else the implementation for the longest proper prefix of the step's domain
+   that ends before a `.` (for `image.object.face`: `image.object`, then
+   `image`);
+3. else its implementation for no domain;
+4. else none: the step fails (R402), with the reason `unsupported_domain`
+   (§5.19.7).
+
+A step without `domain` takes the implementation for no domain, else none
+(R402). The vectors of `tests/conformance/domains/match.json` state these
+choices (§10.3).
+
+The step field is not the workflow's descriptive `domain` (§5.1), nor a
+domain profile's `domain`, which names the profile (`vision`,
+`data-analysis`).
 
 ### 5.3 Binding Syntax
 
@@ -742,6 +878,13 @@ waiting or approval semantics.
 | `identity@1` | bindings of `receive`/`synchronize`/`delegate` `sender_check`, `accept_trust_classes`, `always_ask_trust_classes`; approver identities on approval decisions; in a workflow that targets 1.2, `approval.approver` `sender_check` and `accept_trust_classes` (§5.14, §5.17) |
 | `grounding@1` | workflow `grounding`; the check of host outputs (§5.20) |
 
+The workflow field `agents` (§5.15.2) and the `delegate` input `continues`
+(§5.15.3) are base members of 1.2, governed by no extension. `agents` is
+allowed only in a workflow that targets 1.2 or later (S303 otherwise), so a
+workflow that uses it declares 1.2 and an older consumer refuses it (V109)
+instead of ignoring it. `continues` in a workflow that targets an earlier
+version is W616 (§11.5).
+
 `failure_modes[].when` and `.on_error` are part of base 1.1, not an
 extension: a consumer that ignores them only loses an optional trigger.
 
@@ -904,14 +1047,18 @@ whether or not the failure mode's action is allowed.
   with `!= null` and annotate it where a type matters. `_recovery` is
   reserved: a `store_as` or input with that name is S303.
 - `invoke` steps name their target with `workflow_id` (or a literal
-  `input_bindings.workflow`); a step that sets both to different values is
-  S303, since `workflow_id` would win unseen. A target that is not in the catalog is W607
-  (it cannot be checked); invoke cycles among catalog workflows, including a
-  workflow invoking itself, are V105. The step passes the target's inputs
+  `input_bindings.workflow`), a name or a qualified id (§5.1.1); a step that
+  sets both to different values is S303, since `workflow_id` would win
+  unseen. A target resolves as §5.1.1 says. A qualified id whose catalog is
+  the invoking catalog or another catalog of the set, where that catalog
+  lacks the workflow or (another catalog) does not export it, is V107; every
+  other target that resolves to nothing, a bare name included, is W607 (it
+  cannot be checked). Invoke cycles among the workflows of the catalog set,
+  including a workflow invoking itself, are V105. The step passes the target's inputs
   as `input_bindings.input`: a mapping, or a `${...}` reference whose value
   is one. Absent or null, it passes no inputs; any other value (a list, or
   a string that is not exactly one reference) is B203 against `input`'s
-  object type (§5.4). When the target is in the catalog and the input is a
+  object type (§5.4). When the target resolves and the input is a
   literal mapping, a
   name the target does not declare is S303 (with no `x-` exemption: these
   are the target's inputs, not fields of the step) and a required input it
@@ -1036,7 +1183,7 @@ checkpoint's parallel group counts (the checkpoint may finish first), one
 in the step's own group does not. A step that waits itself acts after its
 wait, so any earlier checkpoint is stale for it; a handler (§5.11) is
 judged at its earliest targeting step, including that step's own wait. An
-`invoke` of a catalog workflow that can wait (any of its steps, handlers
+`invoke` of a workflow of the catalog set that can wait (any of its steps, handlers
 included, waits or delays, or invokes one that can) counts as a wait: the
 run it invokes shares the caller's checkpoints, so its waits invalidate
 them too. This is conservative: a checkpoint the invoked workflow takes
@@ -1056,7 +1203,34 @@ wait would be unclear.
 
 #### 5.13.1 Answers to an Inquiry
 
-<!-- owner: S3; text: S3.md part 2.11 -->
+`inquire` returns the questions to put to someone. Its output carries
+`inquiry_id`, naming the inquiry, and each question an `id`, unique within
+the inquiry, and an `answer_type`: `text` (the answer is a string), `choice`
+(one of the question's `options`), `boolean` or `number`. These are optional
+in the ontology, for compatibility, but a host that produces an `inquire`
+output MUST give it an `inquiry_id` and each question an `id`.
+
+The answers arrive through `receive` (the ontology's `inquire` → `receive`
+edge), as an item, or the event a wait matches, that carries `inquiry_id` and
+`answers`: a list of `{question_id, value}`. `question_id` is the question's
+`id`, or, for a question that has none, its `parameter`; `value` has the
+question's `answer_type`. A host MUST NOT deliver an answer whose
+`question_id` names no question of the inquiry, whose `value` does not have
+its question's type, or that answers a question twice; a question with no
+answer is left out. To wait for one inquiry's answers, correlate on its id:
+
+```yaml
+- capability: receive
+  purpose: Wait for the owner's answers.
+  store_as: answers_out
+  timeout: 2h
+  wait:
+    event_type: inquiry.answered
+    correlate: {inquiry_id: "${questions_out.inquiry_id}"}
+```
+
+The vectors of `tests/conformance/inquiry/answers.json` state which answers a
+host may deliver (§10.3).
 
 ### 5.14 Approval
 
@@ -1082,7 +1256,8 @@ approval:
 | `when_unattended` | `fail` (default), `skip` or `defer_to_queue` |
 
 `approval` is allowed only where the effective `requires_approval` is true
-(S303); other values above are S303 when malformed, and unknown fields W604.
+(S303), and on a `delegate` step of a workflow that declares `agents`
+(§5.15.2); other values above are S303 when malformed, and unknown fields W604.
 
 **The request.** A step whose effective `requires_approval` is true asks for
 approval once its inputs are resolved (after its condition, its gates and
@@ -1372,7 +1547,34 @@ may read but must not change anything: files, repositories, external
 state), and reports the values the host actually used as `effective`; the
 standard does not say how a host enforces `read_only`, only that
 `effective.read_only` attests it. With `identity@1`, `effective` may also
-attest who took the delegation, as `identity` (§5.17). `receive` and `synchronize` accept
+attest who took the delegation, as `identity` (§5.17).
+
+**Model families.** A model family names a provider's line of models,
+without version, size, date or variant: `acme` for every model of a
+(fictional) Acme line, whatever its version or size. It is written in
+lowercase, `[a-z][a-z0-9_-]*`; a literal `model_family` binding or
+`require_model_families` entry of another form is W620. Families are
+compared by exact (code-point) equality wherever they appear: the
+`model_family` input, `effective.model_family`, an identity's
+`model_family` (§5.17) and `require_model_families` (§5.16).
+
+A host that attests a family, as `effective.model_family` or in an identity,
+MUST derive it from the identifier of the model the delegate ran on:
+
+1. keep the part of the identifier after its last `/`;
+2. of that, keep the part after the last `.` or `:` that comes before its
+   first ASCII digit or `-` (any `.` or `:`, if it has neither);
+3. the family is the leading run of ASCII letters (`A`–`Z`, `a`–`z`) of the
+   rest, lowercased. An identifier that does not start with a letter there
+   gives no family, and the host attests none.
+
+So `acme-large-2`, `us.acme.acme-large-2-20260101-v1:0` and
+`ft:acme-mini-1:org::abc` give `acme`, `z3-mini` gives `z`, and
+`Zephyr/Zephyr-3.1-8B-Instruct` gives `zephyr`. The vectors of
+`tests/conformance/families/derive.json` state the rule's results (§10.3). A
+host MAY also attest the identifier as `effective.model_id`.
+
+`receive` and `synchronize` accept
 `accept_from` (a list of principals): received items from other principals
 are dropped and counted, and each kept item's `sender` is the
 host-authenticated principal. A literal empty `accept_from` accepts no one
@@ -1390,18 +1592,150 @@ behalf of the owner has the peer as its principal, and `accept_from: [owner]`
 drops it. The identity behind a principal, and checks on it, are §5.17
 (`identity@1`). Binding any of these inputs needs
 `delegation@1` (V106); they are typed by the ontology like any other input.
+`agent` names the target by the name its agent manifest (§5.15.1) and the
+workflow's `agents` (§5.15.2) use.
 
 #### 5.15.1 Agent Manifests
 
-<!-- owner: S3; text: S3.md part 2.13 -->
+An **agent manifest** (`schemas/agent_manifest_schema.yaml#/agent_manifest`)
+states what an agent that a `delegate` step names may do:
+
+```yaml
+agent: db-writer
+standard: "1.2"
+ontology: "2.2"
+capabilities: [retrieve, checkpoint, mutate]
+task:
+  table: {type: string, required: true}
+  rows: {type: array}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `agent` | Yes | The name a `delegate` step's `agent` and a workflow's `agents` use: a target name, not a principal (§5.15) |
+| `standard`, `ontology` | Yes | The Standard and ontology versions the manifest was written against, `MAJOR.MINOR[.PATCH]` (§11.6) |
+| `capabilities` | Yes | Every ontology capability the agent may exercise, directly or through agents it delegates to and workflows it invokes |
+| `task` | No | The task inputs it accepts, in the form of workflow `inputs` (§5.1) |
+| `version`, `description` | No | For people |
+
+Its **maxima** are, over its capabilities' ontology values, the highest
+`risk` and the OR of `mutation`, `requires_checkpoint` and `requires_approval`
+(`low` and false for no capability). Its **read-only maxima** are the same
+over those of its capabilities whose ontology `mutation` is false. The
+**join** of several maxima is the highest risk and the OR of each boolean.
+A manifest that lists a capability the ontology does not define has no
+maxima. `tests/conformance/agents/maxima.json` gives vectors (§10.3).
+
+Manifests are given to a validator and an executor beside the catalogs they
+check or run, as the ontology is. A manifest that does not conform to its
+schema, whose `ontology` has another major than the consumer's ontology or
+whose `standard` the consumer does not support (V109, §11.6), or that names
+an `agent` another manifest of the same set names MUST be refused when loaded.
+A capability the ontology does not define is V101 where the manifest is used
+(§11.6): at each `delegate` step whose target maxima draw on it (§5.15.2).
+How a host obtains its manifests is outside this standard; it SHOULD derive
+them from what each agent can actually call, and MUST NOT give a manifest
+that leaves out a capability the agent can exercise.
 
 #### 5.15.2 Delegation Targets
 
-<!-- owner: S3; text: S3.md part 2.14 -->
+A workflow that targets 1.2 or later (§11.5) MAY declare `agents`, the agents
+its `delegate` steps may delegate to: a non-empty list of distinct, non-empty
+strings (else S303). In a workflow that targets an earlier version or
+declares none, `agents` is S303: declaring it is an opt-in that an older
+consumer must refuse (V109), not ignore.
+
+```yaml
+agents: [reviewer-a, db-writer]
+```
+
+A host that composes agents statically creates its relationships from it,
+and SHOULD check before the run that it provides every listed agent; a listed
+agent it does not provide is V107 at `agents[i]`.
+
+In a workflow that declares `agents`:
+
+- **Only listed agents.** A literal `agent` that is not listed is V107. The
+  executor refuses a computed `agent` that is not listed, before delegating
+  (R402).
+- **Target maxima.** A `delegate` step's *target maxima* are, for a literal
+  `agent`, its manifest's maxima, and for a computed one, the join of the
+  maxima of every listed agent. A step that binds a literal `read_only: true`
+  takes read-only maxima instead. The target maxima are *unknown* when the
+  manifest of an agent concerned is not given or lists a capability the
+  ontology does not define (V101 at the step's `agent`, §5.15.1).
+- **Flags.** For such a step, the ontology values of §5.2.1 are the stricter
+  of the `delegate` node's and the target maxima. So a delegation to an agent
+  that may `mutate` needs a checkpoint running before it (F501) and an
+  approval (§5.14), and a declaration weaker than the target maxima is W602.
+- **Unknown targets.** An executor MUST NOT delegate for a step whose target
+  maxima are unknown: it fails the step before asking the host (R402). Its
+  flags were computed without its target.
+- **Approval.** An `approval` block on a `delegate` step is not S303 even
+  where the target maxima the validator was given do not raise
+  `requires_approval`: whether they do depends on the host's manifests. It
+  applies whenever they do.
+- **Tasks.** For a literal `agent` whose manifest declares `task`, a literal
+  `task` mapping that gives a name the manifest does not declare is S303
+  (with no `x-` exemption: these are the agent's inputs), and one that lacks a
+  required input is S304. The executor refuses both before delegating
+  (R402), so a `task` given by reference, and a computed `agent`, are checked
+  then.
+- **When.** The executor makes these refusals once the step's inputs are
+  resolved, before it asks for approval or uses a checkpoint: a delegation it
+  will refuse is never put to an approver and uses no checkpoint. Refused so,
+  the step is not retried (§5.2): another attempt would be refused the same
+  way.
+
+A workflow that does not declare `agents` keeps the `delegate` node's flags
+for its delegate steps, as in 1.1.
+
+**Read-only.** A host that receives a delegation with `read_only: true` and
+cannot enforce it MUST refuse the delegation (`accepted` not `true`) instead
+of running it. In a workflow that targets 1.2 or later, an accepted
+delegation whose resolved `read_only` is `true` fails (R402) unless its host
+attests `effective.read_only: true`; `retry` does not apply to this failure
+(§5.2): the delegate has already run without the checkpoint and approval its
+flags were relaxed from, and another attempt would hand its host another
+unchecked delegation.
+
+In a workflow that targets 1.2 or later:
+
+- a `delegate` step whose target maxima are unknown is W621
+  (`UNBOUNDED_DELEGATION`) when the workflow declares `agents` (the executor
+  will not delegate there without the manifests), and, in a workflow that
+  does not, when the step binds no literal `read_only: true` and its
+  effective `requires_approval` is false (the delegate may act on the world
+  with no checkpoint or approval). Declare `agents` and give their manifests,
+  bind `read_only: true`, or require approval;
+- a `delegate` step whose `agent` is not a literal, in a workflow that
+  declares no `agents`, is W622 (`UNDECLARED_DELEGATE`): a host that composes
+  agents statically cannot check the target before the run.
 
 #### 5.15.3 Continuing a Delegation
 
-<!-- owner: S3; text: S3.md part 2.15 -->
+A `delegate` step may bind `continues`: the `task_id` of an earlier delegation
+(`${review_a.task_id}`, or an input) whose delegate the host continues
+instead of starting a new one. The delegate keeps what it did before, so:
+
+- a step that binds `continues` and a literal `fresh_context: true` is S303.
+  A reviewer that binds `continues` therefore never satisfies a quorum's
+  `require_fresh_context` (§5.16), which asks every reviewer for a literal
+  `fresh_context: true`;
+- a delegation whose resolved `continues` is a string fails (R402) if its
+  host attests `effective.fresh_context: true`.
+
+`continues` that resolves to null delegates anew, as if it were not bound.
+
+Every delegation call returns a `task_id` of its own, a continuation
+included: never the `task_id` it continues (the step fails, R402, if it
+does). `continues` may name the `task_id` of any earlier call that started
+or continued the delegate; the host maps it to that delegate. So the
+correlation of a waiting delegate (§5.13) matches only this call's result,
+and `replaces` names one call. A host that cannot continue the delegate
+refuses (`accepted` not `true`, or an `Error`). A retry or loop of the step
+passes the same `continues` and names the call it replaces; the host cancels
+that call's work, not the delegate it continued.
 
 #### 5.15.4 Checkpoints Across a Delegation
 
@@ -1446,7 +1780,7 @@ drops it. The identity behind a principal, and checks on it, are §5.17
 | `require_fresh_context` | Every reviewer binds `fresh_context: true` (F504 otherwise) |
 | `require_read_only` | Every reviewer binds `read_only: true` (F504 otherwise) |
 | `require_distinct_identities` | `identity@1` (else V106): every reviewer waits for its own result and every `verdicts` reference reads a reviewer's own result (else S303: a verdict from a shared inbox or an input could claim any reviewer's name), and a verdict counts only if it was read so and its reviewer's host attested an identity (`effective.identity`, §5.17) whose principal no other counted reviewer has |
-| `require_model_families` | Families the reviewers must cover; F504 when every reviewer binds a literal family and they do not cover the set (otherwise checked at runtime). Only an attested family covers one: `effective.model_family`, or the attested identity's; a family a reviewer asks for that its host does not attest covers nothing |
+| `require_model_families` | Families the reviewers must cover, compared exactly (§5.15); F504 when every reviewer binds a literal family and they do not cover the set (otherwise checked at runtime). Only an attested family covers one: `effective.model_family`, or the attested identity's; a family a reviewer asks for that its host does not attest covers nothing |
 | `min_full` | Passing verdicts whose `scope` is `full` needed: 1 ≤ `min_full` ≤ number of reviewers. These are passes too, so a `min_full` above `min_pass` raises the passes needed |
 
 A missing required field is S304; a malformed value is S303; `verdicts` and
@@ -1489,7 +1823,8 @@ model-family coverage holds; otherwise F504. The output gains `tally`
 An **agent identity** (`schemas/agent_identity_schema.yaml#/agent_identity`)
 says who a party is, as the host authenticated it: its `principal` (§5.15),
 its `kind` (`agent`, `human` or `service`), and optionally its `role`,
-`model_family`, `owner` (the principal it acts for), `authenticated_by` (how
+`model_family` (§5.15), `model_id` (the provider's identifier of the model it
+ran on), `owner` (the principal it acts for), `authenticated_by` (how
 the host authenticated it: `session_id`, `chat_user_id`, `code_host_login`,
 `directory_id`, `api_key`, `signed_token`, or an `x-` vendor value) and
 `trust_class` (`owner`, `decision_person`, `system_of_record`,
@@ -1533,8 +1868,9 @@ to: the executor reads the always-ask classes from it.
 **Delegation.** A delegation's host may attest who took it:
 `effective.identity`, an `agent_identity`. Read only with `identity@1`
 declared, it MUST be one (else R402, and the delegation fails as any
-step does), and its `model_family` and `role`, where given, MUST equal
-`effective.model_family` and `effective.role` (else R402). A waiting
+step does), and its `model_family`, `model_id` and `role`, where given, MUST
+equal `effective.model_family`, `effective.model_id` and `effective.role`
+(else R402). A waiting
 `delegate` (§5.13) then keeps only results whose principal is that
 identity's: any other is dropped and counted (reason `delegate_identity`),
 and the wait goes on; the wait's `AwaitEvent` names the principal as
@@ -1650,7 +1986,7 @@ A **tool binding** is a record (`schemas/interop/tool_binding.schema.json`):
 | `ontology` | string | Yes | The ontology version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
 | `standard` | string | No | The Standard version the record was written against (`MAJOR.MINOR[.PATCH]`, §11.6) |
 | `capability` | string | No | The capability the tool performs; required unless `control` is true |
-| `domain` | string | No | The capability's domain parameter |
+| `domain` | string | No | The capability's domain parameter: a domain id (§5.2.4) |
 | `flags` | object | No | Declared safety flags: `risk`, `mutation`, `requires_checkpoint`, `requires_approval` (§5.2.1) |
 | `additional_capabilities` | array | No | Other capabilities the same call performs (§5.18.3) |
 | `classifier` | string | No | Names the classifier a layer applies to each call (§5.18.3) |
@@ -2029,7 +2365,7 @@ terminal action (`Completed` or `Failed`). Every action carries:
 
 | Action | The host | Responses |
 |--------|----------|-----------|
-| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none, §5.2), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§5.20, §6.5); absent, it attests nothing), `Error` |
+| `InvokeCapability` | performs `capability` with `inputs` for `step`, for the step's `domain` (null when it declares none; the host selects an implementation for it as §5.2.4 says), by `deadline` when it is not null; `attempt` counts attempts from 1 (§5.2), and `replaces` names a delegation this one replaces (§5.13) | `Output` (`value`: the capability's output, an object with the fields its contract requires, else the step fails R402; a host that gets the output as text decodes it as §5.18.9 says; and, optionally, `evidence_seen`: the refs of the evidence the host attests the output's producer had for this answer (§5.20, §6.5); absent, it attests nothing), `Error` |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `Checkpoint` (`checkpoint_id`), `Error` (the step fails F501) |
 | `Rollback` | restores `checkpoint_id` | `RolledBack`, `Error` (the run ends F503) |
 | `RequestApproval` | asks `approver`, in `mode`, about `shown`, by `expires_at` when it is not null (§5.14) | `Decision` (`decision_id`, `decision`, `approvers`, `digest`) |
@@ -3137,6 +3473,11 @@ An implementation is conformant at a given level if it:
 - Validates all store_as identifiers are unique
 - Resolves effective safety flags and reports downgrades (§5.2.1)
 - Reports unknown fields and the standard version (§11.3, §11.5)
+- Checks catalog manifests and resolves `invoke` targets over the catalog set
+  it is given (§5.1.1)
+- Given agent manifests, raises the flags of `delegate` steps and checks
+  their targets and tasks in workflows that declare `agents` (§5.15.2)
+- Reports diagnostic locations with their `path` (§9.8)
 
 **L2 (Schema)**
 - Resolves all $ref schema references
@@ -3200,6 +3541,20 @@ digests MUST produce each vector's `canonical` text and `digest` from its
 that vector's `inputs` or `bindings` and its `recheck_read`, that vector's
 `shown` values, and a layer (§5.18) MUST show, for each `tool_call` vector's
 call, that vector's `shown` values.
+
+A fixture's expectations MAY name `catalogs` (further catalog files of its
+catalog set, §5.1.1) and `agents` (agent manifest files, §5.15.1) to validate
+it with, and `expected_locations`: diagnostics, each a `code` and a `path`,
+that it MUST produce among the codes it expects. Runtime fixtures MAY carry
+`catalogs` (each a catalog with its `header`, a version or null, always
+given as for the primary catalog, §11.5) and `agents` (manifests)
+likewise. Four sets of vectors are language-neutral and normative for what
+they state: `tests/conformance/domains/match.json`, the implementation a host
+selects for a step's domain (§5.2.4); `tests/conformance/agents/maxima.json`,
+the maxima, read-only maxima and joins of agent manifests (§5.15.1);
+`tests/conformance/families/derive.json`, the model family a host derives
+from a model identifier (§5.15); and `tests/conformance/inquiry/answers.json`,
+the answers a host may deliver for an inquiry (§5.13.1).
 
 Grounding vectors (`tests/conformance/grounding/check.json`) state the check
 of §5.20 for one output at a time: an executor that accepts `grounding@1`,
@@ -3289,6 +3644,9 @@ An executor conforms to class EX when it:
   define and a `reason` outside §5.19.7;
 - keeps time, saves and restores, and cancels as §5.19.3–§5.19.5 say, and
   writes action records as §6.4 says, in both record modes;
+- does not delegate for a `delegate` step whose target maxima are unknown,
+  and fails an unattested `read_only` delegation without retrying it
+  (§5.15.2);
 - passes every runtime fixture whose declared extensions it implements.
 
 **Runtime fixtures.** A fixture
@@ -3864,7 +4222,43 @@ Clarifications of 1.1 semantics apply to 1.0 and 1.1 workflows too.
 - Ontology 2.2.0: `audit` input `require_record` and output `record`
 
 ### D.4 Delegation, catalogs and diagnostics (RFC-0007)
-<!-- owner: S3; entries: S3.md part 2.24 -->
+
+**Clarifications of 1.1 semantics** (apply to 1.0, 1.1 and 1.2 workflows):
+
+| Area | 1.1.0 text | 1.2.0 |
+|------|------------|-------|
+| `conflicts_with` scope | "May not run concurrently" | Never in one `parallel_group` of a workflow; the rule does not reach across runs or agents, and a host SHOULD serialise a `rollback` with `mutate` and `persist` on the same state (§4.3) |
+| Model families | Compared exactly by the reference, not stated | Exact (code-point) comparison everywhere; lowercase `[a-z][a-z0-9_-]*` (§5.15) |
+| `read_only` | "must not change anything", enforcement not stated | A host that cannot enforce it refuses the delegation (§5.15.2) |
+| Diagnostic `location` | Shown by example | Every key defined: `step` zero-based in list order, `field` relative to the step, else the workflow, else the document; `column` in code points (§9.8) |
+| The workflow-level `domain` | Listed as recognised | Descriptive: the domain of the profile the workflow is written for (§5.1) |
+
+**New in 1.2.0:**
+- Catalog manifests, catalog sets and qualified workflow ids for `invoke`,
+  with exports (§5.1.1); workflow names SHOULD be identifiers (W620)
+- Agent manifests (`schemas/agent_manifest_schema.yaml` 1.0.0, §5.15.1); the
+  workflow field `agents` (1.2 workflows only), which bounds the targets of
+  `delegate` steps, raises their flags to what the targets may do, stops the
+  executor from delegating when the targets' manifests are missing, and
+  checks tasks (§5.15.2); an unattested `read_only` fails a 1.2 delegation
+  without retry (§5.15.2); the `delegate` input `continues`, with a
+  `task_id` of its own for every call (§5.15.3)
+- Model families derived from the model identifier by one rule (§5.15);
+  `agent_identity_schema.yaml` 1.1.0, the world state's `AgentIdentity`
+  (`world_state_schema.yaml` 1.2.0) and `delegate.effective` gain
+  `model_id` (§5.17)
+- Step `domain` ids and the host's selection rule (§5.2.4)
+- Answers to an inquiry (§5.13.1): ontology 2.2.0 adds `inquire.inquiry_id`,
+  question `id` and `answer_type`, and `receive` items' `inquiry_id` and
+  `answers`
+- Diagnostic locations with `path` (RFC 6901) and `catalog`, and for
+  findings about profiles and tools (§9.8); implementation-defined codes
+  keep out of the standard form (§9.1)
+- Codes W620–W623; V107, V109 and W607 cover catalog sets and delegation
+  targets (§9)
+- Conformance: fixture keys `catalogs`, `agents`, `expected_locations`;
+  vectors for domain selection, agent maxima, model families and inquiry
+  answers (§10.3)
 
 ### D.5 Evidence, grounding and secrets (RFC-0008)
 
