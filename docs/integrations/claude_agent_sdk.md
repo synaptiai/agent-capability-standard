@@ -190,7 +190,7 @@ A tool registered with no capability is unbound too, and is reported as W617 (`U
 
 Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability. A command whose effect the mapper does not know gets Bash's worst case, `mutate` and `send` (`execute` and `send` for an interpreter): it may transmit anywhere, so a destination policy refuses it (below).
 
-The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line gets the worst case when it redirects output to anything but `/dev/null` (or input from `/dev/tcp/`), opens a subshell or a here-document, has an unbalanced quote, or expands what the mapper cannot see: a `$` outside single quotes, a brace expansion, backticks, `eval` or `source`. An allow-listed command is read-only only with the arguments it reads with: `sort`, `uniq`, `date`, `hostname` and `file` take a listed set of options and operands (`sort -o` or `--compress-program`, `uniq IN OUT`, `date -s`, `hostname NAME`, `file -C` and any abbreviation of a writing option, `sort --o=x`, write); `find -delete` or `-exec`, `git ... --output` (or an abbreviation), `git branch NAME`, `git remote` other than `-v` or `get-url`, and `less -o` write or ask another host, as do `pip list`, `pip show` and `npm list` with an option off their lists; and an unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`, `hostname`, `file`, `git`, `less` or `more` command may become an option (quote a pattern: `git log -- '*.py'`). `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
+The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line gets the worst case when it redirects output to anything but `/dev/null` (or input from `/dev/tcp/`), opens a subshell or a here-document, has an unbalanced quote, or expands what the mapper cannot see: a `$` outside single quotes, a brace expansion, backticks, `eval` or `source`. An allow-listed command is read-only only with the arguments it reads with: `sort`, `uniq`, `date`, `hostname` and `file` take a listed set of options and operands (`sort -o` or `--compress-program`, `uniq IN OUT`, `date -s`, `hostname NAME`, `file -C` and any abbreviation of a writing option, `sort --o=x`, write); `find -delete` or `-exec`, `git ... --output` (or an abbreviation), `git branch NAME` and `git remote` other than `-v` or `get-url` write or ask another host, as do `pip list` and `pip show` with an option off their lists; and an unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`, `hostname`, `file` or `git` command may become an option (quote a pattern: `git log -- '*.py'`). `sed`, `awk`, `env`, `less` and `more` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
 
 **`git stash`**, only when the line is exactly one simple command with no option that writes: `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, and `git stash pop <commit>` and `git stash apply <commit>` are `rollback` when `<commit>` is the full id of a commit a checkpoint of this adapter's scope recorded (the commit `git stash create` printed, kept as the checkpoint's `metadata["commit"]`). git applies any merge commit as if it were a stash, so any other revision, an abbreviated id, an option, a bare `pop` or `apply` (which read `refs/stash`, where `git stash create` writes nothing), any other form (`store`, `push`, `drop`, none) and `git -C dir stash ...` are a gated mutation.
 
@@ -199,16 +199,18 @@ The command line is read with the shell's quoting rules and split into simple co
 | Pattern | Capability | Risk | Checkpoint | Approval |
 |---------|-----------|------|------------|----------|
 | `ls`, `cat`, `head`, `pwd` | observe | low | No | No |
-| `git status`, `git log`, `git rev-parse`, `git ls-files` | observe | low | No | No |
+| `git status`, `git log`, `git rev-parse`, `git ls-files` (not in a partial clone) | observe | low | No | No |
 | `git stash create` | checkpoint | low | No | No |
 | `git stash pop <commit>`, `git stash apply <commit>`, a commit a checkpoint recorded | rollback | medium | No (one taken earlier) | No |
 | `git stash pop`, `git stash apply` of anything else | mutate | high | Yes | Yes |
 | `rm`, `mv`, `chmod`, `git stash push` | mutate | high | Yes | Yes |
 | `curl -X POST`, `ssh` | send | high | Yes | Yes |
 | `git push`, `npm publish`, `docker push`, `kubectl apply` | mutate, send | high | Yes | Yes |
-| Asking another host: `npm view`, `kubectl get`, `git remote show`, `pip list --outdated`, `npm list --registry=…`, `cat < /dev/tcp/…` | mutate, send | high | Yes | Yes |
+| Asking another host: `npm view`, `npm list`, `kubectl get`, `docker ps`, `git remote show`, `pip list --outdated`, `cat < /dev/tcp/…`, a git read in a partial clone | mutate, send | high | Yes | Yes |
 | `python -c`, `node -e`, `python script.py` | execute, send | high | Yes | Yes |
-| any other command (`sed`, `awk`, `env`, `curl URL`, `gh`, `make`) | mutate, send | high | Yes | Yes |
+| any other command (`sed`, `awk`, `env`, `less`, `curl URL`, `gh`, `make`), and one over 4096 bytes | mutate, send | high | Yes | Yes |
+
+**In a partial clone** git fetches what a read lacks from the promisor remote, sending it the object id the command names: there, or where git cannot say, a git command that would only read (`git log`, `git stash show`, ...) gets the worst case. The adapter asks about the call's directory, the hook input's `cwd`, which `mapper.map_tool(tool, args, cwd)` also takes. `git stash create` and the restore of a recorded checkpoint keep their classes.
 
 ### MCP Tool Mapping
 

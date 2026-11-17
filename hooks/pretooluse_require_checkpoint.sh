@@ -37,7 +37,8 @@
 #         (--compi); and, for git and file, a word with an unquoted *, ? or
 #         [, which bash replaces with file names, options included: mutate;
 #       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
-#         writes the marker once it succeeded); git stash list|show: observe;
+#         writes the marker once it succeeded); git stash list|show: observe
+#         (mutate where git may fetch, below);
 #         git stash pop|apply <commit>: rollback when <commit> is the full id
 #         of a commit posttooluse_take_checkpoint.sh entered in the project's
 #         git directory (<git dir>/acs/checkpoints/commits/, a lookup of one
@@ -45,7 +46,9 @@
 #         project's repository (its cwd); any other pop or apply, a bare one
 #         included, is mutate, since git applies any merge commit as if it
 #         were a stash; any other git stash form: mutate;
-#       - a command on READ_ONLY: observe (allowed, nothing used);
+#       - a command on READ_ONLY: observe (allowed, nothing used), except a
+#         git command where git may fetch from another host (git_may_fetch:
+#         the call's cwd is in a partial clone, or git cannot say): mutate;
 #       - anything else: mutate.
 #   - Any other tool (Monitor, PowerShell, ExitWorktree, every MCP tool, a
 #     tool this hook does not know): unbound, so mutate (§5.18.2: a layer
@@ -184,6 +187,23 @@ long_option_of() {
   return 1
 }
 
+# Whether git, run where this call runs (its cwd, else the project directory),
+# may ask another host for an object it reads: in a partial clone (a promisor
+# remote, or extensions.partialClone naming one) git fetches each object it
+# lacks from the promisor remote, so a read such as `git show <id>` or `git
+# log -p` reaches that host, and the object id the agent chose goes to it
+# (§5.18.3: a request to another system). Read from the configuration git
+# itself reads there; anything git does not answer counts as yes. The SDK
+# mapper asks the same (git_may_fetch).
+git_may_fetch() {
+  local dir found status=0
+  dir=$(printf '%s' "$payload" | jq -r '.cwd // "" | strings' 2>/dev/null) || return 0
+  dir="${dir:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+  command -v git > /dev/null 2>&1 || return 0
+  found=$(git -C "$dir" config --get-regexp '^(remote\..+\.promisor|extensions\.partialclone)$' 2>/dev/null) || status=$?
+  [ "$status" != 1 ] || [ -n "$found" ]
+}
+
 # Whether one simple command, given as its words, has an option that writes:
 # the mapper's _writes rules for the commands on READ_ONLY. GLOBBED (set by
 # split_words): a word bash expands may be any option.
@@ -233,7 +253,9 @@ classify_bash() {
   if [ "${words[0]}" = "git" ] && [ "${words[1]:-}" = "stash" ]; then
     for entry in "${GIT_STASH_CLASSES[@]}"; do
       if [ "${entry%%=*}" = "${words[2]:-}" ]; then
-        if [ "${entry#*=}" != "rollback" ]; then
+        if [ "${entry#*=}" = "observe" ] && git_may_fetch; then
+          echo mutate
+        elif [ "${entry#*=}" != "rollback" ]; then
           echo "${entry#*=}"
         elif [ "${#words[@]}" -eq 4 ] && [[ "${words[3]}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
           echo "rollback ${words[3]}"
@@ -248,7 +270,11 @@ classify_bash() {
   fi
   for entry in "${READ_ONLY[@]}"; do
     if [ "$entry" = "${words[0]}" ] || [ "$entry" = "${words[0]} ${words[1]:-}" ]; then
-      echo observe
+      if [ "${words[0]}" = "git" ] && git_may_fetch; then
+        echo mutate
+      else
+        echo observe
+      fi
       return
     fi
   done

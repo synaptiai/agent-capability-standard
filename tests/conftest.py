@@ -13,6 +13,9 @@ approval rule (the default, ``approval="ask"``) is tested with
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -106,3 +109,43 @@ class FakeClock:
 def fake_clock() -> FakeClock:
     """A clock that stands still until the test advances it."""
     return FakeClock()
+
+
+def _git(cwd: Path, *args: str) -> str:
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+    done = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return done.stdout
+
+
+@pytest.fixture
+def partial_clone(tmp_path: Path) -> Path:
+    """A partial clone (`git clone --filter=blob:none`) of a repository of
+    two commits, served over file://: its remote is a promisor remote, and
+    it lacks the blob of big.txt at HEAD~1 until a command reads it (git
+    then fetches it from the remote, as it would from another host)."""
+    if shutil.which("git") is None:
+        pytest.skip("needs git")
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-q")
+    for content in ("first", "second"):
+        (source / "big.txt").write_text(content + "\n", encoding="utf-8")
+        _git(source, "add", "big.txt")
+        _git(source, "commit", "-q", "-m", content)
+    _git(source, "config", "uploadpack.allowFilter", "true")
+    _git(tmp_path, "clone", "-q", "--filter=blob:none", source.as_uri(), "clone")
+    return tmp_path / "clone"
+
+
+def missing_objects(repository: Path) -> int:
+    """How many objects a partial clone lacks (git rev-list --missing)."""
+    listed = _git(repository, "rev-list", "--objects", "--missing=print", "--all")
+    return sum(line.startswith("?") for line in listed.splitlines())

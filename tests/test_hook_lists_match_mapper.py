@@ -129,13 +129,17 @@ def test_read_only_in_both(tmp_path: Path, command: str) -> None:
     assert result.returncode == 0
 
 
-def _hook(tmp_path: Path, command: str) -> subprocess.CompletedProcess[str]:
+def _hook(
+    tmp_path: Path, command: str, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
-    payload = {
+    payload: dict[str, object] = {
         "tool_name": "Bash",
         "tool_input": {"command": command},
         "permission_mode": "bypassPermissions",
     }
+    if cwd is not None:
+        payload["cwd"] = str(cwd)
     return subprocess.run(
         ["bash", str(HOOK)],
         input=json.dumps(payload),
@@ -203,3 +207,94 @@ def test_both_checkpoint_hooks_split_words_alike() -> None:
     pre_fn, take_fn = pattern.search(TEXT), pattern.search(take)
     assert pre_fn and take_fn
     assert pre_fn.group(0) == take_fn.group(0)
+
+
+needs_git_and_jq = pytest.mark.skipif(
+    shutil.which("jq") is None or shutil.which("git") is None,
+    reason="the hook needs jq; a repository needs git",
+)
+
+
+@needs_git_and_jq
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git show HEAD~1:big.txt",
+        "git show 7365637265742d646174612d6c65616b65642121",
+        "git log -p",
+        "git diff HEAD~1 --stat",
+        "git status",
+        "git stash list",
+        "git stash show -p",
+    ],
+)
+def test_a_git_read_in_a_partial_clone_is_gated_in_both(
+    tmp_path: Path, partial_clone: Path, command: str
+) -> None:
+    """In a partial clone git fetches what a read lacks from the promisor
+    remote (STANDARD 1.2.0 section 5.18.3): the call's directory, the hook
+    input's `cwd`, decides it in both layers."""
+    project = tmp_path / "project"
+    project.mkdir()
+    for cwd in (partial_clone, partial_clone / "sub"):
+        cwd.mkdir(exist_ok=True)
+        classified = mapper.ToolCapabilityMapper().map_tool(
+            "Bash", {"command": command}, str(cwd)
+        )
+        assert classified.capabilities == ("mutate", "send"), command
+        result = _hook(project, command, cwd)
+        assert result.returncode == 2, command
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+
+@needs_git_and_jq
+def test_without_a_cwd_the_hook_asks_about_the_project(
+    tmp_path: Path, partial_clone: Path
+) -> None:
+    result = _hook(partial_clone, "git log -p")
+    assert result.returncode == 2
+    assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+
+
+@needs_git_and_jq
+def test_a_directory_git_cannot_answer_for_is_gated_in_both(tmp_path: Path) -> None:
+    missing = tmp_path / "no-such-directory"
+    classified = mapper.ToolCapabilityMapper().map_tool(
+        "Bash", {"command": "git log"}, str(missing)
+    )
+    assert classified.capabilities == ("mutate", "send")
+    result = _hook(tmp_path, "git log", missing)
+    assert result.returncode == 2
+    assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+
+
+@needs_git_and_jq
+def test_in_a_full_clone_and_for_other_commands_both_observe(
+    tmp_path: Path, partial_clone: Path
+) -> None:
+    full = tmp_path / "full"
+    full.mkdir()
+    subprocess.run(["git", "init", "-q", str(full)], check=True, timeout=60)
+    for cwd, command in (
+        (full, "git log -p"),
+        (full, "git stash list"),
+        (partial_clone, "ls -la"),
+    ):
+        classified = mapper.ToolCapabilityMapper().map_tool(
+            "Bash", {"command": command}, str(cwd)
+        )
+        assert classified.capabilities == ("observe",), command
+        assert _hook(tmp_path, command, cwd).returncode == 0, command
+
+
+@needs_git_and_jq
+def test_a_checkpoint_stays_possible_in_a_partial_clone(
+    tmp_path: Path, partial_clone: Path
+) -> None:
+    """`git stash create` reads only what the local state holds: it keeps
+    its class in both, so the plugin can still take a checkpoint there."""
+    classified = mapper.ToolCapabilityMapper().map_tool(
+        "Bash", {"command": "git stash create"}, str(partial_clone)
+    )
+    assert classified.capabilities == ("checkpoint",)
+    assert _hook(tmp_path, "git stash create", partial_clone).returncode == 0

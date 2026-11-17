@@ -384,3 +384,217 @@ No version changes.
   not run (no Chromium here); the enforced page touched,
   /guides/claude-agent-sdk/, gains one entry with a fence in its
   Troubleshooting run, an exempt run of that form.
+
+### Batch 2: five reported defects
+
+Security round 1's second batch: five defects an independent verifier
+reproduced on 99c37dd. Two were already fixed on this tree by the round's
+first commit (b61b3b1); the other three, and two siblings found while
+fixing them, are fixed here. Each fix has tests that fail on the code
+before it (run with the old mapper, adapter and hook restored: 53 of the
+new tests failed, 4 of them controls that fail there only because
+`map_tool` took no `cwd`; the rest are controls that pass on both).
+
+#### Already fixed: the log hook's jq depth limit, the hook's maximum age
+
+- "Audit log hook drops a call silently when its JSON nests past jq's parse
+  depth" is item 5 above. The reporter's probe on this tree: depths 254,
+  300 and 10,000 in `tool_input`, and 300 in `tool_response`, each exit 1
+  with "the hook input could not be parsed (jq: parse error: Exceeds depth
+  limit ...) ... this tool call was not logged"; the tests of item 5 pass.
+- "Pre-tool-use hook ignores the configured ACS_CHECKPOINT_MAX_AGE" is item
+  6. The reporter's probe (a marker 600 s old with 1200 s left, the setting
+  60): F501 "checkpoint has expired", the marker filed under `ended/`;
+  `test_the_layer_maximum_age_applies_to_a_marker_written_under_a_longer_one`
+  passes.
+
+#### 11. less and more were read-only in the SDK mapper (high)
+
+`_READ_ONLY_COMMANDS` held `less` and `more`, and `_writes` refused only
+the less options it knew wrote (`+cmd`, `-o`, `-O`, `--log-file`). less
+reads a lesskey source (`-k FILE`, `--lesskey-file`, `--lesskey-src`,
+`--lesskey-content`, or any abbreviation, `--lesskey-s=`), whose `#env`
+section sets `LESSOPEN`, which less runs when it opens a file, a pipe
+included: `printf '#env\nLESSOPEN=|cmd; cat %%s\n' | less
+--lesskey-src=/dev/stdin f` ran `cmd` with no checkpoint, no approval and no
+destination check (the verifier ran a payload that wrote an environment
+secret to a file and one that would send it with wget; the adapter allowed
+both under `allowed_destinations`). The plugin hook never listed them.
+
+- Root cause: an allow-listed command whose options were refused by a
+  deny-list, against §5.18.3's worst case for any argument the classifier
+  does not recognise; and a pager's behaviour also depends on files the
+  classifier cannot read (`LESSOPEN` in the environment, a lesskey file in
+  the home directory; macOS's `more` is less). Fix (`mapper.py`): `less`
+  and `more` are off the list (and off `_ARGUMENT_WRITERS`, and `_writes`
+  loses their rules): each is Bash's worst case, `mutate` and `send`. An
+  agent has no terminal to page on; `cat` and `head` read the same.
+- Tests (`tests/test_bash_classification.py`): `test_a_pager_is_not_read_only`
+  (11: the pipe, a file, a compiled file, abbreviations, `less f`, `more
+  f`, `cat f | more`; all failed before) and three more cases in
+  `test_a_destination_policy_refuses_them` (the pipe, through the adapter
+  with `allowed_destinations`: F504).
+
+#### 12. git reads in a partial clone reach the promisor remote (medium)
+
+In a partial clone, git fetches each object it lacks from the promisor
+remote when a command reads it. `git show`, `git log -p` and `git diff`
+were `observe` in both the mapper and the hook, so they reached that host
+with no checkpoint, no approval and no destination check, and `git show
+<any full id>` sent the 20 bytes the agent chose (the verifier's
+GIT_TRACE_PACKET showed the `want` line). Reproduced here with a `file://`
+partial clone: `git show HEAD~1:big.txt` and `git log -p` fetched (the
+missing objects went from 2 to 1 to 0); `git stash create` and `git stash
+apply <that commit>` fetched nothing.
+
+- Fix, in both layers alike: a git command the allow-list reads as
+  `observe` (one on the read-only list, `git stash list`, `git stash
+  show`) gets the worst case where git may fetch: `git -C <dir> config
+  --get-regexp '^(remote\..+\.promisor|extensions\.partialclone)$'` finds a
+  key, or exits with anything but 1 (no git, no such directory, a
+  configuration git cannot read). `<dir>` is the call's directory: the hook
+  reads the payload's `cwd` (else the project directory); the mapper's
+  `map_tool(tool, args, cwd=None)` takes it (None: the process's working
+  directory) and asks `mapper.git_may_fetch(cwd)` (a function that raises
+  counts as yes). `git stash create` and the restore of a recorded
+  checkpoint keep their classes: they read only what the local state holds
+  (the probe above), and gating `git stash create` would leave the plugin no
+  way to take a checkpoint in a partial clone.
+- The adapter passes the hook input's `cwd` from PreToolUse, PostToolUse and
+  PostToolUseFailure. The permission callback's context carries none, so
+  the PreToolUse hook keeps each call's `cwd` by call id
+  (`_call_dirs`, dropped when the call reports back or at a boundary) and
+  the callback classifies the call there: without it, the callback would
+  read a call the hook put to a person as an observation and allow it.
+- Cost: one `git config` for a git command that would observe (the hook's
+  run went from 14 ms to 22 ms; the mapper's from under 1 ms to 3 to 10
+  ms).
+- Tests: a `partial_clone` fixture in `tests/conftest.py` (two commits
+  served over `file://`, cloned with `--filter=blob:none`);
+  `TestPartialClone` in `tests/test_bash_classification.py` (the fixture
+  fetches what a read lacks; nine git reads, in the clone and a
+  subdirectory, are the worst case; a full clone observes; `git stash
+  create` and a recorded restore keep their classes; a missing directory,
+  a lookup that raises and no git are the worst case; a destination policy
+  refuses `git show <id>` with F504 through the adapter; the permission
+  callback refuses with F502 what the hook put to a person), and in
+  `tests/test_hook_lists_match_mapper.py` the same in both layers (seven
+  reads gated in both, the project directory when the payload has no
+  `cwd`, a missing directory, a full clone and `ls` observe, `git stash
+  create` still a checkpoint).
+
+#### 13. A quoted run of blanks made the SDK classifier quadratic (low)
+
+`_DESTRUCTIVE_PATTERNS`' alternative `\s+(>|>>)\s`, matched against a
+command's joined words, was retried from every blank of a run and
+backtracked over the run: `ls "` + 40,000 blanks + `"` took 7 to 8 s, and
+each call is classified by several hooks. The verifier showed that an
+overrun is refused by the CLI (§5.18.8), so this was a bound, not a
+fail-open path.
+
+- Fix (`mapper.py`): a command over 4096 UTF-8 bytes (the plugin hook's
+  bound, counted alike) is the worst case before any pattern runs; and the
+  alternative is gone: `_simple_commands` reads the line's redirections and
+  gives an output redirection to anything but `/dev/null` the worst case
+  first, so it only matched a quoted `>` in an argument (`grep " > " f`,
+  `mutate` before, `observe` now). At the bound the slowest form measured
+  (repeated `awk ` words) takes 34 ms, a quoted run of blanks 3 ms.
+- Tests: `test_a_command_over_4096_bytes_is_the_worst_case_at_once` (four,
+  within 1 s; all failed before), `test_a_command_of_4096_bytes_is_still_read`
+  (blanks and two-byte characters at exactly 4096 bytes are read; 4098
+  bytes in 2052 characters are not; failed before), and `grep " > "
+  notes.txt` in `test_read_only_arguments_stay_read_only`.
+
+#### 14. npm list sent a project's registry token to the registry it names (high; sibling of 12)
+
+Found while fixing 12: another read-only entry that reaches a host its
+configuration names. `npm list` was read-only with listed options, but
+npm's update check runs with plain `npm list` and asks the registry the
+configuration names, a project's `.npmrc` included (repository content),
+with the token that file gives for it, `${ENV}` expanded. Reproduced with
+npm 11.20.0 and a local listener: a project `.npmrc` of
+`registry=http://127.0.0.1:18765/` and
+`//127.0.0.1:18765/:_authToken=${FAKE_SECRET}` made `npm list` send `GET
+/npm` with `Authorization: Bearer s3cr3t-token`. It was `observe`: no
+approval, no destination check.
+
+- Fix: `npm list` is off the list (with its `_SUBCOMMAND_OPTIONS` entry),
+  as `npm view` already was: the worst case. The plugin hook never listed
+  it.
+- Tests: `npm list`, `npm list --depth=0 --json` and `npm list -g --all`
+  moved from `test_local_forms_of_those_commands_stay_read_only` to
+  `test_a_command_that_reaches_another_host_gets_the_worst_case`, and `npm
+  list` joins `test_a_destination_policy_refuses_them`; all failed before.
+  `pip list` and `pip show` stay as round 2 left them: pip reads no
+  project-level configuration.
+
+#### 15. docker ps, images and logs reach the daemon DOCKER_HOST names (medium; sibling of 12)
+
+The same class, as `kubectl get` was in round 2: the daemon is the one
+`DOCKER_HOST` or the docker context names, over tcp or ssh (which runs ssh
+with its configuration). Reproduced: with `DOCKER_HOST=tcp://127.0.0.1:18766`
+a listener logged `/v1.56/containers/secret-data-leaked/json` for `docker
+logs secret-data-leaked`, a name the agent chose.
+
+- Fix: `docker ps`, `docker images` and `docker logs` are off the list:
+  the worst case. The plugin hook never listed them.
+- Tests: three cases in
+  `test_a_command_that_reaches_another_host_gets_the_worst_case` and `docker
+  logs` in `test_a_destination_policy_refuses_them`; all failed before.
+
+#### Siblings checked
+
+- The rest of the mapper's read-only list (`ls`, `cat`, `head`, `tail`,
+  `file`, `stat`, `du`, `df`, `pwd`, `whoami`, `hostname`, `uname`, `date`,
+  `cal`, `printenv`, `echo`, `printf`, `which`, `whereis`, `locate`, `find`,
+  `grep`, `cut`, `sort`, `uniq`, `wc`, `diff`, `cmp`, `comm`, `tr`, `git
+  ...`, `pip list|show`) was read for options or configuration that run a
+  program or reach a host: none besides those above (`sort
+  --compress-program`, `find -exec`, `git --output` were already refused).
+  git configuration that runs a program on a read (`core.fsmonitor`,
+  `diff.external`, a textconv driver) is written only by a gated call or
+  the environment, not by repository content.
+- The hook's read-only list is a subset of the mapper's (unchanged, and
+  still checked by `test_read_only_list_is_a_subset_of_the_mappers`); it
+  held none of the removed commands.
+- No other classifier pattern is slower than linear in practice at 4096
+  bytes (measured: repeated `curl `, `awk `, `xargs `, `python `, `sed `,
+  `{a`, quoted words, `&& ls`, `-- `: 3 to 34 ms).
+
+#### Documentation
+
+SECURITY.md (§5.1: the partial-clone rule of the pre-tool-use hook; §5.5:
+the adapter's classifier), hooks/README (classification), the SDK guide
+(Bash classification: the pagers in the allow-list sentence, the table's
+rows, and a partial-clone paragraph after the table), and CHANGELOG
+Upgrading (the SDK's Bash fail-closed item, the plugin hooks' partial-clone
+item; the earlier Bash items no longer name `less`, `more` or `npm list` as
+read-only). No version changes.
+
+The SDK guide is an enforced page of the figure-gap sweep. With the
+partial-clone paragraph before the table, its run before the table grew
+from 1772 px to 1986 px (measured with `scripts/check-runs.mjs` and the
+local Chrome for Testing 153, not CI's headless shell): over the 1800 px
+limit. The paragraph now follows the table (a figure), in a run of
+1030 px, and the text before the table is no longer than before; the
+page's longest enforced run is 1772 px, as at HEAD.
+
+#### Checks after batch 2
+
+- Python: `pytest tests/` (4848 passed, 18 skipped; 51 more than after
+  batch 1); ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; the generators' `--check`
+  (`sync_skill_schemas`, `gen_runtime_fixtures`, `gen_call_fixtures`,
+  `gen_trigger_vectors`, `gen_standard_agents_binding`,
+  `gen_capability_json_schemas`).
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1877; the
+  WebAssembly build reused); the binding's check and test (191, 2
+  skipped). No call fixture changed (the call fixtures hold no Bash
+  call).
+- Site: `npm run check`, `npm test` (1173), `npm run build` (check-dist
+  passed) and `scripts/check-runs.mjs --paths /guides/claude-agent-sdk/`
+  with the local Chrome (above).
+- Probes cleaned up: the listeners stopped, the scratch repositories and
+  the npm home removed.

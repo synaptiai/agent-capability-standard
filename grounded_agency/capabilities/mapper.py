@@ -25,8 +25,11 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
 import re
 import shlex
+import shutil
+import subprocess
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
@@ -45,11 +48,15 @@ logger = logging.getLogger("grounded_agency.capabilities.mapper")
 RISK_LEVELS: tuple[str, ...] = ("low", "medium", "high")
 _RISK_ORDER: dict[str, int] = {level: n for n, level in enumerate(RISK_LEVELS)}
 
-# Patterns for Bash command classification
+# Patterns for Bash command classification, matched against one simple
+# command's words joined by spaces. Redirections are not among them:
+# _simple_commands reads them, and gives an output redirection to anything
+# but /dev/null the worst case first. (An alternative `\s+(>|>>)\s` here was
+# retried from every blank of a run and backtracked over the whole run, so a
+# quoted run of 40,000 blanks took 8 s to classify.)
 _DESTRUCTIVE_PATTERNS = re.compile(
     r"""
     ^\s*(rm|rmdir|mv|cp\s+.*\s+/|chmod|chown|ln|unlink|shred)\s |  # File ops
-    \s+(>|>>)\s |                                                   # Redirects
     \|\s*(rm|tee|dd)\s |                                           # Piped destructive
     \bsed\s+-i |                                                   # In-place sed
     \bgit\s+(reset|checkout\s+--|clean|stash\s+drop|branch\s+-[dD]) |  # Git mutations
@@ -143,21 +150,26 @@ _OPERATOR_CHARS = frozenset("();<>|&")
 
 # Commands that only read, unless given an option that writes (_writes).
 # Not here, because they run another command or can write a file whatever
-# their options: env, xargs, sed, awk, tee and the interpreters. Nor commands
-# that reach another host whatever their options, which a destination policy
-# must see (STANDARD 1.2.0 section 5.18.3): `npm view` (a registry, which a
-# project's .npmrc or --registry names) and `kubectl get|describe|logs` (a
-# server, which --server or --kubeconfig names, and a kubeconfig's `exec`
-# runs a command). `git remote`, `pip list`, `pip show` and `npm list` read
-# local state only with the arguments _writes allows.
+# their options: env, xargs, sed, awk, tee and the interpreters, and the
+# pagers less and more (a lesskey file, which `less -k`, `--lesskey-src` or
+# any abbreviation of them names, `/dev/stdin` fed by a pipe included, sets
+# LESSOPEN, which less runs; macOS's more is less). Nor commands that reach
+# another host whatever their options, which a destination policy must see
+# (STANDARD 1.2.0 section 5.18.3): `npm view` and `npm list` (a registry,
+# which a project's .npmrc or --registry names: npm's update check sends
+# the token the .npmrc gives for it, `${ENV}` expanded, to it),
+# `kubectl get|describe|logs` (a server, which --server or --kubeconfig
+# names, and a kubeconfig's `exec` runs a command) and `docker
+# ps|images|logs` (a daemon, which DOCKER_HOST or the docker context names,
+# over tcp or ssh; a container name or filter goes to it). `git` reads local
+# state only where it cannot fetch (git_may_fetch), and `git remote`, `pip
+# list` and `pip show` only with the arguments _writes allows.
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "ls",
         "cat",
         "head",
         "tail",
-        "less",
-        "more",
         "file",
         "stat",
         "du",
@@ -192,12 +204,8 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "git ls-files",
         "git branch",
         "git remote",
-        "npm list",
         "pip list",
         "pip show",
-        "docker ps",
-        "docker images",
-        "docker logs",
     }
 )
 
@@ -350,19 +358,17 @@ _READ_ONLY_OPTIONS: dict[str, _Options] = {
 # Commands whose arguments can make them write: a word the shell expands
 # (an unquoted `*`, `?` or `[`) may become any file name, an option
 # included, so such a word makes the command write.
-_ARGUMENT_WRITERS: frozenset[str] = frozenset(
-    {*_READ_ONLY_OPTIONS, "find", "git", "less", "more"}
-)
+_ARGUMENT_WRITERS: frozenset[str] = frozenset({*_READ_ONLY_OPTIONS, "find", "git"})
 
 # A brace expansion, `{a,b}` or `{1..3}`, in a line whose quoted characters
 # are masked: bash replaces it with words this reading never sees.
 _BRACE_EXPANSION = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
 
 # The options with which these subcommands read local state only. Any other
-# option (an index, a registry, a proxy, a configuration file) can make them
-# ask another host, and takes the worst case: `pip list --outdated` and pip's
-# own version check ask the configured index, and npm's update check asks
-# the registry. pip and npm take any unambiguous prefix of a long option.
+# option (an index, a proxy, a configuration file) can make them ask another
+# host, and takes the worst case: `pip list --outdated` and pip's own version
+# check ask the index the option names. pip takes any unambiguous prefix of a
+# long option.
 _SUBCOMMAND_OPTIONS: dict[tuple[str, str], _Options] = {
     ("pip", "list"): _Options(
         flags="levq",
@@ -377,15 +383,6 @@ _SUBCOMMAND_OPTIONS: dict[tuple[str, str], _Options] = {
         long=frozenset(
             "files verbose quiet disable-pip-version-check no-color isolated".split()
         ),
-    ),
-    ("npm", "list"): _Options(
-        flags="alpg",
-        with_arg="w",
-        long=frozenset(
-            "all json long parseable global link package-lock-only unicode "
-            "workspaces include-workspace-root".split()
-        ),
-        long_with_arg=frozenset({"depth", "omit", "include", "workspace"}),
     ),
 }
 
@@ -557,18 +554,8 @@ def _writes(words: list[str], globbed: bool = False) -> bool:
     options = _READ_ONLY_OPTIONS.get(name)
     if options is not None:
         return _option_writes(args, options)
-    short = [a for a in args if a.startswith("-") and not a.startswith("--")]
     if name == "find":
         return any(a in _FIND_WRITES for a in args)
-    if name == "less":
-        # -o and -O copy the input to a log file; +cmd runs a less command.
-        return (
-            any(a.startswith("+") for a in args)
-            or any(_long_prefix_of(a, ("log-file", "LOG-FILE")) for a in args)
-            or any("o" in a[1:] or "O" in a[1:] for a in short)
-        )
-    if name == "more":
-        return any(a.startswith("+") for a in args)  # runs a pager command
     if name == "git":
         if any(_long_prefix_of(a, ("output",)) for a in args):
             return True
@@ -579,10 +566,47 @@ def _writes(words: list[str], globbed: bool = False) -> bool:
             # `git remote show NAME|URL` asks that remote: a request to
             # another host. `get-url` only reads the configuration.
             return not (rest in ([], ["-v"], ["--verbose"]) or rest[0] == "get-url")
-    if name in ("pip", "npm") and args:
+    if name == "pip" and args:
         options = _SUBCOMMAND_OPTIONS.get((name, args[0]))
         return options is None or _option_writes(args[1:], options)
     return False
+
+
+# The longest command the classifier reads, in UTF-8 bytes: a longer one is
+# the worst case before any pattern runs, so no reading of it can run long
+# (the plugin's PreToolUse hook has the same bound).
+_MAX_COMMAND_BYTES = 4096
+
+# The git configuration that makes a repository a partial clone: a promisor
+# remote, or extensions.partialClone naming one (what `git config
+# --get-regexp` matches, keys in lower case).
+_PROMISOR_CONFIG = r"^(remote\..+\.promisor|extensions\.partialclone)$"
+
+
+def git_may_fetch(cwd: str | None = None) -> bool:
+    """Whether git, run in ``cwd`` (this process's working directory when it
+    is None), may ask another host for an object it reads: in a partial
+    clone, git fetches each object it lacks from the promisor remote, so a
+    read such as `git show <id>` or `git log -p` reaches that host, and the
+    object id the agent chose goes to it (STANDARD 1.2.0 section 5.18.3: a
+    request to another system). Read from the configuration git itself
+    reads there; anything git does not answer (no git, no such directory, a
+    configuration it cannot read) counts as yes. The plugin's PreToolUse
+    hook asks the same question."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    try:
+        where = cwd if isinstance(cwd, str) and cwd else os.getcwd()
+        done = subprocess.run(
+            [git, "-C", where, "config", "--get-regexp", _PROMISOR_CONFIG],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
+    return not (done.returncode == 1 and not done.stdout)
 
 
 def _is_read_only(command: _Command) -> bool:
@@ -849,6 +873,12 @@ class ToolCapabilityMapper:
         # only then. The adapter sets it from its checkpoint tracker; with
         # None, every such command is a gated mutation.
         self.is_checkpoint_commit: Callable[[str], bool] | None = None
+        # Whether git, run in a directory (the call's, or None for this
+        # process's), may ask another host for an object it reads: a git
+        # command the allow-list reads as `observe` takes the worst case
+        # there (:func:`git_may_fetch`, a partial clone). A lookup that
+        # fails is a yes.
+        self.git_may_fetch: Callable[[str | None], bool] = git_may_fetch
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -1162,7 +1192,9 @@ class ToolCapabilityMapper:
             record["approval"] = dict(approval)
         return self.register_binding(record)
 
-    def map_tool(self, tool_name: str, tool_input: dict[str, Any]) -> ToolMapping:
+    def map_tool(
+        self, tool_name: str, tool_input: dict[str, Any], cwd: str | None = None
+    ) -> ToolMapping:
         """
         Map a tool invocation to its capability metadata.
 
@@ -1176,14 +1208,19 @@ class ToolCapabilityMapper:
         Args:
             tool_name: SDK tool name (e.g., "Write", "Bash", "Read")
             tool_input: Tool input parameters
+            cwd: The directory the call runs in (a hook input's ``cwd``);
+                None: this process's working directory. Only a git
+                command's class depends on it (:attr:`git_may_fetch`).
 
         Returns:
             ToolMapping with capability metadata, raised by the applied
             domain profiles (section 5.21.3)
         """
-        return self._apply_profiles(self._map_tool(tool_name, tool_input))
+        return self._apply_profiles(self._map_tool(tool_name, tool_input, cwd))
 
-    def _map_tool(self, tool_name: str, tool_input: dict[str, Any]) -> ToolMapping:
+    def _map_tool(
+        self, tool_name: str, tool_input: dict[str, Any], cwd: str | None = None
+    ) -> ToolMapping:
         """:meth:`map_tool` before domain profiles."""
         # Handle Bash specially - analyze command content. Input that is
         # not a dict has no command to read: classify it as an empty one,
@@ -1191,7 +1228,7 @@ class ToolCapabilityMapper:
         if tool_name == "Bash":
             if not isinstance(tool_input, dict):
                 tool_input = {}
-            return self._classify_bash_command(tool_input)
+            return self._classify_bash_command(tool_input, cwd)
 
         # Check dynamic mappings (MCP tools, etc.)
         if tool_name in self._dynamic_mappings:
@@ -1296,11 +1333,15 @@ class ToolCapabilityMapper:
         self._profiled[mapping] = raised
         return raised
 
-    def _classify_bash_command(self, tool_input: dict[str, Any]) -> ToolMapping:
+    def _classify_bash_command(
+        self, tool_input: dict[str, Any], cwd: str | None = None
+    ) -> ToolMapping:
         """
         Classify a Bash command based on its content (STANDARD 1.2.0
         section 5.18.3).
 
+        0. A command over 4096 UTF-8 bytes is not read: the worst case, before
+           any pattern runs (some take time that grows faster than the line).
         1. Always-dangerous patterns (command substitution, backticks,
            variable expansion, eval, exec, source, control characters) and
            process substitution give the line the worst case at once
@@ -1320,7 +1361,9 @@ class ToolCapabilityMapper:
            whose every command is allow-listed as read-only is an
            observation; any other line takes the strictest flags and every
            prerequisite of all the commands that are not read-only, with
-           their capabilities in order (`_combine`).
+           their capabilities in order (`_combine`). A git command that would
+           observe takes the worst case where git may fetch from another
+           host (:attr:`git_may_fetch` for ``cwd``: a partial clone).
 
         Security principle: fail-safe defaults. A command is high-risk until
         it is shown to be on the read-only allow-list, and a command the
@@ -1330,6 +1373,7 @@ class ToolCapabilityMapper:
 
         Args:
             tool_input: Bash tool input with 'command' key
+            cwd: The directory the command runs in (None: this process's)
 
         Returns:
             ToolMapping based on command analysis
@@ -1337,8 +1381,15 @@ class ToolCapabilityMapper:
         command = tool_input.get("command", "")
         worst = self._worst_case()
 
-        # Empty or non-string command is suspicious - fail-safe
-        if not isinstance(command, str) or not command.strip():
+        # Empty, non-string or over-long command is suspicious - fail-safe.
+        # The length is checked first: a pattern below can take time that
+        # grows faster than the line.
+        if (
+            not isinstance(command, str)
+            or len(command) > _MAX_COMMAND_BYTES
+            or len(command.encode("utf-8", "surrogatepass")) > _MAX_COMMAND_BYTES
+            or not command.strip()
+        ):
             return worst
 
         # SEC-002: These bypass all other checks and are always high-risk.
@@ -1361,15 +1412,25 @@ class ToolCapabilityMapper:
                 and not _writes(words, commands[0].globbed)
             ):
                 capability = _GIT_STASH_CLASSES[words[2]]
+                if capability == "observe" and self._git_may_fetch(cwd):
+                    return worst
                 if capability != "rollback" or self._restores_checkpoint(words):
                     return self._builtin("Bash", capability)
                 return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
-        results = [self._classify_single_command(c) for c in commands]
+        results = [self._classify_single_command(c, cwd) for c in commands]
         gated = [r for r in results if r.risk != "low"]
         if not gated:
             return self._builtin("Bash", "observe")
         return self._combine(gated)
+
+    def _git_may_fetch(self, cwd: str | None) -> bool:
+        """:attr:`git_may_fetch` for ``cwd``; a lookup that fails is a yes."""
+        try:
+            return bool(self.git_may_fetch(cwd))
+        except Exception:
+            logger.exception("Could not tell whether git may fetch in %s", cwd)
+            return True
 
     def _restores_checkpoint(self, words: list[str]) -> bool:
         """Whether `git stash pop|apply <commit>` (``words``) names, as its
@@ -1428,7 +1489,9 @@ class ToolCapabilityMapper:
             ]
         )
 
-    def _classify_single_command(self, command: _Command) -> ToolMapping:
+    def _classify_single_command(
+        self, command: _Command, cwd: str | None = None
+    ) -> ToolMapping:
         """
         Classify one simple command.
 
@@ -1436,7 +1499,9 @@ class ToolCapabilityMapper:
         destructive → `git stash` → read-only allowlist → the worst case. It
         never returns a `git stash` class: those need a line of one command
         (`_classify_bash_command`), so here every `git stash` form is a
-        gated mutation of the local repository.
+        gated mutation of the local repository. A read-only git command
+        where git may fetch from another host (``cwd`` in a partial clone)
+        takes the worst case.
         """
         text = " ".join(command.words)
         # SEC-002: an interpreter runs code this classifier does not see,
@@ -1457,6 +1522,11 @@ class ToolCapabilityMapper:
             return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
         if _is_read_only(command):
+            if command.words[0] == "git" and self._git_may_fetch(cwd):
+                # A read of an object a partial clone lacks fetches it from
+                # the promisor remote: a request to another host, carrying
+                # the object id the command names.
+                return self._worst_case()
             return self._builtin("Bash", "observe")
 
         # SECURE DEFAULT: a command not shown to be read-only is high-risk,

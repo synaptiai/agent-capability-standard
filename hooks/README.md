@@ -221,7 +221,13 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   `wc`, `pwd`, `grep`, `stat`, `file`, `du`, `df`, `which`, `whoami`,
   `uname`, `echo`, `printf`, `git status`, `git log`, `git diff`, `git show`,
   `git rev-parse`, `git ls-files`) only reads and needs nothing; anything else
-  is `mutate`.
+  is `mutate`. A git command that would only read (`git stash list` and
+  `git stash show` included) is `mutate` where the call's directory (the
+  payload's `cwd`, else the project directory) is in a partial clone (a
+  promisor remote, or `extensions.partialClone`), or where git cannot say:
+  there git fetches each object it lacks from the promisor remote, so `git
+  show <id>` sends the id to that host. `git stash create` still takes a
+  checkpoint there (it reads only what the local state holds).
 - Any other tool (`Monitor` and `PowerShell`, which run commands,
   `EnterWorktree`, `ExitWorktree`, every MCP tool, a tool the hook does not
   know) is unbound: `mutate`, since a layer cannot know that an unknown tool

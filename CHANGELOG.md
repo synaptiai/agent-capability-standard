@@ -162,21 +162,39 @@ here and marked so.
     refuses it (F504). These lines are no longer read-only: one with a `$`
     outside single quotes (`echo $HOME` included) or a brace expansion; an
     unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`,
-    `hostname`, `file`, `git`, `less` or `more` command (quote a pattern you
-    pass on); and `sort`, `uniq`, `date`, `hostname` or `file` with an
-    option outside the listed read-only set or an abbreviation of one that
-    writes (`sort --o=x`, `git diff --outp=x`), or `date` with an operand
-    other than `+FORMAT`.
+    `hostname`, `file` or `git` command (quote a pattern you pass on); and
+    `sort`, `uniq`, `date`, `hostname` or `file` with an option outside the
+    listed read-only set or an abbreviation of one that writes (`sort
+    --o=x`, `git diff --outp=x`), or `date` with an operand other than
+    `+FORMAT`.
   - Bash: commands that ask another host are no longer read-only: `npm
     view`, `kubectl get`, `describe` and `logs` (a registry or a cluster
     that the configuration or an option names; a kubeconfig's `exec` runs a
-    command), `git remote show`, and `pip list`, `pip show` or `npm list`
-    with an option outside a listed set (an index, a registry, a proxy,
-    `--outdated`); nor is a line with an input redirection from `/dev/tcp/`
-    or `/dev/udp/`. Each gets Bash's worst case, `mutate` and `send`: it
+    command), `git remote show`, and `pip list` or `pip show` with an option
+    outside a listed set (an index, a proxy, `--outdated`); nor is a line
+    with an input redirection from `/dev/tcp/` or `/dev/udp/`. Each gets
+    Bash's worst case, `mutate` and `send`: it
     needs a checkpoint and approval, and a destination policy refuses it
     (F504). `git remote`, `git remote -v` and `git remote get-url` stay
     read-only.
+  - Bash, fail-closed fixes: these are no longer read-only and get the
+    worst case, `mutate` and `send`. `less` and `more`, with any options (a
+    lesskey file, which `less -k`, `--lesskey-src` or an abbreviation names,
+    `/dev/stdin` fed by a pipe included, sets `LESSOPEN`, which less runs;
+    use `cat` or `head`). `npm list` (npm's update check sends the token a
+    project's `.npmrc` gives for the registry it names) and `docker ps`,
+    `docker images` and `docker logs` (the daemon `DOCKER_HOST` or the
+    docker context names). A git command that would only read (`git
+    status`, `git log`, `git show`, `git diff`, `git stash list|show`, ...)
+    where the repository it runs in is a partial clone, or where git cannot
+    say: there git fetches each object it lacks from the promisor remote.
+    The adapter reads the call's directory from the hook input's `cwd`, and
+    `ToolCapabilityMapper.map_tool` takes it as an optional `cwd` (None:
+    the process's working directory); `git stash create` and the restore of
+    a recorded checkpoint keep their classes there. A command over 4096
+    UTF-8 bytes is not read (the plugin hook's bound): the worst case, where
+    a quoted run of 40,000 blanks took 8 seconds to classify; a quoted `>`
+    (`grep " > " f`) is now an argument, not a redirection.
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
@@ -591,6 +609,12 @@ here and marked so.
     tool call (nested past jq's depth limit, a lone surrogate escape), where
     it exited 0 with nothing logged; input that is not JSON at all is
     reported the same way.
+  - A git command on the read-only list (`git status`, `git log`, `git
+    show`, `git diff`, `git rev-parse`, `git ls-files`, `git stash
+    list|show`) is a gated `mutate` when the call's directory (the payload's
+    `cwd`) is in a partial clone, or git cannot say: there git fetches what
+    a read lacks from the promisor remote, sending the object id the command
+    names. `git stash create` still takes a checkpoint there.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,

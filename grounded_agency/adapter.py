@@ -535,6 +535,13 @@ def _is_allow(result: Any) -> bool:
     )
 
 
+def _cwd_of(input_data: Any) -> str | None:
+    """A hook input's `cwd` (the directory the call runs in), when it is a
+    non-empty string."""
+    cwd = input_data.get("cwd") if isinstance(input_data, dict) else None
+    return cwd if isinstance(cwd, str) and cwd else None
+
+
 def _args_key(args: Any) -> str:
     """A digest of a call's arguments: SHA-256 of their RFC 8785 canonical
     JSON, or, for arguments that are not I-JSON, of a sorted JSON text."""
@@ -796,6 +803,12 @@ class GroundedAgentAdapter:
         # of its output, section 5.20): the post-call hooks do not record
         # it again.
         self._outcome_recorded: set[str] = set()
+        # The directory each call runs in (its hook input's `cwd`), by call
+        # id, from the PreToolUse hook until the call reports back: the
+        # permission callback, whose context carries none, classifies the
+        # call there too, so a git read that may fetch from another host
+        # (a partial clone) is classified alike in both.
+        self._call_dirs: dict[str, str] = {}
         # The tools create_grounded_mcp_server serves, which check their own
         # output (section 5.20); the PostToolUse hook checks other servers'
         # bound MCP tools. Tools a policy would check but whose results carry
@@ -1452,6 +1465,13 @@ class GroundedAgentAdapter:
                 )
         return None
 
+    def _call_dir(self, call: str | None, input_data: dict[str, Any]) -> str | None:
+        """The directory a call that reported back ran in (its hook input's
+        `cwd`), forgetting the one its PreToolUse hook kept."""
+        with self._state_lock:
+            kept = self._call_dirs.pop(call, None) if call else None
+        return _cwd_of(input_data) or kept
+
     def _allow_token(
         self, tool: str, args: Any, delta: int = 1, call: str | None = None
     ) -> None:
@@ -1850,6 +1870,7 @@ class GroundedAgentAdapter:
                 with self._state_lock:
                     self._allowed.clear()
                     self._outcome_recorded.clear()
+                    self._call_dirs.clear()
                 self._record(
                     "boundary",
                     "",
@@ -1971,9 +1992,13 @@ class GroundedAgentAdapter:
                 tool_name = input_data.get("tool_name", "")
                 tool_input = input_data.get("tool_input", {})
                 call = tool_use_id or input_data.get("tool_use_id")
+                cwd = _cwd_of(input_data)
+                if call is not None and cwd is not None:
+                    with self._state_lock:
+                        self._call_dirs[call] = cwd
 
                 try:
-                    mapping = mapper.map_tool(tool_name, tool_input)
+                    mapping = mapper.map_tool(tool_name, tool_input, cwd)
                 except Exception:
                     logger.exception(
                         "Could not classify %s; treating it as unbound", tool_name
@@ -2230,7 +2255,9 @@ class GroundedAgentAdapter:
                         logger.info(
                             "Checkpoint %s used by %s", checkpoint_id, tool_name
                         )
-                mapping = mapper.map_tool(tool_name, tool_input)
+                mapping = mapper.map_tool(
+                    tool_name, tool_input, self._call_dir(holder, input_data)
+                )
                 tool_response = input_data.get("tool_response")
                 try:
                     fault = self._host_result_fault(
@@ -2329,7 +2356,9 @@ class GroundedAgentAdapter:
                     # loses neither the record nor the failure.
                     try:
                         mapping: ToolMapping | None = self.mapper.map_tool(
-                            tool_name, input_data.get("tool_input", {})
+                            tool_name,
+                            input_data.get("tool_input", {}),
+                            self._call_dir(holder, input_data),
                         )
                     except Exception as e:
                         logger.warning("Failure recorder cannot map: %s", e)
@@ -2461,7 +2490,9 @@ class GroundedAgentAdapter:
             """
             holder = getattr(context, "tool_use_id", None)
             try:
-                mapping0 = mapper.map_tool(tool_name, input_data)
+                with self._state_lock:
+                    cwd = self._call_dirs.get(holder) if holder else None
+                mapping0 = mapper.map_tool(tool_name, input_data, cwd)
                 if mapping0.control:
                     return allow(input_data)
 
@@ -2548,7 +2579,7 @@ class GroundedAgentAdapter:
                 mapping1 = mapping0
                 if _args_key(args1) != _args_key(input_data):
                     # Section 5.18.7, changed arguments: classify again.
-                    mapping1 = mapper.map_tool(tool_name, args1)
+                    mapping1 = mapper.map_tool(tool_name, args1, cwd)
                     refusal = (
                         self._secret_refusal(mapping1, tool_name, holder, args1)
                         or self._destination_refusal(mapping1, tool_name, holder, args1)
