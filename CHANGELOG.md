@@ -53,8 +53,8 @@ here and marked so.
   the PreToolUse safety check denies the call in strict mode (in non-strict
   mode it is logged, and a call that requires approval is still asked),
   and an error in the rate check denies it in either mode (R407); `Skill`
-  is no longer added to `allowed_tools`; Stop and SubagentStop hooks are
-  added.
+  is no longer added to `allowed_tools`; Stop, UserPromptSubmit and
+  SubagentStop hooks are added.
 - Python SDK, `wrap_options()` (Fixed): a `can_use_tool` callback in the
   options it is given is now chained to, not replaced: once the layer's
   checks pass, the adapter's callback hands the call to the host's, whose
@@ -76,8 +76,13 @@ here and marked so.
     no other call holds is used, the earlier ones included. A hold that
     lapses, is found on reload or is unresolved when the turn ends counts as
     used. The Stop of any session the adapter serves ends every checkpoint's
-    validity: take a checkpoint in the turn that needs it, and serve sessions
-    that must not share this with separate adapters.
+    validity, and so does its next prompt (UserPromptSubmit), since a turn
+    can end without Stop (StopFailure after an API error, an interrupt):
+    take a checkpoint in the turn that needs it, and serve sessions that
+    must not share this with separate adapters. A tracker does not load a
+    state file (`tracker_state.json`) that git tracks: a repository can ship
+    one, and its checkpoints were taken by no call here; the tracker starts
+    fresh and logs a warning.
   - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
     must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
     set, more than 0 and at most the expiry, and
@@ -495,9 +500,10 @@ here and marked so.
   `.claude/checkpoints/ended/`, as a used one is under `used/`. A read-only
   Bash command and `git stash list|show` need no marker, and `git stash
   pop|apply <commit>` needs none when a checkpoint recorded `<commit>` (the
-  marker's commit, or the entry `.claude/checkpoints/commits/<commit>` a
-  successful `git stash create` writes, one lookup however many checkpoints
-  were taken); any other restore needs a marker like any write. The rollback
+  entry `<git dir>/acs/checkpoints/commits/<commit>` a successful `git stash
+  create` writes in the project's git directory, one lookup however many
+  checkpoints were taken) and the call runs in the project's repository;
+  any other restore needs a marker like any write. The rollback
   skill's command hook refuses (F503) a `git stash pop|apply` that does not
   name such a commit, whatever `git stash list` holds; before, it refused a
   restore only when `git stash list` was empty. The rollback and send skills'
@@ -529,6 +535,46 @@ here and marked so.
   rest of 127/8, 0/8, 169.254/16, IPv6 loopback, mapped, link-local and
   unique-local literals, and an IPv4 host in another form (`127.1`,
   `2130706433`, `0x7f000001`).
+- Plugin hooks, fail-closed fixes (released with plugin 3.0.0):
+  - The PreToolUse hook is registered for every tool (matcher `*`), with
+    `onFailure: "block"` and a 30-second `timeout`, so a run that fails,
+    cannot start or times out blocks the call where Claude Code supports
+    that setting. A tool the SDK mapper maps to a capability that needs
+    neither a checkpoint nor approval (Read, Grep, Glob, WebFetch, Skill,
+    Agent, TodoWrite, ...) still needs nothing; every other tool, MCP tools,
+    `Monitor`, `PowerShell` and `ExitWorktree` included, is now an unbound
+    `mutate` (Standard 1.2.0 §5.18.2): take a checkpoint (`git stash
+    create`) before each such call, which is asked for approval. Before,
+    only Write, Edit, MultiEdit, NotebookEdit and Bash were checked.
+  - A Bash command over 4096 bytes is gated before it is trimmed or read: a
+    command padded with blanks (50,000 trailing ones took 44 seconds to
+    trim) can no longer hold the hook past its time limit.
+  - The commits a rollback may restore are entered in the project's git
+    directory (`<git dir>/acs/checkpoints/commits/`), outside the work tree,
+    and a restore must run in the project's repository: an entry or a
+    marker a cloned repository ships no longer lets `git stash apply` run
+    without a checkpoint or approval. Entries under
+    `.claude/checkpoints/commits/` and the marker's `commit` no longer
+    authorise a restore (checkpoints taken before the upgrade are restored
+    as a gated `mutate`), and `git stash create` outside a git repository
+    writes no marker for a commit. The rollback skill's hook reads the same
+    entries.
+  - A marker git tracks authorises nothing (F501; it is left in place:
+    remove it from the repository). A gated call whose path or command names
+    the layer's records (`checkpoint.ok`, `.claude/checkpoints`,
+    `acs/checkpoints`) is refused with F504.
+  - A marker older than `ACS_CHECKPOINT_MAX_AGE` (the setting in force when
+    it is used, which every audit line records) authorises nothing, whoever
+    wrote it with whatever expiry.
+  - The boundary hook (`stop_end_checkpoints.sh`) also runs on StopFailure,
+    UserPromptSubmit, SessionStart and SessionEnd: a marker a turn left
+    when an API error or an interrupt ended it, or a killed session, no
+    longer carries into the next turn. The hooks' scope, the project
+    directory with every session in it, is stated in SECURITY.md §5.5.
+  - The log hook reports (exit 1) input `jq` cannot parse, which may be a
+    tool call (nested past jq's depth limit, a lone surrogate escape), where
+    it exited 0 with nothing logged; input that is not JSON at all is
+    reported the same way.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,

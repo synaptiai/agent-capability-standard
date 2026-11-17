@@ -32,6 +32,7 @@ import fnmatch
 import json
 import logging
 import os
+import subprocess
 import tempfile
 import threading
 from collections.abc import Callable
@@ -174,6 +175,36 @@ class Checkpoint:
             if fnmatch.fnmatch(target, scope_pattern):
                 return True
         return False
+
+
+def _tracked_by_git(path: Path) -> bool:
+    """Whether git tracks ``path``, an existing file: one a repository ships,
+    not one this layer wrote. git is asked from the file's own directory, so
+    a linked directory or a submodule is read where it leads. No git, or no
+    repository, reads as untracked (nothing a clone can ship); a git that
+    does not answer in time reads as tracked, so the file is not trusted."""
+    if not path.is_file():
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(path.parent),
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                path.name,
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return True
+    except OSError, subprocess.SubprocessError:
+        return False
+    return result.returncode == 0
 
 
 class CheckpointTracker:
@@ -399,6 +430,11 @@ class CheckpointTracker:
     def _load_persisted_state(self) -> None:
         """Load tracker state from disk if available.
 
+        A state file git tracks is not loaded: a repository can ship one (a
+        clone or a checkout writes it), and its checkpoints were taken by no
+        call of this layer (STANDARD 1.2.0 sections 5.18.5, 5.18.6). The
+        tracker starts fresh, and logs why.
+
         Uses O_NOFOLLOW + fstat() on the opened fd to avoid TOCTOU between
         symlink check/existence check and read.  Falls back to is_symlink()
         on platforms without O_NOFOLLOW.
@@ -409,6 +445,14 @@ class CheckpointTracker:
         section 5.18.6).
         """
         state_path = self._state_file_path()
+        if _tracked_by_git(state_path):
+            logger.warning(
+                "Not loading %s: git tracks it, so a repository shipped it and "
+                "no checkpoint in it was taken here; remove it from the "
+                "repository",
+                state_path,
+            )
+            return
         o_nofollow = getattr(os, "O_NOFOLLOW", 0)
         if o_nofollow:
             try:

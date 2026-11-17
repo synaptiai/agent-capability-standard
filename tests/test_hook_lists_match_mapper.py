@@ -1,5 +1,7 @@
 """The plugin hook's classification is derived from the SDK mapper's
-(STANDARD 1.2.0 section 5.18.3): its read-only list is a subset of
+(STANDARD 1.2.0 section 5.18.3): the tools it lets pass are mapper tools
+whose capability needs neither a checkpoint nor approval, and every other
+tool is unbound for both (section 5.18.2); its read-only list is a subset of
 _READ_ONLY_COMMANDS, its git stash table equals _GIT_STASH_CLASSES, and for
 each listed command that _writes has a rule for, an argument that writes
 makes both the mapper and the hook treat the call as a gated mutation."""
@@ -34,6 +36,47 @@ def test_read_only_list_is_a_subset_of_the_mappers() -> None:
     listed = _array("READ_ONLY")
     assert listed
     assert set(listed) <= mapper._READ_ONLY_COMMANDS
+
+
+def test_ungated_tools_need_neither_a_checkpoint_nor_approval_in_the_mapper() -> None:
+    listed = _array("UNGATED_TOOLS")
+    assert listed
+    classify = mapper.ToolCapabilityMapper()
+    for name in listed:
+        assert name in mapper._TOOL_MAPPINGS, name
+        mapping = classify.map_tool(name, {})
+        assert not mapping.requires_checkpoint and not mapping.requires_approval, name
+
+
+def test_every_tool_the_mapper_gates_is_gated_by_the_hook() -> None:
+    """A tool the mapper gates (Write, Edit, ..., and every tool it does not
+    know: Monitor, PowerShell, MCP tools) is not on UNGATED_TOOLS, so the
+    hook gates it too."""
+    listed = set(_array("UNGATED_TOOLS"))
+    classify = mapper.ToolCapabilityMapper()
+    names = [*mapper._TOOL_MAPPINGS, "Monitor", "PowerShell", "mcp__github__push_files"]
+    for name in names:
+        mapping = classify.map_tool(name, {})
+        if mapping.requires_checkpoint or mapping.requires_approval:
+            assert name not in listed, name
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize("tool", ["Monitor", "PowerShell", "mcp__github__push_files"])
+def test_an_unbound_tool_is_gated_in_both(tmp_path: Path, tool: str) -> None:
+    classified = mapper.ToolCapabilityMapper().map_tool(tool, {"command": "ls"})
+    assert classified is mapper.UNCLASSIFIED_TOOL
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}
+    result = subprocess.run(
+        ["bash", str(HOOK)],
+        input=json.dumps({"tool_name": tool, "tool_input": {"command": "ls"}}),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
 
 
 def test_stash_table_equals_the_mappers() -> None:

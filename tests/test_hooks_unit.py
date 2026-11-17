@@ -515,25 +515,67 @@ class TestPostToolUseExitCodes:
         assert result.returncode == 0
         assert not (tmp_path / ".claude" / "audit.log").exists()
 
-    def test_invalid_json_stdin(self, log_env: dict[str, str], tmp_path: Path) -> None:
-        """Invalid JSON on stdin should not crash, and is not a tool call."""
-        result = run_hook(POSTTOOLUSE_HOOK, env_override=log_env, stdin="not json")
-        assert result.returncode == 0
+    @pytest.mark.parametrize(
+        "stdin",
+        [
+            "not json",
+            '{"tool_name": "Bash", "tool_input": {"command": "ls"}} trailing text',
+        ],
+    )
+    def test_input_jq_cannot_parse_is_reported(
+        self, log_env: dict[str, str], tmp_path: Path, stdin: str
+    ) -> None:
+        """Input jq cannot parse may be a tool call it could not read: the
+        hook says so and exits 1 (STANDARD v1.2 §6.4: a capture that fails
+        is reported, never silent)."""
+        result = run_hook(POSTTOOLUSE_HOOK, env_override=log_env, stdin=stdin)
+        assert result.returncode == 1
+        assert "could not be parsed" in result.stderr
+        assert "this tool call was not logged" in result.stderr
         assert not (tmp_path / ".claude" / "audit.log").exists()
 
     def test_input_without_a_tool_name_is_not_logged(
         self, log_env: dict[str, str], tmp_path: Path
     ) -> None:
-        """JSON that names no tool, or a JSON value and more, is not a tool call."""
+        """JSON that names no tool, and no input at all, is not a tool call."""
         for stdin in (
             '{"tool_input": {"command": "ls"}}',
             '{"tool_name": 7}',
             "[1]",
-            '{"tool_name": "Bash", "tool_input": {"command": "ls"}} trailing text',
+            "",
         ):
             result = run_hook(POSTTOOLUSE_HOOK, env_override=log_env, stdin=stdin)
-            assert result.returncode == 0
+            assert (result.returncode, result.stderr) == (0, "")
         assert not (tmp_path / ".claude" / "audit.log").exists()
+
+    @pytest.mark.parametrize("where", ["tool_input", "tool_response"])
+    @pytest.mark.parametrize("depth", [253, 300, 10_000])
+    def test_a_call_nested_past_jqs_limit_is_reported(
+        self, log_env: dict[str, str], tmp_path: Path, where: str, depth: int
+    ) -> None:
+        """jq refuses input nested past its depth limit; Claude Code passes a
+        call's arguments and result as they are, so a tool call nested that
+        deep was dropped with exit 0 and nothing on stderr."""
+        nested = "[" * depth + "]" * depth
+        stdin = (
+            '{"hook_event_name": "PostToolUse", "tool_name": "mcp__x__y", '
+            '"tool_use_id": "toolu_deep", "tool_input": {"batch": []}, '
+            f'"{where}": {{"value": {nested}}}}}'
+        )
+        result = run_hook(POSTTOOLUSE_HOOK, env_override=log_env, stdin=stdin)
+        assert result.returncode == 1
+        assert "could not be parsed" in result.stderr
+        assert "depth" in result.stderr
+
+    def test_a_call_with_a_lone_surrogate_is_reported(
+        self, log_env: dict[str, str], tmp_path: Path
+    ) -> None:
+        """A string cut in the middle of an emoji is written with a lone high
+        surrogate escape (JSON.stringify does so), which jq refuses."""
+        stdin = '{"tool_name": "mcp__x__y", "tool_input": {"text": "ab\\ud83d"}}'
+        result = run_hook(POSTTOOLUSE_HOOK, env_override=log_env, stdin=stdin)
+        assert result.returncode == 1
+        assert "could not be parsed" in result.stderr
 
     def test_rejects_symlinked_audit_log(
         self, log_env: dict[str, str], tmp_path: Path
@@ -1125,7 +1167,8 @@ class TestHookPatternParity:
     # ── hooks.json matcher parity ──
 
     def test_hooks_json_matcher_includes_mutation_tools(self) -> None:
-        """hooks.json PreToolUse matcher must list all SDK mutation tools."""
+        """hooks.json PreToolUse matcher must route all SDK mutation tools
+        ("*" routes every tool)."""
         hooks_json_path = ROOT / "hooks" / "hooks.json"
         hooks_data = json.loads(hooks_json_path.read_text())
 
@@ -1133,20 +1176,21 @@ class TestHookPatternParity:
         matcher_tools = set(matcher.split("|"))
 
         for tool_name in self.PYTHON_MUTATION_TOOLS:
-            assert tool_name in matcher_tools, (
+            assert matcher == "*" or tool_name in matcher_tools, (
                 f"hooks.json matcher is missing mutation tool '{tool_name}'; "
                 f"current matcher: {matcher}"
             )
 
     def test_hooks_json_matcher_includes_bash(self) -> None:
-        """hooks.json PreToolUse matcher must include Bash for sub-command gating."""
+        """hooks.json PreToolUse matcher must route Bash for sub-command
+        gating ("*" routes every tool)."""
         hooks_json_path = ROOT / "hooks" / "hooks.json"
         hooks_data = json.loads(hooks_json_path.read_text())
 
         matcher = hooks_data["hooks"]["PreToolUse"][0]["matcher"]
         matcher_tools = set(matcher.split("|"))
 
-        assert "Bash" in matcher_tools, (
+        assert matcher == "*" or "Bash" in matcher_tools, (
             f"hooks.json matcher must include 'Bash' to gate destructive sub-commands; "
             f"current matcher: {matcher}"
         )

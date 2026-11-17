@@ -1712,7 +1712,7 @@ findings:
     applies the checks by other means or does not cover those calls. spec/SECURITY.md §5.4 maps every
     condition of the six skills'' hooks to a §5.18.10 or §5.18.8 row or to a model-judged addition; the
     rollback skill''s command hook makes the rollback row''s check in the plugin''s form (a restore must
-    name a commit a checkpoint recorded, F503 otherwise, one lookup in .claude/checkpoints/commits/), and the `transform` and `persist`
+    name a commit a checkpoint recorded, F503 otherwise, one lookup in <git dir>/acs/checkpoints/commits/), and the `transform` and `persist`
     secret rows are code where a layer applies §6.7. The send and rollback prompt hooks no longer judge
     approval, checkpoints, rate limits or expiry; the remaining prompt conditions are labelled
     model-judged additions. Tests: tests/test_skill_hooks.py.'

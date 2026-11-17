@@ -6,7 +6,7 @@
   "covers": "every tool call Claude Code reports to the PreToolUse hook of options wrapped by GroundedAgentAdapter.wrap_options(), including tools in allowed_tools",
   "does_not_cover": "a tool's own nested calls (an MCP tool calling another service); calls of a session whose options were not wrapped",
   "scope": "this adapter instance: every session and subagent it serves, ordered by its lock; serve sessions that must not share records with separate adapters",
-  "boundaries": ["Stop of any session this adapter serves (its main agent's turn ends)"],
+  "boundaries": ["Stop of any session this adapter serves (its main agent's turn ends)", "UserPromptSubmit of any session this adapter serves (a turn starts, which also ends what a turn left when its Stop never came)"],
   "checkpoint_max_age": "PT30M",
   "approval": {
     "how": "prompt",

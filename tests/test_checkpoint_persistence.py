@@ -7,6 +7,9 @@ restore it in a new instance, surviving process restarts.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -118,6 +121,60 @@ class TestCrossInstanceRestore:
         active = tracker2.get_active_checkpoint()
         assert active is not None
         assert active.metadata == {"tool": "Edit", "path": "foo.py"}
+
+
+class TestShippedStateFile:
+    """A state file git tracks came with the repository: its checkpoints
+    were taken by no call of this layer, so the tracker does not load it
+    (STANDARD 1.2.0 sections 5.18.5, 5.18.6)."""
+
+    @staticmethod
+    def _git(path: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", *args],
+            cwd=path,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@example.invalid",
+            },
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+
+    def _shipped(self, tmp_path: Path) -> Path:
+        if shutil.which("git") is None:
+            pytest.skip("git not installed")
+        upstream = tmp_path / "upstream"
+        upstream.mkdir()
+        self._git(upstream, "init", "-q")
+        CheckpointTracker(checkpoint_dir=upstream / ".checkpoints").create_checkpoint(
+            scope=["*"], reason="shipped"
+        )
+        self._git(upstream, "add", "-f", ".checkpoints/tracker_state.json")
+        self._git(upstream, "commit", "-q", "-m", "state")
+        victim = tmp_path / "victim"
+        self._git(tmp_path, "clone", "-q", str(upstream), str(victim))
+        return victim / ".checkpoints"
+
+    def test_a_cloned_state_file_authorises_nothing(self, tmp_path: Path) -> None:
+        shipped = self._shipped(tmp_path)
+        assert (shipped / "tracker_state.json").is_file()
+        tracker = CheckpointTracker(checkpoint_dir=shipped)
+        assert not tracker.has_valid_checkpoint()
+        assert tracker.validate_and_reserve("call") == (False, None)
+
+    def test_the_same_state_untracked_still_loads(self, tmp_path: Path) -> None:
+        shipped = self._shipped(tmp_path)
+        own = tmp_path / "own"
+        own.mkdir()
+        (own / "tracker_state.json").write_bytes(
+            (shipped / "tracker_state.json").read_bytes()
+        )
+        assert CheckpointTracker(checkpoint_dir=own).has_valid_checkpoint()
 
 
 class TestCorruptStateHandling:

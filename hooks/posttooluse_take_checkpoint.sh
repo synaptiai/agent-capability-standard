@@ -7,10 +7,11 @@
 # exactly one `git stash create` (no character that joins or expands
 # commands, no option that writes: the same reading as
 # pretooluse_require_checkpoint.sh, whose split_words this hook holds too)
-# and the response shows no error, the hook enters the printed commit in
-# .claude/checkpoints/commits/ (an empty file named by it, which the
-# pre-tool-use hook and the rollback skill look up to restore it) and writes
-# .claude/checkpoint.ok atomically:
+# and the response shows no error, the hook enters the printed commit in the
+# project's git directory, <git dir>/acs/checkpoints/commits/ (an empty file
+# named by it, which the pre-tool-use hook and the rollback skill look up to
+# restore it; outside the work tree, so no clone, checkout or applied stash
+# can ship one) and writes .claude/checkpoint.ok atomically:
 #
 #   {"checkpoint_id": <the printed commit, or clean-<epoch>-<pid>>,
 #    "commit": <the printed commit> | "HEAD",
@@ -19,8 +20,9 @@
 #
 # `git stash create` prints the commit that saved the tracked state, or
 # nothing when the tree is clean, in which case HEAD is the restore point.
-# The hook writes no marker for a line over 4096 bytes (not read), for a
-# call run in the background (its output is not yet the command's), for one
+# The hook writes no marker for a line over 4096 bytes (not read, nor
+# trimmed: the trims' cost grows with the line times its run of blanks), for
+# a call run in the background (its output is not yet the command's), for one
 # run in another repository than the project's (the payload's cwd), for
 # output that is neither a commit id nor empty, or for empty output while the
 # project's tree or index differs from HEAD: HEAD would not restore that
@@ -28,8 +30,10 @@
 # MAX_AGE is ACS_CHECKPOINT_MAX_AGE when it is an integer from 1 to 1800,
 # else 1800 seconds (30 minutes, the Standard's cap). A marker the new one
 # replaces is filed under .claude/checkpoints/ended/ first; its commit, entered
-# in commits/, can still be restored. A failed call reaches PostToolUseFailure, where this
-# hook is not registered.
+# in commits/, can still be restored. A commit is entered only in a git
+# repository: with no git directory to enter it in, no marker is written.
+# A failed call reaches PostToolUseFailure, where this hook is not
+# registered.
 #
 # It always exits 0: the call has already run, and this hook only records.
 set -uo pipefail
@@ -40,6 +44,8 @@ input=$(cat)
 command -v jq > /dev/null 2>&1 || exit 0
 
 command=$(printf '%s' "$input" | jq -r 'if type == "object" then (.tool_input.command | strings) else empty end' 2>/dev/null) || exit 0
+# Not read past 4096 bytes, before the trims (as the pre-tool-use hook).
+[ "${#command}" -le 4096 ] || exit 0
 command="${command#"${command%%[![:space:]]*}"}"
 command="${command%"${command##*[![:space:]]}"}"
 if [ -z "$command" ] || [[ "$command" == *[\;\&\|\<\>\$\`\(\)\{\}\\]* ]] || [[ "$command" == *$'\n'* ]] || [[ "$command" == *$'\r'* ]]; then
@@ -139,9 +145,13 @@ if [ -L "$marker" ]; then
 fi
 
 # Enter the commit before the marker names it, so no marker records a
-# commit the lookup misses.
+# commit the lookup misses: in the project's git directory, outside the
+# work tree.
 if [ "$commit" != "HEAD" ]; then
-  commits_dir="${claude_dir}/checkpoints/commits"
+  command -v git > /dev/null 2>&1 || exit 0
+  git_dir=$(git -C "$project" rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+  [ -n "$git_dir" ] || exit 0
+  commits_dir="${git_dir}/acs/checkpoints/commits"
   mkdir -p "$commits_dir" 2>/dev/null || exit 0
   if [ -L "$commits_dir/$commit" ] || ! : > "$commits_dir/$commit" 2>/dev/null; then
     exit 0

@@ -40,12 +40,15 @@
 # a best-effort capture (STANDARD v1.2 §6.4): it can miss a call, but never
 # silently. When it does not log a call, or logs it without a valid HMAC or
 # chain link, it says why on standard error and exits 1, which Claude Code
-# shows as a non-blocking hook error: no jq, a symlinked audit.log (refused,
-# SEC-006), no openssl, a line that could not be built, a last line whose
-# hmac cannot be read (the line starts a new chain), an input digest that
-# could not be computed (the line says "unavailable"). It exits 0 for a call
-# it logged and for input that is not a tool call; a log directory or file
-# that cannot be written exits non-zero too. A lock that cannot be taken in
+# shows as a non-blocking hook error: no jq, input jq cannot parse (nested
+# past jq's depth limit, a lone surrogate escape, or not JSON at all: such
+# input may be a tool call), a symlinked audit.log (refused, SEC-006), no
+# openssl, a line that could not be built, a last line whose hmac cannot be
+# read (the line starts a new chain), an input digest that could not be
+# computed (the line says "unavailable"). It exits 0 for a call it logged
+# and for JSON that is not a tool call (no input, or a value that is not an
+# object with a string tool_name); a log directory or file that cannot be
+# written exits non-zero too. A lock that cannot be taken in
 # time does not stop the line: it is appended without the lock, with a
 # warning, and the verifier reports any chain-order break.
 #
@@ -74,11 +77,17 @@ if ! command -v jq &> /dev/null; then
   fail "jq is not installed"
 fi
 
-# Input that is not JSON, or names no tool, is not a tool call: nothing is
-# logged. jq fails on invalid JSON (what it printed before failing, for a JSON
-# value followed by other text, is discarded), and `strings` drops a
-# non-string value.
-tool_name=$(printf '%s' "$input" | jq -r '.tool_name | strings' 2>/dev/null) || tool_name=""
+# Input jq cannot parse is reported, not taken for "no tool call": Claude
+# Code passes a call's input and result as they are, so a tool call nested
+# deeper than jq's limit, or holding a lone surrogate escape (a string cut in
+# the middle of an emoji), fails to parse, and would otherwise be dropped
+# silently. Valid JSON that names no tool (no input, a value that is not an
+# object, a tool_name that is not a string) is not a tool call: nothing is
+# logged.
+if ! tool_name=$(printf '%s' "$input" | jq -r 'if type == "object" then (.tool_name | strings) else empty end' 2>/dev/null); then
+  reason=$(printf '%s' "$input" | jq empty 2>&1 | head -n 1 | cut -c1-200 || true)
+  fail "the hook input could not be parsed (${reason:-jq failed}), and may be a tool call"
+fi
 if [[ -z "$tool_name" ]]; then
   exit 0
 fi

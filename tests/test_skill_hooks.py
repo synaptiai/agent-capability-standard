@@ -928,18 +928,25 @@ def repo(tmp_path: Path) -> Path:
 ROLLBACK_ENV = {**GIT_ENV, "CLAUDE_PROJECT_DIR": ""}
 
 
+def commits_dir(repo: Path) -> Path:
+    """Where posttooluse_take_checkpoint.sh enters the commits it records:
+    the repository's git directory, outside the work tree."""
+    return repo / ".git" / "acs" / "checkpoints" / "commits"
+
+
 def checkpoint(repo: Path, where: str = "marker") -> str:
     """Take a checkpoint as the plugin does: `git stash create` (which writes
     no refs/stash, so `git stash list` stays empty), its commit entered in
-    .claude/checkpoints/commits/ and a marker recording it, live or filed
-    under used/ or ended/."""
+    <git dir>/acs/checkpoints/commits/ and a marker recording it, live or
+    filed under used/ or ended/."""
     (repo / "a.txt").write_text("two\n")
     sha = git(repo, "stash", "create", "checkpoint:x").strip()
     assert git(repo, "stash", "list") == ""
     record = json.dumps({"checkpoint_id": sha, "commit": sha})
     claude = repo / ".claude"
-    (claude / "checkpoints" / "commits").mkdir(parents=True)
-    (claude / "checkpoints" / "commits" / sha).touch()
+    commits_dir(repo).mkdir(parents=True)
+    (commits_dir(repo) / sha).touch()
+    claude.mkdir()
     if where == "marker":
         (claude / "checkpoint.ok").write_text(record)
     else:
@@ -968,11 +975,11 @@ class TestRollbackCommandHook:
     def test_a_filed_marker_without_its_entry_restores_nothing(
         self, repo: Path, shell: str
     ) -> None:
-        """The hook looks the commit up in .claude/checkpoints/commits/ (one
-        lookup, however long the history): a record filed under ended/ that
-        nothing entered restores nothing."""
+        """The hook looks the commit up in <git dir>/acs/checkpoints/commits/
+        (one lookup, however long the history): a record filed under ended/
+        that nothing entered restores nothing."""
         sha = checkpoint(repo, "ended")
-        (repo / ".claude" / "checkpoints" / "commits" / sha).unlink()
+        (commits_dir(repo) / sha).unlink()
         hook = command_hook("rollback", "PreToolUse", "Bash")
         result = run_command(
             hook, bash_call(f"git stash apply {sha}"), repo, shell, ROLLBACK_ENV
@@ -1016,6 +1023,51 @@ class TestRollbackCommandHook:
             hook, bash_call("git stash pop"), repo, shell, ROLLBACK_ENV
         )
         assert_blocked(result, "restores no checkpoint", "F503 ROLLBACK_FAILED: ")
+
+    def test_a_cloned_entry_or_marker_restores_nothing(
+        self, repo: Path, tmp_path: Path, shell: str
+    ) -> None:
+        """A repository can ship .claude/checkpoints/commits/<sha> and a
+        marker naming <sha> in its work tree; the entries the hook reads are
+        in the git directory, which no clone fills."""
+        (repo / "a.txt").write_text("two\n")
+        sha = git(repo, "stash", "create", "checkpoint:x").strip()
+        claude = repo / ".claude"
+        (claude / "checkpoints" / "commits").mkdir(parents=True)
+        (claude / "checkpoints" / "commits" / sha).touch()
+        (claude / "checkpoint.ok").write_text(
+            json.dumps({"checkpoint_id": sha, "commit": sha})
+        )
+        git(repo, "add", "-f", ".claude")
+        git(repo, "commit", "-q", "-m", "records")
+        victim = tmp_path / "victim"
+        git(tmp_path, "clone", "-q", str(repo), str(victim))
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        result = run_command(
+            hook, bash_call(f"git stash apply {sha}"), victim, shell, ROLLBACK_ENV
+        )
+        assert_blocked(
+            result,
+            "restores no checkpoint taken in this project",
+            "F503 ROLLBACK_FAILED: ",
+        )
+
+    def test_a_restore_in_another_repository_restores_nothing(
+        self, repo: Path, tmp_path: Path, shell: str
+    ) -> None:
+        sha = checkpoint(repo)
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        git(elsewhere, "init", "-q")
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        call = bash_call(f"git stash apply {sha}")
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(repo)}
+        (repo / "sub").mkdir()
+        for cwd in (repo, repo / "sub"):
+            ran = run_command(hook, {**call, "cwd": str(cwd)}, repo, shell, env)
+            assert ran.returncode == 0, (cwd, ran.stderr)
+        result = run_command(hook, {**call, "cwd": str(elsewhere)}, repo, shell, env)
+        assert_blocked(result, "restores no checkpoint taken", "F503 ROLLBACK_FAILED: ")
 
     def test_reads_the_markers_of_claude_project_dir(
         self, repo: Path, tmp_path: Path, shell: str

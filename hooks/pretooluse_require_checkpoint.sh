@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Apply the checkpoint and approval rules of STANDARD 1.2.0 §5.18 to the tool
-# calls Claude Code routes here (hooks.json: Write, Edit, MultiEdit,
-# NotebookEdit and Bash), as a PreToolUse command hook.
+# Apply the checkpoint and approval rules of STANDARD 1.2.0 §5.18 to every
+# tool call, as a PreToolUse command hook (hooks.json routes every tool here,
+# with onFailure "block": a run that fails, or gives no verdict in time,
+# blocks the call where Claude Code supports that setting).
 #
 # Claude Code passes the tool call as a JSON object on stdin:
-# {"tool_name", "tool_input", "permission_mode", "tool_use_id", ...}. For manual
-# use, a payload given as the first argument is read instead. Only that JSON
-# object is read: anything else, or a system without jq, is blocked with
-# R407 SAFETY_CHECK_FAILED.
+# {"tool_name", "tool_input", "permission_mode", "tool_use_id", "cwd", ...}.
+# For manual use, a payload given as the first argument is read instead. Only
+# that JSON object is read: anything else, or a system without jq, is blocked
+# with R407 SAFETY_CHECK_FAILED.
 #
 # Exit codes follow Claude Code's hook contract:
 #   0  allow the tool call (with an "ask" decision on stdout for a gated call)
@@ -16,16 +17,20 @@
 # Each reason opens with the Standard's code and name (§9.8), for example
 # "F501 CHECKPOINT_REQUIRED: ...".
 #
-# Classification (§5.18.3). The read-only list and the git stash table are a
-# subset of the SDK mapper's (grounded_agency/capabilities/mapper.py:
-# _READ_ONLY_COMMANDS, _GIT_STASH_CLASSES, _writes); a test keeps them so.
+# Classification (§5.18.3). The lists below are subsets of the SDK mapper's
+# (grounded_agency/capabilities/mapper.py: _TOOL_MAPPINGS, _READ_ONLY_COMMANDS,
+# _GIT_STASH_CLASSES, _writes); a test keeps them so.
+#   - A tool on UNGATED_TOOLS (the mapper's tools whose capability needs
+#     neither a checkpoint nor approval: Read, Grep, Skill, Agent, ...):
+#     allowed, nothing used.
 #   - Write, Edit, MultiEdit, NotebookEdit: mutate.
-#   - Bash: a command with any of ; & | < > $ ` ( ) { } \ or a line break may
-#     be more than one simple command or expand something: mutate. Otherwise
-#     its words are read as bash reads them, as exactly one simple command
-#     (split_words: '...' and "..." quote, and the quotes are removed, so
-#     "--output=x" is --output=x; an unbalanced quote, or a line over 4096
-#     bytes, is mutate):
+#   - Bash: a command over 4096 bytes is not read: mutate (checked first, so
+#     no reading of it can run long). A command with any of ; & | < > $ ` ( )
+#     { } \ or a line break may be more than one simple command or expand
+#     something: mutate. Otherwise its words are read as bash reads them, as
+#     exactly one simple command (split_words: '...' and "..." quote, and the
+#     quotes are removed, so "--output=x" is --output=x; an unbalanced quote
+#     is mutate):
 #       - an option that writes: for git, --output or any abbreviation of it
 #         (--out, --outp, ...); for file, -C in any short option cluster, -p,
 #         or --compile or --preserve-date or any abbreviation of them
@@ -34,38 +39,54 @@
 #       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
 #         writes the marker once it succeeded); git stash list|show: observe;
 #         git stash pop|apply <commit>: rollback when <commit> is the full id
-#         of a commit a checkpoint recorded (the marker's, or one
-#         posttooluse_take_checkpoint.sh entered in
-#         .claude/checkpoints/commits/, a lookup of one file however many
-#         checkpoints were taken); any other pop or apply, a bare one
+#         of a commit posttooluse_take_checkpoint.sh entered in the project's
+#         git directory (<git dir>/acs/checkpoints/commits/, a lookup of one
+#         file however many checkpoints were taken) and the call runs in the
+#         project's repository (its cwd); any other pop or apply, a bare one
 #         included, is mutate, since git applies any merge commit as if it
 #         were a stash; any other git stash form: mutate;
 #       - a command on READ_ONLY: observe (allowed, nothing used);
 #       - anything else: mutate.
+#   - Any other tool (Monitor, PowerShell, ExitWorktree, every MCP tool, a
+#     tool this hook does not know): unbound, so mutate (§5.18.2: a layer
+#     cannot know that an unknown tool only reads).
 #
 # Rules.
 #   - rollback: restores a checkpoint this project recorded, so a checkpoint
 #     was taken; allowed, and it uses none. (F503 ROLLBACK_FAILED cannot
-#     arise: a restore of anything else is mutate.)
-#   - mutate: the marker (.claude/checkpoint.ok, a JSON object with
-#     checkpoint_id, created_at, expires_at) must exist, be a regular file,
-#     have times that are whole seconds of at most 12 digits, a created_at
-#     not in the future and an expires_at at most 1800 seconds (30 minutes,
-#     the Standard's cap) after it, and not have expired (F501
-#     CHECKPOINT_REQUIRED; an expired marker is filed under
-#     .claude/checkpoints/ended/, so its commit can still be restored, and a
-#     malformed one is removed). Unless ACS_HOOK_APPROVAL is
-#     "off", the permission mode must be one that puts the call to a person,
-#     default, acceptEdits or plan (F502 APPROVAL_REQUIRED otherwise, with the
-#     marker left in place). Then the call takes the marker: it is renamed
-#     into .claude/checkpoints/used/, atomically, so two calls never both pass
-#     on one marker (F501 for the one that loses). Unless ACS_HOOK_APPROVAL is
-#     "off", the hook then answers permissionDecision "ask" with an F502
-#     reason, so Claude Code puts the call to the person.
+#     arise: a restore of anything else is mutate.) The commits are entered
+#     in the git directory, outside the work tree, so no clone, checkout or
+#     applied stash can ship an entry.
+#   - mutate: a call whose arguments name the layer's own records
+#     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/) is refused
+#     (F504 CONSTRAINT_VIOLATED): only these hooks write them. Then the
+#     marker (.claude/checkpoint.ok, a JSON object with checkpoint_id,
+#     created_at, expires_at) must exist, be a regular file that git does not
+#     track (a repository can ship a tracked one), have times that are whole
+#     seconds of at most 12 digits, a created_at not in the future and an
+#     expires_at at most 1800 seconds (30 minutes, the Standard's cap) after
+#     it, and be within both its expires_at and the layer's maximum age,
+#     ACS_CHECKPOINT_MAX_AGE (1 to 1800 seconds, default 1800) after its
+#     created_at (F501 CHECKPOINT_REQUIRED; a marker past either is filed
+#     under .claude/checkpoints/ended/, and a malformed one is removed).
+#     Unless ACS_HOOK_APPROVAL is "off", the permission mode must be one that
+#     puts the call to a person, default, acceptEdits or plan (F502
+#     APPROVAL_REQUIRED otherwise, with the marker left in place). Then the
+#     call takes the marker: it is renamed into .claude/checkpoints/used/,
+#     atomically, so two calls never both pass on one marker (F501 for the
+#     one that loses). Unless ACS_HOOK_APPROVAL is "off", the hook then
+#     answers permissionDecision "ask" with an F502 reason, so Claude Code
+#     puts the call to the person.
+#
+# Scope (§5.18.5): the project directory, every session in it (one marker).
+# Its execution boundaries are the ends and starts of turns and sessions
+# (stop_end_checkpoints.sh, on Stop, StopFailure, UserPromptSubmit,
+# SessionStart and SessionEnd).
 #
 # It fails closed: Claude Code treats any exit code other than 2 as a
-# non-blocking error and runs the call, so an unexpected failure here blocks
-# the call with R407 instead of exiting with that command's status.
+# non-blocking error and runs the call unless onFailure is "block", so an
+# unexpected failure here blocks the call with R407 instead of exiting with
+# that command's status.
 #
 # The plugin's hooks do not claim class SL (spec/SECURITY.md §5.5).
 #
@@ -97,6 +118,12 @@ if [ -z "$tool_name" ]; then
   block "$unreadable"
 fi
 
+# Tools whose calls need nothing from this hook: the SDK mapper's static
+# mappings (_TOOL_MAPPINGS) whose capability needs neither a checkpoint nor
+# approval (retrieve, search, observe, recall, persist, delegate, invoke,
+# inquire). Every other tool but Bash is classified mutate.
+UNGATED_TOOLS=(Read Glob Grep LS WebFetch WebSearch Task Agent Skill AskUser AskUserQuestion TodoRead TodoWrite TaskList TaskGet TaskCreate TaskUpdate ToolSearch BashOutput TaskOutput ListMcpResourcesTool ReadMcpResourceTool ExitPlanMode)
+
 # Commands that only read, unless given an option that writes (writes below).
 # A subset of the SDK mapper's _READ_ONLY_COMMANDS.
 READ_ONLY=(ls cat head tail wc pwd grep stat file du df which whoami uname echo printf "git status" "git log" "git diff" "git show" "git rev-parse" "git ls-files")
@@ -114,8 +141,8 @@ GIT_STASH_CLASSES=(create=checkpoint list=observe show=observe pop=rollback appl
 # separate words. GLOBBED is 1 when a word holds an unquoted *, ? or [,
 # which bash replaces with file names. Fails on an unbalanced quote, and on
 # a line over 4096 bytes: each character read costs time that grows with the
-# line, so a long one could hold the hook past Claude Code's 60-second limit,
-# after which the call runs unchecked.
+# line, so a long one could hold the hook past its time limit, after which
+# Claude Code runs the call unchecked unless onFailure is "block".
 # posttooluse_take_checkpoint.sh holds the same function; a test keeps them so.
 split_words() {
   local line="$1" ch quote="" word="" inword=0 i
@@ -179,6 +206,13 @@ writes() {
 classify_bash() {
   local command="$1" entry
   local -a words
+  # A line over 4096 bytes is not read: mutate. Checked before the trims
+  # below, whose cost grows with the line times its run of blanks (a gated
+  # command padded with 50,000 blanks took a minute to trim).
+  if [ "${#command}" -gt 4096 ]; then
+    echo mutate
+    return
+  fi
   # Trim, then any character that can join or expand commands: mutate.
   command="${command#"${command%%[![:space:]]*}"}"
   command="${command%"${command##*[![:space:]]}"}"
@@ -220,6 +254,15 @@ classify_bash() {
   echo mutate
 }
 
+for entry in "${UNGATED_TOOLS[@]}"; do
+  if [ "$tool_name" = "$entry" ]; then
+    exit 0
+  fi
+done
+
+# Unbound: a tool this hook does not know, MCP tools included, is a mutate
+# (§5.18.2), and its refusals and its approval request name no capability.
+unbound=0
 case "$tool_name" in
   Write | Edit | MultiEdit | NotebookEdit)
     capability=mutate
@@ -229,8 +272,8 @@ case "$tool_name" in
     capability=$(classify_bash "$command")
     ;;
   *)
-    # Not routed here by hooks.json: nothing this hook gates.
-    exit 0
+    capability=mutate
+    unbound=1
     ;;
 esac
 
@@ -240,34 +283,47 @@ fi
 
 # SEC-006: Use absolute path via CLAUDE_PROJECT_DIR, fall back to CLAUDE_PLUGIN_ROOT, then pwd
 if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-  claude_dir="${CLAUDE_PROJECT_DIR}/.claude"
+  project_dir="${CLAUDE_PROJECT_DIR}"
 elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-  claude_dir="${CLAUDE_PLUGIN_ROOT}/.claude"
+  project_dir="${CLAUDE_PLUGIN_ROOT}"
 else
-  claude_dir="$(pwd)/.claude"
+  project_dir="$(pwd)"
 fi
+claude_dir="${project_dir}/.claude"
 marker="${claude_dir}/checkpoint.ok"
 used_dir="${claude_dir}/checkpoints/used"
 # Markers whose validity ended unused (expired, the turn ended, or a newer
 # checkpoint replaced them), kept like used/.
 ended_dir="${claude_dir}/checkpoints/ended"
-# One empty file per commit a checkpoint recorded, named by the commit:
-# posttooluse_take_checkpoint.sh enters each before it writes the marker.
-commits_dir="${claude_dir}/checkpoints/commits"
+
+# The git directory of the repository a directory is in (absolute), or
+# nothing.
+git_dir_of() {
+  command -v git > /dev/null 2>&1 || return 1
+  git -C "$1" rev-parse --absolute-git-dir 2>/dev/null
+}
 
 # Whether a checkpoint of this project recorded the commit $1 (a full commit
-# id, so a safe file name) as its restore point: the current marker's
-# "commit", or an entry in commits/. One lookup, however many checkpoints
+# id, so a safe file name) as its restore point, for a call that runs in the
+# project's repository: posttooluse_take_checkpoint.sh enters each such
+# commit as an empty file named by it, in <git dir>/acs/checkpoints/commits/,
+# before it writes the marker. That directory is outside the work tree: a
+# clone, a checkout or an applied stash can put files in the work tree,
+# .claude/ included, but none in it. One lookup, however many checkpoints
 # were taken. A checkpoint can be restored valid or not (§5.18.6).
 recorded_commit() {
-  if [ -f "$commits_dir/$1" ] && [ ! -L "$commits_dir/$1" ]; then
-    return 0
+  local git_dir ran_in cwd entry
+  git_dir=$(git_dir_of "$project_dir") || return 1
+  [ -n "$git_dir" ] || return 1
+  # The call restores into the repository it runs in (its cwd): the
+  # project's, or the commit is another repository's state.
+  cwd=$(printf '%s' "$payload" | jq -r '.cwd // "" | strings' 2>/dev/null) || return 1
+  if [ -n "$cwd" ]; then
+    ran_in=$(git_dir_of "$cwd") || return 1
+    [ "$ran_in" = "$git_dir" ] || return 1
   fi
-  if [ -f "$marker" ] && [ ! -L "$marker" ] \
-    && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$marker" 2>/dev/null)" = "$1" ]; then
-    return 0
-  fi
-  return 1
+  entry="${git_dir}/acs/checkpoints/commits/$1"
+  [ -f "$entry" ] && [ ! -L "$entry" ]
 }
 
 if [[ "$capability" == "rollback "* ]]; then
@@ -277,6 +333,22 @@ if [[ "$capability" == "rollback "* ]]; then
     exit 0
   fi
   capability=mutate
+fi
+
+# The layer's records are written by these hooks alone: a Write, Edit,
+# MultiEdit or NotebookEdit of a path, or a Bash command, that names the
+# marker or the checkpoint directories is refused (a written entry would be
+# a permanent pass for a restore, a written marker a checkpoint no call
+# took). This reads the text: a path a command builds when it runs is not
+# seen, and such a call is still a mutate a person approves.
+records_named=$(printf '%s' "$payload" | jq -r '
+  (if .tool_name == "Bash" then .tool_input.command
+   elif .tool_name == "Write" or .tool_name == "Edit" or .tool_name == "MultiEdit" or .tool_name == "NotebookEdit"
+   then (.tool_input.file_path // .tool_input.notebook_path)
+   else null end) as $text
+  | ($text | strings | test("checkpoint\\.ok|\\.claude/checkpoints|acs/checkpoints")) // false' 2>/dev/null) || records_named=true
+if [ "$records_named" != "false" ]; then
+  block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/), which only the plugin's hooks write."
 fi
 
 # mutate: a valid marker for this call alone.
@@ -295,6 +367,15 @@ fi
 
 if [ ! -f "$marker" ]; then
   f501 "checkpoint marker is not a regular file."
+fi
+
+# A marker git tracks came with the repository (a clone or a checkout can
+# ship one), not from a checkpoint taken here: it authorises nothing, and is
+# left as it is. git is asked from the marker's own directory, so a .claude
+# that is a symbolic link or a submodule is read where it leads.
+if command -v git > /dev/null 2>&1 \
+  && git -C "$claude_dir" ls-files --error-unmatch -- checkpoint.ok > /dev/null 2>&1; then
+  f501 "the checkpoint marker is tracked by git, so a repository shipped it: it authorises nothing. Remove it from the repository and take a checkpoint (git stash create)."
 fi
 
 # SEC-001: Validate timestamp freshness
@@ -332,7 +413,15 @@ if ((created_at > now || expires_at > created_at + 1800)); then
   rm -f "$marker"
   f501 "checkpoint marker's times are not possible: taken in the future, or valid for more than 30 minutes (STANDARD 1.2.0 §5.18.6). Take a new checkpoint."
 fi
-if ((now > expires_at)); then
+# The layer's maximum age (§5.18.6), as the take and log hooks read it: a
+# marker written under a longer one (another writer, an earlier setting)
+# authorises nothing past it.
+max_age="${ACS_CHECKPOINT_MAX_AGE:-1800}"
+if ! [[ "$max_age" =~ ^[0-9]{1,4}$ ]] || ((10#$max_age < 1 || 10#$max_age > 1800)); then
+  max_age=1800
+fi
+max_age=$((10#$max_age))
+if ((now > expires_at || now > created_at + max_age)); then
   # Its validity has ended, not its record: file it under ended/, so that a
   # rollback can still restore its commit. Removed only if that fails.
   mkdir -p "$ended_dir" 2>/dev/null || true
@@ -374,7 +463,11 @@ mv "${claim}/marker" "${used_dir}/$(safe "$checkpoint_id").$(safe "$call_id").${
 rmdir "$claim"
 
 if [ "$approval" != "off" ]; then
-  reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate') requires approval; it runs only if this call is approved."
+  if [ "$unbound" = 1 ]; then
+    reason="F502 APPROVAL_REQUIRED: ${tool_name} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
+  else
+    reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate') requires approval; it runs only if this call is approved."
+  fi
   jq -c -n --arg reason "$reason" \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $reason}}'
 fi

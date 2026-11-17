@@ -51,26 +51,35 @@ hooks:
             # A restore in this skill restores a checkpoint taken in the project
             # (STANDARD 1.2.0 §5.18.6, F503): each `git stash pop` or `git stash
             # apply` must name, as its one argument, the full id of a commit a
-            # checkpoint recorded (.claude/checkpoint.ok's, or one entered in
-            # .claude/checkpoints/commits/, one lookup), as the plugin's
-            # pre-tool-use hook reads it; valid or not, used or not. Claude Code
-            # passes the tool call as JSON on stdin; exit 2 blocks the call and the
-            # reason on stderr is shown to Claude. A call that cannot be read is
-            # blocked (R407).
-            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then DIR="$CLAUDE_PROJECT_DIR/.claude"
-            elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then DIR="$CLAUDE_PLUGIN_ROOT/.claude"
-            else DIR="$(pwd)/.claude"; fi
+            # checkpoint recorded, entered in the project's git directory
+            # (<git dir>/acs/checkpoints/commits/, one lookup; outside the work
+            # tree, so no clone, checkout or applied stash can ship an entry),
+            # and run in the project's repository (the call's cwd), as the
+            # plugin's pre-tool-use hook reads it; valid or not, used or not.
+            # Claude Code passes the tool call as JSON on stdin; exit 2 blocks the
+            # call and the reason on stderr is shown to Claude. A call that cannot
+            # be read is blocked (R407).
+            # One read: the call's cwd on the first line, its command after it.
+            OUT="$(jq -r '(.cwd // "" | strings | gsub("[\n\r]"; "")), (.tool_input.command // "" | strings)' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            CWD="${OUT%%
+            *}"
+            case "$OUT" in *"
+            "*) CMD="${OUT#*
+            }" ;; *) CMD="" ;; esac
+            if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then P="$CLAUDE_PROJECT_DIR"
+            elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then P="$CLAUDE_PLUGIN_ROOT"
+            else P="$(pwd)"; fi
+            GD="$(git -C "$P" rev-parse --absolute-git-dir 2>/dev/null || true)"
+            if [ -n "$GD" ] && [ -n "$CWD" ] && [ "$(git -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null || true)" != "$GD" ]; then GD=""; fi
             while IFS= read -r RESTORE; do
               [ -n "$RESTORE" ] || continue
               ARG="$(printf '%s\n' "$RESTORE" | sed -E 's/^git[[:space:]]+stash[[:space:]]+(pop|apply)//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
               FOUND=""
-              if printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
-                if [ -f "$DIR/checkpoints/commits/$ARG" ] && [ ! -L "$DIR/checkpoints/commits/$ARG" ]; then FOUND=1
-                elif [ -f "$DIR/checkpoint.ok" ] && [ ! -L "$DIR/checkpoint.ok" ] && [ "$(jq -r 'if type == "object" then (.commit // "" | strings) else "" end' "$DIR/checkpoint.ok" 2>/dev/null)" = "$ARG" ]; then FOUND=1; fi
+              if [ -n "$GD" ] && printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
+                if [ -f "$GD/acs/checkpoints/commits/$ARG" ] && [ ! -L "$GD/acs/checkpoints/commits/$ARG" ]; then FOUND=1; fi
               fi
               if [ -z "$FOUND" ]; then
-                printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded.\n" "$RESTORE" >&2
+                printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded, in the project's repository.\n" "$RESTORE" >&2
                 exit 2
               fi
             done <<EOF

@@ -16,13 +16,14 @@ options to inject:
   successful state-saving call takes a checkpoint), the use of a held
   checkpoint by a call that ran, and the output check of a bound tool of
   another MCP server (R402, F505, F504), whose refused result it replaces
-- A Stop hook: the end of a turn is an execution boundary
+- A Stop and a UserPromptSubmit hook: the end of a turn and the start of
+  the next are execution boundaries
 
 The layer's scope is the adapter instance: every session and subagent it
-serves shares one set of records, and the Stop of any of them ends the
-validity of every checkpoint the adapter holds. Serve sessions that must not
-share boundaries with separate adapters. The conformance statement is
-``tests/conformance/calls/statements/grounded_agency_adapter.json``.
+serves shares one set of records, and the Stop or the next prompt of any of
+them ends the validity of every checkpoint the adapter holds. Serve sessions
+that must not share boundaries with separate adapters. The conformance
+statement is ``tests/conformance/calls/statements/grounded_agency_adapter.json``.
 
 Example:
     from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
@@ -1562,14 +1563,17 @@ class GroundedAgentAdapter:
         - PostToolUse hooks for evidence collection, the checkpoint recorder
           (registered for every tool) and the use of a held checkpoint by a
           call that ran; a PostToolUseFailure hook that uses it too
-        - a Stop hook (the end of a turn is an execution boundary) and a
-          SubagentStop hook (a finished subagent's holds count as used)
+        - a Stop hook (the end of a turn is an execution boundary), a
+          UserPromptSubmit hook (the start of a turn is one too: it ends
+          what a turn left when its Stop never came, after an API error or
+          an interrupt) and a SubagentStop hook (a finished subagent's
+          holds count as used)
 
         The layer's scope is this adapter: every session and subagent it
-        serves, ordered by its lock. The Stop of any of them ends the
-        validity of every checkpoint it holds; serve sessions that must not
-        share boundaries with separate adapters. Its maximum age is
-        ``config.expiry_minutes``; it relies on a permission prompt only in
+        serves, ordered by its lock. The Stop or the next prompt of any of
+        them ends the validity of every checkpoint it holds; serve sessions
+        that must not share boundaries with separate adapters. Its maximum
+        age is ``config.expiry_minutes``; it relies on a permission prompt only in
         the permission modes of :data:`PROMPTING_PERMISSION_MODES`, read
         from the hook input, else from ``base.permission_mode``.
 
@@ -1637,10 +1641,14 @@ class GroundedAgentAdapter:
         safety_pre_hook._grounded_adapter = self  # see _already_wrapped
         pre_hooks.append(self._wrap_hook(safety_pre_hook))
 
-        # Stop: an execution boundary. SubagentStop: that agent's holds are
-        # unresolved and count as used.
+        # Stop and UserPromptSubmit: execution boundaries (a turn's end, and
+        # the next turn's start, which also ends what a turn left when its
+        # Stop never came). SubagentStop: that agent's holds are unresolved
+        # and count as used.
         stop_hooks = list(existing_hooks.get("Stop", []))
         stop_hooks.append(self._wrap_hook(self._make_boundary()))
+        prompt_hooks = list(existing_hooks.get("UserPromptSubmit", []))
+        prompt_hooks.append(self._wrap_hook(self._make_boundary("turn started")))
         subagent_stop_hooks = list(existing_hooks.get("SubagentStop", []))
         subagent_stop_hooks.append(self._wrap_hook(self._make_subagent_end()))
 
@@ -1670,6 +1678,7 @@ class GroundedAgentAdapter:
                 "PostToolUse": post_hooks,
                 "PostToolUseFailure": failure_hooks,
                 "Stop": stop_hooks,
+                "UserPromptSubmit": prompt_hooks,
                 "SubagentStop": subagent_stop_hooks,
             }
         )
@@ -1777,10 +1786,14 @@ class GroundedAgentAdapter:
                 config["matcher"] = matcher
             return config
 
-    def _make_boundary(self) -> Any:
+    def _make_boundary(self, what: str = "turn ended") -> Any:
         """
         Create the Stop hook: the end of a turn is an execution boundary
-        (STANDARD 1.2.0 section 5.18.6).
+        (STANDARD 1.2.0 section 5.18.6). With ``what`` "turn started", the
+        UserPromptSubmit hook: the start of the next turn is one too, and it
+        ends what a turn left when its Stop never came (Claude Code runs
+        StopFailure in its place after an API error, and an interrupted
+        turn may run neither).
 
         A hold still kept by a call of the stopping session is unresolved
         (the call never reported back), so its checkpoint counts as used.
@@ -1806,7 +1819,7 @@ class GroundedAgentAdapter:
                 holders = tracker.resolve_holds_in_scope(scope)
                 if holders:
                     logger.info("Turn ended: unresolved holds of %s used", holders)
-                ended = tracker.end_validity(f"turn ended in session {session}")
+                ended = tracker.end_validity(f"{what} in session {session}")
                 with self._state_lock:
                     self._allowed.clear()
                     self._outcome_recorded.clear()
@@ -1820,7 +1833,7 @@ class GroundedAgentAdapter:
                     unresolved=holders or None,
                 )
             except Exception as e:
-                logger.error("Turn-end boundary failed: %s", e)
+                logger.error("Boundary (%s) failed: %s", what, e)
             return {}
 
         return end_of_turn
