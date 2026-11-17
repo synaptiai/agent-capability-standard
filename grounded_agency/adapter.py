@@ -803,7 +803,14 @@ class GroundedAgentAdapter:
         # Calls this layer allowed, by (tool, digest of the arguments), not
         # yet run, each with its call id (tool_use_id) when it has one, in
         # the order allowed: what a grounded MCP tool checks (take_allowed).
+        # A call enters only when it is allowed: the PreToolUse hook's pass,
+        # or the permission callback's allow of a call the hook asked about,
+        # never the ask itself (section 5.18.7).
         self._allowed: dict[tuple[str, str], list[str | None]] = {}
+        # Calls the PreToolUse hook asked about and no decision has reached
+        # this layer for yet, keyed as _allowed: the permission callback
+        # allows only a call the hook passed or asked about.
+        self._asked_calls: dict[tuple[str, str], list[str | None]] = {}
         # Calls whose outcome a grounded MCP tool recorded (an F505 refusal
         # of its output, section 5.20): the post-call hooks do not record
         # it again.
@@ -1482,26 +1489,91 @@ class GroundedAgentAdapter:
             kept = self._call_dirs.pop(call, None) if call else None
         return _cwd_of(input_data) or kept
 
+    @staticmethod
+    def _take_entry(
+        table: dict[tuple[str, str], list[str | None]],
+        key: tuple[str, str],
+        call: str | None,
+    ) -> tuple[bool, str | None]:
+        """Remove ``call``'s own entry under ``key`` when it has one, else
+        the oldest: (whether one was there, the call id it named). The
+        caller holds the state lock."""
+        calls = table.get(key)
+        if not calls:
+            return False, None
+        if call in calls:
+            calls.remove(call)
+            taken = call
+        else:
+            taken = calls.pop(0)
+        if not calls:
+            del table[key]
+        return True, taken
+
     def _allow_token(
         self, tool: str, args: Any, delta: int = 1, call: str | None = None
     ) -> None:
         """Grant (``delta`` > 0) or withdraw (``delta`` < 0) the decision for
         a call of ``tool`` with ``args``; a withdrawal takes ``call``'s own
-        grant when it has one, else the oldest."""
+        grant when it has one, else the oldest. A call already granted is
+        not granted twice."""
         key = (tool, _args_key(args))
         with self._state_lock:
-            calls = self._allowed.setdefault(key, [])
             if delta > 0:
-                calls.extend([call] * delta)
+                calls = self._allowed.setdefault(key, [])
+                if call is None or call not in calls:
+                    calls.extend([call] * delta)
             for _ in range(-delta):
-                if not calls:
+                if not self._take_entry(self._allowed, key, call)[0]:
                     break
-                if call in calls:
+
+    def _ask_token(self, tool: str, args: Any, call: str | None) -> None:
+        """Note that the PreToolUse hook asked about a call of ``tool``
+        with ``args``: no decision yet, so nothing is granted."""
+        key = (tool, _args_key(args))
+        with self._state_lock:
+            calls = self._asked_calls.setdefault(key, [])
+            if call is None or call not in calls:
+                calls.append(call)
+
+    def _settle_decision(
+        self,
+        tool: str,
+        args: Any,
+        call: str | None,
+        allowed_args: dict[str, Any] | None = None,
+    ) -> bool:
+        """Settle the permission callback's decision on a call of ``tool``
+        with ``args``: what the PreToolUse hook left for it (its ask, or
+        its pass's grant) is withdrawn; on an allow (``allowed_args``, the
+        arguments the call runs with), the call is granted for those, but
+        only when the hook passed or asked about it. Returns whether it
+        was granted."""
+        key = (tool, _args_key(args))
+        with self._state_lock:
+            asked, asked_id = self._take_entry(self._asked_calls, key, call)
+            passed, passed_id = self._take_entry(self._allowed, key, call)
+            if allowed_args is None or not (asked or passed):
+                return False
+            grant = call if call is not None else (asked_id if asked else passed_id)
+            calls = self._allowed.setdefault((tool, _args_key(allowed_args)), [])
+            if grant is None or grant not in calls:
+                calls.append(grant)
+            return True
+
+    def _forget_call(self, call: str | None) -> None:
+        """Forget a call that reported back (it ran, or failed): a decision
+        it left that no grounded MCP tool took, and its ask, authorise
+        nothing more."""
+        if call is None:
+            return
+        with self._state_lock:
+            for table in (self._allowed, self._asked_calls):
+                for key in [k for k, calls in table.items() if call in calls]:
+                    calls = table[key]
                     calls.remove(call)
-                else:
-                    calls.pop(0)
-            if not calls:
-                del self._allowed[key]
+                    if not calls:
+                        del table[key]
 
     def _take_allowed(self, tool: str, args: Any) -> tuple[bool, str | None]:
         """:meth:`take_allowed`, and the call id of the decision used."""
@@ -1521,15 +1593,25 @@ class GroundedAgentAdapter:
         A grounded MCP tool calls this before it runs
         (``create_grounded_mcp_server(require_layer=True)``): False means
         the call reached the tool without the layer allowing it, and the
-        tool refuses with R407 (section 5.18.8).
+        tool refuses with R407 (section 5.18.8). A decision is granted
+        only when a call is allowed: the PreToolUse hook's pass, or the
+        permission callback's allow of a call the hook asked about; an
+        ask grants nothing, and every refusal the layer makes, a call
+        that reports back, and a boundary withdraw it.
         """
         return self._take_allowed(tool, args)[0]
 
     def _register_grounded_tool(self, tool: str) -> None:
         """Note that ``create_grounded_mcp_server`` serves ``tool``: its
-        output reaches this layer, so a grounding policy checks it."""
+        output reaches this layer, so a grounding policy checks it, and
+        it runs only a call this layer allowed."""
         with self._state_lock:
             self._grounded_tools.add(tool)
+
+    def _is_grounded_tool(self, tool: str) -> bool:
+        """Whether ``create_grounded_mcp_server`` serves ``tool``."""
+        with self._state_lock:
+            return tool in self._grounded_tools
 
     def _warn_unchecked_output(self, mapping: ToolMapping, tool: str) -> None:
         """Warn, once per tool, that a grounding policy (the
@@ -1626,8 +1708,10 @@ class GroundedAgentAdapter:
         still valid, nor when a decision arrived (STANDARD 1.2.0 sections
         5.18.6, 5.18.7): the PreToolUse hook refuses a call that requires a
         checkpoint (R407) and one whose binding sets ``approval.expires``
-        (F502). The prompt tool decides the other calls that require
-        approval.
+        (F502), and so is a call that requires approval of a tool
+        ``create_grounded_mcp_server`` serves (R407: that tool runs only a
+        call this layer saw allowed). The prompt tool decides the other
+        calls that require approval.
 
         Args:
             base: ClaudeAgentOptions instance
@@ -1886,6 +1970,7 @@ class GroundedAgentAdapter:
                 ended = tracker.end_validity(f"{what} in session {session}")
                 with self._state_lock:
                     self._allowed.clear()
+                    self._asked_calls.clear()
                     self._outcome_recorded.clear()
                     self._call_dirs.clear()
                     self._asked_at.clear()
@@ -1953,7 +2038,9 @@ class GroundedAgentAdapter:
         6. Approval (F502), with ``approval="ask"``: a binding that needs
            more than one approver or an approver's role is refused, and so,
            with ``prompt_tool``, is one that sets ``approval.expires`` (this
-           layer cannot see when that tool's decision arrives); in a
+           layer cannot see when that tool's decision arrives), and one of
+           a tool ``create_grounded_mcp_server`` serves (R407: it runs only
+           a call this layer saw allowed); in a
            permission mode outside :data:`PROMPTING_PERMISSION_MODES` the
            call is refused; otherwise the digest of the shown value is
            recorded, the time of the request noted for a binding that sets
@@ -2172,6 +2259,25 @@ class GroundedAgentAdapter:
                                 f"{tool_name} did not run.",
                             )
                         )
+                    if prompt_tool and self._is_grounded_tool(tool_name):
+                        release()
+                        return deny(
+                            self._refuse(
+                                ErrorCode.SAFETY_CHECK_FAILED,
+                                mapping,
+                                tool_name,
+                                call,
+                                f"{_subject(mapping, tool_name)} requires "
+                                f"approval, and a permission prompt tool decides "
+                                f"this session's calls: this layer never sees "
+                                f"the call allowed, so the grounded MCP tool "
+                                f"cannot tell an allowed call from one that "
+                                f"was refused or never decided (STANDARD 1.2.0 "
+                                f"§5.18.8). {tool_name} did not run; the host "
+                                f"can pass a can_use_tool callback instead of "
+                                f"the prompt tool.",
+                            )
+                        )
                     mode = (
                         input_data.get("permission_mode") or options_mode or "default"
                     )
@@ -2209,7 +2315,9 @@ class GroundedAgentAdapter:
                     if expires is not None and call is not None:
                         with self._state_lock:
                             self._asked_at[call] = self._now()
-                    self._allow_token(tool_name, tool_input, call=call)
+                    # No decision yet: a grounded MCP tool runs the call only
+                    # once the permission callback allows it.
+                    self._ask_token(tool_name, tool_input, call)
                     self._record(
                         "asked",
                         tool_name,
@@ -2236,6 +2344,11 @@ class GroundedAgentAdapter:
                 # The detail stays in the log: the deny reason goes back to
                 # the model.
                 logger.exception("PreToolUse safety check failed")
+                # Whatever this hook left for the call authorises nothing.
+                try:
+                    self._settle_decision(tool_name, tool_input, call)
+                except Exception:
+                    logger.exception("Could not withdraw the decision on %s", call)
                 if strict:
                     release()
                     try:
@@ -2306,6 +2419,7 @@ class GroundedAgentAdapter:
             if holder:
                 with self._state_lock:
                     self._asked_at.pop(holder, None)
+                self._forget_call(holder)
             tool_name = input_data.get("tool_name", "")
             tool_input = input_data.get("tool_input", {})
             try:
@@ -2413,6 +2527,7 @@ class GroundedAgentAdapter:
             if holder:
                 with self._state_lock:
                     self._asked_at.pop(holder, None)
+                self._forget_call(holder)
             tool_name = input_data.get("tool_name", "")
             try:
                 checkpoint_id = tracker.consume_checkpoint(holder) if holder else None
@@ -2480,6 +2595,10 @@ class GroundedAgentAdapter:
         5. Uses the held checkpoint when the call is allowed, re-checking in
            one atomic step that it is still valid (F501 otherwise: it
            expired, or a boundary passed, while the call waited).
+        6. Grants a grounded MCP tool the decision for the call (with the
+           arguments it runs with) only on its allow, and only for a call
+           the PreToolUse hook passed or asked about; any other answer,
+           an error included, withdraws what the hook left for the call.
 
         Args:
             host_can_use_tool: The ``can_use_tool`` callback of the options
@@ -2546,26 +2665,14 @@ class GroundedAgentAdapter:
                 logger.warning("Permission warning (non-strict): %s", refusal)
             return checkpoint_id, None
 
-        async def check_permission(
+        async def decide_permission(
             tool_name: str,
             input_data: dict[str, Any],
             context: HookContext | None,
-        ) -> Any:
-            """
-            Permission callback: the checkpoint check, the host's decision,
-            the re-check of changed arguments, then the use of the
-            checkpoint.
-
-            Args:
-                tool_name: Name of tool being invoked
-                input_data: Tool input parameters
-                context: ToolPermissionContext from SDK
-
-            Returns:
-                PermissionResultAllow or PermissionResultDeny, or whatever
-                the host's callback returned
-            """
-            holder = getattr(context, "tool_use_id", None)
+            holder: str | None,
+        ) -> tuple[Any, dict[str, Any] | None]:
+            """The decision on a call, and, on an allow, the arguments it
+            runs with (None on a refusal)."""
             # The request: this layer's ask, else the host's prompt, which
             # this callback starts.
             requested = self._now()
@@ -2577,13 +2684,13 @@ class GroundedAgentAdapter:
                     requested = asked
                 mapping0 = mapper.map_tool(tool_name, input_data, cwd)
                 if mapping0.control:
-                    return allow(input_data)
+                    return allow(input_data), input_data
 
                 if mapping0.requires_checkpoint:
                     if holder is None:
                         message = self._unheld_call_refusal(mapping0, tool_name)
                         if strict:
-                            return deny(message, None)
+                            return deny(message, None), None
                     else:
                         ok, checkpoint_id = tracker.validate_and_reserve(holder)
                         if not ok:
@@ -2595,7 +2702,7 @@ class GroundedAgentAdapter:
                                 _checkpoint_message(mapping0, tool_name, checkpoint_id),
                             )
                             if strict:
-                                return deny(message, holder)
+                                return deny(message, holder), None
                             logger.warning("%s executing without checkpoint", tool_name)
 
                 if host_can_use_tool is None:
@@ -2608,7 +2715,6 @@ class GroundedAgentAdapter:
                             "set GroundedAgentConfig(approval='off').",
                             tool_name,
                         )
-                        self._allow_token(tool_name, input_data, -1, holder)
                         return deny(
                             self._refuse(
                                 ErrorCode.APPROVAL_REQUIRED,
@@ -2621,11 +2727,10 @@ class GroundedAgentAdapter:
                                 f"can_use_tool callback. {tool_name} did not run.",
                             ),
                             holder,
-                        )
+                        ), None
                     checkpoint_id, refusal = use_checkpoint(mapping0, tool_name, holder)
                     if refusal is not None:
-                        self._allow_token(tool_name, input_data, -1, holder)
-                        return deny(refusal, None)
+                        return deny(refusal, None), None
                     self._record(
                         "allowed",
                         tool_name,
@@ -2633,14 +2738,13 @@ class GroundedAgentAdapter:
                         holder,
                         checkpoint_id=checkpoint_id,
                     )
-                    return allow(input_data)
+                    return allow(input_data), input_data
 
                 # The host's permission flow decides what it is asked.
                 result = host_can_use_tool(tool_name, input_data, context)
                 if inspect.isawaitable(result):
                     result = await result
                 if not _is_allow(result):
-                    self._allow_token(tool_name, input_data, -1, holder)
                     if asks and mapping0.requires_approval:
                         reason = getattr(result, "message", "") or "denied"
                         return deny(
@@ -2653,16 +2757,15 @@ class GroundedAgentAdapter:
                             ),
                             holder,
                             interrupt=bool(getattr(result, "interrupt", False)),
-                        )
+                        ), None
                     release(holder)
-                    return result
+                    return result, None
 
                 policy = mapping0.approval
                 expires = policy.expires_seconds if policy is not None else None
                 if asks and mapping0.requires_approval and expires is not None:
                     waited = (self._now() - requested).total_seconds()
                     if waited > expires:
-                        self._allow_token(tool_name, input_data, -1, holder)
                         return deny(
                             self._refuse(
                                 ErrorCode.APPROVAL_REQUIRED,
@@ -2676,7 +2779,7 @@ class GroundedAgentAdapter:
                                 f"run, and needs a new decision",
                             ),
                             holder,
-                        )
+                        ), None
 
                 updated = getattr(result, "updated_input", None)
                 args1 = updated if isinstance(updated, dict) else input_data
@@ -2712,10 +2815,7 @@ class GroundedAgentAdapter:
                             f"the decision was on other arguments",
                         )
                     if refusal is not None:
-                        self._allow_token(tool_name, input_data, -1, holder)
-                        return deny(refusal, holder)
-                    self._allow_token(tool_name, input_data, -1, holder)
-                    self._allow_token(tool_name, args1, call=holder)
+                        return deny(refusal, holder), None
                     if (
                         mapping0.requires_checkpoint
                         and not mapping1.requires_checkpoint
@@ -2724,8 +2824,7 @@ class GroundedAgentAdapter:
 
                 checkpoint_id, refusal = use_checkpoint(mapping1, tool_name, holder)
                 if refusal is not None:
-                    self._allow_token(tool_name, args1, -1, holder)
-                    return deny(refusal, None)
+                    return deny(refusal, None), None
                 digest = None
                 if mapping1.requires_approval:
                     try:
@@ -2743,7 +2842,7 @@ class GroundedAgentAdapter:
                     ),
                     checkpoint_id=checkpoint_id,
                 )
-                return result
+                return result, args1
 
             except Exception as e:
                 # Fail-closed: refuse on error (secure default)
@@ -2761,7 +2860,46 @@ class GroundedAgentAdapter:
                         "R407 SAFETY_CHECK_FAILED: the permission check failed "
                         f"due to an internal error: {e}"
                     )
-                return deny(message, holder)
+                return deny(message, holder), None
+
+        async def check_permission(
+            tool_name: str,
+            input_data: dict[str, Any],
+            context: HookContext | None,
+        ) -> Any:
+            """
+            Permission callback: the checkpoint check, the host's decision,
+            the re-check of changed arguments, then the use of the
+            checkpoint. Only an allow grants a grounded MCP tool the
+            decision for the call (with the arguments it runs with), and
+            every other answer withdraws what the PreToolUse hook left for
+            it (section 5.18.8).
+
+            Args:
+                tool_name: Name of tool being invoked
+                input_data: Tool input parameters
+                context: ToolPermissionContext from SDK
+
+            Returns:
+                PermissionResultAllow or PermissionResultDeny, or whatever
+                the host's callback returned
+            """
+            holder = getattr(context, "tool_use_id", None)
+            result, runs_with = await decide_permission(
+                tool_name, input_data, context, holder
+            )
+            try:
+                self._settle_decision(tool_name, input_data, holder, runs_with)
+            except Exception as e:
+                # The decision cannot be handed to a grounded MCP tool, so
+                # the call is refused (section 5.18.8).
+                logger.error("Could not settle the decision on %s: %s", tool_name, e)
+                return deny(
+                    "R407 SAFETY_CHECK_FAILED: the permission check failed "
+                    f"due to an internal error: {e}",
+                    holder,
+                )
+            return result
 
         return check_permission
 

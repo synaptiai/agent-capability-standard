@@ -837,3 +837,263 @@ was over 1500 px grew, the page's longest is 1798 px as at HEAD.
   (above).
 - Probes: none left running; the scratch copies of the old sources were
   removed.
+
+### Batch 4: five reported defects
+
+Security round 1's fourth batch: five defects an independent verifier
+reproduced on 99c37dd: one in the Python SDK adapter's grounded MCP tools,
+one in its I-JSON walks, and three in the send and audit skills' command
+hooks. None was fixed by an earlier batch (b61b3b1, ffe4ac4, 2fa8648 and
+26b38ca did not touch them). Each fix has tests that fail on the code before
+it (run with the old adapter, output and bindings modules, and the old send
+and audit SKILL.md: 5 adapter tests, 2 memory tests and 236 hook test cases
+under sh and bash failed; the rest are controls that pass on both).
+
+Skill hooks stay registered for the rest of the session once the skill runs
+(SECURITY.md §5.4), so a hook that refused every command it cannot read
+would refuse ordinary commands (`git`, `npm`, `python`) for the rest of the
+session. Both skill hooks therefore first decide, from the text with its
+quotes and backslashes removed (so `c''url` and `rec''ords` count), whether
+a command concerns them, and read every command that does fail-closed;
+what they cannot see is stated, with the plugin's pre-tool-use hook (a
+checkpoint and a person's approval) as the gate behind them.
+
+#### 21. A grounded MCP tool's decision was granted at the ask (medium)
+
+The PreToolUse hook's `ask` branch called `_allow_token` before anyone
+decided, and only the permission callback's deny withdrew it. A caller
+outside the wrapped session that shares the server object ran a `mutate`
+call while the person had not decided (the verifier's case A), and the
+approved in-session call was then refused with R407 (B); a refusal the
+adapter never hears of (another PreToolUse hook's deny, an interrupt, a
+permission prompt tool's deny) left the token until the next boundary (C);
+and the adapter's own refusals in the callback (a host callback that
+raises, a checkpoint no longer valid, a call with no id) never withdrew it
+(D).
+
+- Fix (`adapter.py`): the hook's ask notes the call (`_asked_calls`) and
+  grants nothing. The permission callback settles every answer in one place
+  (`_settle_decision`): it withdraws what the hook left for the call (its
+  ask or its pass's grant), and on an allow, and only for a call the hook
+  passed or asked about, grants the decision for the arguments the call
+  runs with; any other answer, an error included, grants nothing. A call
+  that reports back (PostToolUse, PostToolUseFailure) forgets what it left
+  (`_forget_call`: the SDK refuses arguments its schema rejects before the
+  handler), and an internal error in the hook withdraws it. A grant is not
+  repeated for a call already granted.
+- The SDK passes a served tool's handler no call id (`run_tool(name,
+  arguments)`), so the decision is matched by tool name and arguments; the
+  statement names the remaining window (between the allow and the call, or
+  after a refusal the adapter never hears of of a call it allowed without
+  asking) as a host gap. Claude Code sends `_meta["claudecode/toolUseId"]`
+  in `tools/call`, but the SDK's server drops it before the handler.
+- With a permission prompt tool the adapter never sees an allow, so a call
+  that requires approval of a served tool is refused with R407 at
+  PreToolUse (as item 20 refuses one that needs a checkpoint), instead of
+  being granted at the ask; the statement's prompt configuration says so.
+- Tests (`tests/test_mcp_integration.py`, `TestGroundedServerGuard`):
+  `test_an_asked_call_runs_only_once_it_is_allowed` (A and B),
+  `test_a_refused_call_leaves_no_decision` (deny, and a host callback that
+  raises: D), `test_a_call_never_decided_leaves_no_decision` (C),
+  `test_a_call_that_reported_back_leaves_no_decision`,
+  `test_a_prompt_tool_route_refuses_a_served_call_that_needs_approval`. The
+  verifier's probe now prints R407 for every outside call and runs the
+  approved one.
+
+#### 22. The I-JSON walks built every child's path string up front (low)
+
+`check_i_json` (the output check, `grounded_agency/capabilities/output.py`)
+and `i_json_problem` (a call's and a binding's arguments,
+`capabilities/bindings.py`) built each child's whole path when its parent
+was popped: a long member name above a wide array cost the name's length
+times the width (80 KB took 819 MB; the verifier's extrapolation, about
+125 GB for 1 MB). It failed closed under a memory limit (MemoryError became
+R407), but without one a hostile MCP server could exhaust the host.
+
+- Fix: each value on the stack carries its place as a link to its parent's
+  (`Place`, `place_text`), and the text is written only for the value
+  refused. Measured after: 1 MB of `{"x"*200000: [0]*400000}` takes 110 MB
+  peak and 0.4 s in the output check, 104 MB in `i_json_problem`.
+- Siblings: the TypeScript package's `iJsonProblem` builds its paths with
+  template strings, which V8 keeps as rope strings: measured on 1 MB of the
+  same shape, 94 MB of heap, linear, so it is unchanged.
+  `grounded_agency/state/memory.py`'s `_ijson_problem` is recursive and
+  builds one path at a time: memory stays small (copying is about 0.16 s
+  for 100 KB names over 50,000 items).
+- Tests (`tests/test_capability_output.py`):
+  `test_the_check_takes_memory_in_proportion_to_the_output` (array and
+  object layouts, traced peak under 20 times the input plus 2 MB; before,
+  the paths alone were 100 MB) and `test_a_refusal_still_names_the_place`
+  (control).
+
+#### 23. The send skill's internal-address rule read raw text (medium)
+
+The rule matched the command's text, so quote removal (`local""host`),
+brace expansion, curl's URL globbing and `--variable`/`--expand-url`, a URL
+with no scheme (`curl 127.1:18777`, `wget -qO- 127.1:18777`), one slash
+(`http:/127.0.0.1`), a percent-encoded host and names under `.localhost`
+all reached a 127.0.0.1 listener; and a python one-liner with no curl, wget
+or http in its text was never read.
+
+- Fix (`skills/send/SKILL.md`): the hook reads a command that names curl,
+  wget or http (or `.curlrc`, `.wgetrc`, `/etc/hosts`, `resolv.conf`,
+  `/dev/tcp`, `/dev/udp`) in any quoting with a jq reader of the shell's
+  words (`hooks/shell_words.jq`, shared with the audit hook, its copies kept
+  equal by `test_shell_words_copies_are_equal`): quotes removed, unquoted
+  glob characters marked, redirections and their targets known. Each request
+  is read as the tool reads it: the words after `curl`, `wget` or `http`
+  (wherever it stands, `timeout 5 curl` included), options with their
+  arguments (per-tool tables from `curl --help all` and `wget --help`), and
+  as a host every word the tool may take as a URL. A host is read the way
+  curl and wget read one (a scheme with any number of slashes; one slash is
+  read both as curl's `http:/host` and wget's `host:/path`; `user@`; a port
+  of digits) and refused when it is internal (`localhost`, under
+  `.localhost`, `localhost.localdomain`; IPv4 in any inet_aton form in 0/8,
+  127/8, 10/8, 172.16/12, 192.168/16, 169.254/16 and, new, 100.64/10;
+  internal IPv6 literals) or cannot be read (percent-encoding, non-ASCII,
+  braces or brackets curl expands, a glob character before the path). A URL
+  any program in the command is given is read the same way (`git clone
+  http://local""host/`), a request inside a command line given as a word
+  (`sh -c '...'`, an interpreter's code) is refused, and the old raw checks
+  still run first. Unquoted braces, an unclosed quote and a here-document
+  are refused. jq's global match costs the text times its matches (50,000
+  words took 42 s), so the reader takes a command of at most 16384 bytes
+  (worst case 1.8 s); a longer one that names the tools is refused.
+- Not read (stated in SECURITY.md §5.4 and the hook): a request another
+  program makes with no such name in its text (the python one-liner of the
+  report, `nc`), a name that resolves to an internal address, and a
+  redirect a server answers with; the plugin's pre-tool-use hook gates each
+  as a `send`. The defect offered this statement as the alternative to
+  widening the trigger, which, with session-wide hooks, would refuse every
+  interpreter for the rest of the session.
+- Tests (`TestSendCommandHook`): the reported forms added to
+  `test_blocks_internal_destination`; `test_blocks_words_the_shell_expands`,
+  `test_blocks_a_host_it_cannot_read`, `test_reads_a_url_any_program_is_given`,
+  `test_blocks_a_request_inside_a_command_line`,
+  `test_a_long_command_is_refused_in_bounded_time`,
+  `test_a_command_at_the_bound_is_read_in_bounded_time`, and
+  `test_leaves_other_commands_alone` (commands that name no tool, and named
+  ones that send nowhere internal). The allowed IPv6 example now quotes its
+  brackets: unquoted, a planted directory such as `http:/0` would turn
+  `http://[0:db8::1]/` into `http://0/`; the unquoted form is refused.
+
+#### 24. The send skill's redirect rule matched exact spellings (medium)
+
+`-''x`, `--pr""oxy`, `--proxy1.0`, curl's abbreviations (`--resol`),
+wget's `--exe=httpproxy=...`, `CURL_HOME=.` (with a planted `.curlrc`),
+`XDG_CONFIG_HOME`, `HOME`, `WGETRC` and git's `-c http.proxy` and
+`-c http.curloptResolve` all sent the request to the listener.
+
+- Fix (same reader): a long option is refused when its name (before `=`)
+  starts with a redirecting option (`--proxy` covers `--proxy1.0` and
+  `--proxy-*`) or is a prefix of one of at least three characters (an
+  abbreviation); curl's `--variable` and `--expand-*`, wget's
+  `--use-askpass`, `--input-metalink` and `--config` join the list. A short
+  cluster is read up to its first letter that takes an argument, so `-x` is
+  found in `-sx` and not in `-HX-Api-Key:...`. A variable set on the line,
+  or `CURL_HOME`, `HOME`, `XDG_CONFIG_HOME`, `WGETRC`, a CA bundle,
+  `HOSTALIASES` or a `*_proxy` set anywhere in the command (`export`,
+  `env`), is refused, as is a word naming `.curlrc`, `.wgetrc`,
+  `/etc/hosts`, `resolv.conf`, `/dev/tcp` or `/dev/udp`, and git's
+  `-c http.*`, `url.*`, `core.gitproxy`, `core.sshcommand`, `protocol.*`,
+  `remote.*` and `--config-env`.
+- Tests: the seven reported commands and the verifier's siblings added to
+  `test_blocks_a_redirected_connection`; `test_blocks_a_command_with_a_variable_set`,
+  `test_blocks_a_file_that_sets_where_a_request_goes`,
+  `test_blocks_git_settings_that_redirect_it`.
+
+#### 25. The audit skill's secret check was skipped for other spellings (medium)
+
+The hook read the records file's name as written (`*records.jsonl*`), so
+`rec''ords.jsonl`, `records.json?` and `rec*.jsonl` skipped every check; jq
+keeps the last of two values of one member name, so `{"a":"<token>","a":"x"}`
+was scanned as `{"a":"x"}`; `sed -i` wrote a record in two steps, neither of
+which held a token; a python one-liner wrote one; and an Edit or a Write of
+the file was never read (the hook was on Bash only). §5.18.10 requires the
+audit row's secret check of code.
+
+- Fix (`skills/audit/SKILL.md`): the append form's record is refused when
+  it gives a member name twice (the values jq's stream reads against those
+  of the object it keeps; I-JSON names are unique). Any other command that
+  may name the file (it names `records`, `jsonl`, `audit` or `.claude` in
+  any quoting, runs in a directory under `.claude` (the hook input's
+  `cwd`: Claude Code keeps the directory a command left), or holds a glob
+  that may match `.claude/audit/records.jsonl` from where it runs) is read
+  with the shared word reader and may not redirect output to a file (but
+  `/dev/null`, `/dev/stdout`, `/dev/stderr`), run a program other than a
+  few that write no file but by a redirection and run no other code (`cat`,
+  `echo`, `printf`, `jq`, `ls`, `head`, `tail`, `wc`, `grep`, `cut`, `tr`,
+  `base64`, the digests, `date`, `hostname`, `sleep`, `test`, `true`,
+  `false`, `pwd`, `cd`, `stat`, `basename`, `dirname`, `mkdir`, `openssl
+  dgst` without `-out` and the like, and `mv` only to move the file aside),
+  set a variable for one command or `PATH`, `IFS`, `ENV`, `BASH_ENV`,
+  `CDPATH`, `LD_*`, `DYLD_*`, `OPENSSL_*`, substitute a command or a
+  process or escape text, or hold an unclosed quote, a here-document or an
+  unquoted brace; over 16384 bytes it is refused. A new hook on Edit,
+  Write, MultiEdit and NotebookEdit refuses an edit of the records file,
+  of another file under `.claude/audit/` (the records moved aside), or of
+  a file named `records.jsonl` or `records.*.jsonl`, in any case, the path
+  as written and the file it reaches (links followed; a link that cannot be
+  followed is refused), and another name of the records file (`-ef`).
+- Not read (stated in SECURITY.md): a name built only when a command runs
+  (an interpreter's computed string, escape sequences) and a link planted
+  under another name before the skill ran; the plugin's pre-tool-use hook
+  gates such a write as a `mutate` a person approves. The old documented
+  gap (`cp`, or `tee` from a pipe) is closed for a command that names the
+  file.
+- Tests (`TestAuditCommandHook`): `test_blocks_a_write_other_than_the_append_form`
+  (the quoted and globbed names), `test_blocks_a_program_that_could_write_the_records_file`
+  (both `sed -i` steps, the python one-liner, `cp`, `tee`, `dd`, `ln`,
+  `git checkout`, `curl -o`, `openssl -out`), `test_mv_only_moves_the_records_file_aside`,
+  `test_blocks_a_command_it_cannot_read`, `test_reads_a_glob_from_the_directory_it_runs_in`,
+  `test_blocks_a_record_with_a_name_given_twice`, the Edit hook's three
+  tests, and the allowed commands of the session (`python3 -m pytest`,
+  `git commit -m "$(cat msg.txt)"`, `ls *.py`, `sed -i ... src/*.py`).
+  `test_a_command_hook_that_fails_or_times_out_blocks_the_call` now checks
+  every command hook of a skill (the audit skill has two).
+
+#### Siblings checked
+
+- Plugin hooks: the pre-tool-use hook's Bash classifier already dequotes
+  (round 1 #16) and gates every call these skill hooks miss; no change.
+- The persist skill's Edit hook already follows links; its matcher leaves
+  out NotebookEdit, which writes notebooks, not memory files.
+- Standard Agents binding: no grounded MCP server and no token (21); its
+  I-JSON walk is the TypeScript one above (22); no skill hooks (23 to 25).
+  No call or binding fixture changed.
+
+#### Documentation
+
+SECURITY.md (§5.4: the send row, the audit rows, a row for the new Edit
+hook, the consequences; §5.5: the adapter's grant at the allow and the
+prompt tool's refusal of a served tool), the adapter's statement (prompt
+configuration, a host gap for the name-and-arguments match), the mcp
+module and adapter docstrings, the SDK guide (the `require_layer`
+paragraph, and the prompt tool paragraph kept shorter than before, an
+enforced page of the figure-gap sweep), hooks/README (the shared reader),
+the audit skill's step 6, and CHANGELOG (Upgrading: the adapter's grant,
+the prompt tool's refusal, both skill hooks; Fixed: the I-JSON memory). The
+Standard's text is unchanged. No version changes.
+
+#### Checks after batch 4
+
+- Python: `pytest tests/` (5179 passed, 18 skipped; the hook tests added
+  during the run, 6 more, passed on their own); ruff check and format with
+  CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; the generators' `--check` (`sync_skill_schemas`,
+  `gen_runtime_fixtures`, `gen_call_fixtures`, `gen_trigger_vectors`,
+  `gen_standard_agents_binding`, `gen_capability_json_schemas`).
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1879; the
+  WebAssembly build reused); the binding's check and test (191, 2
+  skipped). No call or binding fixture changed.
+- Site: `npm run check`, `npm test` (1173), `npm run build` (check-dist
+  passed). The SDK guide's prompt tool paragraph is 453 characters, 20
+  fewer than before (its run is near the figure-gap limit); the
+  `require_layer` paragraph gained one sentence in a short run.
+- Hook timing: the worst cases under the 16384-byte bound took 1.8 s (send)
+  and 1.0 s (audit) under sh and bash; 1 MB commands are refused or left
+  alone in under 0.5 s.
+- Probes: none left running; no listener was started (the verifiers'
+  listener runs are cited above).

@@ -75,18 +75,41 @@ def _fail(capability: str, message: str, field: str | None = None) -> None:
     )
 
 
+# A value's place below the root, as a chain of (parent place, step): a
+# member name or an array index. Each value on a walk's stack carries one
+# small link, so the walk's memory grows with the input; the text of a
+# place is built only for the value a message names.
+type Place = tuple[Place, str | int] | None
+
+
+def place_text(root: str, place: Place) -> str:
+    """The text of ``place`` below ``root``: ``$.a[0].b``."""
+    steps: list[str | int] = []
+    while place is not None:
+        place, step = place
+        steps.append(step)
+    return root + "".join(
+        f"[{step}]" if isinstance(step, int) else f".{step}" for step in reversed(steps)
+    )
+
+
 def check_i_json(value: Any, capability: str = "", path: str = "$") -> None:
     """Check that ``value`` is I-JSON (RFC 7493) within the executor's
     limits: integers of magnitude at most 2^53, finite numbers, strings
     without lone surrogates, string object keys, nesting at most 100 levels.
 
+    The walk keeps each value's place as a link to its parent's, so its
+    memory grows with the input, however long the member names above a
+    wide array or object; ``path`` is the text of the root's place.
+
     Raises:
         CapabilityOutputError: R402, naming the first value that fails.
     """
-    stack: list[tuple[Any, str, int]] = [(value, path, 0)]
+    stack: list[tuple[Any, Place, int]] = [(value, None, 0)]
     while stack:
-        v, at, depth = stack.pop()
+        v, place, depth = stack.pop()
         if depth > _MAX_DEPTH:
+            at = place_text(path, place)
             _fail(capability, f"nests deeper than {_MAX_DEPTH} levels at {at}")
         if v is None or isinstance(v, bool):
             continue
@@ -94,30 +117,34 @@ def check_i_json(value: Any, capability: str = "", path: str = "$") -> None:
             if abs(v) > _INT_LIMIT:
                 _fail(
                     capability,
-                    f"holds the integer {v} at {at}, outside ±2^53, which has "
-                    f"no exact I-JSON form",
+                    f"holds the integer {v} at {place_text(path, place)}, outside "
+                    f"±2^53, which has no exact I-JSON form",
                 )
         elif isinstance(v, float):
             if not math.isfinite(v):
+                at = place_text(path, place)
                 _fail(capability, f"holds {v} at {at}, which is not a JSON number")
         elif isinstance(v, str):
-            _check_text(capability, v, at)
+            _check_text(capability, v, path, place)
         elif isinstance(v, list):
-            stack.extend((x, f"{at}[{i}]", depth + 1) for i, x in enumerate(v))
+            stack.extend((x, (place, i), depth + 1) for i, x in enumerate(v))
         elif isinstance(v, dict):
             for key, x in v.items():
                 if not isinstance(key, str):
+                    at = place_text(path, place)
                     _fail(capability, f"has a non-string key {key!r} at {at}")
-                _check_text(capability, key, at)
-                stack.append((x, f"{at}.{key}", depth + 1))
+                _check_text(capability, key, path, place)
+                stack.append((x, (place, key), depth + 1))
         else:
+            at = place_text(path, place)
             _fail(capability, f"holds a {type(v).__name__} at {at}, not JSON")
 
 
-def _check_text(capability: str, text: str, at: str) -> None:
+def _check_text(capability: str, text: str, root: str, place: Place) -> None:
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
+        at = place_text(root, place)
         _fail(capability, f"holds a string with a lone surrogate at {at}")
 
 

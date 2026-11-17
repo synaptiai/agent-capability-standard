@@ -153,6 +153,17 @@ here and marked so.
     `approval.expires` with F502. Before, such a call was asked about and
     ran on its checkpoint even when the prompt was answered after the
     maximum age or a boundary. Pass a `can_use_tool` callback to run them.
+    On that route a call that requires approval of a tool
+    `create_grounded_mcp_server` serves (with `require_layer`) is refused
+    with R407 too: such a tool runs only a call the adapter saw allowed.
+  - A tool `create_grounded_mcp_server` serves (with `require_layer`) runs
+    a call only once it is allowed: the PreToolUse hook's pass, or the
+    permission callback's allow of a call the hook asked about. Before, the
+    hook's ask granted it, so a caller outside the wrapped session that
+    shared the server object ran the call while no one had decided, and the
+    decision stayed after a refusal the adapter never heard of. Every
+    refusal the callback makes (an error of the host's callback included)
+    and a call that reports back withdraw it.
   - Every refusal reason is the text form `CODE NAME: message` (F501, F502,
     F503, F504, R407, V102), and the diagnostics are kept in
     `adapter.call_records`. A rate limit is F504; a failure of the safety
@@ -631,6 +642,33 @@ here and marked so.
   - A marker older than `ACS_CHECKPOINT_MAX_AGE` (the setting in force when
     it is used, which every audit line records) authorises nothing, whoever
     wrote it with whatever expiry.
+  - The send skill's command hook reads a command that names `curl`, `wget`
+    or `http` (or `.curlrc`, `.wgetrc`, `/etc/hosts`, `/dev/tcp`) in any
+    quoting, as the shell passes its words, and each request as the tool
+    reads it. It now also refuses an internal host with no scheme
+    (`curl 127.1:18777`), after one slash (`http:/127.0.0.1`), under
+    `.localhost`, in `100.64/10` or `localhost.localdomain`; a host it
+    cannot read (percent-encoded, non-ASCII, curl's `[1-2]` or `{a,b}`
+    globbing); a quoted, abbreviated or variant option that redirects the
+    connection (`-''x`, `--resol`, `--proxy1.0`, wget's `--exe=`), curl's
+    `--variable`/`--expand-*`, git's `-c http.*`/`-c url.*`; a variable set
+    on the line or `CURL_HOME`, `HOME`, `XDG_CONFIG_HOME`, `WGETRC` or a
+    proxy exported; a request inside `sh -c` or an interpreter's code; an
+    unquoted brace, a glob before a URL's path, an unclosed quote or a
+    here-document; and such a command over 16384 bytes (send a payload
+    from a file, `-d @file`). An IPv6 host's brackets must be quoted
+    (`curl 'http://[2001:db8::1]/'`).
+  - The audit skill's hooks: a record whose JSON gives a member name twice
+    is refused (I-JSON); a command that may name the records file (it names
+    `records`, `jsonl`, `audit` or `.claude` in any quoting, runs under
+    `.claude`, or holds a glob that may match the file) and is not the one
+    append form may not redirect output to a file, run a program but a few
+    that only read (`cat`, `jq`, `tail`, `wc`, ...; `mkdir`; `openssl dgst`;
+    `mv` only to move the file aside), substitute a command or a process,
+    or set `PATH`, `LD_*` or `OPENSSL_*`; and a new hook on Edit, Write,
+    MultiEdit and NotebookEdit refuses an edit of the records file or of
+    another file under `.claude/audit/`, links followed. Compute the HMAC
+    and run `hostname -s` in commands of their own.
   - The boundary hook (`stop_end_checkpoints.sh`) also runs on StopFailure,
     UserPromptSubmit, SessionStart and SessionEnd: a marker a turn left
     when an API error or an interrupt ended it, or a killed session, no
@@ -1298,6 +1336,11 @@ here and marked so.
 - CI tests Python 3.14 and 3.15.
 
 ### Fixed
+- Python SDK: the I-JSON checks of a capability output and of a call's or a
+  binding's arguments built each child's whole path when its parent was
+  read, so a long member name above a wide array cost the name's length
+  times the width (an 80 KB MCP result took about 800 MB at PostToolUse).
+  A path is now written only for the value refused.
 - A reference index beyond the platform's `usize` (`${a[18446744073709551615]}`)
   was a parse error on a 32-bit target and a missing index on a 64-bit one;
   it is a missing index everywhere.

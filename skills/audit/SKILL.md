@@ -16,17 +16,18 @@ hooks:
           onFailure: block
           command: |
             # Code-decided check (STANDARD 1.2.0 §5.18.10): an audit record appended
-            # to .claude/audit/records.jsonl holds no credential (§6.7). Claude Code
-            # passes the tool call as JSON on stdin, read once here; exit 2 blocks
-            # the call and the reason on stderr is shown to Claude. A call that
-            # cannot be read is blocked. Commands that do not name the records
-            # file are other hooks' business.
+            # to .claude/audit/records.jsonl holds no credential (§6.7). The records
+            # file is written in one form only, whose record this hook reads; any
+            # other command is read word by word, as the shell passes the words, and
+            # may not write a file, run a program that could (an interpreter, an
+            # in-place editor, cp, tee, dd, ...), or build its text when it runs. So a
+            # file named with quotes or a glob, a record rewritten in two steps, or one
+            # a program writes, is refused, whether or not its text names the file.
+            # Claude Code passes the tool call as JSON on stdin, read once here; exit 2
+            # blocks the call and the reason on stderr is shown to Claude. A call that
+            # cannot be read is blocked.
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            case "$CMD" in
-              *records.jsonl*) ;;
-              *) exit 0 ;;
-            esac
             # A record is appended in one form only, whose text is the record:
             #   printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"
             # (or >> .claude/audit/records.jsonl), on one line, <json> one JSON
@@ -54,20 +55,182 @@ hooks:
             case "$RECORD" in *\'* | *"$NL"*) RECORD="" ;; esac
             if [ -n "$RECORD" ]; then
               # The record as a reader decodes it: its JSON text with escapes
-              # resolved (\u0067 is g) and each of its strings
+              # resolved (g is g) and each of its strings
               DECODED="$(printf '%s' "$RECORD" | jq -rs 'if length == 1 and (.[0] | type) == "object" then .[0] | (tojson, (.. | strings)) else error("not one object") end' 2>/dev/null)" || {
                 echo "F504 CONSTRAINT_VIOLATED: the audit record is not one JSON object; append it as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" >&2
                 exit 2
               }
+              # A member name given twice: jq keeps the last value, so the earlier
+              # ones are never scanned, though the file holds them (I-JSON names are
+              # unique). The values the text holds, as jq's stream reads them, against
+              # those of the object jq keeps.
+              STREAMED="$(printf '%s' "$RECORD" | jq -n --stream '[inputs | select(length == 2)] | length' 2>/dev/null)" || STREAMED="unread"
+              KEPT="$(printf '%s' "$RECORD" | jq '[tostream | select(length == 2)] | length' 2>/dev/null)" || KEPT="unkept"
+              if [ "$STREAMED" != "$KEPT" ]; then
+                echo "F504 CONSTRAINT_VIOLATED: the audit record is not one JSON object with unique member names (I-JSON): a name given twice hides a value from this check; append it as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" >&2
+                exit 2
+              fi
             else
-              LITERAL="$(printf '%s' "$CMD" | sed 's/[$]{CLAUDE_PROJECT_DIR:-[.]}//g')"
-              case "$LITERAL" in
-                *'$'* | *'`'* | *'\'* | *'<'* | *'>'*)
-                  echo "F504 CONSTRAINT_VIOLATED: a command that names the audit records file may not expand, escape or redirect text, so a record built when it runs is never written unchecked; append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)" >&2
-                  exit 2
+              # Skill hooks stay registered for the rest of the session, so only a
+              # command that may name the records file is read: one that names records,
+              # jsonl, audit or .claude in any quoting (quotes and backslashes removed),
+              # that runs in a directory under .claude, or that holds a glob character
+              # (read below: a glob that may match the records file)
+              RUNS_IN="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)" || RUNS_IN=""
+              [ -n "$RUNS_IN" ] || RUNS_IN="$(pwd)"
+              NAMED=false
+              INAUDIT=false
+              printf '%s\n' "$CMD" | tr -d "\"'\\\\" | grep -qiE 'records|jsonl|audit|\.claude' && NAMED=true
+              printf '%s\n' "$RUNS_IN" | grep -qi '\.claude' && INAUDIT=true
+              if [ "$NAMED" = false ] && [ "$INAUDIT" = false ]; then
+                case "$CMD" in
+                  *'*'* | *'?'* | *'['*) ;;
+                  *) exit 0 ;;
+                esac
+              fi
+              case "$CMD" in
+                *records.jsonl*)
+                  LITERAL="$(printf '%s' "$CMD" | sed 's/[$]{CLAUDE_PROJECT_DIR:-[.]}//g')"
+                  case "$LITERAL" in
+                    *'$'* | *'`'* | *'\'* | *'<'* | *'>'*)
+                      echo "F504 CONSTRAINT_VIOLATED: a command that names the audit records file may not expand, escape or redirect text, so a record built when it runs is never written unchecked; append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)" >&2
+                      exit 2
+                      ;;
+                  esac
                   ;;
               esac
               DECODED=""
+              # Any other command, read word by word (jq reads one of up to 16384
+              # bytes in well under a second)
+              READER="$(cat <<'JQ'
+            # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
+            # A Bash command's simple commands and their words as the shell passes them,
+            # quotes removed. Each word: raw (as written), d (dequoted), m (dequoted, an
+            # unquoted glob character *, ?, [ or ] as \u0001), braces (an unquoted brace
+            # outside ${...}), assign (NAME=value), target (a redirection's target) and
+            # writes (the redirection writes). commands gives {why, cmds}: why names
+            # what this reading cannot follow (an unclosed quote, a here-document, a
+            # process substitution), else is null. jq's global match costs the text
+            # times its matches, so the caller bounds the command's length.
+            def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
+            def segments: [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")]
+              | map(if startswith("'") then {q: true, sq: true, t: .[1:-1]}
+                    elif startswith("\"") then {q: true, sq: false, t: .[1:-1]}
+                    else {q: false, sq: false, t: .} end);
+            def word($raw): ($raw | segments) as $s
+              | {raw: $raw,
+                 d: ($s | map(.t) | add // ""),
+                 m: ($s | map(if .q then .t else (.t | unquoted_globs) end) | add // ""),
+                 braces: ($s | any((.q | not) and (.t | gsub("\\$\\{[^}]*\\}"; "") | test("[{}]")))),
+                 assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
+            def tokens: [match("(?<op>\n|&&|\\|\\||;;|[0-9]*(?:<<<|<<-?|<>|>>|>\\||>&|<&|&>>?|[<>])(?:[0-9]+-?|-)?|[;&|()])|(?<comment>#[^\n]*)|(?<word>(?:[^\\s'\"|&;()<>]|'[^']*'|\"[^\"]*\")+)|(?<bad>['\"])"; "g")
+              | .captures | map(select(.string != null)) | .[0] | {(.name): .string}] | map(select(.comment | not));
+            # A redirection whose target is the next word (2>&1 and >&- name none).
+            def takes_target: test("[<>]") and (test("&([0-9]+-?|-)$") | not);
+            # Each step is linear in the command: no list grows by copying.
+            def commands: tokens as $t | ($t | length) as $n
+              | if any($t[]; .bad) then {why: "quote"}
+                elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
+                elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
+                else [range(0; $n) as $i | $t[$i]
+                      | if .word then
+                          ($t[$i - 1].op // "") as $op
+                          | word(.word) + {target: ($i > 0 and ($op | takes_target)),
+                                           writes: ($i > 0 and ($op | takes_target) and ($op | test(">")))}
+                        else . end] as $w
+                | ([-1] + [range(0; $n) | select($t[.].op and ($t[.].op | test("[<>]") | not))] + [$n]) as $b
+                | {why: null, cmds: [range(0; ($b | length) - 1) as $k | $w[$b[$k] + 1:$b[$k + 1]] | map(select(.d != null)) | select(length > 0)]}
+                end;
+            # END shell-words
+            # The programs a command may run here: none writes a file but by a
+            # redirection, which is refused below, and none runs other code.
+            def readers: ["cat", "echo", "printf", "jq", "ls", "head", "tail", "wc", "grep", "cut", "tr", "base64", "sha256sum", "shasum", "md5sum", "date", "hostname", "sleep", "test", "true", "false", "pwd", "cd", "stat", "basename", "dirname", "mkdir", "mv", "openssl"];
+            def sinks: ["/dev/null", "/dev/stdout", "/dev/stderr"];
+            def basename_ci: ascii_downcase | sub("/+$"; "") | sub("^.*/"; "");
+            def literal_path: gsub("\\$\\{CLAUDE_PROJECT_DIR:-\\.\\}"; ".");
+            def sensitive: test("^(PATH|ENV|BASH_ENV|IFS|CDPATH|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|OPENSSL_[A-Z0-9_]*)$");
+            def openssl_writes: test("^-(out|engine|provider|config|writerand|rand)");
+            # Whether a word with a glob character (marked \u0001) may name the
+            # records file, .claude/audit/records.jsonl, from the directory the command
+            # runs in: each of its last components may match the file's, and the
+            # directories it leaves out are the last ones of that directory. A glob
+            # character matches any run here (more than the shell's), but not a name's
+            # leading dot.
+            def glob_part($pattern): . as $name | ($pattern | ascii_downcase) as $p
+              | (($name | startswith(".")) and ($p | startswith("\u0001")) | not)
+                and ($name | test("^" + ($p | gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*")) + "$"));
+            def may_name_records($cwd): split("/") | map(select(. != "" and . != ".")) as $parts
+              | [".claude", "audit", "records.jsonl"] as $file
+              | ([$parts | length, 3] | min) as $k
+              | any($parts[]; . == "..")
+                or (all(range(0; $k); . as $i | $parts[($parts | length) - 1 - $i] as $p | ($file[2 - $i] | glob_part($p))))
+                    and ($k == 3 or ($cwd | ascii_downcase | rtrimstr("/") | endswith("/" + ($file[:3 - $k] | join("/")))));
+            # The first refusal of a simple command, or null.
+            def check_command($words):
+              ($words | map(select(.target | not))) as $args
+              | (first(range(0; $args | length) | select($args[.].assign | not)) // ($args | length)) as $p
+              | if $p == ($args | length) then
+                  (first($args[] | select(.raw | sub("\\+?=.*$"; "") | sensitive)) // null) as $bad
+                  | if $bad != null then {kind: "assign", word: $bad.raw} else null end
+                elif $p > 0 then {kind: "assign", word: $args[0].raw}
+                else $args[0].d as $prog
+                | if ($prog | test("[/$]")) or (any(readers[]; . == $prog) | not) then {kind: "program", word: $prog}
+                  elif $prog == "openssl" then
+                    (first($args[1:][] | select(.d | startswith("-") | not)) // {d: ""}) as $sub
+                    | if $sub.d != "dgst" then {kind: "program", word: "openssl \($sub.d)"}
+                      else (first($args[1:][] | select(.d | openssl_writes)) // null) as $w
+                      | if $w != null then {kind: "program", word: "openssl dgst \($w.d)"} else null end
+                      end
+                  elif $prog == "mv" then
+                    [$args[1:][] | select(.d | startswith("-") | not)] as $ops
+                    | if any($args[1:][]; .d | startswith("-") and (test("^-[fniv]+$") | not))
+                         or ($ops | length) != 2
+                         or any($ops[]; (.m | test("\u0001")) or (.d | literal_path | test("[$`]")))
+                         or ($ops[0].d | literal_path | basename_ci) != "records.jsonl"
+                         or ($ops[1].d | literal_path | basename_ci | test("^records\\.[^/]+\\.jsonl$") | not)
+                      then {kind: "mv", word: ($args | map(.d) | join(" "))}
+                      else null end
+                  else null end
+                end;
+            .tool_input.command // ""
+            | if utf8bytelength > 16384 then "long "
+              elif [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")] | map(select(startswith("'") | not)) | add // "" | test("\\$\\(|`|\\\\") then "subst "
+              else commands as $c
+              | if ($named | not) and ($inaudit | not) and ($c.why == null)
+                   and (any($c.cmds[][]; .m | test("\u0001") and (may_name_records($cwd) or (sub("^[^=]*="; "") | may_name_records($cwd)))) | not) then "ok"
+                elif $c.why == "process substitution" then "subst "
+                elif $c.why != null then "expands \($c.why)"
+                elif any($c.cmds[][]; .braces) then "expands an unquoted brace"
+                else (first($c.cmds[][] | select(.writes and (.d as $t | any(sinks[]; . == $t) | not))) // null) as $w
+                | if $w != null then "writes \($w.d | .[:200])"
+                  else (first($c.cmds[] | check_command(.) | select(. != null)) // null) as $r
+                  | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
+                  end
+                end
+              end
+            JQ
+            )"
+              VERDICT="$(printf '%s' "$INPUT" | jq -r --arg cwd "$RUNS_IN" --argjson named "$NAMED" --argjson inaudit "$INAUDIT" "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the command" >&2; exit 2; }
+              KIND="${VERDICT%% *}"
+              WORD="${VERDICT#* }"
+              ONE_FORM="append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)"
+              case "$KIND" in
+                ok) ;;
+                writes) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command writes a file only in the one append form, whose record this check reads; it does not redirect output to '$WORD' (a name quoted, globbed or linked may be the records file): $ONE_FORM" >&2; exit 2 ;;
+                program) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command runs only programs that write no file but by a redirection and run no other code (cat, echo, printf, jq, ls, head, tail, wc, grep, cut, tr, base64, sha256sum, shasum, md5sum, date, hostname, sleep, test, true, false, pwd, cd, stat, basename, dirname, mkdir, mv to move the records file aside, openssl dgst), each by its name; it does not run '$WORD', which could write the records file unread: $ONE_FORM" >&2; exit 2 ;;
+                mv) echo "F504 CONSTRAINT_VIOLATED: in the audit skill mv only moves the records file aside, as mv <dir>/records.jsonl <dir>/records.<UTC time>.jsonl with literal paths; it does not run '$WORD', which could put another file in its place: $ONE_FORM" >&2; exit 2 ;;
+                assign) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command does not set a variable for one command (NAME=value cmd), nor PATH, IFS, ENV, BASH_ENV, CDPATH, LD_*, DYLD_* or OPENSSL_*, which change what a program runs or writes: '$WORD'" >&2; exit 2 ;;
+                subst) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command may not substitute a command or a process, or escape text (\$(, a backtick, <(, >( or \\ outside single quotes), since what runs is not what this check reads; run each command on its own, with literal values: $ONE_FORM" >&2; exit 2 ;;
+                expands) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command may not hold text whose words this check cannot read ($WORD); $ONE_FORM" >&2; exit 2 ;;
+                long) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command other than the append form is read up to 16384 bytes, and this one is longer; $ONE_FORM" >&2; exit 2 ;;
+                *) echo "R407 SAFETY_CHECK_FAILED: the audit skill's check could not read the command" >&2; exit 2 ;;
+              esac
+              # A command that does not name the records file is read; its other
+              # text is other hooks' business.
+              case "$CMD" in
+                *records.jsonl*) ;;
+                *) exit 0 ;;
+              esac
             fi
             # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
             # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
@@ -92,6 +255,49 @@ hooks:
             # END secret-scan
             if secret_in "$CMD" || secret_in "$DECODED"; then
               echo "F504 CONSTRAINT_VIOLATED: the audit record holds what looks like a credential; cite it by reference or digest (STANDARD 1.2.0 §6.7)" >&2
+              exit 2
+            fi
+            exit 0
+    - matcher: "Edit|Write|MultiEdit|NotebookEdit"
+      hooks:
+        - type: command
+          timeout: 30
+          onFailure: block
+          command: |
+            # Code-decided check (STANDARD 1.2.0 §5.18.10, §6.7): the records file is
+            # written only in the Bash append form, whose record the Bash hook reads,
+            # so an Edit, Write, MultiEdit or NotebookEdit of it, or of another file of
+            # .claude/audit/ (the records moved aside), is refused: the path as
+            # written and the file it reaches (links followed; a link that cannot be
+            # followed is refused), and another name of the records file (a hard
+            # link). Claude Code passes the tool call as JSON on stdin; exit 2 blocks
+            # the call and the reason on stderr is shown to Claude. A call that cannot
+            # be read is blocked.
+            INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            TARGET="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            [ -n "$TARGET" ] || exit 0
+            REFUSE="F504 CONSTRAINT_VIOLATED: in the audit skill the records file is written only by appending a record with Bash, as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", whose record is checked for credentials; an edit or a write of '$TARGET' could change it unread (STANDARD 1.2.0 §6.7)"
+            REACHED="$TARGET"
+            if [ -L "$TARGET" ]; then
+              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || { echo "$REFUSE" >&2; exit 2; }
+            elif [ -e "$TARGET" ] || [ -d "$(dirname -- "$TARGET")" ]; then
+              REACHED="$(readlink -f -- "$TARGET" 2>/dev/null)" || REACHED="$TARGET"
+            fi
+            for P in "$TARGET" "$REACHED"; do
+              # In lower case (a file system may ignore case), repeated slashes and ./
+              # segments removed
+              SEEN="$(printf '%s\n' "$P" | tr 'A-Z' 'a-z' | sed -e 's#//*#/#g' -e 's#/\./#/#g' -e 's#^\./##')"
+              case "$SEEN" in
+                .claude/audit/* | */.claude/audit/* | records.jsonl | */records.jsonl | records.*.jsonl | */records.*.jsonl | *..*.claude* | *.claude*..*)
+                  echo "$REFUSE" >&2
+                  exit 2
+                  ;;
+              esac
+            done
+            # Another name of the records file (a hard link)
+            RECORDS="${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"
+            if [ -e "$TARGET" ] && [ -e "$RECORDS" ] && [ "$TARGET" -ef "$RECORDS" ]; then
+              echo "$REFUSE" >&2
               exit 2
             fi
             exit 0
@@ -163,7 +369,7 @@ Inputs not listed here are outside the capability's contract: a workflow step th
 
 6) **Write the record (append-only)**: Persist the audit record before returning
    - Build one compact JSON line, the output's `record` (Field Definitions): an action record of this skill's own (STANDARD v1.2 §6.4). Redact credentials and PII first, and never copy a member of `event` to the line's top level: an event shaped as a record stays under `details.event`
-   - Append it with Bash as a literal, exactly `printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` on one line (no intermediate file: the skill's hook reads it there), after `mkdir -p` of its directory, the project's `.claude/`; refuse a symlink, and never rewrite, truncate or reorder lines
+   - Append it with Bash as a literal, exactly `printf '%s\n' '<json>' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"` on one line (no intermediate file: the skill's hook reads it there), after `mkdir -p` of its directory, the project's `.claude/`; refuse a symlink, and never rewrite, truncate or reorder lines. Any other Bash command that names the records file, `.claude` or the audit directory (or runs there, or holds a glob that may match the file) only reads: the skill's hook refuses one that redirects output to a file, runs a program but `cat`, `echo`, `printf`, `jq`, `ls`, `head`, `tail`, `wc`, `grep`, `cut`, `tr`, `base64`, `sha256sum`, `shasum`, `md5sum`, `date`, `hostname`, `sleep`, `test`, `true`, `false`, `pwd`, `cd`, `stat`, `basename`, `dirname`, `mkdir`, `openssl dgst` and the `mv` that moves the file aside, or substitutes a command (`$(...)`); so compute the HMAC and run `hostname -s` in commands of their own, and write values literally. An Edit or a Write of the file is refused too
    - Do not write to `.claude/audit.log`: the plugin's PostToolUse and PostToolUseFailure hooks keep it as an HMAC-chained log of every tool call (checked by `tools/verify_audit_log.py`), and a foreign line would break the chain. The hook appends a call's line only after the call finishes, so there is no line yet for this skill's invocation or for the append itself: cite earlier lines (the calls being audited) as evidence, not these
    - The plugin's PreToolUse hook treats this append as a `mutate` call, since a `>>` redirect writes a file: it is blocked without a valid checkpoint (F501), uses that checkpoint up, and asks for approval (F502). If the append is blocked or fails, set `recorded: false`, return the record in the output anyway, and say why in `assumptions`
 

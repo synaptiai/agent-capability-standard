@@ -455,6 +455,19 @@ does not run it. The scan blocks content written to memory, and a record
 appended to `.claude/audit/records.jsonl`, that holds a credential-shaped
 value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7).
 
+The `send` and `audit` skills' `Bash` hooks share one reader of a command's
+words, `shell_words.jq` in this directory, copied the same way between
+`# BEGIN shell-words` and `# END shell-words` and kept equal by the same
+tests. It reads a command's simple commands and their words as the shell
+passes them (quotes removed, unquoted glob characters marked, a
+redirection's target and whether it writes) and names what it cannot follow
+(an unclosed quote, a here-document, a process substitution). jq's global
+match costs the text times its matches, so each hook reads a command of at
+most 16384 bytes with it; skill hooks stay registered for the rest of the
+session, so each reads only a command that may concern it (one that names
+`curl`, `wget` or `http`, or the audit records, in any quoting) and leaves
+the others alone.
+
 ## Relationship to Spec
 
 These hooks implement runtime enforcement of VERIFY layer requirements:

@@ -40,14 +40,27 @@ hooks:
             # Block a request to localhost or a loopback, private, link-local or
             # unspecified address written as its host (a host-specific destination
             # rule, STANDARD 1.2.0 §5.18.10, F504), and a request whose destination
-            # this check cannot read: one whose text the shell expands or escapes,
-            # or whose connection an option or a proxy setting redirects. A name
-            # that resolves to an internal address, and a redirect a server answers
-            # with, are not checked here. Claude Code passes the tool call as JSON
-            # on stdin; exit 2 blocks the call and the reason on stderr is shown to
-            # Claude. A call that cannot be read is blocked (R407).
-            CMD="$(jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            printf '%s\n' "$CMD" | grep -qiE "(curl|wget|http)" || exit 0
+            # this check cannot read: one whose text the shell expands or escapes, or
+            # whose connection an option, a setting or a file redirects. It reads every
+            # command that names curl, wget or http, or a file that sets where requests
+            # go, in any quoting (quotes and backslashes removed): its words as the
+            # shell passes them, the requests of curl, wget and HTTPie (http) as those
+            # tools read them (options abbreviated or in a cluster; a host with or
+            # without a scheme, http:/host, host:/path, in any numeric form), git's
+            # settings that redirect it, and any URL a program is given. A request
+            # another program makes with no such name in its text, a name that
+            # resolves to an internal address, and a redirect a server answers with,
+            # are not read here; the plugin's pre-tool-use hook gates every such call.
+            # Skill hooks stay registered for the rest of the session, so a command
+            # with no such name is left alone. Claude Code passes the tool call as
+            # JSON on stdin; exit 2 blocks the call and the reason on stderr is shown
+            # to Claude. A call that cannot be read is blocked (R407).
+            INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # The command with its quotes and backslashes removed: c''url, c\url and
+            # "cu"rl name curl
+            printf '%s\n' "$CMD" | tr -d "\"'\\\\" | grep -qiE "(curl|wget|http|dev/tcp|dev/udp|etc/hosts|resolv\.conf)" || exit 0
+            INTERNAL="F504 CONSTRAINT_VIOLATED: the send skill does not send to localhost or a loopback, private, link-local or unspecified address written as the host (internal network access)"
             # IPv4 in dotted-decimal form: 0/8, 127/8 (loopback), 10/8, 172.16/12,
             # 192.168/16 and 169.254/16 (link-local, cloud metadata); also as the
             # first labels of a name (127.0.0.1.nip.io resolves to 127.0.0.1).
@@ -65,7 +78,7 @@ hooks:
             AFTER="\.?([:/?#[:space:]\"']|\$)"
             if printf '%s\n' "$CMD" | grep -qiE "(^|[[:space:]\"']|://|@)(localhost|${ADDR4}|${ADDR6})${AFTER}" \
               || printf '%s\n' "$CMD" | grep -qiE "(://|@)(${NUMERIC})${AFTER}"; then
-              echo "F504 CONSTRAINT_VIOLATED: the send skill does not send to localhost or a loopback, private, link-local or unspecified address written as the host (internal network access)" >&2
+              echo "$INTERNAL" >&2
               exit 2
             fi
             # Options and settings that send the request elsewhere than its URL's
@@ -87,7 +100,215 @@ hooks:
                 exit 2
                 ;;
             esac
-            exit 0
+            # The words, as the shell passes them, of each simple command, and the
+            # host each request names (jq reads a command of up to 16384 bytes in well
+            # under a second)
+            READER="$(cat <<'JQ'
+            # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
+            # A Bash command's simple commands and their words as the shell passes them,
+            # quotes removed. Each word: raw (as written), d (dequoted), m (dequoted, an
+            # unquoted glob character *, ?, [ or ] as \u0001), braces (an unquoted brace
+            # outside ${...}), assign (NAME=value), target (a redirection's target) and
+            # writes (the redirection writes). commands gives {why, cmds}: why names
+            # what this reading cannot follow (an unclosed quote, a here-document, a
+            # process substitution), else is null. jq's global match costs the text
+            # times its matches, so the caller bounds the command's length.
+            def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
+            def segments: [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")]
+              | map(if startswith("'") then {q: true, sq: true, t: .[1:-1]}
+                    elif startswith("\"") then {q: true, sq: false, t: .[1:-1]}
+                    else {q: false, sq: false, t: .} end);
+            def word($raw): ($raw | segments) as $s
+              | {raw: $raw,
+                 d: ($s | map(.t) | add // ""),
+                 m: ($s | map(if .q then .t else (.t | unquoted_globs) end) | add // ""),
+                 braces: ($s | any((.q | not) and (.t | gsub("\\$\\{[^}]*\\}"; "") | test("[{}]")))),
+                 assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
+            def tokens: [match("(?<op>\n|&&|\\|\\||;;|[0-9]*(?:<<<|<<-?|<>|>>|>\\||>&|<&|&>>?|[<>])(?:[0-9]+-?|-)?|[;&|()])|(?<comment>#[^\n]*)|(?<word>(?:[^\\s'\"|&;()<>]|'[^']*'|\"[^\"]*\")+)|(?<bad>['\"])"; "g")
+              | .captures | map(select(.string != null)) | .[0] | {(.name): .string}] | map(select(.comment | not));
+            # A redirection whose target is the next word (2>&1 and >&- name none).
+            def takes_target: test("[<>]") and (test("&([0-9]+-?|-)$") | not);
+            # Each step is linear in the command: no list grows by copying.
+            def commands: tokens as $t | ($t | length) as $n
+              | if any($t[]; .bad) then {why: "quote"}
+                elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
+                elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
+                else [range(0; $n) as $i | $t[$i]
+                      | if .word then
+                          ($t[$i - 1].op // "") as $op
+                          | word(.word) + {target: ($i > 0 and ($op | takes_target)),
+                                           writes: ($i > 0 and ($op | takes_target) and ($op | test(">")))}
+                        else . end] as $w
+                | ([-1] + [range(0; $n) | select($t[.].op and ($t[.].op | test("[<>]") | not))] + [$n]) as $b
+                | {why: null, cmds: [range(0; ($b | length) - 1) as $k | $w[$b[$k] + 1:$b[$k + 1]] | map(select(.d != null)) | select(length > 0)]}
+                end;
+            # END shell-words
+
+            # 0/8, 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16 and 100.64/10 (shared
+            # address space, where a cloud's metadata service may be: 100.100.100.200).
+            def internal4($v): ($v < 16777216) or ($v >= 2130706432 and $v < 2147483648)
+              or ($v >= 167772160 and $v < 184549376) or ($v >= 2886729728 and $v < 2887778304)
+              or ($v >= 3232235520 and $v < 3232301056) or ($v >= 2851995648 and $v < 2852061184)
+              or ($v >= 1681915904 and $v < 1686110208);
+            def part_value: if test("^0x[0-9a-f]*$") then (.[2:] | explode | reduce .[] as $c (0; . * 16 + (if $c >= 97 then $c - 87 else $c - 48 end)))
+              elif test("^0[0-7]*$") then (explode | reduce .[] as $c (0; . * 8 + $c - 48))
+              elif test("^[1-9][0-9]*$") then (if length > 10 then 1e12 else tonumber end)
+              else null end;
+            # A host written as numbers, the way inet_aton reads it: the address, or
+            # null when it is a name, or "bad" when its numbers hold no address.
+            def ipv4: (split(".") | map(part_value)) as $p
+              | if ($p | length) > 4 or ($p | any(. == null)) then null
+                else ($p | length) as $n
+                | if ($p[:-1] | any(. > 255)) or $p[-1] >= pow(256; 5 - $n) then "bad"
+                  else reduce range(0; $n - 1) as $i ($p[-1]; . + $p[$i] * pow(256; 3 - $i)) end end;
+            # "internal", "unreadable" or null for one authority ([user@]host[:port]);
+            # $m is the whole word, for its scheme.
+            def host_verdict($m):
+              . as $auth | ($auth | sub("^.*@"; "")) as $hp
+              | if $auth | test("[^A-Za-z0-9._~:@!$&()*+,;=\\[\\]-]") then "unreadable"
+                elif $hp | test("^\\[[0-9A-Fa-f:.]+\\](:[0-9]*)?$") then
+                  (if $hp | ascii_downcase | test("^\\[(::|0*:|f[cd][0-9a-f]*:|fe[89ab][0-9a-f]*:)") then "internal" else null end)
+                elif $hp | test("^[A-Za-z0-9._-]*(:[0-9]*)?$") | not then "unreadable"
+                else ($hp | sub(":[0-9]*$"; "") | ascii_downcase | sub("\\.$"; "")) as $h
+                | if $h == "" then (if $m | test("^file:"; "i") then null else "unreadable" end)
+                  elif $h == "localhost" or ($h | endswith(".localhost")) or $h == "localhost.localdomain" or $h == "ip6-localhost" or $h == "ip6-loopback" then "internal"
+                  elif ($h | test("^[0-9][0-9a-fx.]*$")) and (($h | ipv4) != null) then
+                    ($h | ipv4) as $v | if $v == "bad" then "unreadable" elif internal4($v) then "internal" else null end
+                  elif $h | test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.") then
+                    ($h | capture("^(?<a>[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\\.").a | ipv4) as $v
+                    | if ($v | type) == "number" and internal4($v) then "internal" else null end
+                  else null end
+                end;
+            # "internal", "unreadable", "expands" or null for a word a request may take
+            # as its URL, read as curl, wget and HTTPie read one:
+            # [scheme://][user@]host[:port][/path][?query][#fragment]. A scheme followed
+            # by one slash is read both ways: curl takes http:/host as http://host, and
+            # wget takes host:/path as an FTP host.
+            def destination($m; $tool):
+              if $m | test("\u0001") and (test("^[A-Za-z][A-Za-z0-9+.-]*://[^/\u0001]*/") | not) then "expands"
+              elif $tool == "http" and ($m | startswith(":")) then "internal"
+              else
+                (if $m | test("^[A-Za-z][A-Za-z0-9+.-]*://") then [$m | sub("^[A-Za-z][A-Za-z0-9+.-]*:/+"; "")]
+                 elif $m | test("^[A-Za-z][A-Za-z0-9+.-]*:/") then [($m | sub("^[A-Za-z][A-Za-z0-9+.-]*:/+"; "")), $m]
+                 else [$m] end) as $readings
+                | first($readings[] | sub("[/?#].*$"; "") | host_verdict($m) | select(. != null)) // null
+              end;
+
+            def tables: {
+              curl: {danger_long: ["--resolve", "--connect-to", "--unix-socket", "--abstract-unix-socket", "--proxy", "--preproxy", "--socks", "--doh-url", "--dns-servers", "--config", "--variable", "--expand-", "--alt-svc", "--ipfs-gateway"],
+                     danger_short: "[xK]",
+                     arg_short: "ECbcdDFPHhmoUQreXYytzTuAwxK",
+                     arg_long: ["--aws-sigv4", "--cacert", "--capath", "--cert", "--cert-type", "--ciphers", "--connect-timeout", "--continue-at", "--cookie", "--cookie-jar", "--create-file-mode", "--crlfile", "--curves", "--data", "--data-ascii", "--data-binary", "--data-raw", "--data-urlencode", "--delegation", "--dns-interface", "--dns-ipv4-addr", "--dns-ipv6-addr", "--dump-header", "--egd-file", "--engine", "--etag-compare", "--etag-save", "--expect100-timeout", "--form", "--form-string", "--ftp-account", "--ftp-alternative-to-user", "--ftp-method", "--ftp-port", "--ftp-ssl-ccc-mode", "--happy-eyeballs-timeout-ms", "--header", "--help", "--hostpubmd5", "--hostpubsha256", "--hsts", "--interface", "--json", "--keepalive-time", "--key", "--key-type", "--krb", "--libcurl", "--limit-rate", "--local-port", "--login-options", "--mail-auth", "--mail-from", "--mail-rcpt", "--max-filesize", "--max-redirs", "--max-time", "--netrc-file", "--noproxy", "--oauth2-bearer", "--output", "--output-dir", "--parallel-max", "--pass", "--pinnedpubkey", "--proto", "--proto-default", "--proto-redir", "--pubkey", "--quote", "--random-file", "--range", "--rate", "--referer", "--request", "--request-target", "--retry", "--retry-delay", "--retry-max-time", "--sasl-authzid", "--service-name", "--speed-limit", "--speed-time", "--stderr", "--telnet-option", "--tftp-blksize", "--time-cond", "--tls-max", "--tls13-ciphers", "--tlsauthtype", "--tlspassword", "--tlsuser", "--trace", "--trace-ascii", "--trace-config", "--upload-file", "--url-query", "--user", "--user-agent", "--write-out"]},
+              wget: {danger_long: ["--execute", "--input-file", "--input-metalink", "--config", "--use-askpass", "--proxy", "--dns-servers", "--bind-dns-address"],
+                     danger_short: "[ei]",
+                     arg_short: "oaBtOTwQPUlARDIXnei",
+                     arg_long: ["--output-file", "--append-output", "--base", "--tries", "--retry-on-http-error", "--output-document", "--start-pos", "--progress", "--timeout", "--dns-timeout", "--connect-timeout", "--read-timeout", "--wait", "--waitretry", "--quota", "--bind-address", "--limit-rate", "--restrict-file-names", "--prefer-family", "--user", "--password", "--local-encoding", "--remote-encoding", "--directory-prefix", "--cut-dirs", "--http-user", "--http-password", "--default-page", "--header", "--compression", "--referer", "--user-agent", "--load-cookies", "--save-cookies", "--post-data", "--post-file", "--method", "--body-data", "--body-file", "--secure-protocol", "--certificate", "--certificate-type", "--private-key", "--private-key-type", "--ca-certificate", "--ca-directory", "--crl-file", "--pinnedpubkey", "--random-file", "--ciphers", "--ftp-user", "--ftp-password", "--warc-file", "--warc-header", "--warc-max-size", "--warc-dedup", "--warc-tempdir", "--level", "--backups", "--accept", "--reject", "--accept-regex", "--reject-regex", "--regex-type", "--domains", "--exclude-domains", "--follow-tags", "--ignore-tags", "--include-directories", "--exclude-directories", "--report-speed", "--rejected-log"]},
+              http: {danger_long: ["--proxy"],
+                     danger_short: "^$",
+                     arg_short: "aAopPs",
+                     arg_long: ["--auth", "--auth-type", "--output", "--print", "--history-print", "--style", "--session", "--session-read-only", "--timeout", "--max-redirects", "--max-headers", "--verify", "--cert", "--cert-key", "--cert-key-pass", "--ssl", "--ciphers", "--pretty", "--format-options", "--response-charset", "--response-mime", "--boundary", "--default-scheme", "--raw"]}};
+
+            # Files that set where a request goes (curl's and wget's configuration, the
+            # resolver's), and bash's /dev/tcp and /dev/udp, which open a connection.
+            def setting_files: "curlrc|wgetrc|/etc/hosts|resolv\\.conf|/dev/(tcp|udp)/";
+            # Settings that send a request elsewhere: curl's and wget's configuration
+            # directories and files, and a proxy, set for a command or exported.
+            def setting_vars: "^(CURL_HOME|XDG_CONFIG_HOME|HOME|WGETRC|SSL_CERT_FILE|CURL_CA_BUNDLE|HOSTALIASES|[A-Za-z_]*_proxy|[A-Za-z_]*_PROXY)\\+?=";
+            # git's settings that send its requests elsewhere (git -c NAME=VALUE).
+            def git_settings: "^(http\\.|url\\.|core\\.gitproxy|core\\.sshcommand|protocol\\.|remote\\.)";
+            # Programs that run a command line given as a word (sh -c '...').
+            def shells: "^(sh|bash|zsh|dash|ksh|mksh|fish|busybox|eval|exec|ssh|su|sudo|doas|xargs|env|watch|script|python[0-9.]*|node|nodejs|deno|bun|perl|ruby|php|lua|osascript|pwsh|powershell)$";
+            def tools: ["curl", "wget", "http", "https"];
+            def name_of: sub("^.*/"; "");
+
+            # The words of a request: curl's, wget's or HTTPie's, after the tool's name.
+            def check_request($tool; $words):
+              tables[$tool] as $t
+              | reduce $words[] as $w ({skip: false, pos: 0, out: null};
+                  if .out != null then .
+                  elif .skip then .skip = false
+                  elif $w.d | test("^-.") then
+                    if $w.d | startswith("--") then ($w.d | sub("=.*$"; "")) as $name
+                      | if [$t.danger_long[] | . as $dl | ($name | startswith($dl)) or (($name | length) >= 3 and ($dl | startswith($name)))] | any
+                        then .out = {kind: "redirect", word: $w.d}
+                        else .skip = (($w.d | contains("=") | not) and any($t.arg_long[]; . == $name))
+                        end
+                    else ($w.d[1:] | explode | map([.] | implode)) as $letters
+                      | (first(range(0; $letters | length) as $i | select($t.arg_short | contains($letters[$i])) | $i) // null) as $at
+                      # The flags of a cluster run to the first letter that takes an
+                      # argument; the rest of the word, if any, is that argument.
+                      | if $letters[:(if $at == null then ($letters | length) else $at + 1 end)] | any(test($t.danger_short))
+                        then .out = {kind: "redirect", word: $w.d}
+                        else .skip = ($at != null and $at == ($letters | length) - 1) end
+                    end
+                  else .pos += 1
+                  | if $tool == "http" and .pos > 2 and (($w.d | test("^[^@/]*?(==|:=@|:=|=@|=)") and ($w.d | split("=")[0] | test("@") | not)) or ($w.d | test("^[A-Za-z0-9_-]+:[^0-9/@][^@]*$"))) then .
+                    else destination($w.m; $tool) as $why | if $why != null then .out = {kind: $why, word: $w.d} else . end
+                    end
+                  end)
+              | .out;
+
+            # The first refusal of a simple command, or null.
+            def check_command($words):
+              ($words | map(select(.target | not))) as $args
+              | (first(range(0; $args | length) as $i | select($args[$i].d | name_of as $n | any(tools[]; . == $n)) | $i) // null) as $at
+              | if $words[0].assign then {kind: "assign", word: $words[0].d}
+                elif any($words[]; .d | test(setting_files; "i")) then
+                  {kind: "file", word: first($words[] | select(.d | test(setting_files; "i")) | .d)}
+                elif any($words[]; .d | test(setting_vars)) then
+                  {kind: "assign", word: first($words[] | select(.d | test(setting_vars)) | .d)}
+                # A command line inside a word (sh -c '...', ssh host '...'): its
+                # words are not read here
+                elif any($args[]; .d | name_of | test(shells))
+                     and any($args[:($at // ($args | length))][]; .d | test("\\s") and test("(^|[\\s;&|(\"'`])(curl|wget|https?)(\\s|$)"; "i")) then
+                  {kind: "nested", word: first($args[] | select(.d | test("\\s") and test("(^|[\\s;&|(\"'`])(curl|wget|https?)(\\s|$)"; "i")) | .d)}
+                else
+                  # git's settings, and a URL any program is given
+                  (first(range(0; $args | length) as $i | select($args[$i].d | name_of == "git") | $i) // null) as $git
+                  | (if $git == null then null
+                     else first(range($git + 1; $args | length) as $i
+                                | $args[$i].d as $d
+                                | select(($d == "--config-env" or ($d | startswith("--config-env=")))
+                                         or ($d | startswith("-c") and ((if $d == "-c" then ($args[$i + 1].d // "") else $d[2:] end) | ascii_downcase | test(git_settings))))
+                                | {kind: "redirect", word: $d}) // null
+                     end) as $g
+                  | if $g != null then $g
+                    else (if $at == null then null
+                          else ($args[$at].d | name_of | if . == "https" then "http" else . end) as $tool
+                          | check_request($tool; $args[$at + 1:]) end) as $r
+                    | if $r != null then $r
+                      else (first($args[:($at // ($args | length))][] | select(.m | test("^[A-Za-z][A-Za-z0-9+.-]*:/")) | destination(.m; "url") as $why | select($why != null) | {kind: $why, word: .d}) // null)
+                      end
+                    end
+                end;
+
+            .tool_input.command // ""
+            | if utf8bytelength > 16384 then "long "
+              else commands as $c
+              | if $c.why != null then "expands \($c.why)"
+                elif any($c.cmds[][]; .braces) then "expands brace"
+                else (first($c.cmds[] | check_command(.) | select(. != null)) // null) as $r
+                | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
+                end
+              end
+            JQ
+            )"
+            VERDICT="$(printf '%s' "$INPUT" | jq -r "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the send skill's check could not read the command" >&2; exit 2; }
+            KIND="${VERDICT%% *}"
+            WORD="${VERDICT#* }"
+            case "$KIND" in
+              ok) exit 0 ;;
+              internal) echo "$INTERNAL: $WORD" >&2 ;;
+              redirect) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose connection an option or a proxy setting redirects ($WORD), in any spelling (quoted, abbreviated, --proxy1.0, git -c http.*), nor curl's --variable and --expand-* options, which build text when the command runs: the address it reaches is not the one this check reads" >&2 ;;
+              file) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command that names bash's /dev/tcp or /dev/udp, which open a connection, or a file that sets where a request goes (.curlrc, .wgetrc, /etc/hosts, resolv.conf): $WORD" >&2 ;;
+              assign) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command with a variable set on its line, nor one that sets CURL_HOME, HOME, XDG_CONFIG_HOME, WGETRC, a CA bundle or a proxy variable ($WORD): a setting changes where the request goes, unseen by this check" >&2 ;;
+              nested) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request inside a command line given as a word (sh -c, an interpreter's code): '$WORD', whose destination this check cannot read; run curl, wget or http directly" >&2 ;;
+              expands) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose text the shell expands or escapes (an unquoted brace, a glob character *, ?, [ or ] before a URL's path, an unclosed quote, a here-document): the host it reaches is not the one this check reads. Quote each URL whole, and send a payload from a file with -d @file" >&2 ;;
+              unreadable) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose host this check cannot read ($WORD): a host is a name of ASCII letters, digits, dots and hyphens, or an IPv6 literal, with a port of digits, no percent-encoding and no braces or brackets curl expands" >&2 ;;
+              long) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request in a command longer than 16384 bytes, which this check does not read; send a long payload from a file with -d @file" >&2 ;;
+              *) echo "R407 SAFETY_CHECK_FAILED: the send skill's check could not read the command" >&2 ;;
+            esac
+            exit 2
 ---
 
 ## Intent

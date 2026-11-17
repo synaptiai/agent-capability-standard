@@ -141,8 +141,15 @@ def create_grounded_mcp_server(
     ``R407 SAFETY_CHECK_FAILED``, unless the adapter's safety layer allowed
     this exact call (tool name and arguments), so a session whose options
     were not wrapped with :meth:`GroundedAgentAdapter.wrap_options` cannot
-    run it (section 5.18.8). A control-only tool (``control: true``) is
-    served as it is: it is never refused (section 5.18.3).
+    run it (section 5.18.8). The decision is granted when the call is
+    allowed (the PreToolUse hook's pass, or the permission callback's allow
+    of a call the hook asked about), never at the ask, and any refusal the
+    adapter makes withdraws it; the SDK passes the handler no call id, so
+    it is matched by tool name and arguments. With a permission prompt
+    tool, whose allow the adapter never sees, a call of such a tool that
+    requires approval is refused with R407. A control-only tool
+    (``control: true``) is served as it is: it is never refused (section
+    5.18.3).
     ``require_layer=False`` restores the earlier behaviour and is outside
     class SL.
 

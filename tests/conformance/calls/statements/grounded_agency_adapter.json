@@ -12,7 +12,7 @@
     "how": "prompt",
     "prompt_configurations": [
       "Claude Code permission mode default, acceptEdits or plan: the PreToolUse hook answers ask and can_use_tool decides, applying the binding's approval.expires from the ask; in any other mode the call is refused with F502",
-      "The same modes with a permission_prompt_tool_name, which decides a call that requires approval and no checkpoint, and whose binding sets no approval.expires: the adapter never sees that tool's allow, so a call that requires a checkpoint is refused with R407 (no check again of its checkpoint when it is allowed) and one whose binding sets approval.expires with F502 (no time of the decision)"
+      "The same modes with a permission_prompt_tool_name, which decides a call that requires approval and no checkpoint, whose binding sets no approval.expires, of a tool create_grounded_mcp_server does not serve: the adapter never sees that tool's allow, so a call that requires a checkpoint is refused with R407 (no check again of its checkpoint when it is allowed), one whose binding sets approval.expires with F502 (no time of the decision), and one of a tool it serves with R407 (the tool runs only a call the adapter saw allowed)"
     ],
     "expires": null,
     "max_approvers": 1,
@@ -26,6 +26,7 @@
     "The permission mode is read from the hook input, else from the wrapped options: a host that changes the mode during a session and omits it from hook input is checked against the mode the session started in",
     "That Claude Code puts an ask to can_use_tool in modes default, acceptEdits and plan rests on its documentation; the tests call the hook and the callback directly",
     "strict_mode=False, approval='off', check_outputs=False or create_grounded_mcp_server(require_layer=False) is outside class SL",
+    "A tool create_grounded_mcp_server serves runs a call only on this layer's decision, granted when the call is allowed (the PreToolUse hook's pass, or can_use_tool's allow of a call it asked about) and withdrawn by any refusal the adapter makes or when the call reports back; the SDK passes the tool's handler no call id, so the decision is matched by tool name and arguments: a caller outside the session that shares the server object and makes the same call between the allow and the call, or after a refusal the adapter never hears of (another PreToolUse hook's deny, an interrupt) of a call allowed without asking, before the next boundary, runs that allowed call in its place",
     "§4.4.2 and §5.18.4, destination policies: the adapter does not see a tool's nested calls, so while a destination policy is in force it refuses with F504 every call of a composite whose invokes reach, transitively, a binding that performs send, wherever that send would go"
   ],
   "calls_without_output": [

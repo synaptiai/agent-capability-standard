@@ -44,6 +44,7 @@ from typing import Any
 
 from ..errors import ErrorCode, ValidationError
 from .mapper import RISK_LEVELS, UNCLASSIFIED_TOOL, ToolMapping
+from .output import Place, place_text
 
 __all__ = [
     "ApprovalPolicy",
@@ -146,19 +147,21 @@ def i_json_problem(value: Any) -> str | None:
         _core.canonical_json(value)
     except (ValueError, TypeError) as e:
         return str(e)
-    stack: list[tuple[Any, str]] = [(value, "$")]
+    # Each value carries its place as a link to its parent's (memory that
+    # grows with the input); the text is built for the value refused.
+    stack: list[tuple[Any, Place]] = [(value, None)]
     while stack:
-        v, at = stack.pop()
+        v, place = stack.pop()
         if isinstance(v, float):
             if v.is_integer() and _INT_LIMIT < abs(v) < 1e21:
                 return (
-                    f"holds the number {v!r} at {at}, which canonical JSON "
-                    f"writes as the integer {int(v)}, outside ±2^53"
+                    f"holds the number {v!r} at {place_text('$', place)}, which "
+                    f"canonical JSON writes as the integer {int(v)}, outside ±2^53"
                 )
         elif isinstance(v, Mapping):
-            stack.extend((x, f"{at}.{k}") for k, x in v.items())
+            stack.extend((x, (place, k)) for k, x in v.items())
         elif isinstance(v, list):
-            stack.extend((x, f"{at}[{i}]") for i, x in enumerate(v))
+            stack.extend((x, (place, i)) for i, x in enumerate(v))
     return None
 
 
