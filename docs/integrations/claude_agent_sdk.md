@@ -261,7 +261,8 @@ flowchart TB
 
 `metadata` may hold `capability`, `domain`, `flags` (`risk`, `mutation`, `requires_checkpoint`, `requires_approval`), `additional_capabilities`, `classifier`, `invokes`, `approval` (`min_approvers`, `role`, `expires`), `control` and `destination`; the flat legacy keys `capability_id`, `risk`, `mutation`, `requires_checkpoint` and `requires_approval` are still accepted (a `capability` and a `capability_id` that disagree raise `ValueError` with S303). A registration follows the Standard's rules ([§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)):
 
-- **A binding that does not load is refused.** A capability the ontology does not define (V101), a member of the wrong type (S303), an `invokes` name that does not resolve (V107) or a cycle (V105) raises `ValueError` whose message opens with each code and name, and no server is created.
+- **A binding that does not load is refused.** A capability the ontology does not define (V101), a member of the wrong type (S303), an `invokes` name that does not resolve (V107) or a cycle (V105) raises `ValueError` whose message opens with each code and name, and no server is created. An `invokes` name resolves to a bound tool only: one registered with no capability, or whose record did not load, is unbound and resolves nothing (V107), and a cycle through bindings loaded earlier is V105 too.
+- **A composite follows what it invokes** ([§5.18.4](../../spec/STANDARD-v1.2.0.md#5184-composite-tools)). When a tool is registered or loaded again, every composite that invokes it, directly or through another composite, is loaded again from its record: it takes the flags the tool now has, and one whose tool is now unbound does not load (V107, in `adapter.mapper.diagnostics`) and is unbound itself.
 - **Flags are effective flags** ([§5.2.1](../../spec/STANDARD-v1.2.0.md#521-safety-flags)): the stricter of the declaration and the ontology flags of every capability named and of every binding invoked. A declared `risk` of `high` also makes `mutation` and `requires_checkpoint` true unless they are declared.
 - **A weaker declaration has no effect.** `capability="mutate"` with `flags={"risk": "low"}` is still high-risk and still needs a checkpoint. Each such flag is kept in `adapter.mapper.warnings` as a W602 (`SAFETY_FLAG_DOWNGRADE`) diagnostic whose `location` holds `tool`, `capability` and `field`. The one exception is `mutation: false` on a capability the ontology marks `mutation_overridable` (`audit`), when no other capability is named.
 - **A tool with no capability is unbound** ([§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools)): the strictest case, reported as W617. It used to be registered as `execute`.
@@ -306,7 +307,7 @@ flowchart TB
 
 ## Checkpoint Lifecycle
 
-Checkpoints are the core safety mechanism ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). One checkpoint authorises one call whose effective `requires_checkpoint` is true:
+Checkpoints are the core safety mechanism ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). One checkpoint authorises one call whose effective `requires_checkpoint` is true, a call of the adapter that took it ([§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency)). A checkpoint the adapter reads back from `checkpoint_dir`, taken by an earlier process or by another adapter on that directory, can be found and restored, but authorises nothing, counts as no checkpoint taken in its scope and names no commit a `git stash apply` restores. Adapters that share the directory merge its state file under a file lock, so none drops or rewinds another's. A checkpoint's life:
 
 ```mermaid
 ---
@@ -322,8 +323,8 @@ flowchart TB
 ```
 
 - **Which one.** The most recently taken of the valid checkpoints no other call holds, the active one or one in history (the reference executor's rule): once the latest is used, an earlier valid one authorises the next call.
-- **When it is used up.** When the call is allowed to start: at the permission callback's allow, re-checked in one atomic step (`CheckpointTracker.consume_if_valid`), or, for a call that ran without passing the callback (a tool in `allowed_tools`, a call that needs no approval, a permission prompt tool's decision), at PostToolUse. A call that started uses it whatever its outcome: PostToolUseFailure uses it too, since a failed call may have changed something.
-- **Holds.** A call holds its checkpoint from PreToolUse until it is allowed or refused. A hold the adapter cannot resolve (it lapses with its checkpoint, or after `checkpoint_reservation_seconds`; it is found on reload; the turn ends with the call unreported) counts as used.
+- **When it is used up.** When the call is allowed to start: at the permission callback's allow, re-checked in one atomic step (`CheckpointTracker.consume_if_valid`), or, for a call that ran without passing the callback (a tool in `allowed_tools`, a call that needs no approval), at PostToolUse. A call that started uses it whatever its outcome: PostToolUseFailure uses it too, since a failed call may have changed something.
+- **Holds.** A call holds its checkpoint from PreToolUse until it is allowed or refused. A hold the adapter cannot resolve (it lapses with its checkpoint, or after `checkpoint_reservation_seconds`; the turn ends with the call unreported) counts as used.
 - **Validity.** A checkpoint authorises nothing after an execution boundary, the Stop or the next prompt (UserPromptSubmit) of any session the adapter serves (one adapter is one layer scope; serve sessions that must not share boundaries with separate adapters), or after its maximum age, `expiry_minutes`, at most 30.
 - **Prerequisites.** A `mutate`, `send` or `rollback` call needs a checkpoint taken in the scope, since the adapter started (F501; F503 for a `rollback` call, which uses none and can restore an expired or used checkpoint). Any other missing prerequisite is V102.
 - **None valid.** The adapter refuses with F501 and does not take a checkpoint on the call's behalf: it cannot know what the call will change. The model takes one with a state-saving call.
@@ -424,6 +425,7 @@ The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, a
 - **The digest is recorded.** The adapter records with each decision the §5.14 digest of the shown value, `[{"action": <tool>, "capability": <capability, or null when unbound>, "args": <the arguments>}]` (`_core.approval_digest`). Arguments that are not I-JSON are refused with F502: an integer beyond ±2^53, or a float that canonical JSON writes as one (1.8e16), a lone surrogate, a value that is not JSON.
 - **One decision per call.** Each gated call goes to the prompt; an identical later call asks again.
 - **What a prompt cannot give** is refused with F502: a binding whose `approval.min_approvers` is above 1, or that names an `approval.role`.
+- **Expiry.** A binding's `approval.expires` is how long after the request a decision may arrive ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)): the permission callback refuses with F502 an allow that comes later than that after PreToolUse asked, and the call does not run.
 - **Changed arguments.** When your callback allows with an `updated_input` other than the input, the adapter classifies the new arguments again and refuses the call if they need approval (F502: the decision was on other arguments), or a checkpoint or prerequisite the call does not hold (F501, F503, V102).
 
 ### Who Decides
@@ -433,19 +435,19 @@ The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, a
 title: Who decides a call that requires approval
 ---
 flowchart TB
-  accDescr: In permission modes default, acceptEdits and plan, PreToolUse answers ask with F502; in any other mode it refuses with F502. If the wrapped options have a can_use_tool callback, the adapter's callback checks the checkpoint, calls yours, re-checks changed arguments and uses the checkpoint at the allow; anything but an allow is F502 and releases the hold. A permission prompt tool decides when there is one. With neither, the call is refused with F502.
+  accDescr: In permission modes default, acceptEdits and plan, PreToolUse answers ask with F502; in any other mode it refuses with F502. If the wrapped options have a can_use_tool callback, the adapter's callback checks the checkpoint, calls yours, refuses a decision later than the binding's approval.expires, re-checks changed arguments and uses the checkpoint at the allow; anything but an allow is F502 and releases the hold. A permission prompt tool decides when there is one, a call that needs no checkpoint and whose binding sets no expiry. With neither, the call is refused with F502.
   mode{"Mode default, acceptEdits or plan?"} -->|no| f502["deny: F502"]
   mode -->|yes| ask["PreToolUse: ask, F502"]
   ask --> q1{"A can_use_tool callback?"}
   q1 -->|yes| cb["Yours decides; the adapter re-checks and uses the checkpoint"]
   q1 -->|no| q2{"A permission prompt tool?"}
-  q2 -->|yes| ppt["Claude Code asks that tool"]
+  q2 -->|yes| ppt["Claude Code asks that tool; a call that needs a checkpoint was refused first, R407"]
   q2 -->|no| none["deny: F502, no one can give it"]
 ```
 
 The adapter relies on a prompt only in the Claude Code permission modes that put it to a person: `default`, `acceptEdits` and `plan` (`grounded_agency.adapter.PROMPTING_PERMISSION_MODES`, not configurable). The mode is read from the hook input, else from the wrapped options' `permission_mode`. In `bypassPermissions` the documentation does not say that a hook's `"ask"` reaches the callback, in `auto` a classifier can answer the prompt, and `dontAsk` denies the call anyway, so in those modes, and in any mode the adapter does not know, a call that requires approval is refused with F502: it could otherwise run on a decision no person made. To run such a session, set `approval="off"`, which is outside class SL.
 
-The adapter installs no callback beside a permission prompt tool, because the SDK refuses the two together. PreToolUse still holds the call's checkpoint. A call the prompt tool refuses is never reported to the adapter, so its checkpoint is lost: it counts as used when its hold lapses or the turn ends, and the next gated call needs a new checkpoint. With neither a callback nor a prompt tool, the call is refused, because no one can decide it.
+The adapter installs no callback beside a permission prompt tool, because the SDK refuses the two together. It then never sees a call allowed, so it cannot check the call's checkpoint again at the allow, nor when the decision came: PreToolUse refuses a call that requires a checkpoint (R407) and one whose binding sets `approval.expires` (F502); the prompt tool decides the rest. With neither a callback nor a prompt tool, the call is refused, because no one can decide it.
 
 Your callback is also called for the calls Claude Code asks about on its own account, whether or not their capability requires approval. When it refuses a call that requires approval, the adapter's answer is `F502 APPROVAL_REQUIRED: <tool> was not approved: <your message>`.
 
@@ -1073,8 +1075,9 @@ a `send` call whose destination, read at its binding's `destination`
 pointer, one does not allow, or whose binding names none, is refused with
 F504 before approval. So is a call of an unbound tool, which the adapter
 cannot tell sends or not (§5.18.2), and a call of a composite whose
-`invokes` reach a binding that performs `send`: the adapter does not see a
-tool's nested calls, so it cannot tell where they go (§5.18.4). A Bash
+`invokes` reach a binding that performs `send`, or an unbound tool: the
+adapter does not see a tool's nested calls, so it cannot tell where they
+go (§5.18.4). A Bash
 command whose classification includes `send` (one that transmits, one the
 mapper does not recognise, an interpreter, a push or publish) is refused
 too, since a command line names no destination the adapter reads: under a
@@ -1235,9 +1238,12 @@ class CheckpointTracker:
     def has_valid_checkpoint(self) -> bool: ...
     # The checkpoint validate_and_reserve would hold now, without holding it
     def valid_checkpoint_id(self) -> str | None: ...
+    # Whether this tracker took a checkpoint at or after `when`; one read
+    # back from checkpoint_dir (another scope's) does not count
     def has_taken_since(self, when: datetime) -> bool: ...
-    # Whether a checkpoint (since `since`) recorded this commit as its
-    # restore point: what makes `git stash apply <commit>` a rollback
+    # Whether a checkpoint this tracker took (since `since`) recorded this
+    # commit as its restore point: what makes `git stash apply <commit>` a
+    # rollback
     def has_commit(self, commit: str, since: datetime | None = None) -> bool: ...
 
     # Hold the newest valid checkpoint no other call holds.

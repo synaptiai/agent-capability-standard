@@ -277,7 +277,11 @@ Then:
   F501). Finally, unless `ACS_HOOK_APPROVAL=off`, the hook answers
   `permissionDecision: "ask"` with an `F502 APPROVAL_REQUIRED:` reason, so
   Claude Code asks the person; with `off`, approval is left to Claude Code's
-  permission rules, and every audit line records that setting.
+  permission rules, and every audit line records that setting. The marker
+  was used before the person answers, and Claude Code runs no hook when
+  they do: a call allowed after the marker's maximum age, or after a
+  boundary of another session, runs all the same (a host gap of these
+  hooks, which do not claim the safety-layer class; SECURITY.md §5.5).
 - A failure of the hook itself blocks the call with `R407
   SAFETY_CHECK_FAILED:` (exit 2; another exit code is blocked by
   `onFailure: "block"` only where Claude Code supports it).

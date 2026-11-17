@@ -567,10 +567,18 @@ export function checkBindings(
     candidates.set(binding.tool, binding);
   }
 
-  // 5. invokes: cycles (V105), then names that resolve to nothing (V107).
-  const graph = new Map([...candidates].map(([tool, b]) => [tool, [...b.invokes]]));
+  // 5. invokes: cycles (V105), through the bindings loaded earlier too (a
+  // set loaded in two steps closes no cycle one set could not), then names
+  // that resolve to nothing (V107).
+  const graph = new Map<string, string[]>([
+    ...Object.entries(known)
+      .filter(([name]) => !candidates.has(name))
+      .map(([name, k]): [string, string[]] => [name, [...k.invokes]]),
+    ...[...candidates].map(([tool, b]): [string, string[]] => [tool, [...b.invokes]]),
+  ]);
   for (const component of cycles(graph)) {
     for (const tool of component) {
+      if (!candidates.has(tool)) continue;
       diagnostics.push(
         diagnostic(
           'V105',

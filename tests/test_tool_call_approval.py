@@ -1002,6 +1002,101 @@ def _pre(wrapped: Any) -> Any:
     return wrapped.hooks["PreToolUse"][-1].hooks[0]
 
 
+class _LateHost(_Host):
+    """A host whose person answers ``delay`` after being asked."""
+
+    def __init__(self, clock: Any, **delay: float) -> None:
+        super().__init__(allow=True)
+        self.clock = clock
+        self.delay = delay
+
+    async def __call__(
+        self, tool_name: str, tool_input: dict[str, Any], context: Any
+    ) -> Any:
+        self.clock.advance(**self.delay)
+        return await super().__call__(tool_name, tool_input, context)
+
+
+class TestDecisionExpiry:
+    """A binding's approval.expires: a decision that arrives later than
+    that after the request decides nothing (STANDARD 1.2.0 §5.18.7, §5.14).
+    Before, the adapter parsed it and never applied it: a decision ten
+    minutes after a 30-second expiry let the call run."""
+
+    @staticmethod
+    def _adapter(
+        ontology_path: str, tmp_path: Path, clock: Any, capability: str, expires: str
+    ) -> GroundedAgentAdapter:
+        adapter = GroundedAgentAdapter(_config(ontology_path, tmp_path), clock=clock)
+        adapter.mapper.register_mcp_tool(
+            "mcp__pay__transfer", capability, approval={"expires": expires}
+        )
+        return adapter
+
+    @pytest.mark.parametrize("capability", ["execute", "mutate"])
+    @pytest.mark.asyncio
+    async def test_a_late_decision_is_refused(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any, capability: str
+    ) -> None:
+        adapter = self._adapter(
+            ontology_path, tmp_path, fake_clock, capability, "PT30S"
+        )
+        host = _LateHost(fake_clock, minutes=10)
+        wrapped = adapter.wrap_options(ClaudeAgentOptions(can_use_tool=host))
+        adapter.create_checkpoint(["*"], "before")
+        call = {
+            "tool_name": "mcp__pay__transfer",
+            "tool_input": {"amount": 5},
+            "session_id": "s1",
+            "permission_mode": "default",
+        }
+        asked = await _pre(wrapped)(call, "t1", None)
+        assert _decision(asked) == "ask"
+        result = await wrapped.can_use_tool(
+            "mcp__pay__transfer", call["tool_input"], _ctx("t1")
+        )
+        assert _denied(result)
+        assert result.message.startswith(F502)
+        assert "approval.expires" in result.message
+        assert adapter.call_records[-1]["decision"] == "refused"
+        # The call never ran: its checkpoint is still valid for another.
+        assert adapter.checkpoint_tracker.held_by("t1") is None
+        if capability == "mutate":
+            assert adapter.has_valid_checkpoint()
+
+    @pytest.mark.asyncio
+    async def test_a_decision_within_the_expiry_lets_the_call_run(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any
+    ) -> None:
+        adapter = self._adapter(ontology_path, tmp_path, fake_clock, "execute", "PT30S")
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(can_use_tool=_LateHost(fake_clock, seconds=29))
+        )
+        call = {"tool_name": "mcp__pay__transfer", "tool_input": {}, "session_id": "s"}
+        assert _decision(await _pre(wrapped)(call, "t1", None)) == "ask"
+        result = await wrapped.can_use_tool("mcp__pay__transfer", {}, _ctx("t1"))
+        assert _allowed(result)
+
+    @pytest.mark.asyncio
+    async def test_the_request_is_the_layers_ask(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any
+    ) -> None:
+        """The expiry runs from the PreToolUse hook's ask, not from when the
+        host's callback is reached; a callback reached with no ask counts
+        from its own start."""
+        adapter = self._adapter(ontology_path, tmp_path, fake_clock, "execute", "PT30S")
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(can_use_tool=_LateHost(fake_clock, seconds=1))
+        )
+        call = {"tool_name": "mcp__pay__transfer", "tool_input": {}, "session_id": "s"}
+        assert _decision(await _pre(wrapped)(call, "t1", None)) == "ask"
+        fake_clock.advance(seconds=40)
+        late = await wrapped.can_use_tool("mcp__pay__transfer", {}, _ctx("t1"))
+        assert _denied(late) and late.message.startswith(F502)
+        fresh = await wrapped.can_use_tool("mcp__pay__transfer", {}, _ctx("t2"))
+        assert _allowed(fresh)
+
+
 class TestWrapOptionsApproval:
     @pytest.mark.asyncio
     async def test_host_can_use_tool_is_chained_not_replaced(
@@ -1062,66 +1157,72 @@ class TestWrapOptionsApproval:
         assert _configure_can_use_tool(wrapped) is wrapped  # no ValueError
 
     @pytest.mark.asyncio
-    async def test_prompt_tool_holds_the_checkpoint(
-        self, asking_adapter: GroundedAgentAdapter
+    async def test_prompt_tool_refuses_a_call_that_needs_a_checkpoint(
+        self, ontology_path: str, tmp_path: Path, fake_clock: Any
     ) -> None:
-        """With a permission prompt tool the adapter never hears of a
-        denial, but an asked call holds its checkpoint all the same (the
-        check and its use are one atomic step, STANDARD 1.2.0 §5.18.5): call
-        2 is refused with F501 while call 1 holds it. When the turn ends with
-        call 1 unreported, its hold is unresolved and counts as used, so a
-        new checkpoint is needed."""
-        base = ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
-        wrapped = asking_adapter.wrap_options(base)
-        asking_adapter.create_checkpoint(["*"], "Test")
+        """With a permission prompt tool no callback sees a call allowed, so
+        the layer cannot check again, at the allow, that the checkpoint it
+        held is still valid (STANDARD 1.2.0 §5.18.6): a call that needs a
+        checkpoint is refused with R407, holding nothing. Before, it was
+        asked about and, allowed after the maximum age or after a boundary
+        of another session, ran on that checkpoint with no F501."""
+        adapter = GroundedAgentAdapter(
+            _config(ontology_path, tmp_path), clock=fake_clock
+        )
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
+        )
+        adapter.create_checkpoint(["*"], "Test")
         call = {
             "tool_name": "Write",
             "tool_input": {"file_path": "a.txt", "content": "x"},
             "session_id": "s1",
+            "permission_mode": "default",
         }
-
-        # Call 1 is asked about; the prompt tool denies it, so no Post* event.
-        first = await _pre(wrapped)(call, "w1", None)
-        assert _decision(first) == "ask"
-        assert _reason(first).startswith(F502)
-
-        # Call 2 is refused: call 1 holds the only checkpoint.
-        second = await _pre(wrapped)(call, "w2", None)
-        assert _decision(second) == "deny"
-        assert _reason(second).startswith(F501)
-
-        # The turn ends; call 1's hold is unresolved, so it counts as used.
-        for entry in wrapped.hooks["Stop"]:
+        for case in ("w1", "w2"):
+            refused = await _pre(wrapped)(call, case, None)
+            assert _decision(refused) == "deny"
+            assert _reason(refused).startswith("R407 SAFETY_CHECK_FAILED: ")
+            assert "can_use_tool" in _reason(refused)
+            assert adapter.checkpoint_tracker.held_by(case) is None
+        assert adapter.has_valid_checkpoint()
+        # The cases the verifier ran: the prompt answered past the maximum
+        # age, and after another session's Stop. Nothing was held, so
+        # nothing runs on an ended checkpoint.
+        fake_clock.advance(minutes=31)
+        for entry in wrapped.hooks["PostToolUse"]:
             for hook in entry.hooks:
-                await hook({"hook_event_name": "Stop", "session_id": "s1"}, None, None)
-        assert not asking_adapter.has_valid_checkpoint()
-
-        # Call 3 needs a new checkpoint.
-        third = await _pre(wrapped)(call, "w3", None)
-        assert _decision(third) == "deny"
-        assert _reason(third).startswith(F501)
+                await hook({**call, "tool_response": {}}, "w1", None)
+        assert not any(
+            r.get("checkpoint_id")
+            for r in adapter.call_records
+            if r["decision"] == "ran"
+        )
 
     @pytest.mark.asyncio
-    async def test_prompt_tool_failed_call_uses_the_checkpoint(
+    async def test_prompt_tool_decides_a_call_that_needs_approval_alone(
         self, asking_adapter: GroundedAgentAdapter
     ) -> None:
-        """A call the prompt tool approved that then fails uses its
-        checkpoint all the same: a call that started uses it whatever its
-        outcome (STANDARD 1.2.0 §5.18.6)."""
+        """A call that needs approval and no checkpoint is put to the
+        prompt tool, unless its binding sets approval.expires: this layer
+        cannot see when that tool's decision arrives (§5.18.7), so it is
+        refused with F502."""
+        asking_adapter.mapper.register_mcp_tool("mcp__ops__run", "execute")
+        asking_adapter.mapper.register_mcp_tool(
+            "mcp__ops__pay", "execute", approval={"expires": "PT30S"}
+        )
         wrapped = asking_adapter.wrap_options(
             ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
         )
-        asking_adapter.create_checkpoint(["*"], "Test")
-        call = {
-            "tool_name": "Write",
-            "tool_input": {"file_path": "a.txt", "content": "x"},
-            "session_id": "s1",
-        }
-        assert _decision(await _pre(wrapped)(call, "w1", None)) == "ask"
-        for entry in wrapped.hooks["PostToolUseFailure"]:
-            for hook in entry.hooks:
-                await hook({**call, "error": "disk full"}, "w1", None)
-        assert not asking_adapter.has_valid_checkpoint()
+        run = {"tool_name": "mcp__ops__run", "tool_input": {}, "session_id": "s1"}
+        asked = await _pre(wrapped)(run, "r1", None)
+        assert _decision(asked) == "ask"
+        assert _reason(asked).startswith(F502)
+        pay = {"tool_name": "mcp__ops__pay", "tool_input": {}, "session_id": "s1"}
+        refused = await _pre(wrapped)(pay, "p1", None)
+        assert _decision(refused) == "deny"
+        assert _reason(refused).startswith(F502)
+        assert "approval.expires" in _reason(refused)
 
     @pytest.mark.asyncio
     async def test_asked_approved_run_and_consumed(

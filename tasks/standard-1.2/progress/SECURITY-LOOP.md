@@ -598,3 +598,242 @@ page's longest enforced run is 1772 px, as at HEAD.
   with the local Chrome (above).
 - Probes cleaned up: the listeners stopped, the scratch repositories and
   the npm home removed.
+
+### Batch 3: five reported defects
+
+Security round 1's third batch: five defects an independent verifier
+reproduced on 99c37dd, all in the Python SDK adapter and its tracker and
+mapper; none was fixed by an earlier batch (the round's commits b61b3b1,
+ffe4ac4 and 2fa8648 touched the hooks and the Bash classifier). Each fix
+has tests that fail on the code before it (run with the old tracker,
+mapper, bindings loader and adapter restored: 28 of the new or changed
+Python tests failed, and the TypeScript package's new cycle test; the rest
+are controls that pass on both).
+
+#### 16. A checkpoint of another scope authorised calls; one checkpoint covered two calls (medium)
+
+`CheckpointTracker.__init__` loaded every unused checkpoint in
+`checkpoint_dir/tracker_state.json` as its own, and `validate_and_reserve`
+held one for any call. The default `checkpoint_dir` (`.checkpoints`) is
+shared by every adapter in a working directory, and the statement's scope
+is "this adapter instance". Adapter B, built after adapter A took a
+checkpoint, ran an unbound MCP call and a Write on A's checkpoint, and A
+then ran its own Write on it: one checkpoint, two gated calls in two
+scopes. After a restart, an adapter that took one checkpoint ran two
+Writes, the second on the earlier process's. Each tracker also wrote the
+shared file whole from its own copy, so a stale tracker dropped another's
+newer records, or brought a used one back unused (the verifier's lost
+update: a new adapter then ran a call on a checkpoint already used).
+
+- Root cause: records read back from the state file were treated as
+  records of the tracker's scope. Fix (`checkpoint_tracker.py`): what a
+  tracker reads back goes to its history, is found and restored
+  (`find_checkpoint`, `restore_checkpoint`, the runner's rollback), and is
+  never held, used or ended by it: it authorises none of its calls
+  (`_valid` excludes the ids it read back) and counts as no checkpoint
+  taken in its scope
+  (`has_taken_since`, `has_commit`; the loaded `last_taken_at` is no longer
+  this scope's). A hold the file names is its holder's (another live
+  tracker's, or a dead process's): it is no longer marked used on load,
+  since nothing read back authorises a call here anyway.
+- Lost updates: each write merges, under an exclusive `flock` on
+  `tracker_state.lock` beside the file (where the platform has `fcntl`):
+  the tracker's own records and holds as it holds them; a record it read
+  back as the file has it now (its owner may have used it since); every
+  record and hold another tracker wrote since the load, unchanged; and a
+  record it removed (pruned, cleared) stays removed. Measured without the
+  lock: 4 trackers taking 10 checkpoints each in threads lost 1 to 4 of the
+  40; with it, none.
+- Statement (`scope`, `concurrency_note`), adapter and tracker docstrings,
+  the SDK guide (a Scope bullet), SECURITY.md §5.5 and CHANGELOG Upgrading
+  say so.
+- Tests: `TestAdapterScope::test_another_adapters_checkpoint_authorises_nothing`
+  (the verifier's run 1: B's unbound call and Write are F501 through the
+  callback and the hook; A's Write runs on its own checkpoint) and
+  `test_a_checkpoint_left_by_an_earlier_process_authorises_nothing` (run 2:
+  the unbound call is F501, then one checkpoint covers one Write);
+  `TestSharedDirectory` in `tests/test_checkpoint_persistence.py` (the lost
+  update with B loaded before and after c1 was taken: the file keeps c1
+  used and a new tracker authorises nothing; B's boundary leaves A's
+  checkpoint and hold alone; a cleared record stays removed; four
+  concurrent writers lose none). Seven tests that asserted the old rule
+  (a reloaded checkpoint authorises a call, a loaded hold is marked used,
+  `has_commit` counts a commit of an earlier adapter) now assert the new
+  one: `TestCrossInstanceRestore` (three), `test_the_same_state_untracked_still_loads`
+  (loaded, and authorising nothing; the tracked copy is still not loaded),
+  `test_holds_persist_and_are_used_on_reload`,
+  `test_unresolved_hold_is_used_on_reload` (the hold stays in the file),
+  `test_checkpoint_survives_restart`, and
+  `test_a_commit_recorded_before_the_scope_began_is_gated`;
+  `test_history_capped_on_persist` reads the cap from the file.
+
+#### 17. A composite could invoke an unbound tool; under a destination policy it ran (medium)
+
+`load_bindings` resolved an `invokes` name against `known`, the mapper's
+dynamic mappings, which hold `UNCLASSIFIED_TOOL` for a tool registered with
+no capability and for one whose record failed to load. A composite that
+listed such a tool loaded with no diagnostic, and `invoked_senders` counted
+only bindings that perform `send`, so under `allowed_destinations` the
+composite was put to a person (or, with `approval="off"`, allowed) while a
+direct call of the tool was F504. The verifier's siblings: a send binding
+whose record failed (S303) reached through its wrapper; a two-level chain
+to an unbound tool.
+
+- Fix (`bindings.py`): a `known` entry that is `UNCLASSIFIED_TOOL` resolves
+  no name (V107, "which is unbound"), so the composite does not load and is
+  unbound itself (F504 under a policy, as §5.18.2 requires). Fail closed
+  besides (`mapper.invoked_senders`): an invoked name that is unbound or
+  missing counts as a tool that may send. The refusal now says the invoked
+  tools "may send".
+- Sibling found while fixing it: V105 looked only at the set being loaded,
+  so a record that invokes a composite loaded earlier, which invokes it,
+  closed a cycle across two loads. The cycle check now runs through the
+  bound tools loaded before (only the set's records are refused), in the
+  Python loader and in the TypeScript package's `checkBindings(records,
+  {known})` alike. Without it, item 18's reload would not terminate.
+- Tests: `test_an_unbound_tool_resolves_no_invokes_name` (registered
+  unbound, a failed send record, a two-level chain: V107, unbound),
+  `test_a_tool_left_unbound_unloads_the_composites_that_invoke_it`,
+  `test_an_unbound_or_missing_invoked_name_may_send`,
+  `test_a_cycle_across_two_loads_is_v105` (`tests/test_tool_bindings.py`);
+  `test_a_composite_that_reaches_an_unbound_tool_is_refused_under_a_policy`
+  (ask and off; the verifier's p6b and p6: the direct call and both
+  composites are F504, the checkpoint unused) in
+  `tests/test_adapter_effects.py`; in `packages/acs-core/test/bindings.test.ts`,
+  "closes no invokes cycle across two loads (V105)" (failed before) and a
+  control.
+
+#### 18. A composite kept the flags it loaded with (medium)
+
+`load_bindings` joined the invoked bindings' flags into the composite once,
+at load; `_apply_profiles` read them again only when profiles were applied.
+Registering a composite's helper again as `mutate` left the composite low
+risk with no checkpoint and no approval: its PreToolUse answer was allow in
+every mode, while a fresh adapter loading the same records (the same
+configuration digest) gave it high risk, a checkpoint and approval. The
+same with the helper registered unbound or failing to load.
+
+- Fix (`mapper.py`): registering or loading tools loads again, as one set,
+  every loaded composite that invokes one of them, transitively, from its
+  stored record (`_load_composites_again`, also after `register_mcp_tool`
+  leaves a tool unbound). A composite takes the flags its tools have now,
+  stricter or weaker, as a fresh load of the records the mapper holds
+  would; one whose tool is now unbound fails V107 and is unbound. Its
+  diagnostics go to `mapper.diagnostics` and `load_bindings`' result;
+  `register_binding` raises only for its own record.
+- Tests: `test_a_composite_takes_the_flags_its_bindings_have_now` (a
+  two-level chain under three re-registrations agrees, flag by flag, with
+  a fresh mapper loading `mapper.records`), and, through the hook,
+  `test_a_composite_takes_a_stricter_registration_of_what_it_invokes`
+  (ask and off: F501 without a checkpoint, then ask F502 or allow).
+
+#### 19. A binding's approval.expires was never applied (medium)
+
+`ApprovalPolicy.expires_seconds` was parsed and read nowhere: an `execute`
+binding with `expires: PT30S` ran on a decision ten minutes after the ask,
+and a `mutate` one was bounded only by the checkpoint's 30 minutes.
+
+- Fix (`adapter.py`): the PreToolUse hook notes, for a call whose binding
+  sets `approval.expires`, when it asked (`_asked_at`, by call id, dropped
+  when the callback decides, the call reports back, or at a boundary); the
+  permission callback refuses with F502 an allow from the host's callback
+  that arrives later than that after the request (the hook's ask, or the
+  callback's start when it came first or there was no ask). The refusal
+  releases the hold: the call never ran. The statement's `expires` stays
+  null (the layer sets no period of its own).
+- Tests: `TestDecisionExpiry` in `tests/test_tool_call_approval.py`: a
+  decision ten minutes after a 30-second expiry is F502 for `execute` and
+  `mutate` (the checkpoint stays valid); one within it runs (control); the
+  request is the hook's ask, not the callback's start.
+
+#### 20. With a permission prompt tool, a hold was never checked again when the call was allowed (medium)
+
+`wrap_options` installs no `can_use_tool` beside a
+`permission_prompt_tool_name` (the SDK refuses both), so nothing ran the
+atomic re-check and use at the allow (`consume_if_valid`); PostToolUse used
+the hold whatever its validity. A Write whose prompt was answered after the
+maximum age, or after another session's Stop, ran on that checkpoint, with
+no F501. The same route could not apply item 19's expiry either: the
+adapter never sees when that tool's decision arrives.
+
+- Root cause: the layer relied on a prompt route on which it cannot
+  complete §5.18.6's check at the allow. Fix: the PreToolUse hook knows
+  the route (`wrap_options` passes `prompt_tool`) and, on it, refuses a call
+  that requires a checkpoint with R407 (the layer cannot complete the
+  re-check), before holding anything, and one whose binding sets
+  `approval.expires` with F502. The prompt tool still decides calls that
+  need approval and no checkpoint. The statement lists the route as its
+  own prompt configuration with those limits, and drops the host gap of a
+  lost hold (no call holds a checkpoint on that route now).
+- Tests: `test_prompt_tool_refuses_a_call_that_needs_a_checkpoint` (R407
+  for two Writes, nothing held, the checkpoint still valid; past the
+  maximum age nothing runs on it) and
+  `test_prompt_tool_decides_a_call_that_needs_approval_alone` (an `execute`
+  tool is asked; one with `approval.expires` is F502). Two tests of the old
+  route (a prompted Write holds the checkpoint; a failed prompted Write uses
+  it) are replaced by these; `test_overlapping_prompt_tool_calls_on_one_checkpoint`
+  now runs on the callback route, which holds, as
+  `test_overlapping_prompted_calls_on_one_checkpoint`.
+
+#### Siblings checked
+
+- Plugin hooks: the pre-tool-use hook uses the marker before it asks, and
+  Claude Code runs no hook when a person answers, so a call allowed after
+  the marker's maximum age, or after another session's boundary, runs (the
+  sibling of item 20). The hooks do not claim class SL and cannot check
+  again at the allow; this is now named among their host gaps (SECURITY.md
+  §5.5, hooks/README). Item 16's sibling there was closed in round 1 (item
+  4: a marker ends at SessionStart; the project directory is the stated
+  scope). They have no composites and no binding expiry.
+- Standard Agents binding: its scope is a thread and its records live in
+  the thread's store, not a shared file (16); a composite takes the tool
+  objects it invokes when it is defined and the binding sees each nested
+  call, checking a nested send's destination as a call of its own (17,
+  18); its approvals are recorded decisions whose `expires` the
+  `decision_expires` call fixture covers, and it has no prompt route (19,
+  20). The TypeScript package's loader shared item 17's cycle sibling,
+  fixed above. No call fixture changed: the new rules concern a layer's
+  persisted records, sequential loads and a host prompt route, which the
+  fixtures do not model.
+- Earlier fixes hold: the full suites pass with them (below); the shipped
+  state file is still not loaded at all (`test_a_cloned_state_file_authorises_nothing`).
+
+#### Documentation
+
+The adapter's statement (`scope`, the prompt configurations, the host gaps,
+`concurrency_note`), SECURITY.md §5.5 (the adapter's scope, re-check and
+expiry, composites; the plugin hooks' new host gap), hooks/README, the SDK
+guide (Scope, Expiry, the prompt tool paragraph and figure, composites in
+the registration rules and the destination policy), and CHANGELOG
+Upgrading (the tracker's scope and lock, expiry, the prompt tool route,
+`invokes` resolution and reloads, the TypeScript package's V105). The
+Standard's text is unchanged: each fix brings an implementation to it. No
+version changes.
+
+The SDK guide is an enforced page of the figure-gap sweep. Measured with
+`scripts/check-runs.mjs` and the local headless shell of Chromium revision
+1248 (CI's is 1254; at HEAD this build measures the page's longest run at
+1798 px): a Scope bullet among the checkpoint bullets made that run 1878 px
+and the longer prompt-tool paragraph its run 1849 px. The scope now opens
+the Checkpoint Lifecycle section, before its figure (a run of 696 px at
+HEAD, 836 px now), and the paragraph is no longer than before; no run that
+was over 1500 px grew, the page's longest is 1798 px as at HEAD.
+
+#### Checks after batch 3
+
+- Python: `pytest tests/` (4868 passed, 18 skipped; 20 more than after
+  batch 2); ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; the generators' `--check`
+  (`sync_skill_schemas`, `gen_runtime_fixtures`, `gen_call_fixtures`,
+  `gen_trigger_vectors`, `gen_standard_agents_binding`,
+  `gen_capability_json_schemas`).
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1879; the
+  WebAssembly build reused); the binding's check and test (191, 2
+  skipped). No call or binding fixture changed.
+- Site: `npm run check`, `npm test` (1173), `npm run build` (check-dist
+  passed) and `scripts/check-runs.mjs --paths /guides/claude-agent-sdk/`
+  (above).
+- Probes: none left running; the scratch copies of the old sources were
+  removed.

@@ -15,6 +15,12 @@ of STANDARD 1.2.0 section 5.18.6 (and section 5.2.2 for steps):
   never reports a refusal) counts as used.
 - Validity ends at an execution boundary (:meth:`end_validity`) and at the
   maximum age, at most 30 minutes.
+- A tracker is one scope (section 5.18.5). The checkpoints it reads back
+  from its state file were taken in another scope (an earlier process, or
+  another tracker on the same ``checkpoint_dir``): it finds and restores
+  them, but they authorise none of its calls and count as no checkpoint
+  taken in its scope. Trackers that share a directory merge their records
+  into the state file under a lock, so none loses another's.
 
 Validity is what a checkpoint authorises; retention is what it can restore
 (STANDARD 1.2.0 section 4.4.1). With a :class:`FileSnapshotStore`
@@ -35,11 +41,17 @@ import os
 import subprocess
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+try:  # POSIX: trackers that share a directory serialise their writes
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -249,9 +261,20 @@ class CheckpointTracker:
         }
 
     Each Checkpoint dict contains: id, scope, reason, created_at,
-    expires_at, consumed, consumed_at, metadata, invalidated_at. A hold
-    found in the state file belongs to a process that is gone, so it is
-    unresolved: its checkpoint counts as used.
+    expires_at, consumed, consumed_at, metadata, invalidated_at.
+
+    One tracker is one scope (STANDARD 1.2.0 section 5.18.5). What it reads
+    back from the state file was recorded in another scope: by an earlier
+    process, or by another tracker on the same directory (another adapter,
+    which may still be running). Those checkpoints are found and restored
+    (:meth:`find_checkpoint`, :meth:`restore_checkpoint`), but they
+    authorise no call of this tracker, count as no checkpoint taken in its
+    scope (:meth:`has_taken_since`, :meth:`has_commit`), and are never held,
+    used or ended by it (it prunes them from its history as its own); a
+    hold the file names is its holder's. Each write merges
+    this tracker's records with those other trackers wrote since it loaded
+    (under an exclusive lock on ``tracker_state.lock`` where the platform
+    has ``fcntl``), so a tracker never drops or rewinds another's.
     """
 
     MAX_AGE_MINUTES: int = MAX_AGE_MINUTES
@@ -335,8 +358,17 @@ class CheckpointTracker:
         # Holds by checkpoint id.
         self._reservations: dict[str, _Reservation] = {}
         self._checkpoint_history: list[Checkpoint] = []
-        # When the newest checkpoint was taken: survives history pruning.
+        # When the newest checkpoint of this scope was taken: survives
+        # history pruning.
         self._last_taken_at: datetime | None = None
+        # Ids of the checkpoints read back from the state file: another
+        # scope's, never valid here, so never held, used or ended here
+        # (section 5.18.5).
+        self._earlier: set[str] = set()
+        # Ids of every checkpoint this tracker knows (read back or taken):
+        # a record in the state file with another id was written by another
+        # tracker since the load, and each write keeps it.
+        self._known: set[str] = set()
         self._snapshots = snapshots
         if snapshots is not None:
             # The tracker's own records are never within a rollback's reach
@@ -360,13 +392,15 @@ class CheckpointTracker:
         return self._max_age_minutes
 
     def _valid(self, checkpoint: Checkpoint, now: datetime) -> bool:
-        """Whether ``checkpoint`` can authorise a call at ``now``: valid by
-        its own record, taken no later than ``now`` and no longer ago than
-        the maximum age. A checkpoint dated after ``now`` (a crafted state
-        file, or a clock that stepped back) authorises nothing: the maximum
-        age could not bound it."""
+        """Whether ``checkpoint`` can authorise a call at ``now``: taken by
+        this tracker (one read back from the state file is another scope's,
+        section 5.18.5), valid by its own record, taken no later than
+        ``now`` and no longer ago than the maximum age. A checkpoint dated
+        after ``now`` (a clock that stepped back) authorises nothing: the
+        maximum age could not bound it."""
         return (
-            checkpoint.is_valid(now)
+            checkpoint.id not in self._earlier
+            and checkpoint.is_valid(now)
             and checkpoint.created_at <= now
             and now <= checkpoint.created_at + timedelta(minutes=self._max_age_minutes)
         )
@@ -379,70 +413,216 @@ class CheckpointTracker:
         """Path to the persisted tracker state file."""
         return self._checkpoint_dir / "tracker_state.json"
 
+    def _state_lock_path(self) -> Path:
+        """Path to the lock trackers that share the directory write under."""
+        return self._checkpoint_dir / "tracker_state.lock"
+
+    @contextmanager
+    def _state_file_lock(self) -> Iterator[None]:
+        """An exclusive lock on :meth:`_state_lock_path`, where the platform
+        has ``fcntl``: trackers that share the directory, in this process or
+        another, read and write the state file one at a time. Without
+        ``fcntl`` the merge still runs, unlocked."""
+        if _fcntl is None:  # pragma: no cover - Windows
+            yield
+            return
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        fd = os.open(str(self._state_lock_path()), flags, 0o600)
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
+    def _open_state_file(self) -> Any:
+        """The state file, opened for reading without following a symbolic
+        link (``O_NOFOLLOW`` and ``fstat`` on the descriptor, so no check
+        races the read; ``is_symlink()`` on platforms without it). None when
+        there is none, or it is a link."""
+        state_path = self._state_file_path()
+        o_nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if o_nofollow:
+            try:
+                fd = os.open(str(state_path), os.O_RDONLY | o_nofollow)
+            except FileNotFoundError:
+                return None
+            except OSError as e:
+                if e.errno in _ELOOP_ERRNOS:  # ELOOP — symlink rejected
+                    logger.warning(
+                        "Refusing to follow symlink for state file: %s", state_path
+                    )
+                    return None
+                raise
+            try:
+                return os.fdopen(fd, encoding="utf-8")
+            except Exception:
+                os.close(fd)
+                raise
+        if state_path.is_symlink():
+            logger.warning("Refusing to follow symlink for state file: %s", state_path)
+            return None
+        try:
+            return open(state_path, encoding="utf-8")
+        except FileNotFoundError:
+            return None
+
+    def _read_state_file(self) -> dict[str, Any] | None:
+        """The state file's object, or None when there is none, it is a
+        link, or it is larger than the limit.
+
+        Raises:
+            OSError, ValueError: The file cannot be read, or holds no JSON
+                object.
+        """
+        f = self._open_state_file()
+        if f is None:
+            return None
+        with f:
+            file_size = os.fstat(f.fileno()).st_size
+            if file_size > self._MAX_STATE_FILE_BYTES:
+                logger.warning(
+                    "State file too large (%d bytes, limit %d) — starting fresh",
+                    file_size,
+                    self._MAX_STATE_FILE_BYTES,
+                )
+                return None
+            raw = f.read()
+        state = json.loads(raw)
+        if not isinstance(state, dict):
+            raise ValueError("the state file holds no JSON object")
+        return state
+
+    @staticmethod
+    def _checkpoints_in(state: dict[str, Any]) -> list[Checkpoint]:
+        """The checkpoints a state file's object records (its active one,
+        then its history), skipping any entry that does not read as one."""
+        history = state.get("history")
+        entries = [state.get("active"), *(history if isinstance(history, list) else [])]
+        found: list[Checkpoint] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                found.append(Checkpoint.from_dict(entry))
+            except KeyError, ValueError, TypeError, AttributeError:
+                continue
+        return found
+
+    def _merged_state(self) -> dict[str, Any]:
+        """What :meth:`_persist_state` writes: this tracker's checkpoints
+        and holds as it holds them; each checkpoint it read back as the
+        file has it now (its own tracker may have used it since); and every
+        checkpoint and hold another tracker on the directory wrote since
+        this one loaded, unchanged. A checkpoint this tracker removed
+        (pruned or cleared) stays removed. Caller holds the file lock."""
+        try:
+            current = self._read_state_file() or {}
+        except (OSError, ValueError) as e:
+            logger.warning("Replacing a state file that cannot be read: %s", e)
+            current = {}
+        on_file = {c.id: c for c in self._checkpoints_in(current)}
+        history = [
+            on_file.get(c.id, c) if c.id in self._earlier else c
+            for c in self._checkpoint_history
+        ]
+        history += [c for c in on_file.values() if c.id not in self._known]
+        history.sort(key=lambda c: c.created_at.timestamp())
+        history = history[-self._max_history :]
+        written = {c.id for c in history}
+        if self._active_checkpoint is not None:
+            written.add(self._active_checkpoint.id)
+        own = self._known - self._earlier
+        holds = [
+            {"checkpoint_id": r.checkpoint_id, "holder": r.holder}
+            for r in self._reservations.values()
+        ]
+        file_holds = current.get("reservations")
+        for hold in file_holds if isinstance(file_holds, list) else []:
+            if not isinstance(hold, dict):
+                continue
+            checkpoint_id = hold.get("checkpoint_id")
+            if (
+                isinstance(checkpoint_id, str)
+                and checkpoint_id in written
+                and checkpoint_id not in own
+                and checkpoint_id not in self._reservations
+            ):
+                holds.append(
+                    {"checkpoint_id": checkpoint_id, "holder": str(hold.get("holder"))}
+                )
+        last = self._last_taken_at
+        try:
+            file_last = datetime.fromisoformat(str(current.get("last_taken_at")))
+            if last is None or file_last.timestamp() > last.timestamp():
+                last = file_last
+        except ValueError:
+            pass
+        return {
+            "active": (
+                self._active_checkpoint.to_dict() if self._active_checkpoint else None
+            ),
+            "history": [c.to_dict() for c in history],
+            "reservations": holds,
+            "last_taken_at": last.isoformat() if last else None,
+        }
+
     def _persist_state(self) -> None:
-        """Atomically write tracker state to disk.
+        """Atomically write tracker state to disk, merged with what other
+        trackers on the directory wrote (:meth:`_merged_state`), under the
+        directory's lock.
 
         Uses write-to-tmp + rename for crash safety.
         """
         try:
             self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            state = {
-                "active": (
-                    self._active_checkpoint.to_dict()
-                    if self._active_checkpoint
-                    else None
-                ),
-                # Cap history before serializing to prevent unbounded file growth.
-                "history": [
-                    c.to_dict() for c in self._checkpoint_history[-self._max_history :]
-                ],
-                "reservations": [
-                    {"checkpoint_id": r.checkpoint_id, "holder": r.holder}
-                    for r in self._reservations.values()
-                ],
-                "last_taken_at": (
-                    self._last_taken_at.isoformat() if self._last_taken_at else None
-                ),
-            }
-            state_path = self._state_file_path()
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(self._checkpoint_dir), suffix=".tmp"
-            )
-            try:
+            with self._state_file_lock():
+                state = self._merged_state()
+                state_path = self._state_file_path()
+                fd, tmp_path = tempfile.mkstemp(
+                    dir=str(self._checkpoint_dir), suffix=".tmp"
+                )
                 try:
-                    f = os.fdopen(fd, "w", encoding="utf-8")
+                    try:
+                        f = os.fdopen(fd, "w", encoding="utf-8")
+                    except Exception:
+                        os.close(fd)
+                        raise
+                    with f:
+                        json.dump(state, f)
+                    os.replace(tmp_path, str(state_path))
                 except Exception:
-                    os.close(fd)
+                    # Clean up temp file on failure; re-raise original error.
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
                     raise
-                with f:
-                    json.dump(state, f)
-                os.replace(tmp_path, str(state_path))
-            except Exception:
-                # Clean up temp file on failure; re-raise original error.
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+            # A removed checkpoint is gone from the file now: only the ids
+            # this tracker still holds need to stay known.
+            self._known = {c.id for c in self._all()}
         except (OSError, TypeError, ValueError, OverflowError) as e:
             logger.warning("Failed to persist checkpoint state: %s", e)
 
     def _load_persisted_state(self) -> None:
         """Load tracker state from disk if available.
 
+        What is loaded was recorded in another scope (STANDARD 1.2.0 section
+        5.18.5): by an earlier process, or by another tracker on the same
+        directory. It goes to the history, to be found and restored; none of
+        it authorises a call of this tracker or counts as a checkpoint taken
+        in its scope, and this tracker never holds, uses or ends it. A hold
+        the file names is its holder's, and stays in the file.
+
         A state file git tracks is not loaded: a repository can ship one (a
         clone or a checkout writes it), and its checkpoints were taken by no
         call of this layer (STANDARD 1.2.0 sections 5.18.5, 5.18.6). The
-        tracker starts fresh, and logs why.
-
-        Uses O_NOFOLLOW + fstat() on the opened fd to avoid TOCTOU between
-        symlink check/existence check and read.  Falls back to is_symlink()
-        on platforms without O_NOFOLLOW.
-        Handles missing and corrupt files gracefully.
-
-        A hold in the file belongs to a call this process never saw finish:
-        it is unresolved, so its checkpoint counts as used (STANDARD 1.2.0
-        section 5.18.6).
+        tracker starts fresh, and logs why. So does a file that is a
+        symbolic link, larger than the limit, or does not parse.
         """
         state_path = self._state_file_path()
         if _tracked_by_git(state_path):
@@ -453,98 +633,42 @@ class CheckpointTracker:
                 state_path,
             )
             return
-        o_nofollow = getattr(os, "O_NOFOLLOW", 0)
-        if o_nofollow:
-            try:
-                fd = os.open(str(state_path), os.O_RDONLY | o_nofollow)
-            except FileNotFoundError:
-                return
-            except OSError as e:
-                if e.errno in _ELOOP_ERRNOS:  # ELOOP — symlink rejected
-                    logger.warning(
-                        "Refusing to follow symlink for state file: %s", state_path
-                    )
-                    return
-                raise
-            try:
-                f = os.fdopen(fd, encoding="utf-8")
-            except Exception:
-                os.close(fd)
-                raise
-        else:
-            if state_path.is_symlink():
-                logger.warning(
-                    "Refusing to follow symlink for state file: %s", state_path
-                )
-                return
-            try:
-                f = open(state_path, encoding="utf-8")
-            except FileNotFoundError:
-                return
         try:
-            with f:
-                file_size = os.fstat(f.fileno()).st_size
-                if file_size > self._MAX_STATE_FILE_BYTES:
-                    logger.warning(
-                        "State file too large (%d bytes, limit %d) — starting fresh",
-                        file_size,
-                        self._MAX_STATE_FILE_BYTES,
-                    )
-                    return
-                raw = f.read()
-            state = json.loads(raw)
+            state = self._read_state_file()
+            if state is None:
+                return
             loaded_at = self._now()
+            loaded: list[Checkpoint] = []
             if state.get("active"):
-                self._active_checkpoint = Checkpoint.from_dict(state["active"])
+                loaded.append(Checkpoint.from_dict(state["active"]))
             # Cap loaded history to _max_history to prevent unbounded growth
             # from a crafted or accumulated state file.
-            self._checkpoint_history = [
+            loaded += [
                 Checkpoint.from_dict(entry)
                 for entry in state.get("history", [])[: self._max_history]
             ]
-            # A checkpoint dated after the load was not taken by this layer
-            # as the clock now reads (a crafted file, or a clock that stepped
-            # back): it authorises nothing, counts as no checkpoint taken and
-            # names no restore point, so it is dropped (section 5.18.6).
-            future = [c.id for c in self._all() if c.created_at > loaded_at]
+            # A checkpoint dated after the load (a crafted file, or a clock
+            # that stepped back) names no restore point the maximum age
+            # could bound: it is dropped (section 5.18.6).
+            future = [c.id for c in loaded if c.created_at > loaded_at]
             if future:
                 logger.warning(
                     "Dropping %d checkpoint(s) dated after the load time: %s",
                     len(future),
                     ", ".join(future),
                 )
-                if (
-                    self._active_checkpoint is not None
-                    and self._active_checkpoint.created_at > loaded_at
-                ):
-                    self._active_checkpoint = None
-                self._checkpoint_history = [
-                    c for c in self._checkpoint_history if c.created_at <= loaded_at
-                ]
-            last = state.get("last_taken_at")
-            if isinstance(last, str) and datetime.fromisoformat(last) <= loaded_at:
-                self._last_taken_at = datetime.fromisoformat(last)
-            else:
-                created = [c.created_at for c in self._all()]
-                self._last_taken_at = max(created) if created else None
-            holds = state.get("reservations") or []
-            resolved = False
-            if isinstance(holds, list):
-                for hold in holds:
-                    if not isinstance(hold, dict):
-                        continue
-                    checkpoint = self._find(str(hold.get("checkpoint_id")))
-                    if checkpoint is not None and not checkpoint.consumed:
-                        logger.warning(
-                            "Checkpoint %s was held by %s when the tracker last "
-                            "stopped; the hold is unresolved, so it counts as used",
-                            checkpoint.id,
-                            hold.get("holder"),
-                        )
-                        self._mark_used(checkpoint, "unresolved hold")
-                        resolved = True
-            if resolved:
-                self._persist_state()
+                loaded = [c for c in loaded if c.created_at <= loaded_at]
+            loaded.sort(key=lambda c: c.created_at.timestamp())
+            self._checkpoint_history = loaded
+            self._earlier = {c.id for c in loaded}
+            self._known = set(self._earlier)
+            if any(c.is_valid(loaded_at) for c in loaded):
+                logger.info(
+                    "Read back %d checkpoint(s) from %s: taken in another "
+                    "scope, they authorise no call of this tracker",
+                    len(loaded),
+                    state_path,
+                )
         except (
             json.JSONDecodeError,
             KeyError,
@@ -557,7 +681,8 @@ class CheckpointTracker:
             # Start fresh — don't propagate corrupt state
             self._active_checkpoint = None
             self._checkpoint_history = []
-            self._last_taken_at = None
+            self._earlier = set()
+            self._known = set()
 
     # ------------------------------------------------------------------
     # Internal helpers (caller holds the lock unless stated)
@@ -703,6 +828,7 @@ class CheckpointTracker:
 
             # A hold of the previous checkpoint stays with its holder.
             self._active_checkpoint = checkpoint
+            self._known.add(checkpoint.id)
             self._last_taken_at = now
             self._write_marker(checkpoint)
             self._persist_state()
@@ -784,25 +910,28 @@ class CheckpointTracker:
         return out
 
     def has_commit(self, commit: str, since: datetime | None = None) -> bool:
-        """Whether a checkpoint taken at or after ``since`` (any time when
-        omitted) and not after now, valid or not, recorded ``commit`` as its
-        restore point
-        (``metadata["commit"]``, as ``git stash create`` printed it): what
-        lets ``git stash pop|apply <commit>`` count as a rollback (section
-        5.18.3). A checkpoint pruned from the history is not found."""
+        """Whether a checkpoint this tracker took at or after ``since`` (any
+        time when omitted) and not after now, valid or not, recorded
+        ``commit`` as its restore point (``metadata["commit"]``, as ``git
+        stash create`` printed it): what lets ``git stash pop|apply
+        <commit>`` count as a rollback (section 5.18.3). A checkpoint read
+        back from the state file was taken in another scope and is not
+        counted; one pruned from the history is not found."""
         with self._lock:
             now = self._now()
             return any(
-                c.metadata.get("commit") == commit
+                c.id not in self._earlier
+                and c.metadata.get("commit") == commit
                 and (since is None or c.created_at >= since)
                 and c.created_at <= now
                 for c in self._all()
             )
 
     def has_taken_since(self, when: datetime) -> bool:
-        """Whether a checkpoint was taken at or after ``when``, and not
-        after now: what a ``checkpoint`` prerequisite reads (section
-        5.18.5). History pruning does not hide one."""
+        """Whether this tracker took a checkpoint at or after ``when``, and
+        not after now: what a ``checkpoint`` prerequisite reads (section
+        5.18.5). History pruning does not hide one; one read back from the
+        state file was taken in another scope and does not count."""
         with self._lock:
             return (
                 self._last_taken_at is not None

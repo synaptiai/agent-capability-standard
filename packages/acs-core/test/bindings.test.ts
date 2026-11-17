@@ -161,6 +161,32 @@ describe('flags over several capabilities', () => {
   });
 });
 
+describe('bindings loaded earlier (known)', () => {
+  const record = (tool: string, capability: string, invokes?: string[]) => ({
+    tool,
+    ontology: '2.2.0',
+    capability,
+    ...(invokes ? { invokes } : {}),
+  });
+
+  it('closes no invokes cycle across two loads (V105)', () => {
+    const first = checkBindings([record('a', 'retrieve'), record('b', 'generate', ['a'])]);
+    expect(first.diagnostics).toEqual([]);
+    const second = checkBindings([record('a', 'generate', ['b'])], { known: first.effective });
+    expect(second.diagnostics.map((d) => `${d.code} ${d.location.tool}`)).toEqual(['V105 a']);
+    expect(second.effective).toEqual({});
+  });
+
+  it('resolves an invokes name among them', () => {
+    const first = checkBindings([record('w', 'mutate')]);
+    const { effective, diagnostics } = checkBindings([record('batch', 'invoke', ['w'])], {
+      known: first.effective,
+    });
+    expect(diagnostics).toEqual([]);
+    expect(effective['batch']!.requires_checkpoint).toBe(true);
+  });
+});
+
 describe('annotationRecord', () => {
   it('reads the record members and ignores the copies', () => {
     expect(

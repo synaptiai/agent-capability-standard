@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..errors import ErrorCode, ValidationError
-from .mapper import RISK_LEVELS, ToolMapping
+from .mapper import RISK_LEVELS, UNCLASSIFIED_TOOL, ToolMapping
 
 __all__ = [
     "ApprovalPolicy",
@@ -599,7 +599,8 @@ def load_bindings(
         requires: The ontology's ``requires`` edges as ``(from, to)``.
         ontology_version: The ontology's ``meta.version``.
         known: Mappings already loaded, which an ``invokes`` name may
-            resolve to.
+            resolve to. An entry that is :data:`~.mapper.UNCLASSIFIED_TOOL`
+            is an unbound tool, which resolves no name (V107).
 
     Returns:
         The loaded mappings by tool name, and every diagnostic: errors for
@@ -673,11 +674,24 @@ def load_bindings(
             continue
         candidates[binding.tool] = binding
 
-    # 5. invokes: cycles (V105), then names that resolve to no loaded
-    # binding (V107), until nothing changes.
-    graph = {tool: list(b.invokes) for tool, b in candidates.items()}
+    # 5. invokes: cycles (V105), through the bindings loaded earlier too (a
+    # set loaded in two steps closes no cycle a single set could not), then
+    # names that resolve to no loaded binding (V107), until nothing changes.
+    # A tool known as unbound (registered with no capability, or whose
+    # record did not load) has no binding (section 5.18.1).
+    bound = {
+        name: mapping
+        for name, mapping in known.items()
+        if mapping is not UNCLASSIFIED_TOOL and name not in candidates
+    }
+    graph = {
+        **{name: list(mapping.invokes) for name, mapping in bound.items()},
+        **{tool: list(b.invokes) for tool, b in candidates.items()},
+    }
     for component in _cycles(graph):
         for tool in component:
+            if tool not in candidates:
+                continue
             diagnostics.append(
                 ValidationError(
                     ErrorCode.CIRCULAR_DEPENDENCY,
@@ -694,15 +708,20 @@ def load_bindings(
             unresolved = [
                 name
                 for name in binding.invokes
-                if name not in candidates and name not in known
+                if name not in candidates and name not in bound
             ]
             if unresolved:
                 for name in unresolved:
+                    why = (
+                        "which is unbound (its record names no capability or "
+                        "did not load)"
+                        if name in known
+                        else "which no loaded binding of the set names"
+                    )
                     diagnostics.append(
                         ValidationError(
                             ErrorCode.UNRESOLVED_TARGET,
-                            f"tool '{tool}' invokes '{name}', which no loaded "
-                            f"binding of the set names; it is not loaded",
+                            f"tool '{tool}' invokes '{name}', {why}; it is not loaded",
                             {"tool": tool, "field": "invokes"},
                         )
                     )

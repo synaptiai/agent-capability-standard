@@ -74,15 +74,27 @@ here and marked so.
     callback's allow, or at PostToolUse for a call that did not pass the
     callback), and a call that fails uses it too. The newest valid checkpoint
     no other call holds is used, the earlier ones included. A hold that
-    lapses, is found on reload or is unresolved when the turn ends counts as
-    used. The Stop of any session the adapter serves ends every checkpoint's
-    validity, and so does its next prompt (UserPromptSubmit), since a turn
-    can end without Stop (StopFailure after an API error, an interrupt):
-    take a checkpoint in the turn that needs it, and serve sessions that
-    must not share this with separate adapters. A tracker does not load a
-    state file (`tracker_state.json`) that git tracks: a repository can ship
-    one, and its checkpoints were taken by no call here; the tracker starts
-    fresh and logs a warning.
+    lapses or is unresolved when the turn ends counts as used. The Stop of
+    any session the adapter serves ends every checkpoint's validity, and so
+    does its next prompt (UserPromptSubmit), since a turn can end without
+    Stop (StopFailure after an API error, an interrupt): take a checkpoint
+    in the turn that needs it, and serve sessions that must not share this
+    with separate adapters. A tracker does not load a state file
+    (`tracker_state.json`) that git tracks: a repository can ship one, and
+    its checkpoints were taken by no call here; the tracker starts fresh and
+    logs a warning.
+  - One adapter, and one `CheckpointTracker`, is one scope: a checkpoint it
+    reads back from its `checkpoint_dir`, taken by an earlier process or by
+    another adapter on the same directory (the default `.checkpoints` is
+    shared by every adapter in a working directory), no longer authorises
+    its calls. It is still found and restored (`find_checkpoint`,
+    `restore_checkpoint`), but `has_valid_checkpoint`, `validate_and_reserve`,
+    `has_taken_since` and `has_commit` count only the tracker's own, and a
+    hold the state file names is left to its holder (it is no longer marked
+    used on load). After a restart, take a new checkpoint before a gated
+    call. Trackers that share a directory merge their records into its
+    state file under a lock (`tracker_state.lock`, where the platform has
+    `fcntl`), so one no longer drops or rewinds another's.
   - `wrap_options()` registers the safety PreToolUse hook with
     `on_failure="block"`: a callback that fails or gives no verdict in time,
     as the CLI sees it, blocks the call, where it was no decision and the
@@ -100,8 +112,8 @@ here and marked so.
     its `expiry_minutes`) bounds every checkpoint: one taken through
     `adapter.checkpoint_tracker.create_checkpoint()` with a longer
     `expiry_minutes` is stored with the maximum age as its expiry, and one
-    read back from a state file stops authorising a call at its
-    `created_at` plus the maximum age. A checkpoint dated after the clock
+    taken through the tracker stops authorising a call at its `created_at`
+    plus the maximum age. A checkpoint dated after the clock
     (a crafted state file, a clock that stepped back) authorises nothing,
     counts as no checkpoint taken and names no restore point; one found
     dated after the load is dropped from the state.
@@ -130,7 +142,17 @@ here and marked so.
     a call that requires approval is refused (F502), since nothing puts it to
     a person. A binding whose `approval` asks for more than one approver or a
     `role` is refused F502. Arguments the permission callback changes are
-    classified again.
+    classified again. A binding's `approval.expires` is applied: the
+    permission callback refuses (F502) an allow that arrives later than
+    that after the PreToolUse hook asked.
+  - With a `permission_prompt_tool_name` (no `can_use_tool`), the adapter
+    never sees a call allowed, so it cannot check the call's checkpoint
+    again then, nor when the decision came: a call that requires a
+    checkpoint (Write, Edit, a mutating Bash command, a `mutate` or `send`
+    tool) is refused with R407, and one whose binding sets
+    `approval.expires` with F502. Before, such a call was asked about and
+    ran on its checkpoint even when the prompt was answered after the
+    maximum age or a boundary. Pass a `can_use_tool` callback to run them.
   - Every refusal reason is the text form `CODE NAME: message` (F501, F502,
     F503, F504, R407, V102), and the diagnostics are kept in
     `adapter.call_records`. A rate limit is F504; a failure of the safety
@@ -200,7 +222,15 @@ here and marked so.
     `mapper.warnings`. Tool `metadata` may be a tool binding record
     (`capability`, `flags`, `additional_capabilities`, `invokes`,
     `approval`, `control`); the flat keys still work, and `capability` and
-    `capability_id` that disagree are S303.
+    `capability_id` that disagree are S303. An `invokes` name resolves only
+    to a bound tool: one registered with no capability, or whose record did
+    not load, is V107 (it resolved before), and so is a cycle through tools
+    registered earlier (V105). Registering or loading a tool again loads
+    again every composite that invokes it, transitively: the composite
+    takes the tool's flags as they are now (it kept those it was loaded
+    with), and one whose tool is now unbound is itself unbound (V107 in
+    `mapper.diagnostics`). `register_binding` raises only for its own
+    record's errors.
     `create_grounded_mcp_server()` now defaults to `require_layer=True`:
     each tool it serves refuses (R407) a call the adapter's layer did not
     allow, so a session whose options were not wrapped with
@@ -386,8 +416,9 @@ here and marked so.
     rather than a list of patterns raises `TypeError`. While a policy is in
     force, `GroundedAgentAdapter` also refuses (F504) a call of an unbound
     tool, which it cannot tell sends or not, and of a composite whose
-    `invokes` reach a binding that performs `send`: it does not see nested
-    calls, so it cannot tell where they go. In the Standard Agents binding,
+    `invokes` reach a binding that performs `send`, or an unbound tool: it
+    does not see nested calls, so it cannot tell where they go. In the
+    Standard Agents binding,
     the `allowed_destinations` of profiles given to a composite reach the
     sends its code invokes, at any depth.
   - A `persist` or `recall` step of a workflow that targets 1.2 and binds
@@ -720,6 +751,10 @@ here and marked so.
   userinfo password and an `Authorization` header's value included.
 - Standard Agents binding: `LintDiagnostic.code` gains `V107` and
   `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
+- TypeScript package: `checkBindings(records, {known})` reports V105 for a
+  cycle that runs through the `known` bindings too (a record that invokes a
+  known composite that invokes it), and does not load the record, as the
+  Python loader does; before, a set loaded in two steps closed the cycle.
 
 **Interoperability data.**
 

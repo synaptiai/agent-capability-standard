@@ -24,8 +24,11 @@ options to inject:
 The layer's scope is the adapter instance: every session and subagent it
 serves shares one set of records, and the Stop or the next prompt of any of
 them ends the validity of every checkpoint the adapter holds. Serve sessions
-that must not share boundaries with separate adapters. The conformance
-statement is ``tests/conformance/calls/statements/grounded_agency_adapter.json``.
+that must not share boundaries with separate adapters. A checkpoint the
+adapter reads back from its ``checkpoint_dir`` (taken by an earlier process,
+or by another adapter on that directory) authorises none of its calls. The
+conformance statement is
+``tests/conformance/calls/statements/grounded_agency_adapter.json``.
 
 Example:
     from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
@@ -246,7 +249,9 @@ class GroundedAgentConfig:
             log a warning and let the checkpoint, prerequisite and internal
             checks pass (outside class SL; approval still applies).
         audit_log_path: Path for audit log file
-        checkpoint_dir: Directory for checkpoint storage
+        checkpoint_dir: Directory for checkpoint storage. Adapters that
+            share it share its state file (merged under a file lock), not
+            their checkpoints: each authorises only its own adapter's calls
         expiry_minutes: The layer's checkpoint maximum age, in minutes:
             more than 0 and at most 30 (STANDARD 1.2.0 section 5.18.6). The
             checkpoint tracker applies it to every checkpoint, one taken
@@ -809,6 +814,11 @@ class GroundedAgentAdapter:
         # call there too, so a git read that may fetch from another host
         # (a partial clone) is classified alike in both.
         self._call_dirs: dict[str, str] = {}
+        # When the layer asked for a decision on a call whose binding sets
+        # approval.expires, by call id (the PreToolUse hook's "ask"): the
+        # permission callback refuses a decision that arrives later than
+        # that after the request (section 5.18.7).
+        self._asked_at: dict[str, datetime] = {}
         # The tools create_grounded_mcp_server serves, which check their own
         # output (section 5.20); the PostToolUse hook checks other servers'
         # bound MCP tools. Tools a policy would check but whose results carry
@@ -874,8 +884,9 @@ class GroundedAgentAdapter:
         at the binding's ``destination`` pointer. A call of an unbound tool
         is refused too: this layer cannot tell whether or where it sends
         (section 5.18.2). So is a composite that invokes, transitively, a
-        binding that performs ``send``: this layer does not see a tool's
-        nested calls (section 5.18.4), so it cannot tell where they send.
+        binding that performs ``send`` or an unbound tool: this layer does
+        not see a tool's nested calls (section 5.18.4), so it cannot tell
+        where they send.
         None for any other call, and when no policy is in force. The
         destination is not repeated: it is in the call's input (section
         6.7)."""
@@ -903,11 +914,10 @@ class GroundedAgentAdapter:
             mapping,
             tool,
             call,
-            f"{tool} invokes {', '.join(senders)}, which "
-            f"{'sends' if len(senders) == 1 else 'send'}, and this layer does not "
-            f"see a tool's nested calls, so it cannot tell where they go and no "
-            f"destination policy in force can allow them (STANDARD 1.2.0 §4.4.2, "
-            f"§5.18.4)",
+            f"{tool} invokes {', '.join(senders)}, which may send, and this "
+            f"layer does not see a tool's nested calls, so it cannot tell where "
+            f"they go and no destination policy in force can allow them "
+            f"(STANDARD 1.2.0 §4.4.2, §5.18.4)",
         )
 
     def _direct_destination_refusal(
@@ -1596,7 +1606,9 @@ class GroundedAgentAdapter:
         The layer's scope is this adapter: every session and subagent it
         serves, ordered by its lock. The Stop or the next prompt of any of
         them ends the validity of every checkpoint it holds; serve sessions
-        that must not share boundaries with separate adapters. Its maximum
+        that must not share boundaries with separate adapters. Only the
+        checkpoints it took authorise its calls, not those its tracker reads
+        back from ``checkpoint_dir``. Its maximum
         age is ``config.expiry_minutes``; it relies on a permission prompt only in
         the permission modes of :data:`PROMPTING_PERMISSION_MODES`, read
         from the hook input, else from ``base.permission_mode``.
@@ -1609,9 +1621,13 @@ class GroundedAgentAdapter:
         Where ``base`` names a ``permission_prompt_tool_name``, no
         ``can_use_tool`` callback is installed: the SDK refuses the two
         together, and that tool is then the permission flow that answers
-        the hook's ``"ask"``. The PreToolUse hook holds the call's
-        checkpoint; a call the prompt tool refuses is never reported, so its
-        hold counts as used when it lapses or the turn ends.
+        the hook's ``"ask"``. This layer then never sees a call allowed, so
+        it cannot check again, at the allow, that a held checkpoint is
+        still valid, nor when a decision arrived (STANDARD 1.2.0 sections
+        5.18.6, 5.18.7): the PreToolUse hook refuses a call that requires a
+        checkpoint (R407) and one whose binding sets ``approval.expires``
+        (F502). The prompt tool decides the other calls that require
+        approval.
 
         Args:
             base: ClaudeAgentOptions instance
@@ -1660,7 +1676,8 @@ class GroundedAgentAdapter:
         # PreToolUse hook: every check of section 5.18
         pre_hooks = list(existing_hooks.get("PreToolUse", []))
         safety_pre_hook = self._make_pretooluse_safety_hook(
-            options_mode=getattr(base, "permission_mode", None)
+            options_mode=getattr(base, "permission_mode", None),
+            prompt_tool=bool(getattr(base, "permission_prompt_tool_name", None)),
         )
         safety_pre_hook._grounded_adapter = self  # see _already_wrapped
         # It refuses with R407 when a check fails inside it; a callback that
@@ -1871,6 +1888,7 @@ class GroundedAgentAdapter:
                     self._allowed.clear()
                     self._outcome_recorded.clear()
                     self._call_dirs.clear()
+                    self._asked_at.clear()
                 self._record(
                     "boundary",
                     "",
@@ -1907,7 +1925,9 @@ class GroundedAgentAdapter:
 
         return subagent_end
 
-    def _make_pretooluse_safety_hook(self, options_mode: str | None = None) -> Any:
+    def _make_pretooluse_safety_hook(
+        self, options_mode: str | None = None, prompt_tool: bool = False
+    ) -> Any:
         """
         Create the PreToolUse hook that applies STANDARD 1.2.0 section 5.18
         to every tool call.
@@ -1926,13 +1946,19 @@ class GroundedAgentAdapter:
            prerequisite V102.
         5. Checkpoint (F501): a gated call holds the newest valid checkpoint
            no other call holds, keyed by its ``tool_use_id`` (a call with
-           none cannot hold one: R407).
+           none cannot hold one: R407). With ``prompt_tool`` the call is
+           refused with R407 instead: a permission prompt tool may decide
+           it, and this layer cannot check its hold again when it is
+           allowed (section 5.18.6).
         6. Approval (F502), with ``approval="ask"``: a binding that needs
-           more than one approver or an approver's role is refused; in a
+           more than one approver or an approver's role is refused, and so,
+           with ``prompt_tool``, is one that sets ``approval.expires`` (this
+           layer cannot see when that tool's decision arrives); in a
            permission mode outside :data:`PROMPTING_PERMISSION_MODES` the
            call is refused; otherwise the digest of the shown value is
-           recorded and the hook answers ``permissionDecision: "ask"``.
-           Each refusal releases the hold step 5 took.
+           recorded, the time of the request noted for a binding that sets
+           ``approval.expires``, and the hook answers ``permissionDecision:
+           "ask"``. Each refusal releases the hold step 5 took.
 
         With ``strict_mode=False`` the checks of steps 4 and 5 log instead
         of refusing (outside class SL); approval still applies. Any other
@@ -1945,6 +1971,9 @@ class GroundedAgentAdapter:
         Args:
             options_mode: The wrapped options' ``permission_mode``: used
                 when the hook input carries none.
+            prompt_tool: The wrapped options name a
+                ``permission_prompt_tool_name``, so no permission callback
+                sees a call allowed.
 
         Returns:
             Async hook callback function
@@ -2054,7 +2083,24 @@ class GroundedAgentAdapter:
                         return deny(refusal)
                     logger.warning("PreToolUse warning (non-strict): %s", refusal)
 
-                if mapping.requires_checkpoint:
+                if mapping.requires_checkpoint and prompt_tool:
+                    message = self._refuse(
+                        ErrorCode.SAFETY_CHECK_FAILED,
+                        mapping,
+                        tool_name,
+                        call,
+                        f"{_subject(mapping, tool_name)} requires a checkpoint, "
+                        f"and a permission prompt tool decides this session's "
+                        f"calls: this layer never sees the call allowed, so it "
+                        f"cannot check again then that the checkpoint is still "
+                        f"valid (STANDARD 1.2.0 §5.18.6). {tool_name} did not "
+                        f"run; the host can pass a can_use_tool callback "
+                        f"instead of the prompt tool.",
+                    )
+                    if strict:
+                        return deny(message)
+                    logger.warning("PreToolUse warning (non-strict): %s", message)
+                elif mapping.requires_checkpoint:
                     scope = (input_data.get("session_id"), input_data.get("agent_id"))
                     if call is None:
                         message = self._unheld_call_refusal(mapping, tool_name)
@@ -2108,6 +2154,24 @@ class GroundedAgentAdapter:
                                 f"person's role",
                             )
                         )
+                    expires = policy.expires_seconds if policy is not None else None
+                    if expires is not None and prompt_tool:
+                        release()
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping,
+                                tool_name,
+                                call,
+                                f"{_subject(mapping, tool_name)} takes a "
+                                f"decision only within {expires:g} s of the "
+                                f"request (its binding's approval.expires), and "
+                                f"a permission prompt tool decides this "
+                                f"session's calls: this layer cannot see when "
+                                f"its decision arrives (STANDARD 1.2.0 §5.18.7). "
+                                f"{tool_name} did not run.",
+                            )
+                        )
                     mode = (
                         input_data.get("permission_mode") or options_mode or "default"
                     )
@@ -2142,6 +2206,9 @@ class GroundedAgentAdapter:
                     message = _approval_request(
                         mapping, tool_name, self.mapper.person_required(mapping)
                     )
+                    if expires is not None and call is not None:
+                        with self._state_lock:
+                            self._asked_at[call] = self._now()
                     self._allow_token(tool_name, tool_input, call=call)
                     self._record(
                         "asked",
@@ -2236,6 +2303,9 @@ class GroundedAgentAdapter:
         ) -> dict[str, Any]:
             """PostToolUse hook: use the call's hold, record that it ran."""
             holder = tool_use_id or input_data.get("tool_use_id")
+            if holder:
+                with self._state_lock:
+                    self._asked_at.pop(holder, None)
             tool_name = input_data.get("tool_name", "")
             tool_input = input_data.get("tool_input", {})
             try:
@@ -2340,6 +2410,9 @@ class GroundedAgentAdapter:
         ) -> dict[str, Any]:
             """PostToolUseFailure hook: use the call's hold."""
             holder = tool_use_id or input_data.get("tool_use_id")
+            if holder:
+                with self._state_lock:
+                    self._asked_at.pop(holder, None)
             tool_name = input_data.get("tool_name", "")
             try:
                 checkpoint_id = tracker.consume_checkpoint(holder) if holder else None
@@ -2392,7 +2465,11 @@ class GroundedAgentAdapter:
         3. Hands the decision to ``host_can_use_tool`` when there is one.
            A result that is not an allow releases the hold; for a call that
            requires approval it becomes ``F502 APPROVAL_REQUIRED: <tool> was
-           not approved: <the host's message>``. An allow whose
+           not approved: <the host's message>``. So does an allow that
+           arrives later than the binding's ``approval.expires`` after the
+           request (the PreToolUse hook's ask, or this callback's call of
+           the host's, whichever came first; STANDARD 1.2.0 section
+           5.18.7). An allow whose
            ``updated_input`` differs from the input is classified again
            (STANDARD 1.2.0 section 5.18.7): refused if the new arguments need
            a prerequisite (F501, F503, V102) or a checkpoint (F501) the call
@@ -2489,9 +2566,15 @@ class GroundedAgentAdapter:
                 the host's callback returned
             """
             holder = getattr(context, "tool_use_id", None)
+            # The request: this layer's ask, else the host's prompt, which
+            # this callback starts.
+            requested = self._now()
             try:
                 with self._state_lock:
                     cwd = self._call_dirs.get(holder) if holder else None
+                    asked = self._asked_at.pop(holder, None) if holder else None
+                if asked is not None and asked < requested:
+                    requested = asked
                 mapping0 = mapper.map_tool(tool_name, input_data, cwd)
                 if mapping0.control:
                     return allow(input_data)
@@ -2573,6 +2656,27 @@ class GroundedAgentAdapter:
                         )
                     release(holder)
                     return result
+
+                policy = mapping0.approval
+                expires = policy.expires_seconds if policy is not None else None
+                if asks and mapping0.requires_approval and expires is not None:
+                    waited = (self._now() - requested).total_seconds()
+                    if waited > expires:
+                        self._allow_token(tool_name, input_data, -1, holder)
+                        return deny(
+                            self._refuse(
+                                ErrorCode.APPROVAL_REQUIRED,
+                                mapping0,
+                                tool_name,
+                                holder,
+                                f"the decision on {tool_name} arrived "
+                                f"{waited:.0f} s after the request, later than "
+                                f"the {expires:g} s its binding's "
+                                f"approval.expires allows; {tool_name} did not "
+                                f"run, and needs a new decision",
+                            ),
+                            holder,
+                        )
 
                 updated = getattr(result, "updated_input", None)
                 args1 = updated if isinstance(updated, dict) else input_data

@@ -298,16 +298,20 @@ class TestReservation:
         assert lapsed.metadata["consumed_by"] == "lapsed hold of a"
 
     def test_unresolved_hold_is_used_on_reload(self, tmp_path: Path) -> None:
-        """A hold found on reload belongs to a call the layer never saw
-        finish: unresolved, so its checkpoint counts as used."""
+        """A hold found on reload belongs to a call the reloaded tracker
+        never saw: its checkpoint, like every one read back, authorises
+        nothing there, and the hold stays its holder's in the file."""
+        import json
+
         tracker = CheckpointTracker(checkpoint_dir=str(tmp_path))
         created = tracker.create_checkpoint(scope=["*"], reason="test")
         tracker.validate_and_reserve("a")
         reloaded = CheckpointTracker(checkpoint_dir=str(tmp_path))
         assert reloaded.validate_and_reserve("b") == (False, None)
-        used = reloaded.get_checkpoint_by_id(created)
-        assert used is not None and used.consumed
-        assert used.metadata["consumed_by"] == "unresolved hold"
+        assert reloaded.get_checkpoint_by_id(created) is not None
+        reloaded.create_checkpoint(scope=["*"], reason="its own")
+        state = json.loads((tmp_path / "tracker_state.json").read_text("utf-8"))
+        assert {"checkpoint_id": created, "holder": "a"} in state["reservations"]
 
     def test_concurrent_reservations_have_one_winner(
         self, tracker: CheckpointTracker

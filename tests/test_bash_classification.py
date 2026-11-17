@@ -176,7 +176,7 @@ class TestAdapterRestore:
             ["*"], "git stash create", metadata={"commit": SHA}
         )
         later = GroundedAgentAdapter(config)
-        assert later.checkpoint_tracker.has_commit(SHA)
+        assert not later.checkpoint_tracker.has_commit(SHA)
         assert later.mapper.map_tool(
             "Bash", {"command": f"git stash apply {SHA}"}
         ).capabilities == ("mutate",)

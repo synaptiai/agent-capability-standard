@@ -1019,11 +1019,27 @@ class ToolCapabilityMapper:
         """Load a set of tool binding records (STANDARD 1.2.0 section 5.18.1).
 
         Each record that loads is stored under its ``tool``; ``invokes``
-        names resolve within the set and among the tools registered before.
-        A tool whose record does not load is unbound (:data:`UNCLASSIFIED_TOOL`).
-        Nothing is raised: every diagnostic is returned and kept in
-        :attr:`diagnostics` (warnings also in :attr:`warnings`).
+        names resolve within the set and among the bound tools registered
+        before. A tool whose record does not load is unbound
+        (:data:`UNCLASSIFIED_TOOL`).
+
+        A composite's effective flags include those of the bindings it
+        invokes (section 5.18.4), so every loaded composite that invokes,
+        transitively, a tool of the set is loaded again from its record,
+        with the set: it takes the flags they now have, and one that now
+        invokes an unbound tool does not load (V107) and is unbound itself.
+        Nothing is raised: every diagnostic, the composites' included, is
+        returned and kept in :attr:`diagnostics` (warnings also in
+        :attr:`warnings`).
         """
+        own, dependents = self._load(records)
+        return own + dependents
+
+    def _load(
+        self, records: Iterable[Mapping[str, Any]], *, again: bool = True
+    ) -> tuple[list[ValidationError], list[ValidationError]]:
+        """:meth:`load_bindings`: the set's diagnostics, and those of the
+        composites loaded again (none when ``again`` is false)."""
         from .bindings import load_bindings
 
         records = [dict(r) if isinstance(r, Mapping) else r for r in records]
@@ -1057,6 +1073,31 @@ class ToolCapabilityMapper:
             if isinstance(r, Mapping) and r.get("tool") in loaded:
                 # A copy the caller cannot change under the digest.
                 self._records[r["tool"]] = copy.deepcopy(dict(r))
+        return diagnostics, (self._load_composites_again(names) if again else [])
+
+    def _load_composites_again(self, changed: set[str]) -> list[ValidationError]:
+        """Load again, as one set, every loaded composite that invokes a
+        tool in ``changed``, transitively (section 5.18.4): what a layer
+        loading the records it now holds would compute. Its diagnostics.
+        ``invokes`` has no cycle among loaded bindings (V105 counts those
+        loaded before), so the set is finite and loads once."""
+        again: set[str] = set()
+        reached = set(changed)
+        while reached:
+            reached = {
+                name
+                for name, mapping in self._dynamic_mappings.items()
+                if name in self._records
+                and name not in changed
+                and name not in again
+                and reached.intersection(mapping.invokes)
+            }
+            again |= reached
+        if not again:
+            return []
+        diagnostics, _ = self._load(
+            [self._records[name] for name in sorted(again)], again=False
+        )
         return diagnostics
 
     def register_binding(self, record: Mapping[str, Any]) -> ToolMapping:
@@ -1065,9 +1106,11 @@ class ToolCapabilityMapper:
         Raises:
             ValueError: If the record does not load (S303, S304, V101, V105,
                 V107, V109, V110). The message opens with each error's code
-                and name; the tool stays unbound.
+                and name; the tool stays unbound. A composite loaded again
+                with it (:meth:`load_bindings`) raises nothing here: its
+                diagnostics are in :attr:`diagnostics`.
         """
-        diagnostics = self.load_bindings([record])
+        diagnostics, _ = self._load([record])
         errors = [d for d in diagnostics if d.severity is Severity.ERROR]
         if errors:
             raise ValueError("; ".join(text_form(e) for e in errors))
@@ -1156,6 +1199,8 @@ class ToolCapabilityMapper:
             )
             logger.warning("%s", text_form(report))
             self._diagnostics[tool_name] = [report]
+            # A composite that invokes it no longer loads (V107).
+            self._load_composites_again({tool_name})
             return UNCLASSIFIED_TOOL
 
         if mutation is None and risk == "high":
@@ -1259,10 +1304,13 @@ class ToolCapabilityMapper:
         return mapping.person_required
 
     def invoked_senders(self, mapping: ToolMapping) -> list[str]:
-        """The bindings ``mapping`` invokes, transitively, that perform
-        ``send`` (sections 4.4.2, 5.18.4), in the order found. This mapper's
-        layer does not see a composite's nested calls, so it cannot tell
-        where they send."""
+        """The tools ``mapping`` invokes, transitively, that may perform
+        ``send`` (sections 4.4.2, 5.18.4), in the order found: each binding
+        that performs it, and each tool that is unbound, which may send
+        anywhere (section 5.18.2; a composite does not load with one, V107,
+        so this is the fail-closed answer should one be reached). This
+        mapper's layer does not see a composite's nested calls, so it cannot
+        tell where they send."""
         found: list[str] = []
         seen: set[str] = set()
         queue = list(mapping.invokes)
@@ -1272,7 +1320,7 @@ class ToolCapabilityMapper:
                 continue
             seen.add(name)
             invoked = self._dynamic_mappings.get(name, UNCLASSIFIED_TOOL)
-            if "send" in invoked.capabilities:
+            if invoked is UNCLASSIFIED_TOOL or "send" in invoked.capabilities:
                 found.append(name)
             queue.extend(invoked.invokes)
         return found
