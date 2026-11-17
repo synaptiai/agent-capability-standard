@@ -235,3 +235,152 @@ UserPromptSubmit hook and state-file rule). No version changes.
   not run (no Chromium here); the one enforced page touched,
   /guides/claude-agent-sdk/, gains five words in the Checkpoint Lifecycle
   section's Validity item and one word in a list of hooks.
+
+### Batch 1 recheck: the four reported defects and their siblings
+
+Security round 1's first batch (defects 1 to 4 above, as an independent
+verifier reproduced them on 99c37dd) was rechecked on this tree, b61b3b1,
+before anything else was changed. Each fix holds:
+
+- 1: the reporters' probe, `rm -rf a.txt` padded with 50,000 trailing
+  spaces, 200,000 leading spaces, 200,000 trailing tabs or 1,000,000
+  trailing spaces, is F501 in 22, 32, 40 and 107 ms (each under `timeout
+  120` and a 4 GB address-space limit); `hooks.json` gives the hook
+  `onFailure: "block"` and `timeout: 30`, which Claude Code 2.1.325's binary
+  honours for a command hook (`Iq`).
+- 2: the clone tests (`TestShellHookTrustsOnlyItsOwnRecords`,
+  `TestRollbackCommandHook`, `TestShippedStateFile`) pass; the SDK holds too:
+  a checkpoint a first adapter took on a `checkpoint_dir` does not authorise
+  a gated Write in a second adapter on the same directory ("no checkpoint
+  was taken in this scope"), and the tracker drops a loaded checkpoint dated
+  after its load, so a planted state file never authorises a call.
+- 3: `Monitor`, `PowerShell`, `ExitWorktree` and an MCP tool are gated
+  (`TestShellHookRoutesEveryTool`, `test_hook_lists_match_mapper.py`).
+- 4: each boundary event ends the marker (the lifecycle tests); the SDK's
+  UserPromptSubmit boundary test passes; the Standard Agents binding's
+  boundary is a new execution (`flowId`), so it has no turn to miss.
+
+The targeted files (hooks, lifecycle, mapper lists, skill hooks,
+persistence: 697 tests) passed before any change. Four siblings were found
+and fixed; each new test was run against the code before the fix and fails
+there.
+
+#### 7. The audit skill's hook read its append form in quadratic time (medium)
+
+Sibling of 1: a PreToolUse command hook whose run outlives its time limit
+gives no verdict, and the call runs. The audit skill's `Bash` hook read
+`printf '%s\n' '<record>' >> ...records.jsonl` with `${REST%%\'*}` and
+`${REST#*\'}`; with no quote after the record, the second costs the line
+times itself (dash, which runs `sh -c` here: 25 KB 0.94 s, 50 KB 3.7 s,
+100 KB 15.1 s, so about 700 KB outlives Claude Code's default 600 s; bash's
+`%%` is quadratic too, 5.1 s at 1 MB). The check is the §6.7 credential scan
+of an audit record (§5.18.10).
+
+- Fix: the form is read with one `case` pattern per allowed destination
+  (`"$FORM"*"$TO"`) and the removal of the literal prefix and suffix; a
+  record holding a quote or a line break is not the form (as before). In
+  both shells 1 MB takes at most 25 ms.
+- Tests: `TestAuditCommandHook::test_a_long_line_is_decided_in_bounded_time`
+  (sh and bash: 200 KB and 1 MB records with no closing quote, a 1 MB
+  record that is not JSON, and a valid 1 MB record, each decided within
+  10 s). All 8 failed on the old hook (each hit the 30 s subprocess
+  timeout).
+- Siblings checked: the persist, rollback and send hooks, and the shared
+  secret scan, took at most 75 ms on 400 KB adversarial inputs (repeated
+  `password=`, `a://b:`, `authorization: `, blanks before a restore id,
+  newline-separated restores, `http://a`, numeric hosts, a long option
+  cluster); the log hook took at most 367 ms on a 1 MB command and output
+  (blanks, quotes, `a/` segments); the take hook stops at 4096 bytes before
+  any trim.
+
+#### 8. The skill command hooks did not block when they failed (medium)
+
+Sibling of 1's `onFailure` fix: `hooks.json` gave the plugin's PreToolUse
+hook `onFailure: "block"`, but the four blocking skill command hooks
+(audit, persist, rollback, send), which make code-decided checks (§6.7
+secrets, the §5.18.10 destination row, F503 rollback history), set neither
+it nor a `timeout`: one that crashed or timed out let the call run. Claude
+Code parses a skill's frontmatter `hooks` with the settings' hook schema
+(`sQ`), whose command hook takes `timeout` and `onFailure`.
+
+- Fix: each sets `timeout: 30` and `onFailure: block`.
+- Test: `test_a_command_hook_that_fails_or_times_out_blocks_the_call` (four);
+  all four failed before.
+
+#### 9. The SDK adapter's safety hook did not block when it failed in the CLI (medium)
+
+SDK sibling of 1's `onFailure` fix. The adapter's PreToolUse callback
+refuses with R407 when a check fails inside it, but a callback that fails
+or gives no verdict within the matcher's timeout (60 s by default), as the
+CLI sees it, was no decision there: the call ran (in `bypassPermissions`
+outright). `claude-agent-sdk` 0.2.172 carries `HookMatcher.on_failure`, and
+with `"block"` it refuses to connect to a Claude Code that does not honour
+it (`hook_on_failure_supported`, which Claude Code 2.1.325 answers).
+
+- Fix: `wrap_options()` registers the safety hook's matcher with
+  `on_failure="block"` (`_wrap_hook(..., on_failure=...)`; the dict form
+  without the SDK carries it too). An SDK whose `HookMatcher` lacks the
+  field cannot ask for it: the adapter logs a warning, and the conformance
+  statement lists that host gap. The other hooks keep the SDK's default (the
+  boundary and PostToolUse callbacks catch their own errors; a PostToolUse
+  block cannot undo a call).
+- Tests (`TestPreToolUseInWrapOptions`):
+  `test_the_safety_hook_blocks_when_it_fails_in_the_cli` (the safety
+  matcher blocks, a caller's matcher and every other hook are unchanged)
+  and `test_without_the_sdk_the_dict_form_carries_it`; both failed before.
+  No call fixture changed; the statement gains a host gap.
+
+#### 10. The records guard read one spelling of each path (low)
+
+Sibling of 2's F504 guard, which tests the call's text for `checkpoint.ok`,
+`.claude/checkpoints` and `acs/checkpoints`: `.git/acs//checkpoints/...`,
+`.git/acs/./checkpoints/...`, `.git/acs/x/../checkpoints/...`,
+`.git/ACS/Checkpoints/...` (the same directory on a case-insensitive file
+system) and `.claude/Checkpoint.OK` were not refused, so an entry, a
+permanent pass for a restore, could be written by a call a person approves
+as an ordinary write. Such a call still needed a checkpoint and approval.
+
+- Fix: the text is read as a path is: case-insensitive, a run of slashes
+  and `./` segments as one slash (a regular expression, linear in the
+  text), and, in a text of at most 4096 bytes, each `x/../` resolved
+  (jq's `split` and `reduce`, whose cost grows faster than the text: 1 MB
+  of `a/` took 11 s, so a longer text is not resolved; a longer path cannot
+  be opened, and a longer command is a `mutate` already). `Monitor` and
+  `PowerShell` commands are read as Bash's. A megabyte command takes
+  129 ms. (jq 1.7's regex `splits` is quadratic in the number of matches:
+  not used.)
+- Tests: `test_another_spelling_of_the_records_is_refused` (13: five
+  spellings of an entry, the marker in other case, `.claude//checkpoints`,
+  three Bash spellings, Monitor, PowerShell, and a padded command over
+  4096 bytes); all 13 failed before. `test_a_long_path_is_read_in_bounded_time`
+  (a 1 MB command of segments, decided within 10 s) is a control.
+- The SDK adapter keeps no records in the work tree that authorise a call
+  (see 2 above), so it has no such guard to align.
+
+#### Documentation
+
+SECURITY.md (§5.1's records sentence, the §5.4 plugin row for the records,
+the consequence on the skills' command hooks, §5.5's host gap on
+`onFailure` and its adapter paragraph), hooks/README (records, skill
+hooks), CLAUDE.md's hook list, the SDK guide (a troubleshooting entry for
+the connection error), the adapter's docstrings and conformance statement,
+and CHANGELOG Upgrading (the plugin hooks' fail-closed item, the SDK item).
+No version changes.
+
+#### Checks after the batch 1 recheck
+
+- Python: `pytest tests/` (4797 passed, 18 skipped; 28 more than after
+  round 1, the new tests); ruff check and format; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; the generators' `--check`
+  (`sync_skill_schemas`, `gen_runtime_fixtures`, `gen_call_fixtures`,
+  `gen_trigger_vectors`, `gen_standard_agents_binding`,
+  `gen_capability_json_schemas`).
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1877; the
+  WebAssembly build reused); the binding's check and test (191, 2 skipped).
+  No call fixture changed.
+- Site: `npm run check` and `npm test` (1173). `scripts/check-runs.mjs` was
+  not run (no Chromium here); the enforced page touched,
+  /guides/claude-agent-sdk/, gains one entry with a fence in its
+  Troubleshooting run, an exempt run of that form.

@@ -243,11 +243,14 @@ Then:
   turn or was replaced can still be restored. Restoring anything else is a
   `mutate`.
 - **The layer's records**: a `mutate` call that names them, a `Write`,
-  `Edit`, `MultiEdit` or `NotebookEdit` of a path, or a `Bash` command
-  whose text holds `checkpoint.ok`, `.claude/checkpoints` or
-  `acs/checkpoints`, is blocked with `F504 CONSTRAINT_VIOLATED:`: only the
-  hooks write them. Reading them is not refused, and a path a command builds
-  when it runs is not seen.
+  `Edit`, `MultiEdit` or `NotebookEdit` of a path, or a `Bash`, `Monitor`
+  or `PowerShell` command whose text holds `checkpoint.ok`,
+  `.claude/checkpoints` or `acs/checkpoints`, is blocked with
+  `F504 CONSTRAINT_VIOLATED:`: only the hooks write them. The text is read
+  as a path is: in any letter case, with a run of slashes and `./` segments
+  as one slash, and, in a text of at most 4096 bytes, each `x/../`
+  resolved. Reading them is not refused, and a path a command builds when it
+  runs is not seen.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
   file (not a symlink, SEC-006) that git does not track (a repository can
   ship a tracked one; git is asked from the marker's own directory, so a
@@ -419,7 +422,10 @@ declare hooks of their own in the frontmatter of their `SKILL.md`. Claude Code
 registers them when the skill is invoked. Their command hooks follow the same
 contract as the hooks here: the tool call as JSON on stdin, exit 2 to block
 with the reason on stderr, and a digest in place of the tool input in what
-they log. Their prompt hooks hold only model-judged additions: a check the
+they log. Each sets `onFailure: block` and a 30-second `timeout`, as
+`hooks.json` does for the pre-tool-use hook, so a run that fails, cannot
+start or gives no verdict in time blocks the call; each reads a command in
+time that grows with its length alone. Their prompt hooks hold only model-judged additions: a check the
 Standard requires (approval, the checkpoint, rollback history, the
 destination policy, secrets) is decided by code (STANDARD 1.2.0 §5.18.10).
 [SECURITY.md §5.4](../spec/SECURITY.md#54-checks-enforced-by-code-and-checks-a-model-judges)

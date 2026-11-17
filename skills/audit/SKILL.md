@@ -12,6 +12,8 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
+          timeout: 30
+          onFailure: block
           command: |
             # Code-decided check (STANDARD 1.2.0 §5.18.10): an audit record appended
             # to .claude/audit/records.jsonl holds no credential (§6.7). Claude Code
@@ -32,21 +34,24 @@ hooks:
             # may not build or redirect text: a $ (but in ${CLAUDE_PROJECT_DIR:-.}),
             # a backtick, a backslash, < or > would let the record's text be
             # computed when the command runs, where no scan of the command sees it.
+            # The form is read with a case pattern and the removal of a literal
+            # prefix and suffix, whose cost grows with the line alone: a pattern
+            # removal such as ${REST#*\'} costs the line times itself when no
+            # quote follows, so a long line would hold the hook past its time.
             FORM="printf '%s\n' '"
             RECORD=""
-            case "$CMD" in
-              "$FORM"*)
-                REST="${CMD#"$FORM"}"
-                RECORD="${REST%%\'*}"
-                case "${REST#*\'}" in
-                  ' >> "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"' | ' >> .claude/audit/records.jsonl') ;;
-                  *) RECORD="" ;;
-                esac
-                ;;
-            esac
+            for TO in "' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" "' >> .claude/audit/records.jsonl"; do
+              case "$CMD" in
+                "$FORM"*"$TO")
+                  RECORD="${CMD#"$FORM"}"
+                  RECORD="${RECORD%"$TO"}"
+                  break
+                  ;;
+              esac
+            done
             NL='
             '
-            case "$RECORD" in *"$NL"*) RECORD="" ;; esac
+            case "$RECORD" in *\'* | *"$NL"*) RECORD="" ;; esac
             if [ -n "$RECORD" ]; then
               # The record as a reader decodes it: its JSON text with escapes
               # resolved (\u0067 is g) and each of its strings

@@ -83,6 +83,13 @@ here and marked so.
     state file (`tracker_state.json`) that git tracks: a repository can ship
     one, and its checkpoints were taken by no call here; the tracker starts
     fresh and logs a warning.
+  - `wrap_options()` registers the safety PreToolUse hook with
+    `on_failure="block"`: a callback that fails or gives no verdict in time,
+    as the CLI sees it, blocks the call, where it was no decision and the
+    call ran. With it, the SDK refuses to connect to a Claude Code that does
+    not honour `on_failure` (`CLIConnectionError`): update Claude Code. A
+    `claude-agent-sdk` whose `HookMatcher` has no `on_failure` cannot ask
+    for it; the adapter logs a warning and registers the hook as before.
   - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
     must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
     set, more than 0 and at most the expiry, and
@@ -560,9 +567,18 @@ here and marked so.
     writes no marker for a commit. The rollback skill's hook reads the same
     entries.
   - A marker git tracks authorises nothing (F501; it is left in place:
-    remove it from the repository). A gated call whose path or command names
-    the layer's records (`checkpoint.ok`, `.claude/checkpoints`,
-    `acs/checkpoints`) is refused with F504.
+    remove it from the repository). A gated call whose path, or Bash,
+    Monitor or PowerShell command, names the layer's records
+    (`checkpoint.ok`, `.claude/checkpoints`, `acs/checkpoints`) is refused
+    with F504, in any spelling a path accepts: any letter case, a run of
+    slashes, `./` segments and (in a text of at most 4096 bytes) `x/../`.
+  - The audit, persist, rollback and send skills' command hooks set
+    `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
+    does: a check that fails or gives no verdict in time blocks the call
+    where it let the call run. The audit hook reads its append form in time
+    that grows with the line alone (a 100 KB record with no closing quote
+    took 15 seconds, and about 700 KB outlived Claude Code's default
+    timeout).
   - A marker older than `ACS_CHECKPOINT_MAX_AGE` (the setting in force when
     it is used, which every audit line records) authorises nothing, whoever
     wrote it with whatever expiry.

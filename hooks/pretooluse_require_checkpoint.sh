@@ -58,7 +58,8 @@
 #     in the git directory, outside the work tree, so no clone, checkout or
 #     applied stash can ship an entry.
 #   - mutate: a call whose arguments name the layer's own records
-#     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/) is refused
+#     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/, in any letter
+#     case and with //, ./ and x/../ read as a path reads them) is refused
 #     (F504 CONSTRAINT_VIOLATED): only these hooks write them. Then the
 #     marker (.claude/checkpoint.ok, a JSON object with checkpoint_id,
 #     created_at, expires_at) must exist, be a regular file that git does not
@@ -336,17 +337,26 @@ if [[ "$capability" == "rollback "* ]]; then
 fi
 
 # The layer's records are written by these hooks alone: a Write, Edit,
-# MultiEdit or NotebookEdit of a path, or a Bash command, that names the
-# marker or the checkpoint directories is refused (a written entry would be
-# a permanent pass for a restore, a written marker a checkpoint no call
-# took). This reads the text: a path a command builds when it runs is not
-# seen, and such a call is still a mutate a person approves.
+# MultiEdit or NotebookEdit of a path, or a Bash, Monitor or PowerShell
+# command, that names the marker or the checkpoint directories is refused (a
+# written entry would be a permanent pass for a restore, a written marker a
+# checkpoint no call took). The text is read as a path is: in any letter case
+# (a case-insensitive file system opens CHECKPOINT.OK as checkpoint.ok), with
+# a run of slashes and ./ segments as one slash, and, in a text of at most
+# 4096 bytes, each x/../ resolved (a longer path cannot be opened, and a
+# longer command is a mutate already; the resolution's cost grows faster than
+# the text). A path a command builds when it runs is not seen, and such a call
+# is still a mutate a person approves.
 records_named=$(printf '%s' "$payload" | jq -r '
-  (if .tool_name == "Bash" then .tool_input.command
+  def records: test("checkpoint\\.ok|\\.claude/+(\\./+)*checkpoints|acs/+(\\./+)*checkpoints"; "i");
+  def lexical: ascii_downcase | split("/")
+    | reduce .[] as $s ([]; if $s == "" or $s == "." then . elif $s == ".." then (if length > 0 then .[:-1] else . end) else . + [$s] end)
+    | join("/");
+  (if .tool_name == "Bash" or .tool_name == "Monitor" or .tool_name == "PowerShell" then .tool_input.command
    elif .tool_name == "Write" or .tool_name == "Edit" or .tool_name == "MultiEdit" or .tool_name == "NotebookEdit"
    then (.tool_input.file_path // .tool_input.notebook_path)
    else null end) as $text
-  | ($text | strings | test("checkpoint\\.ok|\\.claude/checkpoints|acs/checkpoints")) // false' 2>/dev/null) || records_named=true
+  | ($text | strings | records or (length <= 4096 and (lexical | records))) // false' 2>/dev/null) || records_named=true
 if [ "$records_named" != "false" ]; then
   block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/), which only the plugin's hooks write."
 fi

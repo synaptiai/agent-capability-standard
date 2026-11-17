@@ -21,6 +21,7 @@
   "concurrency_note": "CheckpointTracker's lock makes a check, a hold and its use one atomic step; a hold is re-checked and used in one step when the call is allowed",
   "features": ["unbound_calls", "offered_tools"],
   "host_gaps": [
+    "The PreToolUse matcher sets on_failure \"block\", so a callback that fails or gives no verdict in time, as the CLI sees it, blocks the call, and the SDK refuses to connect to a Claude Code that does not honour it; a claude-agent-sdk whose HookMatcher has no on_failure cannot ask for it (the adapter logs a warning), and there such a callback is no decision and the call runs",
     "With a permission_prompt_tool_name, a call the prompt tool refuses is not reported to the adapter: the checkpoint it held is lost (it counts as used when its hold lapses or the session's turn ends), so the next gated call needs a new checkpoint",
     "The permission mode is read from the hook input, else from the wrapped options: a host that changes the mode during a session and omits it from hook input is checked against the mode the session started in",
     "That Claude Code puts an ask to can_use_tool in modes default, acceptEdits and plan rests on its documentation; the tests call the hook and the callback directly",

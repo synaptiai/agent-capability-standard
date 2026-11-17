@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -254,6 +255,18 @@ class TestFrontmatterHooks:
             if hooks_of(skill, "PreToolUse", "command")
         ]
         assert declared == ["audit", "persist", "rollback", "send"]
+
+    @pytest.mark.parametrize("skill", ["audit", "persist", "rollback", "send"])
+    def test_a_command_hook_that_fails_or_times_out_blocks_the_call(
+        self, skill: str
+    ) -> None:
+        """Each check is code-decided (STANDARD 1.2.0 §5.18.10): Claude Code
+        runs the call when a command hook fails, cannot start or gives no
+        verdict in time, unless the hook sets onFailure "block" (as the
+        plugin's pre-tool-use hook in hooks.json does)."""
+        (hook,) = hooks_of(skill, "PreToolUse", "command")
+        assert hook["onFailure"] == "block"
+        assert isinstance(hook["timeout"], int) and 0 < hook["timeout"] <= 60
 
     @pytest.mark.parametrize("skill", ["audit", "persist"])
     def test_secret_scan_copies_are_equal(self, skill: str) -> None:
@@ -885,6 +898,46 @@ class TestAuditCommandHook:
         result = run_command(hook, bash_call(command), tmp_path, shell)
         assert result.returncode == 0, result.stderr
         assert result.stderr == ""
+
+    @pytest.mark.parametrize(
+        ("record", "closed", "expect"),
+        [
+            # No quote closes the record: the old pattern removal
+            # ${REST#*\'} cost the line times itself (100 KB took 15 s in
+            # dash, so about 700 KB outlived Claude Code's 600 s default)
+            ("a" * 200_000, False, "may not expand, escape or redirect text"),
+            ("a" * 1_000_000, False, "may not expand, escape or redirect text"),
+            ("a" * 1_000_000, True, "is not one JSON object"),
+            ('{"note":"' + "a" * 1_000_000 + '"}', True, None),
+        ],
+        ids=["open-200k", "open-1m", "closed-1m", "record-1m"],
+    )
+    def test_a_long_line_is_decided_in_bounded_time(
+        self,
+        tmp_path: Path,
+        shell: str,
+        record: str,
+        closed: bool,
+        expect: str | None,
+    ) -> None:
+        """A hook that gives no verdict in time lets the call run where
+        Claude Code does not block on failure: the form is read in time
+        that grows with the line alone."""
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = (
+            "printf '%s\\n' '"
+            + record
+            + ("'" if closed else "")
+            + " >> .claude/audit/records.jsonl"
+        )
+        started = time.monotonic()
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert time.monotonic() - started < 10
+        if expect is None:
+            assert result.returncode == 0, result.stderr
+            assert result.stderr == ""
+        else:
+            assert_blocked(result, expect, F504)
 
 
 # ---------------------------------------------------------------------------

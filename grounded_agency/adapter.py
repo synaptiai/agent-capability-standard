@@ -8,7 +8,9 @@ options to inject:
 
 - A PreToolUse hook that applies the rate limit, the prerequisites, the
   checkpoint rule (F501, F503) and the approval rule (F502) to every tool
-  call, and refuses with R407 when it cannot complete a check
+  call, and refuses with R407 when it cannot complete a check; its
+  matcher's ``on_failure`` is ``"block"``, so a callback that fails or
+  gives no verdict in time, as the CLI sees it, blocks the call too
 - A permission callback that re-checks the call (arguments the host
   changed are classified again) and uses its checkpoint up when the call is
   allowed, after passing the decision to the host's own ``can_use_tool``
@@ -1555,7 +1557,9 @@ class GroundedAgentAdapter:
         Injects:
         - enable_file_checkpointing=True for SDK-level rollback
         - a PreToolUse hook for the rate limit, the prerequisites, the
-          checkpoint rule and the approval rule
+          checkpoint rule and the approval rule, whose matcher has
+          ``on_failure="block"`` (the SDK then refuses to connect to a
+          Claude Code that does not honour it)
         - a can_use_tool callback that passes the decision to the
           ``can_use_tool`` callback of ``base``, if it has one, re-checks the
           call (arguments the host changed are classified again) and uses
@@ -1639,7 +1643,10 @@ class GroundedAgentAdapter:
             options_mode=getattr(base, "permission_mode", None)
         )
         safety_pre_hook._grounded_adapter = self  # see _already_wrapped
-        pre_hooks.append(self._wrap_hook(safety_pre_hook))
+        # It refuses with R407 when a check fails inside it; a callback that
+        # fails or gives no verdict in time, seen from the CLI, blocks the
+        # call too (section 5.18.8), where the SDK can say so.
+        pre_hooks.append(self._wrap_hook(safety_pre_hook, on_failure="block"))
 
         # Stop and UserPromptSubmit: execution boundaries (a turn's end, and
         # the next turn's start, which also ends what a turn left when its
@@ -1758,6 +1765,7 @@ class GroundedAgentAdapter:
         self,
         hook_fn: Any,
         matcher: str | None = None,
+        on_failure: str | None = None,
     ) -> Any:
         """
         Wrap a hook function in the SDK's expected format.
@@ -1768,6 +1776,13 @@ class GroundedAgentAdapter:
         Args:
             hook_fn: Async hook callback
             matcher: Optional tool matcher string
+            on_failure: ``"block"``: the CLI blocks the action when the
+                callback fails, as it sees it (an error, or no answer
+                within the matcher's timeout). Set where the SDK's
+                ``HookMatcher`` has ``on_failure``; an older SDK has no way
+                to ask, and a warning says so. With it, connecting to a
+                Claude Code that does not honour it raises
+                ``CLIConnectionError``.
 
         Returns:
             Hook configuration dict or HookMatcher
@@ -1775,16 +1790,28 @@ class GroundedAgentAdapter:
         # Try to use SDK's HookMatcher if available
         try:
             from claude_agent_sdk import HookMatcher
-
-            if matcher:
-                return HookMatcher(matcher=matcher, hooks=[hook_fn])
-            return HookMatcher(hooks=[hook_fn])
         except ImportError:
-            # Fallback: return dict format
+            # Fallback: return dict format (the SDK's internal form)
             config: dict[str, Any] = {"hooks": [hook_fn]}
             if matcher:
                 config["matcher"] = matcher
+            if on_failure is not None:
+                config["on_failure"] = on_failure
             return config
+        kwargs: dict[str, Any] = {"hooks": [hook_fn]}
+        if matcher:
+            kwargs["matcher"] = matcher
+        if on_failure is not None:
+            if "on_failure" in getattr(HookMatcher, "__dataclass_fields__", {}):
+                kwargs["on_failure"] = on_failure
+            else:
+                logger.warning(
+                    "This claude-agent-sdk's HookMatcher has no on_failure: a "
+                    "safety hook that fails or times out in the CLI is no "
+                    "decision there, so the call is not blocked. Update "
+                    "claude-agent-sdk."
+                )
+        return HookMatcher(**kwargs)
 
     def _make_boundary(self, what: str = "turn ended") -> Any:
         """

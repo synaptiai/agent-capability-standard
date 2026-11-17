@@ -40,6 +40,8 @@ hooks:
             Return ok: false, with the specific reason, if validation fails.
           once: false
         - type: command
+          timeout: 30
+          onFailure: block
           command: |
             # Code-decided checks (STANDARD 1.2.0 §5.18.10): the target file is not
             # a system or credential file, and the content holds no credential

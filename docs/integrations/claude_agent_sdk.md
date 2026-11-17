@@ -1015,6 +1015,14 @@ If `claude_agent_sdk` isn't installed, the adapter falls back to dict-based type
 pip install claude-agent-sdk
 ```
 
+### CLIConnectionError: Does Not Honor on_failure
+
+The adapter's PreToolUse safety hook asks the CLI to block a call when the hook fails or gives no verdict in time (`on_failure="block"`), and the SDK will not connect to a Claude Code too old to honour that. Update Claude Code.
+
+```bash
+claude update
+```
+
 ## API Reference
 
 ### grounded_query()

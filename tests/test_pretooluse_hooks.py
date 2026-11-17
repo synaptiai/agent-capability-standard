@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from grounded_agency import GroundedAgentAdapter
 
@@ -195,6 +195,46 @@ class TestPreToolUseInWrapOptions:
 
         assert "PreToolUse" in wrapped.hooks
         assert "PostToolUse" in wrapped.hooks
+
+    def test_the_safety_hook_blocks_when_it_fails_in_the_cli(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """STANDARD 1.2.0 §5.18.8: the hook refuses with R407 when a check
+        fails inside it, but a callback that fails or gives no verdict in
+        time, as the CLI sees it, was no decision there and the call ran.
+        Its matcher asks the CLI to block instead (as hooks.json does for
+        the plugin's hook); a caller's own matcher is left as it was."""
+        existing = HookMatcher(hooks=[lambda *_: {}])
+        wrapped = strict_adapter.wrap_options(
+            ClaudeAgentOptions(hooks={"PreToolUse": [existing]})
+        )
+        first, safety = wrapped.hooks["PreToolUse"]
+        assert first is existing and first.on_failure is None
+        (fn,) = safety.hooks
+        assert getattr(fn, "_grounded_adapter", None) is strict_adapter
+        assert safety.on_failure == "block"
+        # The other hooks keep the SDK's default.
+        for event, matchers in wrapped.hooks.items():
+            for entry in matchers:
+                if entry is not safety:
+                    assert getattr(entry, "on_failure", None) is None, event
+
+    def test_without_the_sdk_the_dict_form_carries_it(
+        self, strict_adapter: GroundedAgentAdapter, monkeypatch
+    ):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_sdk(name, *args, **kwargs):
+            if name == "claude_agent_sdk":
+                raise ImportError(name)
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_sdk)
+        entry = strict_adapter._wrap_hook(lambda *_: {}, on_failure="block")
+        assert entry["on_failure"] == "block"
+        assert "on_failure" not in strict_adapter._wrap_hook(lambda *_: {})
 
 
 def _hooks(entry) -> list:
@@ -719,6 +759,14 @@ def _write_call(mode: str = "default", call: str = "w1") -> dict:
     }
 
 
+def _write_to(file_path: str) -> dict:
+    return {
+        "tool_name": "Write",
+        "tool_input": {"file_path": file_path, "content": ""},
+        "tool_use_id": "w1",
+    }
+
+
 @needs_bash_and_jq
 class TestShellHookSection518:
     """The plugin's PreToolUse hook under STANDARD 1.2.0 §5.18: one marker
@@ -1154,6 +1202,60 @@ class TestShellHookTrustsOnlyItsOwnRecords:
         assert result.returncode == 2, tool_call
         assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: "), tool_call
         assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    @pytest.mark.parametrize(
+        "tool_call",
+        [
+            _write_to("/p/.git/acs//checkpoints/commits/a"),
+            _write_to("/p/.git/acs/./checkpoints/commits/a"),
+            _write_to("/p/.git/acs/x/../checkpoints/commits/a"),
+            _write_to("/p/.git/acs/x/y/../../checkpoints/commits/a"),
+            _write_to("/p/.git/ACS/Checkpoints/commits/a"),
+            _write_to("/p/.claude/Checkpoint.OK"),
+            _write_to("/p/.claude//checkpoints/used/x"),
+            _bash("touch .git/acs//checkpoints/commits/0123"),
+            _bash("touch .git/acs/./checkpoints/commits/0123"),
+            _bash("touch .claude/x/../checkpoints/ended/m"),
+            {
+                "tool_name": "Monitor",
+                "tool_input": {"command": "touch .claude/checkpoint.ok"},
+            },
+            {
+                "tool_name": "PowerShell",
+                "tool_input": {"command": "New-Item .git/acs/checkpoints/commits/a"},
+            },
+            # Padded past 4096 bytes: no ../ resolution, the rest still read
+            _bash("touch .git/acs//checkpoints/commits/0123" + " " * 5000),
+        ],
+    )
+    def test_another_spelling_of_the_records_is_refused(
+        self, tmp_path: Path, tool_call: dict
+    ):
+        """A path is read as the file system reads it: slashes run
+        together, ./ and x/../ segments, and letter case (a case-insensitive
+        file system opens CHECKPOINT.OK as checkpoint.ok) name the same
+        records, and refuse the call as the plain spelling does."""
+        _write_marker(tmp_path)
+        result = _gated_hook(
+            {**tool_call, "permission_mode": "default"}, tmp_path, approval="off"
+        )
+        assert result.returncode == 2, tool_call
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: "), tool_call
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    def test_a_long_path_is_read_in_bounded_time(self, tmp_path: Path):
+        """Resolving x/../ costs more than the text's length, so it is done
+        only on a text of at most 4096 bytes; a megabyte of segments is
+        decided at once."""
+        _write_marker(tmp_path)
+        started = time.monotonic()
+        result = _gated_hook(
+            {**_bash("touch " + "a/" * 500_000 + "x"), "permission_mode": "default"},
+            tmp_path,
+            approval="off",
+        )
+        assert time.monotonic() - started < 10
+        assert result.returncode == 0, result.stderr
 
     def test_reading_the_records_and_writing_text_about_them_pass(self, tmp_path: Path):
         for tool_call in (

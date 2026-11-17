@@ -47,6 +47,8 @@ hooks:
             - Current state needs to be preserved first
           once: false
         - type: command
+          timeout: 30
+          onFailure: block
           command: |
             # A restore in this skill restores a checkpoint taken in the project
             # (STANDARD 1.2.0 §5.18.6, F503): each `git stash pop` or `git stash

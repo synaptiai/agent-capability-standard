@@ -34,6 +34,8 @@ hooks:
             Return ok: false, with the specific violation as the reason, if any check fails.
           once: false
         - type: command
+          timeout: 30
+          onFailure: block
           command: |
             # Block a request to localhost or a loopback, private, link-local or
             # unspecified address written as its host (a host-specific destination
