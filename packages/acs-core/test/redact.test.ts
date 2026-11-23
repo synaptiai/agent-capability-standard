@@ -135,6 +135,18 @@ describe('reading a long text (security round 1, batch 5)', () => {
     '--a-',
     '--password ',
     '--password --',
+    // Quoted values read to their closing quote, whitespace and all: a run
+    // ends at the next quote of its kind or a line break, and a run with no
+    // closing quote is read once more as an unquoted value (security round
+    // 1, batch 8's verification).
+    'password: "a ',
+    'password=\'a password="a ',
+    'password: "\\ ',
+    'password=\'\\"a ',
+    '"cookie", "value": "a ',
+    "['token', 'a ",
+    "-u 'a:b ",
+    '--password "a ',
   ];
   it.each(units)('reads 1 MB of %j in time in proportion to its length', (unit) => {
     const text = unit.repeat(Math.ceil(1_000_000 / unit.length)).slice(0, 1_000_000);
@@ -144,6 +156,36 @@ describe('reading a long text (security round 1, batch 5)', () => {
     holdsSecret({ data: text });
     // Well under a second here; the old patterns took 10 s at 100 KB.
     expect(performance.now() - started).toBeLessThan(20_000);
+  });
+
+  // A text that opens a quoted value and never closes it (on one line): the
+  // run is read to its end once for the quoted reading and once more as an
+  // unquoted value, not again from each of its positions.
+  const unclosed: [string, string][] = [
+    ['password: "', 'a '],
+    ["password: '", 'password: "a '],
+    ['"passphrase": "', '\\ '],
+    ['[\'cookie\', "', 'a ; '],
+    ["-u 'a:", 'b c '],
+    ['--password "', 'x\\y '],
+  ];
+  it.each(unclosed)('reads 1 MB of %j then %j with no closing quote in linear time', (prefix, tail) => {
+    const text = (prefix + tail.repeat(Math.ceil(1_000_000 / tail.length))).slice(0, 1_000_000);
+    const started = performance.now();
+    holdsCredential({ data: text });
+    redactText(text);
+    holdsSecret({ data: text });
+    expect(performance.now() - started).toBeLessThan(20_000);
+  });
+
+  it('replaces a quoted credential value whole', () => {
+    // A passphrase's later words are no longer kept (security round 1,
+    // batch 8's verification: only its first word was replaced).
+    expect(redactText('ValueError: bad config {"passphrase": "correct horse battery staple"}')).toBe(
+      'ValueError: bad config {"passphrase": "[REDACTED]"}',
+    );
+    // The refusal rule is unchanged: prose with a quoted phrase passes.
+    expect(holdsCredential('token: "rotate monthly"')).toBe(false);
   });
 
   it('matches as before, and reads a URL scheme inside a word', () => {

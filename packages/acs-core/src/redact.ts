@@ -28,6 +28,12 @@
  * tuple in JSON or code text (`"name": "Authorization", "value": "Basic
  * ..."`, `('Cookie', 'sid=...')`); quotes around a name and a value may be
  * escaped (`{\"password\": \"...\"}`, JSON text inside a JSON string).
+ * A quoted value (of an assignment, an option, a user option's password, a
+ * pair or a tuple) is read to its closing quote on its line, whitespace and
+ * all (`"passphrase": "correct horse battery staple"`, a `Cookie` header's
+ * later cookies), and an unquoted one (or one whose quote does not close on
+ * its line) to a blank or a quote (or `,` or `;` in a pair or tuple, and
+ * `&`, `,` or `;` in an assignment).
  * Not read: a password given to a short option with no name attached
  * (`mysql -p<secret>`), and a secret in base64 or another encoding than
  * these, unless it is registered in that form too. In a JSON value, a member
@@ -110,6 +116,17 @@ const QUOTE = `\\\\*["']`;
  */
 const valueChar = (excluded = ''): string => `(?:${char(`${NOT_WS}"'\\\\${excluded}`)}|\\\\+(?![\\\\"']))`;
 
+/**
+ * A value in `quote` quotes, whitespace and all, of four characters or more,
+ * read to its closing quote on its line (escaped or not), so a quoted
+ * passphrase is replaced whole. A character (code point) is not that quote,
+ * a backslash or a line break, or is a run of backslashes that no such quote
+ * follows (read once). With no closing quote on the line nothing matches,
+ * and the value is read as an unquoted one is.
+ */
+const quotedValue = (quote: string): string =>
+  `(?<secret>(?:${char(`${quote}\\\\\\n\\r`)}|\\\\+(?![\\\\${quote}])){4,})(?=\\\\*${quote})`;
+
 /** A secret member's name (see {@link SECRET_MEMBER}), quoted as JSON or code text quotes it. */
 const QUOTED_SECRET_NAME = `["'][^${NOT_WS}"']*(?:${NAMES}|authorization|cookies?)${QUOTE}`;
 
@@ -122,14 +139,16 @@ const VALUE_SCHEME = `(?:(?:bearer|basic|token|digest|negotiate)${WS}+)?`;
  * Each attempt starts at a bracket and reads to the next quote or
  * whitespace, so a text is read once.
  */
-const TUPLE_TEXT = `[\\[(]${WS}*\\\\*${QUOTED_SECRET_NAME}${WS}*,${WS}*${QUOTE}${VALUE_SCHEME}`;
+const TUPLE_HEAD = `[\\[(]${WS}*\\\\*${QUOTED_SECRET_NAME}${WS}*,${WS}*`;
+const TUPLE_TEXT = `${TUPLE_HEAD}${QUOTE}${VALUE_SCHEME}`;
 
 /**
  * A header or credential given as a name/value pair in JSON or code text, up
  * to its value: `"Authorization", "value": "...`, as a HAR's `{"name": ...,
  * "value": ...}` reads. Each attempt starts at a quote.
  */
-const PAIR_TEXT = `${QUOTED_SECRET_NAME}${WS}*,${WS}*(?:${QUOTE})?value(?:${QUOTE})?${WS}*[:=]${WS}*${QUOTE}${VALUE_SCHEME}`;
+const PAIR_HEAD = `${QUOTED_SECRET_NAME}${WS}*,${WS}*(?:${QUOTE})?value(?:${QUOTE})?${WS}*[:=]${WS}*`;
+const PAIR_TEXT = `${PAIR_HEAD}${QUOTE}${VALUE_SCHEME}`;
 
 /**
  * What separates a command's option from its value: blanks, `=`, or the
@@ -145,6 +164,11 @@ const OPTION_SEPARATOR = `(?:${WS}+(?:${QUOTE})?|=(?:${QUOTE})?|(?:${QUOTE})?${W
 const USER_OPTION =
   `(?<![A-Za-z0-9_-])(?:-[uU]${OPTION_SEPARATOR}?|--(?:proxy-)?user${OPTION_SEPARATOR})` +
   `[^${NOT_WS}:"'\\\\]*:`;
+/** ... and the same option up to the quote its value opens with. */
+const USER_OPTION_QUOTE_SEPARATOR = `(?:${WS}+|=|(?:${QUOTE})?${WS}*,${WS}*)`;
+const USER_OPTION_NAME =
+  `(?<![A-Za-z0-9_-])(?:-[uU]${USER_OPTION_QUOTE_SEPARATOR}?|--(?:proxy-)?user` +
+  `${USER_OPTION_QUOTE_SEPARATOR})`;
 
 /**
  * A command's option named for a credential (`--password`, `--api-key`,
@@ -155,6 +179,17 @@ const CREDENTIAL_OPTION_NAME = `(?<![A-Za-z0-9_-])--(?:[A-Za-z0-9]+[_-])*(?:${NA
 const CREDENTIAL_OPTION_SEPARATOR = `(?:${WS}+|(?:${QUOTE})?${WS}*,${WS}*)`;
 /** ... up to its value, which is not another option. */
 const CREDENTIAL_OPTION = `${CREDENTIAL_OPTION_NAME}(?:${WS}+(?:${QUOTE})?|(?:${QUOTE})?${WS}*,${WS}*${QUOTE})(?!-)`;
+
+/** An assignment to a credential name, up to its value. */
+const ASSIGN = `(?:${NAMES})(?:${QUOTE})?${WS}*[:=]${WS}*`;
+
+/**
+ * The patterns of a value after `prefix` in double or single quotes (escaped
+ * or not), `afterQuote` read first: the value is read to its closing quote,
+ * whitespace and all (see {@link quotedValue}).
+ */
+const quotedForms = (prefix: string, afterQuote = '', flags = 'dgi'): RegExp[] =>
+  ['"', "'"].map((quote) => new RegExp(`${prefix}\\\\*${quote}${afterQuote}${quotedValue(quote)}`, flags));
 
 /**
  * The default patterns; each marks the secret with the group `secret` (a
@@ -175,7 +210,10 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
     'dgi',
   ),
   // A header or credential given as a name/value pair or a [name, value]
-  // tuple in text: its value, of four characters or more.
+  // tuple in text: its value, of four characters or more, read to its
+  // closing quote (`"Cookie", "theme=dark; sid=..."`) ...
+  ...quotedForms(`(?:${TUPLE_HEAD}|${PAIR_HEAD})`, VALUE_SCHEME),
+  // ... or, with no closing quote on its line, to a blank, `,` or `;`.
   new RegExp(`(?:${TUPLE_TEXT}|${PAIR_TEXT})(?<secret>${valueChar(',;')}{4,})`, 'dgi'),
   // Bearer tokens.
   new RegExp(`(?<![A-Za-z0-9])bearer${WS}+(?<secret>[A-Za-z0-9._~+/=-]{8,})`, 'dgi'),
@@ -184,15 +222,21 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   new RegExp(`${SCHEME}://[^${NOT_WS}/:@]*:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
   // Assignments to a credential name, alone or at the end of a longer name
   // (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text, its
-  // quotes escaped or not (`{\"password\": \"...\"}`).
-  new RegExp(
-    `(?:${NAMES})(?:${QUOTE})?${WS}*[=:]${WS}*(?:${QUOTE})?` + `(?<secret>${valueChar('&,;')}{4,})`,
-    'dgi',
-  ),
-  // A command's user option: the password (`curl -u user:<secret>`).
+  // quotes escaped or not (`{\"password\": \"...\"}`): a quoted value
+  // read to its closing quote (`"passphrase": "correct horse ..."`) ...
+  ...quotedForms(ASSIGN),
+  // ... or an unquoted one (or one with no closing quote on its line) to a
+  // blank, a quote, `&`, `,` or `;`.
+  new RegExp(`${ASSIGN}(?:${QUOTE})?(?<secret>${valueChar('&,;')}{4,})`, 'dgi'),
+  // A command's user option: the password (`curl -u user:<secret>`), read to
+  // its closing quote when the option's value is quoted ...
+  ...quotedForms(USER_OPTION_NAME, `[^${NOT_WS}:"'\\\\]*:`, 'dg'),
+  // ... or to a blank or a quote.
   new RegExp(`${USER_OPTION}(?<secret>${valueChar()}{4,})`, 'dg'),
   // A command's option named for a credential, its value after blanks
-  // (`--password <secret>`, `--api-key <secret>`).
+  // (`--password <secret>`, `--api-key <secret>`), quoted ...
+  ...quotedForms(`${CREDENTIAL_OPTION_NAME}${CREDENTIAL_OPTION_SEPARATOR}`, '(?!-)'),
+  // ... or not.
   new RegExp(`${CREDENTIAL_OPTION}(?<secret>${valueChar()}{4,})`, 'dgi'),
   // AWS access key ids.
   /\b(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})\b/dg,
@@ -489,7 +533,6 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
   // the longest), so a run is read once.
   /(?<![A-Za-z0-9_-])(?:(?!eyJ)[A-Za-z0-9_-])*eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
 ];
-const ASSIGN = `(?:${NAMES})(?:${QUOTE})?${WS}*[:=]${WS}*`;
 // A quoted value with no whitespace, 8 or more characters (its quotes
 // escaped or not), after an assignment or a credential option.
 const QUOTED_CREDENTIAL = new RegExp(

@@ -1981,3 +1981,83 @@ version changes.
   and bash; the verifier's #42 steps (`head -n 2`, `sed -i '$d'` and one
   more call, `rm` and one more call) fail verification; `probe46` finds no
   host key in any stored entry. None left running.
+
+### Batch 8, verified again: one sibling of #41
+
+A later session confirmed batch 8 on 6199574 before returning: the
+reported cases of #41 are redacted by both redactors and refused by
+`holds_credential`, `holdsCredential` and `secret_in` under sh and bash
+(identical results), the runner keeps no password in a failed step, #42's
+head and #43's `registerSecrets` tests pass, and the records guard refuses
+a call naming `audit.head`. One sibling of #41 was open.
+
+#### 44. A quoted credential value was redacted to its first blank (medium; sibling of #41)
+
+Batch 8 made `passphrase` a credential name, but in text every value rule
+(an assignment, a credential option, a user option's password, a header
+pair or tuple) read a value to its first blank, quote, `,` or `;` (`&` too
+in an assignment), quoted or not. So `ValueError: bad config
+{"passphrase": "correct horse battery staple"}` kept `horse battery
+staple` in a failed step's trace, `{'password': 'it is a secret'}` kept
+`is a secret`, `--password "correct horse battery"` kept two words, and a
+`Cookie` pair or tuple (`[["Cookie", "theme=dark; session=..."]]`, a HAR's
+`{"name": "Cookie", "value": ...}` in text) kept every cookie after the
+first. Both redactors agreed (Python and TypeScript, the same output). JSON
+data was not affected: a secret member's value is replaced whole.
+
+- Fix (`redaction.py`, `redact.ts`, identically): a value that opens with a
+  quote (escaped or not) is read to its closing quote of the same kind on
+  its line, whitespace and all (`_quoted_value` / `quotedValue`: any
+  character but that quote, a backslash or a line break, or a run of
+  backslashes no such quote follows; 4 or more characters). Each of the
+  four rules gains a quoted form for each quote kind, applied before its
+  unquoted form (`_quoted_forms` / `quotedForms`; the pair and tuple heads
+  and the assignment's prefix are named once, `_TUPLE_HEAD`, `_PAIR_HEAD`,
+  `_ASSIGN`, and shared). A value whose quote does not close on its line
+  is read as before, to a blank; one shorter than 4 characters is not
+  read past its closing quote (`password: "x" and then "..."` is kept).
+- Not changed: the refusal rule. Text's quoted values still count only
+  with no whitespace (`token: "rotate monthly"` is prose and passes), so
+  the shell scan and `credentials.json` are unchanged; JSON data is
+  refused by its members, as before.
+- Linear time: a quoted run ends at the next quote of its kind or a line
+  break, so runs from different openings do not overlap; a run with no
+  closing quote is read once more by the unquoted form. 8 new repeated
+  shapes and 6 unclosed-quote shapes (a prefix and a 1 MB tail) in both
+  timing tests: Python at most 3.1 s at 1 MB (about 1.5 times HEAD's time
+  for the same text: eight more passes), 0.2 s at 100 KB, so linear.
+- Tests: 4 vectors in `tests/conformance/secrets/redact.json`
+  (`quoted_value_with_whitespace`, `quoted_pair_and_tuple_values`,
+  `quoted_option_values`, and `quoted_value_controls`: a short quoted
+  value, an unclosed quote, a line break), run by Python and the
+  TypeScript package; `tests/test_runner.py::test_no_secret_in_a_failed_step`
+  gains `raised_quoted_passphrase`; `test_a_quoted_credential_value_is_replaced_whole`
+  and its TypeScript twin. With HEAD's redactors the first three vectors,
+  the runner case and both direct tests fail; the controls pass on both.
+- Parity: 4000 fuzzed strings over quotes, escaped quotes, blanks, line
+  breaks, names, options and pair and tuple tokens give the same
+  redaction, pointers and refusal in Python and TypeScript (0
+  differences); 2 of them redact more than on HEAD, none less.
+- Docs: both redactors' module docs, SECURITY.md §1.5's bullet on
+  credential forms, CHANGELOG (the credential forms entry of Upgrading).
+  No version changes.
+
+#### Checks after #44
+
+- Python: `pytest tests/` (5427 passed, 18 skipped), and again the tests
+  that read the files edited after it started (`test_acs_core_package.py`,
+  `test_version_lines.py`, `test_redaction.py`); ruff check and format
+  with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators'
+  `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (2002; the
+  WebAssembly build reused); the binding's check and test (217, 2
+  skipped).
+- Site: `npm run check`, `npm test` (1173).
+- Probes, each under `timeout 120` and a 4 GB address-space limit, inputs
+  at most 1 MB: the batch's cases and the new quoted forms through both
+  redactors and the shell scan (sh and bash), the timing shapes at 100 KB
+  and 1 MB against HEAD's redactor, and the fuzz parity run above. None
+  left running; the scratch files were removed.

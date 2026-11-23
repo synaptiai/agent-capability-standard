@@ -27,18 +27,23 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
   ``DJANGO_SECRET_KEY`` or ``access_token``) with ``=`` or ``:``, of 4 or
   more characters, in assignments, query strings and JSON text, its quotes
   escaped or not (``{\\"password\\": \\"...\\"}``, JSON text inside a
-  JSON string or a shell's double quotes);
+  JSON string or a shell's double quotes); a quoted value is read to its
+  closing quote on its line, whitespace and all (``"passphrase": "correct
+  horse battery staple"``), and an unquoted one (or one whose quote does not
+  close on its line) to a blank, a quote, ``&``, ``,`` or ``;``;
 - a command's user option (``curl -u user:<secret>``, ``-uuser:...``,
   ``--user``, ``-U``, ``--proxy-user``) and an option named for a
   credential with its value after blanks (``--password <secret>``,
   ``--api-key <secret>``, not another option), also as a list's items
-  (``['-u', 'user:<secret>']``, as an exception's text quotes a command);
+  (``['-u', 'user:<secret>']``, as an exception's text quotes a command),
+  a quoted value or password read to its closing quote as above;
 - PEM ``PRIVATE KEY`` blocks (the body);
 - AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys and JWTs;
 - a header or credential given as a name/value pair or a ``[name, value]``
   tuple in JSON or code text (``"name": "Authorization", "value": "Basic
   ..."``, ``('Cookie', 'sid=...')``), its quotes escaped or not: its value,
-  of 4 or more characters.
+  of 4 or more characters, read to its closing quote as above (a
+  ``Cookie`` header's later cookies too).
 
 Not read: a password given to a short option with no name attached
 (``mysql -p<secret>``, ``sshpass -p <secret>``: ``-p`` means too many other
@@ -148,6 +153,16 @@ def _value_char(excluded: str = "") -> str:
     return rf"(?:[^{_NOT_WS}\"'\\{excluded}]|\\+(?![\\\"']))"
 
 
+def _quoted_value(quote: str) -> str:
+    """A value in ``quote`` quotes, whitespace and all, of 4 characters or
+    more, read to its closing quote on its line (escaped or not), so a
+    quoted passphrase is replaced whole. A character is not that quote, a
+    backslash or a line break, or is a run of backslashes that no such quote
+    follows (read once). With no closing quote on the line nothing matches,
+    and the value is read as an unquoted one is."""
+    return rf"(?P<secret>(?:[^{quote}\\\n\r]|\\+(?![\\{quote}])){{4,}})(?=\\*{quote})"
+
+
 # A secret member's name (see _SECRET_MEMBER), quoted as JSON or code text
 # quotes it.
 _QUOTED_SECRET_NAME = (
@@ -159,16 +174,16 @@ _VALUE_SCHEME = rf"(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
 # text, up to its value: `["Authorization", "Basic ...`, `('Cookie', '...`.
 # Each attempt starts at a bracket and reads to the next quote or
 # whitespace, so a text is read once.
-_TUPLE_TEXT = (
-    rf"[\[(]{_WS}*\\*{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*{_QUOTE}{_VALUE_SCHEME}"
-)
+_TUPLE_HEAD = rf"[\[(]{_WS}*\\*{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*"
+_TUPLE_TEXT = rf"{_TUPLE_HEAD}{_QUOTE}{_VALUE_SCHEME}"
 # A header or credential given as a name/value pair in JSON or code text, up
 # to its value: `"Authorization", "value": "...`, as a HAR's `{"name": ...,
 # "value": ...}` reads. Each attempt starts at a quote.
-_PAIR_TEXT = (
+_PAIR_HEAD = (
     rf"{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*(?:{_QUOTE})?value(?:{_QUOTE})?{_WS}*[:=]"
-    rf"{_WS}*{_QUOTE}{_VALUE_SCHEME}"
+    rf"{_WS}*"
 )
+_PAIR_TEXT = rf"{_PAIR_HEAD}{_QUOTE}{_VALUE_SCHEME}"
 # What separates a command's option from its value: blanks, `=`, or the
 # next item of a list (`'-u', '...`, `"--token", "...`), the value quoted
 # or not.
@@ -181,6 +196,12 @@ _USER_OPTION = (
     rf"(?<![A-Za-z0-9_-])(?:-[uU]{_OPTION_SEPARATOR}?|--(?:proxy-)?user"
     rf"{_OPTION_SEPARATOR})[^{_NOT_WS}:\"'\\]*:"
 )
+# ... and the same option up to the quote its value opens with.
+_USER_OPTION_QUOTE_SEPARATOR = rf"(?:{_WS}+|=|(?:{_QUOTE})?{_WS}*,{_WS}*)"
+_USER_OPTION_NAME = (
+    rf"(?<![A-Za-z0-9_-])(?:-[uU]{_USER_OPTION_QUOTE_SEPARATOR}?|--(?:proxy-)?user"
+    rf"{_USER_OPTION_QUOTE_SEPARATOR})"
+)
 # A command's option named for a credential (`--password`, `--api-key`,
 # `--db-token`), and what separates it from a value given after blanks or as
 # a list's next item; `--password=...` is an assignment.
@@ -191,6 +212,24 @@ _CREDENTIAL_OPTION = (
     rf"{_CREDENTIAL_OPTION_NAME}(?:{_WS}+(?:{_QUOTE})?|(?:{_QUOTE})?{_WS}*,{_WS}*"
     rf"{_QUOTE})(?!-)"
 )
+# An assignment to a credential name, up to its value.
+_ASSIGN = rf"(?:{_NAMES})(?:{_QUOTE})?{_WS}*[:=]{_WS}*"
+
+
+def _quoted_forms(
+    prefix: str, after_quote: str = "", flags: re.RegexFlag = re.IGNORECASE
+) -> tuple[re.Pattern[str], ...]:
+    """The patterns of a value after ``prefix`` in double or single quotes
+    (escaped or not), ``after_quote`` read first: the value is read to its
+    closing quote, whitespace and all (see _quoted_value)."""
+    return tuple(
+        re.compile(
+            rf"{prefix}\\*{quote}{after_quote}{_quoted_value(quote)}",
+            re.ASCII | flags,
+        )
+        for quote in ('"', "'")
+    )
+
 
 DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     # PEM private key blocks: the body. A header with no end after it
@@ -210,7 +249,10 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         re.ASCII | re.IGNORECASE,
     ),
     # A header or credential given as a name/value pair or a [name, value]
-    # tuple in text: its value, of four characters or more.
+    # tuple in text: its value, of four characters or more, read to its
+    # closing quote (`"Cookie", "theme=dark; sid=..."`) ...
+    *_quoted_forms(rf"(?:{_TUPLE_HEAD}|{_PAIR_HEAD})", _VALUE_SCHEME),
+    # ... or, with no closing quote on its line, to a blank, `,` or `;`.
     re.compile(
         rf"(?:{_TUPLE_TEXT}|{_PAIR_TEXT})(?P<secret>{_value_char(',;')}{{4,}})",
         re.ASCII | re.IGNORECASE,
@@ -228,19 +270,30 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
     # Assignments to a credential name, alone or at the end of a longer name
     # (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text, its
-    # quotes escaped or not (`{\\"password\\": \\"...\\"}`).
+    # quotes escaped or not (`{\\"password\\": \\"...\\"}`): a quoted
+    # value read to its closing quote (`"passphrase": "correct horse ..."`)
+    # ...
+    *_quoted_forms(_ASSIGN),
+    # ... or an unquoted one (or one with no closing quote on its line) to a
+    # blank, a quote, `&`, `,` or `;`.
     re.compile(
-        rf"(?:{_NAMES})(?:{_QUOTE})?{_WS}*[=:]{_WS}*(?:{_QUOTE})?"
-        rf"(?P<secret>{_value_char('&,;')}{{4,}})",
+        rf"{_ASSIGN}(?:{_QUOTE})?(?P<secret>{_value_char('&,;')}{{4,}})",
         re.ASCII | re.IGNORECASE,
     ),
-    # A command's user option: the password (`curl -u user:<secret>`).
+    # A command's user option: the password (`curl -u user:<secret>`), read
+    # to its closing quote when the option's value is quoted ...
+    *_quoted_forms(_USER_OPTION_NAME, rf"[^{_NOT_WS}:\"'\\]*:", re.NOFLAG),
+    # ... or to a blank or a quote.
     re.compile(
         rf"{_USER_OPTION}(?P<secret>{_value_char()}{{4,}})",
         re.ASCII,
     ),
     # A command's option named for a credential, its value after blanks
-    # (`--password <secret>`, `--api-key <secret>`).
+    # (`--password <secret>`, `--api-key <secret>`), quoted ...
+    *_quoted_forms(
+        rf"{_CREDENTIAL_OPTION_NAME}{_CREDENTIAL_OPTION_SEPARATOR}", "(?!-)"
+    ),
+    # ... or not.
     re.compile(
         rf"{_CREDENTIAL_OPTION}(?P<secret>{_value_char()}{{4,}})",
         re.ASCII | re.IGNORECASE,
@@ -289,7 +342,6 @@ _CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
         re.ASCII,
     ),
 )
-_ASSIGN = rf"(?:{_NAMES})(?:{_QUOTE})?{_WS}*[:=]{_WS}*"
 # A quoted value with no whitespace, 8 or more characters (its quotes
 # escaped or not), after an assignment or a credential option.
 _QUOTED_CREDENTIAL = re.compile(

@@ -188,6 +188,18 @@ _LONG_RUNS = [
     "--a-",
     "--password ",
     "--password --",
+    # Quoted values read to their closing quote, whitespace and all: a run
+    # ends at the next quote of its kind or a line break, and a run with no
+    # closing quote is read once more as an unquoted value (security round
+    # 1, batch 8's verification).
+    'password: "a ',
+    "password='a password=\"a ",
+    'password: "\\ ',
+    "password='\\\"a ",
+    '"cookie", "value": "a ',
+    "['token', 'a ",
+    "-u 'a:b ",
+    '--password "a ',
 ]
 
 
@@ -204,6 +216,49 @@ def test_a_long_text_is_read_in_time_in_proportion_to_its_length(unit: str) -> N
     holds_secret({"data": text})
     # About 1 s here; the old patterns took 20 s at 100 KB.
     assert time.perf_counter() - started < 20
+
+
+# A text that opens a quoted value and never closes it (on one line): the
+# run is read to its end once for the quoted reading and once more as an
+# unquoted value, not again from each of its positions.
+_UNCLOSED_QUOTES = [
+    ('password: "', "a "),
+    ("password: '", 'password: "a '),
+    ('"passphrase": "', "\\ "),
+    ("['cookie', \"", "a ; "),
+    ("-u 'a:", "b c "),
+    ('--password "', "x\\y "),
+]
+
+
+@pytest.mark.parametrize(("prefix", "tail"), _UNCLOSED_QUOTES)
+def test_a_quoted_value_with_no_closing_quote_is_read_in_linear_time(
+    prefix: str, tail: str
+) -> None:
+    import time
+
+    from grounded_agency.state.redaction import holds_credential
+
+    text = (prefix + tail * (1_000_000 // len(tail) + 1))[:1_000_000]
+    started = time.perf_counter()
+    holds_credential({"data": text})
+    redact_text(text)
+    holds_secret({"data": text})
+    assert time.perf_counter() - started < 20
+
+
+def test_a_quoted_credential_value_is_replaced_whole() -> None:
+    # A passphrase's later words are no longer kept (security round 1,
+    # batch 8's verification: only its first word was replaced).
+    text = 'ValueError: bad config {"passphrase": "correct horse battery staple"}'
+    assert redact_text(text) == (
+        'ValueError: bad config {"passphrase": "[REDACTED]"}',
+        True,
+    )
+    # The refusal rule is unchanged: prose with a quoted phrase passes.
+    from grounded_agency.state.redaction import holds_credential
+
+    assert not holds_credential('token: "rotate monthly"')
 
 
 def test_the_patterns_read_a_run_once_and_match_as_before() -> None:

@@ -126,7 +126,11 @@ The reference implementations enforce this by code:
   empty (`redis://:<secret>@`), a command's user option (`curl -u
   user:<secret>`, `--user`), an option named for a credential with its
   value after blanks (`--password <secret>`), and `secret_key` and
-  `passphrase` among the credential names. A registered value is replaced
+  `passphrase` among the credential names. Redaction reads a quoted value
+  to its closing quote on its line, whitespace and all (`"passphrase":
+  "correct horse battery staple"`, a `Cookie` pair's later cookies), not
+  to its first blank; the refusal rule still reads text's quoted values
+  with no whitespace only, so prose passes. A registered value is replaced
   and refused as it is, JSON-escaped (once or twice) and percent-encoded
   (`encoded_forms`, `encodedForms`). Not read: a password attached to a
   short option with no name (`mysql -p<secret>`), and a secret in base64 or

@@ -1313,6 +1313,7 @@ def test_host_cannot_serve_reason(runner: WorkflowRunner) -> None:
         "raised_url_empty_user",
         "raised_user_option",
         "raised_escaped_json",
+        "raised_quoted_passphrase",
     ],
 )
 def test_no_secret_in_a_failed_step(runner: WorkflowRunner, answer: str) -> None:
@@ -1322,7 +1323,8 @@ def test_no_secret_in_a_failed_step(runner: WorkflowRunner, answer: str) -> None
     repeats the value) nor the text of an exception the host raised reaches
     the trace, the result, the run record or the snapshot with a secret in
     it, in the forms an exception's text gives it (a URL whose user's name
-    is empty, a command's ``-u user:<password>``, escaped JSON text)."""
+    is empty, a command's ``-u user:<password>``, escaped JSON text, a
+    quoted value with blanks in it)."""
     import subprocess
 
     from grounded_agency.workflows import HostCannotServe
@@ -1345,6 +1347,10 @@ def test_no_secret_in_a_failed_step(runner: WorkflowRunner, answer: str) -> None
                 )
             if answer == "raised_escaped_json":
                 raise RuntimeError(f'POST failed: {{\\"password\\": \\"{secret}\\"}}')
+            if answer == "raised_quoted_passphrase":
+                raise ValueError(
+                    f'bad config {{"passphrase": "correct horse {secret}"}}'
+                )
             if answer == "reason_text":
                 return {
                     "kind": "Error",

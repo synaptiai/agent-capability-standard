@@ -301,7 +301,12 @@ here and marked so.
   exception's text quotes a command), an option named for a credential with
   its value after blanks (`--password <value>`, `--api-key <value>`, not
   another option), and `secret_key` (`SECRET_KEY`, `DJANGO_SECRET_KEY`) and
-  `passphrase` as credential names. Redaction replaces them; a `persist` or
+  `passphrase` as credential names. Redaction replaces them, and reads a
+  quoted value in text (an assignment's, an option's, a quoted user
+  option's password, a header pair's or tuple's) to its closing quote on
+  its line, whitespace and all, so `"passphrase": "correct horse battery
+  staple"` and a `Cookie` pair's later cookies are replaced whole, not to
+  the first blank, `,` or `;`; a `persist` or
   `audit` call is refused (F504) for a user option's password of 8 or more
   characters mixing letters and digits (`docker run -u 1000:1000` passes)
   and for a credential option's value as for an assignment's. A registered
