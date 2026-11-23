@@ -319,8 +319,9 @@ class GroundedAgentConfig:
             ``JsonlEvidenceStore``. None: a new in-memory ``EvidenceStore``.
         secret_values: The host's own secrets (§6.7), registered with the
             evidence store's and the coordination audit log's redactor so
-            they never reach an anchor or a record. Never part of
-            ``recorded_by``.
+            they never reach an anchor or a record; the layer's own records
+            (its call records, refusals and checkpoints) are redacted with
+            them too. Never part of ``recorded_by``.
         grounding: Grounding policies the layer applies to the output of
             each call whose capability one requires (§5.20): one
             :class:`GroundingPolicy` or several. A call's argument names are
@@ -785,21 +786,24 @@ class GroundedAgentAdapter:
         )
         now: Callable[[], datetime] = self.clock or (lambda: datetime.now(UTC))
         self._now = now
+        # The layer's redactor (STANDARD v1.2 §6.7): what it recognises as a
+        # secret, the host's own values included. Its records, refusals and
+        # evidence are redacted with it, and persist and audit calls whose
+        # data holds a credential are refused (§5.18.10).
+        self.redactor = Redactor(self.config.secret_values)
         # The tracker enforces the layer's maximum age on every checkpoint,
         # one taken through its own API or read back from its state file
-        # included (STANDARD 1.2.0 section 5.18.6).
+        # included (STANDARD 1.2.0 section 5.18.6). Its checkpoints are
+        # records of the calls that took them, whose reason and scope a
+        # model may write: it redacts them with the layer's redactor (§6.7).
         self.checkpoint_tracker = CheckpointTracker(
             self.config.checkpoint_dir,
             reservation_seconds=self.config.checkpoint_reservation_seconds,
             clock=now,
             max_age_minutes=self.config.expiry_minutes,
             snapshots=self.config.snapshots,
+            redactor=self.redactor,
         )
-        # The layer's redactor (STANDARD v1.2 §6.7): what it recognises as a
-        # secret, the host's own values included. Its records, refusals and
-        # evidence are redacted with it, and persist and audit calls whose
-        # data holds a credential are refused (§5.18.10).
-        self.redactor = Redactor(self.config.secret_values)
         # ``is None``, not ``or``: an empty store is falsy (``len`` 0) and is
         # still the store the host gave.
         self.evidence_store = (

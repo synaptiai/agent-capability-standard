@@ -108,11 +108,19 @@ The reference implementations enforce this by code:
   cancel's reason (the R408 message, which the core writes into the trace
   and the records), and by the adapter to its records and refusals; the
   evidence collector keeps no `digest` of a tool response that holds a
-  recognised secret. The host's `IdempotencyLog` is a record of what the
-  host did: it keeps a `send`'s output as the runner submits it, its
-  anchors and `evidence_seen` redacted and every other secret replaced, and
-  the destination redacted; the runner gives the log, the host's memory
-  store and its own the secrets its redactor recognises.
+  recognised secret. A `CheckpointTracker`'s checkpoints are the records of
+  the calls that took them: it redacts every string it records (a
+  checkpoint's `reason`, its `scope` items and its `metadata`, and the
+  words that end or use one), in memory, in its state file and in its
+  archive, with the adapter's redactor in the adapter (a bound checkpoint
+  tool's `reason` and `scope` are the model's words), and captures the
+  files the scope names as given. The host's `IdempotencyLog` is a record
+  of what the host did: it keeps a `send`'s output as the runner submits
+  it, its anchors and `evidence_seen` redacted and every other secret
+  replaced, and the destination redacted; the runner gives the log, the
+  host's checkpoint tracker (a `checkpoint` step's scope is its input),
+  the host's memory store and its own the secrets its redactor
+  recognises.
 - The core's diagnostics repeat no text of a host's output: a grounding
   refusal (F505) names an anchor by its index and kind, never by the `ref`
   it cites (a presigned or signed URL is a natural one), a confidence that
@@ -132,10 +140,11 @@ The reference implementations enforce this by code:
   metadata (`Redactor.redact_anchor`, `redactAnchor`). The cited content
   holds the secret too, and the redacted excerpt still shows the text around
   it, so a digest of it could confirm a guess (§6.7).
-- The TypeScript binding redacts every trace entry it writes and every
-  `acs.evidence_recorded` notification, whether or not the tool registers
-  secrets; values `configureLayer({ secrets })` registers reach every entry,
-  the audit hook's for plain tools included.
+- The TypeScript binding redacts every trace entry it writes, the id of
+  each checkpoint it records (what the `checkpoint` call returned) and
+  every `acs.evidence_recorded` notification, whether or not the tool
+  registers secrets; values `configureLayer({ secrets })` registers reach
+  every entry, the audit hook's for plain tools included.
 - The adapter and the binding refuse a `persist` or `audit` call whose data
   holds a credential-shaped value, or a value in a member named for a
   credential (`password`, `Authorization`, ...) that redaction would replace

@@ -93,6 +93,11 @@ export interface RecordedBy {
 
 /** One checkpoint. `valid` turns false when a step that requires one uses it. */
 export interface CheckpointRecord {
+  /**
+   * The id the `checkpoint` call's output gave (`checkpoint-<seq>` when it
+   * gave none), with every secret replaced (§6.7, `addCheckpoint`): a value
+   * the call returned, which may repeat what the model wrote.
+   */
   id: string;
   valid: boolean;
   /** The trace entry of the `checkpoint` call that took it. */
@@ -284,19 +289,21 @@ export function stale(waiting: Unlinked, flow: string | null, step: number | nul
 }
 
 /**
- * An entry's `error` and `evidence_anchors` with every secret replaced
- * (STANDARD v1.2.0 §6.7): always the default patterns and the secrets
- * registered layer-wide (`configureLayer({ secrets })`), plus `secrets`.
- * An anchor that held a secret loses its `digest` (`redactAnchor`). Nothing
- * else in an entry holds a value a call received.
+ * An entry's `error`, `evidence_anchors` and `checkpoint_id` with every
+ * secret replaced (STANDARD v1.2.0 §6.7): always the default patterns and
+ * the secrets registered layer-wide (`configureLayer({ secrets })`), plus
+ * `secrets`. An anchor that held a secret loses its `digest`
+ * (`redactAnchor`). Nothing else in an entry holds a value a call received
+ * (a checkpoint's id is what a `checkpoint` call returned).
  */
-function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>>(
+function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors' | 'checkpoint_id'>>>(
   entry: T,
   secrets: readonly string[],
 ): T {
   const values = [...secrets, ...layerSecrets()];
   const out = { ...entry };
   if (typeof out.error === 'string') out.error = redactText(out.error, values);
+  if (typeof out.checkpoint_id === 'string') out.checkpoint_id = redactText(out.checkpoint_id, values);
   // An anchor that held a secret keeps no digest of what it cites
   // (`redactAnchor`): a digest of content that may be no more than the
   // secret could be inverted by guessing.
@@ -373,6 +380,21 @@ export async function readTrace(store: Store): Promise<TraceEntry[]> {
 
 export async function readCheckpoints(store: Store): Promise<CheckpointRecord[]> {
   return (await store.getValue<CheckpointRecord[]>(KEYS.checkpoints)) ?? [];
+}
+
+/**
+ * Record a checkpoint taken, its id redacted as {@link appendTrace} redacts
+ * (§6.7): the id is what the `checkpoint` call returned, and the record is
+ * the layer's. Two ids that are one after redaction name one checkpoint, so
+ * a call that uses one uses both (the safe side).
+ */
+export async function addCheckpoint(
+  store: Store,
+  record: CheckpointRecord,
+  secrets: readonly string[] = [],
+): Promise<void> {
+  const id = redactText(record.id, [...secrets, ...layerSecrets()]);
+  await store.setValue(KEYS.checkpoints, [...(await readCheckpoints(store)), { ...record, id }]);
 }
 
 /**

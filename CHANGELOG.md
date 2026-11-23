@@ -467,11 +467,25 @@ here and marked so.
   the evidence store as a list), the `not_covered` items of a `RolledBack`
   and the reason given to `cancel` (the R408 message, the trace and the
   records hold the redacted reason). When the runner has a `redactor` of
-  its own, it gives what it recognises to the host's `IdempotencyLog` and
-  `MemoryStore` and to its `memory` (a store on the shared default redactor
-  gets one of its own), so the host's memory refuses a `persist` of a
-  registered value. `IdempotencyLog` and `MemoryStore` gain a `redactor`
-  property, and `Redactor` gains `include(other)`.
+  its own, it gives what it recognises to the host's `IdempotencyLog`,
+  `CheckpointTracker` and `MemoryStore` and to its `memory` (a store on the
+  shared default redactor gets one of its own), so the host's memory
+  refuses a `persist` of a registered value. `IdempotencyLog`,
+  `CheckpointTracker` and `MemoryStore` gain a `redactor` property, and
+  `Redactor` gains `include(other)`.
+- Python SDK, `CheckpointTracker` (§5.18.8, §6.7): the tracker redacts
+  every string it records, with its new `redactor` (the default patterns
+  unless given; the adapter's tracker has the layer's redactor, so the
+  host's `secret_values` too): a checkpoint's `reason`, its `scope` items
+  and its `metadata`, the reason an execution boundary gives
+  (`invalidated_by`) and the words that use one (`consumed_by`), in memory,
+  in `tracker_state.json` and in the archive. A bound checkpoint tool's
+  `reason` and `scope` are the model's words, which reached the state file
+  as written. A snapshot store still captures the files the scope names as
+  given; the checkpoint's recorded `scope` (and so `matches_scope` and
+  `has_checkpoint_for_scope`) is the redacted one. Checkpoints a tracker
+  wrote before keep what they hold: delete `tracker_state.json` and the
+  archive once they are no longer needed.
 - Python SDK, `IdempotencyLog` (§6.4, §6.7): the log keeps a `send`'s
   output as the runner submits it (its anchors redacted without their
   digest, `evidence_seen` rewritten to match) with every other secret its
@@ -1306,7 +1320,11 @@ here and marked so.
   JSON), is refused with R407 and recorded with the call that covered it,
   where the exception reached the composite's code and nothing was
   recorded; a nested plain call with such arguments, which ran, is refused
-  too, as a grounded tool's own call is.
+  too, as a grounded tool's own call is. The id of a checkpoint the layer
+  records (`acs:checkpoints`, and a trace entry's `checkpoint_id`), the
+  value the `checkpoint` call returned, is stored redacted too
+  (`addCheckpoint`); two ids that are one once redacted name one
+  checkpoint, so a call that uses one uses both.
 
 **Interoperability data.**
 

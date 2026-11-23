@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..utils.git import SAFE_GIT_OPTIONS, git_dir_is_made, safe_git_environment
 from ..utils.layer_dir import LayerDir, LinkedPathError, open_layer_dir
+from .redaction import DEFAULT_REDACTOR, Redactor
 
 try:  # POSIX: trackers that share a directory serialise their writes
     import fcntl as _fcntl
@@ -291,6 +292,15 @@ class CheckpointTracker:
     Each Checkpoint dict contains: id, scope, reason, created_at,
     expires_at, consumed, consumed_at, metadata, invalidated_at.
 
+    The checkpoints are the layer's records of the calls that took them
+    (STANDARD 1.2.0 sections 5.18.8, 6.7), and a call's ``reason`` and
+    ``scope`` may be text a model wrote: every string the tracker records
+    (a checkpoint's ``reason``, its ``scope`` items, its ``metadata`` and
+    the words that end or use it) is redacted with its ``redactor`` when
+    recorded, so no secret it recognises reaches the records in memory,
+    the state file or the archive. A snapshot store captures the files the
+    scope names as given.
+
     One tracker is one scope (STANDARD 1.2.0 section 5.18.5). What it reads
     back from the state file was recorded in another scope: by an earlier
     process, or by another tracker on the same directory (another adapter,
@@ -322,6 +332,7 @@ class CheckpointTracker:
         clock: Callable[[], datetime] | None = None,
         max_age_minutes: float | None = None,
         snapshots: FileSnapshotStore | None = None,
+        redactor: Redactor = DEFAULT_REDACTOR,
     ) -> None:
         """
         Initialize the tracker.
@@ -358,6 +369,10 @@ class CheckpointTracker:
                        :meth:`restore_checkpoint` puts them back; the
                        tracker's ``checkpoint_dir`` and ``marker_dir`` are
                        protected in it, never captured or restored.
+            redactor: What the records are redacted with (STANDARD 1.2.0
+                       section 6.7; default: the default patterns). The
+                       adapter passes its own, which knows the host's
+                       registered secrets.
 
         Raises:
             ValueError: If ``reservation_seconds`` is not more than 0, or
@@ -403,6 +418,7 @@ class CheckpointTracker:
         # tracker since the load, and each write keeps it.
         self._known: set[str] = set()
         self._snapshots = snapshots
+        self._redactor = redactor
         if snapshots is not None:
             # The tracker's own records are never within a rollback's reach
             # (section 4.4.1): a used checkpoint stays used.
@@ -415,6 +431,19 @@ class CheckpointTracker:
     def snapshots(self) -> FileSnapshotStore | None:
         """The store that keeps checkpoints' content, if any."""
         return self._snapshots
+
+    @property
+    def redactor(self) -> Redactor:
+        """What the tracker redacts its records with (section 6.7)."""
+        return self._redactor
+
+    @redactor.setter
+    def redactor(self, redactor: Redactor) -> None:
+        self._redactor = redactor
+
+    def _redacted_text(self, text: str) -> str:
+        """``text`` as a record keeps it: each secret replaced."""
+        return self._redactor.redact_text(text)[0]
 
     def _now(self) -> datetime:
         return self._clock()
@@ -758,7 +787,7 @@ class CheckpointTracker:
             checkpoint.consumed = True
             checkpoint.consumed_at = self._now()
             if by is not None:
-                checkpoint.metadata["consumed_by"] = by
+                checkpoint.metadata["consumed_by"] = self._redacted_text(by)
         if self._active_checkpoint is checkpoint:
             self._active_checkpoint = None
             self._checkpoint_history.append(checkpoint)
@@ -820,6 +849,11 @@ class CheckpointTracker:
         """
         Create a new checkpoint.
 
+        The checkpoint records ``reason``, ``scope`` and ``metadata``
+        with every secret the tracker's ``redactor`` recognises replaced
+        (section 6.7); a snapshot store captures what ``scope`` names as
+        given.
+
         Args:
             scope: List of file patterns or "*" for all
             reason: Human-readable reason for checkpoint
@@ -858,14 +892,17 @@ class CheckpointTracker:
             summary.pop("checkpoint_id", None)
             summary.pop("timestamp", None)
             metadata["capture"] = summary
+        # The record holds no secret the redactor recognises (section 6.7):
+        # a bound tool's reason and scope are the model's words.
+        redacted_metadata, _ = self._redactor.redact(metadata)
         now = self._now()
         checkpoint = Checkpoint(
             id=checkpoint_id,
-            scope=scope,
-            reason=reason,
+            scope=[self._redacted_text(str(s)) for s in scope],
+            reason=self._redacted_text(str(reason)),
             created_at=now,
             expires_at=now + timedelta(minutes=min(minutes, self._max_age_minutes)),
-            metadata=metadata,
+            metadata=redacted_metadata,
         )
 
         with self._lock:
@@ -1398,7 +1435,7 @@ class CheckpointTracker:
             for checkpoint in self._all():
                 if self._valid(checkpoint, now):
                     checkpoint.invalidated_at = now
-                    checkpoint.metadata["invalidated_by"] = reason
+                    checkpoint.metadata["invalidated_by"] = self._redacted_text(reason)
                     ended.append(checkpoint.id)
             if self._active_checkpoint is not None:
                 self._checkpoint_history.append(self._active_checkpoint)

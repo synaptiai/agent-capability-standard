@@ -102,6 +102,7 @@ import {
 import {
   CODE_NAMES,
   KEYS,
+  addCheckpoint,
   appendTrace,
   completeTrace,
   flowOf,
@@ -1835,11 +1836,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         completed = entry;
         if (capabilities.includes('checkpoint')) {
           const id = typeof output['checkpoint_id'] === 'string' ? output['checkpoint_id'] : `checkpoint-${entry.seq}`;
-          const checkpoints = await readCheckpoints(state);
-          await state.setValue(KEYS.checkpoints, [
-            ...checkpoints,
-            { id, valid: true, seq: entry.seq, at: entry.at, flow_id: flow },
-          ]);
+          await addCheckpoint(state, { id, valid: true, seq: entry.seq, at: entry.at, flow_id: flow }, secrets);
         }
       });
     } catch (recordFailure) {

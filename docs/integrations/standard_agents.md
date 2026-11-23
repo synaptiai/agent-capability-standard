@@ -236,7 +236,8 @@ model family for a child. Two of them touch evidence:
   1.2.0 keeps secrets out of evidence, records, notifications, diagnostics
   and stored memory
   ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)): the binding
-  redacts every trace entry it writes with default patterns, and
+  redacts every trace entry it writes, and the id of each checkpoint it
+  records (what the `checkpoint` call returned), with default patterns, and
   `configureLayer({ secrets })` registers the deployment's own values for
   every entry, the audit hook's for plain tools included, and for the data a
   `persist` or `audit` call would store (a grounded tool's `secrets` option,

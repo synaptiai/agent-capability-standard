@@ -21,6 +21,7 @@ import {
 } from '../src/acs/approval.js';
 import { digest } from '@synaptiai/acs-core';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
+import { resetLayer } from '../src/acs/layer.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
 import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags } from '../src/acs/ontology.js';
 import { KEYS, readCheckpoints, readTrace } from '../src/acs/records.js';
@@ -238,6 +239,44 @@ describe('checkpoint before mutation', () => {
     await save.execute(t.state, {});
     clock = 60_001;
     expect((await quick.execute(t.state, {})).error).toMatch(/too long ago/);
+  });
+
+  it('records a checkpoint id without the secrets it holds (§6.7)', async () => {
+    // The id is what the checkpoint call returned: here, the model's label.
+    const password = 'Hunter2Hunter2xyz';
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+    const registered = 'RegisteredHostSecretValue9876';
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'x',
+      args: z.object({ label: z.string() }),
+      secrets: async () => [registered],
+      execute: async (_state, args) => ({ checkpoint_id: args.label, evidence_anchors: [] }),
+    });
+    const store = groundedTool({
+      name: 'store',
+      capability: 'persist',
+      flags: { requires_checkpoint: true },
+      description: 'x',
+      args: z.object({}),
+      execute: async () => ({ stored: true, evidence_anchors: [] }),
+    });
+    const t = thread();
+    try {
+      data(await save.execute(t.state, { label: `before DB_PASSWORD=${password} and ${token} ${registered}` }));
+      // The checkpoint still authorises the next call, which uses it.
+      data(await store.execute(t.state, {}));
+      const id = 'before DB_PASSWORD=[REDACTED] and [REDACTED] [REDACTED]';
+      const checkpoints = await readCheckpoints(t.state);
+      const trace = await readTrace(t.state);
+      expect(checkpoints).toMatchObject([{ id, valid: false }]);
+      expect(trace.at(-1)).toMatchObject({ status: 'executed', checkpoint_id: id });
+      const kept = JSON.stringify([checkpoints, trace]);
+      for (const secret of [password, token, registered]) expect(kept).not.toContain(secret);
+    } finally {
+      resetLayer();
+    }
   });
 
   it('refuses a rollback when no checkpoint has run', async () => {

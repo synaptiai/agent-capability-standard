@@ -4504,3 +4504,139 @@ requires R407 and a record of each refusal. No version changes.
   arguments nested 20,000 deep (about 100 KB) refused at once. No CLI or
   nested agent was started; nothing was left running; the probe copies and
   scratch files were removed.
+
+### Batch 5: one reported defect
+
+One defect, reproduced by an independent verifier on 6004f78 and reproduced
+again here on 5a709e9 (batch 4's commit) before any change, with the
+reporter's unit probe and the verifier's end-to-end probe pointed at this
+worktree (`tracker_state.json` held the GitHub token, the password
+assignment, the URL's password and the registered secret). Not fixed by an
+earlier batch: git log and rounds 1 to 3 checked (round 2 #10 knew `reason`
+and `scope` are model-written but fixed only where the archive is written,
+not what it holds; batch 4 shared the runner's redactor with the log and
+the memory stores, not the tracker). Each fix has tests that fail on the
+code before it (below).
+
+#### 1. A bound checkpoint tool's model-chosen `reason` (and `scope`) was written verbatim to the checkpoint tracker's state file and archive (medium); siblings: the tracker's other text, a runner's `checkpoint` step, the binding's checkpoint ids
+
+`create_checkpoint_recorder` passed a bound checkpoint tool's input
+`reason` and `scope` (or the response's `scope`) to
+`CheckpointTracker.create_checkpoint`, which kept them as given in its
+records and wrote them to `tracker_state.json` and, once pruned, to the
+archive. The adapter registers the recorder for every tool and redacted
+its call records, diagnostics and evidence, but its tracker had no
+redactor: a checkpoint is the layer's record of the call that took it
+(§5.18.8: it names the call by `metadata.source` and `tool_use_id`), which
+§6.7 keeps secrets out of.
+
+- Fix at the root, the tracker (`grounded_agency/state/checkpoint_tracker.py`):
+  it takes a `redactor` (default `DEFAULT_REDACTOR`; a `redactor` property
+  with a setter, as `IdempotencyLog` and `MemoryStore` have) and redacts
+  every string it records when it records it: a checkpoint's `reason`, its
+  `scope` items and its `metadata` (structured redaction, so a member named
+  for a credential is replaced too), the reason an execution boundary gives
+  (`invalidated_by`) and the words that use a checkpoint (`consumed_by`).
+  So the records in memory (`get_history`, `get_active_checkpoint`), the
+  state file and the archive hold no secret it recognises, whoever calls
+  `create_checkpoint` (the recorder, `adapter.create_checkpoint`, the
+  workflow engine, a runner's host). The snapshot store captures what the
+  scope names as given (the capture runs before the record is made), so a
+  restore still finds the files; the checkpoint's recorded `scope`, which
+  `matches_scope` and `has_checkpoint_for_scope` read, is the redacted one
+  (no layer check reads it; a model that writes the scope could write
+  `*`).
+- The adapter builds its redactor before its tracker and gives it the
+  layer's (`redactor=self.redactor`), so `secret_values` reach the
+  checkpoint records too.
+- Sibling, the runner: a `checkpoint` step's `scope` is the step's input
+  (`Host.invoke_capability` passes it to `create_checkpoint`), so
+  `WorkflowRunner._share_redactor` now gives the host's
+  `checkpoint_tracker` what its redactor recognises, as it gives the log
+  and the memory stores (a tracker on the shared default redactor gets one
+  of its own).
+- Sibling, the Standard Agents binding: a checkpoint record
+  (`acs:checkpoints`) kept the `checkpoint_id` the `checkpoint` call's
+  output gave, as given, and a later call's trace entry repeated it
+  (`redacted` read only `error` and `evidence_anchors`, saying nothing else
+  in an entry held a value a call received). `addCheckpoint`
+  (`src/acs/records.ts`) records the id redacted (default patterns, the
+  tool's secrets, the layer's), and `redacted` redacts an entry's
+  `checkpoint_id` as well. Two ids that are one once redacted name one
+  checkpoint, so a call that uses one uses both: the safe side. The
+  binding records no `reason` or `scope` (the example's `label` is not
+  kept). The plugin's shell hooks keep no model text in their checkpoint
+  records (a commit id, generated ids, times, a call id).
+- Tests (`tests/test_checkpoint_secrets.py`, 7): the reported probe (the
+  recorder on a tracker with the default redactor: the checkpoint is
+  taken, its reason and scope are recorded redacted, its metadata kept,
+  and no file holds the password, the token or the URL's password); the
+  adapter end to end through `wrap_options` (PreToolUse then PostToolUse
+  with a valid output: one checkpoint, and neither the checkpoint in
+  memory nor any file under the run's directory holds the four secrets,
+  the registered one included; the tracker has the layer's redactor; the
+  shared default never learns the value); the archive and the boundary's
+  and holder's words (`max_history=1`: the archive, the history and the
+  state file hold none, `invalidated_by` and `consumed_by` redacted); the
+  snapshot store capturing and restoring a directory whose name holds a
+  password assignment or a registered secret while the record's scope is
+  redacted; a runner whose `checkpoint` step's scope holds a registered
+  secret and a URL's password, with the host's tracker on the default
+  redactor and on its own. Six fail on 5a709e9's Python (the reason
+  recorded as given; the four secrets in the adapter's state file; three
+  secrets in the archive and state file; the registered value in the
+  runner's state file; two through the new `redactor` argument and
+  property); the control (a reason and scope without a secret kept as
+  given) passes on both. Binding (`test/grounded.test.ts`, `records a
+  checkpoint id without the secrets it holds (§6.7)`: a checkpoint tool
+  that returns the model's label as its id, holding a password
+  assignment, a GitHub token and a value its `secrets` function gives;
+  the next call uses the checkpoint, and neither `acs:checkpoints` nor
+  the trace holds any of them): fails on 5a709e9's `src/acs/`.
+- Not changed: checkpoints a tracker wrote before this fix keep what they
+  hold, in the state file and the archive (a tracker writes back the
+  records it read as the file has them; redacting every record at every
+  write would cost about 16 ms per write for 100 checkpoints, against
+  about 2 ms for the write); delete them once no longer needed. The
+  snapshot store's manifest keeps the scope's patterns as given: a restore
+  matches them (the files created since in the captured scope are
+  removed), and the store holds the files' own bytes, whatever they hold
+  (§4.4.1; §6.7 governs records, not restore content). A hold's holder (a
+  call id) is kept as given: it is what the hold is matched by.
+
+#### Documentation
+
+SECURITY.md §1.5 (the tracker's redaction, the runner giving it its
+secrets, the binding's checkpoint ids), the SDK guide's Secrets section,
+the Standard Agents guide's secrets bullet, the running-workflows guide
+(the runner's redactor reaches the host's tracker), the tracker's,
+recorder's, adapter's and runner's docstrings, and CHANGELOG [Unreleased]
+Upgrading (the Python `CheckpointTracker` and the runner; the binding's
+checkpoint ids). The Standard's text was not changed: §6.7 already names a
+safety layer's record of a call (§5.18.8), which a checkpoint the layer
+records for the call that took it is. No version changes.
+
+#### Checks after batch 5
+
+- Python: `pytest tests/` (6702 passed, 18 skipped: 6695 plus the 7 new);
+  ruff check and format with CI's lists; mypy; every `tools/validate_*.py`
+  of CLAUDE.md, `validate_workflows.py --strict` and every domain catalog
+  and example `--strict`; `sync_skill_schemas.py --check` and the
+  generators' `--check` (no fixture or vector changed);
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: the package's check and test (2012; no package source
+  changed, its build reused); the binding's check and test (247 passed, 2
+  skipped; 246 plus the new one).
+- Site: `npm run check`, `npm test` (1173).
+- Old code: the 7 new Python tests against 5a709e9's `grounded_agency/`
+  (6 fail; the control passes) and the binding's new test against
+  5a709e9's `src/acs/` (fails).
+- Probes, each under `timeout 120` and a 4 GB address-space limit: the
+  reporter's unit probe and the verifier's end-to-end probe pointed at this
+  worktree hold none of the secrets in any file after the fix; redacting
+  100 checkpoint records takes about 16 ms (why records written before the
+  fix are not rewritten at every write). No CLI or nested agent was
+  started; nothing was left running; the probe copies and scratch files
+  were removed.

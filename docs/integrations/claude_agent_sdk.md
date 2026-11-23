@@ -699,7 +699,11 @@ the content it cites holds the secret, and the redacted excerpt would show
 the text to check a guess against. Register the host's
 own secrets with `GroundedAgentConfig(secret_values=(...))`: they reach the
 store's and the coordination audit log's redactor, and never
-`recorded_by`. The adapter also redacts its call records and refusals, and
+`recorded_by`. The adapter also redacts its call records and refusals,
+and its checkpoint tracker every string it records (a checkpoint's
+`reason`, `scope` and `metadata`: a bound checkpoint tool's `reason` and
+`scope` are the model's words), in memory, in
+`checkpoint_dir/tracker_state.json` and in its archive; it
 refuses a `persist` or `audit` call whose data holds a credential-shaped
 value, or a value in a member named for a credential (`password`,
 `accessToken`, `Authorization`) that redaction would replace, unless it is a

@@ -450,10 +450,11 @@ a secret with it replaced and without its digest (§6.5, §6.7).
 `evidence_seen` is rewritten to match: it lists an anchor's redacted `ref`
 when it listed the anchor's own, and when two anchors are one after
 redaction it lists neither unless it listed both. The runner gives what its
-redactor recognises to the host's `IdempotencyLog` and `MemoryStore` and to
-its own `memory` (a store on the shared default redactor gets one of its
-own), so the log's file and a refused `persist` know the registered secrets
-too. A signed URL's
+redactor recognises to the host's `IdempotencyLog`, `CheckpointTracker` and
+`MemoryStore` and to its own `memory` (a store on the shared default
+redactor gets one of its own), so the log's file, the tracker's records (a
+checkpoint's reason and scope, which a `checkpoint` step's input gives)
+and a refused `persist` know the registered secrets too. A signed URL's
 signature (`sig=`, `X-Amz-Signature=`) is not among the default patterns:
 a host that cites signed URLs adds a pattern for them
 (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) or cites them without

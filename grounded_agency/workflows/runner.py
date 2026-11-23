@@ -1191,15 +1191,18 @@ class WorkflowRunner:
     def _share_redactor(self, host: Host) -> None:
         """Give the stores that write records for the run what the runner's
         ``redactor`` recognises (§6.7): the host's idempotency log, which
-        keeps each ``send``'s destination and output, and its memory store
-        and the runner's, which refuse a ``persist`` of a secret. A store on
-        the shared default redactor gets one of its own (the default
-        patterns and the runner's), so the runner's values never reach a
-        redactor other runners share; any other takes them in."""
+        keeps each ``send``'s destination and output, its checkpoint
+        tracker, which keeps each checkpoint's reason and scope (a
+        ``checkpoint`` step's scope is the step's input), and its memory
+        store and the runner's, which refuse a ``persist`` of a secret. A
+        store on the shared default redactor gets one of its own (the
+        default patterns and the runner's), so the runner's values never
+        reach a redactor other runners share; any other takes them in."""
         if self._redactor is DEFAULT_REDACTOR:
             return
         for store in (
             getattr(host, "idempotency", None),
+            getattr(host, "checkpoint_tracker", None),
             getattr(host, "memory", None),
             self._memory,
         ):

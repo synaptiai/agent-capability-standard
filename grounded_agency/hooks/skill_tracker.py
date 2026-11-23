@@ -140,7 +140,10 @@ def create_checkpoint_recorder(
     the command's), for empty output over a changed tree (``HEAD`` would not
     restore it), or for output that is neither. A bound ``checkpoint``
     tool's scope is its input's ``scope``, else its response's, else
-    ``["*"]``.
+    ``["*"]``, and its reason the input's ``reason``: text a model may have
+    written, which the tracker records with every secret its ``redactor``
+    recognises replaced (STANDARD 1.2.0 section 6.7; the adapter's tracker
+    has the layer's redactor, the host's registered secrets included).
 
     Args:
         checkpoint_tracker: CheckpointTracker to update
