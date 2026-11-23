@@ -308,7 +308,13 @@ The schema is
 [`standard_agents_annotation.schema.json`](../../schemas/interop/standard_agents_annotation.schema.json),
 generated from the ontology. It refuses a copy that names another layer than
 the capability's or a flag weaker than the ontology's, so a reader that does
-use the copies is not misled. A tool with no `acs` annotation is **unbound**:
+use the copies is not misled. Every other member of an `acs` annotation is
+read as the record's, so one the record does not have (a misspelt `aproval`
+or `flag`) is S303 and the annotation does not load: the tool is unbound
+rather than read in part ([§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)),
+`groundedTool` refuses a composite that lists it (V107), the lint reports it
+(W617) and `deriveAgentManifest` names it malformed. Vendor data goes under a
+key that starts with `x-`. A tool with no `acs` annotation is **unbound**:
 [§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools) treats each of its calls as the strictest
 case, high risk with a checkpoint and an approval. A tool that only signals
 the host carries `{ standard, ontology, tool, control: true }` instead
@@ -896,7 +902,7 @@ call's, against its capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 35 binding fixtures in the package's `test/bindings.test.ts`, and the 32
+the 36 binding fixtures in the package's `test/bindings.test.ts`, and the 32
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). It skips two: one needs a call

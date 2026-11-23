@@ -233,6 +233,12 @@ binding(
     errors=[diag("S303", "look")],
 )
 binding(
+    "unknown_member",
+    "An unknown member whose name does not start with x- is S303, and the record is not loaded (section 5.18.1): a misspelt approval or flags member could declare something stricter, so the tool is unbound rather than read in part. A carrier, such as an annotation, is read as the record: its unknown members reach the record and refuse it the same way.",
+    [rec("wipe", "retrieve", aproval={"min_approvers": 2, "role": "admin"})],
+    errors=[diag("S303", "wipe")],
+)
+binding(
     "domain_id_loads",
     "A domain id of several segments, such as image.object, is a valid domain: the record loads.",
     [rec("look", "detect", domain="image.object")],

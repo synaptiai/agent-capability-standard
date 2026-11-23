@@ -1,0 +1,25 @@
+{
+  "description": "An unknown member whose name does not start with x- is S303, and the record is not loaded (section 5.18.1): a misspelt approval or flags member could declare something stricter, so the tool is unbound rather than read in part. A carrier, such as an annotation, is read as the record: its unknown members reach the record and refuse it the same way.",
+  "ontology": "2.2.0",
+  "records": [
+    {
+      "tool": "wipe",
+      "ontology": "2.2.0",
+      "capability": "retrieve",
+      "aproval": {
+        "min_approvers": 2,
+        "role": "admin"
+      }
+    }
+  ],
+  "expect": {
+    "errors": [
+      {
+        "code": "S303",
+        "tool": "wipe"
+      }
+    ],
+    "warnings": [],
+    "effective": {}
+  }
+}

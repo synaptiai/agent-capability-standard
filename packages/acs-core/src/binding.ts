@@ -770,35 +770,35 @@ function checkOffered(
   return out;
 }
 
-/** The record members an `acs` annotation carries; the rest are copies or the annotation's own. */
-const RECORD_MEMBERS = [
-  'standard',
-  'ontology',
-  'capability',
-  'domain',
-  'flags',
-  'additional_capabilities',
-  'classifier',
-  'invokes',
-  'approval',
-  'control',
-  'destination',
-] as const;
+/**
+ * The members of an `acs` annotation that are copies (§5.18.1): the name the
+ * tool is offered under, the capability's layer and the effective flags. A
+ * layer computes these itself and ignores them.
+ */
+const ANNOTATION_COPIES: ReadonlySet<string> = new Set([
+  'tool',
+  'layer',
+  'risk',
+  'mutation',
+  'requires_checkpoint',
+  'requires_approval',
+]);
 
 /**
  * Read a Standard Agents `acs` annotation as a tool binding record (§5.18.1:
- * an annotation is a carrier). `tool` is the name the tool is offered under;
- * the copies an annotation holds (`layer`, the effective flags) are ignored.
+ * an annotation is a carrier, read as the record). `tool` is the name the
+ * tool is offered under; the copies an annotation holds (`layer`, the
+ * effective flags) are ignored. Every other member is the record's, an
+ * unknown one included, so `checkBindings` reports it (S303) and does not
+ * load the record: a record a layer cannot read in full is not read in part.
  * Null for a value that is not an object.
  */
 export function annotationRecord(name: string, annotation: unknown): Record<string, unknown> | null {
   if (!isObject(annotation)) return null;
-  const record: Record<string, unknown> = { tool: name };
-  for (const member of RECORD_MEMBERS) {
-    if (Object.hasOwn(annotation, member)) record[member] = annotation[member];
-  }
-  for (const [key, value] of Object.entries(annotation)) {
-    if (key.startsWith('x-')) record[key] = value;
-  }
-  return record;
+  // Object.fromEntries defines each member as an own property, so a member
+  // named __proto__ stays a member (and is reported) rather than a prototype.
+  return Object.fromEntries([
+    ['tool', name],
+    ...Object.entries(annotation).filter(([key]) => !ANNOTATION_COPIES.has(key)),
+  ]);
 }

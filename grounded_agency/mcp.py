@@ -25,24 +25,11 @@ import logging
 from typing import Any
 
 from .adapter import GroundedAgentAdapter
+from .capabilities.bindings import _MEMBERS
 from .errors import Severity, text_form
 
 logger = logging.getLogger("grounded_agency.mcp")
 
-# Members of a tool binding record (schemas/interop/tool_binding.schema.json)
-# that tool metadata may carry; `tool` and `ontology` the factory supplies.
-_RECORD_MEMBERS: tuple[str, ...] = (
-    "capability",
-    "domain",
-    "flags",
-    "additional_capabilities",
-    "classifier",
-    "invokes",
-    "approval",
-    "control",
-    "destination",
-    "standard",
-)
 # The legacy flat keys, still accepted.
 _LEGACY_FLAGS: tuple[str, ...] = (
     "risk",
@@ -55,8 +42,16 @@ _LEGACY_FLAGS: tuple[str, ...] = (
 def _record(
     full_name: str, server: str, ontology: str, metadata: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """The tool binding record a tool's metadata carries, or None for a
-    tool with no capability that is not control-only (unbound).
+    """The tool binding record a tool's metadata carries, or None for
+    metadata that carries no record (unbound).
+
+    The metadata is a carrier read as the record (STANDARD 1.2.0 section
+    5.18.1): every member is the record's but ``tool`` (the factory names
+    the tool), the legacy ``capability_id`` and flat flags (read into
+    ``capability`` and ``flags``), and ``ontology`` defaults to the
+    adapter's. An unknown member reaches the record, so the loader reports
+    it (S303) and the record is not loaded: a record a layer cannot read in
+    full is not read in part.
 
     Raises:
         ValueError: S303 when ``capability`` and ``capability_id`` disagree,
@@ -64,12 +59,10 @@ def _record(
             values.
     """
     record: dict[str, Any] = {"tool": full_name, "ontology": ontology}
-    for member in _RECORD_MEMBERS:
-        if member in metadata:
-            record[member] = metadata[member]
     for key, value in metadata.items():
-        if isinstance(key, str) and key.startswith("x-"):
-            record[key] = value
+        if key == "tool" or key == "capability_id" or key in _LEGACY_FLAGS:
+            continue
+        record[key] = value
     if "capability_id" in metadata:
         legacy = metadata["capability_id"]
         if "capability" in record and record["capability"] != legacy:
@@ -98,8 +91,16 @@ def _record(
             flags.setdefault("mutation", True)
             flags.setdefault("requires_checkpoint", True)
         record["flags"] = flags
+    # A tool with no capability that is not control-only is unbound, as
+    # before, unless its metadata holds a member no record has (a misspelt
+    # ``capabilty``): that record goes to the loader, which reports it (S303)
+    # and stops the server rather than leave the tool unbound unnoticed.
     if "capability" not in record and record.get("control") is not True:
-        return None
+        if all(
+            key in _MEMBERS or (isinstance(key, str) and key.startswith("x-"))
+            for key in record
+        ):
+            return None
     return record
 
 
@@ -129,7 +130,12 @@ def create_grounded_mcp_server(
     - ``domain``, ``flags`` (``risk``, ``mutation``, ``requires_checkpoint``,
       ``requires_approval``; the legacy flat keys are still accepted),
       ``additional_capabilities``, ``classifier``, ``invokes``,
-      ``approval`` (``min_approvers``, ``role``, ``expires``), ``control``.
+      ``approval`` (``min_approvers``, ``role``, ``expires``), ``control``,
+      ``destination``, ``standard``, and vendor data (``x-...``).
+
+    Any other member, a misspelt one included, is the record's as well, so
+    the record does not load (S303) and no server is created: a record read
+    in part could drop something stricter that it declares.
 
     The registered flags are the stricter of the metadata's and the
     ontology's (section 5.2.1); a weaker one has no effect and is reported

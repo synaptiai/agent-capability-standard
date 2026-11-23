@@ -590,14 +590,22 @@ a command's words, `shell_words.jq` in this directory, copied the same way
 between `# BEGIN shell-words` and `# END shell-words` and kept equal by the
 same tests. It reads a command's simple commands and their words as the
 shell passes them (quotes removed, unquoted glob characters marked, a
-redirection's target and whether it writes) and names what it cannot follow
-(an unclosed quote, a here-document, a process substitution). jq's global
+redirection's target and whether it writes), pairing quotes as bash pairs
+them: a backslash escapes the next character, in double quotes and `$'...'`
+too, so an escaped quote never closes one, and a line continuation is
+removed, inside an operator (`<\<newline><` is `<<`) and before a comment as
+well. It marks a word that holds `$'...'` or `$"..."` (kept as written: bash
+decodes or translates them) and one that holds a command substitution whose
+own quotes bash pairs apart from the text around it (a backtick, or `$(` or
+`${` in double quotes), and names what it cannot follow (an unclosed quote,
+a here-document, a process substitution). jq's global
 match costs the text times its matches, so each hook reads a command of at
 most 16384 bytes with it; skill hooks stay registered for the rest of the
 session, so each reads only a command that may concern it (one that names
 `curl`, `wget` or `http`, the audit records, a program that writes the files
-its input names, or `git stash`, in any quoting, or holds a glob or a brace
-that may expand to one of those names) and leaves the others alone.
+its input names, or `git stash`, in any quoting, line continuations joined,
+or holds `$'...'`, `$"..."`, or a glob or a brace that may expand to one of
+those names) and leaves the others alone.
 
 ## Relationship to Spec
 

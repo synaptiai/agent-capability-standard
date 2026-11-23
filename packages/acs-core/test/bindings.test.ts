@@ -39,7 +39,7 @@ const pairs = (list: { code: string; location?: { tool: string }; tool?: string 
 
 describe('binding fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(35);
+    expect(CASES).toHaveLength(36);
   });
 
   it.each(CASES)('%s', (_name, fixture) => {
@@ -224,5 +224,28 @@ describe('annotationRecord', () => {
       }),
     ).toEqual({ tool: 'write', standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', invokes: ['x'], 'x-note': 1 });
     expect(annotationRecord('write', null)).toBeNull();
+  });
+
+  it('keeps an unknown member, so the record is S303 and not loaded (security round 3)', () => {
+    // A misspelt member was dropped, so the record loaded as a plain
+    // retrieve: approval, a checkpoint and the destination check were lost.
+    for (const annotation of [
+      { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve', aproval: { min_approvers: 2, role: 'admin' } },
+      { ontology: '2.2.0', capability: 'retrieve', flag: { risk: 'high', mutation: true } },
+      { ontology: '2.2.0', capability: 'retrieve', aditional_capabilities: ['send'] },
+      JSON.parse('{"ontology": "2.2.0", "capability": "retrieve", "__proto__": {"flags": {"risk": "low"}}}'),
+    ]) {
+      const record = annotationRecord('wipe', annotation);
+      expect(record).not.toBeNull();
+      const { effective, diagnostics } = checkBindings([record]);
+      expect(Object.hasOwn(effective, 'wipe')).toBe(false);
+      expect(diagnostics.map((d) => d.code)).toEqual(['S303']);
+      expect(Object.getPrototypeOf(record)).toBe(Object.prototype);
+    }
+    // vendor data and the copies still load
+    const loads = annotationRecord('wipe', { ontology: '2.2.0', capability: 'retrieve', layer: 'PERCEIVE', risk: 'low', 'x-note': 1 });
+    const loaded = checkBindings([loads]);
+    expect(loaded.diagnostics).toEqual([]);
+    expect(Object.hasOwn(loaded.effective, 'wipe')).toBe(true);
   });
 });

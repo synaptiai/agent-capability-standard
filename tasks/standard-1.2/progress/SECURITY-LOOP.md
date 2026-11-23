@@ -3982,3 +3982,275 @@ persist entry). No version changes.
   agent was started (Claude Code's edit functions were read in its binary
   with `grep`); the docker listener and every other process were stopped;
   the scratch repositories, locales and inputs were removed.
+
+### Batch 3: four reported defects
+
+Four defects, each reproduced by an independent verifier on 6004f78 and
+reproduced again here on 6b41119 (batch 2's commit) before any change: two
+in the audit skill's command hook, one in the send skill's, and one in how
+the TypeScript package and the Python MCP factory read a carrier of a tool
+binding record. None was fixed by an earlier batch (git log and rounds 1 to
+3 checked; batches 1 and 2 changed no skill hook but persist's and no
+carrier). Each fix has tests that fail on the code before it: the new skill
+hook tests run against 6b41119's hooks in a scratch tree (the test file,
+its fixtures, the hooks and the skills, 4.7 MB, removed) gave 132 failures
+of 198 (audit) and 88 of 154 (send and rollback); what passed is the
+controls (commands each hook must leave alone, the moves the new mv rule
+allows) and sibling forms the old hooks refused for another reason (a
+literal `.claude` beside `$"..."`, a `$` in a path). The new TypeScript
+test fails with 6b41119's `annotationRecord` (1 of 81 in the package; 3 of
+95 in the binding's three files), and the Python factory tests with
+6b41119's `mcp.py` (4 of 5; the fifth is the control).
+
+The skill hooks are host-specific narrowings (§5.18.10's last paragraph);
+the plugin's pre-tool-use hook gates every reported command as a `mutate`
+(or `send`) a person approves. Each defect is a hook that did less than
+SECURITY.md §5.4 says.
+
+#### 1. The audit hook's gate did not read `$'...'`, so a records path spelled with ANSI-C quoting skipped every check (medium); siblings: escaped quotes, line continuations, command substitutions, the send and rollback gates
+
+The gate looked for `records|jsonl|audit|\.claude` with quotes and
+backslashes removed; `$'\x2ecla\x75de/a\x75dit/rec\x6frds.js\x6fnl'` and the
+octal form spell the path with none of them, and `tee` and `cp` are not on
+the writer list, so `tee -a $'...'` appended a token to the records file
+(bash, verified). Siblings found here, each exit 0 on 6b41119:
+
+- the shared word reader (`hooks/shell_words.jq`) did not pair quotes as
+  bash does: an escaped quote (`echo "\"" ; git apply p ; echo "\""`,
+  `echo \' ; ...`, `echo $'\'' ; ...`) made it read the commands after it
+  as one quoted word, so the audit hook's rules for every command (the
+  writer list, the glob that may name the file) did not see `git apply`
+  or `tee -a .c*/a*/r*`; a backslash in a name stayed in the word
+  (`pat\ch` was not `patch`);
+- a line continuation split a name the gates look for (the `tr` they use
+  reads lines): `tee -a .cl\<nl>aude/au\<nl>dit/rec\<nl>ords.js\<nl>onl`
+  (audit), `cu\<nl>rl 127.0.0.1:18777/` (send: no address check at all),
+  `git sta\<nl>sh apply <unrecorded>` and `git $\<nl>'\x73tash' apply`
+  (rollback; bash restores);
+- the writer rule did not read a command substitution's command (`` echo
+  `git apply p` ``, `` x=`git apply p` ``, `echo "$(git apply p)"`), nor the
+  commands after quotes nested inside one (`echo "$(echo '"')"; git apply
+  p; echo '"'`);
+- the reader's operator pattern took the digits after any `>` as a file
+  descriptor (`>2` read as an operator with no target).
+
+- Fix (shared reader, all four copies): words and segments pair quotes as
+  bash does: a backslash escapes the next character (unquoted, in double
+  quotes before `$`, `` ` ``, `"`, `\` or a newline, and in `$'...'`, kept
+  whole); a line continuation is removed, also between an operator's
+  characters (`<\<nl><` is `<<`) and before a comment; a lone backslash or
+  an unclosed `$'` is `bad`. Each word gains `ansi` (it holds `$'...'` or
+  `$"..."`, kept as written) and `subst` (a backtick, or `$(` or `${` in
+  double quotes). Digits follow only `>&` and `<&`. Checked against bash on
+  4000 generated commands (escapes, `$'...'`, `$"..."`, continuations in
+  words, operators and before comments, comments, globs): no difference but
+  the expansions the reader does not make (`${HOME}`, `$'\x41'`); the old
+  reader differed on 416 of 500.
+- Fix (audit gate): `$'` or `$"` in the command, or in it with its line
+  continuations joined (`$\<nl>'`), sends it to the full reading, which
+  refuses `$'...'` and `$"..."` (the `subst` refusal names them); the name
+  grep removes line breaks; the writer grep reads the command as written
+  and with its line continuations joined (`a\\<nl>tar` keeps the break).
+- Fix (audit, every command): where the reader cannot follow the command
+  (an unclosed quote, a word with `subst`), it is read again with no
+  quoting at all (each real line continuation removed, a backtick read as
+  `;`, a `#` as a letter, every quote and backslash removed), which reads
+  more commands than bash runs and every one it runs; the writer rule and
+  the glob rule apply to both readings. So a command substitution in
+  quotes is read; the documented limit drops it.
+- Fix (send and rollback gates): the same line-break removal and
+  joined-continuation `$'` check; the send hook's glob rule for tool names
+  reads the joined text too (`c?\<nl>rl`).
+- Tests: `test_blocks_a_name_spelled_with_ansi_c_quoting` (11, the
+  reported three and the verifier's siblings), `test_an_ansi_c_spelled_
+  name_is_the_records_file` (bash writes the token; the hook refuses
+  first), `test_reads_quotes_and_escapes_as_bash_does` (15), and in send
+  and rollback the line-continuation and escaped-quote cases.
+
+#### 2. The audit hook's `mv` rule compared base names, so any `records.jsonl` came in as a moved-aside file and the live records could leave (medium); siblings: a moved-aside file named by a glob, programs that write the files their input names
+
+`mv /tmp/x/records.jsonl .claude/audit/records.1.jsonl` and `mv
+.claude/audit/records.jsonl /tmp/records.gone.jsonl` passed. The reported
+chain (`base64 -d`, `gunzip -N`, `mv`) left a token in
+`.claude/audit/records.1.jsonl`; the verifier's escalation then overwrote
+the live file with `gunzip -fN -S l .c*/a*/r*1*`, whose glob `may_name`
+did not read (it matched only `records.jsonl` as the last component).
+
+- Fix (mv): both operands, resolved from the call's directory with
+  `${CLAUDE_PROJECT_DIR:-.}` at the start read as the project's directory
+  (the hook's `CLAUDE_PROJECT_DIR`, else the call's directory), must be in
+  `<project>/.claude/audit`, the source `records.jsonl`, the target
+  `records.<x>.jsonl`; a `..`, a `~`, an expansion, a glob, a brace or
+  `$'...'` is refused. Both operands with the prefix stay in one directory
+  whatever the Bash tool's environment expands it to.
+- Fix (`may_name`): a glob or a brace that may name any file of
+  `.claude/audit` (`.c*/a*/r*1*`) sends the command to the full reading.
+- Fix (writers, every command): `gzip`, `gunzip`, `pigz`, `unpigz` with
+  `-N`/`--name` (or abbreviated, or in a cluster) or where the command
+  names `GZIP` (gzip 1.12 honours `GZIP=-N`, verified); `curl` unless `-q`
+  (or `--disable`, or a cluster starting `-q`) is its first word (it reads
+  `.curlrc`, which may set `remote-header-name` and `output-dir`) and with
+  `-J`, `-K`, `--remote-header-name`, `--config`, `--variable` or
+  `--expand-*` (abbreviations read: curl 8.5 takes `--remote-header`);
+  `wget` unless given `--no-config` (exact; wget honours it anywhere,
+  verified) and with `--content-disposition`, `--trust-server-names`,
+  `-r`, `-m`, `-p`, `-x`, `-i`, `-e`, `-B`, `-F`, `--config` and the like;
+  HTTPie, `aria2c`, `ditto`, `xar`, `aa`, `aunpack`, `atool`, `dtrx`,
+  `patool`; `dpkg -x|-X|-i|-R`, `rpm -i|-U|-F`; `python -m zipfile|tarfile`;
+  and a git command that is not one of git's own (git 2.43's list and a
+  few later ones): an alias a configuration file or `GIT_CONFIG_*` defines
+  runs `git apply` (verified: `[alias] x = apply` in `.git/config`, then
+  `git x notes.patch`, wrote the token), and the hook refused only
+  `-c alias.*`, `--config-env` and `git config alias.*`. A bare `git` or
+  `git --version` is left alone (it was refused, but the gate never read
+  it).
+- Not changed: package installers' scripts and a program named by a
+  variable stay the documented limit (code a script runs, a name built when
+  the command runs).
+- Tests: the reported moves and ten siblings in
+  `test_mv_only_moves_the_records_file_aside`, `test_mv_of_a_path_the_
+  shell_builds_is_refused`, `test_mv_moves_the_records_aside_in_their_
+  directory` (four allowed forms), `test_blocks_more_programs_that_write_
+  files_their_input_names` (31), `test_still_allows_these_commands` (19
+  controls, the commit here-document among them), `test_a_name_gunzip_
+  restores_is_refused_before_it_runs` (gunzip restores the stored name;
+  each step refused) and `test_a_git_alias_from_a_configuration_file_is_
+  refused` (the alias applies the patch; the hook refuses first).
+
+#### 3. The send hook never read the setting files curl and wget take at run time; a brace or glob spelling, `~/.ipfs/gateway` and `IPFS_GATEWAY` were not on its lists (medium); siblings: wget's, a Write of the files
+
+`tee ~/.cu{r,r}lrc`, `tee ~/.c*rlrc`, `tee -a /etc/ho{s,s}ts`, `> ~/.ipfs/gateway`
+and `tee ~/.wge{t,t}rc` passed, after which a plain `curl` or `wget`
+reached a 127.0.0.1 listener; `export IPFS_GATEWAY=http:/127.0.0.1:18777;
+curl ipfs://...` did in one command. Reproduced here with a listener (a
+`.curlrc` proxy: the plain request logged `GET http://example.com/
+Host=example.com`; with `-q` nothing reached it).
+
+- Fix (requests): `curl` runs only with `-q` (or `--disable`) first, `wget`
+  only with `--no-config`, HTTPie only where the configuration file it
+  reads (`$HTTPIE_CONFIG_DIR`, `$XDG_CONFIG_HOME/httpie` or
+  `~/.config/httpie`, and `~/.httpie`) sets no default options (it has no
+  option to skip the file; an unreadable file refuses), so no setting file
+  can redirect a request whatever wrote it, before the skill ran too; and
+  no `ipfs://` or `ipns://` URL (the gateway decides the host). The rule
+  applies where the tool runs a request (it is the program, or after one
+  that runs another), so `apt-get install curl` and `curl --version` pass.
+  Another refusal of the same request is reported first.
+- Fix (every command): a glob or a brace that may expand to a setting file
+  (`.curlrc`, `.config/curlrc`, `.wgetrc`, `etc/wgetrc`, `etc/hosts`,
+  `etc/resolv.conf`, `resolve/resolv.conf`, `.ipfs/gateway`,
+  `httpie/config.json`, `.httpie/config.json`: last components matched, a
+  leading dot only by a dot, the last pattern holding a letter or a digit)
+  is refused; each run's brace words are computed once for this and the
+  tool-name rule (distinct runs at the 16384-byte bound: 1.7 s for braces,
+  0.9 s for globs).
+- Fix (lists): `ipfs` in the gate, `\.ipfs(/|$)` and `httpie/config` in the
+  setting files, `IPFS_GATEWAY`, `IPFS_PATH`, `SYSTEM_WGETRC` and
+  `HTTPIE_CONFIG_DIR` in the setting variables.
+- Fix (new hook): an Edit, Write, MultiEdit or NotebookEdit of those files,
+  by the path as written and the file it reaches (links followed), is
+  refused (the matcher was Bash only).
+- Not changed: a name that resolves to an internal address (a hosts file a
+  name built at run time writes) stays the documented limit; the plugin
+  applies no destination policy, so §4.4.2 binds no destination here.
+- Tests: `test_blocks_a_setting_file_however_it_is_named` (12),
+  `test_blocks_a_request_a_configuration_or_a_gateway_redirects` (15),
+  `test_curl_reads_its_configuration_file_unless_given_q_first` (the
+  fixture's own check, offline), `test_httpie_runs_only_without_default_
+  options` (5 configurations × 2 directories), `test_an_edit_of_a_setting_
+  file_is_refused` (14 paths × 3 tools), `test_an_edit_through_a_link_to_a_
+  setting_file_is_refused`. Tests changed to the new rule: the allowed
+  request examples now run `curl -q` and `wget --no-config` (and the audit
+  hook's allowed `curl` with a secret header, `curl -q`); the refusal of
+  the plain forms is in the new tests.
+
+#### 4. An annotation (or MCP metadata) was read in part: an unknown member was dropped, not S303 (medium)
+
+`annotationRecord` copied only the record's members and `x-` keys, so
+`{capability: 'retrieve', aproval: {...}}` or `flag: {...}` loaded as a
+plain retrieve: a composite's nested call of such a tool ran with no
+approval, checkpoint or destination check, `lintPromptTools` passed it and
+`deriveAgentManifest` understated the agent. The Python factory's `_record`
+did the same with MCP metadata.
+
+- Fix (TypeScript): `annotationRecord` passes every member but the copies
+  (`tool`, `layer`, `risk`, `mutation`, `requires_checkpoint`,
+  `requires_approval`) to the record, built with `Object.fromEntries` so a
+  member named `__proto__` stays a member; `checkBindings` reports the
+  unknown one (S303) and does not load it: V107 in a composite's
+  `invokes`, W617 in the lint, a malformed tool in `deriveAgentManifest`.
+- Fix (Python): `_record` passes every metadata member but `tool`,
+  `capability_id` and the flat flags (which it reads into `capability` and
+  `flags`); a metadata `ontology` is now the record's. A tool with no
+  capability that is not control-only stays unbound unless its metadata
+  holds a member no record has (a misspelt `capabilty`): that record goes
+  to the loader, so the factory raises rather than leave the tool unbound
+  unnoticed.
+- Fixture: `tests/conformance/bindings/unknown_member.json` (a record with
+  `aproval` is S303, not loaded), generated by
+  `scripts/gen_call_fixtures.py`; both runners count 36 binding fixtures.
+- Tests: `annotationRecord` keeps an unknown member (four annotations, the
+  `__proto__` one included, each S303; copies and vendor data still load);
+  the binding's V107 test (three misspelt records), manifest test (two)
+  and lint test (W617); the factory raises S303 for four metadata forms and
+  registers nothing, and reads copies, flat flags and vendor data as
+  before.
+
+#### Siblings checked
+
+- Rounds 1 to 3 hold: every skill hook test passes (1437), the persist
+  hook's reading is unchanged (it does not use the shared reader), and the
+  rollback hook's recorded restore still restores (`git stash apply <id>`,
+  and `git "stash" apply <id>`).
+- The plugin's pre-tool-use hook and the SDK mapper refuse any backslash
+  or read the worst case for each reported command; neither reads a carrier
+  of an annotation, and the SDK adapter's own records go through the same
+  loader (`parse_record`, S303 for an unknown member already).
+- The other users of `checkBindings` and `parse_record` take records, not
+  carriers, so they read every member already.
+
+#### Documentation
+
+SECURITY.md §5.4 (the audit, send and rollback rows; a row for the send
+skill's new Edit and Write hook), the three hooks' header comments,
+`hooks/README.md` (the shared reader's quoting), `docs/integrations/
+standard_agents.md` (an annotation's unknown member), the factory's
+docstring, spec/CONFORMANCE.md (36 binding and 32 call-sequence fixtures;
+the counts were stale), and CHANGELOG [Unreleased] Upgrading (the plugin's
+skill hooks; the MCP metadata; `annotationRecord`). The Standard's text
+was not changed: §5.18.1 already says a carrier is read as the record and
+an unknown member is S303. No version changes.
+
+#### Checks after batch 3
+
+- Python: `pytest tests/` (6676 passed, 18 skipped), and again the files
+  the last edits touched and every file that reads the docs (1769 passed;
+  `tests/test_skill_hooks.py` 1437); ruff check and format with CI's
+  lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators'
+  `--check` (one binding fixture added, written by its generator);
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: `packages/acs-core` build, check and test (2009; the
+  WebAssembly build reused); the binding's check and test (236 passed, 2
+  skipped).
+- Site: `npm run check`, `npm test` (1173; the fixture counts the site
+  reads come from tracked files, so the new fixture is added to git first).
+- Old code: the new tests against 6b41119's hooks, `annotationRecord` and
+  `mcp.py` (above, per defect).
+- Probes, each under `timeout 120` and a 4 GB address-space limit, inputs
+  of at most 1 MB: every reported command against the old hooks (exit 0)
+  and the new ones (refused); the reader against bash on 4000 generated
+  commands; a listener on 127.0.0.1:18777 reached by a plain `curl`
+  through a planted `.curlrc` proxy and not by `curl -q`; `GZIP=-N
+  gunzip` restoring a stored name (gzip 1.12); wget honouring
+  `--no-config` after the URL and curl `-q` only as the first word. Timing
+  at the 16384-byte bound: the audit hook 0.04 to 1.7 s (a backtick word
+  per four bytes, which the second reading reads, 1.7 s; the old reader
+  took 0.58 s for a word per two bytes), the send hook 0.04 to 1.7 s
+  (distinct brace runs 1.7 s, glob runs 0.9 s, a word per three bytes
+  1.6 s), a 1 MB command to the audit hook 0.36 s. No CLI or nested agent
+  was started; the listener and every other process were stopped; the
+  scratch tree, projects and archives were removed.

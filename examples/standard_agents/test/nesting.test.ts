@@ -303,7 +303,17 @@ describe('nested calls of a tool the binding did not define (security round 1, b
 
   it('does not define a composite that lists a tool with no binding the layer loads (V107)', () => {
     try {
-      for (const record of [null, { capability: 'teleport' }, { tool: 'notify', capability: 'invoke', invokes: ['other'] }]) {
+      for (const record of [
+        null,
+        { capability: 'teleport' },
+        { tool: 'notify', capability: 'invoke', invokes: ['other'] },
+        // Security round 3: a misspelt member was dropped, so the record
+        // loaded as a plain retrieve and the nested call ran with no
+        // approval, checkpoint or destination check; it is S303 now
+        { capability: 'retrieve', flag: { risk: 'high', mutation: true, requires_checkpoint: true, requires_approval: true } },
+        { capability: 'retrieve', aproval: { min_approvers: 2, role: 'admin' } },
+        { capability: 'retrieve', aditional_capabilities: ['send'] },
+      ]) {
         const { relay } = relaySetup(record);
         expect(relay).toThrow(/V107 UNRESOLVED_TARGET: it invokes 'notify'/);
       }

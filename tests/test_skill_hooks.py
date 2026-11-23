@@ -868,7 +868,7 @@ class TestSendCommandHook:
             "git clone https://github.com/example/repo.git",
             'git commit -m "fix the curl call"',
             "apt-get install -y curl",
-            "/usr/bin/curl https://example.com/",
+            "/usr/bin/curl -q https://example.com/",
             # Globs and braces that expand to no request tool's name (read
             # in every command since security round 2)
             "ls src/*.py",
@@ -878,13 +878,13 @@ class TestSendCommandHook:
             "cp config.yaml{,.bak}",
             "jq '.[0]' out.json",
             "cat > notes.md <<'EOF'\n* item\n- [x] done\nEOF",
-            "git config user.name x && curl https://example.com/",
+            "git config user.name x && curl -q https://example.com/",
             'for f in *.json; do jq . "$f"; done',
             # Data piped to an interpreter that runs code given as a word
-            "curl -s https://api.example.com/ | python3 -m json.tool",
-            "curl -s https://api.example.com/ | python3 -c "
+            "curl -q -s https://api.example.com/ | python3 -m json.tool",
+            "curl -q -s https://api.example.com/ | python3 -c "
             "'import json,sys; print(json.load(sys.stdin))'",
-            "curl -s https://api.example.com/ | sed s/a/b/",
+            "curl -q -s https://api.example.com/ | sed s/a/b/",
         ],
     )
     def test_leaves_other_commands_alone(
@@ -915,7 +915,7 @@ class TestSendCommandHook:
         self, tmp_path: Path, shell: str
     ) -> None:
         """The worst case under the bound: a word per two bytes."""
-        command = "curl https://example.com/" + " -s" * ((16_384 - 26) // 3)
+        command = "curl -q https://example.com/" + " -s" * ((16_384 - 29) // 3)
         assert len(command.encode()) <= 16_384
         hook = command_hook("send", "PreToolUse", "Bash")
         started = time.monotonic()
@@ -926,36 +926,47 @@ class TestSendCommandHook:
     @pytest.mark.parametrize(
         "command",
         [
-            "curl https://api.example.com/v1/messages",
-            "curl -i https://api.example.com/v1/messages",
-            "curl -H @headers.txt https://api.example.com/",
-            "curl --noproxy '*' https://example.com/",
+            "curl -q https://api.example.com/v1/messages",
+            "curl -q -i https://api.example.com/v1/messages",
+            "curl -q -H @headers.txt https://api.example.com/",
+            "curl -q --noproxy '*' https://example.com/",
             "tar -xzf http-lib.tgz",
             # a version number is not an address
-            "curl -O https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz",
-            "curl https://localhost.example.com/",
+            "curl -q -O https://www.python.org/ftp/python/3.10.2/Python-3.10.2.tgz",
+            "curl -q https://localhost.example.com/",
             # an address-like part of a path or a query is not the host
-            "curl -O https://dl.example.com/win/10.0.19041.1/setup.zip",
-            "curl https://example.com/?v=10.2.3.4",
+            "curl -q -O https://dl.example.com/win/10.0.19041.1/setup.zip",
+            "curl -q https://example.com/?v=10.2.3.4",
             "ls -la",
             "ping 10.0.0.5",
             # a number that is an argument, not a host
-            "curl --max-time 30 https://example.com/",
-            "curl -m 30 --retry 3 https://example.com/",
+            "curl -q --max-time 30 https://example.com/",
+            "curl -q -m 30 --retry 3 https://example.com/",
             # public addresses, canonical
-            "curl http://8.8.8.8/",
-            "curl http://1.0.0.1/",
-            "curl http://100.128.0.1/",
-            "curl 'http://[2001:db8::1]/'",
-            "curl https://example.com:8443/x",
+            "curl -q http://8.8.8.8/",
+            "curl -q http://1.0.0.1/",
+            "curl -q http://100.128.0.1/",
+            "curl -q 'http://[2001:db8::1]/'",
+            "curl -q https://example.com:8443/x",
             # payloads, headers and pipelines the skill uses
-            "curl -X POST https://api.example.com/ -H 'Content-Type: application/json'"
+            "curl -q -X POST https://api.example.com/ -H 'Content-Type: application/json'"
             ' -d \'{"a":1,"callback":"https://hooks.example.com/"}\'',
-            "curl -HX-Api-Key:abc https://api.example.com/",
-            "cat payload.json | curl -sS -d @- https://api.example.com/ > out.json 2>&1",
-            "curl -o x.json https://example.com/ && jq . x.json",
-            "wget -qO- https://example.com/",
-            "curl https://api.example.com/ # a comment, not a word: x{1,2}",
+            "curl -q -HX-Api-Key:abc https://api.example.com/",
+            "cat payload.json | curl -q -sS -d @- https://api.example.com/ > out.json 2>&1",
+            "curl -q -o x.json https://example.com/ && jq . x.json",
+            "wget --no-config -qO- https://example.com/",
+            "curl -q https://api.example.com/ # a comment, not a word: x{1,2}",
+            "curl -qsS https://api.example.com/",
+            "curl --disable -s https://api.example.com/",
+            "wget -q --no-config -O- https://example.com/",
+            # the tool named but no request made
+            "curl --version",
+            "which curl wget",
+            # globs that may name no file that sets where a request goes
+            "ls /etc/*",
+            "ls *.conf",
+            "ls -a ~/.*",
+            "cat src/*rc",
         ],
     )
     def test_allows_other_commands(
@@ -965,6 +976,185 @@ class TestSendCommandHook:
         result = run_command(hook, bash_call(command), tmp_path, shell)
         assert result.returncode == 0, result.stderr
         assert result.stderr == ""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Security round 3: a brace or a glob spelling of a file that sets
+            # where a request goes was read only where the command named a
+            # tool (each exited 0; a later plain curl reached 127.0.0.1)
+            "printf 'proxy = 127.1:18777\\n' | tee ~/.cu{r,r}lrc",
+            "printf x | tee ~/.c*rlrc",
+            "printf x | tee ~/.c?rlrc",
+            "printf '127.0.0.1 example.com\\n' | tee -a /etc/ho{s,s}ts",
+            "printf x | tee -a /etc/h?sts",
+            "printf 'use_proxy = on\\n' | tee ~/.wge{t,t}rc",
+            "printf x | tee ~/.config/c*rlrc",
+            "printf x | tee /etc/resolv.c*",
+            "printf x | tee ~/.ipfs/g*",
+            "printf x | tee ~/.config/h*/config.json",
+            # curl's IPFS gateway file, named
+            "printf 'ht%sp://12%s.0.0.1:18777' t 7 > ~/.ipfs/gateway",
+            "mkdir -p ~/.ipfs && printf x > ~/.ipfs/gateway",
+        ],
+    )
+    def test_blocks_a_setting_file_however_it_is_named(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "a file that sets where a request goes", F504)
+
+    @pytest.mark.parametrize(
+        ("command", "reason"),
+        [
+            # Security round 3: curl and wget read their configuration files at
+            # run time, which this check does not read (a proxy there sent a
+            # plain request to 127.0.0.1)
+            ("curl -sS http://example.com/", "runs curl only with -q"),
+            ("curl -sq http://example.com/", "runs curl only with -q"),
+            ("/usr/bin/curl https://example.com/", "runs curl only with -q"),
+            ("wget -qO- http://example.com/", "wget only with --no-config"),
+            ("wget --no-confi -qO- http://example.com/", "wget only with --no-config"),
+            # an IPFS URL goes to the gateway a variable or a file names
+            (
+                "export IPFS_GATEWAY=http:/127.0.0.1:18777; curl -q -sS "
+                "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/",
+                "",
+            ),
+            ("curl -q -sS ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y/", "ipfs://"),
+            ("curl -q -sS IPNS://example.com/", "ipfs://"),
+            ("IPFS_PATH=/tmp/x curl -q ipfs://x/", ""),
+            (
+                "export SYSTEM_WGETRC=/tmp/w; wget --no-config https://x/",
+                "SYSTEM_WGETRC",
+            ),
+            ("export HTTPIE_CONFIG_DIR=/tmp/h; http https://x/", "HTTPIE_CONFIG_DIR"),
+            # a tool's name split by a line continuation (cu\<newline>rl)
+            ("cu\\\nrl -q 127.0.0.1:18777/", "internal"),
+            ("w\\\nget --no-config 127.0.0.1:18777/", "internal"),
+            ("cu\\\nrl -q -s https://example.com/ -x 127.1:1", ""),
+            ("c?\\\nrl -q example.com", "may expand to the name"),
+            ("printf 'http_proxy = http://127.0.0.1:18777/' | tee ~/.wge{t,t}rc", ""),
+        ],
+    )
+    def test_blocks_a_request_a_configuration_or_a_gateway_redirects(
+        self, tmp_path: Path, shell: str, command: str, reason: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, reason, F504)
+
+    def test_curl_reads_its_configuration_file_unless_given_q_first(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """The fixture's own check, offline: curl reads ~/.curlrc (here an
+        unknown option, which it reports) unless -q is its first word."""
+        if shutil.which("curl") is None:
+            pytest.skip("curl not available")
+        (tmp_path / ".curlrc").write_text("no-such-option\n")
+        env = {**os.environ, "HOME": str(tmp_path), "CURL_HOME": str(tmp_path)}
+        env.pop("XDG_CONFIG_HOME", None)
+        read = subprocess.run(
+            ["curl", "-s", "file:///dev/null"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert "no-such-option" in read.stderr
+        skipped = subprocess.run(
+            ["curl", "-q", "-s", "file:///dev/null"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert "no-such-option" not in skipped.stderr
+
+    @pytest.mark.parametrize(
+        ("config", "blocked"),
+        [
+            (None, False),
+            ('{"default_options": []}', False),
+            ('{"default_options": ["--proxy=http:http://127.0.0.1:18777"]}', True),
+            ('{"default_options": ["--verify=no"]}', True),
+            ("not json", True),
+        ],
+    )
+    def test_httpie_runs_only_without_default_options(
+        self, tmp_path: Path, shell: str, config: str | None, blocked: bool
+    ) -> None:
+        """HTTPie has no option to skip its configuration file, whose
+        default options may hold a proxy: the hook reads the file, in its
+        directory and in the legacy ~/.httpie."""
+        home = tmp_path / "home"
+        home.mkdir()
+        env = {"HOME": str(home), "XDG_CONFIG_HOME": "", "HTTPIE_CONFIG_DIR": ""}
+        hook = command_hook("send", "PreToolUse", "Bash")
+        call = bash_call("http https://api.example.com/")
+        for where in (home / ".config" / "httpie", home / ".httpie"):
+            if config is not None:
+                where.mkdir(parents=True)
+                (where / "config.json").write_text(config)
+            result = run_command(hook, call, tmp_path, shell, env)
+            if blocked:
+                assert_blocked(
+                    result, "its configuration file sets default options", F504
+                )
+            else:
+                assert result.returncode == 0, result.stderr
+            if config is not None:
+                (where / "config.json").unlink()
+
+    @pytest.mark.parametrize(
+        ("file_path", "blocked"),
+        [
+            ("/home/u/.curlrc", True),
+            ("/home/u/.CURLRC", True),
+            ("/home/u/.config/curlrc", True),
+            ("/home/u/.wgetrc", True),
+            ("/etc/wgetrc", True),
+            ("/etc/hosts", True),
+            ("/etc/resolv.conf", True),
+            ("/home/u/.ipfs/gateway", True),
+            ("/home/u/.config/httpie/config.json", True),
+            ("/home/u//.httpie/./config.json", True),
+            ("notes.md", False),
+            ("src/hosts.py", False),
+            ("src/gateway.py", False),
+            ("config.json", False),
+        ],
+    )
+    def test_an_edit_of_a_setting_file_is_refused(
+        self, tmp_path: Path, shell: str, file_path: str, blocked: bool
+    ) -> None:
+        """The hook was on Bash only, so a Write of ~/.curlrc or /etc/hosts
+        was never seen (security round 3)."""
+        hook = command_hook("send", "PreToolUse", "Edit|Write|MultiEdit|NotebookEdit")
+        for call in (
+            edit_call(file_path),
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": file_path, "content": "x"},
+            },
+            {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": file_path}},
+        ):
+            result = run_command(hook, call, tmp_path, shell)
+            if blocked:
+                assert_blocked(result, "sets where a request goes", F504)
+            else:
+                assert result.returncode == 0, result.stderr
+
+    def test_an_edit_through_a_link_to_a_setting_file_is_refused(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        (tmp_path / ".curlrc").write_text("")
+        (tmp_path / "notes.md").symlink_to(tmp_path / ".curlrc")
+        hook = command_hook("send", "PreToolUse", "Edit|Write|MultiEdit|NotebookEdit")
+        call = edit_call(str(tmp_path / "notes.md"))
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "sets where a request goes", F504)
 
 
 # ---------------------------------------------------------------------------
@@ -1776,7 +1966,7 @@ class TestAuditCommandHook:
             "wc -l .claude/audit/records.jsonl",
             # A secret in a command that does not touch the records file is
             # other hooks' business.
-            "curl -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz' https://x",
+            "curl -q -H 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz' https://x",
             # Skill hooks stay registered for the rest of the session: a
             # command that cannot name the records file is left alone
             "python3 -m pytest -q",
@@ -2032,14 +2222,299 @@ class TestAuditCommandHook:
             "mv -t .claude/audit /tmp/records.jsonl",
             "mv .claude/audit/records.jsonl .claude/audit/records.jsonl.bak",
             "mv .claude/audit/records.jsonl .claude/audit/rec*.jsonl",
+            # Security round 3: the rule compared base names only, so any file
+            # named records.jsonl came in as a moved-aside records file, and the
+            # live records left the project (each exited 0)
+            "mv /tmp/x/records.jsonl .claude/audit/records.1.jsonl",
+            "mv .claude/audit/records.jsonl /tmp/records.gone.jsonl",
+            "mv /home/user/somefile/records.jsonl /tmp/records.x.jsonl",
+            "mv x/records.jsonl .claude/audit/records.1.jsonl",
+            "mv other/.claude/audit/records.jsonl .claude/audit/records.1.jsonl",
+            "mv .claude/audit/records.jsonl other/.claude/audit/records.1.jsonl",
+            "mv x/../.claude/audit/records.jsonl .claude/audit/records.1.jsonl",
+            "mv ~/.claude/audit/records.jsonl ~/.claude/audit/records.1.jsonl",
+            "mv .claude/audit/rec''ords.jsonl "
+            '"${CLAUDE_PROJECT_DIR:-.}/../x/.claude/audit/records.1.jsonl"',
+            "mv .claude/audit/records.jsonl .claude/audit/r*.jsonl",
         ],
     )
     def test_mv_only_moves_the_records_file_aside(
         self, tmp_path: Path, shell: str, command: str
     ) -> None:
         hook = command_hook("audit", "PreToolUse", "Bash")
-        result = run_command(hook, bash_call(command), tmp_path, shell)
+        call = {**bash_call(command), "cwd": str(tmp_path)}
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_command(hook, call, tmp_path, shell, env)
         assert_blocked(result, "mv only moves the records file aside", F504)
+
+    @pytest.mark.parametrize(
+        ("command", "reason"),
+        [
+            # a path the shell builds or decodes is refused before mv is read
+            ('mv "$D/records.jsonl" "$D/records.1.jsonl"', "may not expand"),
+            (
+                "mv $'.claude/audit/records.jsonl' $'.claude/audit/records.1.jsonl'",
+                "may not expand",
+            ),
+        ],
+    )
+    def test_mv_of_a_path_the_shell_builds_is_refused(
+        self, tmp_path: Path, shell: str, command: str, reason: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        call = {**bash_call(command), "cwd": str(tmp_path)}
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_command(hook, call, tmp_path, shell, env)
+        assert_blocked(result, reason, F504)
+
+    @pytest.mark.parametrize(
+        ("command", "cwd"),
+        [
+            (
+                "mv .claude/audit/records.jsonl "
+                ".claude/audit/records.20260101T000000Z.jsonl",
+                "",
+            ),
+            (
+                'mv -f "${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl" '
+                '"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.2026.jsonl"',
+                "src",
+            ),
+            ("mv audit/records.jsonl audit//records.2026.jsonl", ".claude"),
+            ("mv records.jsonl ./records.2026.jsonl", ".claude/audit"),
+        ],
+    )
+    def test_mv_moves_the_records_aside_in_their_directory(
+        self, tmp_path: Path, shell: str, command: str, cwd: str
+    ) -> None:
+        """Moving the project's records file aside in its own directory,
+        from any directory, by its literal path, is the one mv allowed."""
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        where = tmp_path / cwd if cwd else tmp_path
+        call = {**bash_call(command), "cwd": str(where)}
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_command(hook, call, tmp_path, shell, env)
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Security round 3: ANSI-C quoting spells the records path with no
+            # name the hook's first reading saw; each exited 0, and the first
+            # appended the token under bash
+            "printf '%s\\n' '{\"t\":\"__T__\"}' | "
+            "tee -a $'\\x2ecla\\x75de/a\\x75dit/rec\\x6frds.js\\x6fnl'",
+            "printf '%s\\n' '{\"t\":\"__T__\"}' | "
+            "tee -a $'\\056claude/\\141udit/rec\\157rds.js\\157nl'",
+            "cp /tmp/tok.txt $'\\x2ecla\\x75de/a\\x75dit/rec\\x6frds.js\\x6fnl'",
+            # siblings the verifier found, and $"..." (a locale string)
+            "sed -i 's/x/__T__/' $'\\x2ecla\\x75de/a\\x75dit/rec\\x6frds.js\\x6fnl'",
+            "ln -sf /tmp/x $'\\x2ecla\\x75de/a\\x75dit/rec\\x6frds.js\\x6fnl'",
+            "dd if=/tmp/x $'of=\\x2ecla\\x75de/a\\x75dit/rec\\x6frds.js\\x6fnl'",
+            "cd $'\\x2ecla\\x75de/a\\x75dit' && "
+            "tee -a $'rec\\x6frds.js\\x6fnl' < /tmp/x",
+            "$'\\x70atch' -p0 < /tmp/p.diff",
+            "git $'\\x61pply' /tmp/p.diff",
+            'tee -a $".claude/audit/records.jsonl" < /tmp/x',
+            # $' after a line continuation
+            "tee -a $\\\n'\\x2ecla\\x75de/a\\x75dit/rec\\x6frds.js\\x6fnl' < /tmp/x",
+        ],
+    )
+    def test_blocks_a_name_spelled_with_ansi_c_quoting(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        """$'...' and $"..." can spell any name, so a command holding one
+        is read in full, and a word bash decodes or translates is refused."""
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = command.replace("__T__", TOKEN)
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "", F504)
+
+    def test_an_ansi_c_spelled_name_is_the_records_file(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """The reported route, end to end: bash appends the token to the
+        records file; the hook refuses the call first."""
+        if shutil.which("bash") is None:
+            pytest.skip("bash not available")
+        records = tmp_path / ".claude" / "audit" / "records.jsonl"
+        records.parent.mkdir(parents=True)
+        records.write_text('{"event":"start"}\n')
+        command = (
+            "printf '%s\\n' '{\"t\":\"" + TOKEN + "\"}' | "
+            "tee -a $'\\x2ecla\\x75de/a\\x75dit/rec\\x6frds.js\\x6fnl' > /dev/null"
+        )
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        call = {**bash_call(command), "cwd": str(tmp_path)}
+        assert_blocked(run_command(hook, call, tmp_path, shell), "", F504)
+        subprocess.run(["bash", "-c", command], cwd=tmp_path, check=True, timeout=30)
+        assert TOKEN in records.read_text()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Security round 3: the shared reader did not pair quotes as bash
+            # does, so an escaped quote hid the commands after it (each exited 0)
+            'echo "\\"" ; git apply notes.patch ; echo "\\""',
+            "echo \\' ; git apply notes.patch ; echo \\'",
+            "echo $'\\'' ; git apply notes.patch ; echo $'\\''",
+            "echo \\' ; tee -a .c*/a*/r* ; echo \\'",
+            # an escape inside a name, and a name split by a line continuation
+            "pat\\ch -p1 -i notes.patch",
+            "printf x | tee -a .cl\\\naude/au\\\ndit/rec\\\nords.js\\\nonl",
+            "pat\\\nch -p1 -i notes.patch",
+            "echo a\\\\\ntar xf notes.tar",
+            # an operator a line continuation splits (<\<newline>< is <<)
+            "cat <\\\n<E\nit's\nE\ngit apply notes.patch\necho '",
+            "true \\\n# it's\ngit apply notes.patch\necho ''",
+            # a command substitution's command, and quotes inside one
+            "echo `git apply notes.patch`",
+            "x=`git apply notes.patch`",
+            'echo "$(git apply notes.patch)"',
+            "echo \"$(echo '\"')\"; git apply notes.patch; echo '\"'",
+            'echo "${x:-"}" ; git apply notes.patch ; echo ""}"',
+        ],
+    )
+    def test_reads_quotes_and_escapes_as_bash_does(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        """The words are read as bash reads them: escapes, $'...', line
+        continuations (in a name and in an operator); where a command
+        substitution's own quotes may differ, the command is read again
+        with no quoting at all."""
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Security round 3: programs that write the files their input names,
+            # not on the list (each exited 0)
+            "gunzip -N x/f.gz",
+            "gunzip -fN -S l x/f.gz",
+            "gzip -dN x/f.gz",
+            "gunzip --name x/f.gz",
+            "gunzip --na x/f.gz",
+            "GZIP=-N gunzip x/f.gz",
+            "export GZIP=-N; gunzip x/f.gz",
+            "unpigz -N x/f.gz",
+            "curl -s https://example.com/r",
+            "curl -q -sOJ https://example.com/r",
+            "curl -q -O --remote-header-name https://example.com/r",
+            "curl -q -O --remote-header https://example.com/r",
+            "curl -q -K urls.txt",
+            "curl -q --variable %HOME --expand-output '{{HOME}}/x' https://x/",
+            "wget https://example.com/r",
+            "wget --no-config --content-disposition https://example.com/r",
+            "wget --no-config --trust-server-names https://example.com/r",
+            "wget --no-config -r -nH https://example.com/",
+            "wget --no-config -qrnH https://example.com/",
+            "wget --no-config -x -nH -i urls.txt",
+            "wget --no-config -e content_disposition=on https://example.com/r",
+            "http --download https://example.com/r",
+            "aria2c https://example.com/r",
+            "dpkg -x p.deb .",
+            "rpm -ivh p.rpm",
+            "python3 -m zipfile -e notes.zip .",
+            "python3 -m tarfile -e notes.tar",
+            # a git alias defined in a configuration file or variable
+            "git x notes.patch",
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=apply "
+            "git x notes.patch",
+            "git -C . x notes.patch",
+            # a moved-aside file named by a glob: another file of .claude/audit
+            "gunzip -f -S l .c*/a*/r*1*",
+        ],
+    )
+    def test_blocks_more_programs_that_write_files_their_input_names(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q -s https://example.com/r",
+            "curl -q -sSL -o out.json https://example.com/r",
+            "wget --no-config -q -O- https://example.com/r",
+            "gzip -k notes.txt",
+            "gunzip notes.txt.gz",
+            "zcat notes.txt.gz | head",
+            "git status",
+            "git --version",
+            "git -C src log --oneline -3",
+            "git stash list",
+            "python3 -m pytest -q",
+            "python3 -m json.tool data.json",
+            "dpkg -l",
+            "rpm -qa",
+            "echo 'a\\'",
+            'echo "a\\"b" && ls',
+            "find . -name '*.py' -exec grep -l foo {} \\;",
+            'docker run --rm \\\n  -v "$PWD:/w" \\\n  img make',
+            "git commit -m \"$(cat <<'EOF'\nDon't apply the patch twice\nEOF\n)\"",
+        ],
+    )
+    def test_still_allows_these_commands(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    def test_a_name_gunzip_restores_is_refused_before_it_runs(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """The reported chain: a gzip whose stored name is records.jsonl,
+        gunzip -N, then mv into the audit directory. gunzip restores the
+        name (the fixture's own check); each step is refused now."""
+        if shutil.which("gzip") is None:
+            pytest.skip("gzip not available")
+        work = tmp_path / "x"
+        work.mkdir()
+        (work / "records.jsonl").write_text('{"t":"' + TOKEN + '"}\n')
+        subprocess.run(["gzip", "-N", str(work / "records.jsonl")], check=True)
+        (work / "records.jsonl.gz").rename(work / "f.gz")
+        subprocess.run(["gunzip", "-N", str(work / "f.gz")], check=True)
+        assert (work / "records.jsonl").read_text().startswith('{"t":"ghp_')
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        for command in (
+            "gunzip -N x/f.gz",
+            "mv x/records.jsonl .claude/audit/records.1.jsonl",
+        ):
+            call = {**bash_call(command), "cwd": str(tmp_path)}
+            assert_blocked(run_command(hook, call, tmp_path, shell, env), "", F504)
+
+    def test_a_git_alias_from_a_configuration_file_is_refused(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """An alias a configuration file defines makes git x run git apply,
+        which writes the records file a patch names (the fixture's own
+        check); a command other than git's own is refused."""
+        if shutil.which("git") is None:
+            pytest.skip("git not available")
+        project = tmp_path / "p"
+        records = project / ".claude" / "audit" / "records.jsonl"
+        records.parent.mkdir(parents=True)
+        records.write_text('{"event":"start"}\n')
+        git(project, "init", "-q")
+        git(project, "add", "-f", ".claude")
+        git(project, "commit", "-q", "-m", "records")
+        records.write_text('{"event":"start"}\n{"note":"' + TOKEN + '"}\n')
+        (project / "notes.patch").write_text(git(project, "diff"))
+        git(project, "checkout", "-q", "--", ".")
+        with (project / ".git" / "config").open("a") as config:
+            config.write("[alias]\n\tx = apply\n")
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        call = {**bash_call("git x notes.patch"), "cwd": str(project)}
+        assert_blocked(run_command(hook, call, project, shell), "git x", F504)
+        git(project, "x", "notes.patch")
+        assert TOKEN in records.read_text()
 
     @pytest.mark.parametrize(
         ("command", "reason"),
@@ -2384,6 +2859,14 @@ class TestRollbackCommandHook:
             # words it cannot read
             "sh <<'EOF'\ngit stash apply {other}\nEOF",
             "git stash apply '{other}",
+            # Security round 3: a line continuation split the name the hook's
+            # first reading looks for (each exited 0, and bash restored)
+            "git sta\\\nsh apply {other}",
+            "git $\\\n'\\x73tash' apply {other}",
+            "git stash ap\\\nply {sha}",
+            # an escaped quote no longer hides the commands after it
+            "echo $'\\'' ; git stash apply {other} ; echo $'\\''",
+            'echo "\\"" ; git stash apply {other} ; echo "\\""',
         ],
     )
     def test_blocks_another_spelling_of_a_restore(

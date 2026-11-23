@@ -1137,6 +1137,76 @@ class TestGroundedServerGuard:
             )
         assert adapter.mapper.records == []
 
+    @pytest.mark.parametrize(
+        "metadata",
+        [
+            # Security round 3: an unknown member was dropped, so the tool
+            # loaded as a plain retrieve and ran with no approval, checkpoint
+            # or destination check (STANDARD 1.2.0 section 5.18.1)
+            {
+                "capability": "retrieve",
+                "aproval": {"min_approvers": 2, "role": "admin"},
+            },
+            {"capability": "retrieve", "flag": {"requires_approval": True}},
+            {"capability": "retrieve", "aditional_capabilities": ["send"]},
+            {"capabilty": "mutate"},
+        ],
+    )
+    def test_metadata_with_an_unknown_member_does_not_load(
+        self, ontology_path: str, tmp_path: Path, metadata: dict[str, object]
+    ) -> None:
+        """The metadata is a carrier read as the record: an unknown member
+        reaches the record, which the loader refuses (S303), and no server
+        is created; nothing is registered."""
+        from grounded_agency.mcp import _record, create_grounded_mcp_server
+
+        record = _record("mcp__srv__wipe", "srv", "2.2.0", metadata)
+        assert record is not None
+        assert set(metadata) <= set(record)
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+            )
+        )
+
+        async def handler(args: dict[str, object]) -> dict[str, object]:
+            return {"content": []}
+
+        wipe = SimpleNamespace(
+            name="wipe",
+            description="Wipes.",
+            input_schema={},
+            handler=handler,
+            metadata=metadata,
+        )
+        with pytest.raises(ValueError, match=r"S303 SCHEMA_VALIDATION_FAILED"):
+            create_grounded_mcp_server(
+                name="srv", version="1.0.0", tools=[wipe], adapter=adapter
+            )
+        assert adapter.mapper.records == []
+
+    def test_metadata_reads_the_copies_and_vendor_data_as_before(self) -> None:
+        """The factory names the tool; the legacy capability_id and flat
+        flags are read into capability and flags; vendor data is kept; a
+        tool with no record member is unbound."""
+        from grounded_agency.mcp import _record
+
+        assert _record(
+            "mcp__srv__x",
+            "srv",
+            "2.2.0",
+            {"tool": "x", "capability_id": "mutate", "risk": "high", "x-note": 1},
+        ) == {
+            "tool": "mcp__srv__x",
+            "ontology": "2.2.0",
+            "capability": "mutate",
+            "x-note": 1,
+            "flags": {"risk": "high", "mutation": True, "requires_checkpoint": True},
+        }
+        assert _record("mcp__srv__x", "srv", "2.2.0", {"x-note": 1}) is None
+        assert _record("mcp__srv__x", "srv", "2.2.0", {"risk": "high"}) is None
+
 
 # =============================================================================
 # to_sdk_agents() Tests (Issue 8)

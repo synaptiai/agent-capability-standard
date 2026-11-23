@@ -1104,6 +1104,13 @@ describe('the agent definition', () => {
     ]);
   });
 
+  it('reports an annotation with an unknown member, which does not load (security round 3)', () => {
+    // A misspelt member was dropped, so the lint passed a send read as a
+    // retrieve; the record is S303, so the tool is unbound (W617).
+    const lookup = { annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve', aditional_capabilities: ['send'] } } };
+    expect(lintPromptTools('p', { lookup }).map((d) => [d.code, d.location.tool])).toEqual([['W617', 'lookup']]);
+  });
+
   it('reports a tool whose stated name is not the name it is offered under', () => {
     // Copied from another tool, with `name` left unchanged: an approver
     // would be shown `archive_record` for a call that purges.
