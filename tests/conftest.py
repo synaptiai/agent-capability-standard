@@ -177,3 +177,22 @@ def enter_checkpoint_commit(git_dir: Path, commit: str) -> Path:
         encoding="ascii",
     )
     return entry
+
+
+async def pre_tool_use(
+    adapter: GroundedAgentAdapter,
+    tool_name: str,
+    tool_input: Any,
+    call: str | None,
+    **fields: Any,
+) -> dict[str, Any]:
+    """Run the adapter's PreToolUse safety hook on a call, as Claude Code
+    does before it asks the permission callback about it: the callback
+    decides only on a call the hook checked, with the input it checked
+    (anything else is changed arguments, or R407 with no record).
+    ``fields`` are further hook input members (``cwd``, ``session_id``,
+    ``permission_mode``...). Returns the hook's output."""
+    hook = adapter._make_pretooluse_safety_hook()
+    payload = {"tool_name": tool_name, "tool_input": tool_input, **fields}
+    result: dict[str, Any] = await hook(payload, call, None)
+    return result

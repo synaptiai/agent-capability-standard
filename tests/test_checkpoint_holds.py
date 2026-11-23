@@ -33,6 +33,24 @@ def _adapter(ontology_path: str, tmp_path: Path, **config: Any) -> GroundedAgent
     )
 
 
+async def _decide(
+    adapter: GroundedAgentAdapter, tool: str, args: dict[str, Any], call: str
+) -> Any:
+    """A call's decision as Claude Code reaches it: the PreToolUse hook,
+    then, unless the hook refused it, the permission callback. A hook's
+    refusal is returned in the callback's form (behavior, message)."""
+    from types import SimpleNamespace
+
+    hook = adapter._make_pretooluse_safety_hook()
+    out = (await hook({"tool_name": tool, "tool_input": args}, call, None)).get(
+        "hookSpecificOutput", {}
+    )
+    if out.get("permissionDecision") == "deny":
+        return SimpleNamespace(behavior="deny", message=out["permissionDecisionReason"])
+    callback = adapter._make_permission_callback()
+    return await callback(tool, args, SimpleNamespace(tool_use_id=call))
+
+
 def _decision(result: dict[str, Any]) -> str:
     return result.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
 
@@ -143,17 +161,11 @@ class TestAdapterScope:
         adapter = _adapter(ontology_path, tmp_path)
         adapter.create_checkpoint(["*"], "one")
         adapter.create_checkpoint(["*"], "two")
-        callback = adapter._make_permission_callback()
-        from types import SimpleNamespace
 
         for call in ("w1", "w2"):
-            result = await callback(
-                "Write", {"file_path": call}, SimpleNamespace(tool_use_id=call)
-            )
+            result = await _decide(adapter, "Write", {"file_path": call}, call)
             assert result.behavior == "allow"
-        third = await callback(
-            "Write", {"file_path": "w3"}, SimpleNamespace(tool_use_id="w3")
-        )
+        third = await _decide(adapter, "Write", {"file_path": "w3"}, "w3")
         assert third.message.startswith("F501 CHECKPOINT_REQUIRED:")
 
     @pytest.mark.asyncio
@@ -197,27 +209,19 @@ class TestAdapterScope:
         still can (STANDARD 1.2.0 section 5.18.5). Before, B ran an unbound
         tool and a Write on A's checkpoint, and A then ran its own Write on
         it too: one checkpoint, two gated calls in two scopes."""
-        from types import SimpleNamespace
-
         a = _adapter(ontology_path, tmp_path)
         taken = a.create_checkpoint(["*"], "A's")
         b = _adapter(ontology_path, tmp_path)
         assert not b.has_valid_checkpoint()
-        b_call = b._make_permission_callback()
         for tool, call in (("mcp__ext__do_it", "b1"), ("Write", "b2")):
-            refused = await b_call(
-                tool, {"file_path": "x"}, SimpleNamespace(tool_use_id=call)
-            )
+            refused = await _decide(b, tool, {"file_path": "x"}, call)
             assert refused.message.startswith("F501 CHECKPOINT_REQUIRED:")
         b_pre = b._make_pretooluse_safety_hook()
         result = await b_pre(
             {"tool_name": "mcp__ext__do_it", "tool_input": {}}, "b3", None
         )
         assert _reason(result).startswith("F501 CHECKPOINT_REQUIRED:")
-        a_call = a._make_permission_callback()
-        ran = await a_call(
-            "Write", {"file_path": "a"}, SimpleNamespace(tool_use_id="a1")
-        )
+        ran = await _decide(a, "Write", {"file_path": "a"}, "a1")
         assert ran.behavior == "allow"
         assert a.call_records[-1]["checkpoint_id"] == taken
 
@@ -228,23 +232,14 @@ class TestAdapterScope:
         """A restart is a new scope: the checkpoint an earlier process took
         and never used authorises none of the new adapter's calls. Before,
         the new adapter ran a second Write on it after using its own."""
-        from types import SimpleNamespace
-
         _adapter(ontology_path, tmp_path).create_checkpoint(["*"], "earlier")
         later = _adapter(ontology_path, tmp_path)
-        callback = later._make_permission_callback()
-        unbound = await callback(
-            "mcp__ext__do_it", {}, SimpleNamespace(tool_use_id="m1")
-        )
+        unbound = await _decide(later, "mcp__ext__do_it", {}, "m1")
         assert unbound.message.startswith("F501 CHECKPOINT_REQUIRED:")
         later.create_checkpoint(["*"], "its own")
-        first = await callback(
-            "Write", {"file_path": "w1"}, SimpleNamespace(tool_use_id="w1")
-        )
+        first = await _decide(later, "Write", {"file_path": "w1"}, "w1")
         assert first.behavior == "allow"
-        second = await callback(
-            "Write", {"file_path": "w2"}, SimpleNamespace(tool_use_id="w2")
-        )
+        second = await _decide(later, "Write", {"file_path": "w2"}, "w2")
         assert second.message.startswith("F501 CHECKPOINT_REQUIRED:")
 
     @pytest.mark.asyncio

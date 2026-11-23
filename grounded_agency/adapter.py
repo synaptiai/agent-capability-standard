@@ -50,7 +50,7 @@ import logging
 import os
 import re
 import threading
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -103,6 +103,30 @@ SAFETY_HOOK_TIMEOUT_S: float = 60.0
 
 # A call argument an `acs:` anchor can cite (a §5.3 identifier).
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+
+
+# How many calls' PreToolUse records the adapter keeps (_HookCheck): a call
+# the host never decides nor reports back (a permission rule of its own
+# refused it) leaves one. The oldest goes first; the permission callback
+# refuses a call whose record went (R407).
+_HOOK_CHECK_LIMIT = 4096
+
+
+class _HookCheck(NamedTuple):
+    """What the PreToolUse hook checked of a call it passed or asked about,
+    kept by call id until the call reports back or the permission callback
+    refuses it, whatever boundary passes in between: the callback decides
+    on what the hook checked, or refuses."""
+
+    args_key: str
+    """:func:`_args_key` of the input the hook checked."""
+    cwd: str | None
+    """The directory the call runs in (its hook input's ``cwd``): the
+    callback's context carries none, and a git read that may fetch from
+    another host (a partial clone) is classified there."""
+    asked_at: datetime | None
+    """When the hook asked for a decision (its ``"ask"``): a binding's
+    ``approval.expires`` counts from then (section 5.18.7)."""
 
 
 class _Fault(NamedTuple):
@@ -822,17 +846,13 @@ class GroundedAgentAdapter:
         # of its output, section 5.20): the post-call hooks do not record
         # it again.
         self._outcome_recorded: set[str] = set()
-        # The directory each call runs in (its hook input's `cwd`), by call
-        # id, from the PreToolUse hook until the call reports back: the
-        # permission callback, whose context carries none, classifies the
-        # call there too, so a git read that may fetch from another host
-        # (a partial clone) is classified alike in both.
-        self._call_dirs: dict[str, str] = {}
-        # When the layer asked for a decision on a call whose binding sets
-        # approval.expires, by call id (the PreToolUse hook's "ask"): the
-        # permission callback refuses a decision that arrives later than
-        # that after the request (section 5.18.7).
-        self._asked_at: dict[str, datetime] = {}
+        # What the PreToolUse hook checked of each call it passed or asked
+        # about, by call id (_HookCheck): the input's digest, the call's
+        # directory and the time of the ask. Kept until the call reports
+        # back or the permission callback refuses it; an execution boundary
+        # does not clear it (it records what was checked, and authorises
+        # nothing). Bounded by _HOOK_CHECK_LIMIT, oldest first.
+        self._hook_checks: OrderedDict[str, _HookCheck] = OrderedDict()
         # The tools create_grounded_mcp_server serves, which check their own
         # output (section 5.20); the PostToolUse hook checks other servers'
         # bound MCP tools. Tools a policy would check but whose results carry
@@ -1489,12 +1509,87 @@ class GroundedAgentAdapter:
                 )
         return None
 
+    def _changed_input_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None, args: Any
+    ) -> str | None:
+        """The refusal of a call the permission callback is asked about
+        with an input the PreToolUse hook did not check (section 5.18.7,
+        changed arguments), or None: a check of section 5.18.10 that fails
+        with it (F504: a secret in persist or audit data, a destination the
+        policy does not allow); a prerequisite that has not run (F501,
+        F503, V102) or a checkpoint the call does not hold (F501), which
+        log instead with ``strict_mode=False``; and, for a call that
+        requires approval, F502: the decision asked for was on other
+        arguments."""
+        refusal = self._secret_refusal(
+            mapping, tool, call, args
+        ) or self._destination_refusal(mapping, tool, call, args)
+        if refusal is not None:
+            return refusal
+        refusal = self._prerequisite_refusal(mapping, tool, call)
+        if refusal is None and mapping.requires_checkpoint:
+            held = call is not None and self.checkpoint_tracker.held_by(call)
+            if not held:
+                refusal = self._refuse(
+                    ErrorCode.CHECKPOINT_REQUIRED,
+                    mapping,
+                    tool,
+                    call,
+                    f"the input of {tool} is not the one this layer's "
+                    f"PreToolUse hook checked, and the call it makes requires "
+                    f"a checkpoint the call does not hold",
+                )
+        if refusal is not None:
+            if self.config.strict_mode:
+                return refusal
+            logger.warning("Permission warning (non-strict): %s", refusal)
+        if self.config.approval != "off" and mapping.requires_approval:
+            return self._refuse(
+                ErrorCode.APPROVAL_REQUIRED,
+                mapping,
+                tool,
+                call,
+                f"the input of {tool} is not the one this layer's PreToolUse "
+                f"hook checked: the decision asked for was on other arguments. "
+                f"{tool} did not run.",
+            )
+        return None
+
+    def _note_hook_check(
+        self, call: str, input_data: dict[str, Any], asked: bool
+    ) -> None:
+        """Keep what the PreToolUse hook checked of ``call`` (_HookCheck)."""
+        check = _HookCheck(
+            _args_key(input_data.get("tool_input", {})),
+            _cwd_of(input_data),
+            self._now() if asked else None,
+        )
+        with self._state_lock:
+            self._hook_checks.pop(call, None)
+            self._hook_checks[call] = check
+            while len(self._hook_checks) > _HOOK_CHECK_LIMIT:
+                self._hook_checks.popitem(last=False)
+
+    def _hook_check(self, call: str | None) -> _HookCheck | None:
+        """What the PreToolUse hook checked of ``call``, if it kept it."""
+        if call is None:
+            return None
+        with self._state_lock:
+            return self._hook_checks.get(call)
+
+    def _drop_hook_check(self, call: str | None) -> _HookCheck | None:
+        """Forget what the PreToolUse hook checked of ``call``."""
+        if call is None:
+            return None
+        with self._state_lock:
+            return self._hook_checks.pop(call, None)
+
     def _call_dir(self, call: str | None, input_data: dict[str, Any]) -> str | None:
         """The directory a call that reported back ran in (its hook input's
-        `cwd`), forgetting the one its PreToolUse hook kept."""
-        with self._state_lock:
-            kept = self._call_dirs.pop(call, None) if call else None
-        return _cwd_of(input_data) or kept
+        `cwd`, else the one its PreToolUse hook kept), forgetting what that
+        hook kept of it."""
+        kept = self._drop_hook_check(call)
+        return _cwd_of(input_data) or (kept.cwd if kept is not None else None)
 
     @staticmethod
     def _take_entry(
@@ -1726,6 +1821,11 @@ class GroundedAgentAdapter:
         call this layer saw allowed). The prompt tool decides the other
         calls that require approval.
 
+        Options this adapter wrapped can be wrapped again: their hooks are
+        kept, and the safety hook is replaced by one built for the options
+        now wrapped, so a permission prompt tool or a permission mode set
+        between the two wraps applies as if they were wrapped once.
+
         Args:
             base: ClaudeAgentOptions instance
 
@@ -1739,8 +1839,10 @@ class GroundedAgentAdapter:
         # Build hooks dict
         existing_hooks = getattr(base, "hooks", None) or {}
         # Options this adapter already wrapped keep their hooks (adding a
-        # second safety hook would charge the rate limit twice per call);
-        # everything else below is applied again.
+        # second safety hook would charge the rate limit twice per call),
+        # but for the safety hook, which is built for the options it wraps
+        # (their permission prompt tool and mode) and so is replaced by one
+        # built for these; everything else below is applied again.
         already_wrapped = self._already_wrapped(existing_hooks)
         post_hooks = list(existing_hooks.get("PostToolUse", []))
 
@@ -1780,11 +1882,10 @@ class GroundedAgentAdapter:
         # It refuses with R407 when a check fails inside it; a callback that
         # fails or gives no verdict in time, seen from the CLI, blocks the
         # call too (section 5.18.8), where the SDK can say so.
-        pre_hooks.append(
-            self._wrap_hook(
-                safety_pre_hook, on_failure="block", timeout=SAFETY_HOOK_TIMEOUT_S
-            )
+        safety_entry = self._wrap_hook(
+            safety_pre_hook, on_failure="block", timeout=SAFETY_HOOK_TIMEOUT_S
         )
+        pre_hooks.append(safety_entry)
 
         # Stop and UserPromptSubmit: execution boundaries (a turn's end, and
         # the next turn's start, which also ends what a turn left when its
@@ -1815,7 +1916,12 @@ class GroundedAgentAdapter:
             pre_hooks.append(self._wrap_hook(discovery_hook))
 
         merged_hooks = (
-            existing_hooks
+            {
+                **existing_hooks,
+                "PreToolUse": self._replace_safety_hook(
+                    existing_hooks.get("PreToolUse") or [], safety_entry
+                ),
+            }
             if already_wrapped
             else {
                 **existing_hooks,
@@ -1885,16 +1991,46 @@ class GroundedAgentAdapter:
 
         return replace(base, **kwargs)
 
+    @staticmethod
+    def _entry_hooks(entry: Any) -> list[Any]:
+        """The hook functions of a PreToolUse entry (a ``HookMatcher`` or
+        the SDK's dict form)."""
+        if isinstance(entry, dict):
+            return list(entry.get("hooks") or [])
+        return list(getattr(entry, "hooks", None) or [])
+
+    def _is_safety_hook(self, fn: Any) -> bool:
+        return getattr(fn, "_grounded_adapter", None) is self
+
     def _already_wrapped(self, hooks: dict[str, Any]) -> bool:
         """Whether ``hooks`` already holds this adapter's safety hook."""
-        for entry in hooks.get("PreToolUse") or []:
-            if isinstance(entry, dict):
-                fns = entry.get("hooks") or []
-            else:
-                fns = getattr(entry, "hooks", None) or []
-            if any(getattr(fn, "_grounded_adapter", None) is self for fn in fns):
-                return True
-        return False
+        return any(
+            self._is_safety_hook(fn)
+            for entry in hooks.get("PreToolUse") or []
+            for fn in self._entry_hooks(entry)
+        )
+
+    def _replace_safety_hook(self, entries: list[Any], safety_entry: Any) -> list[Any]:
+        """``entries`` (PreToolUse) with this adapter's safety hook replaced
+        by ``safety_entry``, where the first one was; any other function an
+        entry held beside it is kept in that entry."""
+        out: list[Any] = []
+        placed = False
+        for entry in entries:
+            fns = self._entry_hooks(entry)
+            if not any(self._is_safety_hook(fn) for fn in fns):
+                out.append(entry)
+                continue
+            if not placed:
+                out.append(safety_entry)
+                placed = True
+            rest = [fn for fn in fns if not self._is_safety_hook(fn)]
+            if rest:
+                if isinstance(entry, dict):
+                    out.append({**entry, "hooks": rest})
+                else:
+                    out.append(replace(entry, hooks=rest))
+        return out
 
     def _wrap_hook(
         self,
@@ -1972,7 +2108,10 @@ class GroundedAgentAdapter:
         whatever session took it: one adapter is one scope. Holds of other
         sessions' calls in flight stay with them; one still waiting at a
         prompt is refused with F501 when it is allowed. The calls this layer
-        allowed and that did not run are forgotten.
+        allowed and that did not run are forgotten. What the PreToolUse hook
+        checked of each call in flight (its directory, the input's digest,
+        the time of its ask) is kept: the permission callback still decides
+        on it, whoever's turn ended.
 
         Returns:
             Async hook callback function
@@ -1995,8 +2134,6 @@ class GroundedAgentAdapter:
                     self._allowed.clear()
                     self._asked_calls.clear()
                     self._outcome_recorded.clear()
-                    self._call_dirs.clear()
-                    self._asked_at.clear()
                 self._record(
                     "boundary",
                     "",
@@ -2107,12 +2244,12 @@ class GroundedAgentAdapter:
         def deny(message: str) -> dict[str, Any]:
             return decide("deny", message)
 
-        async def check_before_tool(
+        async def check_call(
             input_data: dict[str, Any],
             tool_use_id: str | None,
             context: HookContext | None,
         ) -> dict[str, Any]:
-            """PreToolUse hook: every check of section 5.18, in order."""
+            """Every check of section 5.18, in order."""
             tool_name = ""
             # Until the call is classified, assume the strictest case.
             mapping = UNCLASSIFIED_TOOL
@@ -2132,9 +2269,6 @@ class GroundedAgentAdapter:
                 tool_input = input_data.get("tool_input", {})
                 call = tool_use_id or input_data.get("tool_use_id")
                 cwd = _cwd_of(input_data)
-                if call is not None and cwd is not None:
-                    with self._state_lock:
-                        self._call_dirs[call] = cwd
 
                 try:
                     mapping = mapper.map_tool(tool_name, tool_input, cwd)
@@ -2335,9 +2469,6 @@ class GroundedAgentAdapter:
                     message = _approval_request(
                         mapping, tool_name, self.mapper.person_required(mapping)
                     )
-                    if expires is not None and call is not None:
-                        with self._state_lock:
-                            self._asked_at[call] = self._now()
                     # No decision yet: a grounded MCP tool runs the call only
                     # once the permission callback allows it.
                     self._ask_token(tool_name, tool_input, call)
@@ -2402,6 +2533,28 @@ class GroundedAgentAdapter:
                 return decide("ask", _approval_request(mapping, tool_name, person))
             return {}
 
+        async def check_before_tool(
+            input_data: dict[str, Any],
+            tool_use_id: str | None,
+            context: HookContext | None,
+        ) -> dict[str, Any]:
+            """PreToolUse hook: every check of section 5.18, in order; for a
+            call it passes or asks about, what it checked is kept for the
+            permission callback (:meth:`_note_hook_check`)."""
+            result = await check_call(input_data, tool_use_id, context)
+            out = result.get("hookSpecificOutput") or {}
+            decision = out.get("permissionDecision")
+            call = tool_use_id or input_data.get("tool_use_id")
+            if decision == "deny" or not isinstance(call, str):
+                return result
+            try:
+                self._note_hook_check(call, input_data, asked=decision == "ask")
+            except Exception:
+                # The permission callback, if the host asks it, finds no
+                # record and refuses the call (R407).
+                logger.exception("Could not keep what the PreToolUse hook checked")
+            return result
+
         return check_before_tool
 
     def _make_mutation_consumer(self) -> Any:
@@ -2440,9 +2593,8 @@ class GroundedAgentAdapter:
             """PostToolUse hook: use the call's hold, record that it ran."""
             holder = tool_use_id or input_data.get("tool_use_id")
             if holder:
-                with self._state_lock:
-                    self._asked_at.pop(holder, None)
                 self._forget_call(holder)
+            call_dir = self._call_dir(holder, input_data)
             tool_name = input_data.get("tool_name", "")
             tool_input = input_data.get("tool_input", {})
             try:
@@ -2462,9 +2614,7 @@ class GroundedAgentAdapter:
                         logger.info(
                             "Checkpoint %s used by %s", checkpoint_id, tool_name
                         )
-                mapping = mapper.map_tool(
-                    tool_name, tool_input, self._call_dir(holder, input_data)
-                )
+                mapping = mapper.map_tool(tool_name, tool_input, call_dir)
                 tool_response = input_data.get("tool_response")
                 try:
                     fault = self._host_result_fault(
@@ -2548,9 +2698,8 @@ class GroundedAgentAdapter:
             """PostToolUseFailure hook: use the call's hold."""
             holder = tool_use_id or input_data.get("tool_use_id")
             if holder:
-                with self._state_lock:
-                    self._asked_at.pop(holder, None)
                 self._forget_call(holder)
+            call_dir = self._call_dir(holder, input_data)
             tool_name = input_data.get("tool_name", "")
             try:
                 checkpoint_id = tracker.consume_checkpoint(holder) if holder else None
@@ -2567,9 +2716,7 @@ class GroundedAgentAdapter:
                     # loses neither the record nor the failure.
                     try:
                         mapping: ToolMapping | None = self.mapper.map_tool(
-                            tool_name,
-                            input_data.get("tool_input", {}),
-                            self._call_dir(holder, input_data),
+                            tool_name, input_data.get("tool_input", {}), call_dir
                         )
                     except Exception as e:
                         logger.warning("Failure recorder cannot map: %s", e)
@@ -2596,11 +2743,17 @@ class GroundedAgentAdapter:
         callback:
 
         1. Allows a control-only call.
-        2. For a gated call, holds its checkpoint (the same hold as the
+        2. Decides only on what this layer's PreToolUse hook checked of the
+           call (:meth:`_note_hook_check`, by ``tool_use_id``): a call it
+           has no record of is refused (R407), and an input other than the
+           one it checked, as another hook's ``updatedInput`` makes it, is
+           changed arguments (:meth:`_changed_input_refusal`: F504, F501,
+           F502). The call is classified in the directory the hook saw.
+        3. For a gated call, holds its checkpoint (the same hold as the
            PreToolUse hook's; F501 when none is left; R407 when the call has
            no ``tool_use_id``). The checkpoint is checked before a person is
            asked.
-        3. Hands the decision to ``host_can_use_tool`` when there is one.
+        4. Hands the decision to ``host_can_use_tool`` when there is one.
            A result that is not an allow releases the hold; for a call that
            requires approval it becomes ``F502 APPROVAL_REQUIRED: <tool> was
            not approved: <the host's message>``. So does an allow that
@@ -2613,12 +2766,12 @@ class GroundedAgentAdapter:
            a prerequisite (F501, F503, V102) or a checkpoint (F501) the call
            does not hold, or approval (F502: the decision was on other
            arguments).
-        4. With no host callback: refuses a call that requires approval
+        5. With no host callback: refuses a call that requires approval
            (F502), since no one can give it.
-        5. Uses the held checkpoint when the call is allowed, re-checking in
+        6. Uses the held checkpoint when the call is allowed, re-checking in
            one atomic step that it is still valid (F501 otherwise: it
            expired, or a boundary passed, while the call waited).
-        6. Grants a grounded MCP tool the decision for the call (with the
+        7. Grants a grounded MCP tool the decision for the call (with the
            arguments it runs with) only on its allow, and only for a call
            the PreToolUse hook passed or asked about; any other answer,
            an error included, withdraws what the hook left for the call.
@@ -2700,14 +2853,47 @@ class GroundedAgentAdapter:
             # this callback starts.
             requested = self._now()
             try:
-                with self._state_lock:
-                    cwd = self._call_dirs.get(holder) if holder else None
-                    asked = self._asked_at.pop(holder, None) if holder else None
-                if asked is not None and asked < requested:
-                    requested = asked
+                # What the PreToolUse hook checked of this call: where it
+                # runs, the input, and when the hook asked.
+                checked = self._hook_check(holder)
+                cwd = checked.cwd if checked is not None else None
+                if checked is not None and checked.asked_at is not None:
+                    requested = min(requested, checked.asked_at)
                 mapping0 = mapper.map_tool(tool_name, input_data, cwd)
                 if mapping0.control:
                     return allow(input_data), input_data
+
+                if checked is None:
+                    # Section 5.18.8: the layer cannot tell what was checked
+                    # of the call it is asked about (its hook did not run on
+                    # it, or it has no tool_use_id to find the record by).
+                    if holder is None and mapping0.requires_checkpoint:
+                        message = self._unheld_call_refusal(mapping0, tool_name)
+                    else:
+                        message = self._refuse(
+                            ErrorCode.SAFETY_CHECK_FAILED,
+                            mapping0,
+                            tool_name,
+                            holder,
+                            f"this layer's PreToolUse hook has no record of "
+                            f"checking this {tool_name} call"
+                            + ("" if holder else " (it has no tool_use_id)")
+                            + f", so the layer cannot tell what the decision "
+                            f"would be on; {tool_name} did not run",
+                        )
+                    if strict:
+                        return deny(message, holder), None
+                    logger.warning("Permission warning (non-strict): %s", message)
+                if checked is None or checked.args_key != _args_key(input_data):
+                    # Section 5.18.7, changed arguments: another hook, or
+                    # the host, changed the input after this layer's hook
+                    # checked it. Checked again (section 5.18.10), and the
+                    # decision asked for was on other arguments.
+                    refusal = self._changed_input_refusal(
+                        mapping0, tool_name, holder, input_data
+                    )
+                    if refusal is not None:
+                        return deny(refusal, holder), None
 
                 if mapping0.requires_checkpoint:
                     if holder is None:
@@ -2911,6 +3097,9 @@ class GroundedAgentAdapter:
             result, runs_with = await decide_permission(
                 tool_name, input_data, context, holder
             )
+            if runs_with is None:
+                # Refused: the call never runs nor reports back.
+                self._drop_hook_check(holder)
             try:
                 self._settle_decision(tool_name, input_data, holder, runs_with)
             except Exception as e:

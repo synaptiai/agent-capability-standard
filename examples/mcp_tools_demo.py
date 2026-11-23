@@ -152,21 +152,33 @@ async def demo_permission_enforcement():
         # execute requires approval, so the host's callback (here:
         # approve) decides the call once the checkpoint rule is satisfied.
         callback = adapter._make_permission_callback(approve)
+        pre_tool_use = adapter._make_pretooluse_safety_hook()
 
-        # Claude Code names each call (tool_use_id); the call holds the
-        # checkpoint it uses under that id.
+        async def decide(tool_use_id: str) -> object:
+            # Claude Code names each call (tool_use_id), runs the PreToolUse
+            # hook on it, then, unless the hook refused it, asks the
+            # callback, which decides only on a call the hook checked. The
+            # call holds the checkpoint it uses under that id.
+            call = {"tool_name": "mcp__deploy__push", "tool_input": {}}
+            out = (await pre_tool_use(call, tool_use_id, None)).get(
+                "hookSpecificOutput", {}
+            )
+            if out.get("permissionDecision") == "deny":
+                return SimpleNamespace(
+                    behavior="deny", message=out["permissionDecisionReason"]
+                )
+            return await callback(
+                "mcp__deploy__push", {}, SimpleNamespace(tool_use_id=tool_use_id)
+            )
+
         # Without checkpoint
-        result = await callback(
-            "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="deploy-1")
-        )
+        result = await decide("deploy-1")
         print(f"Without checkpoint: {'allowed' if is_allowed(result) else 'BLOCKED'}")
         print(f"  {getattr(result, 'message', '')}")
 
         # With checkpoint
         adapter.create_checkpoint(["*"], "Before deploy")
-        result = await callback(
-            "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="deploy-2")
-        )
+        result = await decide("deploy-2")
         print(f"With checkpoint: {'ALLOWED' if is_allowed(result) else 'blocked'}")
 
 

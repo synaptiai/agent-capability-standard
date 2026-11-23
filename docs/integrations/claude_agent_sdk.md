@@ -309,7 +309,7 @@ flowchart TB
 
 ## Checkpoint Lifecycle
 
-Checkpoints are the core safety mechanism ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). One checkpoint authorises one call whose effective `requires_checkpoint` is true, a call of the adapter that took it ([§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency)). A checkpoint the adapter reads back from `checkpoint_dir`, taken by an earlier process or by another adapter on that directory, can be found and restored, but authorises nothing, counts as no checkpoint taken in its scope and names no commit a `git stash apply` restores. Adapters that share the directory merge its state file under a file lock, so none drops or rewinds another's. A checkpoint's life:
+Checkpoints are the core safety mechanism ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). One checkpoint authorises one call whose effective `requires_checkpoint` is true, a call of the adapter that took it ([§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency)). A checkpoint the adapter reads back from `checkpoint_dir`, taken by an earlier process or by another adapter on that directory, can be found and restored, but authorises nothing, counts as no checkpoint taken in its scope and names no commit a `git stash apply` restores. Adapters that share the directory merge its state file under a file lock, so none drops or rewinds another's. The tracker writes in `checkpoint_dir` and its `archive/` without following a symbolic link (at those directories, at each directory on the way to a relative `checkpoint_dir`, and at the files), and neither reads nor appends to an archive git tracks: a repository can ship a link there, and with one the tracker keeps its records in memory and logs a warning. A checkpoint's life:
 
 ```mermaid
 ---
@@ -430,6 +430,8 @@ The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, a
 - **What a prompt cannot give** is refused with F502: a binding whose `approval.min_approvers` is above 1, or that names an `approval.role`.
 - **Expiry.** A binding's `approval.expires` is how long after the request a decision may arrive ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)): the permission callback refuses with F502 an allow that comes later than that after PreToolUse asked, and the call does not run.
 - **Changed arguments.** When your callback allows with an `updated_input` other than the input, the adapter classifies the new arguments again and refuses the call if they need approval (F502: the decision was on other arguments), or a checkpoint or prerequisite the call does not hold (F501, F503, V102).
+- **What the hook checked.** The permission callback decides only on what the PreToolUse hook checked of the call: the hook keeps, by `tool_use_id`, the digest of the input it checked, the call's directory and the time of its ask, until the call reports back or the callback refuses it (no boundary clears them). An input other than that one, as when another PreToolUse hook answers with `updatedInput`, is changed arguments: checked again against the secret and destination rules (F504), and refused when it needs a checkpoint the call does not hold (F501) or approval (F502). A call the hook has no record of is refused with R407. A call the hook passed that Claude Code's own rules allow without the callback (`allowed_tools`, an allow rule, `bypassPermissions`) runs with another hook's `updatedInput` unchecked: keep the tools such a hook rewrites out of those rules.
+- **Wrapping again.** Options `wrap_options()` returned can be wrapped again (after setting a `permission_prompt_tool_name` or a `permission_mode`, say): the hooks are kept, and the safety hook is replaced by one built for the options now wrapped.
 
 ### Who Decides
 
@@ -1069,7 +1071,8 @@ class GroundedClient:
 
 ### GroundedAgentAdapter
 
-**Checkpoint content.** With `GroundedAgentConfig(snapshots=FileSnapshotStore(".", ".snapshots"))`,
+**Checkpoint content.** With `GroundedAgentConfig(snapshots=FileSnapshotStore(".", ".snapshots"))`
+(the store refuses, with `ValueError`, a `store_dir` or an `objects/` or `manifests/` in it that is a symbolic link),
 a checkpoint also keeps a copy of the files its scope names, and
 `adapter.checkpoint_tracker.restore_checkpoint(checkpoint_id)` puts them
 back, used or not (STANDARD 1.2.0 §4.4.1); it never captures `.claude/`,

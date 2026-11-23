@@ -81,16 +81,29 @@ async def main():
     # mutate requires approval as well as a checkpoint; approve stands in
     # for the host's can_use_tool callback.
     permission_callback = adapter._make_permission_callback(approve)
+    pre_tool_use = adapter._make_pretooluse_safety_hook()
+
+    async def decide(tool_name: str, tool_input: dict, tool_use_id: str) -> object:
+        # Claude Code runs the PreToolUse hook on a call, then, unless the
+        # hook refused it, asks the callback, which decides only on a call
+        # the hook checked.
+        call = {"tool_name": tool_name, "tool_input": tool_input}
+        out = (await pre_tool_use(call, tool_use_id, None)).get(
+            "hookSpecificOutput", {}
+        )
+        if out.get("permissionDecision") == "deny":
+            return SimpleNamespace(behavior="deny", message=out["permissionDecisionReason"])
+        return await permission_callback(
+            tool_name, tool_input, SimpleNamespace(tool_use_id=tool_use_id)
+        )
 
     print("\n--- Initial State ---")
     print(f"Valid checkpoint: {adapter.has_valid_checkpoint()}")
 
     # Try Write without checkpoint
     print("\nAttempting Write without checkpoint:")
-    result = await permission_callback(
-        "Write",
-        {"file_path": "config.yaml", "content": "debug: true"},
-        SimpleNamespace(tool_use_id="write_001"),
+    result = await decide(
+        "Write", {"file_path": "config.yaml", "content": "debug: true"}, "write_001"
     )
     print(f"  Result: {'allowed' if is_allowed(result) else 'BLOCKED'}")
 
@@ -142,10 +155,8 @@ async def main():
 
     # Now try Write again - should be allowed
     print("\nAttempting Write with checkpoint:")
-    result = await permission_callback(
-        "Write",
-        {"file_path": "config.yaml", "content": "debug: true"},
-        SimpleNamespace(tool_use_id="write_002"),
+    result = await decide(
+        "Write", {"file_path": "config.yaml", "content": "debug: true"}, "write_002"
     )
     print(f"  Result: {'ALLOWED' if is_allowed(result) else 'blocked'}")
     print(f"Valid checkpoint after the Write: {adapter.has_valid_checkpoint()}")

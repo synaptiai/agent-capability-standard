@@ -2533,3 +2533,239 @@ quoting. No version changes.
   before the change: the 140 ms is the pattern checks that run before the
   line is read). No CLI or nested agent was started; nothing was left
   running; the scratch repositories were removed.
+
+### Batch 3: four reported defects
+
+Four defects, each reproduced by an independent verifier on bfb18b1: one in
+how the checkpoint tracker writes its files, three in how the SDK adapter's
+permission callback relates to its PreToolUse hook. None was fixed by an
+earlier batch (git log, round 1 and batches 1 and 2 checked; their tests pass
+unchanged). Each fix has tests that fail on the code before it: the 35 new
+tests were run with e3968ef's tracker, snapshot store and adapter put back,
+and 31 failed; the 4 that passed are controls (an ordinary snapshot store, an
+absolute `checkpoint_dir` through a linked parent, an unchanged input, a
+control-only call with no record).
+
+#### 10. The checkpoint archive followed a repository-shipped link (medium); siblings: the checkpoint directory, the archive directory, the snapshot store
+
+The tracker opened its state file and lock with `O_NOFOLLOW` and did not load
+a state file git tracks, but appended pruned checkpoints with
+`open(checkpoint_dir/archive/pruned_checkpoints.jsonl, "a")` after
+`archive.mkdir()`. git stores links, so a clone could ship the archive file
+as one: the 102nd checkpoint (each a call that needs no checkpoint and no
+approval: `git stash create`, a bound `checkpoint` tool) appended a JSON line,
+with the `reason` and `scope` a bound tool's caller writes, wherever it led
+(the verifier's probe: `~/.bashrc`, and a `$(...)` in the reason ran when the
+shell started). Siblings the verifier found: a link at `.checkpoints/archive`
+made the tracker create the archive in another directory, and one at
+`.checkpoints` itself put the state file, its lock and the archive there
+(`O_NOFOLLOW` guards only the last component; `mkstemp` and `os.replace` ran
+in the linked directory). Sibling found here: `FileSnapshotStore(".",
+".snapshots")`, which the SDK guide names, resolved `store_dir` through a
+link and created `objects/` and `manifests/` there, and `chmod`ed the target
+to 0700.
+
+- Fix: `grounded_agency/utils/layer_dir.py` (`open_layer_dir`, `LayerDir`,
+  `LinkedPathError`): a directory of the layer's records is opened without
+  following a link at it, nor, for a relative path, at any directory on the
+  way to it from the current one (the directories above an absolute path are
+  the host's); every file operation then stays in that directory through its
+  descriptor (`dir_fd`: open with `O_NOFOLLOW`, `mkdir`, the temporary file,
+  `os.replace`, `unlink`), with an `lstat` check per name where the platform
+  has no `dir_fd`.
+- Tracker: the state file, its lock, its temporary file and the archive are
+  opened through it; the archive only as a regular file (`fstat`, opened
+  `O_NONBLOCK` so a FIFO is not waited on), created mode 0600, and an
+  archive git tracks is neither read nor appended to (`_tracked_by_git`, as
+  for the state file). With a link, the tracker writes nothing and keeps its
+  records in memory; a prune that cannot archive is logged with the ids it
+  drops, and the pruned checkpoints' content is discarded either way
+  (before, it was discarded only after a successful archive write).
+- Snapshot store: `_private_store` makes or checks `store_dir`, `objects/`
+  and `manifests/` the same way (mode 0700 through the descriptor) and
+  raises `ValueError` for a link.
+- Not changed: the tracker's `marker_dir` (`.claude/checkpoint.ok`) keeps
+  the plugin's convention, which reads and writes a linked `.claude` where
+  it leads (round 2 #2); the tracker writes a fixed name with fixed content
+  there by `os.replace`, never through a link at the file and never an
+  append. The evidence, idempotency and memory stores open a path the host
+  names with `O_NOFOLLOW` at the file and create no directory.
+- Tests: `tests/test_shipped_record_links.py` (16): a shipped link at the
+  archive file, at `.checkpoints/archive` and at `.checkpoints`, from a
+  relative and an absolute `checkpoint_dir` (nothing written or read through
+  it, the prune logged, the tracker still authorises its calls); a tracked
+  archive neither read nor written; the adapter end to end (102 calls of a
+  bound checkpoint tool through the hooks `wrap_options` installs, the
+  verifier's reproduction); the snapshot store with a linked `store_dir`,
+  `objects/` or `manifests/` (`ValueError`, nothing made there, no mode
+  change); controls (an ordinary archive, written 0600 and read back; an
+  absolute path through a linked parent; an ordinary store).
+
+#### 11. A boundary in any session cleared the per-call state of other sessions' calls in flight (medium)
+
+`end_of_turn` (the Stop or UserPromptSubmit of any session the adapter
+serves) cleared `_call_dirs` and `_asked_at` for every call. The permission
+callback then classified a waiting call in the host process's directory and
+counted `approval.expires` from its own start: a `git log -p` in a partial
+clone (gated as `mutate` and `send` in its own directory) was `observe` and
+allowed with no approval, on a checkpoint the boundary had ended; a decision
+40 s after a PT30S ask was allowed. The window is from A's PreToolUse hook
+to the start of the callback (the verifier's correction: a boundary while the
+host's prompt is open was already refused).
+
+- Fix: one record per call, `_HookCheck` (the digest of the input the hook
+  checked, the call's `cwd`, the time of its ask), kept by the PreToolUse
+  hook for every call it passes or asks about (a wrapper around the checks,
+  so every such return keeps one) in `_hook_checks`, until the call reports
+  back (PostToolUse, PostToolUseFailure drop it first thing) or the callback
+  refuses it. No boundary clears it: it records what was checked and
+  authorises nothing (the boundary still clears `_allowed`, `_asked_calls`
+  and `_outcome_recorded`). The table is bounded (`_HOOK_CHECK_LIMIT`, 4096,
+  oldest first: a call the host refused by its own rules leaves one).
+- The callback refuses with R407 a call it has no record of (§5.18.8: it
+  cannot tell what was checked), a control-only call excepted; a call
+  without a `tool_use_id` that needs a checkpoint keeps its earlier
+  diagnostic (F501 when no checkpoint is valid, else R407).
+- Tests: `TestABoundaryKeepsWhatTheHookChecked` in
+  `tests/test_permission_callback_record.py` (the partial clone with the host
+  process elsewhere and session B's Stop or UserPromptSubmit in between:
+  refused as `mutate`, nothing fetched; with a host that approves, F501; the
+  PT30S expiry with the callback starting at 25 s and the answer at 40 s:
+  F502), and `TestACallTheHookHasNoRecordOf` (R407; a control-only call still
+  runs; the record goes when the call reports back or is refused; the
+  oldest goes past the limit, and its call is then R407).
+
+#### 12. The permission callback did not check input other than the one the hook checked (medium)
+
+`decide_permission` classified the callback's input, but ran the secret,
+destination and prerequisite checks only when the host's allow carried an
+`updated_input` that differed from it. Claude Code gives every PreToolUse
+hook the model's input and then runs the call with another hook's
+`updatedInput` in its place (read from the bundled CLI by the verifier), so
+the callback was asked about input B while the hook had checked A: a send to
+a destination the policy refuses and persist data holding an AWS key were
+allowed, with or without a host callback.
+
+- Fix: with #11's record, an input whose digest differs from the one the
+  hook checked (or with no record, in non-strict mode) is changed arguments
+  (§5.18.7), `_changed_input_refusal`: the secret and destination checks of
+  §5.18.10 (F504), the prerequisites and a checkpoint the call does not hold
+  (F501, F503, V102; logged with `strict_mode=False`), and F502 for a call
+  that requires approval (the decision asked for was on other arguments).
+  The host's own `updated_input` is checked as before.
+- Not covered, named in the statement's host gaps and SECURITY.md §5.5: a
+  call the hook passed that Claude Code's own rules allow without the
+  callback (`allowed_tools`, an allow rule, `bypassPermissions`) runs with
+  another hook's `updatedInput`, which the layer sees only at PostToolUse; a
+  host that adds such a hook keeps the tools it rewrites out of those rules.
+  For the plugin the same rewrite comes from a hook in the settings, whose
+  commands already run unchecked (round 2 #6, #9).
+- Tests: `TestAnInputTheHookDidNotCheck` (the verifier's cases: a refused
+  destination and a key in `TaskCreate` data, F504 with and without a host
+  callback; an allowed destination with other arguments, F502; `ls` checked
+  and `rm -rf x` asked about, F501; the same input, allowed and granted).
+
+#### 13. Re-wrapping options kept the first wrap's safety hook (medium); siblings: the permission mode, a prompt tool removed
+
+`wrap_options` kept the existing hooks when they held this adapter's safety
+hook, which was built with the first wrap's `prompt_tool` and
+`options_mode`. Wrapped, then given a `permission_prompt_tool_name` (and
+`can_use_tool=None`, which the SDK requires) and wrapped again, the options
+had no callback and the old hook asked about a Write and held its
+checkpoint: allowed by the prompt tool after another session's boundary, it
+ran on the ended checkpoint with no F501 (round 1 #20's R407 no longer
+applied), and `approval.expires` was not refused (F502). Siblings: a
+`permission_mode` set between the wraps was not read (the hook answered
+`ask` in `bypassPermissions` for an input without a mode), and a prompt tool
+removed between the wraps kept refusing Writes with R407.
+
+- Fix: on a re-wrap, `_replace_safety_hook` puts a safety hook built for the
+  options now wrapped where the first one was, keeping any other function an
+  entry held beside it; the other hooks are kept as before (one safety hook,
+  so the rate limit is charged once).
+- Tests: four in `TestWrapOptionsApproval` (`tests/test_tool_call_approval.py`):
+  re-wrapped with a prompt tool, a Write is R407 holding nothing and an
+  `approval.expires` binding F502, with one safety hook; re-wrapped in
+  `bypassPermissions`, F502; re-wrapped without the prompt tool, the Write is
+  asked about and allowed; a host function sharing the safety hook's entry
+  is kept.
+
+#### Tests changed to the new behaviour
+
+31 tests called the permission callback without the PreToolUse hook that
+Claude Code always runs first, so they met #11's R407. One,
+`test_context_without_tool_use_id_still_needs_a_checkpoint`, passes
+unchanged once a call without a `tool_use_id` keeps its F501 diagnostic.
+The other 30 now run the hook on the call first
+(`tests/conftest.py::pre_tool_use`, or the wrapped options' hook), keeping
+what they test: `test_permission_callback.py` (4),
+`test_tool_call_approval.py` (13), `test_sdk_e2e.py` (4),
+`test_sdk_integration.py` (4), `test_checkpoint_holds.py` (3, through a
+local `_decide` that refuses where the hook refuses),
+`test_mcp_integration.py` (1), `test_adapter_effects.py` (1). One more
+stated #13's old behaviour: `test_wrapping_twice_charges_the_rate_limit_once`
+(`test_sdk_e2e.py`) asserted that the re-wrapped hooks equal the first
+wrap's; it now asserts that the other hooks are equal and that PreToolUse
+holds one entry with one safety hook, and still charges the rate limit
+once. Where the old
+test asserted the callback's F501 for a call the hook itself refuses, it now
+asserts the hook's F501 (the callback is never asked about such a call);
+`test_host_is_not_asked_about_a_call_without_a_checkpoint` now ends the held
+checkpoint's validity between the hook and the callback, the path on which
+the callback meets it; `test_the_request_is_the_layers_ask` asks the second
+call through the hook and adds a third, never asked about, which is R407.
+The four SDK demos (`examples/grounded_agent_demo.py`,
+`checkpoint_enforcement_demo.py`, `mcp_tools_demo.py`,
+`capability_skills_demo.py`) run the hook before the callback the same way,
+and `tests/test_examples_demos.py` passes unchanged.
+
+#### Siblings checked
+
+- The TypeScript package and the Standard Agents binding check a call in
+  the tool's own handler, with the arguments it runs with, and bind a
+  decision to their digest: there is no hook and callback pair, no
+  per-call state a boundary clears, no wrapping of options, and no file the
+  binding writes (no archive, no state file). No call fixture changes.
+- The plugin's hooks: Claude Code's own prompt decides, with no callback of
+  the layer's; another hook's `updatedInput` is the host gap above. The
+  plugin's take hook already refuses a linked records or commits directory.
+- The other adapter tables a boundary clears (`_allowed`, `_asked_calls`,
+  `_outcome_recorded`) are authorisations, which a boundary must withdraw.
+
+#### Documentation
+
+SECURITY.md §5.5 (the tracker's and the store's link rule; what the callback
+decides on, the R407 and changed-input rules and the `updatedInput` host gap;
+re-wrapping), the adapter's statement (`host_gaps`, the `updatedInput` gap),
+`docs/integrations/claude_agent_sdk.md` (the checkpoint section, the approval
+list, checkpoint content), the docstrings of `wrap_options`, the permission
+callback and `CheckpointTracker`, and CHANGELOG [Unreleased] Upgrading (the
+tracker and the snapshot store; re-wrapping; the callback). The Standard's
+text was not changed: §5.18.7's changed-arguments rule already covers
+arguments other than those the call was checked with, and §5.18.8 the R407.
+No version changes.
+
+#### Checks after batch 3
+
+- Python: `pytest tests/` (5668 passed, 18 skipped); ruff check and format
+  with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators' `--check`;
+  `scripts/run_conformance.py`; the four SDK demos (no R407 in their output).
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check and test (2002; the
+  WebAssembly build reused); the binding's check and test (217, 2 skipped).
+  No TypeScript source changed.
+- Site: `npm run check`, `npm test` (1173).
+- Probes, each under `timeout 120` and a 4 GB address-space limit, inputs at
+  most 1 MB, in a scratch copy of the reporters' probes pointed at this
+  worktree: the archive link (101 checkpoints, nothing written to the
+  linked `~/.bashrc`, nothing run); the boundary between hook and callback
+  in a partial clone (F502 without the boundary, F501 with it; never
+  allowed); the PT30S expiry across a boundary (F502); the input swap (F504
+  for the destination and the key, with and without a host callback); the
+  re-wrap with a prompt tool (R407, no hold). Timing: the hook and the
+  callback on a 1 MB Write input, 0.013 s and 0.022 s; a checkpoint that
+  prunes the history, 6.4 ms (two git calls), against 1.2 ms without. No
+  CLI or nested agent was started; nothing was left running; the scratch
+  repositories were removed.

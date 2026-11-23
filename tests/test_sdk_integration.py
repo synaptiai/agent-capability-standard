@@ -725,26 +725,31 @@ class TestCheckpointReservation:
         assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
         await consumer(self._post("Write", is_error=True), "t1", None)
         assert not adapter.has_valid_checkpoint()
-        denied = await callback("Write", {}, self._ctx("t2"))
-        assert _denied(denied)
-        assert denied.message.startswith("F501 CHECKPOINT_REQUIRED:")
+        denied = await pre({"tool_name": "Write", "tool_input": {}}, "t2", None)
+        assert denied["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+            "F501 CHECKPOINT_REQUIRED:"
+        )
+        assert _denied(await callback("Write", {}, self._ctx("t2")))
 
     @pytest.mark.asyncio
     async def test_successful_mutation_consumes_the_checkpoint(
         self, adapter: GroundedAgentAdapter
     ) -> None:
         adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
         consumer = adapter._make_mutation_consumer()
 
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
         assert not _denied(await callback("Write", {}, self._ctx("t1")))
         # Used up at the callback's allow, before the call runs.
         assert not adapter.has_valid_checkpoint()
         await consumer(self._post("Write"), "t1", None)
         assert not adapter.has_valid_checkpoint()
-        denied = await callback("Write", {}, self._ctx("t2"))
-        assert _denied(denied)
-        assert "reserved" not in denied.message
+        denied = await pre({"tool_name": "Write", "tool_input": {}}, "t2", None)
+        reason = denied["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("F501 CHECKPOINT_REQUIRED:")
+        assert "reserved" not in reason
 
     @pytest.mark.asyncio
     async def test_other_calls_cannot_end_a_reservation(
@@ -850,6 +855,7 @@ class TestCheckpointReservation:
         monkeypatch.undo()
 
         assert adapter.has_valid_checkpoint()
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t2", None) == {}
         assert not _denied(await callback("Write", {}, self._ctx("t2")))
 
     @pytest.mark.asyncio
@@ -857,11 +863,16 @@ class TestCheckpointReservation:
         self, adapter: GroundedAgentAdapter
     ) -> None:
         adapter.create_checkpoint(["*"], "Test")
+        pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
 
+        assert await pre({"tool_name": "Write", "tool_input": {}}, "t1", None) == {}
+        for other in ("t2", "t3"):
+            refused = await pre({"tool_name": "Write", "tool_input": {}}, other, None)
+            assert refused["hookSpecificOutput"]["permissionDecision"] == "deny"
+            assert _denied(await callback("Write", {}, self._ctx(other)))
+        assert adapter.checkpoint_tracker.held_by("t1")
         assert not _denied(await callback("Write", {}, self._ctx("t1")))
-        assert _denied(await callback("Write", {}, self._ctx("t2")))
-        assert _denied(await callback("Write", {}, self._ctx("t3")))
 
     def test_wrap_options_registers_the_failure_hook(
         self, adapter: GroundedAgentAdapter

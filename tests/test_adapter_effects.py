@@ -12,6 +12,7 @@ from claude_agent_sdk import PermissionResultAllow
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.state.snapshots import FileSnapshotStore
+from tests.conftest import pre_tool_use
 
 POLICY = ["https://hooks.example.com/*"]
 
@@ -365,6 +366,9 @@ async def test_changed_arguments_are_checked_against_the_policy(
         return PermissionResultAllow(updated_input={"to": "https://evil.net/x"})
 
     callback = adapter._make_permission_callback(host)
+    await pre_tool_use(
+        adapter, "mcp__mail__deliver", {"to": "https://hooks.example.com/r"}, "c1"
+    )
     result = await callback(
         "mcp__mail__deliver",
         {"to": "https://hooks.example.com/r"},

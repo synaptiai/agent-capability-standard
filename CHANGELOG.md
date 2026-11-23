@@ -104,6 +104,22 @@ here and marked so.
     call. Trackers that share a directory merge their records into its
     state file under a lock (`tracker_state.lock`, where the platform has
     `fcntl`), so one no longer drops or rewinds another's.
+  - `CheckpointTracker` (Fixed) opens `checkpoint_dir`, its `archive/` and
+    their files without following a symbolic link (at those directories, at
+    each directory on the way to a relative `checkpoint_dir`, and at the
+    files), appends only to a regular archive file (created with mode
+    0600), and neither reads nor appends to an archive git tracks. A
+    repository could ship a link there (the default `.checkpoints` is in the
+    working directory), and the 101st checkpoint's prune appended the
+    pruned checkpoints, with a `reason` and `scope` a bound checkpoint
+    tool's caller writes, wherever it led. With such a link the tracker
+    writes nothing, keeps its records in memory and logs a warning; a prune
+    is logged with the ids it drops, and the pruned checkpoints' content is
+    discarded whether or not the archive was written.
+    `FileSnapshotStore(root, store_dir)` raises `ValueError` when
+    `store_dir`, its `objects/` or its `manifests/` is a symbolic link (or,
+    for a relative `store_dir`, a directory on the way to it): name the
+    directory it leads to.
   - `wrap_options()` registers the safety PreToolUse hook with
     `on_failure="block"`: a callback that fails or gives no verdict in time,
     as the CLI sees it, blocks the call, where it was no decision and the
@@ -168,6 +184,35 @@ here and marked so.
     On that route a call that requires approval of a tool
     `create_grounded_mcp_server` serves (with `require_layer`) is refused
     with R407 too: such a tool runs only a call the adapter saw allowed.
+  - `wrap_options()` on options it already wrapped (Fixed): the safety hook
+    is replaced by one built for the options now wrapped, so a
+    `permission_prompt_tool_name` or a `permission_mode` set between the
+    two wraps applies as if the options were wrapped once (R407 for a call
+    that requires a checkpoint and F502 for `approval.expires` on the
+    prompt-tool route). Before, the first wrap's hook stayed: with a prompt
+    tool added, a Write was asked about, held a checkpoint no callback
+    checked again, and ran after a boundary.
+  - The permission callback decides only on what the PreToolUse hook
+    checked of the call (Fixed). The hook keeps, by `tool_use_id`, the
+    digest of the input it checked, the call's directory and the time of
+    its ask, until the call reports back or the callback refuses it; an
+    execution boundary no longer clears them. The callback refuses with
+    R407 a call the hook has no record of: code that calls
+    `_make_permission_callback()` itself runs the hook on the call first,
+    as Claude Code does. An input other than the one the hook checked
+    (another PreToolUse hook's `updatedInput`) is changed arguments
+    (Standard 1.2.0 §5.18.7): F504 when a secret or destination check fails
+    with it, F501 when it needs a checkpoint the call does not hold, F502
+    when it needs approval. Before, another session's Stop or prompt
+    between the hook and the callback made the callback classify the call
+    in the host process's directory (a git read in a partial clone then
+    ran as `observe`, with no approval and on an ended checkpoint) and count
+    `approval.expires` from its own start, and an input another hook
+    rewrote was allowed without the secret and destination checks. A call
+    the hook passed that Claude Code's own rules allow without the callback
+    (`allowed_tools`, an allow rule, `bypassPermissions`) still runs with
+    another hook's `updatedInput` unchecked: keep the tools such a hook
+    rewrites out of those rules (the statement names this host gap).
   - A tool `create_grounded_mcp_server` serves (with `require_layer`) runs
     a call only once it is allowed: the PreToolUse hook's pass, or the
     permission callback's allow of a call the hook asked about. Before, the

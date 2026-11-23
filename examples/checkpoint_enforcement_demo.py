@@ -55,6 +55,31 @@ async def approve(tool_name: str, tool_input: dict, context: object) -> object:
     return PermissionResultAllow(updated_input=tool_input)
 
 
+async def decide(
+    adapter: GroundedAgentAdapter,
+    permission_callback: object,
+    tool_name: str,
+    tool_input: dict,
+) -> object:
+    """A new call's decision in the order Claude Code reaches it: the
+    adapter's PreToolUse hook, then, unless the hook refused it, the
+    permission callback, which decides only on a call the hook checked
+    (otherwise R407). A hook's refusal is returned as the callback's result
+    would be (``behavior``, ``message``)."""
+    context = call()
+    hook = adapter._make_pretooluse_safety_hook()
+    out = (
+        await hook(
+            {"tool_name": tool_name, "tool_input": tool_input},
+            context.tool_use_id,
+            None,
+        )
+    ).get("hookSpecificOutput", {})
+    if out.get("permissionDecision") == "deny":
+        return SimpleNamespace(behavior="deny", message=out["permissionDecisionReason"])
+    return await permission_callback(tool_name, tool_input, context)
+
+
 def is_allowed(result: object) -> bool:
     """An SDK permission result (``behavior``) or the fallback (``allowed``)."""
     return (
@@ -97,7 +122,7 @@ async def main():
 
     print("\nAttempting mutations without checkpoint:")
     for tool_name, tool_input in mutations:
-        result = await permission_callback(tool_name, tool_input, call())
+        result = await decide(adapter, permission_callback, tool_name, tool_input)
 
         if is_allowed(result):
             print(f"  {tool_name}: allowed")
@@ -116,7 +141,7 @@ async def main():
 
     print("\nAttempting a mutation with checkpoint:")
     tool_name, tool_input = mutations[0]
-    result = await permission_callback(tool_name, tool_input, call())
+    result = await decide(adapter, permission_callback, tool_name, tool_input)
     if is_allowed(result):
         print(f"  {tool_name}: ALLOWED (checkpoint: {checkpoint_id[:20]}...)")
     else:
@@ -130,7 +155,7 @@ async def main():
 
     print("\nAttempting mutations after checkpoint consumed:")
     for tool_name, tool_input in mutations[:2]:
-        result = await permission_callback(tool_name, tool_input, call())
+        result = await decide(adapter, permission_callback, tool_name, tool_input)
 
         if is_allowed(result):
             print(f"  {tool_name}: allowed")
@@ -149,7 +174,7 @@ async def main():
     ]
 
     for tool_name, tool_input in read_only:
-        result = await permission_callback(tool_name, tool_input, call())
+        result = await decide(adapter, permission_callback, tool_name, tool_input)
         allowed = is_allowed(result)
 
         mapping = adapter.mapper.map_tool(tool_name, tool_input)

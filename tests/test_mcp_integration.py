@@ -18,6 +18,7 @@ import pytest
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper
+from tests.conftest import pre_tool_use
 
 # =============================================================================
 # Dynamic Tool Registration Tests
@@ -250,8 +251,10 @@ class TestAdapterMCPIntegration:
         elif hasattr(result, "behavior"):
             assert result.behavior == "deny"
 
-        # With checkpoint, should be allowed
+        # With checkpoint, should be allowed (once the PreToolUse hook has
+        # checked the call, as Claude Code runs it first)
         adapter.create_checkpoint(["*"], "Test")
+        await pre_tool_use(adapter, "mcp__deploy__push", {}, "t2")
         result = await callback(
             "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="t2")
         )
