@@ -847,6 +847,35 @@ here and marked so.
     MultiEdit and NotebookEdit refuses an edit of the records file or of
     another file under `.claude/audit/`, links followed. Compute the HMAC
     and run `hostname -s` in commands of their own.
+  - Skill hooks, security round 2 (they stay registered for the rest of
+    the session once the skill ran): the send skill's hook now refuses, in
+    every command, a word a glob or a brace may expand to `curl`, `wget`
+    or `http` (`/usr/bin/c?rl`, `cu{r,r}l`; `ls /usr/bin/c*` too), and
+    reads a command holding `$'...'`, `$"..."` or a `/dev/` path the shell
+    expands; in a command that names a request tool it refuses code piped
+    or redirected to a shell or an interpreter (`curl .../install.sh | sh`,
+    `| python3`; `| python3 -m json.tool` and `| python3 -c '...'` still
+    run), a request inside a word of any program that runs one (`trap`,
+    `awk`, `sed`, `find -exec`, `git rebase -x`, `env -S`, ...), `xargs` or
+    `parallel` feeding the tool, a copy or a link of it, a git setting
+    outside `user.*`, `color.*`, `advice.*`, `init.defaultbranch`,
+    `core.quotepath`, `i18n.*`, `column.*` and `log.*` (`-c` or `git
+    config`), and a word naming a proxy, CA-bundle, resolver, git
+    (`GIT_*`) or loader (`LD_*`) variable, or `HOME`, `PATH`, `ENV`, `IFS`,
+    with or without a value (`for http_proxy in`, `read`, `printf -v`).
+    The audit skill's hook now refuses, in every command, a program that
+    writes files its input names (`patch`, `git apply`/`am`, `tar` but to
+    create or list with short options, `unzip` but to list, `cpio`,
+    `rsync`, `7z`, git's index and tree plumbing, a git alias, `find
+    -exec` or `xargs` running a program other than its readers), and reads
+    a brace expansion, a glob that may name `.claude` or `.claude/audit`,
+    and a redirection to a name the shell builds (`>> $A$B`) as it reads a
+    command naming the records file. The rollback skill's hook reads the
+    command's words as the shell passes them and allows a restore only as
+    `git stash apply|pop <recorded id>`, those four words alone: `git -C .
+    stash apply`, `env git stash ...`, `git stash branch` and a restore in
+    `sh -c` are refused with F503 (the plugin's hook gated them as
+    `mutate` already).
   - The boundary hook (`stop_end_checkpoints.sh`) also runs on StopFailure,
     UserPromptSubmit, SessionStart and SessionEnd: a marker a turn left
     when an API error or an interrupt ended it, or a killed session, no

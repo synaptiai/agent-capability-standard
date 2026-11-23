@@ -18,11 +18,19 @@ hooks:
             # Code-decided check (STANDARD 1.2.0 §5.18.10): an audit record appended
             # to .claude/audit/records.jsonl holds no credential (§6.7). The records
             # file is written in one form only, whose record this hook reads; any
-            # other command is read word by word, as the shell passes the words, and
-            # may not write a file, run a program that could (an interpreter, an
-            # in-place editor, cp, tee, dd, ...), or build its text when it runs. So a
-            # file named with quotes or a glob, a record rewritten in two steps, or one
-            # a program writes, is refused, whether or not its text names the file.
+            # other command that may name the file (in any quoting, from a directory
+            # under .claude, by a glob or a brace that may match it or a directory on
+            # its way, or by a redirection to a name the shell builds) is read word
+            # by word, as the shell passes the words, and may not write a file, run a
+            # program that could (an interpreter, an in-place editor, cp, tee, dd,
+            # ...), or build its text when it runs. So a file named with quotes, a
+            # glob or a brace, or a record rewritten in two steps, is refused. In
+            # every command, a program that writes the files its input names (an
+            # archive or patch tool, git apply, find -exec or xargs running another)
+            # is refused. A name built only when a command runs, code inside a word
+            # (sh -c, an interpreter's, a script) and a link planted under another
+            # name are not read here; the plugin's pre-tool-use hook gates such a
+            # write as a mutate.
             # Claude Code passes the tool call as JSON on stdin, read once here; exit 2
             # blocks the call and the reason on stderr is shown to Claude. A call that
             # cannot be read is blocked.
@@ -72,10 +80,12 @@ hooks:
               fi
             else
               # Skill hooks stay registered for the rest of the session, so only a
-              # command that may name the records file is read: one that names records,
+              # command that may write the records file is read: one that names records,
               # jsonl, audit or .claude in any quoting (quotes and backslashes removed),
-              # that runs in a directory under .claude, or that holds a glob character
-              # (read below: a glob that may match the records file)
+              # that runs in a directory under .claude, that holds a glob character or a
+              # brace (read below: a pattern that may match the records file or a
+              # directory on its way), that redirects output and expands text, or that
+              # names a program that writes files its input names (read below)
               RUNS_IN="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)" || RUNS_IN=""
               [ -n "$RUNS_IN" ] || RUNS_IN="$(pwd)"
               NAMED=false
@@ -83,10 +93,11 @@ hooks:
               printf '%s\n' "$CMD" | tr -d "\"'\\\\" | grep -qiE 'records|jsonl|audit|\.claude' && NAMED=true
               printf '%s\n' "$RUNS_IN" | grep -qi '\.claude' && INAUDIT=true
               if [ "$NAMED" = false ] && [ "$INAUDIT" = false ]; then
-                case "$CMD" in
-                  *'*'* | *'?'* | *'['*) ;;
-                  *) exit 0 ;;
-                esac
+                READ=false
+                case "$CMD" in *'*'* | *'?'* | *'['* | *'{'*) READ=true ;; esac
+                case "$CMD" in *'>'*'$'* | *'$'*'>'* | *'>'*'`'* | *'`'*'>'*) READ=true ;; esac
+                printf '%s\n' "$CMD" | tr -d "\"'\\\\" | grep -qE '(^|[^A-Za-z0-9_.-])(g?tar|bsdtar|pax|cpio|ar|unzip|7zr?a?|unar|unrar|rar|jar|cabextract|lha|unsquashfs|dpkg-deb|patch|rsync|busybox|toybox|xargs|find|apply|am|update-index|read-tree|checkout-index|mktree|fast-import|alias|config-env)($|[^A-Za-z0-9_-])' && READ=true
+                [ "$READ" = true ] || exit 0
               fi
               case "$CMD" in
                 *records.jsonl*)
@@ -150,21 +161,50 @@ hooks:
             def literal_path: gsub("\\$\\{CLAUDE_PROJECT_DIR:-\\.\\}"; ".");
             def sensitive: test("^(PATH|ENV|BASH_ENV|IFS|CDPATH|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|OPENSSL_[A-Z0-9_]*)$");
             def openssl_writes: test("^-(out|engine|provider|config|writerand|rand)");
-            # Whether a word with a glob character (marked \u0001) may name the
-            # records file, .claude/audit/records.jsonl, from the directory the command
-            # runs in: each of its last components may match the file's, and the
-            # directories it leaves out are the last ones of that directory. A glob
-            # character matches any run here (more than the shell's), but not a name's
-            # leading dot.
+            # Whether a word with a glob character (marked \u0001), or a word a brace
+            # expansion gives, may name the records file, .claude/audit/records.jsonl,
+            # or a directory on its way (.claude, .claude/audit: cd .cl*/au*t, then the
+            # file by its last name), from the directory the command runs in: each of
+            # its last components may match the path's, and the directories it leaves
+            # out are the last ones of that directory. A glob character matches any run
+            # here (more than the shell's), but not a name's leading dot; a sequence of
+            # numbers gives a run of digits (\u0006).
+            # (A pattern with more characters than the name, glob characters
+            # aside, cannot match it: so no regex is built from a long word.)
             def glob_part($pattern): . as $name | ($pattern | ascii_downcase) as $p
-              | (($name | startswith(".")) and ($p | startswith("\u0001")) | not)
-                and ($name | test("^" + ($p | gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*")) + "$"));
+              | ($p | explode | map(select(. != 1 and . != 6)) | length) <= ($name | length)
+              and (($name | startswith(".")) and ($p | startswith("\u0001")) | not)
+                and ($name | test("^" + ($p | gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*") | gsub("\u0006"; "[0-9-]*")) + "$"));
+            def may_name_path($cwd; $file): . as $parts
+              | ($file | length) as $n
+              | ([$parts | length, $n] | min) as $k
+              | (all(range(0; $k); . as $i | $parts[($parts | length) - 1 - $i] as $p | ($file[$n - 1 - $i] | glob_part($p))))
+                and ($k == $n or ($cwd | ascii_downcase | rtrimstr("/") | endswith("/" + ($file[:$n - $k] | join("/")))));
             def may_name_records($cwd): split("/") | map(select(. != "" and . != ".")) as $parts
-              | [".claude", "audit", "records.jsonl"] as $file
-              | ([$parts | length, 3] | min) as $k
               | any($parts[]; . == "..")
-                or (all(range(0; $k); . as $i | $parts[($parts | length) - 1 - $i] as $p | ($file[2 - $i] | glob_part($p))))
-                    and ($k == 3 or ($cwd | ascii_downcase | rtrimstr("/") | endswith("/" + ($file[:3 - $k] | join("/")))));
+                or any([".claude"], [".claude", "audit"], [".claude", "audit", "records.jsonl"]; . as $file | $parts | may_name_path($cwd; $file));
+            # Brace expansion, as bash makes it of a word: a group holding a comma, or a
+            # sequence x..y, gives its words (.cl{a,}ude is .claude and .clude), the
+            # innermost group first. A sequence of numbers gives digits (\u0006); a
+            # group bash leaves as it is stays, as a character no name holds (\u0007).
+            # At most 256 words, from at most 32 groups: null for more.
+            def brace_group: "\\{[^{}]*(,|\\.\\.)[^{}]*\\}";
+            def expand_first: match(brace_group) as $g
+              | .[:$g.offset] as $pre | .[$g.offset + $g.length:] as $post | $g.string[1:-1] as $body
+              | if $body | test(",") then $body | split(",")[]
+                elif $body | test("^-?[0-9]+\\.\\.-?[0-9]+(\\.\\.-?[0-9]+)?$") then "\u0006"
+                elif $body | test("^[A-Za-z]\\.\\.[A-Za-z](\\.\\.-?[0-9]+)?$") then
+                  ($body | explode) as $c | range([$c[0], $c[3]] | min; ([$c[0], $c[3]] | max) + 1) | [.] | implode
+                else "\u0007" end
+              | $pre + . + $post;
+            def brace_words: {n: 0, ws: [.]}
+              | until(all(.ws[]; test(brace_group) | not) or (.ws | length) > 256 or .n > 32;
+                      {n: (.n + 1), ws: [.ws[] | if test(brace_group) then expand_first else . end]})
+              | if (.ws | length) > 256 or .n > 32 then null else .ws end;
+            def names_records($cwd): may_name_records($cwd) or (sub("^[^=]*="; "") | may_name_records($cwd));
+            def may_name($cwd):
+              if .braces then (.m | brace_words) as $ws | $ws == null or any($ws[]; names_records($cwd))
+              else .m | test("\u0001") and names_records($cwd) end;
             # The first refusal of a simple command, or null.
             def check_command($words):
               ($words | map(select(.target | not))) as $args
@@ -192,20 +232,109 @@ hooks:
                       else null end
                   else null end
                 end;
+            # The simple commands of any command, read even where the shared reader
+            # stops: a here-document's body is read as commands too (more than bash
+            # runs), a lone quote is left out, and heredoc says whether it holds one.
+            def loose: tokens as $t | ($t | length) as $n
+              | [range(0; $n) as $i | $t[$i]
+                 | if .word then
+                     ($t[$i - 1].op // "") as $op
+                     | word(.word) + {target: ($i > 0 and ($op | takes_target)),
+                                      writes: ($i > 0 and ($op | takes_target) and ($op | test(">")))}
+                   else . end] as $w
+              | ([-1] + [range(0; $n) | select($t[.].op and ($t[.].op | test("[<>]") | not))] + [$n]) as $b
+              | {heredoc: any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)),
+                 cmds: [range(0; ($b | length) - 1) as $k | $w[$b[$k] + 1:$b[$k + 1]] | map(select(.d != null)) | select(length > 0)]};
+            def name_of: sub("^.*/"; "");
+            # Programs that run the program their words name (timeout 5 tar ...).
+            def wrappers: ["env", "nice", "nohup", "timeout", "time", "command", "builtin", "exec", "sudo", "doas", "stdbuf", "ionice", "chrt", "taskset", "setsid", "unbuffer", "xargs", "watch", "flock", "chroot", "strace", "ltrace", "faketime", "firejail", "nsenter", "unshare", "prlimit", "numactl", "systemd-run", "script", "parallel", "busybox", "toybox"];
+            # Programs that write the files their input names (an archive's members, a
+            # patch's targets), and git's commands that write files or the index from
+            # a patch or from data (git checkout then writes what the index holds).
+            def writers: ["gtar", "bsdtar", "pax", "cpio", "ar", "7z", "7za", "7zr", "unar", "unrar", "rar", "jar", "cabextract", "lha", "unsquashfs", "dpkg-deb", "patch", "rsync", "busybox", "toybox"];
+            def git_writers: ["apply", "am", "update-index", "read-tree", "checkout-index", "mktree", "fast-import"];
+            # The programs find -exec and xargs may run on the names they find or read.
+            def fed_readers: [readers[] | select(. != "mv" and . != "openssl" and . != "cd")];
+            def letters: ltrimstr("-") | explode | map([.] | implode);
+            # tar creating or listing an archive, with short options only.
+            def tar_reads($rest): ($rest | map(.d)) as $r
+              | (any($r[]; startswith("--")) | not)
+                and ([($r[] | select(startswith("-"))), (if ($r | length) > 0 and ($r[0] | startswith("-") | not) then $r[0] else empty end) | letters[]] as $ls
+                     | ($ls | length) > 0 and all($ls[]; IN("c", "t", "v", "f", "z", "j", "J", "C", "T", "h", "p", "P", "S")) and any($ls[]; . == "c" or . == "t"));
+            # unzip listing or testing an archive.
+            def unzip_reads($rest): ($rest | map(.d)) as $r
+              | ($r | length) > 0 and ($r[0] | startswith("-"))
+                and ([$r[] | select(startswith("-")) | letters[]] as $ls
+                     | all($ls[]; IN("l", "t", "v", "Z", "q", "z")) and any($ls[]; IN("l", "t", "v", "Z")));
+            def git_refusal($rest):
+              (reduce $rest[] as $w ({skip: false, sub: null, alias: false};
+                 if .sub != null then .
+                 elif .skip then .skip = false | .alias = (.alias or ($w.d | ascii_downcase | startswith("alias.")))
+                 elif $w.d | startswith("-") then
+                   .skip = ($w.d | test("^(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path|--attr-source)$"))
+                   | .alias = (.alias or ($w.d | test("^-c.*alias\\.|^--config-env"; "i")))
+                 else .sub = $w.d end)) as $g
+              | if $g.sub == null then "git"
+                elif $g.alias then "git -c alias.*"
+                elif any(git_writers[]; . == $g.sub) then "git \($g.sub)"
+                elif $g.sub == "config" and any($rest[]; .d | ascii_downcase | startswith("alias.")) then "git config alias.*"
+                else null end;
+            def find_refusal($rest):
+              first(range(0; $rest | length) as $i | $rest[$i].d as $d
+                | select(($d | IN("-fprint", "-fprint0", "-fprintf", "-fls"))
+                         or (($d | IN("-exec", "-execdir", "-ok", "-okdir")) and (($rest[$i + 1].d // "") as $q | any(fed_readers[]; . == $q) | not)))
+                | "find \($d) \($rest[$i + 1].d // "")") // null;
+            def xargs_refusal($rest):
+              (reduce $rest[] as $w ({skip: false, prog: null};
+                 if .prog != null then .
+                 elif .skip then .skip = false
+                 elif $w.d | startswith("-") then .skip = ($w.d | test("^(-[aIdEnLPs]|--(arg-file|delimiter|eof|max-args|max-lines|max-procs|max-chars|process-slot-var))$"))
+                 else .prog = $w.d end)) as $x
+              | if $x.prog == null or any(fed_readers[]; . == $x.prog) then null else "xargs \($x.prog)" end;
+            # A program of a simple command that writes files its input names: its
+            # program, and any word after a program that runs another. Each is read
+            # over its next 64 words (no list grows with the command); a longer one is
+            # refused.
+            def writer_refusal($words):
+              ($words | map(select(.target | not))) as $a
+              | ($a | length) as $n
+              | (first(range(0; $n) | select($a[.].assign | not)) // $n) as $p
+              | (first(range($p; $n) | select($a[.].d | name_of | IN(wrappers[]))) // $n) as $wrap
+              | first(range($p; $n) as $i | select($i == $p or $i > $wrap)
+                      | ($a[$i].d | name_of) as $prog | $a[$i + 1:$i + 65] as $rest
+                      | if ($prog | IN(writers[])) then $prog
+                        elif ($prog | IN("tar", "unzip", "git", "find", "xargs") | not) then empty
+                        elif $n - $i > 65 then "\($prog) with more than 64 words"
+                        elif $prog == "tar" then (if tar_reads($rest) then empty else "tar" end)
+                        elif $prog == "unzip" then (if unzip_reads($rest) then empty else "unzip" end)
+                        elif $prog == "git" then (git_refusal($rest) // empty)
+                        elif $prog == "find" then (find_refusal($rest) // empty)
+                        else (xargs_refusal($rest) // empty) end
+                      | {kind: "writer", word: .}) // null;
             .tool_input.command // ""
             | if utf8bytelength > 16384 then "long "
-              elif [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")] | map(select(startswith("'") | not)) | add // "" | test("\\$\\(|`|\\\\") then "subst "
-              else commands as $c
-              | if ($named | not) and ($inaudit | not) and ($c.why == null)
-                   and (any($c.cmds[][]; .m | test("\u0001") and (may_name_records($cwd) or (sub("^[^=]*="; "") | may_name_records($cwd)))) | not) then "ok"
-                elif $c.why == "process substitution" then "subst "
-                elif $c.why != null then "expands \($c.why)"
-                elif any($c.cmds[][]; .braces) then "expands an unquoted brace"
-                else (first($c.cmds[][] | select(.writes and (.d as $t | any(sinks[]; . == $t) | not))) // null) as $w
-                | if $w != null then "writes \($w.d | .[:200])"
-                  else (first($c.cmds[] | check_command(.) | select(. != null)) // null) as $r
-                  | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
+              else loose as $l
+              # A command that may name the records file, or a directory on its way, or
+              # that redirects output to a name the shell builds, is read as a whole
+              | if $named or $inaudit or any($l.cmds[][]; may_name($cwd))
+                   or any($l.cmds[][]; .writes and ((.raw | test("[$`]")) or .braces)) then
+                  if [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")] | map(select(startswith("'") | not)) | add // "" | test("\\$\\(|`|\\\\") then "subst "
+                  else commands as $c
+                  | if $c.why == "process substitution" then "subst "
+                    elif $c.why != null then "expands \($c.why)"
+                    elif any($c.cmds[][]; .braces) then "expands an unquoted brace"
+                    else (first($c.cmds[][] | select(.writes and (.d as $t | any(sinks[]; . == $t) | not))) // null) as $w
+                    | if $w != null then "writes \($w.d | .[:200])"
+                      else (first($c.cmds[] | check_command(.) | select(. != null)) // null) as $r
+                      | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
+                      end
+                    end
                   end
+                # A here-document whose text a quote carries past a line's end: where
+                # its body ends, and what runs after it, are not read
+                elif $l.heredoc and any($l.cmds[][]; .raw | test("\n")) then "expands a here-document"
+                else (first($l.cmds[] | writer_refusal(.) | select(. != null)) // null) as $r
+                | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
                 end
               end
             JQ
@@ -216,7 +345,8 @@ hooks:
               ONE_FORM="append a record only as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", with the record literal (STANDARD 1.2.0 §6.7)"
               case "$KIND" in
                 ok) ;;
-                writes) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command writes a file only in the one append form, whose record this check reads; it does not redirect output to '$WORD' (a name quoted, globbed or linked may be the records file): $ONE_FORM" >&2; exit 2 ;;
+                writes) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command writes a file only in the one append form, whose record this check reads; it does not redirect output to '$WORD' (a name quoted, globbed, braced, linked or built when the command runs may be the records file): $ONE_FORM" >&2; exit 2 ;;
+                writer) echo "F504 CONSTRAINT_VIOLATED: in the audit skill no command runs a program that writes files its input names, which could write the records file unread: '$WORD' (an archive or patch tool, git apply, am, update-index, read-tree, checkout-index, mktree or fast-import, a git alias, find -exec or xargs running a program other than a reader; tar only creates or lists, with short options, and unzip only lists): $ONE_FORM" >&2; exit 2 ;;
                 program) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command runs only programs that write no file but by a redirection and run no other code (cat, echo, printf, jq, ls, head, tail, wc, grep, cut, tr, base64, sha256sum, shasum, md5sum, date, hostname, sleep, test, true, false, pwd, cd, stat, basename, dirname, mkdir, mv to move the records file aside, openssl dgst), each by its name; it does not run '$WORD', which could write the records file unread: $ONE_FORM" >&2; exit 2 ;;
                 mv) echo "F504 CONSTRAINT_VIOLATED: in the audit skill mv only moves the records file aside, as mv <dir>/records.jsonl <dir>/records.<UTC time>.jsonl with literal paths; it does not run '$WORD', which could put another file in its place: $ONE_FORM" >&2; exit 2 ;;
                 assign) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command does not set a variable for one command (NAME=value cmd), nor PATH, IFS, ENV, BASH_ENV, CDPATH, LD_*, DYLD_* or OPENSSL_*, which change what a program runs or writes: '$WORD'" >&2; exit 2 ;;

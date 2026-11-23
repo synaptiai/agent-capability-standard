@@ -51,9 +51,11 @@ hooks:
           onFailure: block
           command: |
             # A restore in this skill restores a checkpoint taken in the project
-            # (STANDARD 1.2.0 §5.18.6, F503): each `git stash pop` or `git stash
-            # apply` must name, as its one argument, the full id of a commit a
-            # checkpoint recorded, entered in the project's git directory
+            # (STANDARD 1.2.0 §5.18.6, F503): a command that restores a stash (git
+            # stash pop, apply or branch) is allowed only as `git stash pop|apply
+            # <id>`, a simple command whose words, as the shell passes them (quotes
+            # removed), are those four, with <id> the full id of a commit a checkpoint
+            # recorded, entered in the project's git directory
             # (<git dir>/acs/checkpoints/commits/, one lookup; outside the work
             # tree, so no clone, checkout or applied stash can ship an entry),
             # holding the HMAC of the commit under the project's checkpoint key
@@ -61,18 +63,109 @@ hooks:
             # no entry, in a git directory git made for a work tree (a
             # repository can ship one of its own), and run in the project's
             # repository (the call's cwd), as the plugin's pre-tool-use hook
-            # reads it; valid or not, used or not. git runs with core.fsmonitor
-            # and hooks turned off.
+            # reads it; valid or not, used or not. Any other spelling is refused:
+            # git's options before stash (-C, -c, an alias), a program that runs git
+            # (env, xargs), a restore in a word (sh -c '...', code piped to a shell),
+            # a word the shell expands or escapes ($, a backtick, \, a glob, a
+            # brace), and a command these words cannot be read from (an unclosed
+            # quote, a here-document, a process substitution, over 16384 bytes).
+            # Skill hooks stay registered for the rest of the session, so only a
+            # command that names stash (quotes, backslashes and $ removed) or holds
+            # $'...' or $"..." is read; a name built only when a command runs, or one
+            # git's configuration gives, is not, and the plugin's pre-tool-use hook
+            # gates such a command as a mutate. git runs with core.fsmonitor and
+            # hooks turned off.
             # Claude Code passes the tool call as JSON on stdin; exit 2 blocks the
             # call and the reason on stderr is shown to Claude. A call that cannot
             # be read is blocked (R407).
-            # One read: the call's cwd on the first line, its command after it.
-            OUT="$(jq -r '(.cwd // "" | strings | gsub("[\n\r]"; "")), (.tool_input.command // "" | strings)' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            CWD="${OUT%%
-            *}"
-            case "$OUT" in *"
-            "*) CMD="${OUT#*
-            }" ;; *) CMD="" ;; esac
+            INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            CMD="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // "" | strings' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            case "$CMD" in
+              *"\$'"* | *'$"'*) ;;
+              *) printf '%s\n' "$CMD" | tr -d "\"'\\\\\$" | grep -q stash || exit 0 ;;
+            esac
+            CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // "" | strings | gsub("[\n\r]"; "")' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # The restores of the command: "restore <id>" for each `git stash
+            # pop|apply <id>`, "refuse <words>" for any other spelling of one.
+            READER="$(cat <<'JQ'
+            # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
+            # A Bash command's simple commands and their words as the shell passes them,
+            # quotes removed. Each word: raw (as written), d (dequoted), m (dequoted, an
+            # unquoted glob character *, ?, [ or ] as \u0001), braces (an unquoted brace
+            # outside ${...}), assign (NAME=value), target (a redirection's target) and
+            # writes (the redirection writes). commands gives {why, cmds}: why names
+            # what this reading cannot follow (an unclosed quote, a here-document, a
+            # process substitution), else is null. jq's global match costs the text
+            # times its matches, so the caller bounds the command's length.
+            def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
+            def segments: [scan("'[^']*'|\"[^\"]*\"|[^'\"]+")]
+              | map(if startswith("'") then {q: true, sq: true, t: .[1:-1]}
+                    elif startswith("\"") then {q: true, sq: false, t: .[1:-1]}
+                    else {q: false, sq: false, t: .} end);
+            def word($raw): ($raw | segments) as $s
+              | {raw: $raw,
+                 d: ($s | map(.t) | add // ""),
+                 m: ($s | map(if .q then .t else (.t | unquoted_globs) end) | add // ""),
+                 braces: ($s | any((.q | not) and (.t | gsub("\\$\\{[^}]*\\}"; "") | test("[{}]")))),
+                 assign: ($raw | test("^[A-Za-z_][A-Za-z0-9_]*\\+?="))};
+            def tokens: [match("(?<op>\n|&&|\\|\\||;;|[0-9]*(?:<<<|<<-?|<>|>>|>\\||>&|<&|&>>?|[<>])(?:[0-9]+-?|-)?|[;&|()])|(?<comment>#[^\n]*)|(?<word>(?:[^\\s'\"|&;()<>]|'[^']*'|\"[^\"]*\")+)|(?<bad>['\"])"; "g")
+              | .captures | map(select(.string != null)) | .[0] | {(.name): .string}] | map(select(.comment | not));
+            # A redirection whose target is the next word (2>&1 and >&- name none).
+            def takes_target: test("[<>]") and (test("&([0-9]+-?|-)$") | not);
+            # Each step is linear in the command: no list grows by copying.
+            def commands: tokens as $t | ($t | length) as $n
+              | if any($t[]; .bad) then {why: "quote"}
+                elif any($t[]; .op and (.op | test("<<")) and (.op | test("<<<") | not)) then {why: "heredoc"}
+                elif any(range(1; $n); ($t[. - 1].op // "" | test("[<>]$")) and $t[.].op == "(") then {why: "process substitution"}
+                else [range(0; $n) as $i | $t[$i]
+                      | if .word then
+                          ($t[$i - 1].op // "") as $op
+                          | word(.word) + {target: ($i > 0 and ($op | takes_target)),
+                                           writes: ($i > 0 and ($op | takes_target) and ($op | test(">")))}
+                        else . end] as $w
+                | ([-1] + [range(0; $n) | select($t[.].op and ($t[.].op | test("[<>]") | not))] + [$n]) as $b
+                | {why: null, cmds: [range(0; ($b | length) - 1) as $k | $w[$b[$k] + 1:$b[$k + 1]] | map(select(.d != null)) | select(length > 0)]}
+                end;
+            # END shell-words
+
+            # A word the shell expands or escapes: any word at all after expansion.
+            def expands: (.raw | test("[$`\\\\]")) or (.m | test("\u0001")) or .braces;
+            # The word with its backslashes removed, as bash removes them.
+            def plain: .d | gsub("\\\\"; "");
+            def token($names): plain | test("(^|[^A-Za-z0-9_.-])(\($names))($|[^A-Za-z0-9_.-])");
+            def names_git: (plain | sub("^.*/"; "") == "git") or token("git");
+            # An unquoted $ expansion or a backtick: the shell splits what it
+            # gives into words (S="git stash"; $S apply ...). $'...' does not.
+            def splits: [.raw | scan("'[^']*'|\"[^\"]*\"|[^'\"]+")] as $s
+              | any(range(0; $s | length) as $i | $s[$i]
+                    | select((startswith("'") or startswith("\"")) | not)
+                    | test("\\$[^'\"]|`") or (endswith("$") and $i == ($s | length) - 1); .);
+            def restore($words):
+              ($words | map(select(.target | not))) as $a
+              # the program's word: the first that sets no variable
+              | (first(range(0; $a | length) as $i | select($a[$i].assign | not) | $i) // 0) as $p
+              | if any($words[]; (plain | test("\\s")) and token("stash") and token("pop|apply|branch")) then
+                  {refuse: first($words[] | select((plain | test("\\s")) and token("stash") and token("pop|apply|branch")) | .d)}
+                elif ([range(0; $a | length) as $i | ($a[$i] | names_git or splits) or ($i == $p and ($a[$i] | expands))] | any)
+                     and any($a[]; token("stash") or expands) and any($a[]; token("pop|apply|branch") or expands) then
+                  if ($a | length) == 4 and $a[0].d == "git" and $a[1].d == "stash" and ($a[2].d == "pop" or $a[2].d == "apply")
+                     and ($a[3].d | test("^([0-9a-f]{40}|[0-9a-f]{64})$")) and (any($a[]; expands) | not)
+                  then {restore: "\($a[2].d) \($a[3].d)"}
+                  else {refuse: ($a | map(.d) | join(" "))} end
+                else null end;
+
+            .tool_input.command // ""
+            | if utf8bytelength > 16384 then "unread over 16384 bytes"
+              else commands as $c
+              | if $c.why != null then "unread \(if $c.why == "quote" then "an unclosed quote" elif $c.why == "heredoc" then "a here-document" else "a process substitution" end)"
+                else $c.cmds[] | restore(.) | select(. != null)
+                | if .restore then "restore \(.restore)" else "refuse \(.refuse | gsub("[\n\r]"; " ") | .[:200])" end
+                end
+              end
+            JQ
+            )"
+            LINES="$(printf '%s' "$INPUT" | jq -r "$READER" 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: the rollback skill's check could not read the command" >&2; exit 2; }
+            [ -n "$LINES" ] || exit 0
             if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then P="$CLAUDE_PROJECT_DIR"
             elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then P="$CLAUDE_PLUGIN_ROOT"
             else P="$(pwd)"; fi
@@ -85,11 +178,21 @@ hooks:
               KEY="$(head -c 128 "$GD/acs/checkpoints/key" 2>/dev/null || true)"
               printf '%s\n' "$KEY" | grep -qxE '[0-9a-f]{64}' || KEY=""
             fi
-            while IFS= read -r RESTORE; do
-              [ -n "$RESTORE" ] || continue
-              ARG="$(printf '%s\n' "$RESTORE" | sed -E 's/^git[[:space:]]+stash[[:space:]]+(pop|apply)//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+            while IFS= read -r LINE; do
+              case "$LINE" in
+                "restore "*) SUB="${LINE#restore }"; ARG="${SUB#* }"; SUB="${SUB%% *}" ;;
+                "refuse "*)
+                  printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project: this skill reads a restore only as git stash apply <sha> (or pop), those four words alone, with the full commit id a checkpoint recorded, in the project's repository; git's options before stash, a program that runs git, a restore inside a word and a word the shell expands or escapes are refused.\n" "${LINE#refuse }" >&2
+                  exit 2
+                  ;;
+                "unread "*)
+                  printf "F503 ROLLBACK_FAILED: the rollback skill cannot read the words of a command that names git stash (%s), so it restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded, on its own line.\n" "${LINE#unread }" >&2
+                  exit 2
+                  ;;
+                *) echo "R407 SAFETY_CHECK_FAILED: the rollback skill's check could not read the command" >&2; exit 2 ;;
+              esac
               FOUND=""
-              if [ -n "$KEY" ] && printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
+              if [ -n "$KEY" ]; then
                 E="$GD/acs/checkpoints/commits/$ARG"
                 if [ -f "$E" ] && [ ! -L "$E" ]; then
                   SIG="$(printf 'acs-checkpoint-commit:%s' "$ARG" | openssl dgst -sha256 -hmac "$KEY" 2>/dev/null | awk '{print $NF}' || true)"
@@ -98,11 +201,11 @@ hooks:
                 fi
               fi
               if [ -z "$FOUND" ]; then
-                printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded, in the project's repository.\n" "$RESTORE" >&2
+                printf "F503 ROLLBACK_FAILED: 'git stash %s %s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded, in the project's repository.\n" "$SUB" "$ARG" >&2
                 exit 2
               fi
             done <<EOF
-            $(printf '%s\n' "$CMD" | grep -oE 'git[[:space:]]+stash[[:space:]]+(pop|apply)([[:space:]][^;&|<>()]*)?' || true)
+            $LINES
             EOF
             exit 0
 ---

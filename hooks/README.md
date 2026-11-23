@@ -519,7 +519,9 @@ it a model-judged addition. The rollback skill's command hook reads the
 same entries as the hook here: a `git stash pop` or `git stash apply` that
 does not name a commit a checkpoint entered in `<git dir>/acs/checkpoints/commits/`,
 or that runs in another repository, restores no checkpoint and is blocked
-with `F503 ROLLBACK_FAILED:`.
+with `F503 ROLLBACK_FAILED:`; it reads the command's words as the shell
+passes them, and any spelling of a stash restore but `git stash apply|pop
+<id>`, those four words alone, is blocked the same way.
 
 The `persist` skill's command hook and the `audit` skill's `Bash` hook share
 one secret scan, `secret_scan.sh` in this directory: each copies it verbatim
@@ -534,18 +536,19 @@ that it does not hold now, each also with its JSON-style escapes decoded, so
 a credential whose key is already in the file, or that two edits build, is
 read whole. GNU grep reads the scan's patterns in time linear in the text.
 
-The `send` and `audit` skills' `Bash` hooks share one reader of a command's
-words, `shell_words.jq` in this directory, copied the same way between
-`# BEGIN shell-words` and `# END shell-words` and kept equal by the same
-tests. It reads a command's simple commands and their words as the shell
-passes them (quotes removed, unquoted glob characters marked, a
+The `send`, `audit` and `rollback` skills' `Bash` hooks share one reader of
+a command's words, `shell_words.jq` in this directory, copied the same way
+between `# BEGIN shell-words` and `# END shell-words` and kept equal by the
+same tests. It reads a command's simple commands and their words as the
+shell passes them (quotes removed, unquoted glob characters marked, a
 redirection's target and whether it writes) and names what it cannot follow
 (an unclosed quote, a here-document, a process substitution). jq's global
 match costs the text times its matches, so each hook reads a command of at
 most 16384 bytes with it; skill hooks stay registered for the rest of the
 session, so each reads only a command that may concern it (one that names
-`curl`, `wget` or `http`, or the audit records, in any quoting) and leaves
-the others alone.
+`curl`, `wget` or `http`, the audit records, a program that writes the files
+its input names, or `git stash`, in any quoting, or holds a glob or a brace
+that may expand to one of those names) and leaves the others alone.
 
 ## Relationship to Spec
 

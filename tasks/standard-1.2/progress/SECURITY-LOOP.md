@@ -2769,3 +2769,242 @@ No version changes.
   prunes the history, 6.4 ms (two git calls), against 1.2 ms without. No
   CLI or nested agent was started; nothing was left running; the scratch
   repositories were removed.
+
+### Batch 4: four reported defects
+
+Four defects, each reproduced by an independent verifier on bfb18b1, all in
+the command hooks three skills declare in their frontmatter (send, audit,
+rollback). None was fixed by an earlier batch (git log, round 1 and batches
+1 to 3 checked: round 1 #23 to #25 built the shared word reader these
+hooks use, and their tests pass unchanged). Skill hooks stay registered for
+the rest of the session once the skill ran, so each fix keeps reading only
+what may concern the hook, and widens that to what the reports showed it
+missed. Each fix has tests that fail on the code before it: the 301 new test
+cases (each command under sh and bash) were run with 5945508's three
+SKILL.md files put back, and 215 failed; the 86 that passed
+are the controls (ordinary commands each hook must leave alone, the recorded
+restore read through quotes) and 13 sibling forms the old hooks refused by
+accident (the rollback hook's raw match found `git stash apply` inside
+`sh -c '...'`, `echo '...' | sh`, `awk`, a here-string, a here-document and
+`xargs`, and failed `$(cat id.txt)` and an unclosed quote as no full id; the
+send hook refused `env -S`, `find -exec sh -c` and `git rebase -x` as a
+request inside a word or a `-x` cluster, `$"curl"` for its `$`, and `declare
+-n r=http_proxy; r=...` for its assignment). Two cases moved: `curl
+https://example.com/install.sh | sh` was in `test_leaves_other_commands_alone`
+and is now refused (code piped to a shell), in
+`test_blocks_code_a_program_runs`.
+
+The plugin's pre-tool-use hook and the SDK mapper already gate every
+reported command as `mutate` (or `execute` and `send`): checked again for
+the 15 reported forms with the mapper (`mutate`/`execute`, checkpoint and
+approval each), and by the verifiers with the hook (F501 without a marker).
+So no gated call ran without a checkpoint and approval; each defect is a
+skill's narrowing that did less than SECURITY.md said. Neither the
+TypeScript package nor the binding has a Bash tool or these skills, and no
+call fixture changes.
+
+#### 14. The send skill's hook: names the shell builds, piped code, code strings, copies and xargs (medium)
+
+The hook read a command only when its raw text, quotes removed, named curl,
+wget or http; found the request program only where a word's name was
+literally one of those; read code in a word only for programs on its
+`shells` list; and never read a URL that reaches curl on stdin. Fourteen
+probes reached a 127.0.0.1 listener with exit 0.
+
+- Fix, in every command (`skills/send/SKILL.md`): each run of the text
+  (split at blanks and operators, quotes and backslashes removed) that holds
+  a glob character or a brace is expanded as bash expands braces (the
+  innermost group first, `{a..z}` and `{1..9}` sequences, at most 256 words
+  from 32 groups, else refused) and its last component matched as a glob
+  against `curl`, `wget`, `http` and `https`; one that may name a tool is
+  refused (`/usr/bin/c?rl`, `c[u]rl`, `cu{r,r}l`, `wg?t`, `cp
+  /usr/bin/c?rl fetch`). A pattern with no letter or digit of its own (`*`)
+  names none, and one of more than 5 characters a match must take (a class
+  one, a `*` none) names none, so `ls *.py`, `rm -rf build/*`, `mkdir -p
+  src/{a,b}` and a here-document's `* item` lines are left alone. The name
+  gate also opens for `$'...'` and `$"..."` (`$'\x63url'`) and for a `/dev/`
+  path the shell expands (`/dev/${t}cp`, `$D/tcp/`), which the `$` refusal
+  then blocks. A command over 16384 bytes that names a tool or holds a glob
+  or a brace is refused (it was only one naming a tool).
+- Fix, in a command that names a tool: a request inside a word where the
+  command runs any program that runs one (the list now holds `trap`,
+  `alias`, `awk` and its kin, `sed`, `find`, `make`, `xargs`, `parallel`,
+  the wrappers, editors, database shells, ...; and git when given `-x`,
+  `--exec`, `--extcmd` or `foreach`), and a `!` before the tool's name
+  counts; code a shell or an interpreter reads from a pipe or a redirection
+  (`... | sh`, `sh < f`, `sh <<< '...'`, `| python3`, `python3 -`,
+  `/dev/stdin`; a pipe into `python3 -m json.tool` or `python3 -c '...'`
+  still runs); `xargs` or `parallel` before the tool; a copier (`cp`, `ln`,
+  `install`, `cat`, `dd`, `tee`, `rsync`, ...) the command runs, or runs
+  after `sudo` and the like, given the tool; and a git setting outside an
+  allowlist (`user.*`, `color.*`, `advice.*`, `init.defaultbranch`,
+  `core.quotepath`, `i18n.*`, `column.*`, `log.*`), with `-c` or in `git
+  config`, where it refused only `http.*`, `url.*`, `core.gitproxy`,
+  `core.sshcommand`, `protocol.*` and `remote.*` (so `alias.*`,
+  `core.pager`, `core.fsmonitor`, `credential.helper`, `diff.external` ran).
+- Left as the documented limit, stated in the hook and SECURITY.md §5.4: a
+  request another program makes with no tool's name in its text (a program
+  named by a variable, `"$(...)"` inside quotes, a copy made in an earlier
+  command under another name, a script, an interpreter's code). The
+  internal-address rule is a host-specific narrowing (§5.18.10's last
+  paragraph): the plugin applies no destination policy, so §4.4.2's
+  "refuse what you cannot tell" binds no destination here, and the plugin's
+  hook gates every such call. Refusing every command the hook cannot read
+  would refuse every interpreter for the rest of the session.
+- Tests (`TestSendCommandHook`): `test_blocks_code_a_program_runs`,
+  `test_blocks_a_request_another_program_starts`,
+  `test_blocks_a_word_the_shell_may_expand_to_a_tool`,
+  `test_reads_a_name_the_shell_spells`, and new cases in
+  `test_leaves_other_commands_alone` (globs and braces that name no tool, a
+  here-document of bullets, data piped to `python3 -m json.tool`).
+
+#### 15. The send skill's hook: a proxy variable set without `=` (medium)
+
+The setting rule matched `NAME=` only, but bash sets a variable with no `=`
+(`for http_proxy in`, `read`, `printf -v`, `getopts`, a nameref) and exports
+it with `export NAME` or `set -a`; git reads `GIT_CONFIG_COUNT`,
+`GIT_CONFIG_KEY_n` and `GIT_CONFIG_VALUE_n`, which the rule did not list.
+
+- Fix: a word that names a sensitive variable, with or without a value, is
+  refused in a command that names a tool: `CURL_HOME`, `WGETRC`, the CA
+  bundles, `HOSTALIASES`, `RES_OPTIONS`, `LOCALDOMAIN`, `BASH_ENV`, any
+  `*_proxy` in any case, any `GIT_*` and the loader's `LD_*`/`DYLD_*` as a
+  word or a word's part (`-vhttp_proxy`, `r=http_proxy`); `HOME`, `PATH`,
+  `ENV`, `IFS` and `XDG_CONFIG_HOME` as a word of their own, `NAME=...`,
+  `-vNAME` or a nameref's value. A long option's value stays the request
+  reader's (`wget --exe=http_proxy=...` is a redirect, as before).
+- Tests: `test_blocks_a_setting_made_without_an_assignment` (the three
+  reported forms; allexport, `while read`, `ALL_PROXY`, wget, `-vNAME`, a
+  nameref, `getopts`, `GIT_CONFIG_*`, `GIT_CONFIG_PARAMETERS`, `export
+  LD_PRELOAD=`, `export PATH=`, `read CURL_HOME`).
+
+#### 16. The audit skill's hook: a brace-expanded path, and a program that takes the file's name from its input (medium)
+
+The hook read a command other than the append form only when its text named
+the records, it ran under `.claude`, or it held `*`, `?` or `[`; braces were
+no trigger, and a program that writes the files a patch or an archive names
+never names them in the command. `tee -a .cl{a,}ude/au{d,}it/rec{o,}rds.js{o,}nl`
+and `git apply notes.patch` each wrote a token line into the records file.
+
+- Fix (`skills/audit/SKILL.md`): the hook now reads every command that holds
+  a brace, a glob, a redirection with `$` or a backtick, or the name of a
+  program that writes the files its input names. A word with a brace is
+  expanded as bash does (the send hook's expansion) and each word it gives
+  is matched against the records path; a glob or a brace that may name the
+  file or a directory on its way (`.claude`, `.claude/audit`: `cd
+  .cl*/au*t && ... >> rec*.js*nl`, a sibling the old hook let through) and a
+  redirection to a name the shell builds (`>> $A$B$C$D$E`) send the command
+  to the full reading (no write but the append form, readers only,
+  unquoted braces refused). In every command, a program that writes the
+  files its input names is refused where a command runs it or after a
+  program that runs another (`timeout 5`, `env -u x`): `patch`, `rsync`,
+  `bsdtar`, `cpio`, `pax`, `ar`, `7z`, `unar`, `unrar`, `jar`, `busybox`,
+  ...; `tar` but to create or list with short options; `unzip` but to list;
+  git's `apply`, `am`, `update-index`, `read-tree`, `checkout-index`,
+  `mktree`, `fast-import`, a git alias (`-c alias.*`, `--config-env`, `git
+  config alias.*`); `find` with `-exec`, `-execdir`, `-ok`, `-okdir` or
+  `-fprint*` running a program other than the readers; `xargs` running one.
+  A here-document's lines are read as commands too (`sh <<'EOF'` then `git
+  apply`), and one whose text a quote carries past a line's end is refused,
+  since where its body ends is not read. Each check reads at most 64 words
+  past the program (a longer one is refused), so the reading stays linear.
+- Not taken: refusing every program but the readers in every command (the
+  session's other work), and a PostToolUse scan of the records file (it
+  could only report a credential already written). Left as the documented
+  limit: a name built only when a command runs, code inside a word (`sh -c`,
+  a command substitution inside quotes, an interpreter's code, a script),
+  and a link planted under another name; the plugin's hook gates each as a
+  `mutate`.
+- Tests (`TestAuditCommandHook`): `test_blocks_a_name_the_shell_builds`,
+  `test_blocks_a_program_that_writes_files_its_input_names`,
+  `test_a_patch_that_writes_the_records_file_is_refused_before_it_runs`
+  (the reported route end to end: refused, and `git apply` does write the
+  token), and new cases in `test_allows_other_commands` (`mkdir -p
+  src/{a,b}`, `echo {1..3}`, `cp f{,.bak}`, `jq '{a,b}'`, `find -exec grep`,
+  `xargs wc -l`, `tar czf`, `unzip -l`, a JSON here-document, the commit
+  message here-document with `apply` and `patch` in it).
+- Timing: the hook's own long-input paths, 16384 bytes each under a 4 GB
+  limit: a word per two bytes 0.58 s, brace words 0.80 s, a here-document
+  of 2700 lines 1.30 s, `env` then 4000 `tar` words 0.26 s. A pattern of
+  16000 braces took 11.8 s while the glob match built a regex from it; a
+  pattern with more characters than the name it is compared with now builds
+  none (0.23 s), which also bounds the glob path the hook had before.
+
+#### 17. The rollback skill's hook: other spellings of `git stash apply|pop` (low)
+
+The hook found restores with a regex on the raw text, so `git -C . stash
+apply`, `git "stash" apply`, `git stash app''ly` and `git -c x.y=z stash
+pop` named no restore and exited 0 for an unrecorded commit.
+
+- Fix (`skills/rollback/SKILL.md`): the hook copies the shared word reader
+  (`hooks/shell_words.jq`, kept equal by `test_shell_words_copies_are_equal`,
+  which now lists rollback) and reads a command that names `stash` (quotes,
+  backslashes and `$` removed) or holds `$'...'` or `$"..."`. A simple
+  command with a word that names git (or splits into words, or is the
+  program and expands), a `stash` word and a `pop`, `apply` or `branch` word
+  (or words the shell expands) is a restore, allowed only as `git stash
+  apply|pop <id>`, those four words alone with none expanded, and only for a
+  recorded commit, as before; a word holding a command line with `stash` and
+  a restore (`sh -c '...'`, `echo '...' | sh`, `awk`'s `system`) and a
+  command the reader cannot read are refused with F503 as well. The quoted
+  form of a recorded restore (`git "stash" apply <id>`) still restores, as
+  the plugin's hook counts it a rollback.
+- Tests (`TestRollbackCommandHook`): `test_blocks_another_spelling_of_a_restore`
+  (the four reported forms and 19 siblings, recorded commit or not),
+  `test_a_long_command_naming_stash_is_refused_in_bounded_time`,
+  `test_reads_the_recorded_restore_as_the_shell_passes_it`, and new cases in
+  `test_allows_commands_that_restore_nothing`.
+
+#### Siblings checked
+
+- The plugin's pre-tool-use hook and the SDK mapper: each reported form is
+  gated (above); the mapper's interpreter and network rules already take
+  `send` with the worst case, so a destination policy refuses them in the
+  SDK (§4.4.2).
+- The persist skill's hook reads file tools' paths and content, not Bash
+  commands, so none of these forms reaches it.
+- Round 1's send and audit fixes (#23 to #25) hold: their tests pass
+  unchanged, with the reader's refusal of an unquoted brace, a here-document
+  and an unclosed quote in a command that names a tool or the records.
+
+#### Documentation
+
+SECURITY.md §5.4 (the send, audit and rollback rows: what each hook reads,
+refuses and leaves to the plugin's hook; the shared reader's 16384-byte
+bound now names the rollback hook), the three hooks' header comments,
+`hooks/README.md` (the rollback hook's spellings; the shared reader's three
+users and what makes each read a command), and CHANGELOG [Unreleased]
+Upgrading (the plugin's skill hooks, with the commands each now refuses for
+the rest of a session). The Standard's text was not changed: §5.18.10's last
+paragraph already makes a skill hook's extra condition a MAY, and §4.4.2
+binds a destination only under a policy. No version changes.
+
+#### Checks after batch 4
+
+- Python: `pytest tests/` (5967 passed, 18 skipped), and again the files
+  that read the skills and the docs after the last comment edits (1510
+  passed; `tests/test_skill_hooks.py` 1098); ruff check and format with
+  CI's lists; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators' `--check`;
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check and test (2002; the
+  WebAssembly build reused); the binding's check and test (217, 2 skipped).
+  No TypeScript source changed: neither has a Bash tool or these skills.
+- Site: `npm run check`, `npm test` (1173).
+- Old code: the 301 new cases run against 5945508's three SKILL.md files in
+  a scratch tree of the test file, its fixtures, the hooks and the skills
+  (500 KB, removed): 215 failed, 86 passed (above).
+- Probes, each under `timeout 120` and a 4 GB address-space limit, commands
+  of at most 1 MB: every reported form of the four defects against the new
+  hooks (each refused: F504, or F503 for the rollback hook) and against the
+  old ones (each exit 0); the patch route end to end (`git apply` writes the
+  token; the hook refuses the call first); the SDK mapper on the 15
+  reported forms (each gated). Timing at the 16384-byte bound: the send
+  hook 0.04 to 1.16 s (a word per two bytes when it names curl, 1.16 s; a
+  glob word per three bytes, 0.41 s; 16000 brackets, 0.04 s); the audit
+  hook 0.02 to 1.30 s (above); the rollback hook refuses a 1 MB command
+  that names `git stash` at once. No listener was needed (each form is
+  refused before it runs); no CLI or nested agent was started; nothing was
+  left running; the scratch repositories and trees were removed.
