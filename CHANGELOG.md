@@ -310,7 +310,20 @@ here and marked so.
     `ToolCapabilityMapper.git_dir_may_be_content` is the new lookup beside
     `git_may_fetch`. The adapter's own git commands run with
     `core.fsmonitor` and hooks turned off and fetch nothing, and the
-    tracker reads no state file in such a git directory.
+    tracker reads no state file in such a git directory. Security round 3:
+    a git read, and a restore, also get the worst case where the
+    repository's own configuration (local and worktree scopes, with what
+    they include) names a program git runs (a `core.fsmonitor` other than
+    a boolean, a diff driver, a filter, a merge driver, a signature
+    program, a pager) or its hooks hold `post-index-change`, as a project
+    delivered with its `.git` can; `git stash create` there is `checkpoint`
+    with the worst case beside it (take the first checkpoint with
+    `create_checkpoint`). `ToolCapabilityMapper.git_config_may_run` is the
+    new lookup. The recorder's clean-tree check turns those filters off.
+    `printf` with an option (`printf -v NAME`, which sets a shell variable
+    the later commands of the line run with), or with a word bash expands,
+    is the worst case, where a line of read-only commands could run code
+    as `observe`.
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
@@ -833,7 +846,17 @@ here and marked so.
     `.claude/checkpoints`, `acs/checkpoints`) is refused with F504, in any
     spelling a path accepts: any letter case, a run of slashes, `./`
     segments and (in a text of at most 4096 bytes) `x/../`, and through a
-    symbolic link on a path one of its words names.
+    symbolic link on a path one of its words names. Security round 3: the
+    hook also reads every string and member name of any other tool's input
+    but Agent's and Task's (an MCP filesystem server's path, an MCP shell
+    server's command), a `~` the shell expands (`~+`, `~user`; `~-` and
+    `~N` are refused outright), a path attached to a short option
+    (`-tdir`), and the command a quoted word holds (`sh -c '...'`); a call
+    that names the directory holding the records (the project's `.claude`,
+    the git directory's `acs/`: `rm -rf .claude`, `mv .claude x`) is
+    refused too, as is a call with more than 65536 bytes of strings of at
+    most 4096 bytes. A commit message or an MCP text that names
+    `.claude` as a word, or a record's name, is refused: write it otherwise.
   - The audit, persist, rollback and send skills' command hooks set
     `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
     does: a check that fails or gives no verdict in time blocks the call
@@ -921,7 +944,20 @@ here and marked so.
     directory git finds is not one git made for a work tree (a directory a
     repository ships holding `HEAD`, `objects/` and `refs/`, whose `config`
     names programs git runs). The hooks' own git commands run with
-    `core.fsmonitor` and hooks turned off and fetch nothing.
+    `core.fsmonitor` and hooks turned off and fetch nothing. Security round
+    3: the same where the repository's own configuration (the local and
+    worktree scopes, with what they include) names a program git runs (a
+    `core.fsmonitor` other than `true` or `false`, a diff driver's
+    `textconv` or `command`, `diff.external`, a filter, a merge driver, a
+    signature program, a pager) or its hooks directory holds
+    `post-index-change`: a git read and a recorded restore are a gated
+    `mutate`, and `git stash create` is put to a person with no marker
+    asked for (F502 in `bypassPermissions` or `dontAsk` unless
+    `ACS_HOOK_APPROVAL=off`). A project that sets such a program itself
+    (git-lfs or git-crypt installed with `--local`, a watchman fsmonitor)
+    gets these prompts; set it in the global configuration instead. The
+    take hook's clean-tree check turns the repository's own filters off. A
+    Bash `printf` with an option (`printf -v NAME`) is a gated `mutate`.
   - The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
     `AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`) belong in `~/.claude/settings.json`,
     managed settings or the environment Claude Code starts in. While the
@@ -963,7 +999,12 @@ here and marked so.
   to start a new log), a head another key signed, a log that had no head
   (anchored from then on, once) and a head that cannot be written. The
   pre-tool-use hook refuses a call that names `audit.head` (F504). The hook
-  now also runs `mv`.
+  now also runs `mv`. Security round 3: in a git repository the hook keeps
+  the same head, its anchor, in `<git dir>/acs/audit.head`, which `git
+  clean -fdx` or `rm -rf .claude` leaves, so a log removed with its head
+  is reported and fails verification; the verifier reads the anchor where
+  it exists (`--anchor-file` names another). To start a new log, move
+  `audit.log`, `audit.head` and the anchor aside together.
 - Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
   an action record of its own (Standard 1.2.0 §6.4), with the event under
   `details.event`, the collected `audit_record`, `changes` and `provenance`

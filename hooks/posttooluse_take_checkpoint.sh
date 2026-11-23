@@ -30,7 +30,8 @@
 # run in another repository than the project's (the payload's cwd), for
 # output that is neither a commit id nor empty, or for empty output while the
 # project's tree or index differs from HEAD: HEAD would not restore that
-# state.
+# state (checked with each filter the repository's own configuration names
+# turned off, so the check runs no program the repository chose).
 # MAX_AGE is ACS_CHECKPOINT_MAX_AGE when it is an integer from 1 to 1800,
 # else 1800 seconds (30 minutes, the Standard's cap). While the project's
 # .claude/settings.json or .claude/settings.local.json names one of the
@@ -143,8 +144,21 @@ elif [ -z "$printed" ]; then
   # Nothing to save, so HEAD restores the state: only if the project's
   # tracked files and index are HEAD's now.
   command -v git > /dev/null 2>&1 || exit 0
-  hgit -C "$project" diff --quiet --no-ext-diff --no-textconv HEAD -- 2>/dev/null || exit 0
-  hgit -C "$project" diff --cached --quiet --no-ext-diff --no-textconv HEAD -- 2>/dev/null || exit 0
+  # Each filter the repository's own configuration (local or worktree
+  # scope) names is turned off (an empty command is no filter), so hashing
+  # a changed file runs no program the repository chose; a name that cannot
+  # be passed so, or a listing git cannot give, writes no marker.
+  filters_off=()
+  filters_status=0
+  filters=$(hgit -C "$project" config --show-scope --name-only --get-regexp '^filter\..+\.(clean|smudge|process)$' 2>/dev/null) || filters_status=$?
+  case "$filters_status" in 0 | 1) ;; *) exit 0 ;; esac
+  while IFS=$'\t' read -r scope key; do
+    case "$scope" in local | worktree) ;; *) continue ;; esac
+    case "$key" in "" | *=*) exit 0 ;; esac
+    filters_off+=(-c "${key}=")
+  done <<< "$filters"
+  hgit ${filters_off[@]+"${filters_off[@]}"} -C "$project" diff --quiet --no-ext-diff --no-textconv HEAD -- 2>/dev/null || exit 0
+  hgit ${filters_off[@]+"${filters_off[@]}"} -C "$project" diff --cached --quiet --no-ext-diff --no-textconv HEAD -- 2>/dev/null || exit 0
   checkpoint_id="clean-${now}-$$"
   commit="HEAD"
 else

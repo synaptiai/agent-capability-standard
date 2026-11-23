@@ -3477,3 +3477,270 @@ the persist row of every layer. No version changes.
   hook's timing at 100 KB and 1 MB (0.04 to 0.37 s). No CLI or nested
   agent was started; nothing was left running; the probe copies and the
   scratch project were removed.
+
+## Round 3
+
+### Batch 1: five reported defects
+
+Five defects, each reproduced by an independent verifier on 6004f78: one in
+the SDK classifier's reading of a line of read-only commands, two in what
+the records guard reads (the paths the shell reads differently from their
+text, and every argument of a tool other than Bash, Skill and the file
+tools), one in what git reads let the repository run, and one in the audit
+log's end. None was fixed by an earlier batch (git log and rounds 1 and 2
+checked; round 2's fixes hold: their tests pass unchanged, and round 2 #4's
+link resolution is the base the new reading extends). Each fix has tests
+that fail on the code before it: the 184 tests of the three new files and
+the new `TestAnchor` were run with 6004f78's three hooks, mapper, recorder
+and verifier put back, and 145 failed; the 39 that passed are the
+fixtures' own checks (bash runs code through `printf -v`; a delivered
+config and a `post-index-change` hook run their programs), the controls
+(other paths asked, `printf` without an option, a plain repository, the
+user's own configuration, git's own fsmonitor, `~/` and the Monitor and
+PowerShell commands the old guard read already) and two timing bounds.
+
+#### 1. The records guard read `~+`, `~-`, `~user` and a path attached to a short option as written (low); sibling: the command a quoted word holds
+
+`path_words` rewrote only a word opening with `~/`, and a path glued to a
+short option (`-tnotes/k`, `-onotes/todo.md`) stayed one word resolved as
+`<cwd>/-tnotes/k`. `cp -r fixtures/key fixtures/commits ~+/notes/k/` (with
+the shipped link `notes/k -> ../.git/acs/checkpoints`) was only asked,
+and, once approved, replaced the key and entered a forged commit: every
+later restore of the repository's commit M ran with no checkpoint and no
+approval. Sibling, not reported and not in SECURITY.md's "not seen" list:
+`sh -c 'cp -r fixtures/key fixtures/commits notes/k/'` was read as one
+word, `cp -r ... notes/k/`, resolved as a single path.
+
+- Fix (`word_candidates`): each word is resolved as written and, for a
+  word opening with `~`, as the shell expands it (`~`, `~/`: `$HOME`; `~+`:
+  the call's directory; `~name`: that user's home, by the shell's own
+  lookup on a name of `[A-Za-z0-9._-]` only); `~-`, `~N`, `~+N`, `~-N`
+  (the shell's previous directory, its directory stack, which the hook
+  cannot know) and a `~` followed by a name no user can have are refused
+  (F504). A word opening with a single `-` is also resolved from each
+  place a short option's value may start (the second character up to the
+  first that is not a letter or digit, which covers `-rtdir`). Both
+  readings are checked, so a quoted `'~+'` (which the shell leaves as
+  written) is not missed either way.
+- Fix (`add_words`): a word that holds a blank, a quote, a backslash or an
+  operator once dequoted (the text a shell reads again: `sh -c`, `ssh`,
+  `git -c alias.x='!...'`, `find -exec sh -c`) is read again with
+  `path_words`, and a word that still holds one at that level is split at
+  every blank, quote and operator.
+- Bounds: every resolution counts its path's bytes against a budget of
+  262144 per call (`RESOLVE_LEFT`, beside the 200-link budget), so a
+  4000-letter option cluster is refused in 0.4 s, not resolved 4000 times;
+  a word with no slash that is no link resolves to itself without the
+  function (most words); the resolved paths are kept in an array (appending
+  to one string copied it whole each time, which made a 150 KB input take
+  15 s).
+- Tests: `TestShellExpandedPaths` in `tests/test_records_guard.py` (the
+  reported spellings, `~/` with `HOME`, `~user` by the path from that
+  user's home, which fails when read as written; `~-`, `~1`, `~+2`
+  refused; six nested commands; seven controls asked; the verifier's chain
+  ends at the refused copy; a 4000-letter cluster in bounded time).
+
+#### 2. The records guard never read an MCP tool's arguments (medium)
+
+`call_text` came only from Bash, Monitor and PowerShell `.command`, a file
+tool's path and Skill `.args`; every other tool gave null, so
+`mcp__filesystem__write_file {"path": ".git/acs/checkpoints/key"}` and a
+filesystem server's path through a shipped link were only asked.
+
+- Fix (`RECORD_TEXTS_JQ`): the texts read are a file tool's path (read
+  whole), a Bash command and a Skill call's arguments (read as words), and,
+  for every other tool but Agent and Task, every string and every member
+  name of the input, read whole and as words, since the hook cannot know
+  which the tool takes for a path or a command. Agent and Task are not
+  read: a subagent's own calls come to the hook, and reading prompts would
+  refuse prose. The records regex and the lexical reading apply to every
+  text; texts of at most 4096 bytes are resolved (a longer one cannot be a
+  path that opens, and is a command not read, as a Bash command over 4096
+  bytes is). More than 65536 bytes of such texts in one call is refused
+  (F504): reading strings that each hold quoted words costs about 0.2 s per
+  4 KB here, and 64 KB of them took 3.0 s, within the hook's 30 s limit on
+  a slower machine.
+- Not changed: a text over 4096 bytes is still not read for paths (a Bash
+  command or a shell server's command padded past it), as SECURITY.md
+  states; it is a `mutate` a person approves.
+- Tests: `TestEveryToolsArguments` (eleven inputs refused: literal records
+  in three filesystem calls, paths through links, `~+`, a shell server's
+  command and argv, a member name, Monitor, PowerShell; four asked; the
+  65536-byte refusal within 10 s; the slowest reading under the budget
+  within 25 s; a 5 KB string not read).
+
+#### 3. git reads and `git stash create` ran programs the repository's own configuration names (medium); siblings: hooks, a recorded restore, the clean-tree checks
+
+`git_read_gated` checked only a promisor, a partial clone and submodules,
+and `git_dir_is_made` trusts any `*/.git` by name. A project delivered with
+its `.git` (an archive, a copied checkout), or one approved `git config
+core.fsmonitor ./x`, makes `git status`, `git diff`, `git log -p`, `git
+show`, `git ls-files` and `git stash create` run the repository's program
+as `observe` or `checkpoint`, with no checkpoint and no approval, in the
+plugin hook and the SDK mapper alike. Siblings: a `post-index-change` hook
+in the delivered `.git/hooks` runs on `git status` (verified: it ran once);
+a recorded restore (`git stash apply <id>`, allowed with nothing) runs the
+smudge filters and merge drivers; the take hook's and the SDK recorder's
+clean-tree check (`git diff --quiet HEAD`) ran the clean filter (verified
+with a sentinel).
+
+- Fix (hook `git_runs_configured`, mapper `git_config_may_run`, the same
+  pattern `GIT_PROGRAM_KEYS` / `_PROGRAM_CONFIG`): `git config
+  --show-scope --get-regexp` of `core.fsmonitor` (unless a boolean),
+  `core.pager`, `pager.*`, `diff.external`, `diff.*.textconv|command`,
+  `filter.*.clean|smudge|process`, `merge.*.driver`, `gpg.program`,
+  `gpg.*.program`, in the local or worktree scope (an included file is
+  reported with the scope of the file that includes it, checked), or a
+  `post-index-change` in the hooks directory `git rev-parse --git-path
+  hooks` names; a lookup git cannot answer is a yes, no repository a no.
+  The user's own configuration (global, system, command line) is not
+  repository content and gates nothing, so a global git-lfs filter changes
+  nothing.
+- Where it answers yes: a git read is gated (hook: `mutate`; mapper: the
+  worst case), a recorded restore is a gated `mutate` in both, and `git
+  stash create` is, in the hook, put to a person with no marker asked for
+  (`checkpoint-ask`: only that command makes a marker, so requiring one
+  would leave such a repository with no checkpoint ever; F502 in a mode
+  that asks no one), and in the mapper `checkpoint` with the worst case
+  beside it (`checkpoint`, `execute`, `send`: a host takes the first
+  checkpoint with `create_checkpoint`, and a destination policy refuses
+  it, since the program may send anywhere).
+- Fix (clean-tree checks): the take hook and `_tree_is_head` turn each
+  filter the local or worktree configuration names off (`-c
+  filter.<name>.clean=` and the like: an empty command is no filter,
+  verified); a name holding `=` or a listing git cannot give writes no
+  marker.
+- Why not the reporter's per-key value checks for every key: a pager runs
+  only on a terminal and the signature program only with
+  `log.showSignature`, but the hook cannot tell how the command it allows
+  will run; naming the key is enough to gate.
+- Tests: `tests/test_git_config_programs.py` (the fixture's programs run
+  under plain git; 7 configurations × 8 reads refused F501 in the hook with
+  no program run, and the worst case in the mapper; `git stash create`
+  F502 in bypassPermissions and asked in default with no marker used; a
+  recorded restore F501; an included file and a `post-index-change` hook
+  count; git's own fsmonitor values and the user's global configuration
+  gate nothing; the mapper's classes for create and restore, its lookup
+  answering as the hook does, and a failed lookup a yes; the take hook and
+  the recorder run no filter and still write a clean marker, and none over
+  a changed tree).
+
+#### 4. `rm -rf .claude` removed the audit log with its head, and the next line began a log that verifies (low)
+
+The records patterns matched `audit.head` and `.claude/checkpoints` but not
+their directory, and the log hook took no log and no head for a new log.
+
+- Fix (guard): a path that resolves to the project's `.claude` or to its
+  git directory's `acs/` (compared as resolved, in any letter case) is
+  refused (F504): `rm -rf .claude`, `mv .claude x`, `rm -rf lnk/` (a link
+  to `.claude`), `cp -r x/. .claude/`, `sh -c 'rm -rf .claude'`, `rm -rf
+  ~+/.claude`, and an MCP move of `.claude`. Another `.claude` (`~/.claude`,
+  `other/.claude`) and a path under it are not.
+- Fix (anchor): the log hook keeps the same head in the project's git
+  directory, `<git dir>/acs/audit.head` (only in a git directory git made
+  for a work tree, the directory created with mode 700 and not through a
+  link: a link there, or a directory it cannot make, is reported at each
+  call, exit 1), and checks the log against both before it appends: a log removed
+  with its head (`git clean -fdx`, which names nothing, removes `.claude`
+  whole) is a cut, reported (exit 1), with neither head moved, at every
+  later call. `tools/verify_audit_log.py` checks the anchor where it exists
+  (`--anchor-file`, by default `<git dir>/acs/audit.head` for a log in
+  `<project>/.claude/`, a `.git` file's `gitdir:` followed); after such a
+  removal the default run fails on "Head not found" and on the anchor.
+- Not changed: outside a git repository there is no anchor, and a command
+  that removes both `.claude` and the git directory's `acs/` without naming
+  them (a pattern) removes all three; SECURITY.md §5.5 says so.
+- Tests: `TestTheDirectoryThatHoldsThem` (eight commands and an MCP call
+  refused, three paths asked) and `TestAnchor` in
+  `tests/test_verify_audit_log.py` (the anchor equals the head; `rm -rf
+  .claude` and `git clean -fdx` each leave a log the hook and the verifier,
+  by default and with `--head-file`, report, at every later call; moving
+  all three aside starts a log that verifies; an anchor behind the log
+  still anchors it; a link at `acs/` is written through by nothing and
+  reported; no anchor without a git directory).
+
+#### 5. `printf -v` (an allow-listed builtin) set shell variables, so a line of read-only commands ran code as `observe` (high)
+
+The mapper classifies each simple command of a line on its own, and
+`printf` was read-only whatever its arguments. `printf -v y
+'a[\044(echo PWNED > f)]' && printf -v 'z[y]' 1` ran its command
+substitution through arithmetic subscript evaluation (a `%s` with `$` does
+the same, so blocking octal escapes alone would not close it); `printf -v
+PATH . ; ls` ran a shipped `./ls`; `printf -v HOME . && git status` made
+git read the repository's `.gitconfig` and run its fsmonitor. The adapter
+allowed all three with no checkpoint, no person and no destination check.
+
+- Fix (mapper `_writes`): `printf` writes when its first argument starts
+  with `-` (`-v NAME`, `-vNAME`, `--`), and `printf` joins
+  `_ARGUMENT_WRITERS`, so a word bash expands (which may become `-v...`)
+  makes it write. The line takes the worst case (`mutate`, `send`).
+- Fix (hook `writes`, kept a subset of the mapper's rules): the same, so
+  the two agree; the hook read only lines of one command already, where a
+  lone `printf -v` is harmless, but a test keeps the rules alike.
+- Tests: `tests/test_shell_state.py` (bash runs each reported line's code;
+  15 lines and single commands take the worst case in the mapper, three
+  forms without an option still observe; `_writes` itself; the adapter's
+  F501 without a checkpoint, the ask with one, and F504 under a destination
+  policy; the hook's F501 and ask for six forms, and its pass for three).
+
+#### Siblings checked
+
+- Round 1 and 2 fixes hold: the quoted and abbreviated git options, the
+  bounded word splitter (a 4096-byte line still splits in bounded time), the
+  read-only allowlist's exclusions, round 2 #4's link resolution (its
+  tests pass unchanged), the shipped `.claude` git directory and embedded
+  git directories (their tests pass unchanged).
+- Other read-only builtins: `echo`, `pwd` and the rest of the list set no
+  shell state; `read`, `declare`, `let`, `test -v`, `[[ ]]`, `getopts`,
+  `mapfile`, `unset` are on no list.
+- The TypeScript package and the binding classify no shell command and run
+  no git. The rollback skill's hook still allows a restore of a recorded
+  commit (its check is unchanged); the pre-tool-use hook now gates that
+  restore where the repository names a program git runs.
+- The log hook's git lookup for the anchor runs with `core.fsmonitor` and
+  hooks off and no fetch, as `hgit` does.
+
+#### Documentation
+
+SECURITY.md §5.1 (the Bash read-only rule and `printf`; git reads and
+restores where the repository's own configuration or hooks name a program,
+`git stash create` put to a person; the records guard's texts, expansions,
+nested commands, the directory that holds the records and the 65536-byte
+bound; the audit head's anchor), the §5.4 table row and §5.5 (the records
+gap, the anchor's limit; the adapter's classifier), `hooks/README.md` (the
+same, and the verifier's `--anchor-file`), the three hooks' header
+comments, the mapper's docstrings, `docs/integrations/claude_agent_sdk.md`
+(the Bash table: `git stash create` and git reads where the repository
+names a program, `printf` with an option), and CHANGELOG [Unreleased]
+Upgrading (the SDK's Bash entry; the plugin's records, git and audit log
+entries). No version changes.
+
+#### Checks after batch 1
+
+- Python: `pytest tests/` (6200 passed, 18 skipped), and again the log
+  hook's and the skill hooks' test files after the last hook edit (255 and
+  1099 passed); ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; `sync_skill_schemas.py
+  --check` and the generators' `--check` (no fixture or vector changed);
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: `packages/acs-core` build, check and test (2007; the
+  WebAssembly build reused); the binding's check and test (235 passed, 2
+  skipped). No TypeScript source changed: neither classifies shell
+  commands nor runs git.
+- Site: `npm run check`, `npm test` (1173). The run sweep was not run: of
+  the enforced pages only `/guides/claude-agent-sdk/` changed, and only by
+  rows of its Bash table (a figure).
+- Old code: the 184 new tests run with 6004f78's three hooks, mapper,
+  recorder and verifier put back: 145 failed (above, per defect).
+- Probes, each under `timeout 120` and a 4 GB address-space limit, inputs of
+  at most 1.2 MB: every reported spelling against the final hook (F504;
+  the controls asked); the MCP calls of #2 (F504); the hook's time on a
+  4000-letter option cluster (0.38 s, refused), 15 strings of 4 KB of
+  quoted words (3.0 s, asked), about 60 KB of slashed words (2.4 s), inputs of
+  174 KB and 1.2 MB of short strings (refused in 0.47 and 0.75 s) and one
+  1 MB string (0.22 s, not read for paths). No CLI or nested agent was
+  started; nothing was left running; the scratch repositories and inputs
+  were removed.

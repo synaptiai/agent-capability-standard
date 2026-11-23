@@ -679,6 +679,130 @@ class TestHead:
 
 
 @pytest.mark.skipif(
+    shutil.which("jq") is None
+    or shutil.which("openssl") is None
+    or shutil.which("git") is None,
+    reason="the hook needs jq and openssl, and the anchor a git directory",
+)
+class TestAnchor:
+    """A command that removes .claude whole (rm -rf .claude, git clean
+    -fdx) removes the log with its head: the next line begins a new log
+    that verifies (security round 3, batch 1, #4). The hook keeps the
+    same head in the project's git directory, <git dir>/acs/audit.head,
+    which such a command leaves, and the hook and the verifier both check
+    the log against it."""
+
+    VERIFIER = Path(__file__).resolve().parents[1] / "tools" / "verify_audit_log.py"
+
+    @pytest.fixture
+    def project(self, tmp_path: Path) -> Path:
+        project = tmp_path / "proj"
+        project.mkdir()
+        subprocess.run(
+            ["git", "init", "-q"], cwd=project, check=True, capture_output=True
+        )
+        return project
+
+    def _cli(self, project: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(self.VERIFIER), "--hmac-key", HMAC_KEY, *args],
+            capture_output=True,
+            text=True,
+            cwd=project,
+            timeout=30,
+        )
+
+    def _three(self, project: Path) -> tuple[Path, Path, Path]:
+        for call_id in ("toolu_1", "toolu_2", "toolu_3"):
+            assert TestHead._call(project, call_id).returncode == 0
+        return (
+            project / ".claude" / "audit.log",
+            project / ".claude" / "audit.head",
+            project / ".git" / "acs" / "audit.head",
+        )
+
+    def test_the_hook_keeps_the_anchor_beside_the_head(self, project: Path) -> None:
+        log, head, anchor = self._three(project)
+        assert anchor.read_text() == head.read_text()
+        assert verify_log(log, HMAC_KEY, head, anchor) == (3, 3, [])
+        result = self._cli(project)
+        assert result.returncode == 0, result.stdout
+        assert "3/3 entries verified" in result.stdout
+
+    @pytest.mark.parametrize("how", ["rm -rf .claude", "git clean -fdx"])
+    def test_a_log_removed_with_its_head_fails_verification(
+        self, project: Path, how: str
+    ) -> None:
+        """The verifier's reproduction: three entries, one of them a git
+        push --force, then .claude removed and one more call logged."""
+        log, head, anchor = self._three(project)
+        subprocess.run(how.split(), cwd=project, check=True, capture_output=True)
+        assert not log.exists() and not head.exists() and anchor.exists()
+        result = TestHead._call(project, "toolu_4")
+        assert result.returncode == 1
+        assert "anchor" in result.stderr
+        assert not head.exists()
+        assert len(log.read_text().splitlines()) == 1
+        errors = verify_log(log, HMAC_KEY, head, anchor)[2]
+        assert any(
+            e.startswith("Anchor: the log ends before its anchor") for e in errors
+        )
+        for args in ((), ("--head-file", ".claude/audit.head")):
+            cli = self._cli(project, *args)
+            assert cli.returncode == 1, args
+            assert "INTEGRITY CHECK FAILED" in cli.stdout
+        # And it stays so at every later call.
+        assert TestHead._call(project, "toolu_5").returncode == 1
+        assert self._cli(project).returncode == 1
+
+    def test_moving_all_three_aside_starts_a_new_log(self, project: Path) -> None:
+        log, head, anchor = self._three(project)
+        for path in (log, head, anchor):
+            path.rename(path.with_name(path.name + ".old"))
+        assert TestHead._call(project, "toolu_4").returncode == 0
+        assert verify_log(log, HMAC_KEY, head, anchor) == (1, 1, [])
+        assert self._cli(project).returncode == 0
+
+    def test_an_anchor_behind_the_log_still_anchors_it(self, project: Path) -> None:
+        log, head, anchor = self._three(project)
+        second = json.loads(log.read_text().splitlines()[1])["hmac"]
+        anchor.write_text(
+            json.dumps(
+                {
+                    "entries": 2,
+                    "hmac": second,
+                    "head_hmac": compute_hmac(f"acs-audit-head:2:{second}", HMAC_KEY),
+                }
+            )
+            + "\n"
+        )
+        assert verify_log(log, HMAC_KEY, head, anchor) == (3, 3, [])
+        assert TestHead._call(project, "toolu_4").returncode == 0
+        assert json.loads(anchor.read_text())["entries"] == 4
+
+    def test_an_anchor_the_hook_cannot_keep_is_reported(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """A link at the git directory's acs/: the hook writes nothing
+        through it, and says the anchor is not kept."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (project / ".git" / "acs").symlink_to(elsewhere)
+        result = TestHead._call(project, "toolu_1")
+        assert result.returncode == 1
+        assert "anchor is not kept" in result.stderr
+        assert not any(elsewhere.iterdir())
+        assert (project / ".claude" / "audit.head").exists()
+
+    def test_without_a_git_directory_there_is_no_anchor(self, tmp_path: Path) -> None:
+        for call_id in ("toolu_1", "toolu_2"):
+            assert TestHead._call(tmp_path, call_id).returncode == 0
+        assert not (tmp_path / ".git").exists()
+        log = tmp_path / ".claude" / "audit.log"
+        assert verify_log(log, HMAC_KEY, log.with_suffix(".head"), None) == (2, 2, [])
+
+
+@pytest.mark.skipif(
     shutil.which("jq") is None or shutil.which("openssl") is None,
     reason="the hook needs jq and openssl",
 )

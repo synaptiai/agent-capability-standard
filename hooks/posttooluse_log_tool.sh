@@ -38,14 +38,18 @@
 # link, so the hook also keeps the chain's end in .claude/audit.head, one
 # line of JSON: {"entries": the number of lines in the log, "hmac": the last
 # line's hmac, "head_hmac": HMAC-SHA-256 of "acs-audit-head:<entries>:<hmac>"
-# under the same key}. Before it appends, the hook checks that the log still
-# holds the entry the head records, at its place; tools/verify_audit_log.py
-# checks the same, so a log cut short, or removed, fails verification. When
-# the log no longer holds that entry, or the head is not one this key signed,
-# the hook says so, appends the line, and leaves the head as it is: it is
-# the evidence of the cut. The pre-tool-use hook refuses a call that names
-# the head (F504). To start a new log, move audit.log and audit.head aside
-# together.
+# under the same key}, and the same line, the head's anchor, in the
+# project's git directory (<git dir>/acs/audit.head), which a command that
+# removes .claude whole (git clean -fdx, rm -rf .claude) leaves. Before it
+# appends, the hook checks that the log still holds the entry the head and
+# the anchor record, at its place; tools/verify_audit_log.py checks the
+# same, so a log cut short, or removed, with its head or not, fails
+# verification. When the log no longer holds that entry, or the head or the
+# anchor is not one this key signed, the hook says so, appends the line, and
+# leaves both as they are: they are the evidence of the cut. The pre-tool-use
+# hook refuses a call that names the head, .claude or the git directory's
+# acs/ (F504). To start a new log, move audit.log, audit.head and the anchor
+# aside together.
 #
 # The hook records; it does not block (the tool has already run). The log is
 # a best-effort capture (STANDARD v1.2 §6.4): it can miss a call, but never
@@ -213,6 +217,29 @@ mkdir -p "$log_dir"
 log_file="$log_dir/audit.log"
 head_file="$log_dir/audit.head"
 
+# The head's anchor: the same head, kept in the project's git directory
+# (<git dir>/acs/audit.head), outside the directory a project command removes
+# whole (git clean -fdx, rm -rf .claude): a log and head removed together
+# leave it, and it shows the cut. Only in a git directory git made for a
+# work tree (a .git directory, or a linked worktree's or a submodule's under
+# one: any other may be repository content), asked with core.fsmonitor and
+# hooks turned off; none without git or a repository.
+anchor_file=""
+anchor_unkept=0
+if command -v git &> /dev/null \
+  && anchor_git=$(GIT_NO_LAZY_FETCH=1 git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$project_dir" rev-parse --absolute-git-dir 2>/dev/null); then
+  case "$anchor_git" in
+    */.git | */.git/worktrees/* | */.git/modules/*)
+      if (umask 077 && mkdir -p "$anchor_git/acs") 2>/dev/null && [ ! -L "$anchor_git/acs" ]; then
+        anchor_file="$anchor_git/acs/audit.head"
+      else
+        # A link there, or a directory that cannot be made: said below.
+        anchor_unkept=1
+      fi
+      ;;
+  esac
+fi
+
 # SEC-006: Reject symlinked audit log to prevent log redirection attacks
 if [ -L "$log_file" ]; then
   fail "audit.log is a symlink (refused, SEC-006)"
@@ -258,28 +285,40 @@ _do_append() {
     [[ "$entries" =~ ^[0-9]{1,12}$ ]] || entries=""
   fi
 
-  # The head: does the log still hold the entry it records, at its place?
-  # ok: yes, or no head and no entry yet; new: no head for a log that has
-  # entries (begun before the hook kept one); cut: no, or a head this key did
-  # not sign, or one that cannot be read; held: the head cannot be written.
-  local head_state="ok" head_entries="" head_hmac_recorded=""
-  if [ -L "$head_file" ] || { [ -e "$head_file" ] && [ ! -f "$head_file" ]; }; then
-    head_state="held"
-  elif [ -f "$head_file" ]; then
-    local head_line head_sig
-    IFS= read -r -n 4096 head_line < "$head_file" 2>/dev/null || true
-    head_entries=$(printf '%s' "$head_line" | jq -r '.entries | numbers | tostring' 2>/dev/null) || head_entries=""
-    head_hmac_recorded=$(printf '%s' "$head_line" | jq -r '.hmac | strings' 2>/dev/null) || head_hmac_recorded=""
-    head_sig=$(printf '%s' "$head_line" | jq -r '.head_hmac | strings' 2>/dev/null) || head_sig=""
-    head_state="cut"
-    if [[ "$head_entries" =~ ^[1-9][0-9]{0,11}$ && "$head_hmac_recorded" =~ ^[0-9a-f]{64}$ ]] \
-      && [ "$head_sig" = "$(printf 'acs-audit-head:%s:%s' "$head_entries" "$head_hmac_recorded" | hmac_hex)" ] \
-      && [[ -n "$entries" ]] && (( 10#$entries >= 10#$head_entries )); then
-      local held_hmac
-      held_hmac=$(awk -v n="$head_entries" 'NR == n { print; exit }' "$log_file" 2>/dev/null | jq -r '.hmac | strings' 2>/dev/null) || held_hmac=""
-      [ "$held_hmac" = "$head_hmac_recorded" ] && head_state="ok"
+  # The head and its anchor: does the log still hold the entry each
+  # records, at its place? ok: yes, or no head, no anchor and no entry yet;
+  # new: neither for a log that has entries (begun before the hook kept
+  # one); cut: no, for either, or one this key did not sign, or one that
+  # cannot be read (a log removed with its head, the anchor left); held:
+  # one cannot be written.
+  local head_state="ok" head_entries="" head_hmac_recorded="" kept=0 file
+  for file in "$head_file" "$anchor_file"; do
+    [ -n "$file" ] || continue
+    if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+      [ "$head_state" = "cut" ] || head_state="held"
+    elif [ -f "$file" ]; then
+      kept=1
+      local head_line head_sig recorded_entries recorded_hmac file_state="cut"
+      head_line=""
+      IFS= read -r -n 4096 head_line < "$file" 2>/dev/null || true
+      recorded_entries=$(printf '%s' "$head_line" | jq -r '.entries | numbers | tostring' 2>/dev/null) || recorded_entries=""
+      recorded_hmac=$(printf '%s' "$head_line" | jq -r '.hmac | strings' 2>/dev/null) || recorded_hmac=""
+      head_sig=$(printf '%s' "$head_line" | jq -r '.head_hmac | strings' 2>/dev/null) || head_sig=""
+      if [[ "$recorded_entries" =~ ^[1-9][0-9]{0,11}$ && "$recorded_hmac" =~ ^[0-9a-f]{64}$ ]] \
+        && [ "$head_sig" = "$(printf 'acs-audit-head:%s:%s' "$recorded_entries" "$recorded_hmac" | hmac_hex)" ] \
+        && [[ -n "$entries" ]] && (( 10#$entries >= 10#$recorded_entries )); then
+        local held_hmac
+        held_hmac=$(awk -v n="$recorded_entries" 'NR == n { print; exit }' "$log_file" 2>/dev/null | jq -r '.hmac | strings' 2>/dev/null) || held_hmac=""
+        [ "$held_hmac" = "$recorded_hmac" ] && file_state="ok"
+      fi
+      if [ "$file_state" = "cut" ]; then
+        head_state="cut"
+        head_entries="$recorded_entries"
+        head_hmac_recorded="$recorded_hmac"
+      fi
     fi
-  elif [[ "$entries" != "0" ]]; then
+  done
+  if [ "$head_state" = "ok" ] && [ "$kept" = 0 ] && [[ "$entries" != "0" ]]; then
     head_state="new"
   fi
 
@@ -348,11 +387,11 @@ _do_append() {
   local head_problem=0
   case "$head_state" in
     cut)
-      echo "posttooluse_log_tool: audit.log no longer holds the entry its head records (entry ${head_entries:-?} of the log, hmac ${head_hmac_recorded:-?}; the log had ${entries:-?} lines), or audit.head is not one this key signed: entries were removed or changed. The head is kept as the evidence; to start a new log, move audit.log and audit.head aside together" >&2
+      echo "posttooluse_log_tool: audit.log no longer holds the entry its head records, or the head's anchor (${anchor_file:-none}) does (entry ${head_entries:-?} of the log, hmac ${head_hmac_recorded:-?}; the log had ${entries:-?} lines), or one is not a head this key signed: entries, or the log with its head, were removed or changed. The head and the anchor are kept as the evidence; to start a new log, move audit.log, audit.head and the anchor aside together" >&2
       head_problem=1
       ;;
     held)
-      echo "posttooluse_log_tool: audit.head is a symlink or not a regular file (refused, SEC-006); the log's end is not anchored" >&2
+      echo "posttooluse_log_tool: audit.head or its anchor (${anchor_file:-none}) is a symlink or not a regular file (refused, SEC-006); the log's end is not anchored" >&2
       head_problem=1
       ;;
     *)
@@ -363,6 +402,26 @@ _do_append() {
       last_hmac=$(tail -1 "$log_file" 2>/dev/null | jq -r '.hmac | strings' 2>/dev/null) || last_hmac=""
       if [[ "$written" =~ ^[1-9][0-9]{0,11}$ && "$last_hmac" =~ ^[0-9a-f]{64}$ ]]; then
         sig=$(printf 'acs-audit-head:%s:%s' "$written" "$last_hmac" | hmac_hex) || sig=""
+      fi
+      local anchor_tmp="" anchored=1
+      if [ -n "$anchor_file" ]; then
+        anchor_tmp="${anchor_file%/*}/.audit.head.$$"
+        anchored=0
+        if [[ "$sig" =~ ^[0-9a-f]{64}$ ]] \
+          && (set -C; printf '{"entries":%s,"hmac":"%s","head_hmac":"%s"}\n' "$written" "$last_hmac" "$sig" > "$anchor_tmp") 2>/dev/null \
+          && mv -f "$anchor_tmp" "$anchor_file" 2>/dev/null; then
+          anchored=1
+        else
+          rm -f "$anchor_tmp" 2>/dev/null || true
+        fi
+      fi
+      if (( anchor_unkept )); then
+        echo "posttooluse_log_tool: the git directory's acs/ is a symlink or cannot be made, so the head's anchor is not kept; a log removed with its head may not be seen" >&2
+        head_problem=1
+      fi
+      if (( ! anchored )); then
+        echo "posttooluse_log_tool: the head's anchor (${anchor_file}) could not be written; a log removed with its head may not be seen" >&2
+        head_problem=1
       fi
       if [[ "$sig" =~ ^[0-9a-f]{64}$ ]] \
         && (set -C; printf '{"entries":%s,"hmac":"%s","head_hmac":"%s"}\n' "$written" "$last_hmac" "$sig" > "$head_tmp") 2>/dev/null \

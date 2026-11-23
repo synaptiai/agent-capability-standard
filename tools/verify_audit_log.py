@@ -10,6 +10,9 @@ Reads .claude/audit.log and verifies that:
 4. The log still holds the entry its head records, at its place: the head,
    .claude/audit.head, is the chain's end as the hook last wrote it (the
    number of entries and the last one's hmac, signed with the same key).
+   So does the head's anchor, the same head the hook keeps in the project's
+   git directory (<git dir>/acs/audit.head), where a command that removes
+   .claude whole (git clean -fdx, rm -rf .claude) leaves it.
 
 A line is checked as the bytes it holds, not as what a parser reads from
 it: JSON that names a member twice parses, in most readers, to the last
@@ -20,7 +23,8 @@ value. Each of those is refused.
 
 The chain alone shows a changed or removed entry by the link of the entry
 after it; removing the last entries, or the whole log, breaks no link, and
-the head shows it. A log begun before the hook kept a head, and a chain no
+the head shows it; removing the log with its head, and starting a new one,
+the anchor shows. A log begun before the hook kept a head, and a chain no
 head anchors (the audit skill's .claude/audit/records.jsonl), are verified
 with --no-head, which checks the chain alone.
 
@@ -41,7 +45,7 @@ every field but ``hmac`` in the order recorded:
 
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
-        [--head-file PATH | --no-head]
+        [--head-file PATH] [--anchor-file PATH] [--no-head]
 
 SEC-005: Audit log integrity verification.
 """
@@ -247,23 +251,87 @@ def read_head(head_path: Path, hmac_key: str) -> tuple[int, str] | str:
     return entries, last
 
 
+def default_anchor(log_path: Path) -> Path | None:
+    """Where the hook keeps the head's anchor for a log at
+    ``<project>/.claude/audit.log``: ``<git dir>/acs/audit.head``, the git
+    directory being ``<project>/.git`` or the one a ``.git`` file names
+    (``gitdir: <path>``, a linked worktree's or a submodule's). None for a
+    log elsewhere, or a project with no ``.git``."""
+    if log_path.parent.name != ".claude":
+        return None
+    dotgit = log_path.parent.parent / ".git"
+    if dotgit.is_dir():
+        return dotgit / "acs" / "audit.head"
+    try:
+        line = dotgit.read_text(encoding="utf-8").partition("\n")[0]
+    except OSError, UnicodeDecodeError:
+        return None
+    if not line.startswith("gitdir: "):
+        return None
+    git_dir = Path(line.removeprefix("gitdir: ").strip())
+    if not git_dir.is_absolute():
+        git_dir = dotgit.parent / git_dir
+    return git_dir / "acs" / "audit.head"
+
+
+def _head_errors(name: str, head: tuple[int, str], lines: list[str]) -> list[str]:
+    """Whether ``lines`` still hold the entry ``head`` records, at its
+    place; ``name`` is "Head" or "Anchor"."""
+    entries, last = head
+    total = len(lines)
+    if total < entries:
+        why = (
+            "its last entries were removed"
+            if name == "Head"
+            else "its last entries were removed, or the log was removed with "
+            "its head and begun again"
+        )
+        return [
+            f"{name}: the log ends before its {name.lower()}: {entries} entries "
+            f"recorded, {total} found ({why})"
+        ]
+    held: object = None
+    try:
+        held = parse_line(lines[entries - 1]).get("hmac")
+    except ValueError, AttributeError:
+        held = None
+    if held != last:
+        return [
+            f"{name}: entry {entries} is not the one the {name.lower()} records "
+            "(entries were removed or replaced)"
+        ]
+    return []
+
+
 def verify_log(
-    log_path: Path, hmac_key: str, head_path: Path | None = None
+    log_path: Path,
+    hmac_key: str,
+    head_path: Path | None = None,
+    anchor_path: Path | None = None,
 ) -> tuple[int, int, list[str]]:
     """Verify the entire audit log, and, given ``head_path``, that the log
     still holds the entry its head records, at its place (so that its last
-    entries were not removed).
+    entries were not removed); and, given ``anchor_path`` where a file is,
+    the same of the head's anchor (so that the log was not removed with its
+    head and begun again).
 
     Returns:
         (total_entries, valid_entries, all_errors)
     """
     head = read_head(head_path, hmac_key) if head_path is not None else None
     head_errors = [head] if isinstance(head, str) else []
+    anchor: tuple[int, str] | str | None = None
+    if anchor_path is not None and (anchor_path.exists() or anchor_path.is_symlink()):
+        anchor = read_head(anchor_path, hmac_key)
+        if isinstance(anchor, str):
+            head_errors.append(f"Anchor: {anchor}")
     if not log_path.exists():
-        if isinstance(head, tuple):
-            head_errors.append(
-                f"Audit log not found, though its head records {head[0]} entries"
-            )
+        for name, recorded in (("head", head), ("anchor", anchor)):
+            if isinstance(recorded, tuple):
+                head_errors.append(
+                    f"Audit log not found, though its {name} records "
+                    f"{recorded[0]} entries"
+                )
         return 0, 0, ["Audit log not found", *head_errors]
 
     # One entry per "\n": the hook writes no other line break between
@@ -282,23 +350,9 @@ def verify_log(
     all_errors: list[str] = list(head_errors)
     prev_hmac = ""
     if isinstance(head, tuple):
-        entries, last = head
-        held: object = None
-        if total >= entries:
-            try:
-                held = parse_line(lines[entries - 1]).get("hmac")
-            except ValueError, AttributeError:
-                held = None
-        if total < entries:
-            all_errors.append(
-                f"Head: the log ends before its head: {entries} entries "
-                f"recorded, {total} found (its last entries were removed)"
-            )
-        elif held != last:
-            all_errors.append(
-                f"Head: entry {entries} is not the one the head records "
-                "(entries were removed or replaced)"
-            )
+        all_errors += _head_errors("Head", head, lines)
+    if isinstance(anchor, tuple):
+        all_errors += _head_errors("Anchor", anchor, lines)
 
     for i, line in enumerate(lines, 1):
         if not line.strip():
@@ -327,27 +381,40 @@ def main() -> None:
         default=None,
         help="HMAC key (default: derived from hostname, matching shell hook)",
     )
-    head = parser.add_mutually_exclusive_group()
-    head.add_argument(
+    parser.add_argument(
         "--head-file",
         type=Path,
         default=None,
         help="The log's head (default: the log's path with the suffix .head, "
         "as the hook writes .claude/audit.head)",
     )
-    head.add_argument(
+    parser.add_argument(
+        "--anchor-file",
+        type=Path,
+        default=None,
+        help="The head's anchor, checked where it exists (default, for "
+        "<project>/.claude/audit.log: <git dir>/acs/audit.head)",
+    )
+    parser.add_argument(
         "--no-head",
         action="store_true",
         help="Check the chain alone: a log begun before the hook kept a head, "
         "or a chain no head anchors (removing its last entries is not seen)",
     )
     args = parser.parse_args()
+    if args.no_head and (args.head_file or args.anchor_file):
+        parser.error(
+            "--no-head checks no head: it takes no --head-file or --anchor-file"
+        )
 
     hmac_key = args.hmac_key or get_default_hmac_key()
     head_path = (
         None if args.no_head else (args.head_file or args.log_file.with_suffix(".head"))
     )
-    total, valid, errors = verify_log(args.log_file, hmac_key, head_path)
+    anchor_path = (
+        None if args.no_head else (args.anchor_file or default_anchor(args.log_file))
+    )
+    total, valid, errors = verify_log(args.log_file, hmac_key, head_path, anchor_path)
 
     if errors:
         print(f"INTEGRITY CHECK FAILED: {len(errors)} error(s) in {total} entries\n")

@@ -52,21 +52,29 @@
 #       - an option that writes: for git, --output or any abbreviation of it
 #         (--out, --outp, ...); for file, -C in any short option cluster, -p,
 #         or --compile or --preserve-date or any abbreviation of them
-#         (--compi); and, for git and file, a word with an unquoted *, ? or
-#         [, which bash replaces with file names, options included: mutate;
+#         (--compi); for printf, any option (a first argument starting with
+#         -: printf -v NAME sets a shell variable); and, for git, file and
+#         printf, a word with an unquoted *, ? or [, which bash replaces with
+#         file names, options included: mutate;
 #       - any git stash form where the git directory git finds is not one git
 #         made for a work tree (git_dir_is_content: git runs what that
 #         directory's configuration names): mutate;
 #       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
-#         writes the marker once it succeeded); git stash list|show: observe
-#         (mutate where a git read may do more, below);
+#         writes the marker once it succeeded), but where the repository's
+#         own configuration or hooks name a program git runs
+#         (git_runs_configured): checkpoint-ask, put to a person with no
+#         marker asked for (only this command makes one; F502 in a mode that
+#         asks no one); git stash list|show: observe (mutate where a git
+#         read may do more, below);
 #         git stash pop|apply <commit>: rollback when <commit> is the full id
 #         of a commit posttooluse_take_checkpoint.sh entered, signed, in the
 #         project's git directory (<git dir>/acs/checkpoints/commits/, a
-#         lookup of one file however many checkpoints were taken) and the
-#         call runs in the project's repository (its cwd); any other pop or
-#         apply, a bare one included, is mutate, since git applies any merge
-#         commit as if it were a stash; any other git stash form: mutate;
+#         lookup of one file however many checkpoints were taken), the call
+#         runs in the project's repository (its cwd) and the repository's
+#         own configuration and hooks name no program git runs; any other
+#         pop or apply, a bare one included, is mutate, since git applies
+#         any merge commit as if it were a stash; any other git stash form:
+#         mutate;
 #       - a first word holding a blank (a quoted "git status") or a slash:
 #         bash runs the program of that name, which is on no list: mutate;
 #       - a command on READ_ONLY (a one-word entry the first word, a two-word
@@ -74,8 +82,9 @@
 #         used), except a
 #         git command where a git read may do more than read the repository's
 #         own state (git_read_gated: the git directory is not one git made
-#         for a work tree, a partial clone, a repository with submodules, or
-#         git cannot say): mutate;
+#         for a work tree, the repository's own configuration or hooks name
+#         a program git runs, a partial clone, a repository with submodules,
+#         or git cannot say): mutate;
 #       - anything else: mutate.
 #   - Any other tool (Monitor, PowerShell, ExitWorktree, every MCP tool, a
 #     tool this hook does not know): unbound, so mutate (§5.18.2: a layer
@@ -101,9 +110,15 @@
 #   - mutate: a call whose arguments name the layer's own records
 #     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/, audit.head, in
 #     any letter case and with //, ./ and x/../ read as a path reads them, or
-#     through a symbolic link: each word of a text of at most 4096 bytes is
-#     resolved as the system resolves a path) is refused (F504
-#     CONSTRAINT_VIOLATED): only these hooks write them. Then the
+#     through a symbolic link, a ~ the shell expands or a path attached to a
+#     short option: each path a text of at most 4096 bytes names is resolved
+#     as the system resolves a path), or the directory that holds them (the
+#     project's .claude, its git directory's acs/), is refused (F504
+#     CONSTRAINT_VIOLATED): only these hooks write them. The texts read are
+#     a file tool's path, a Bash command and a Skill call's arguments, and
+#     every string and member name of any other tool's input but Agent's
+#     and Task's (an MCP filesystem server's path, a shell server's
+#     command). Then the
 #     marker (.claude/checkpoint.ok, a JSON object with checkpoint_id,
 #     created_at, expires_at) must exist, be a regular file that git does not
 #     track (a repository can ship a tracked one) in a directory whose git
@@ -363,10 +378,61 @@ git_dir_is_content() {
   ! git_dir_is_made "$git_dir"
 }
 
+# The configuration keys that name a program git runs: core.fsmonitor (to
+# refresh the index: git status, git diff, git stash; true and false name
+# git's own), a diff driver's textconv or command and diff.external (git
+# diff, git log -p, git show), a filter's clean, smudge or process (git
+# status and git diff hash a changed file through clean; a restore writes
+# through smudge), a merge driver (a restore merges), a signature program
+# (git log and git show with log.showSignature) and a pager. The SDK mapper
+# holds the same pattern (_PROGRAM_CONFIG).
+GIT_PROGRAM_KEYS='^(core\.fsmonitor|core\.pager|pager\..+|diff\.external|diff\..+\.(textconv|command)|filter\..+\.(clean|smudge|process)|merge\..+\.driver|gpg\.program|gpg\..+\.program)$'
+
+# Whether git, run where this call runs, may run a program the repository
+# itself names: its own configuration (the local and worktree scopes, with
+# the files they include) sets one of GIT_PROGRAM_KEYS, or its hooks
+# directory holds post-index-change, which git runs when a read such as git
+# status writes the index. A repository delivered with its .git (an archive,
+# a copied checkout) brings that configuration and those hooks, and one
+# approved `git config core.fsmonitor ./x` writes it; the user's own
+# settings (global, system, the command line) are not repository content.
+# No repository there: no. Anything git does not answer: yes. The SDK
+# mapper asks the same (git_config_may_run).
+git_runs_configured() {
+  local dir found status=0 hooks
+  dir=$(call_dir) || return 0
+  command -v git > /dev/null 2>&1 || return 0
+  hgit -C "$dir" rev-parse --absolute-git-dir > /dev/null 2>&1 || return 1
+  found=$(hgit -C "$dir" config --show-scope --get-regexp "$GIT_PROGRAM_KEYS" 2>/dev/null) || status=$?
+  case "$status" in
+    0) ;;
+    1) found="" ;;
+    *) return 0 ;;
+  esac
+  if printf '%s\n' "$found" | awk -F '\t' '
+    $1 == "local" || $1 == "worktree" {
+      key = $2; value = ""; blank = index(key, " ")
+      if (blank) { value = substr(key, blank + 1); key = substr(key, 1, blank - 1) }
+      if (key == "core.fsmonitor" && tolower(value) ~ /^(true|false|yes|no|on|off|1|0)?$/) next
+      named = 1
+    }
+    END { exit named ? 0 : 1 }'; then
+    return 0
+  fi
+  # Where git looks for hooks (core.hooksPath, else <git dir>/hooks): asked
+  # without hgit, which points it at /dev/null.
+  hooks=$(GIT_NO_LAZY_FETCH=1 git -c core.fsmonitor=false -C "$dir" rev-parse --git-path hooks 2>/dev/null) || return 0
+  [ -n "$hooks" ] || return 0
+  case "$hooks" in /*) ;; *) hooks="$dir/$hooks" ;; esac
+  [ -e "$hooks/post-index-change" ] || [ -L "$hooks/post-index-change" ]
+}
+
 # Whether a git command that only reads, run where this call runs, may do
 # more than read this repository's own state; anything git does not answer
 # counts as yes:
 #   - the git directory there is repository content (git_dir_is_content);
+#   - the repository's own configuration or hooks name a program git runs
+#     (git_runs_configured);
 #   - a partial clone (a promisor remote, or extensions.partialClone naming
 #     one): git fetches each object it lacks from the promisor remote, so a
 #     read such as `git show <id>` or `git log -p` reaches that host, and the
@@ -376,13 +442,15 @@ git_dir_is_content() {
 #     in the index): a read that looks into a submodule (`--submodule=diff`,
 #     the diff.submodule setting, `git status`) reads its object store,
 #     where a partial clone fetches the same way.
-# The SDK mapper asks the same (git_may_fetch, git_dir_may_be_content).
+# The SDK mapper asks the same (git_may_fetch, git_dir_may_be_content,
+# git_config_may_run).
 git_read_gated() {
   local dir found status=0 git_dir common links
   dir=$(call_dir) || return 0
   command -v git > /dev/null 2>&1 || return 0
   git_dir=$(hgit -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || git_dir=""
   if [ -n "$git_dir" ] && ! git_dir_is_made "$git_dir"; then return 0; fi
+  if git_runs_configured; then return 0; fi
   found=$(hgit -C "$dir" config --get-regexp '^(remote\..+\.promisor|extensions\.partialclone)$' 2>/dev/null) || status=$?
   if [ "$status" != 1 ] || [ -n "$found" ]; then return 0; fi
   if [ -n "$git_dir" ]; then
@@ -411,6 +479,12 @@ writes() {
       if long_option_of "$word" compile preserve-date; then return 0; fi
       if [[ "$word" == -* && "$word" != --* && "${word:1}" == *[Cp]* ]]; then return 0; fi
     done
+  elif [ "$1" = "printf" ]; then
+    # printf -v NAME assigns a shell variable (an array element's subscript
+    # is evaluated as arithmetic, which runs a $(...) the format wrote): any
+    # option, so any first argument starting with -, and any word bash
+    # expands, which may be one.
+    if [ "$GLOBBED" = 1 ] || [[ "${2:-}" == -* ]]; then return 0; fi
   fi
   return 1
 }
@@ -453,9 +527,14 @@ classify_bash() {
       if [ "${entry%%=*}" = "${words[2]:-}" ]; then
         if [ "${entry#*=}" = "observe" ] && git_read_gated; then
           echo mutate
+        elif [ "${entry#*=}" = "checkpoint" ] && git_runs_configured; then
+          # It refreshes the index, running what the repository's own
+          # configuration names: a person approves it. No marker is asked
+          # for: only this command makes one.
+          echo checkpoint-ask
         elif [ "${entry#*=}" != "rollback" ]; then
           echo "${entry#*=}"
-        elif [ "${#words[@]}" -eq 4 ] && [[ "${words[3]}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+        elif [ "${#words[@]}" -eq 4 ] && [[ "${words[3]}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && ! git_runs_configured; then
           echo "rollback ${words[3]}"
         else
           echo mutate
@@ -571,6 +650,39 @@ if [ "$capability" = "observe" ] || [ "$capability" = "checkpoint" ]; then
   exit 0
 fi
 
+# Approval needs a person (§5.18.7): unless ACS_HOOK_APPROVAL is "off", a
+# call that requires it is blocked in a permission mode that puts no call to
+# a person.
+approval="${ACS_HOOK_APPROVAL:-ask}"
+require_person() {
+  local mode
+  [ "$approval" != "off" ] || return 0
+  mode=$(printf '%s' "$payload" | jq -r '.permission_mode // "default" | if type == "string" then . else "(not a string)" end' 2>/dev/null) || mode="(unreadable)"
+  case "$mode" in
+    default | acceptEdits | plan) ;;
+    *)
+      block "F502 APPROVAL_REQUIRED: permission mode '$mode' does not put this call to a person; set ACS_HOOK_APPROVAL=off to leave approval to Claude Code's permission rules."
+      ;;
+  esac
+}
+
+# Put the call to the person, with the reason $1 (unless ACS_HOOK_APPROVAL is
+# "off").
+ask_person() {
+  [ "$approval" != "off" ] || return 0
+  jq -c -n --arg reason "$1" \
+    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $reason}}'
+}
+
+# A checkpoint whose taking runs a program the repository's own git
+# configuration or hooks name (git_runs_configured): a person approves it,
+# and it needs no marker, since only this command makes one.
+if [ "$capability" = "checkpoint-ask" ]; then
+  require_person
+  ask_person "F502 APPROVAL_REQUIRED: Bash (capability 'checkpoint'): git stash create runs the programs this repository's own git configuration names (core.fsmonitor, a filter, a diff or merge driver) or its post-index-change hook; it runs only if this call is approved."
+  exit 0
+fi
+
 claude_dir="${project_dir}/.claude"
 marker="${claude_dir}/checkpoint.ok"
 used_dir="${claude_dir}/checkpoints/used"
@@ -641,41 +753,59 @@ if [[ "$capability" == "rollback "* ]]; then
   capability=mutate
 fi
 
-# The layer's records are written by these hooks alone: a Write, Edit,
-# MultiEdit or NotebookEdit of a path, a Bash, Monitor or PowerShell command,
-# or a Skill call's arguments (which Claude Code substitutes into the shell
-# commands a skill's file embeds), that names the marker, the checkpoint
-# directories (the key included) or the audit log's head is refused (a
-# written entry or key would be a pass for a restore, a written marker a
-# checkpoint no call took, a written or removed head a log cut short that
-# verifies). The text is read as a path is: in any letter case (a
-# case-insensitive file system opens CHECKPOINT.OK as checkpoint.ok), with a
-# run of slashes and ./ segments as one slash, and, in a text of at most 4096
-# bytes, each x/../ resolved (a longer path cannot be opened, and a longer
-# command is a mutate already; the resolution's cost grows faster than the
-# text).
-call_text=$(printf '%s' "$payload" | jq -r '
-  if .tool_name == "Bash" or .tool_name == "Monitor" or .tool_name == "PowerShell" then .tool_input.command
-  elif .tool_name == "Write" or .tool_name == "Edit" or .tool_name == "MultiEdit" or .tool_name == "NotebookEdit"
-  then (.tool_input.file_path // .tool_input.notebook_path)
-  elif .tool_name == "Skill" then .tool_input.args
-  else null end | strings' 2>/dev/null) || block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
-records_named=$(printf '%s' "$call_text" | jq -R -s -r '
+# The layer's records are written by these hooks alone. The texts a call
+# names paths in are read: a Write, Edit, MultiEdit or NotebookEdit call's
+# path (P: read whole), a Bash command and a Skill call's arguments (which
+# Claude Code substitutes into the shell commands a skill's file embeds) (W:
+# read as words), and, for every other tool but Agent and Task (Monitor and
+# PowerShell, which run commands, every MCP tool, a tool this hook does not
+# know), every string of its input and every member name (B: read whole and
+# as words), since the hook cannot know which of them the tool takes for a
+# path or a command (a filesystem server's path, a shell server's command).
+# Agent and Task are not read: a subagent's own calls come here. A text that
+# names the marker, the checkpoint directories (the key included) or the
+# audit log's head is refused (a written entry or key would be a pass for a
+# restore, a written marker a checkpoint no call took, a written or removed
+# head a log cut short that verifies). The text is read as a path is: in any
+# letter case (a case-insensitive file system opens CHECKPOINT.OK as
+# checkpoint.ok), with a run of slashes and ./ segments as one slash, and, in
+# a text of at most 4096 bytes, each x/../ resolved (a longer path cannot be
+# opened, and a longer command is a mutate already; the resolution's cost
+# grows faster than the text). The texts of at most 4096 bytes are then read
+# for paths below: more than 65536 bytes of them in one call is refused,
+# rather than hold the hook past its time limit.
+RECORD_TEXTS_JQ='
+  def file_tool: .tool_name == "Write" or .tool_name == "Edit" or .tool_name == "MultiEdit" or .tool_name == "NotebookEdit";
+  def texts:
+    if .tool_name == "Bash" then [.tool_input.command | strings]
+    elif .tool_name == "Skill" then [.tool_input.args | strings]
+    elif file_tool then [(.tool_input.file_path // .tool_input.notebook_path) | strings]
+    elif .tool_name == "Agent" or .tool_name == "Task" then []
+    else [.tool_input | .. | (strings, (objects | keys[]))]
+    end;
+  def mode: if .tool_name == "Bash" or .tool_name == "Skill" then "W" elif file_tool then "P" else "B" end;
   def records: test("checkpoint\\.ok|audit\\.head|\\.claude/+(\\./+)*checkpoints|acs/+(\\./+)*checkpoints"; "i");
   def lexical: ascii_downcase | split("/")
     | reduce .[] as $s ([]; if $s == "" or $s == "." then . elif $s == ".." then (if length > 0 then .[:-1] else . end) else . + [$s] end)
     | join("/");
-  records or (length <= 4096 and (lexical | records))' 2>/dev/null) || records_named=true
+'
+records_named=$(printf '%s' "$payload" | jq -r "$RECORD_TEXTS_JQ"'
+  texts as $t
+  | if any($t[]; records or (length <= 4096 and (lexical | records))) then "named"
+    elif ([$t[] | utf8bytelength | select(. <= 4096)] | add // 0) > 65536 then "over"
+    else "no" end' 2>/dev/null) || block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
 records_refusal="F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write"
-if [ "$records_named" != "false" ]; then
-  block "${records_refusal}."
-fi
+case "$records_named" in
+  no) ;;
+  over) block "F504 CONSTRAINT_VIOLATED: ${tool_name}'s input holds more than 65536 bytes of strings of at most 4096 bytes, more than this hook reads for paths into the layer's records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/, .claude/audit.head) in its time limit, so the call is blocked." ;;
+  *) block "${records_refusal}." ;;
+esac
 
 # The words of a text the shell would pass as arguments, into PATH_WORDS:
 # split at blanks, line breaks and ; & | < > ( ) { } ` $ = outside quotes,
 # with '...' and "..." quoting, a backslash keeping the character after it,
-# and the quotes removed; a word that opens with ~/ starts at $HOME. A text
-# over 4096 bytes is not read (as split_words).
+# and the quotes removed. A text over 4096 bytes is not read (as
+# split_words).
 path_words() {
   local line="$1" ch quote="" word="" esc=0 i
   PATH_WORDS=()
@@ -715,10 +845,13 @@ path_words() {
 # written), into RESOLVED. Fails past 40 links on the path, past the call's
 # budget of LINKS_LEFT links in all (one readlink each, so a command that
 # names a long chain of links many times cannot hold the hook past its time
-# limit), or for a link it cannot read. No subshell.
+# limit), past its budget of RESOLVE_LEFT bytes of paths, or for a link it
+# cannot read. No subshell.
 resolve_path() {
   local out="${1%/}" comp target links=0 i=0 IFS=/
   local -a parts more
+  RESOLVE_LEFT=$((RESOLVE_LEFT - ${#2}))
+  [ "$RESOLVE_LEFT" -ge 0 ] || return 1
   case "$2" in /*) out="" ;; esac
   set -f
   parts=($2)
@@ -749,39 +882,154 @@ resolve_path() {
   RESOLVED="${out:-/}"
 }
 
-# ...and through a symbolic link: each word of a text of at most 4096 bytes
-# (a file tool's path whole; a command's or a skill's arguments as the shell
-# would pass them) is resolved from the call's directory, each link on it
-# followed, and one that resolves to the records is refused the same way. A
-# link the repository ships can lead there: `touch notes/todo.md`, where
-# notes/todo.md is a link to <git dir>/acs/checkpoints/key, writes the key.
-# A link a word cannot be resolved through (a loop, a path past 40 links, a
-# call past 200 links in all) is refused too. Not seen: a path a command
-# builds when it runs, a pattern the shell expands, or a link a command
-# reaches without naming it (copying a directory that holds one); such a
-# call is still a mutate a person approves.
-if [ -n "$call_text" ] && [ "${#call_text}" -le 4096 ]; then
-  LINKS_LEFT=200
-  if base=$(call_dir) && resolve_path / "$base"; then
-    base="$RESOLVED"
-    case "$tool_name" in
-      Write | Edit | MultiEdit | NotebookEdit) PATH_WORDS=("$call_text") ;;
-      *) path_words "$call_text" || PATH_WORDS=() ;;
-    esac
-    resolved=""
-    for word in ${PATH_WORDS[@]+"${PATH_WORDS[@]}"}; do
-      case "$word" in "~/"*) word="${HOME:-/}/${word#"~/"}" ;; esac
-      if ! resolve_path "$base" "$word"; then
-        block "${records_refusal}, or a symbolic link on one of its paths could not be followed (a loop, more than 40 links on one path, or more than 200 in the call)."
-      fi
-      resolved+="$RESOLVED"$'\n'
+# The characters that make a word, once dequoted, more than one word to a
+# shell that reads it again (sh -c '...', ssh, an alias, find -exec sh -c)
+# or a text that holds a quote or an escape.
+NESTED='*[[:space:]\;\&\|\<\>\(\)\{\}\`\$=\"\\'\'']*'
+
+# Add the paths a text names to READ_WORDS, as the shell would read them:
+# its words (path_words), the words of each word a shell may read again
+# (one that holds a blank, a quote or an operator: `sh -c 'cp x notes/k'`
+# names notes/k), and, a level below that, the pieces of such a word split
+# at every blank, quote and operator.
+add_words() {
+  local word inner piece flat
+  local -a top nested pieces
+  path_words "$1" || return 0
+  top=(${PATH_WORDS[@]+"${PATH_WORDS[@]}"})
+  for word in ${top[@]+"${top[@]}"}; do
+    READ_WORDS+=("$word")
+    # shellcheck disable=SC2053
+    [[ "$word" == $NESTED ]] || continue
+    path_words "$word" || continue
+    nested=(${PATH_WORDS[@]+"${PATH_WORDS[@]}"})
+    for inner in ${nested[@]+"${nested[@]}"}; do
+      READ_WORDS+=("$inner")
+      # shellcheck disable=SC2053
+      [[ "$inner" == $NESTED ]] || continue
+      flat="${inner//[[:space:]\;\&\|\<\>\(\)\{\}\`\$=\"\\\']/ }"
+      set -f
+      pieces=($flat)
+      set +f
+      for piece in ${pieces[@]+"${pieces[@]}"}; do READ_WORDS+=("$piece"); done
     done
-    if printf '%s' "$resolved" | grep -Eiq '(^|/)(checkpoint\.ok|audit\.head)(/|$)|(^|/)(\.claude|acs)/checkpoints(/|$)'; then
-      block "${records_refusal}: one of its paths leads there through a symbolic link."
-    fi
-  else
-    block "R407 SAFETY_CHECK_FAILED: cannot read the directory the call runs in, so the call is blocked."
+  done
+}
+
+# The paths a word may name, into CANDIDATES: the word as written; for one
+# that opens with ~, what the shell expands it to as well (~ and ~/: $HOME;
+# ~+: the call's directory; ~name: that user's home directory); and for one
+# that opens with a single - (a cluster of short options), each text that
+# may follow an option there as its value (-tdir, -ofile, -rtdir: from the
+# second character to the first that is not a letter or digit). Fails (2)
+# for ~- and ~N, ~+N, ~-N, which name a directory the hook cannot know (the
+# shell's previous directory, its directory stack), and for ~ followed by a
+# name no user can have.
+word_candidates() {
+  local word="$1" prefix rest home run k
+  CANDIDATES=("$word")
+  case "$word" in
+    "~"*)
+      prefix="${word%%/*}"
+      prefix="${prefix#"~"}"
+      rest="${word:$((${#prefix} + 1))}"
+      case "$prefix" in
+        "") CANDIDATES+=("${HOME:-/}$rest") ;;
+        +) CANDIDATES+=("$base$rest") ;;
+        - | [+-][0-9]* | [0-9]*) return 2 ;;
+        *)
+          [[ "$prefix" =~ ^[A-Za-z0-9._][A-Za-z0-9._-]*$ ]] || return 2
+          # The name holds only those characters: the shell's own lookup.
+          eval "home=~$prefix"
+          [ "$home" = "~$prefix" ] || CANDIDATES+=("$home$rest")
+          ;;
+      esac
+      ;;
+    -[!-]*)
+      run="${word:1}"
+      run="${run%%[!A-Za-z0-9]*}"
+      for ((k = 2; k <= ${#run} + 1; k++)); do
+        [ -z "${word:k}" ] || CANDIDATES+=("${word:k}")
+      done
+      ;;
+  esac
+  return 0
+}
+
+# ...and through a symbolic link, a ~ the shell expands, or a path attached
+# to a short option: each path a text of at most 4096 bytes names (READ_WORDS:
+# a file tool's path whole; a command's or a skill's arguments as the shell
+# would pass them; both for other tools) is resolved from the call's
+# directory (word_candidates, resolve_path), each link on it followed, and
+# one that resolves to the records is refused the same way, as is one that
+# resolves to the directory that holds them (the project's .claude, the
+# project's git directory's acs/): removing or moving it removes the marker
+# and the audit log's head with it. A link the repository ships can lead
+# there: `touch notes/todo.md`, where notes/todo.md is a link to <git
+# dir>/acs/checkpoints/key, writes the key. A link a word cannot be resolved
+# through (a loop, a path past 40 links, a call past 200 links in all), a
+# call that names more than 262144 bytes of paths to resolve, and a ~ form
+# the hook cannot expand are refused too. Not seen: a path a command builds
+# when it runs, a pattern the shell expands, or a link a command reaches
+# without naming it (copying a directory that holds one); such a call is
+# still a mutate a person approves.
+LINKS_LEFT=200
+RESOLVE_LEFT=262144
+READ_WORDS=()
+if base=$(call_dir) && resolve_path / "$base"; then
+  base="$RESOLVED"
+else
+  block "R407 SAFETY_CHECK_FAILED: cannot read the directory the call runs in, so the call is blocked."
+fi
+texts_read=0
+while IFS= read -r -d '' text; do
+  case "$text" in
+    E) texts_read=1 ;;
+    P*) READ_WORDS+=("${text:1}") ;;
+    W*) add_words "${text:1}" ;;
+    B*) READ_WORDS+=("${text:1}"); add_words "${text:1}" ;;
+  esac
+done < <(printf '%s' "$payload" | jq -j "$RECORD_TEXTS_JQ"'
+  mode as $m | (texts[] | select(utf8bytelength <= 4096) | $m + (split("\u0000") | join(" ")) + "\u0000"), "E\u0000"' 2>/dev/null)
+if [ "$texts_read" != 1 ]; then
+  block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
+fi
+# Each path as the system resolves it (an array: appending to one string
+# copies it whole each time).
+resolved=()
+for word in ${READ_WORDS[@]+"${READ_WORDS[@]}"}; do
+  if ! word_candidates "$word"; then
+    block "${records_refusal}, or names a path that opens with ~-, ~N or another ~ form this hook cannot expand (the shell's previous directory, its directory stack), so it cannot tell where the path leads."
   fi
+  for candidate in "${CANDIDATES[@]}"; do
+    # A name with no slash that is no link resolves to itself (most words).
+    case "$candidate" in
+      */* | . | .. | "") ;;
+      *)
+        if [ ! -L "${base%/}/$candidate" ]; then
+          resolved+=("${base%/}/$candidate")
+          continue
+        fi
+        ;;
+    esac
+    if ! resolve_path "$base" "$candidate"; then
+      block "${records_refusal}, or a symbolic link on one of its paths could not be followed (a loop, more than 40 links on one path, or more than 200 in the call), or it names more paths than this hook resolves in its time limit."
+    fi
+    resolved+=("$RESOLVED")
+  done
+done
+if [ "${#resolved[@]}" -gt 0 ] && printf '%s\n' "${resolved[@]}" | grep -Eiq '(^|/)(checkpoint\.ok|audit\.head)(/|$)|(^|/)(\.claude|acs)/checkpoints(/|$)'; then
+  block "${records_refusal}: one of its paths leads there, through a symbolic link, a ~ the shell expands or a path attached to an option."
+fi
+# The directories that hold the records: the project's .claude, and the
+# project's git directory's acs/ (both as the system resolves them).
+holders=()
+if resolve_path / "${project_dir}/.claude"; then holders+=(-e "$RESOLVED"); fi
+if records_git_dir=$(git_dir_of "$project_dir") && [ -n "$records_git_dir" ] && resolve_path / "${records_git_dir}/acs"; then
+  holders+=(-e "$RESOLVED")
+fi
+if [ "${#holders[@]}" -gt 0 ] && [ "${#resolved[@]}" -gt 0 ] && printf '%s\n' "${resolved[@]}" | grep -Fxiq "${holders[@]}"; then
+  block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the directory that holds the layer's records (the project's .claude, its git directory's acs/), which only the plugin's hooks write: moving or removing it, or writing into it, removes or replaces the checkpoint marker and the audit log's head."
 fi
 
 # mutate: a valid marker for this call alone.
@@ -880,16 +1128,7 @@ fi
 
 # Approval needs a person (§5.18.7): checked before the marker is taken, so a
 # block here uses nothing.
-approval="${ACS_HOOK_APPROVAL:-ask}"
-if [ "$approval" != "off" ]; then
-  mode=$(printf '%s' "$payload" | jq -r '.permission_mode // "default" | if type == "string" then . else "(not a string)" end' 2>/dev/null) || mode="(unreadable)"
-  case "$mode" in
-    default | acceptEdits | plan) ;;
-    *)
-      block "F502 APPROVAL_REQUIRED: permission mode '$mode' does not put this call to a person; set ACS_HOOK_APPROVAL=off to leave approval to Claude Code's permission rules."
-      ;;
-  esac
-fi
+require_person
 
 # Take the marker: one rename into a directory this run alone created, atomic
 # on one filesystem, so of two calls that both read the marker only one can
@@ -909,15 +1148,12 @@ fi
 mv "${claim}/marker" "${used_dir}/$(safe "$checkpoint_id").$(safe "$call_id").${claim##*.}"
 rmdir "$claim"
 
-if [ "$approval" != "off" ]; then
-  if [ "$unbound" = 1 ]; then
-    reason="F502 APPROVAL_REQUIRED: ${tool_name} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
-  elif [ "$unseen" = 1 ]; then
-    reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
-  else
-    reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate') requires approval; it runs only if this call is approved."
-  fi
-  jq -c -n --arg reason "$reason" \
-    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $reason}}'
+if [ "$unbound" = 1 ]; then
+  reason="F502 APPROVAL_REQUIRED: ${tool_name} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
+elif [ "$unseen" = 1 ]; then
+  reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
+else
+  reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate') requires approval; it runs only if this call is approved."
 fi
+ask_person "$reason"
 exit 0

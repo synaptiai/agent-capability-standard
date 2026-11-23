@@ -33,24 +33,59 @@ logger = logging.getLogger("grounded_agency.hooks.skill_tracker")
 _COMMIT = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
+def _filters_off(git: str, where: str) -> list[str] | None:
+    """Options that turn off each filter the repository's own configuration
+    (the local and worktree scopes) names (`-c filter.<name>.clean=`, an
+    empty command being no filter), so that hashing a changed file runs no
+    program the repository chose; None when git cannot list them or a name
+    cannot be passed that way."""
+    try:
+        done = subprocess.run(
+            [git, *SAFE_GIT_OPTIONS, "-C", where, "config", "--show-scope"]
+            + ["--name-only", "--get-regexp", r"^filter\..+\.(clean|smudge|process)$"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+            env=safe_git_environment(),
+        )
+    except OSError, subprocess.SubprocessError:
+        return None
+    if done.returncode == 1:
+        return []
+    if done.returncode != 0:
+        return None
+    options: list[str] = []
+    for line in done.stdout.decode("utf-8", "surrogateescape").splitlines():
+        scope, _, key = line.partition("\t")
+        if scope not in ("local", "worktree"):
+            continue
+        if "=" in key or not key:
+            return None
+        options += ["-c", f"{key}="]
+    return options
+
+
 def _tree_is_head(cwd: Any) -> bool:
     """Whether the tracked files and the index of the repository at ``cwd``
     (the call's working directory; this process's when it is not given) are
     ``HEAD``'s: only then does ``HEAD`` restore the state a `git stash create`
     that printed nothing saw. git runs as the layer runs it (no fsmonitor
-    program, no hook, no external diff or textconv). Any failure answers
-    no."""
+    program, no hook, no external diff or textconv, and no filter the
+    repository's own configuration names). Any failure answers no."""
     git = shutil.which("git")
     if git is None:
         return False
     where = cwd if isinstance(cwd, str) and cwd else os.getcwd()
+    filters_off = _filters_off(git, where)
+    if filters_off is None:
+        return False
     for args in (
         ["diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--"],
         ["diff", "--cached", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--"],
     ):
         try:
             done = subprocess.run(
-                [git, *SAFE_GIT_OPTIONS, "-C", where, *args],
+                [git, *SAFE_GIT_OPTIONS, *filters_off, "-C", where, *args],
                 capture_output=True,
                 timeout=30,
                 check=False,

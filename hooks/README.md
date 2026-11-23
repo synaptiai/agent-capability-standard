@@ -244,9 +244,10 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   `mutate`): an option that writes is `mutate` (for `git`, `--output` or an
   abbreviation of it such as `--outp`; for `file`, `-C` or `-p` in any short
   option, or `--compile` or `--preserve-date` or an abbreviation such as
-  `--compi`), and so is a `git` or `file` command with a word holding an
-  unquoted `*`, `?` or `[`, which bash replaces with file names, options
-  included; `git stash create` takes a
+  `--compi`; for `printf`, any option: `printf -v NAME` sets a shell
+  variable), and so is a `git`, `file` or `printf` command with a word
+  holding an unquoted `*`, `?` or `[`, which bash replaces with file names,
+  options included; `git stash create` takes a
   checkpoint; `git stash list` and `git stash show` only read; `git stash pop
   <commit>` and `git stash apply <commit>` restore one (`rollback`) when
   `<commit>` is the full id of a commit a checkpoint recorded and the call
@@ -276,8 +277,20 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   repository can ship a directory holding `HEAD`, `objects/` and `refs/`
   (an embedded bare repository), and git run there reads its `config` and
   runs what it names (`core.fsmonitor` for `git status`, a textconv driver
-  for `git log -p`). The hooks' own git commands run with `core.fsmonitor`
-  and hooks turned off and no object fetched (`hgit`).
+  for `git log -p`). The same holds where the repository's own
+  configuration (the local and worktree scopes, with the files they
+  include) names a program git runs (a `core.fsmonitor` other than `true`
+  or `false`, a diff driver's `textconv` or `command`, `diff.external`, a
+  filter's `clean`, `smudge` or `process`, a merge driver, a signature
+  program, a pager) or its hooks directory holds `post-index-change` (which
+  `git status` runs when it writes the index): a project delivered with its
+  `.git`, or one approved `git config core.fsmonitor ./x`, brings them. There
+  a read and a restore are `mutate`, and `git stash create` is put to a
+  person with no marker asked for (only it makes one; `F502` in a mode that
+  asks no one). The user's own configuration (global, system) gates
+  nothing. The hooks' own git commands run with `core.fsmonitor` and hooks
+  turned off and no object fetched (`hgit`), and the take hook's clean-tree
+  check with the repository's filters turned off.
 - Any other tool (`Monitor` and `PowerShell`, which run commands,
   `EnterWorktree`, `ExitWorktree`, every MCP tool, a tool the hook does not
   know) is unbound: `mutate`, since a layer cannot know that an unknown tool
@@ -304,23 +317,37 @@ Then:
   however many checkpoints were taken. It uses no checkpoint: one that was used, expired, ended with its
   turn or was replaced can still be restored. Restoring anything else is a
   `mutate`.
-- **The layer's records**: a `mutate` call that names them, a `Write`,
-  `Edit`, `MultiEdit` or `NotebookEdit` of a path, a `Bash`, `Monitor`
-  or `PowerShell` command, or a `Skill` call's arguments, whose text holds
+- **The layer's records**: a `mutate` call that names them is blocked
+  with `F504 CONSTRAINT_VIOLATED:`: only the hooks write them. The texts
+  read are a `Write`, `Edit`, `MultiEdit` or `NotebookEdit` call's path, a
+  `Bash` command, a `Skill` call's arguments, and every string and member
+  name of any other tool's input but `Agent`'s and `Task`'s (`Monitor` and
+  `PowerShell` commands, an MCP filesystem server's path, an MCP shell
+  server's command; a subagent's own calls come here). A text that holds
   `checkpoint.ok`, `.claude/checkpoints`, `acs/checkpoints` or `audit.head`
-  (the audit log's head, below), is blocked with
-  `F504 CONSTRAINT_VIOLATED:`: only the hooks write them. The text is read
-  as a path is: in any letter case, with a run of slashes and `./` segments
-  as one slash, and, in a text of at most 4096 bytes, each `x/../`
-  resolved; and in a text of at most 4096 bytes each word (a file tool's
-  path whole, a command's words as the shell passes them) is followed,
-  from the call's directory, through the symbolic links on its path, so
-  `touch notes/todo.md`, where the repository ships `notes/todo.md` as a
-  link to `.git/acs/checkpoints/key`, is blocked too (and a link that
-  cannot be followed, a loop or more than 40 links). Reading them is not
-  refused; a path a command builds when it runs, a pattern the shell
-  expands and a link a command reaches without naming it (copying a
-  directory that holds one) are not seen.
+  (the audit log's head, below) is blocked, read as a path is: in any
+  letter case, with a run of slashes and `./` segments as one slash, and,
+  in a text of at most 4096 bytes, each `x/../` resolved. In a text of at
+  most 4096 bytes each path it names (a file tool's path whole, a
+  command's words as the shell passes them; for other tools both, each
+  string whole and as words) is then followed, from the call's directory,
+  through the symbolic links on it, so `touch notes/todo.md`, where the
+  repository ships `notes/todo.md` as a link to
+  `.git/acs/checkpoints/key`, is blocked too. So are the paths the shell
+  reads differently from their text: a `~` it expands (`~`, `~+`, `~user`;
+  `~-` and `~N`, which name a directory the hook cannot know, are blocked
+  outright), a path attached to a short option (`-tnotes/k`,
+  `-onotes/todo.md`), and the command a quoted word holds for a shell that
+  reads it again (`sh -c 'cp x notes/k/'`). A path that leads to the
+  directory holding the records (the project's `.claude`, its git
+  directory's `acs/`) is blocked too: `rm -rf .claude` removes the marker,
+  and the audit log with its head. So is a link that cannot be followed (a
+  loop, more than 40 links), and a call with more than 65536 bytes of
+  strings of at most 4096 bytes, more than the hook reads in its time
+  limit. Reading the records is not refused; a path a command builds when
+  it runs, a pattern the shell expands and a link a command reaches without
+  naming it (copying a directory that holds one) are not seen, nor is a
+  text over 4096 bytes read for paths.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
   file (not a symlink, SEC-006) that git does not track (a repository can
   ship a tracked one; git is asked from the marker's own directory, so a
@@ -418,7 +445,7 @@ skill writes its own records, of the events a workflow reports.
 - Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
 - Each entry includes the HMAC of the previous entry, creating a hash chain: a changed or removed entry breaks the link of the entry after it
-- Keeps the chain's end in `.claude/audit.head`: the number of entries and the last one's `hmac`, signed with the same key (`head_hmac`, the HMAC of `acs-audit-head:<entries>:<hmac>`). Removing the last entries, or the whole log, breaks no link; the head shows it. Before it appends, the hook checks that the log still holds the entry the head records, at its place: when it does not, or the head is not one this key signed, the hook says so, writes the line, and leaves the head as it is, the evidence of the cut. The pre-tool-use hook refuses a call that names the head (`F504`). To start a new log, move `audit.log` and `audit.head` aside together
+- Keeps the chain's end in `.claude/audit.head`: the number of entries and the last one's `hmac`, signed with the same key (`head_hmac`, the HMAC of `acs-audit-head:<entries>:<hmac>`), and the same head, its anchor, in the project's git directory (`<git dir>/acs/audit.head`; none outside a repository). Removing the last entries, or the whole log, breaks no link; the head shows it, and a command that removes `.claude` whole with the log and its head (`git clean -fdx`) leaves the anchor, which shows it. Before it appends, the hook checks that the log still holds the entry the head and the anchor record, at its place: when it does not, or one is not a head this key signed, the hook says so, writes the line, and leaves both as they are, the evidence of the cut. The pre-tool-use hook refuses a call that names the head, `.claude` or the git directory's `acs/` (`F504`). To start a new log, move `audit.log`, `audit.head` and the anchor aside together
 - Serializes concurrent runs (tool calls made in parallel) with flock(2) on the log file itself, opened for append, taken by `perl` or, without it, by `flock`, so the chain stays in order and sessions using either exclude each other. There is no separate lock file, and the kernel releases the lock when its holder exits, however it exits. A run tries for at most `AUDIT_LOCK_WAIT` seconds (default 40, at most 55) and then appends without the lock, with a warning, at once where the lock cannot be taken at all: the verifier reports an entry out of chain order, and a held lock cannot silence the log
 
 The log is a best-effort capture (STANDARD v1.2 §6.4): it can miss a call,
@@ -500,7 +527,9 @@ python tools/verify_audit_log.py
 ```
 
 It checks the chain and that the log still holds the entry its head
-records, at its place (`--head-file` names another head). Each line is
+records, at its place (`--head-file` names another head), and the same of
+the anchor where there is one (`<git dir>/acs/audit.head` for a log in
+`<project>/.claude/`; `--anchor-file` names another). Each line is
 checked as the bytes the hook signed: the compact JSON `jq -c` writes,
 ending in its `hmac` member, with each member named once, the HMAC taken
 over the line without that member. A line that parses to the entry signed

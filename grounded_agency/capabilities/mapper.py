@@ -165,7 +165,9 @@ _OPERATOR_CHARS = frozenset("();<>|&")
 # ps|images|logs` (a daemon, which DOCKER_HOST or the docker context names,
 # over tcp or ssh; a container name or filter goes to it). `git` reads local
 # state only where it cannot fetch (git_may_fetch), and `git remote`, `pip
-# list` and `pip show` only with the arguments _writes allows.
+# list` and `pip show` only with the arguments _writes allows. `printf` only
+# without an option: `printf -v NAME` sets a shell variable that the later
+# commands of the line run with (_writes).
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "ls",
@@ -360,7 +362,9 @@ _READ_ONLY_OPTIONS: dict[str, _Options] = {
 # Commands whose arguments can make them write: a word the shell expands
 # (an unquoted `*`, `?` or `[`) may become any file name, an option
 # included, so such a word makes the command write.
-_ARGUMENT_WRITERS: frozenset[str] = frozenset({*_READ_ONLY_OPTIONS, "find", "git"})
+_ARGUMENT_WRITERS: frozenset[str] = frozenset(
+    {*_READ_ONLY_OPTIONS, "find", "git", "printf"}
+)
 
 # A brace expansion, `{a,b}` or `{1..3}`, in a line whose quoted characters
 # are masked: bash replaces it with words this reading never sees.
@@ -570,6 +574,13 @@ def _writes(words: list[str], globbed: bool = False) -> bool:
         return _option_writes(args, options)
     if name == "find":
         return any(a in _FIND_WRITES for a in args)
+    if name == "printf":
+        # bash's printf takes one option, -v NAME, which assigns its output
+        # to the shell variable NAME (PATH, HOME, IFS, an array element whose
+        # subscript bash evaluates as arithmetic, running a `$(...)` the
+        # format wrote): the later commands of the line run with it. A first
+        # argument that starts with `-` is an option (or `--`).
+        return bool(args) and args[0].startswith("-")
     if name == "git":
         if any(_long_prefix_of(a, ("output",)) for a in args):
             return True
@@ -595,6 +606,29 @@ _MAX_COMMAND_BYTES = 4096
 # remote, or extensions.partialClone naming one (what `git config
 # --get-regexp` matches, keys in lower case).
 _PROMISOR_CONFIG = r"^(remote\..+\.promisor|extensions\.partialclone)$"
+
+
+# The configuration keys that name a program git runs: core.fsmonitor (to
+# refresh the index: `git status`, `git diff`, `git stash`; true and false
+# name git's own), a diff driver's textconv or command and diff.external
+# (`git diff`, `git log -p`, `git show`), a filter's clean, smudge or process
+# (a read hashes a changed file through clean; a restore writes through
+# smudge), a merge driver (a restore merges), a signature program (`git log`
+# with log.showSignature) and a pager. The plugin's PreToolUse hook holds the
+# same pattern (GIT_PROGRAM_KEYS).
+_PROGRAM_CONFIG = (
+    r"^(core\.fsmonitor|core\.pager|pager\..+|diff\.external"
+    r"|diff\..+\.(textconv|command)|filter\..+\.(clean|smudge|process)"
+    r"|merge\..+\.driver|gpg\.program|gpg\..+\.program)$"
+)
+# The configuration scopes a repository's own files give (`git config
+# --show-scope`; an included file takes the scope of the file that
+# includes it).
+_REPOSITORY_SCOPES = (b"local", b"worktree")
+# core.fsmonitor values that name git's own daemon or none, not a program.
+_GIT_BOOLEANS = frozenset(
+    {b"", b"true", b"false", b"yes", b"no", b"on", b"off", b"1", b"0"}
+)
 
 
 def _git(git: str, where: str, *args: str) -> subprocess.CompletedProcess[bytes]:
@@ -677,6 +711,74 @@ def git_may_fetch(cwd: str | None = None) -> bool:
     except OSError, ValueError, subprocess.SubprocessError:
         return True
     return any(line.startswith(b"160000 ") for line in index.stdout.splitlines())
+
+
+def _names_program(listing: bytes) -> bool:
+    """Whether a `git config --show-scope --get-regexp` listing of
+    :data:`_PROGRAM_CONFIG` sets one of its keys in a scope the repository's
+    own files give (core.fsmonitor only to a value other than a boolean)."""
+    for line in listing.splitlines():
+        scope, tab, rest = line.partition(b"\t")
+        if not tab or scope not in _REPOSITORY_SCOPES:
+            continue
+        key, _, value = rest.partition(b" ")
+        if key == b"core.fsmonitor" and value.lower() in _GIT_BOOLEANS:
+            continue
+        return True
+    return False
+
+
+def git_config_may_run(cwd: str | None = None) -> bool:
+    """Whether git, run in ``cwd`` (this process's working directory when
+    it is None), may run a program the repository itself names: its own
+    configuration (the local and worktree scopes, with the files they
+    include) sets a key of :data:`_PROGRAM_CONFIG`, or its hooks directory
+    holds ``post-index-change``, which git runs when a read such as `git
+    status` writes the index. A repository delivered with its ``.git`` (an
+    archive, a copied checkout) brings that configuration and those hooks,
+    and one approved `git config core.fsmonitor ./x` writes it; the user's
+    own settings (global, system, the command line) are not repository
+    content. No repository there is a no; no git, or git failing in another
+    way, a yes. The plugin's PreToolUse hook asks the same
+    (git_runs_configured)."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    where = _where(cwd)
+    try:
+        if _git(git, where, "rev-parse", "--absolute-git-dir").returncode != 0:
+            return False
+        done = _git(
+            git, where, "config", "--show-scope", "--get-regexp", _PROGRAM_CONFIG
+        )
+        if done.returncode not in (0, 1):
+            return True
+        if done.returncode == 0 and _names_program(done.stdout):
+            return True
+        # Where git looks for hooks (core.hooksPath, else <git dir>/hooks):
+        # asked without the layer's options, which point it at /dev/null.
+        hooks = subprocess.run(
+            [
+                git,
+                "-c",
+                "core.fsmonitor=false",
+                "-C",
+                where,
+                "rev-parse",
+                "--git-path",
+                "hooks",
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env=safe_git_environment(),
+        )
+        if hooks.returncode != 0 or not hooks.stdout.strip():
+            return True
+        path = os.path.join(where, os.fsdecode(hooks.stdout.strip()))
+        return os.path.lexists(os.path.join(path, "post-index-change"))
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
 
 
 def _is_read_only(command: _Command) -> bool:
@@ -982,6 +1084,12 @@ class ToolCapabilityMapper:
         self.git_dir_may_be_content: Callable[[str | None], bool] = (
             git_dir_may_be_content
         )
+        # Whether git, run in a directory, may run a program the
+        # repository's own configuration or hooks name: a git read takes the
+        # worst case there, `git stash create` the worst case beside its
+        # checkpoint, and a restore is a gated mutation
+        # (:func:`git_config_may_run`). A lookup that fails is a yes.
+        self.git_config_may_run: Callable[[str | None], bool] = git_config_may_run
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -1512,15 +1620,23 @@ class ToolCapabilityMapper:
            when <commit> is the full id of a commit the layer recorded as a
            checkpoint (:attr:`is_checkpoint_commit`); any other `pop` or
            `apply` is a gated mutation, since git applies any merge commit
-           as if it were a stash. A git option before `stash` (`git -C dir
-           stash ...`) is not recognised.
+           as if it were a stash. Where the repository's own configuration
+           or hooks name a program git runs (:attr:`git_config_may_run`),
+           `create` takes a checkpoint beside the worst case (a host takes
+           the first checkpoint with ``create_checkpoint``) and a restore is
+           a gated mutation. A git option before `stash` (`git -C dir stash
+           ...`) is not recognised.
         3. Otherwise each simple command is classified on its own. A line
            whose every command is allow-listed as read-only is an
            observation; any other line takes the strictest flags and every
            prerequisite of all the commands that are not read-only, with
            their capabilities in order (`_combine`). A git command that would
            observe takes the worst case where git may fetch from another
-           host (:attr:`git_may_fetch` for ``cwd``: a partial clone).
+           host (:attr:`git_may_fetch` for ``cwd``: a partial clone) or run
+           a program the repository names (:attr:`git_dir_may_be_content`,
+           :attr:`git_config_may_run`). `printf` with an option (`-v NAME`
+           sets a shell variable the later commands of the line run with)
+           is not read-only (`_writes`).
 
         Security principle: fail-safe defaults. A command is high-risk until
         it is shown to be on the read-only allow-list, and a command the
@@ -1577,6 +1693,19 @@ class ToolCapabilityMapper:
                 capability = _GIT_STASH_CLASSES[words[2]]
                 if capability == "observe" and self._git_read_gated(cwd):
                     return worst
+                if capability != "observe" and self._git_config_may_run(cwd):
+                    # It runs what the repository's own configuration names:
+                    # a checkpoint taken with the worst case beside it (a
+                    # host takes the first with create_checkpoint), and a
+                    # restore that is a gated mutation.
+                    if capability == "checkpoint":
+                        return self._combine(
+                            [
+                                self._builtin("Bash", "checkpoint"),
+                                self._worst_case("execute"),
+                            ]
+                        )
+                    return self._builtin("Bash", "mutate", checkpoint_gated=True)
                 if capability != "rollback" or self._restores_checkpoint(words):
                     return self._builtin("Bash", capability)
                 return self._builtin("Bash", "mutate", checkpoint_gated=True)
@@ -1596,12 +1725,23 @@ class ToolCapabilityMapper:
             logger.exception("Could not tell which git directory serves %s", cwd)
             return True
 
+    def _git_config_may_run(self, cwd: str | None) -> bool:
+        """:attr:`git_config_may_run` for ``cwd``; a lookup that fails is a
+        yes."""
+        try:
+            return bool(self.git_config_may_run(cwd))
+        except Exception:
+            logger.exception(
+                "Could not tell whether git runs configured programs in %s", cwd
+            )
+            return True
+
     def _git_read_gated(self, cwd: str | None) -> bool:
         """Whether a git command that only reads may do more in ``cwd``: run
-        what repository content names (:attr:`git_dir_may_be_content`) or
-        fetch from another host (:attr:`git_may_fetch`). A lookup that fails
-        is a yes."""
-        if self._git_dir_may_be_content(cwd):
+        what repository content names (:attr:`git_dir_may_be_content`,
+        :attr:`git_config_may_run`) or fetch from another host
+        (:attr:`git_may_fetch`). A lookup that fails is a yes."""
+        if self._git_dir_may_be_content(cwd) or self._git_config_may_run(cwd):
             return True
         try:
             return bool(self.git_may_fetch(cwd))

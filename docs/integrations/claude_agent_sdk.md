@@ -199,14 +199,17 @@ The command line is read with the shell's quoting rules and split into simple co
 | Pattern | Capability | Risk | Checkpoint | Approval |
 |---------|-----------|------|------------|----------|
 | `ls`, `cat`, `head`, `pwd` | observe | low | No | No |
-| `git status`, `git log`, `git rev-parse`, `git ls-files` (not in a partial clone, a repository with submodules or a shipped git directory) | observe | low | No | No |
+| `git status`, `git log`, `git rev-parse`, `git ls-files` (not in a partial clone, a repository with submodules, a shipped git directory, or one whose own configuration or hooks name a program git runs) | observe | low | No | No |
 | `git stash create` | checkpoint | low | No | No |
+| `git stash create` where the repository's own configuration (local, worktree, the files they include) names a program git runs (`core.fsmonitor` other than `true`/`false`, a filter, a diff or merge driver, a signature program, a pager) or its hooks hold `post-index-change`, as a project delivered with its `.git` can (take the first checkpoint with `create_checkpoint`) | checkpoint, execute, send | high | Yes | Yes |
 | `git stash pop <commit>`, `git stash apply <commit>`, a commit a checkpoint recorded | rollback | medium | No (one taken earlier) | No |
 | `git stash pop`, `git stash apply` of anything else | mutate | high | Yes | Yes |
 | `rm`, `mv`, `chmod`, `git stash push` | mutate | high | Yes | Yes |
 | `curl -X POST`, `ssh` | send | high | Yes | Yes |
 | `git push`, `npm publish`, `docker push`, `kubectl apply` | mutate, send | high | Yes | Yes |
 | Asking another host: `npm view`, `npm list`, `kubectl get`, `docker ps`, `git remote show`, `pip list --outdated`, `cat < /dev/tcp/…`, a git read in a partial clone or a repository with submodules | mutate, send | high | Yes | Yes |
+| Running what the repository names: a git read where its own configuration or hooks name a program git runs (`mapper.git_config_may_run`; a restore there is a gated `mutate`) | mutate, send | high | Yes | Yes |
+| Setting the shell's state: `printf` with an option (`printf -v PATH .; ls`: `-v NAME` sets a variable the line's later commands run with, an array subscript evaluated as arithmetic runs code) or a word bash expands | mutate, send | high | Yes | Yes |
 | `python -c`, `node -e`, `python script.py` | execute, send | high | Yes | Yes |
 | any other command (`sed`, `awk`, `env`, `less`, `curl URL`, `gh`, `make`), and one over 4096 bytes | mutate, send | high | Yes | Yes |
 
