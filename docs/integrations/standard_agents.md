@@ -240,7 +240,10 @@ model family for a child. Two of them touch evidence:
   `configureLayer({ secrets })` registers the deployment's own values for
   every entry, the audit hook's for plain tools included, and for the data a
   `persist` or `audit` call would store (a grounded tool's `secrets` option,
-  and `recordToolCall`'s, add more).
+  and `recordToolCall`'s, add more). An evidence anchor that held a secret
+  keeps no `digest` of what it cites (its metadata says `digest_omitted:
+  secret`): the redacted excerpt would show the text to check a guess
+  against.
 
 ## A grounded Standard Agent today
 

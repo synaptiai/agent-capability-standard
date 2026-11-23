@@ -86,7 +86,7 @@ flowchart TB
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; select the implementation for it with `select_implementation`, [§5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter); a waiting `delegate` that delegates again names the delegation it replaces in `replaces`); `idempotency_key` (`<run_id>:<n>`) is the same for every attempt of one pass of the step: perform the effect at most once per key ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
+| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; select the implementation for it with `select_implementation`, [§5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter); a waiting `delegate` that delegates again names the delegation it replaces in `replaces`); `idempotency_key` (`<run_id>:<n>`) is the same for every attempt of one pass of the step: perform the effect at most once per key ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts both) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` only when everything the checkpoint captured is restored, optionally with `"not_covered": [{"item", "reason"}, ...]` (changes it never covered: `transmitted`, `delegated`, `outside_scope`, [§4.4.1](../../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)); otherwise an `Error` (the run fails F503) |
 | `RequestApproval` | asks `approver` about `shown`, in `mode`: `in_session`, whoever attends the run, in its session; `out_of_band`, a separate channel whose approvers need not attend the run (keep the run's snapshot while you wait). `queued_action_id` names the queued action a resumed run is asking about, on every such request ([Resuming a deferred run](#resuming-a-deferred-run)) | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable`; with `identity@1`, optionally `approver_identities` (each an `agent_identity`, one per principal; `approvers` then empty or their principals) |
@@ -144,9 +144,10 @@ vendor reason `x-...`. The code still decides what happens (an
 `unsupported_domain` R402 is retried like any R402); the reason travels to
 the step's trace event, to the run's `Failed` action and `RunResult.reason`,
 and to the step's record as `reason_code`. A `reason` outside that grammar
-is ignored and noted in the trace as `reason_ignored`. Raise
-`HostCannotServe(reason, message)` from `invoke_capability` or `await_event`
-and the runner answers the action with that `Error`.
+is ignored and noted in the trace as `reason_ignored` (redacted, as the
+message is). Raise `HostCannotServe(reason, message)` from
+`invoke_capability` or `await_event` and the runner answers the action with
+that `Error`.
 
 The executor computes some members of the actions it issues: `deadline` is
 the time the attempt's action was issued plus the step's `timeout`;
@@ -439,7 +440,8 @@ them to a file (`durable`), so evidence outlives the process (§6.6).
 runs; each is checked against the ontology when it is made, so a misspelt
 capability is a `ValueError` naming V101. `WorkflowRunner(...,
 redactor=Redactor([...]))` registers the host's secrets: the runner redacts
-the message of every `Error` it submits (§6.7).
+the `message` and `reason` of every `Error` it submits, the one it builds
+when the run refuses a host's response included (§6.7).
 
 ## Hosting runs
 

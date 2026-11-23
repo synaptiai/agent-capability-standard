@@ -346,6 +346,54 @@ describe('approval bound to what was shown', () => {
     expect(await tool.execute(t.state, { version: '1.2.0' })).toMatchObject({ error_code: 'F502' });
   });
 
+  it('decides nothing with a request asked under a weaker policy than the tool has at the call', async () => {
+    // A deployment tightens a tool's policy; thread values outlive the old
+    // definition. A request the old one made, decided before or after the
+    // change, authorises no call under the new one (§5.18.7): the call opens
+    // a new round under its own policy.
+    let clock = 1_000_000;
+    const release = (approval: ApprovalPolicy) =>
+      groundedTool({
+        name: 'release',
+        capability: 'execute',
+        description: 'Run the release.',
+        approval,
+        args: z.object({ version: z.string() }),
+        now: () => clock,
+        execute: async () => ({ result: 'released', success: true, evidence_anchors: [] }),
+      });
+    const strict = { min_approvers: 2, role: 'admin', expires_ms: 60_000 };
+
+    // A pending request, decided by bob (no role) after the change.
+    const t = thread();
+    const d = digestOf(await release({}).execute(t.state, { version: '1.2.0' }));
+    await decideApproval(t.state, user('bob'), d, 'approved', clock, 1);
+    const tightened = await release(strict).execute(t.state, { version: '1.2.0' });
+    expect(tightened).toMatchObject({ error_code: 'F502', error_data: { state: 'pending', round: 2 } });
+    expect(await readApproval(t.state, d)).toMatchObject({ min_approvers: 2, role: 'admin', expires_ms: 60_000 });
+    await expect(decideApproval(t.state, user('bob'), d, 'approved', clock, 2)).rejects.toThrow(/admin/);
+
+    // A request approved with no expiry, used a month after a role and an
+    // expiry were added.
+    const u = thread();
+    const e = digestOf(await release({}).execute(u.state, { version: '1.2.0' }));
+    await decideApproval(u.state, user('bob'), e, 'approved', clock, 1);
+    clock += 30 * 24 * 3600 * 1000;
+    expect(await release({ role: 'admin', expires_ms: 60_000 }).execute(u.state, { version: '1.2.0' })).toMatchObject({
+      error_code: 'F502',
+      error_data: { state: 'pending', round: 2 },
+    });
+    expect((await readTrace(u.state)).filter((x) => x.status === 'executed')).toEqual([]);
+
+    // Control: a request asked under a policy at least as strict stays, and
+    // its decisions count.
+    const v = thread();
+    const f = digestOf(await release(strict).execute(v.state, { version: '1.2.0' }));
+    await decideApproval(v.state, user('alice', ['admin']), f, 'approved', clock, 1);
+    await decideApproval(v.state, user('carol', ['admin']), f, 'approved', clock, 1);
+    expect(data(await release({ role: 'admin' }).execute(v.state, { version: '1.2.0' }))).toMatchObject({ success: true });
+  });
+
   it('records who approved a call as attested identities', async () => {
     const release = () =>
       groundedTool({

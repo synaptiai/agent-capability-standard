@@ -102,6 +102,9 @@ here and marked so.
     not honour `on_failure` (`CLIConnectionError`): update Claude Code. A
     `claude-agent-sdk` whose `HookMatcher` has no `on_failure` cannot ask
     for it; the adapter logs a warning and registers the hook as before.
+    Its matcher also states the CLI's time limit, `timeout=60` seconds
+    (`SAFETY_HOOK_TIMEOUT_S`, the SDK's default), where the SDK's
+    `HookMatcher` has the field.
   - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
     must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
     set, more than 0 and at most the expiry, and
@@ -286,6 +289,32 @@ here and marked so.
   `('Cookie', 'sid=...')`) is redacted, and refused when it is 8 or more
   characters mixing letters and digits (the plugin's `persist` and `audit`
   hooks too; a list of names is not a tuple).
+- Python SDK and Standard Agents binding, evidence anchors that held a
+  secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
+  metadata redaction changed is kept with no `digest` and no
+  `metadata.hash`, and its metadata says `digest_omitted: "secret"` (the
+  Python evidence stores, `Redactor.redact_anchor`; the binding's trace,
+  its notifications and `exportEvidence`), since the content it cites
+  holds the secret and the redacted excerpt would show the text to check a
+  guess against. An anchor with no secret keeps its digest. The TypeScript
+  package exports `redactAnchor` and the Python `Redactor` gains
+  `redact_anchor_data`, the same rule on an anchor's JSON form.
+- Python SDK, coordination records (§6.7): `CoordinationAuditLog.record`
+  redacts every value an event keeps, not only `details`: `intent` (an
+  `audit` step's event intent or type), `evidence_refs` (a shared or
+  delegated anchor's ref), the event type, the agent ids and the
+  capability, so `CoordinationEvent`, `to_dict()` and the action record hold
+  the redacted text; a query by an agent id or event type that held a
+  secret matches the redacted one. `manual_override` (and
+  `TrustModel.manual_override`) redacts its action record, its anchors kept
+  as an evidence store keeps them, and takes an optional `redactor`.
+- Python SDK, `WorkflowRunner` (§6.7): the runner redacts the `reason` of
+  every `Error` it submits as well as its `message` (a string as text, any
+  other value as JSON; a token is unchanged), so a `HostCannotServe` given
+  free text, or a `reason` object, no longer reaches the trace and the
+  snapshot as `reason_ignored` with a secret in it; and the `Error` it
+  builds when the run refuses a host's response (whose account repeats the
+  value refused) is redacted too.
 - Python SDK, evidence: anchor metadata nested deeper than two levels is
   kept as its JSON text, redacted while its structure can still be read and
   whole (the 1 KB metadata limit replaces a value too large), not as the
@@ -884,7 +913,8 @@ here and marked so.
   included, is redacted with them, and `persist` data or an `audit` record
   holding one is refused. `recordToolCall` takes an optional last argument,
   `{ secrets }`. `configureLayer` replaces the whole configuration, so pass
-  `secrets` with the policies and profiles.
+  `secrets` with the policies and profiles. An evidence anchor that held a
+  secret loses its `digest` in the trace (above).
 
 **Interoperability data.**
 

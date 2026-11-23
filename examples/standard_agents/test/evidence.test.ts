@@ -200,6 +200,47 @@ describe('secrets (§6.7)', () => {
     expect(JSON.stringify(await readTrace(t.state))).not.toContain('s3cr3t-value');
     expect(JSON.stringify(t.emitted)).not.toContain('s3cr3t-value');
   });
+
+  it('keeps no digest of what an anchor that held a secret cites', async () => {
+    // The digest of `DB_PASSWORD=sunshine42\n`, and of `sunshine42` alone:
+    // with the redacted excerpt beside it, a guess of the password could be
+    // checked against either (§6.7).
+    const framed = 'sha256:58450d2be404c0431af23ddfe25cb85db350e5bff557e779024ecc6e629d1f3c';
+    const alone = 'sha256:473fc524c94137859fe6927567786bd20e3cafed4c866efb5033963e18f8907d';
+    const clean = 'sha256:fc54daf6865cec6354a8ada602faade2a408b3acbe4d2357274d21f7cd0cb9e1';
+    const t = memoryThread();
+    const tool = groundedTool({
+      name: 'read_env',
+      capability: 'retrieve',
+      description: 'x',
+      args,
+      secrets: async () => ['hunter2-registered'],
+      execute: async () => ({
+        data: 1,
+        evidence_anchors: [
+          { ref: 'file:config/.env', kind: 'file', excerpt: 'DB_PASSWORD=sunshine42\n', digest: framed },
+          { ref: 'file:secrets/db', kind: 'file', excerpt: 'hunter2-registered', digest: alone },
+          { ref: 'file:report.txt', kind: 'file', excerpt: 'report body', digest: clean },
+        ],
+        confidence: 1,
+      }),
+    });
+    expect((await tool.execute(t.state, {})).status).toBe('success');
+    const anchors = (await readTrace(t.state)).at(-1)?.evidence_anchors;
+    expect(anchors).toEqual([
+      { ref: 'file:config/.env', kind: 'file', excerpt: 'DB_PASSWORD=[REDACTED]\n', metadata: { digest_omitted: 'secret' } },
+      { ref: 'file:secrets/db', kind: 'file', excerpt: '[REDACTED]', metadata: { digest_omitted: 'secret' } },
+      { ref: 'file:report.txt', kind: 'file', excerpt: 'report body', digest: clean },
+    ]);
+    for (const where of [JSON.stringify(await readTrace(t.state)), JSON.stringify(t.emitted)]) {
+      expect(where).not.toContain(framed);
+      expect(where).not.toContain(alone);
+    }
+    // The notification names the digest only of the anchor that kept one.
+    expect(t.emitted.at(-1)?.data).toMatchObject({ anchors: [{ ref: 'file:config/.env' }, { ref: 'file:secrets/db' }, { digest: clean }] });
+    const records = await exportEvidence(t.state);
+    expect(records.every((r) => isRecord(r))).toBe(true);
+  });
 });
 
 describe('the evidence notification and export (§6.6)', () => {

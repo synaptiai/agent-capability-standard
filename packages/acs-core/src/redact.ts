@@ -288,6 +288,34 @@ export function redactJson(value: Json, secrets: readonly string[] = []): { valu
   return { value: walk(value, '', false), pointers };
 }
 
+/**
+ * An evidence anchor (§6.5) with every secret replaced, as an evidence store
+ * or a trace keeps it, and the JSON Pointers of the members changed (as
+ * {@link redactJson} gives them). An anchor that held a secret keeps no
+ * digest of what it cites: its `digest` and its `metadata.hash` go, and its
+ * `metadata` says `digest_omitted: "secret"`. The cited content holds the
+ * secret too and may be no more than it, or than it and the text the
+ * redacted excerpt still shows around the marker, so a digest of it could
+ * be inverted by guessing (§6.7). The Python redactor's `redact_anchor`
+ * does the same. A value that is not an object is redacted as any JSON
+ * value is.
+ */
+export function redactAnchor(anchor: Json, secrets: readonly string[] = []): { value: Json; pointers: string[] } {
+  const out = redactJson(anchor, secrets);
+  const value = out.value;
+  if (out.pointers.length === 0 || value === null || typeof value !== 'object' || Array.isArray(value)) return out;
+  const metadata = value['metadata'];
+  const meta = metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : undefined;
+  if (Object.hasOwn(value, 'digest') || (meta !== undefined && Object.hasOwn(meta, 'hash'))) {
+    delete value['digest'];
+    const kept: { [key: string]: Json } = { ...(meta ?? {}) };
+    delete kept['hash'];
+    kept['digest_omitted'] = 'secret';
+    value['metadata'] = kept;
+  }
+  return out;
+}
+
 /** Whether {@link redactJson} would change `value`. */
 export function holdsSecret(value: Json, secrets: readonly string[] = []): boolean {
   return redactJson(value, secrets).pointers.length > 0;

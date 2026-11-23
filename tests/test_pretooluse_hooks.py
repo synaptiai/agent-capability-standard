@@ -20,6 +20,7 @@ import pytest
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from grounded_agency import GroundedAgentAdapter
+from grounded_agency.adapter import SAFETY_HOOK_TIMEOUT_S
 
 
 def _decision(result: dict) -> str | None:
@@ -213,11 +214,44 @@ class TestPreToolUseInWrapOptions:
         (fn,) = safety.hooks
         assert getattr(fn, "_grounded_adapter", None) is strict_adapter
         assert safety.on_failure == "block"
+        # Its time limit is stated, not left to the SDK's default.
+        assert safety.timeout == SAFETY_HOOK_TIMEOUT_S == 60
         # The other hooks keep the SDK's default.
         for event, matchers in wrapped.hooks.items():
             for entry in matchers:
                 if entry is not safety:
                     assert getattr(entry, "on_failure", None) is None, event
+                    assert getattr(entry, "timeout", None) is None, event
+
+    @pytest.mark.asyncio
+    async def test_a_long_input_is_decided_well_within_the_time_limit(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """The secret check of a persist call reads its input in time linear
+        in its length: a TodoWrite (persist) with 1 MB of padding before an
+        AWS key is refused F504 in about half a second, where the patterns
+        before security round 1's fifth batch took 64 s at 290 KB, past the
+        CLI's time limit (which then blocks, on_failure="block")."""
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        todos = [
+            {"content": "a" * 1_000_000, "status": "pending"},
+            {"content": "deploy key AKIAABCDEFGHIJKLMNOP", "status": "pending"},
+        ]
+        started = time.perf_counter()
+        out = await hook(
+            {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": todos},
+                "permission_mode": "bypassPermissions",
+            },
+            "t-long",
+            None,
+        )
+        elapsed = time.perf_counter() - started
+        decision = out["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny"
+        assert decision["permissionDecisionReason"].startswith("F504")
+        assert elapsed < SAFETY_HOOK_TIMEOUT_S / 6
 
     def test_without_the_sdk_the_dict_form_carries_it(
         self, strict_adapter: GroundedAgentAdapter, monkeypatch
@@ -232,9 +266,13 @@ class TestPreToolUseInWrapOptions:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", no_sdk)
-        entry = strict_adapter._wrap_hook(lambda *_: {}, on_failure="block")
+        entry = strict_adapter._wrap_hook(
+            lambda *_: {}, on_failure="block", timeout=SAFETY_HOOK_TIMEOUT_S
+        )
         assert entry["on_failure"] == "block"
-        assert "on_failure" not in strict_adapter._wrap_hook(lambda *_: {})
+        assert entry["timeout"] == SAFETY_HOOK_TIMEOUT_S
+        plain = strict_adapter._wrap_hook(lambda *_: {})
+        assert "on_failure" not in plain and "timeout" not in plain
 
 
 def _hooks(entry) -> list:

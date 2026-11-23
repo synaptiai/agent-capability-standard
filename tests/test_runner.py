@@ -1302,6 +1302,77 @@ def test_host_cannot_serve_reason(runner: WorkflowRunner) -> None:
     assert result.run_record["reason_code"] == "unsupported_domain"
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "cannot_serve_free_text",
+        "reason_text",
+        "reason_object",
+        "malformed_output",
+        "malformed_output_url",
+    ],
+)
+def test_no_secret_in_a_failed_step(runner: WorkflowRunner, answer: str) -> None:
+    """§6.7: neither the ``reason`` of a host's ``Error`` (a token or not:
+    the core traces any other value as ``reason_ignored``) nor the ``Error``
+    the runner builds for a response the run refused (the core's account
+    repeats the value) reaches the trace, the result, the run record or the
+    snapshot with a secret in it."""
+    from grounded_agency.workflows import HostCannotServe
+
+    secret = "Hunter2SuperSecret99"
+    dsn = f"postgres://app:{secret}@db.internal/prod"
+
+    class Leaky(FakeHost):
+        def invoke_capability(self, action: dict[str, Any]) -> dict[str, Any]:
+            if action["capability"] != "retrieve":
+                return super().invoke_capability(action)
+            value = {"data": {"v": 1}, "confidence": 1.0, "evidence_anchors": []}
+            if answer == "cannot_serve_free_text":
+                raise HostCannotServe(f"backend {dsn} unreachable")
+            if answer == "reason_text":
+                return {
+                    "kind": "Error",
+                    "code": "R402",
+                    "message": "db down",
+                    "reason": f"connect {dsn}",
+                }
+            if answer == "reason_object":
+                return {
+                    "kind": "Error",
+                    "code": "R402",
+                    "message": "db down",
+                    "reason": {"password": secret},
+                }
+            if answer == "malformed_output":
+                return {
+                    "kind": "Output",
+                    "value": value,
+                    "evidence_seen": f"Authorization: Bearer {secret}",
+                }
+            return {
+                "kind": "Output",
+                "value": value,
+                "evidence_seen": f"https://app:{secret}@files.internal/x",
+            }
+
+    run = runner.start("change_config", {"setting": "x"}, run_id="r1", now_ms=1_000)
+    result = runner.drive(run, Leaky(Clock()))
+    assert result.code == "R402"
+    (failed,) = [e for e in result.trace if e["kind"] == "step_failed"]
+    assert "[REDACTED]" in json.dumps(failed)
+    for kept in (
+        result.trace,
+        result.message,
+        result.reason,
+        result.action_records,
+        result.run_record,
+        run.run_record(),
+        run.snapshot(b"k"),
+    ):
+        assert secret not in json.dumps(kept, default=str)
+
+
 def test_start_from_schedule_trigger_is_unattended(triggered: WorkflowRunner) -> None:
     run = triggered.start("nightly", trigger=0, now_ms=0)
     assert json.loads(run.snapshot()["state"])["attendance"] == "unattended"

@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from grounded_agency.state.evidence_store import EvidenceAnchor, plain
 from grounded_agency.state.redaction import (
     DEFAULT_PATTERNS,
     DEFAULT_REDACTOR,
@@ -35,11 +36,28 @@ def test_the_vector_file() -> None:
     assert VECTORS.read_text(encoding="utf-8").isascii()
 
 
+def _kept_anchor(redactor: Redactor, data: dict[str, Any]) -> dict[str, Any]:
+    """The anchor ``data`` as an evidence store keeps it, in its JSON form
+    with its metadata (members that are None left out)."""
+    anchor = redactor.redact_anchor(EvidenceAnchor.from_dict(data))
+    out = {k: v for k, v in anchor.to_dict().items() if v is not None}
+    if anchor.metadata:
+        out["metadata"] = plain(anchor.metadata)
+    return out
+
+
 @pytest.mark.parametrize("vector", DOC["vectors"], ids=lambda v: v["name"])
 def test_vector(vector: dict[str, Any]) -> None:
     redactor = Redactor(vector["secret_values"])
     given = copy.deepcopy(vector["input"])
     output, pointers = redactor.redact(given)
+    if vector.get("anchor"):
+        # Kept as an evidence anchor: no digest once it held a secret.
+        assert redactor.redact_anchor_data(given) == (
+            vector["expect"]["output"],
+            vector["expect"]["pointers"],
+        )
+        output = _kept_anchor(redactor, given)
     assert output == vector["expect"]["output"]
     assert pointers == vector["expect"]["pointers"]
     # The value given is not modified.
@@ -204,6 +222,132 @@ def test_coordination_audit_log_redacts_details() -> None:
     text = json.dumps(event.to_action_record())
     assert "s3cr3t-value" not in text and "abcdefgh1234" not in text
     assert MARKER in text
+
+
+def test_coordination_audit_log_redacts_every_member() -> None:
+    """Not only ``details``: the record's ``intent``, its
+    ``details.evidence_refs`` and the event's own members are redacted too
+    (§6.7), in the event, its ``to_dict`` and its action record."""
+    from grounded_agency.coordination.audit import CoordinationAuditLog
+
+    log = CoordinationAuditLog(redactor=Redactor(["s3cr3t-value"]))
+    key = "AKIAABCDEFGHIJKLMNOP"
+    url = "https://api.example.com/report?access_token=Hunter2SuperSecret99"
+    event = log.record(
+        "rotation token=abcd1234efgh",
+        "agent s3cr3t-value",
+        ["worker password=hunter22"],
+        capability_id="audit",
+        details={"note": "plain"},
+        evidence_refs=[url, "file:report.txt"],
+        intent=f"rotated deploy key {key}",
+    )
+    for text in (
+        json.dumps(event.to_action_record()),
+        json.dumps(event.to_dict()),
+        json.dumps(log.export_action_records()),
+        json.dumps(log.to_list()),
+        repr(event),
+    ):
+        for secret in (
+            key,
+            "Hunter2SuperSecret99",
+            "abcd1234efgh",
+            "s3cr3t-value",
+            "hunter22",
+        ):
+            assert secret not in text
+    assert event.intent == f"rotated deploy key {MARKER}"
+    assert event.evidence_refs == (
+        f"https://api.example.com/report?access_token={MARKER}",
+        "file:report.txt",
+    )
+    # A value that holds no secret is kept as given.
+    plain_event = log.record("delegation", "a", ["b"], evidence_refs=["file:x"])
+    assert plain_event.to_dict()["evidence_refs"] == ["file:x"]
+    assert plain_event.to_action_record()["intent"] == "delegation"
+
+
+def test_coordination_records_redact_intent_and_evidence_refs() -> None:
+    """Through the layer's own writers: an ``audit`` step's event intent (or
+    event type), a shared anchor's ref and a delegate's anchor refs reach
+    the action record redacted, as ``details`` already were."""
+    from grounded_agency.capabilities.registry import CapabilityRegistry
+    from grounded_agency.coordination.audit import CoordinationAuditLog
+    from grounded_agency.coordination.evidence_bridge import (
+        CrossAgentEvidenceBridge,
+    )
+    from grounded_agency.coordination.orchestrator import OrchestrationRuntime
+    from grounded_agency.coordination.registry import AgentRegistry
+    from grounded_agency.state.evidence_store import EvidenceAnchor, EvidenceStore
+    from grounded_agency.workflows.engine import WorkflowStep
+
+    ontology = str(
+        Path(__file__).resolve().parents[1] / "schemas" / "capability_ontology.yaml"
+    )
+    key = "AKIAABCDEFGHIJKLMNOP"
+
+    # The audit step: the event's intent, then its event type.
+    runtime = OrchestrationRuntime(CapabilityRegistry(ontology))
+    step = WorkflowStep(capability="audit", purpose="Record the rotation.")
+    for event in (
+        {"intent": f"rotated deploy key {key}", "event_type": "key_rotation"},
+        {"event_type": "login with password=Sup3rS3cret!"},
+    ):
+        result = runtime.execute_workflow_step(step, {"event": event})
+        record = result.output["record"]
+        assert MARKER in record["intent"]
+    text = json.dumps(runtime.audit_log.export_action_records()) + json.dumps(
+        runtime.audit_log.to_list()
+    )
+    assert key not in text and "Sup3rS3cret!" not in text
+
+    # Evidence shared between agents.
+    secret = "Hunter2SuperSecret99"
+    agents = AgentRegistry(CapabilityRegistry(ontology))
+    agents.register("a1", {"retrieve"}, trust_score=0.9)
+    agents.register("a2", {"retrieve"}, trust_score=0.9)
+    log = CoordinationAuditLog()
+    bridge = CrossAgentEvidenceBridge(agents, EvidenceStore(), log)
+    bridge.share_evidence(
+        EvidenceAnchor(
+            ref=f"https://api.example.com/report?access_token={secret}",
+            kind="url",
+            timestamp="2026-11-01T00:00:00Z",
+        ),
+        "a1",
+        ["a2"],
+    )
+    record = log.export_action_records()[0]
+    assert record["details"]["evidence_refs"] == [record["details"]["evidence_ref"]]
+    assert secret not in json.dumps(log.export_action_records()) + json.dumps(
+        log.to_list()
+    )
+
+    # A delegate's anchors, at the task's completion.
+    runtime = OrchestrationRuntime(CapabilityRegistry(ontology))
+    runtime.register_agent("w1", {"retrieve"}, trust_score=0.9)
+    task = runtime.delegation.delegate(
+        description="fetch report",
+        required_capabilities=["retrieve"],
+        target_agent_id="w1",
+        input_data={},
+    )
+    presigned = (
+        "https://bucket.s3.amazonaws.com/r.csv?X-Amz-Credential="
+        f"{key}%2F20261117&X-Amz-Signature=" + "a" * 64
+    )
+    runtime.delegation.complete_task(
+        task.task_id,
+        {"ok": True},
+        [EvidenceAnchor(ref=presigned, kind="url", timestamp="2026-11-17T00:00:00Z")],
+    )
+    records = runtime.audit_log.export_action_records()
+    [done] = [r for r in records if r["intent"] == "task_complete"]
+    assert any(
+        f"X-Amz-Credential={MARKER}" in r for r in done["details"]["evidence_refs"]
+    )
+    assert key not in json.dumps(records)
 
 
 def test_runner_redacts_a_host_exception(tmp_path: Path) -> None:

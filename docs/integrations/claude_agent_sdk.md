@@ -683,7 +683,11 @@ credential assignments, private keys and common key formats) before it
 keeps it: a secret becomes `[REDACTED]`. The collector keeps a response's
 `digest` only when the redactor finds no secret in the response, since the
 digest of a response that is a secret could be inverted by guessing; the
-anchor's metadata then says `digest_omitted: secret`. Register the host's
+anchor's metadata then says `digest_omitted: secret`. A store does the same
+with any anchor it redacts (one a runner's host or a grounded tool
+supplies): it keeps neither its `digest` nor its metadata's `hash`, since
+the content it cites holds the secret, and the redacted excerpt would show
+the text to check a guess against. Register the host's
 own secrets with `GroundedAgentConfig(secret_values=(...))`: they reach the
 store's and the coordination audit log's redactor, and never
 `recorded_by`. The adapter also redacts its call records and refusals, and
@@ -1021,7 +1025,7 @@ pip install claude-agent-sdk
 
 ### CLIConnectionError: Does Not Honor on_failure
 
-The adapter's PreToolUse safety hook asks the CLI to block a call when the hook fails or gives no verdict in time (`on_failure="block"`), and the SDK will not connect to a Claude Code too old to honour that. Update Claude Code.
+The adapter's PreToolUse safety hook asks the CLI to block a call when the hook fails or gives no verdict in time (`on_failure="block"`, with a 60-second `timeout`), and the SDK will not connect to a Claude Code too old to honour that. Update Claude Code.
 
 ```bash
 claude update

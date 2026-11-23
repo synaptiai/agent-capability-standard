@@ -94,6 +94,13 @@ PROMPTING_PERMISSION_MODES: frozenset[str] = frozenset(
     {"default", "acceptEdits", "plan"}
 )
 
+# How long the CLI waits for the safety hook (seconds), stated on its
+# matcher with `on_failure="block"`: a callback that gives no verdict by then
+# blocks the call (section 5.18.8). It is the SDK's default, stated so that a
+# change of the default does not change it. The checks read a call's input
+# in time linear in its length (a 1 MB input in under a second).
+SAFETY_HOOK_TIMEOUT_S: float = 60.0
+
 # A call argument an `acs:` anchor can cite (a §5.3 identifier).
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 
@@ -1671,7 +1678,8 @@ class GroundedAgentAdapter:
         - a PreToolUse hook for the rate limit, the prerequisites, the
           checkpoint rule and the approval rule, whose matcher has
           ``on_failure="block"`` (the SDK then refuses to connect to a
-          Claude Code that does not honour it)
+          Claude Code that does not honour it) and a ``timeout`` of
+          :data:`SAFETY_HOOK_TIMEOUT_S`
         - a can_use_tool callback that passes the decision to the
           ``can_use_tool`` callback of ``base``, if it has one, re-checks the
           call (arguments the host changed are classified again) and uses
@@ -1767,7 +1775,11 @@ class GroundedAgentAdapter:
         # It refuses with R407 when a check fails inside it; a callback that
         # fails or gives no verdict in time, seen from the CLI, blocks the
         # call too (section 5.18.8), where the SDK can say so.
-        pre_hooks.append(self._wrap_hook(safety_pre_hook, on_failure="block"))
+        pre_hooks.append(
+            self._wrap_hook(
+                safety_pre_hook, on_failure="block", timeout=SAFETY_HOOK_TIMEOUT_S
+            )
+        )
 
         # Stop and UserPromptSubmit: execution boundaries (a turn's end, and
         # the next turn's start, which also ends what a turn left when its
@@ -1887,6 +1899,7 @@ class GroundedAgentAdapter:
         hook_fn: Any,
         matcher: str | None = None,
         on_failure: str | None = None,
+        timeout: float | None = None,
     ) -> Any:
         """
         Wrap a hook function in the SDK's expected format.
@@ -1904,6 +1917,8 @@ class GroundedAgentAdapter:
                 to ask, and a warning says so. With it, connecting to a
                 Claude Code that does not honour it raises
                 ``CLIConnectionError``.
+            timeout: Seconds the CLI waits for the callback (the matcher's
+                ``timeout``); None leaves the SDK's default.
 
         Returns:
             Hook configuration dict or HookMatcher
@@ -1918,10 +1933,16 @@ class GroundedAgentAdapter:
                 config["matcher"] = matcher
             if on_failure is not None:
                 config["on_failure"] = on_failure
+            if timeout is not None:
+                config["timeout"] = timeout
             return config
         kwargs: dict[str, Any] = {"hooks": [hook_fn]}
         if matcher:
             kwargs["matcher"] = matcher
+        if timeout is not None and "timeout" in getattr(
+            HookMatcher, "__dataclass_fields__", {}
+        ):
+            kwargs["timeout"] = timeout
         if on_failure is not None:
             if "on_failure" in getattr(HookMatcher, "__dataclass_fields__", {}):
                 kwargs["on_failure"] = on_failure

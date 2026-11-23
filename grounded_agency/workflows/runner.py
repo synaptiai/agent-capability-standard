@@ -1197,17 +1197,30 @@ class WorkflowRunner:
         return result
 
     def _redact_error(self, response: Any) -> Any:
-        """An ``Error`` response with its message redacted (§6.7); any
-        other response as it is."""
-        if (
-            isinstance(response, dict)
-            and response.get("kind") == "Error"
-            and isinstance(response.get("message"), str)
-        ):
-            text, changed = self._redactor.redact_text(response["message"])
+        """An ``Error`` response with its ``message`` and ``reason`` redacted
+        (§6.7); any other response as it is. A ``reason`` outside the token
+        grammar is free text or any JSON value (``HostCannotServe``'s first
+        argument, say), which the core keeps in the trace and the snapshot
+        as ``reason_ignored``: a string is redacted as text, any other value
+        as JSON."""
+        if not (isinstance(response, dict) and response.get("kind") == "Error"):
+            return response
+        out = response
+        message = response.get("message")
+        if isinstance(message, str):
+            text, changed = self._redactor.redact_text(message)
             if changed:
-                return {**response, "message": text}
-        return response
+                out = {**out, "message": text}
+        if "reason" in response:
+            reason = response["reason"]
+            if isinstance(reason, str):
+                kept, changed = self._redactor.redact_text(reason)
+            else:
+                kept, pointers = self._redactor.redact(reason)
+                changed = bool(pointers)
+            if changed:
+                out = {**out, "reason": kept}
+        return out
 
     def _record_evidence(
         self, run: _core.Run, action: Action, response: Any, seq: int
@@ -1269,12 +1282,14 @@ class WorkflowRunner:
             except Exception:  # noqa: BLE001
                 logger.warning("could not count the capture failure", exc_info=True)
 
-    @staticmethod
-    def _submit(run: _core.Run, action: Action, response: Any, now: int) -> None:
+    def _submit(self, run: _core.Run, action: Action, response: Any, now: int) -> None:
         """Submit ``response`` at ``now``. One the run refuses (it changes
         nothing then) fails the step for a capability, as a host exception
         does, and stops the runner for anything else. ``now`` is read
-        before, so a faulty clock is not mistaken for a refused response."""
+        before, so a faulty clock is not mistaken for a refused response.
+        The ``Error`` that fails the step is redacted as a host's is (§6.7):
+        the core's account of a malformed response repeats the value it
+        refused."""
         _check_ms(now)
         try:
             run.submit(action["id"], response, now)
@@ -1291,11 +1306,13 @@ class WorkflowRunner:
             ) from error
         run.submit(
             action["id"],
-            {
-                "kind": "Error",
-                "code": "R402",
-                "message": f"the host's response was refused: {error}",
-            },
+            self._redact_error(
+                {
+                    "kind": "Error",
+                    "code": "R402",
+                    "message": f"the host's response was refused: {error}",
+                }
+            ),
             now,
         )
 

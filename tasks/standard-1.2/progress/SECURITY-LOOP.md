@@ -1574,3 +1574,199 @@ No version changes.
   audit hook, with the secret registered by `configureLayer({ secrets })`,
   redacts all four phrasings; `redactJson`, `holdsCredential` and
   `redactText` redact and refuse the HAR and tuple forms. None left running.
+
+### Batch 7: five reported defects
+
+Security round 1's seventh batch: five defects an independent verifier
+reproduced on 99c37dd, one in the Standard Agents binding's approval
+records, three in what the Python SDK and the binding write into records
+(§6.7), and one in the time the redactors take and the adapter's hook
+matcher. Each was probed again on 69b2d3a (batch 6) before it was fixed.
+Two were already closed there: #36 by batch 5's #30 (`requestApproval`
+opens a new round when the live request was asked under a weaker policy),
+and the regex half of #40 by batch 5's #29 (with batch 1's #9 for
+`on_failure="block"`); for both, the verifier's probes now refuse, and the
+tests below pin them. #37 to #39 reproduced as reported. Each new test
+fails on the code before its fix (run with the old binding source, the old
+redactors, audit log, trust module, runner and adapter: 15 Python tests,
+4 TypeScript vectors, 2 binding tests; the bounded-time test, run with
+99c37dd's redactor, gave no decision within 100 s; the rest are controls
+that pass on both).
+
+#### 36. An approval request kept the policy it was made under (medium; closed by batch 5)
+
+On 99c37dd a request a tool made under `approval: {}` was decided by bob,
+who holds no role, after the deployment redefined the tool with
+`{min_approvers: 2, role: 'admin', expires_ms: 60000}` (thread values
+outlive a redeploy), and the new definition's call ran on it; one approved
+with no expiry stayed usable a month after an expiry was added. Batch 5's
+#30 made `requestApproval` keep a live request only when it was asked under
+a policy at least as strict as the call's (`asStrictAs`: as many approvers,
+the same role when the call's sets one, an expiry no longer than its own),
+and otherwise close it into `history` and open a new round under the call's
+policy, so decisions given under the weaker one decide nothing; the call
+then counts the new round's decisions against that round's policy, which is
+the call's or stricter. The verifier's probe (cases A to D, the
+`approvals.post` endpoint included) now refuses each call with F502; bob's
+decision is still accepted on the closed round, which no call uses.
+
+- Test (`test/grounded.test.ts`, "decides nothing with a request asked
+  under a weaker policy than the tool has at the call"): the pending request
+  decided after the change (round 2 opened under the new policy, bob
+  refused on it), the approved request a month later (F502, nothing
+  executed), and a control (a request asked under a stricter policy stays
+  and its admins' decisions run the call). It fails with `asStrictAs`
+  removed from `requestApproval`, the code before batch 5.
+- Python sibling: none; the adapter keeps no approval request across calls
+  (its permission prompt decides one call), and a run's approval policy is
+  its catalog's.
+
+#### 37. Evidence anchors kept the digest of content whose secret they redacted (medium)
+
+`Redactor.redact_anchor` replaced a secret in an anchor's `ref`, `excerpt`
+or metadata and kept its `digest`; the binding's trace did the same
+(`redactJson` over `evidence_anchors`). With `DB_PASSWORD=[REDACTED]\n`
+beside the digest of `DB_PASSWORD=sunshine42\n`, 343 guesses recovered the
+password; with a registered secret quoted whole, the record held the
+digest of the secret alone, which §6.7 forbids outright. The collector
+already dropped the digest of a response holding a secret; anchors a host
+supplies (a runner `Output`, a grounded tool's output, a direct append)
+did not get that rule.
+
+- Fix (`redaction.py`, `redact.ts`, identically): an anchor redaction
+  changed keeps no digest of what it cites: its `digest` and its
+  metadata's `hash` go, and its metadata says `digest_omitted: "secret"`
+  (only when one was dropped). Python: `Redactor.redact_anchor` (both
+  evidence stores) and `Redactor.redact_anchor_data`, the same rule on an
+  anchor's JSON form; TypeScript: `redactAnchor`, which the binding's
+  `redacted()` applies to each anchor of every trace entry (the
+  notification and `exportEvidence` read the stored entry). An anchor with
+  no secret keeps its digest.
+- Tests: six vectors with `anchor: true` in
+  `tests/conformance/secrets/redact.json` (an excerpt, a registered secret
+  alone, a ref with a metadata `hash`, a secret in metadata only, a secret
+  with no digest, and a control), run by both vector runners through
+  `redact_anchor`, `redact_anchor_data` and `redactAnchor` (4 failed on both
+  old redactors); the binding's `test/evidence.test.ts` ("keeps no digest of
+  what an anchor that held a secret cites": the trace, the notification and
+  the export; failed on the old `records.ts`). The verifier's `p7_digest.py`
+  and `p_alone.py` now find no digest to invert.
+
+#### 38. The coordination audit log redacted only `details` (medium)
+
+`CoordinationAuditLog.record` redacted `details` and kept `intent` and
+`evidence_refs` as given, so an `audit` step's event intent (or event type),
+an anchor ref shared through `CrossAgentEvidenceBridge` and a delegate's
+anchor refs at `complete_task` (an S3 presigned URL's
+`X-Amz-Credential=AKIA...`) reached the action record and `to_dict` with
+the secret that the same record's `details` held redacted.
+
+- Fix (`coordination/audit.py`): every value an event keeps is redacted
+  before the event is kept: `details`, `intent`, each `evidence_refs` item,
+  the event type, the agent ids and the capability; the debug log line
+  names the redacted values.
+- Sibling: `trust.manual_override` (and `TrustModel.manual_override`) built
+  an action record from its target, values and anchors and handed it to
+  the host's `record` unredacted; it now redacts the record with a
+  `redactor` (new optional argument, default patterns), each anchor as a
+  store keeps it (`redact_anchor_data`).
+- Tests: `tests/test_redaction.py::test_coordination_audit_log_redacts_every_member`
+  and `::test_coordination_records_redact_intent_and_evidence_refs` (the
+  audit step by intent and by event type, `share_evidence`, `complete_task`
+  with a presigned URL; both failed before);
+  `tests/test_audit_records.py::test_manual_override_records_no_secret`
+  (failed before).
+
+#### 39. The runner redacted only an Error's message (medium)
+
+`WorkflowRunner._redact_error` redacted `message` and passed `reason`
+through; the core traces a reason outside the token grammar as
+`reason_ignored`, so `HostCannotServe(f"backend {dsn} unreachable")` (its
+first argument doubles as the message) left the DSN's password in the
+trace and the snapshot beside its redacted copy in the message, as did a
+`reason` object. The `Error` the runner built when the run refused a host's
+response (`the host's response was refused: <the core's error>`, which
+repeats the value refused) was submitted unredacted, so a malformed
+`evidence_seen` holding a bearer token reached the trace, the result, the
+run record and the snapshot.
+
+- Fix (`runner.py`): `_redact_error` also redacts `reason` (a string as
+  text, any other value as JSON; a token is unchanged), and `_submit`, now
+  an instance method, passes its fallback `Error` through it.
+  `_cannot_serve`'s `Error` goes through `_redact_error` with every other
+  response.
+- Not changed: the core keeps `reason_ignored` as the host gave it. It
+  keeps a host's `message` as given too; §6.7 puts both on the host, and
+  the runner, the SDK's host side, now redacts both.
+- Test: `tests/test_runner.py::test_no_secret_in_a_failed_step` (free-text
+  `HostCannotServe`, a text reason, a reason object, and malformed
+  `evidence_seen` as a header and as a URL; the trace, the result, the run
+  record and the snapshot): all 5 failed before. The verifier's probe
+  finds no leak in any of its nine modes.
+
+#### 40. Quadratic redaction patterns held the adapter's hook past its time limit (medium; closed by batches 1 and 5)
+
+On 99c37dd the URL patterns read a long run again from each position
+(`holds_credential` of 256 KB of `a`: 100 s), so the adapter's PreToolUse
+check of a TodoWrite (persist) with 290 KB of padding before an AWS key took
+64 s, past the SDK's 60 s, and its matcher had no `on_failure`, so the CLI
+ran the call. Batch 1's #9 set `on_failure="block"` on the safety matcher
+and batch 5's #29 made every pattern read a run once. Measured on this
+tree (each under `timeout 120` and a 4 GB limit): Python
+`holds_credential` of 1 MB of `a` 0.82 s, of hex 0.66 s, `response_digest`
+of 1 MB of `a.` 0.21 s; TypeScript `holdsCredential` and `redactText` of
+1 MB 0.02 to 0.07 s; the adapter's hook denies the verifier's TodoWrite
+with 290 KB of padding in 0.1 s and 1 MB in 0.4 s.
+
+- Change (`adapter.py`): the safety matcher states its time limit,
+  `timeout=SAFETY_HOOK_TIMEOUT_S` (60 s, the SDK's default, so a change of
+  the default does not change it), where the SDK's `HookMatcher` has the
+  field; the dict form carries it too. No cap on the text a check reads: a
+  check that outlived the limit blocks the call (`on_failure="block"`).
+- Tests (`tests/test_pretooluse_hooks.py`): the matcher's `timeout` and the
+  dict form (both failed on the old adapter), and
+  `test_a_long_input_is_decided_well_within_the_time_limit` (the
+  verifier's TodoWrite with 1 MB of padding is F504 within 10 s; with
+  99c37dd's redactor it gave no decision within 100 s). The 1 MB shapes of
+  both redactors' timing tests (batch 5) already cover `a`, hex and `a.`.
+
+#### Siblings checked
+
+- The binding's `args_digest` is of a call's whole arguments, which no
+  record holds beside it (§6.7 allows the digest of a whole value); the
+  plugin's audit log likewise keeps only `input_sha256`.
+- The adapter's call records redact their details; the orchestration and
+  delegation anchors go through the store's `redact_anchor`, so #37's rule
+  reaches them.
+- The binding has no runner; the TypeScript package's `Run.submit` passes
+  a host's response to the core as the host gives it (§6.7's duty stays
+  the host's).
+
+#### Documentation
+
+SECURITY.md (§1.5: the redaction bullets, the anchor digest rule, the time
+limit; the class SL paragraph: the adapter matcher's timeout); the SDK
+guide (secrets, the CLIConnectionError note); the runner guide (`reason`
+redacted, `reason_ignored`); the Standard Agents guide (secrets); the
+`acs-core` README (`redactAnchor`); the redactors', stores' and audit
+log's docstrings; CHANGELOG (Upgrading: the adapter's matcher timeout,
+anchors that held a secret, coordination records and `manual_override`,
+the runner's `reason`, the binding's secrets). The Standard's §6.7 already
+forbids each leak; no change there. No version changes.
+
+#### Checks after batch 7
+
+- Python: `pytest tests/` (5296 passed, 18 skipped); ruff check and format
+  with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; the generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1923; the WebAssembly
+  build reused); the binding's check and test (215, 2 skipped).
+- Site: `npm run check`, `npm test` (1173).
+- Probes (the verifier's, pointed at this worktree, each under `timeout
+  120` and an address-space limit): `v37` cases A to D refuse with F502;
+  `p7_digest.py`, `p_alone.py`, `probe_anchor.mjs` and `probe_alone.mjs`
+  find no digest; the coordination repros find no key in any record; the
+  runner probe finds no leak in its nine modes; `p10_hook.py` denies at
+  16 KB to 1 MB of padding in at most 0.4 s. None left running.

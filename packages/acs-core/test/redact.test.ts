@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Json } from '../src/canonical.js';
-import { DEFAULT_PATTERNS, holdsCredential, holdsSecret, MARKER, redactJson, redactText } from '../src/redact.js';
+import { DEFAULT_PATTERNS, holdsCredential, holdsSecret, MARKER, redactAnchor, redactJson, redactText } from '../src/redact.js';
 // The redaction vectors, read in place; the Python redactor
 // (grounded_agency/state/redaction.py) is held to the same file.
 import vectors from '../../../tests/conformance/secrets/redact.json' with { type: 'json' };
 
 interface Vector {
   name: string;
+  /** Redacted as an evidence anchor (`redactAnchor`). */
+  anchor?: boolean;
   input: Json;
   secret_values: string[];
   expect: { output: Json; pointers: string[] };
@@ -22,8 +24,10 @@ describe('redaction vectors (STANDARD v1.2.0 §6.7)', () => {
 
   it.each(cases.map((v) => [v.name, v] as const))('%s', (_name, vector) => {
     const given = structuredClone(vector.input);
-    const { value, pointers } = redactJson(given, vector.secret_values);
+    const { value, pointers } = (vector.anchor ? redactAnchor : redactJson)(given, vector.secret_values);
     expect(value).toEqual(vector.expect.output);
+    // An anchor's pointers are those of the input read as a JSON value.
+    if (vector.anchor) expect(redactJson(vector.input, vector.secret_values).pointers).toEqual(pointers);
     expect(pointers).toEqual(vector.expect.pointers);
     // The value given is not modified, and redacting again changes nothing.
     expect(given).toEqual(vector.input);

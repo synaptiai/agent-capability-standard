@@ -14,7 +14,7 @@
  * per entry.
  */
 import type { ThreadState } from '@standardagents/spec';
-import { redactJson, redactText, type EvidenceAnchor, type Json, type TRUST_CLASSES } from '@synaptiai/acs-core';
+import { redactAnchor, redactText, type EvidenceAnchor, type Json, type TRUST_CLASSES } from '@synaptiai/acs-core';
 import { layerSecrets } from './layer.js';
 import type { CapabilityId } from './ontology.js';
 
@@ -287,7 +287,8 @@ export function stale(waiting: Unlinked, flow: string | null, step: number | nul
  * An entry's `error` and `evidence_anchors` with every secret replaced
  * (STANDARD v1.2.0 §6.7): always the default patterns and the secrets
  * registered layer-wide (`configureLayer({ secrets })`), plus `secrets`.
- * Nothing else in an entry holds a value a call received.
+ * An anchor that held a secret loses its `digest` (`redactAnchor`). Nothing
+ * else in an entry holds a value a call received.
  */
 function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>>(
   entry: T,
@@ -296,8 +297,11 @@ function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors
   const values = [...secrets, ...layerSecrets()];
   const out = { ...entry };
   if (typeof out.error === 'string') out.error = redactText(out.error, values);
+  // An anchor that held a secret keeps no digest of what it cites
+  // (`redactAnchor`): a digest of content that may be no more than the
+  // secret could be inverted by guessing.
   if (Array.isArray(out.evidence_anchors)) {
-    out.evidence_anchors = redactJson(out.evidence_anchors as Json, values).value as Json[];
+    out.evidence_anchors = (out.evidence_anchors as Json[]).map((a) => redactAnchor(a, values).value);
   }
   return out;
 }

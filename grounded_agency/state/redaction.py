@@ -437,7 +437,15 @@ class Redactor:
     def redact_anchor(self, anchor: EvidenceAnchor) -> EvidenceAnchor:
         """``anchor`` with every secret in its ``ref``, ``excerpt`` and
         metadata values replaced (§6.5, §6.7): the anchor itself when
-        nothing changes, else a new (unfrozen) anchor."""
+        nothing changes, else a new (unfrozen) anchor.
+
+        An anchor that held a secret keeps no digest of what it cites: its
+        ``digest`` and its metadata's ``hash`` go, and the metadata says
+        ``digest_omitted: secret``, as the evidence collector says of a
+        response that holds one. The cited content holds the secret too and
+        may be no more than it, or than it and the text the redacted
+        excerpt still shows around the marker, so a digest of it could be
+        inverted by guessing (§6.7)."""
         ref, ref_changed = self.redact_text(anchor.ref)
         excerpt, excerpt_changed = (
             self.redact_text(anchor.excerpt)
@@ -447,7 +455,32 @@ class Redactor:
         metadata, pointers = self.redact(_plain(anchor.metadata))
         if not (ref_changed or excerpt_changed or pointers):
             return anchor
-        return dataclasses.replace(anchor, ref=ref, excerpt=excerpt, metadata=metadata)
+        if anchor.digest is not None or "hash" in metadata:
+            metadata.pop("hash", None)
+            metadata["digest_omitted"] = "secret"
+        return dataclasses.replace(
+            anchor, ref=ref, excerpt=excerpt, metadata=metadata, digest=None
+        )
+
+    def redact_anchor_data(self, value: Any) -> tuple[Any, list[str]]:
+        """An evidence anchor in its JSON form (§6.5), redacted as
+        :meth:`redact_anchor` redacts an anchor, and the JSON Pointers of the
+        members changed (as :meth:`redact` gives them): once it held a
+        secret, its ``digest`` and ``metadata.hash`` go and its ``metadata``
+        says ``digest_omitted: secret``. ``packages/acs-core``'s
+        ``redactAnchor`` does the same. A value that is not an object is
+        redacted as any JSON value is."""
+        out, pointers = self.redact(value)
+        if not pointers or not isinstance(out, dict):
+            return out, pointers
+        metadata = out.get("metadata")
+        meta = metadata if isinstance(metadata, dict) else None
+        if "digest" in out or (meta is not None and "hash" in meta):
+            out.pop("digest", None)
+            kept = {k: v for k, v in (meta or {}).items() if k != "hash"}
+            kept["digest_omitted"] = "secret"
+            out["metadata"] = kept
+        return out, pointers
 
     def _walk(
         self, value: Any, pointer: str, pointers: list[str], secret: bool = False

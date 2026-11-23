@@ -13,7 +13,8 @@ or reorders a kept record, never reuses a ``record_id``, answers queries in
 append order, exports JSON Lines, states its durability and whether it is
 bounded, counts what it removes, and notifies subscribers
 (``acs.evidence_recorded``). It redacts every anchor before keeping it
-(§6.7) and keeps a frozen copy, never the caller's object.
+(§6.7; an anchor that held a secret keeps no ``digest``) and keeps a frozen
+copy, never the caller's object.
 """
 
 from __future__ import annotations
@@ -862,9 +863,10 @@ class EvidenceStore:
     eviction, and each record :meth:`clear` drops, counts in
     ``info().removed``; record ids (``ev-<n>``) are never reused.
 
-    Every anchor is redacted (``redactor``, §6.7) and kept as a frozen copy:
-    what a getter returns cannot be changed, and changing the caller's
-    anchor after it was added changes nothing the store holds.
+    Every anchor is redacted (``redactor``, §6.7; one that held a secret
+    keeps no ``digest``, :meth:`Redactor.redact_anchor`) and kept as a
+    frozen copy: what a getter returns cannot be changed, and changing the
+    caller's anchor after it was added changes nothing the store holds.
 
     Example:
         store = EvidenceStore(max_anchors=1000)
