@@ -15,7 +15,11 @@
  * Secrets here (§6.7) are the host's own credentials, registered layer-wide:
  * every trace entry the binding writes is redacted with them (the audit
  * hook's entries for plain tools included), and `persist` data or an
- * `audit` record holding one is refused, beside each tool's own `secrets`.
+ * `audit` record holding one is refused. Each grounded tool's own `secrets`
+ * join them ({@link registerSecrets}): given as an array, when the tool is
+ * defined; given as a function, the values it returns, at each call. So a
+ * credential the deployment registers with any tool is redacted from every
+ * entry, a plain tool's included, and not only from that tool's.
  * Module-level, like the binding's other per-realm state: call
  * `configureLayer` in the module that defines the agent's tools, before
  * them. Without a call no policy or profile is in force, and a destination
@@ -65,6 +69,15 @@ interface Config {
 
 let config: Config = { destinations: [], profiles: null, secrets: [] };
 
+/** The secrets grounded tools registered (§6.7); `configureLayer` keeps them, since the tools stay defined. */
+const toolSecrets = new Set<string>();
+/** The layer's secrets and the tools', each once. */
+let secretsInForce: readonly string[] = Object.freeze([]);
+
+function refreshSecrets(): void {
+  secretsInForce = Object.freeze([...new Set([...config.secrets, ...toolSecrets])]);
+}
+
 /**
  * Put the layer's destination policies and profiles in force, replacing any
  * earlier configuration. Throws, and changes nothing, when a pattern is not
@@ -94,6 +107,7 @@ export function configureLayer(next: LayerConfig): void {
     profiles: next.profiles ?? null,
     secrets: Object.freeze([...secrets]),
   };
+  refreshSecrets();
 }
 
 /** The destination policies in force: the host's, then the profiles'. */
@@ -106,12 +120,31 @@ export function layerProfiles(): BindingProfiles | null {
   return config.profiles;
 }
 
-/** The host's secrets registered layer-wide (§6.7). */
+/**
+ * Register secrets a grounded tool holds (§6.7), so that every entry the
+ * binding writes is redacted with them, whichever tool or hook writes it:
+ * `groundedTool` registers a tool's `secrets` given as an array when it is
+ * defined, and the values a `secrets` function returns at each call. A value
+ * that is not a string is ignored.
+ */
+export function registerSecrets(values: readonly unknown[]): void {
+  const before = toolSecrets.size;
+  for (const v of values) if (typeof v === 'string') toolSecrets.add(v);
+  if (toolSecrets.size !== before) refreshSecrets();
+}
+
+/**
+ * The host's secrets in force (§6.7): those registered layer-wide
+ * (`configureLayer({ secrets })`) and those grounded tools registered
+ * ({@link registerSecrets}).
+ */
 export function layerSecrets(): readonly string[] {
-  return config.secrets;
+  return secretsInForce;
 }
 
 /** No policy, profile or secret in force: the configuration a realm starts with (for tests). */
 export function resetLayer(): void {
   config = { destinations: [], profiles: null, secrets: [] };
+  toolSecrets.clear();
+  refreshSecrets();
 }

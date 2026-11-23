@@ -5,6 +5,15 @@ Reads .claude/audit.log and verifies that:
 1. Each entry is valid JSON with required fields
 2. Each entry's HMAC matches its content
 3. Each entry's prev_hmac matches the previous entry's HMAC (chain integrity)
+4. The log still holds the entry its head records, at its place: the head,
+   .claude/audit.head, is the chain's end as the hook last wrote it (the
+   number of entries and the last one's hmac, signed with the same key).
+
+The chain alone shows a changed or removed entry by the link of the entry
+after it; removing the last entries, or the whole log, breaks no link, and
+the head shows it. A log begun before the hook kept a head, and a chain no
+head anchors (the audit skill's .claude/audit/records.jsonl), are verified
+with --no-head, which checks the chain alone.
 
 The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call.
 Three generations of entry verify, in any mix, because the HMAC is taken over
@@ -23,6 +32,7 @@ every field but ``hmac`` in the order recorded:
 
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
+        [--head-file PATH | --no-head]
 
 SEC-005: Audit log integrity verification.
 """
@@ -108,14 +118,64 @@ def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[st
     return errors
 
 
-def verify_log(log_path: Path, hmac_key: str) -> tuple[int, int, list[str]]:
-    """Verify the entire audit log.
+def head_hmac(entries: int, last_hmac: str, key: str) -> str:
+    """The signature of a head: the hook's HMAC of
+    ``acs-audit-head:<entries>:<hmac>``."""
+    return compute_hmac(f"acs-audit-head:{entries}:{last_hmac}", key)
+
+
+def read_head(head_path: Path, hmac_key: str) -> tuple[int, str] | str:
+    """The head at ``head_path`` as (entries, hmac), or why it cannot be
+    used."""
+    try:
+        with head_path.open(encoding="utf-8") as f:
+            line = f.readline(4096)
+    except FileNotFoundError:
+        return (
+            f"Head not found: {head_path} (the hook keeps one beside the log; "
+            "a log begun before it did, or a chain no head anchors, is "
+            "verified with --no-head)"
+        )
+    except (OSError, UnicodeDecodeError) as e:
+        return f"Head unreadable: {e}"
+    try:
+        head = json.loads(line)
+    except json.JSONDecodeError:
+        return "Head is not JSON"
+    entries = head.get("entries") if isinstance(head, dict) else None
+    last = head.get("hmac") if isinstance(head, dict) else None
+    sig = head.get("head_hmac") if isinstance(head, dict) else None
+    if not (
+        isinstance(entries, int)
+        and not isinstance(entries, bool)
+        and entries >= 1
+        and isinstance(last, str)
+        and isinstance(sig, str)
+    ):
+        return "Head lacks entries, hmac or head_hmac"
+    if not hmac.compare_digest(sig, head_hmac(entries, last, hmac_key)):
+        return "Head HMAC mismatch: the head was not signed with this key"
+    return entries, last
+
+
+def verify_log(
+    log_path: Path, hmac_key: str, head_path: Path | None = None
+) -> tuple[int, int, list[str]]:
+    """Verify the entire audit log, and, given ``head_path``, that the log
+    still holds the entry its head records, at its place (so that its last
+    entries were not removed).
 
     Returns:
         (total_entries, valid_entries, all_errors)
     """
+    head = read_head(head_path, hmac_key) if head_path is not None else None
+    head_errors = [head] if isinstance(head, str) else []
     if not log_path.exists():
-        return 0, 0, ["Audit log not found"]
+        if isinstance(head, tuple):
+            head_errors.append(
+                f"Audit log not found, though its head records {head[0]} entries"
+            )
+        return 0, 0, ["Audit log not found", *head_errors]
 
     # One entry per "\n": the hook writes no other line break between
     # entries, and str.splitlines() would also split at U+0085, U+2028 and
@@ -123,12 +183,30 @@ def verify_log(log_path: Path, hmac_key: str) -> tuple[int, int, list[str]]:
     text = log_path.read_text(encoding="utf-8").strip()
     lines = text.split("\n") if text else []
     if not lines:
-        return 0, 0, ["Audit log is empty"]
+        return 0, 0, ["Audit log is empty", *head_errors]
 
     total = len(lines)
     valid = 0
-    all_errors: list[str] = []
+    all_errors: list[str] = list(head_errors)
     prev_hmac = ""
+    if isinstance(head, tuple):
+        entries, last = head
+        held: object = None
+        if total >= entries:
+            try:
+                held = json.loads(lines[entries - 1]).get("hmac")
+            except json.JSONDecodeError, AttributeError:
+                held = None
+        if total < entries:
+            all_errors.append(
+                f"Head: the log ends before its head: {entries} entries "
+                f"recorded, {total} found (its last entries were removed)"
+            )
+        elif held != last:
+            all_errors.append(
+                f"Head: entry {entries} is not the one the head records "
+                "(entries were removed or replaced)"
+            )
 
     for i, line in enumerate(lines, 1):
         line = line.strip()
@@ -167,10 +245,27 @@ def main() -> None:
         default=None,
         help="HMAC key (default: derived from hostname, matching shell hook)",
     )
+    head = parser.add_mutually_exclusive_group()
+    head.add_argument(
+        "--head-file",
+        type=Path,
+        default=None,
+        help="The log's head (default: the log's path with the suffix .head, "
+        "as the hook writes .claude/audit.head)",
+    )
+    head.add_argument(
+        "--no-head",
+        action="store_true",
+        help="Check the chain alone: a log begun before the hook kept a head, "
+        "or a chain no head anchors (removing its last entries is not seen)",
+    )
     args = parser.parse_args()
 
     hmac_key = args.hmac_key or get_default_hmac_key()
-    total, valid, errors = verify_log(args.log_file, hmac_key)
+    head_path = (
+        None if args.no_head else (args.head_file or args.log_file.with_suffix(".head"))
+    )
+    total, valid, errors = verify_log(args.log_file, hmac_key, head_path)
 
     if errors:
         print(f"INTEGRITY CHECK FAILED: {len(errors)} error(s) in {total} entries\n")

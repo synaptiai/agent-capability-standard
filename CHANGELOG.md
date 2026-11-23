@@ -289,6 +289,26 @@ here and marked so.
   `('Cookie', 'sid=...')`) is redacted, and refused when it is 8 or more
   characters mixing letters and digits (the plugin's `persist` and `audit`
   hooks too; a list of names is not a tuple).
+- Python SDK, TypeScript package and plugin, credential forms (Standard
+  1.2.0 §6.7): the redactors, the refusal rule (`holds_credential`,
+  `holdsCredential`, the `persist` and `audit` hooks' scan) and so the
+  runner, the stores and the binding also read a URL's userinfo with an
+  empty user's name (`redis://:<password>@`), quotes escaped as JSON text
+  inside a JSON string or a shell's double quotes escapes them
+  (`{\"password\": \"...\"}`, also around a header pair or tuple), a
+  command's user option (`curl -u user:<password>`, `-uuser:...`,
+  `--user`, `-U`, `--proxy-user`, also as a list's items, as an
+  exception's text quotes a command), an option named for a credential with
+  its value after blanks (`--password <value>`, `--api-key <value>`, not
+  another option), and `secret_key` (`SECRET_KEY`, `DJANGO_SECRET_KEY`) and
+  `passphrase` as credential names. Redaction replaces them; a `persist` or
+  `audit` call is refused (F504) for a user option's password of 8 or more
+  characters mixing letters and digits (`docker run -u 1000:1000` passes)
+  and for a credential option's value as for an assignment's. A registered
+  secret is also replaced and refused JSON-escaped (once or twice, `/` as
+  `\/` or not, non-ASCII as `\uXXXX` or not) and percent-encoded (each
+  common encoding, upper- or lower-case hex): `encoded_forms` and
+  `encodedForms` list the forms. `Redactor.add_secret` registers them all.
 - Python SDK and Standard Agents binding, evidence anchors that held a
   secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
   metadata redaction changed is kept with no `digest` and no
@@ -755,12 +775,29 @@ here and marked so.
   cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
   line with `hmac: "no-hmac-available"`, which broke the chain), a line that
   could not be built, an unreadable last line, an unavailable digest.
+- Plugin audit log, its end: the chain shows a changed or removed entry by
+  the link of the entry after it, but not the removal of the last entries
+  or of the whole log, which the hook's comment claimed it did. The hook now
+  keeps the chain's end in `.claude/audit.head` (the number of entries and
+  the last one's `hmac`, signed with the same key), and
+  `tools/verify_audit_log.py` fails a log that no longer holds that entry at
+  its place. The verifier reads the head beside the log (`--head-file`
+  names another) and fails when there is none: verify a log begun before
+  the hook kept a head, or the audit skill's `records.jsonl`, with
+  `--no-head` (the chain alone). The hook reports, as a non-blocking error,
+  a log that no longer holds its head's entry (it writes the line and keeps
+  the head as the evidence: move `audit.log` and `audit.head` aside together
+  to start a new log), a head another key signed, a log that had no head
+  (anchored from then on, once) and a head that cannot be written. The
+  pre-tool-use hook refuses a call that names `audit.head` (F504). The hook
+  now also runs `mv`.
 - Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
   an action record of its own (Standard 1.2.0 §6.4), with the event under
   `details.event`, the collected `audit_record`, `changes` and `provenance`
   under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (else
   the hook's default key), so `tools/verify_audit_log.py --log-file
-  .claude/audit/records.jsonl` checks the file. Lines an earlier version
+  .claude/audit/records.jsonl --no-head` checks the file (no head anchors
+  its end). Lines an earlier version
   wrote (`audit_id`, `timestamp`, `event`, `context`, `retention`,
   `audit_record`, `changes`, `provenance`) carry no chain and do not verify:
   move an existing file aside and let the skill start a new one (it does so
@@ -913,7 +950,11 @@ here and marked so.
   included, is redacted with them, and `persist` data or an `audit` record
   holding one is refused. `recordToolCall` takes an optional last argument,
   `{ secrets }`. `configureLayer` replaces the whole configuration, so pass
-  `secrets` with the policies and profiles. An evidence anchor that held a
+  `secrets` with the policies and profiles. A grounded tool's own `secrets`
+  join the layer's (`registerSecrets`; an array when the tool is defined, a
+  function's values at each call) and `configureLayer` keeps them, so the
+  audit hook's entry for a plain tool, and `persist` data, are redacted and
+  refused with every secret any tool registered; `resetLayer` forgets them. An evidence anchor that held a
   secret loses its `digest` in the trace (above).
 
 **Interoperability data.**

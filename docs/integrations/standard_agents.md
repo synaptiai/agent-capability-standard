@@ -240,7 +240,9 @@ model family for a child. Two of them touch evidence:
   `configureLayer({ secrets })` registers the deployment's own values for
   every entry, the audit hook's for plain tools included, and for the data a
   `persist` or `audit` call would store (a grounded tool's `secrets` option,
-  and `recordToolCall`'s, add more). An evidence anchor that held a secret
+  and `recordToolCall`'s, add more: a grounded tool's join the layer's, an
+  array when the tool is defined and a function's values at each call, so
+  the audit hook's entry for a plain tool is redacted with them too). An evidence anchor that held a secret
   keeps no `digest` of what it cites (its metadata says `digest_omitted:
   secret`): the redacted excerpt would show the text to check a guess
   against.
@@ -768,7 +770,10 @@ A grounded tool takes four more options:
   earlier request, not by this one.
 - **`secrets`**: values the redactor replaces besides its default patterns
   and those `configureLayer({ secrets })` registers for every tool and the
-  audit hook. Redaction is always on: every trace entry's `evidence_anchors`
+  audit hook. They join the layer's (an array when the tool is defined, a
+  function's values at each call), so every entry the binding writes, other
+  tools' and the audit hook's included, is redacted with them too. Each is
+  replaced as it is, JSON-escaped and percent-encoded (`encodedForms`). Redaction is always on: every trace entry's `evidence_anchors`
   and `error`, and every notification, pass through it. A `persist` or
   `audit` tool refuses data that holds a credential-shaped value or a
   registered secret (F504, §5.18.10).

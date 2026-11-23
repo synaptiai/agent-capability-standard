@@ -258,3 +258,55 @@ describe('secrets registered with configureLayer (security round 1, batch 6)', (
     expect(layerSecrets()).toEqual([]);
   });
 });
+
+// A grounded tool's own secrets join the layer's (security round 1, batch 8):
+// the deployment registers its credentials with the tools that use them, and
+// the audit hook's entry for a plain tool, which no grounded tool writes,
+// must not keep one (STANDARD 1.2.0 §6.7).
+describe("a grounded tool's secrets reach every entry (security round 1, batch 8)", () => {
+  const HOST_KEY = 'hk_live_7f3a9c2e1b8d4f6a';
+  const TENANT_KEY = 'tk_9d8c7b6a5f4e3d2c';
+  const call = (id: string, name: string) => ({ id, type: 'function' as const, function: { name, arguments: '{}' } });
+  const failing = (secrets: readonly string[] | (() => Promise<readonly string[]>)) =>
+    groundedTool({
+      name: 'list_items',
+      capability: 'retrieve',
+      description: 'list',
+      args: z.object({}),
+      secrets,
+      execute: async () => {
+        throw new Error(`GET https://api.vendor.example/v1/items failed: 401 for key ${HOST_KEY}`);
+      },
+    });
+
+  it("redacts an array given at definition in the audit hook's entry for a plain tool", async () => {
+    const t = memoryThread();
+    const listItems = failing([HOST_KEY]);
+    expect(layerSecrets()).toContain(HOST_KEY);
+    // The grounded tool's own entry, linked by the hook.
+    expect((await listItems.execute(t.state, {})).status).toBe('error');
+    await recordToolCall(t.state, call('call_1', 'list_items'), { status: 'error', error: 'x' }, 1);
+    // A plain tool failing with the same text: the entry the hook writes.
+    const error = `GET https://api.vendor.example/v1/items failed: 401 for key ${HOST_KEY}`;
+    const entry = await recordToolCall(t.state, call('call_2', 'http_get'), { status: 'error', error }, 2);
+    expect(entry.capability).toBeNull();
+    expect(entry.error).toBe('GET https://api.vendor.example/v1/items failed: 401 for key [REDACTED]');
+    expect(JSON.stringify(await readTrace(t.state))).not.toContain(HOST_KEY);
+    // persist data that holds it is refused, whichever tool registered it.
+    await expect(persistEntry(t.state, { key: 'k', data: { note: `key ${HOST_KEY}` } }, 3)).rejects.toBeInstanceOf(MemoryRefusal);
+  });
+
+  it("redacts a function's values once a call has read them, and configureLayer keeps them", async () => {
+    const t = memoryThread();
+    const listItems = failing(async () => [TENANT_KEY]);
+    expect(layerSecrets()).not.toContain(TENANT_KEY);
+    expect((await listItems.execute(t.state, {})).status).toBe('error');
+    configureLayer({});
+    expect(layerSecrets()).toContain(TENANT_KEY);
+    const entry = await recordToolCall(t.state, call('call_3', 'crm_sync'), { status: 'error', error: `rejected ${TENANT_KEY}` }, 4);
+    expect(entry.error).toBe('rejected [REDACTED]');
+    // resetLayer forgets them, as it forgets the layer's own.
+    resetLayer();
+    expect(layerSecrets()).toEqual([]);
+  });
+});

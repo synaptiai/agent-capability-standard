@@ -251,7 +251,8 @@ Then:
 - **The layer's records**: a `mutate` call that names them, a `Write`,
   `Edit`, `MultiEdit` or `NotebookEdit` of a path, or a `Bash`, `Monitor`
   or `PowerShell` command whose text holds `checkpoint.ok`,
-  `.claude/checkpoints` or `acs/checkpoints`, is blocked with
+  `.claude/checkpoints`, `acs/checkpoints` or `audit.head` (the audit
+  log's head, below), is blocked with
   `F504 CONSTRAINT_VIOLATED:`: only the hooks write them. The text is read
   as a path is: in any letter case, with a run of slashes and `./` segments
   as one slash, and, in a text of at most 4096 bytes, each `x/../`
@@ -348,7 +349,8 @@ skill writes its own records, of the events a workflow reports.
 - Logs every tool call that ran, one JSON line per call (the `PostToolUse` and `PostToolUseFailure` matchers are `*`). A call that a pre-tool-use hook or a permission rule refused did not run and is not logged
 - Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
-- Each entry includes the HMAC of the previous entry, creating a hash chain
+- Each entry includes the HMAC of the previous entry, creating a hash chain: a changed or removed entry breaks the link of the entry after it
+- Keeps the chain's end in `.claude/audit.head`: the number of entries and the last one's `hmac`, signed with the same key (`head_hmac`, the HMAC of `acs-audit-head:<entries>:<hmac>`). Removing the last entries, or the whole log, breaks no link; the head shows it. Before it appends, the hook checks that the log still holds the entry the head records, at its place: when it does not, or the head is not one this key signed, the hook says so, writes the line, and leaves the head as it is, the evidence of the cut. The pre-tool-use hook refuses a call that names the head (`F504`). To start a new log, move `audit.log` and `audit.head` aside together
 - Serializes concurrent runs (tool calls made in parallel) with flock(2) on the log file itself, opened for append, taken by `perl` or, without it, by `flock`, so the chain stays in order and sessions using either exclude each other. There is no separate lock file, and the kernel releases the lock when its holder exits, however it exits. A run tries for at most `AUDIT_LOCK_WAIT` seconds (default 40, at most 55) and then appends without the lock, with a warning, at once where the lock cannot be taken at all: the verifier reports an entry out of chain order, and a held lock cannot silence the log
 
 The log is a best-effort capture (STANDARD v1.2 §6.4): it can miss a call,
@@ -359,7 +361,11 @@ Claude Code shows as a non-blocking hook error: no `jq`, a symlinked
 one would make every later line fail verification), a line that could not
 be built or written, a last line whose `hmac` cannot be read (the line is
 written and starts a new chain), an input digest that could not be computed
-(the line is written with `unavailable`), and input `jq` cannot parse:
+(the line is written with `unavailable`), a log that no longer holds the
+entry its head records or a head this key did not sign (the line is written
+and the head kept), a log that had no head (one begun before the hook kept
+one: its end is anchored from that line on), a head that cannot be written,
+and input `jq` cannot parse:
 Claude Code passes a call's input and result on as they are, and `jq`
 refuses JSON nested past its depth limit or holding a lone surrogate escape
 (a string cut in the middle of an emoji), so such input may be a tool call.
@@ -413,15 +419,23 @@ were written with.
 title: The audit log's hash chain
 ---
 flowchart TB
-  accDescr: Each audit log entry includes the HMAC of the entry before it, so the entries form a hash chain that tools/verify_audit_log.py can check for tampering.
+  accDescr: Each audit log entry includes the HMAC of the entry before it, so the entries form a hash chain, and audit.head keeps the chain's end, so that tools/verify_audit_log.py can check the log for changed, removed and missing last entries.
   e1[Entry 1] -->|HMAC included in| e2[Entry 2] -->|HMAC included in| e3[Entry 3]
-  e3 -.-> v[verify_audit_log.py checks the chain]
+  e3 -->|count and HMAC kept in| h[audit.head]
+  e3 -.-> v[verify_audit_log.py checks the chain and its end]
+  h -.-> v
 ```
 
 Verify audit log integrity:
 ```bash
 python tools/verify_audit_log.py
 ```
+
+It checks the chain and that the log still holds the entry its head
+records, at its place (`--head-file` names another head). A log begun
+before the hook kept a head, or a chain no head anchors (the `audit`
+skill's `.claude/audit/records.jsonl`), is checked with `--no-head`, the
+chain alone: removing its last entries is not seen.
 
 Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable.
 

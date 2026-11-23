@@ -9,17 +9,28 @@
  * list as `redactions` (§6.2).
  *
  * The values a host registers (`secrets`, four characters or more) are
- * replaced first, longest first; then what the default patterns recognise.
+ * replaced first, longest first, each also in the forms text carries it in
+ * ({@link encodedForms}: JSON-escaped, once or twice, and percent-encoded);
+ * then what the default patterns recognise.
  * The patterns are those of the Python redactor,
  * `grounded_agency/state/redaction.py`, and
  * `tests/conformance/secrets/redact.json` pins both: `Authorization` and
  * `Proxy-Authorization` header values, `Bearer` tokens, a URL's userinfo
- * password, an assignment to a credential name (`password`, `token`,
- * `api_key`, ..., alone or ending a longer name) of four characters or more,
- * PEM private key bodies, AWS access key ids, GitHub and Slack tokens, `sk-`
- * keys and JWTs, and a header or credential given as a name/value pair or a
- * `[name, value]` tuple in JSON or code text (`"name": "Authorization",
- * "value": "Basic ..."`, `('Cookie', 'sid=...')`). In a JSON value, a member
+ * password (the user's name empty or not: `redis://:<secret>@`), an
+ * assignment to a credential name (`password`, `passphrase`, `token`,
+ * `secret_key`, `api_key`, ..., alone or ending a longer name) of four
+ * characters or more, a command's user option (`curl -u user:<secret>`,
+ * `--user`, `-U`, `--proxy-user`) and an option named for a credential
+ * with its value after blanks (`--password <secret>`, not another option),
+ * also as a list's items (`['-u', 'user:<secret>']`), PEM private key
+ * bodies, AWS access key ids, GitHub and Slack tokens, `sk-` keys and JWTs,
+ * and a header or credential given as a name/value pair or a `[name, value]`
+ * tuple in JSON or code text (`"name": "Authorization", "value": "Basic
+ * ..."`, `('Cookie', 'sid=...')`); quotes around a name and a value may be
+ * escaped (`{\"password\": \"...\"}`, JSON text inside a JSON string).
+ * Not read: a password given to a short option with no name attached
+ * (`mysql -p<secret>`), and a secret in base64 or another encoding than
+ * these, unless it is registered in that form too. In a JSON value, a member
  * whose name ends in a credential name (in any case, after any prefix:
  * `accessToken`, `dbPassword`, `x-api-key`) or in `authorization`, `cookie`
  * or `cookies` (the structured `Authorization`, `Proxy-Authorization`,
@@ -51,9 +62,12 @@
  * Slack, `sk-` keys, JWTs, a bearer token of 20 or more characters), the
  * password of a URL's userinfo unless it is a placeholder, an
  * `Authorization` or `Proxy-Authorization` header's value of 8 or more token
- * characters mixing letters and digits, and an assignment to a credential
- * name whose value is quoted with no whitespace and 8 or more characters, or
- * unquoted, 12 or more characters, mixing letters and digits, and such a
+ * characters mixing letters and digits, a command's user option's password
+ * of 8 or more characters mixing letters and digits (`curl -u
+ * admin:<value>`; `docker run -u 1000:1000` passes), and an assignment to a
+ * credential name, or a credential option's value, that is quoted with no
+ * whitespace and 8 or more characters, or unquoted, 12 or more characters,
+ * mixing letters and digits (quotes escaped or not), and such a
  * header's value of 8 or more token characters mixing letters and digits
  * given as a pair or tuple in text; prose such as `token: rotate monthly`
  * passes. `tests/conformance/secrets/credentials.json`
@@ -70,7 +84,7 @@ export const MARKER = '[REDACTED]';
 export const MIN_SECRET_LENGTH = 4;
 
 const NAMES =
-  'password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key';
+  'password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key';
 const WS = '[ \\t\\n\\r\\f\\v]';
 const NOT_WS = ' \\t\\n\\r\\f\\v';
 /** One character (code point) of a class: a unit that is not a surrogate, or a surrogate pair. */
@@ -83,8 +97,21 @@ const char = (excluded: string): string => `(?:[^${excluded}\\uD800-\\uDFFF]|[\\
  */
 const SCHEME = '(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*';
 
+/**
+ * A quote as JSON or code text writes it, or escaped (`\"`, as JSON text
+ * inside a JSON string writes it, or escaped again: `\\\"`).
+ */
+const QUOTE = `\\\\*["']`;
+
+/**
+ * One character (code point) of a value: not whitespace, a quote, a
+ * backslash or one of `excluded`, or a run of backslashes that no quote
+ * follows (an escaped quote ends the value, as a quote does).
+ */
+const valueChar = (excluded = ''): string => `(?:${char(`${NOT_WS}"'\\\\${excluded}`)}|\\\\+(?![\\\\"']))`;
+
 /** A secret member's name (see {@link SECRET_MEMBER}), quoted as JSON or code text quotes it. */
-const QUOTED_SECRET_NAME = `["'][^${NOT_WS}"']*(?:${NAMES}|authorization|cookies?)["']`;
+const QUOTED_SECRET_NAME = `["'][^${NOT_WS}"']*(?:${NAMES}|authorization|cookies?)${QUOTE}`;
 
 /** A header's scheme, which the value after it may start with. */
 const VALUE_SCHEME = `(?:(?:bearer|basic|token|digest|negotiate)${WS}+)?`;
@@ -95,14 +122,39 @@ const VALUE_SCHEME = `(?:(?:bearer|basic|token|digest|negotiate)${WS}+)?`;
  * Each attempt starts at a bracket and reads to the next quote or
  * whitespace, so a text is read once.
  */
-const TUPLE_TEXT = `[\\[(]${WS}*${QUOTED_SECRET_NAME}${WS}*,${WS}*["']${VALUE_SCHEME}`;
+const TUPLE_TEXT = `[\\[(]${WS}*\\\\*${QUOTED_SECRET_NAME}${WS}*,${WS}*${QUOTE}${VALUE_SCHEME}`;
 
 /**
  * A header or credential given as a name/value pair in JSON or code text, up
  * to its value: `"Authorization", "value": "...`, as a HAR's `{"name": ...,
  * "value": ...}` reads. Each attempt starts at a quote.
  */
-const PAIR_TEXT = `${QUOTED_SECRET_NAME}${WS}*,${WS}*["']?value["']?${WS}*[:=]${WS}*["']${VALUE_SCHEME}`;
+const PAIR_TEXT = `${QUOTED_SECRET_NAME}${WS}*,${WS}*(?:${QUOTE})?value(?:${QUOTE})?${WS}*[:=]${WS}*${QUOTE}${VALUE_SCHEME}`;
+
+/**
+ * What separates a command's option from its value: blanks, `=`, or the
+ * next item of a list (`'-u', '...`, `"--token", "...`), the value quoted or
+ * not.
+ */
+const OPTION_SEPARATOR = `(?:${WS}+(?:${QUOTE})?|=(?:${QUOTE})?|(?:${QUOTE})?${WS}*,${WS}*${QUOTE})`;
+
+/**
+ * A command's user option, up to the user's password: curl's `-u
+ * user:<secret>` (also `-uuser:...`), `--user`, `--proxy-user` and `-U`.
+ */
+const USER_OPTION =
+  `(?<![A-Za-z0-9_-])(?:-[uU]${OPTION_SEPARATOR}?|--(?:proxy-)?user${OPTION_SEPARATOR})` +
+  `[^${NOT_WS}:"'\\\\]*:`;
+
+/**
+ * A command's option named for a credential (`--password`, `--api-key`,
+ * `--db-token`), and what separates it from a value given after blanks or
+ * as a list's next item; `--password=...` is an assignment.
+ */
+const CREDENTIAL_OPTION_NAME = `(?<![A-Za-z0-9_-])--(?:[A-Za-z0-9]+[_-])*(?:${NAMES})`;
+const CREDENTIAL_OPTION_SEPARATOR = `(?:${WS}+|(?:${QUOTE})?${WS}*,${WS}*)`;
+/** ... up to its value, which is not another option. */
+const CREDENTIAL_OPTION = `${CREDENTIAL_OPTION_NAME}(?:${WS}+(?:${QUOTE})?|(?:${QUOTE})?${WS}*,${WS}*${QUOTE})(?!-)`;
 
 /**
  * The default patterns; each marks the secret with the group `secret` (a
@@ -117,24 +169,31 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?:(?<secret>[\s\S]+?)-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|[\s\S]*)/dg,
   // Authorization and Proxy-Authorization header values (after a scheme).
   new RegExp(
-    `(?<![A-Za-z0-9])(?:proxy-)?authorization["']?${WS}*[:=]${WS}*["']?` +
+    `(?<![A-Za-z0-9])(?:proxy-)?authorization(?:${QUOTE})?${WS}*[:=]${WS}*(?:${QUOTE})?` +
       `(?:(?:bearer|basic|token|digest|negotiate)${WS}+)?` +
-      `(?<secret>[^${NOT_WS}"',;]+)`,
+      `(?<secret>${valueChar(',;')}+)`,
     'dgi',
   ),
   // A header or credential given as a name/value pair or a [name, value]
   // tuple in text: its value, of four characters or more.
-  new RegExp(`(?:${TUPLE_TEXT}|${PAIR_TEXT})(?<secret>${char(`${NOT_WS}"',;`)}{4,})`, 'dgi'),
+  new RegExp(`(?:${TUPLE_TEXT}|${PAIR_TEXT})(?<secret>${valueChar(',;')}{4,})`, 'dgi'),
   // Bearer tokens.
   new RegExp(`(?<![A-Za-z0-9])bearer${WS}+(?<secret>[A-Za-z0-9._~+/=-]{8,})`, 'dgi'),
-  // The password of a URL's userinfo.
-  new RegExp(`${SCHEME}://[^${NOT_WS}/:@]+:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
+  // The password of a URL's userinfo, the user's name empty or not
+  // (`redis://:<secret>@`).
+  new RegExp(`${SCHEME}://[^${NOT_WS}/:@]*:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
   // Assignments to a credential name, alone or at the end of a longer name
-  // (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text.
+  // (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text, its
+  // quotes escaped or not (`{\"password\": \"...\"}`).
   new RegExp(
-    `(?:${NAMES})["']?${WS}*[=:]${WS}*["']?` + `(?<secret>${char(`${NOT_WS}"'&,;`)}{4,})`,
+    `(?:${NAMES})(?:${QUOTE})?${WS}*[=:]${WS}*(?:${QUOTE})?` + `(?<secret>${valueChar('&,;')}{4,})`,
     'dgi',
   ),
+  // A command's user option: the password (`curl -u user:<secret>`).
+  new RegExp(`${USER_OPTION}(?<secret>${valueChar()}{4,})`, 'dg'),
+  // A command's option named for a credential, its value after blanks
+  // (`--password <secret>`, `--api-key <secret>`).
+  new RegExp(`${CREDENTIAL_OPTION}(?<secret>${valueChar()}{4,})`, 'dgi'),
   // AWS access key ids.
   /\b(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})\b/dg,
   // GitHub tokens.
@@ -180,10 +239,104 @@ function secretScalar(value: Json): boolean {
   return typeof value === 'number';
 }
 
-/** The registered values a redactor replaces: long enough, distinct, longest first. */
+const JSON_SHORT_ESCAPES: { readonly [ch: string]: string } = {
+  '"': '\\"',
+  '\\': '\\\\',
+  '\b': '\\b',
+  '\f': '\\f',
+  '\n': '\\n',
+  '\r': '\\r',
+  '\t': '\\t',
+};
+const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+/**
+ * What each percent-encoding leaves as it is, and whether it writes a space
+ * as `+`: RFC 3986's unreserved characters (a URL component), and `/` too (a
+ * path), and `!*'()` too (`encodeURIComponent`); a form's body (Python's
+ * `quote_plus`, the WHATWG URL Standard's urlencoded serializer).
+ */
+const PERCENT_ENCODINGS: readonly (readonly [string, boolean])[] = [
+  [`${ALPHANUMERIC}-._~`, false],
+  [`${ALPHANUMERIC}-._~/`, false],
+  [`${ALPHANUMERIC}-._~!*'()`, false],
+  [`${ALPHANUMERIC}-._~`, true],
+  [`${ALPHANUMERIC}*-._`, true],
+];
+const hex4 = (n: number): string => n.toString(16).padStart(4, '0');
+
+/**
+ * `value` as a JSON string's contents: `"`, `\` and control characters
+ * escaped (`\n` and the other short forms, else `\u00XX`), and, when
+ * `asciiOnly`, each character past ASCII as `\uXXXX` (a pair of them past
+ * the Basic Multilingual Plane).
+ */
+function jsonEscaped(value: string, asciiOnly: boolean): string {
+  let out = '';
+  for (const ch of value) {
+    const cp = ch.codePointAt(0) ?? 0;
+    const short = JSON_SHORT_ESCAPES[ch];
+    if (short !== undefined) out += short;
+    else if (cp < 0x20 || (asciiOnly && cp > 0x7f && cp <= 0xffff)) out += `\\u${hex4(cp)}`;
+    else if (asciiOnly && cp > 0xffff) {
+      const v = cp - 0x10000;
+      out += `\\u${hex4(0xd800 + (v >> 10))}\\u${hex4(0xdc00 + (v & 0x3ff))}`;
+    } else out += ch;
+  }
+  return out;
+}
+
+/** UTF-8 `data` percent-encoded: each byte outside `keep` as `%XX` (upper-case hex), a space as `+` when `plus`. */
+function percentEncoded(data: Uint8Array, keep: string, plus: boolean): string {
+  let out = '';
+  for (const b of data) {
+    const c = String.fromCharCode(b);
+    if (b < 0x80 && keep.includes(c)) out += c;
+    else if (plus && c === ' ') out += '+';
+    else out += `%${b.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+  return out;
+}
+
+/** A lone surrogate: a string that holds one has no UTF-8. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * `value` and the forms text carries it in, each once, in this order: as it
+ * is; JSON-escaped (a JSON string's contents, non-ASCII as it is and as
+ * `\uXXXX`, then each with `/` as `\/`, then each of the first two escaped
+ * again, as JSON text inside a JSON string holds it); and percent-encoded
+ * (UTF-8, by each of the encodings of {@link PERCENT_ENCODINGS}, in
+ * upper-case hex, then in lower-case hex). A value with a lone surrogate has no UTF-8 and so no
+ * percent-encoded form. The Python redactor's `encoded_forms` gives the
+ * same forms in the same order.
+ */
+export function encodedForms(value: string): string[] {
+  const once = jsonEscaped(value, false);
+  const asciiOnce = jsonEscaped(value, true);
+  const forms = [
+    value,
+    once,
+    asciiOnce,
+    once.split('/').join('\\/'),
+    asciiOnce.split('/').join('\\/'),
+    jsonEscaped(once, false),
+    jsonEscaped(asciiOnce, false),
+  ];
+  if (!LONE_SURROGATE.test(value)) {
+    const data = new TextEncoder().encode(value);
+    const upper = PERCENT_ENCODINGS.map(([keep, plus]) => percentEncoded(data, keep, plus));
+    forms.push(...upper, ...upper.map((f) => f.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase())));
+  }
+  return [...new Set(forms)];
+}
+
+/**
+ * The registered values a redactor replaces, each with the forms text
+ * carries it in ({@link encodedForms}): long enough, distinct, longest first.
+ */
 function registered(secrets: readonly string[]): string[] {
   const length = (s: string): number => [...s].length;
-  const kept = [...new Set(secrets.filter((s) => length(s) >= MIN_SECRET_LENGTH))];
+  const kept = [...new Set(secrets.filter((s) => length(s) >= MIN_SECRET_LENGTH).flatMap(encodedForms))];
   // Longest first (in characters, as Python counts); a stable sort keeps
   // the order given among values of one length.
   return kept.sort((a, b) => length(b) - length(a));
@@ -336,17 +489,33 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
   // the longest), so a run is read once.
   /(?<![A-Za-z0-9_-])(?:(?!eyJ)[A-Za-z0-9_-])*eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
 ];
-const ASSIGN = `(?:${NAMES})["']?${WS}*[:=]${WS}*`;
-const QUOTED_CREDENTIAL = new RegExp(`${ASSIGN}["'][^${NOT_WS}"']{8,}["']`, 'i');
+const ASSIGN = `(?:${NAMES})(?:${QUOTE})?${WS}*[:=]${WS}*`;
+// A quoted value with no whitespace, 8 or more characters (its quotes
+// escaped or not), after an assignment or a credential option.
+const QUOTED_CREDENTIAL = new RegExp(
+  `${ASSIGN}${QUOTE}[^${NOT_WS}"']{8,}["']` +
+    `|${CREDENTIAL_OPTION_NAME}${CREDENTIAL_OPTION_SEPARATOR}${QUOTE}[^${NOT_WS}"'-][^${NOT_WS}"']{7,}["']`,
+  'i',
+);
+// An unquoted value of 12 or more characters with letters and digits, after
+// an assignment or a credential option (not another option).
 const UNQUOTED_VALUE = new RegExp(`${ASSIGN}(?<value>[^${NOT_WS}"']{12,})`, 'gi');
-// The password of a URL's userinfo (`scheme://user:<value>@`), unless it is a
-// placeholder (`password`, `<password>`, `${DB_PASSWORD}`, `****`).
-const URL_PASSWORD = new RegExp(`${SCHEME}://[^${NOT_WS}/:@]+:(?<value>[^${NOT_WS}/@]+)@`, 'g');
+const OPTION_VALUE = new RegExp(
+  `${CREDENTIAL_OPTION_NAME}${WS}+(?<value>[^${NOT_WS}"'-][^${NOT_WS}"']{11,})`,
+  'gi',
+);
+// A command's user option's password (`curl -u user:<value>`): 8 or more
+// characters with letters and digits.
+const USER_OPTION_VALUE = new RegExp(`${USER_OPTION}(?<value>[^${NOT_WS}"'\\\\]{8,})`, 'g');
+// The password of a URL's userinfo (`scheme://user:<value>@`, the user's
+// name empty or not), unless it is a placeholder (`password`, `<password>`,
+// `${DB_PASSWORD}`, `****`).
+const URL_PASSWORD = new RegExp(`${SCHEME}://[^${NOT_WS}/:@]*:(?<value>[^${NOT_WS}/@]+)@`, 'g');
 const PLACEHOLDER = /^(?:[$<{*[].*|password|passwd|pwd|pass|secret|token)$/i;
 // An Authorization or Proxy-Authorization header's value, after its scheme:
 // 8 or more token characters with letters and digits.
 const AUTHORIZATION_VALUE = new RegExp(
-  `(?:proxy-)?authorization["']?${WS}*[:=]${WS}*["']?` +
+  `(?:proxy-)?authorization(?:${QUOTE})?${WS}*[:=]${WS}*(?:${QUOTE})?` +
     `(?:(?:basic|bearer|token|digest|negotiate)${WS}+)?(?<value>[A-Za-z0-9._~+/=-]{8,})`,
   'gi',
 );
@@ -354,7 +523,7 @@ const AUTHORIZATION_VALUE = new RegExp(
 // tuple of exactly two (a list of names is not one), in text, after its
 // scheme: 8 or more token characters with letters and digits.
 const PAIR_VALUE_TEXT = new RegExp(`${PAIR_TEXT}(?<value>[A-Za-z0-9._~+/=-]{8,})`, 'gi');
-const TUPLE_VALUE_TEXT = new RegExp(`${TUPLE_TEXT}(?<value>[A-Za-z0-9._~+/=-]{8,})["']${WS}*[\\])]`, 'gi');
+const TUPLE_VALUE_TEXT = new RegExp(`${TUPLE_TEXT}(?<value>[A-Za-z0-9._~+/=-]{8,})${QUOTE}${WS}*[\\])]`, 'gi');
 
 const lettersAndDigits = (v: string): boolean => /[0-9]/.test(v) && /[A-Za-z]/.test(v);
 
@@ -364,7 +533,14 @@ function credentialText(text: string): boolean {
   for (const m of text.matchAll(URL_PASSWORD)) {
     if (!PLACEHOLDER.test(m.groups?.['value'] ?? '')) return true;
   }
-  for (const pattern of [UNQUOTED_VALUE, AUTHORIZATION_VALUE, PAIR_VALUE_TEXT, TUPLE_VALUE_TEXT]) {
+  for (const pattern of [
+    UNQUOTED_VALUE,
+    OPTION_VALUE,
+    USER_OPTION_VALUE,
+    AUTHORIZATION_VALUE,
+    PAIR_VALUE_TEXT,
+    TUPLE_VALUE_TEXT,
+  ]) {
     for (const m of text.matchAll(pattern)) {
       if (lettersAndDigits(m.groups?.['value'] ?? '')) return true;
     }

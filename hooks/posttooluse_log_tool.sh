@@ -33,8 +33,19 @@
 # skill's arguments can hold a credential. The digest lets a reader who holds
 # an input confirm that it is the one that ran.
 #
-# The HMAC chain ensures tamper detection: modifying or deleting
-# any entry invalidates all subsequent HMACs.
+# The HMAC chain makes a change detectable: changing or removing an entry
+# breaks the link of the entry after it. Removing the last entries breaks no
+# link, so the hook also keeps the chain's end in .claude/audit.head, one
+# line of JSON: {"entries": the number of lines in the log, "hmac": the last
+# line's hmac, "head_hmac": HMAC-SHA-256 of "acs-audit-head:<entries>:<hmac>"
+# under the same key}. Before it appends, the hook checks that the log still
+# holds the entry the head records, at its place; tools/verify_audit_log.py
+# checks the same, so a log cut short, or removed, fails verification. When
+# the log no longer holds that entry, or the head is not one this key signed,
+# the hook says so, appends the line, and leaves the head as it is: it is
+# the evidence of the cut. The pre-tool-use hook refuses a call that names
+# the head (F504). To start a new log, move audit.log and audit.head aside
+# together.
 #
 # The hook records; it does not block (the tool has already run). The log is
 # a best-effort capture (STANDARD v1.2 §6.4): it can miss a call, but never
@@ -45,7 +56,8 @@
 # input may be a tool call), a symlinked audit.log (refused, SEC-006), no
 # openssl, a line that could not be built, a last line whose hmac cannot be
 # read (the line starts a new chain), an input digest that could not be
-# computed (the line says "unavailable"). It exits 0 for a call it logged
+# computed (the line says "unavailable"), a head the log no longer matches
+# or that cannot be written (the line is written; see above). It exits 0 for a call it logged
 # and for JSON that is not a tool call (no input, or a value that is not an
 # object with a string tool_name); a log directory or file that cannot be
 # written exits non-zero too. A lock that cannot be taken in
@@ -161,6 +173,7 @@ fi
 mkdir -p "$log_dir"
 
 log_file="$log_dir/audit.log"
+head_file="$log_dir/audit.head"
 
 # SEC-006: Reject symlinked audit log to prevent log redirection attacks
 if [ -L "$log_file" ]; then
@@ -189,13 +202,49 @@ fi
 # cryptographic secret (e.g., 32+ random hex characters).
 hmac_key="${AUDIT_HMAC_KEY:-grounded-agency-audit-$(hostname -s 2>/dev/null || echo 'default')}"
 
-# Append the line. Returns 0 when it was written with a valid chain link, 3
-# when it was written but starts a new chain (the last line's hmac could not
-# be read), and 1 when nothing was written (the line could not be built or
-# signed).
+# HMAC-SHA-256 (hex) of stdin under the key
+hmac_hex() {
+  openssl dgst -sha256 -hmac "$hmac_key" -hex 2>/dev/null | awk '{print $NF}'
+}
+
+# Append the line. Returns 0 when it was written with a valid chain link and
+# the head moved to it, 3 when it was written but starts a new chain (the
+# last line's hmac could not be read), 4 when it was written but the head
+# was not moved (said on standard error), and 1 when nothing was written (the
+# line could not be built or signed).
 _do_append() {
   # Get previous entry's HMAC for chaining (empty string for first entry)
-  local prev_hmac="" broken=0
+  local prev_hmac="" broken=0 entries=0
+  if [ -f "$log_file" ]; then
+    entries=$(awk 'END { print NR }' "$log_file" 2>/dev/null) || entries=""
+    [[ "$entries" =~ ^[0-9]{1,12}$ ]] || entries=""
+  fi
+
+  # The head: does the log still hold the entry it records, at its place?
+  # ok: yes, or no head and no entry yet; new: no head for a log that has
+  # entries (begun before the hook kept one); cut: no, or a head this key did
+  # not sign, or one that cannot be read; held: the head cannot be written.
+  local head_state="ok" head_entries="" head_hmac_recorded=""
+  if [ -L "$head_file" ] || { [ -e "$head_file" ] && [ ! -f "$head_file" ]; }; then
+    head_state="held"
+  elif [ -f "$head_file" ]; then
+    local head_line head_sig
+    IFS= read -r -n 4096 head_line < "$head_file" 2>/dev/null || true
+    head_entries=$(printf '%s' "$head_line" | jq -r '.entries | numbers | tostring' 2>/dev/null) || head_entries=""
+    head_hmac_recorded=$(printf '%s' "$head_line" | jq -r '.hmac | strings' 2>/dev/null) || head_hmac_recorded=""
+    head_sig=$(printf '%s' "$head_line" | jq -r '.head_hmac | strings' 2>/dev/null) || head_sig=""
+    head_state="cut"
+    if [[ "$head_entries" =~ ^[1-9][0-9]{0,11}$ && "$head_hmac_recorded" =~ ^[0-9a-f]{64}$ ]] \
+      && [ "$head_sig" = "$(printf 'acs-audit-head:%s:%s' "$head_entries" "$head_hmac_recorded" | hmac_hex)" ] \
+      && [[ -n "$entries" ]] && (( 10#$entries >= 10#$head_entries )); then
+      local held_hmac
+      held_hmac=$(awk -v n="$head_entries" 'NR == n { print; exit }' "$log_file" 2>/dev/null | jq -r '.hmac | strings' 2>/dev/null) || held_hmac=""
+      [ "$held_hmac" = "$head_hmac_recorded" ] && head_state="ok"
+    fi
+  elif [[ "$entries" != "0" ]]; then
+    head_state="new"
+  fi
+
   if [ -f "$log_file" ] && [ -s "$log_file" ]; then
     local last_line
     last_line=$(tail -1 "$log_file" 2>/dev/null || echo "")
@@ -254,8 +303,48 @@ _do_append() {
   fi
 
   echo "$final_entry" >> "$log_file" || return 1
+
+  # Move the head to the line just written, unless it is the evidence of a
+  # cut. Written whole to a file this run creates (noclobber: never one
+  # already there, nor through a link), then renamed over the old one.
+  local head_problem=0
+  case "$head_state" in
+    cut)
+      echo "posttooluse_log_tool: audit.log no longer holds the entry its head records (entry ${head_entries:-?} of the log, hmac ${head_hmac_recorded:-?}; the log had ${entries:-?} lines), or audit.head is not one this key signed: entries were removed or changed. The head is kept as the evidence; to start a new log, move audit.log and audit.head aside together" >&2
+      head_problem=1
+      ;;
+    held)
+      echo "posttooluse_log_tool: audit.head is a symlink or not a regular file (refused, SEC-006); the log's end is not anchored" >&2
+      head_problem=1
+      ;;
+    *)
+      # The log's end as it is now: its last line, which is this one unless a
+      # run that could not take the lock appended after it.
+      local written last_hmac sig="" head_tmp="$log_dir/.audit.head.$$"
+      written=$(awk 'END { print NR }' "$log_file" 2>/dev/null) || written=""
+      last_hmac=$(tail -1 "$log_file" 2>/dev/null | jq -r '.hmac | strings' 2>/dev/null) || last_hmac=""
+      if [[ "$written" =~ ^[1-9][0-9]{0,11}$ && "$last_hmac" =~ ^[0-9a-f]{64}$ ]]; then
+        sig=$(printf 'acs-audit-head:%s:%s' "$written" "$last_hmac" | hmac_hex) || sig=""
+      fi
+      if [[ "$sig" =~ ^[0-9a-f]{64}$ ]] \
+        && (set -C; printf '{"entries":%s,"hmac":"%s","head_hmac":"%s"}\n' "$written" "$last_hmac" "$sig" > "$head_tmp") 2>/dev/null \
+        && mv -f "$head_tmp" "$head_file" 2>/dev/null; then
+        if [[ "$head_state" == "new" ]]; then
+          echo "posttooluse_log_tool: audit.log had no head (audit.head), so the end of its first ${entries} entries was not anchored; its end is anchored from this line on" >&2
+          head_problem=1
+        fi
+      else
+        rm -f "$head_tmp" 2>/dev/null || true
+        echo "posttooluse_log_tool: audit.head could not be written; the log's end is not anchored past its last head" >&2
+        head_problem=1
+      fi
+      ;;
+  esac
   if (( broken )); then
     return 3
+  fi
+  if (( head_problem )); then
+    return 4
   fi
   return 0
 }
@@ -333,6 +422,7 @@ case "$rc" in
     echo "posttooluse_log_tool: the last line of audit.log has no readable hmac; this line starts a new chain" >&2
     exit 1
     ;;
+  4) exit 1 ;;
   *) fail "the log line could not be built or written" ;;
 esac
 

@@ -1770,3 +1770,214 @@ forbids each leak; no change there. No version changes.
   find no digest; the coordination repros find no key in any record; the
   runner probe finds no leak in its nine modes; `p10_hook.py` denies at
   16 KB to 1 MB of padding in at most 0.4 s. None left running.
+
+### Batch 8: three reported defects
+
+Security round 1's eighth and last batch: three defects an independent
+verifier reproduced on 99c37dd, one in the redactors and refusal rule of
+both SDKs and the plugin's scan, one in the plugin's audit log, and one in
+the Standard Agents binding's audit hook. Each was probed again on 8a913da
+(batch 7) before it was fixed. Of #41, the header name/value objects and
+`[["Cookie", ...]]` pairs in data were already closed by batch 6's #32
+(redacted and refused in both SDKs; the verifier's `p1.py` now shows
+them so); every other case reproduced as reported, and so did #42. Of #43,
+batch 6's #35 had added `configureLayer({ secrets })`, but the
+registration the report names, a grounded tool's own `secrets`, still did
+not reach the audit hook's entries: the verifier's `probe46` stored the host
+key in the hook's entry. Each new test fails on the code before its fix
+(run with the old redactors, shell scan and skill copies: 64 Python and
+shell tests and 34 TypeScript vector tests; with the old redactor: the 3
+new runner cases; with the old log hook,
+verifier and pre-tool-use hook: 7 head tests and 3 guard cases; with the
+old binding: 2 tests; the pinned-forms tests call a function the old code
+does not have).
+
+#### 41. Common credential forms passed the redactors and the refusal rule (medium)
+
+Unchanged by both redactors and not refused by `holds_credential`,
+`holdsCredential` or `secret_in` (identical results): a URL's userinfo with
+an empty user's name (`redis://:<password>@`, Redis's form; the user part
+was `[^/:@]+`), an assignment in escaped JSON text (`curl -d
+"{\"password\": \"...\"}"`, an AWS `SecretString`; only `["']?` was read
+around the name), `curl -u user:<password>` (also as an exception's
+`['false', '-u', 'admin:...']`), `SECRET_KEY=`, `DJANGO_SECRET_KEY=`,
+`{"secret_key": ...}` and `{"passphrase": ...}`, and a registered value
+percent-encoded or JSON-escaped (only the verbatim form was replaced). End
+to end, `WorkflowRunner` kept the password in the message and the trace for
+the empty-user URL, the `CalledProcessError` text and the escaped JSON.
+
+- Fix (`redaction.py`, `redact.ts`, `hooks/secret_scan.sh` and its copies
+  in the `persist` and `audit` skills, identically):
+  - the userinfo rule takes an empty user's name (`[^/:@]*`);
+  - a quote around a credential name or value may be escaped (`\\*["']`),
+    in the assignment, `Authorization`, pair and tuple rules of redaction
+    and refusal; a value ends at an escaped quote, so the escapes around
+    the marker stay (a value character is not a backslash, or is a run of
+    backslashes no quote follows, read once);
+  - new rules for a command's user option (`-u`, `-U`, `--user`,
+    `--proxy-user`; the value after blanks, `=`, attached to `-u`, or as a
+    list's next item) and for an option named for a credential with its
+    value after blanks or as a list's next item (`--password <value>`, not
+    a value that starts with `-`). Redaction replaces the password or value
+    (4 characters or more); the refusal rule takes a user option's password
+    of 8 or more characters mixing letters and digits (so `docker run -u
+    1000:1000` passes) and a credential option's value as an assignment's
+    (quoted, 8 or more; unquoted, 12 or more mixing letters and digits);
+  - `passphrase` and `secret[_-]?key` join the credential names (text and
+    JSON members);
+  - a registered value is registered in the forms text carries it in:
+    `encoded_forms` / `encodedForms` (new, exported) give, in one order, the
+    value, its JSON-escaped forms (non-ASCII as it is and as `\uXXXX`, each
+    with `/` as `\/`, and the first two escaped again) and its
+    percent-encoded forms (UTF-8; RFC 3986's unreserved characters kept,
+    with `/` too, with `!*'()` too as `encodeURIComponent` keeps them, and
+    the two form-body encodings with `+` for a space; upper- then lower-case
+    hex). `Redactor.add_secret` and the package's `registered` add them all;
+    replacement and refusal then see them as they see the value.
+- Sibling: the runner, the evidence stores, the coordination audit log, the
+  adapter and the binding's trace and memory all redact and refuse through
+  these redactors, so they take each change; `GroundedAgentConfig.
+  secret_values` and the binding's `secrets` register the encoded forms.
+- Not read, stated in both redactors' docstrings and SECURITY.md: a
+  password attached to a short option with no name (`mysql -p<secret>`;
+  `-p` means too much else) and a secret in base64 or another encoding
+  unless the host registers that form.
+- Tests: 13 vectors in `tests/conformance/secrets/redact.json` (empty-user
+  URL, escaped JSON once and twice, an escaped `Authorization` header and
+  pair, user options, a user option as list items, a credential option,
+  one before another option and options that take no password as
+  controls, `SECRET_KEY` and `passphrase` in text and as members, encoded
+  and non-ASCII registered values) and 17 in `credentials.json` (with
+  controls: an empty-user placeholder, `docker run -u 1000:1000` and `git
+  push -u`, credential options in prose, `secret_key: see the vault`), run
+  by Python, the TypeScript package and the shell scan under sh and bash;
+  `tests/test_runner.py::test_no_secret_in_a_failed_step` gains the three
+  end-to-end cases; the pinned forms in `tests/test_redaction.py` and
+  `test/redact.test.ts` (each checks the standard library's or the
+  platform's encoders' output is among them, and that it is redacted and
+  refused); 11 new 1 MB shapes in both timing tests (backslash runs,
+  escaped pairs and tuples, `a://:`, `-u`, `'-u', '`, `-ua:`, `--a-`,
+  `--password`). Measured: Python at most 2.1 s at 1 MB, TypeScript 0.3 s,
+  the shell scan 0.2 s.
+- Parity: 4000 fuzzed strings over the new tokens give the same redaction,
+  pointers and refusal in Python and TypeScript (0 differences), and 1094
+  single-line ones the same refusal in Python and the shell scan under bash
+  and sh.
+
+#### 42. The audit log's chain did not show its last entries removed (low)
+
+`tools/verify_audit_log.py` checked each entry and its link to the one
+before; nothing anchored the end, so `head -n 2` of a three-line log
+verified (2/2), as did a log whose last line was deleted and to which the
+hook then chained the next call, or a log removed and begun again. The
+hook's comment claimed that deleting any entry invalidates all later HMACs.
+
+- Fix: the log hook keeps the chain's end in `.claude/audit.head`, one line
+  of JSON: `entries` (the log's line count), `hmac` (the last line's) and
+  `head_hmac`, the HMAC of `acs-audit-head:<entries>:<hmac>` under the
+  log's key. Under the log's lock, before it appends, it checks that the
+  log still holds the head's entry at its place; after it appends, it
+  writes the head for the log's end as it then is (to a file it creates
+  with noclobber, renamed over the old one). A log that no longer holds the
+  head's entry, or a head another key signed, is reported (exit 1, the
+  line still written) and the head is kept: it is the evidence of the cut,
+  at every later call, until a person moves both files aside. A log with no
+  head (begun before the hook kept one) is anchored from that line on,
+  reported once. A head behind the log (a run that appended and could not
+  write it) still anchors it. The verifier reads the head beside the log
+  (`<log>.head`; `--head-file` names another) and fails a log that ends
+  before it, holds another entry at its place, or has no head (`--no-head`
+  checks the chain alone: a log begun before the head, and the audit
+  skill's `records.jsonl`). `verify_log` takes the head as an optional
+  argument. The pre-tool-use hook's records guard refuses a call that names
+  `audit.head` (F504), as it refuses one naming the checkpoint records.
+  The comment, hooks/README.md, SECURITY.md §5 and the audit skill's
+  verifier command (`--no-head`) say what the chain and the head show.
+- Not changed: with the default key, derived from the host name, the chain
+  and the head show accidental damage only (stated, as before);
+  removing both files with a call a person approved, or a process outside
+  the agent, leaves nothing to compare; the audit skill's records file has
+  no head (its command hook refuses every command naming it but the append
+  form and moving it aside).
+- Tests: `tests/test_verify_audit_log.py::TestHead` (the head the hook
+  writes, the verifier's report case, a cut log whose head the hook keeps,
+  a removed log, a head another key signed, a log begun before the head, a
+  head behind the log: all 7 failed before); three cases in
+  `tests/test_pretooluse_hooks.py::test_a_call_that_writes_the_records_is_refused`
+  (Write, `rm`, `mv` to `AUDIT.HEAD`; failed before), and reading the head
+  passes. The restricted-PATH concurrency test lists `mv`, which the hook
+  now runs; six concurrent runs keep the chain and the head.
+
+#### 43. The binding's audit hook did not use a grounded tool's secrets (medium; partly closed by batch 6)
+
+A deployment registers its credentials through each grounded tool's
+`secrets` option; `recordToolCall`'s entry for a plain tool was redacted
+with the default patterns, the layer's secrets (`configureLayer`, batch 6)
+and its own argument, never with a tool's. The verifier's probe stored
+`401 for key hk_live_...` in the hook's entry.
+
+- Fix (`layer.ts`, `grounded.ts`): `registerSecrets` adds a grounded
+  tool's secrets to the layer's: an array when the tool is defined, a
+  function's values at each call. `layerSecrets()` gives both,
+  `configureLayer` keeps the tools' (the tools stay defined) and
+  `resetLayer` forgets them, so every entry the binding writes (the audit
+  hook's, other tools', a control tool's) and every `persist` refusal use
+  them.
+- Not changed: a grounded tool returns its error to the runtime as its
+  code threw it, so the model's tool message can hold a secret. That
+  message is not among §6.7's places (records, anchors, notifications,
+  diagnostics and `Error`s, traces, `persist` data), the Python adapter
+  does not redact what a tool returns to the model either, and the
+  verifier noted it as outside the list.
+- Tests (`test/layer.test.ts`, "a grounded tool's secrets reach every
+  entry"): the verifier's case, an array at definition reaching the hook's
+  entry for `http_get` and refusing `persist` data; a function's values
+  reaching it after a call, kept by `configureLayer`, forgotten by
+  `resetLayer`. Both failed before. The verifier's `probe46` now finds no
+  key in the grounded entry, the hook's entry or the store.
+
+#### Siblings checked
+
+- Both redactors, the refusal rule and the shell scan share each new rule;
+  the vectors pin them for all three, and the fuzz runs above found no
+  difference.
+- `persistEntry`, the Python memory store, the adapter's TodoWrite check and
+  the skills' hooks refuse through the shared rule, so #41's forms are
+  refused there too.
+- The audit skill's records chain is #42's sibling (no head); documented,
+  with `--no-head`, above.
+
+#### Documentation
+
+SECURITY.md (§1.5: a bullet on the credential forms and encoded registered
+values, the `audit` row of §5.4; §5: the audit log's head and the default
+key); both redactors' module docs; the log hook's comment and
+hooks/README.md (the head, the hook's reports, `--no-head`, the diagram);
+the verifier's docstring and help; the persist skill's text and the audit
+skill's verifier command; the binding's `secrets` option, `audit.ts`,
+`layer.ts`, the binding README and the Standard Agents guide; the
+`acs-core` README (`encodedForms`); CHANGELOG (Upgrading: credential forms,
+the audit log's head and `--no-head`, the binding's tool secrets). The
+Standard's §6.7 already forbids each leak and asks a host to recognise the
+credentials it holds, and §6.4 only asks for a chain; no change there. No
+version changes.
+
+#### Checks after batch 8
+
+- Python: `pytest tests/` (5407 passed, 18 skipped), and again the 1777
+  tests that read the documents edited after it started; ruff check and
+  format with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; the generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1983; the WebAssembly
+  build reused); the binding's check and test (217, 2 skipped).
+- Site: `npm run check`, `npm test` (1173).
+- Probes (the verifier's, pointed at this worktree, each under `timeout
+  120` and an address-space limit): `p1.py` finds every case of #41
+  redacted and refused; the runner probe `p2.py` finds no password in any
+  of its four modes; `p4.sh` flags every case but the letters-only Basic
+  value in text, which the text rule leaves to data, as before, under sh
+  and bash; the verifier's #42 steps (`head -n 2`, `sed -i '$d'` and one
+  more call, `rm` and one more call) fail verification; `probe46` finds no
+  host key in any stored entry. None left running.

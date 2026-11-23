@@ -179,7 +179,10 @@ layer does not guess an argument the model can set while the tool's code
 sends elsewhere. Without `configureLayer`, no policy is in force.
 `configureLayer({ secrets })` registers the host's own credentials (§6.7):
 every trace entry the binding writes, the audit hook's included, is
-redacted with them, and `persist` data holding one is refused. A tool's `profiles` add
+redacted with them, and `persist` data holding one is refused. A grounded
+tool's own `secrets` join them (an array when the tool is defined, a
+function's values at each call), so they reach every entry too, not only
+that tool's. A tool's `profiles` add
 their `allowed_destinations` for that tool and, given to a composite, for
 the sends its code invokes at any depth (each nested call the binding
 attributes to it, §5.18.4).

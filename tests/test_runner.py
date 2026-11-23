@@ -1310,14 +1310,21 @@ def test_host_cannot_serve_reason(runner: WorkflowRunner) -> None:
         "reason_object",
         "malformed_output",
         "malformed_output_url",
+        "raised_url_empty_user",
+        "raised_user_option",
+        "raised_escaped_json",
     ],
 )
 def test_no_secret_in_a_failed_step(runner: WorkflowRunner, answer: str) -> None:
     """§6.7: neither the ``reason`` of a host's ``Error`` (a token or not:
     the core traces any other value as ``reason_ignored``) nor the ``Error``
     the runner builds for a response the run refused (the core's account
-    repeats the value) reaches the trace, the result, the run record or the
-    snapshot with a secret in it."""
+    repeats the value) nor the text of an exception the host raised reaches
+    the trace, the result, the run record or the snapshot with a secret in
+    it, in the forms an exception's text gives it (a URL whose user's name
+    is empty, a command's ``-u user:<password>``, escaped JSON text)."""
+    import subprocess
+
     from grounded_agency.workflows import HostCannotServe
 
     secret = "Hunter2SuperSecret99"
@@ -1330,6 +1337,14 @@ def test_no_secret_in_a_failed_step(runner: WorkflowRunner, answer: str) -> None
             value = {"data": {"v": 1}, "confidence": 1.0, "evidence_anchors": []}
             if answer == "cannot_serve_free_text":
                 raise HostCannotServe(f"backend {dsn} unreachable")
+            if answer == "raised_url_empty_user":
+                raise ConnectionError(f"cannot reach redis://:{secret}@cache:6379/0")
+            if answer == "raised_user_option":
+                raise subprocess.CalledProcessError(
+                    22, ["curl", "-u", f"admin:{secret}", "https://x"]
+                )
+            if answer == "raised_escaped_json":
+                raise RuntimeError(f'POST failed: {{\\"password\\": \\"{secret}\\"}}')
             if answer == "reason_text":
                 return {
                     "kind": "Error",

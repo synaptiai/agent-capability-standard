@@ -103,6 +103,46 @@ def test_patterns_name_their_secret() -> None:
     )
 
 
+# The forms of a registered value, in order; packages/acs-core's
+# test/redact.test.ts pins the same list for encodedForms.
+_FORMS_PINNED = json.loads(
+    r"""["p@ss/w~rd é!\"", "p@ss/w~rd é!\\\"", "p@ss/w~rd \\u00e9!\\\"", "p@ss\\/w~rd é!\\\"", "p@ss\\/w~rd \\u00e9!\\\"", "p@ss/w~rd é!\\\\\\\"", "p@ss/w~rd \\\\u00e9!\\\\\\\"", "p%40ss%2Fw~rd%20%C3%A9%21%22", "p%40ss/w~rd%20%C3%A9%21%22", "p%40ss%2Fw~rd%20%C3%A9!%22", "p%40ss%2Fw~rd+%C3%A9%21%22", "p%40ss%2Fw%7Erd+%C3%A9%21%22", "p%40ss%2fw~rd%20%c3%a9%21%22", "p%40ss/w~rd%20%c3%a9%21%22", "p%40ss%2fw~rd%20%c3%a9!%22", "p%40ss%2fw~rd+%c3%a9%21%22", "p%40ss%2fw%7erd+%c3%a9%21%22"]"""
+)
+
+
+def test_registered_values_in_the_forms_text_carries_them() -> None:
+    """A registered value is replaced as it is, JSON-escaped and
+    percent-encoded (security round 1, batch 8): the forms the standard
+    library's encoders give are among those registered, and the order is
+    the TypeScript redactor's."""
+    import urllib.parse
+
+    from grounded_agency.state.redaction import encoded_forms
+
+    value = 'p@ss/w~rd \u00e9!"'
+    forms = encoded_forms(value)
+    assert forms == _FORMS_PINNED
+    for encoded in (
+        json.dumps(value)[1:-1],
+        json.dumps(value, ensure_ascii=False)[1:-1],
+        json.dumps(json.dumps(value)[1:-1])[1:-1],
+        json.dumps(json.dumps(value, ensure_ascii=False)[1:-1], ensure_ascii=False)[
+            1:-1
+        ],
+        urllib.parse.quote(value, safe=""),
+        urllib.parse.quote(value),
+        urllib.parse.quote_plus(value, safe=""),
+        urllib.parse.urlencode({"k": value})[2:],
+    ):
+        assert encoded in forms, encoded
+        assert Redactor([value]).redact_text(f"x={encoded};") == (f"x={MARKER};", True)
+        assert Redactor([value]).holds_credential({"note": f"x={encoded}"})
+    # A value with a lone surrogate has no UTF-8: its JSON forms only.
+    assert encoded_forms("ab\ud800cd") == ["ab\ud800cd", "ab\\ud800cd", "ab\\\\ud800cd"]
+    # A value of letters and digits has one form.
+    assert encoded_forms("s3cr3tValue") == ["s3cr3tValue"]
+
+
 def test_pointers_escape_and_tuples() -> None:
     value = {"a~b": ("Bearer abcdefgh12345678",), "c": {"client_secret": "s3cr3t!"}}
     output, pointers = redact(value)
@@ -134,6 +174,20 @@ _LONG_RUNS = [
     "['token', '",
     '"cookie", "value": "Basic ',
     '["',
+    # Escaped quotes, empty userinfo users and command options (security
+    # round 1, batch 8): a run of backslashes is read once, and an option's
+    # attempt starts at its dashes.
+    "\\",
+    "password=\\",
+    '\\"token\\", \\"value\\": \\"',
+    '[\\"token\\", \\"',
+    "a://:",
+    "-u ",
+    "'-u', '",
+    "-ua:",
+    "--a-",
+    "--password ",
+    "--password --",
 ]
 
 

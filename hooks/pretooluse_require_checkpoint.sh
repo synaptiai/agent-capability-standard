@@ -364,9 +364,10 @@ fi
 
 # The layer's records are written by these hooks alone: a Write, Edit,
 # MultiEdit or NotebookEdit of a path, or a Bash, Monitor or PowerShell
-# command, that names the marker or the checkpoint directories is refused (a
-# written entry would be a permanent pass for a restore, a written marker a
-# checkpoint no call took). The text is read as a path is: in any letter case
+# command, that names the marker, the checkpoint directories or the audit
+# log's head is refused (a written entry would be a permanent pass for a
+# restore, a written marker a checkpoint no call took, a written or removed
+# head a log cut short that verifies). The text is read as a path is: in any letter case
 # (a case-insensitive file system opens CHECKPOINT.OK as checkpoint.ok), with
 # a run of slashes and ./ segments as one slash, and, in a text of at most
 # 4096 bytes, each x/../ resolved (a longer path cannot be opened, and a
@@ -374,7 +375,7 @@ fi
 # the text). A path a command builds when it runs is not seen, and such a call
 # is still a mutate a person approves.
 records_named=$(printf '%s' "$payload" | jq -r '
-  def records: test("checkpoint\\.ok|\\.claude/+(\\./+)*checkpoints|acs/+(\\./+)*checkpoints"; "i");
+  def records: test("checkpoint\\.ok|audit\\.head|\\.claude/+(\\./+)*checkpoints|acs/+(\\./+)*checkpoints"; "i");
   def lexical: ascii_downcase | split("/")
     | reduce .[] as $s ([]; if $s == "" or $s == "." then . elif $s == ".." then (if length > 0 then .[:-1] else . end) else . + [$s] end)
     | join("/");
@@ -384,7 +385,7 @@ records_named=$(printf '%s' "$payload" | jq -r '
    else null end) as $text
   | ($text | strings | records or (length <= 4096 and (lexical | records))) // false' 2>/dev/null) || records_named=true
 if [ "$records_named" != "false" ]; then
-  block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/), which only the plugin's hooks write."
+  block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write."
 fi
 
 # mutate: a valid marker for this call alone.

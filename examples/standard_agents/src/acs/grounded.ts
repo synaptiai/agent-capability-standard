@@ -80,7 +80,7 @@ import {
   type Json,
 } from '@synaptiai/acs-core';
 import { notifyEvidence } from './evidence.js';
-import { destinationPolicies, layerProfiles, layerSecrets } from './layer.js';
+import { destinationPolicies, layerProfiles, layerSecrets, registerSecrets } from './layer.js';
 import { confidenceFailure, type BindingProfiles } from './profiles.js';
 import {
   CAPABILITIES,
@@ -280,9 +280,12 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   /**
    * The host's own secrets (§6.7), registered with the redactor that every
    * trace entry this tool writes passes through, and refused in a `persist`
-   * or `audit` call's data. The default patterns and the secrets registered
-   * layer-wide (`configureLayer({ secrets })`) apply whether or not this is
-   * given.
+   * or `audit` call's data. They join the layer's (`registerSecrets`): an
+   * array when the tool is defined, a function's values at each call, so
+   * every entry the binding writes is redacted with them, those of other
+   * tools and of the audit hook included. The default patterns and the
+   * secrets registered layer-wide (`configureLayer({ secrets })`) apply
+   * whether or not this is given.
    */
   secrets?: readonly string[] | ((state: ThreadState) => Promise<readonly string[]>);
   /**
@@ -940,10 +943,16 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     ...(options.grounding === undefined ? [] : groundingPolicies(options.grounding)),
     ...(fromProfiles.length > 0 ? groundingPolicies(fromProfiles) : []),
   ].filter((p) => p.require.includes(capability));
-  // The tool's own secrets and the layer's (§6.7), read at each call.
+  // The tool's own secrets and the layer's (§6.7), read at each call. The
+  // tool's join the layer's (registerSecrets), so that the entries other
+  // tools and the audit hook write are redacted with them too: an array
+  // now, a function's values when it gives them.
+  if (Array.isArray(options.secrets)) registerSecrets(options.secrets);
   const secretsOf = async (state: ThreadState): Promise<readonly string[]> => {
     const given = options.secrets;
-    return [...(typeof given === 'function' ? await given(state) : (given ?? [])), ...layerSecrets()];
+    const own = typeof given === 'function' ? await given(state) : (given ?? []);
+    if (typeof given === 'function') registerSecrets(own);
+    return [...own, ...layerSecrets()];
   };
   // persist data and audit records holding a secret are refused (§5.18.10).
   const holdsRecords = capabilities.includes('persist') || capabilities.includes('audit');

@@ -500,3 +500,179 @@ class TestRecordedBy:
         checked, valid, errors = verify_log(log, HMAC_KEY)
         assert (checked, valid) == (1, 0)
         assert errors
+
+
+@pytest.mark.skipif(
+    shutil.which("jq") is None or shutil.which("openssl") is None,
+    reason="the hook needs jq and openssl",
+)
+class TestHead:
+    """The chain shows a changed or removed entry by the link of the entry
+    after it; removing the last entries, or the whole log, breaks no link
+    (security round 1, batch 8). The hook keeps the chain's end in
+    .claude/audit.head, signed with the log's key, and the verifier checks
+    that the log still holds that entry at its place."""
+
+    VERIFIER = Path(__file__).resolve().parents[1] / "tools" / "verify_audit_log.py"
+
+    @staticmethod
+    def _call(
+        tmp_path: Path, call_id: str, key: str = HMAC_KEY
+    ) -> subprocess.CompletedProcess:
+        payload = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Read",
+            "tool_use_id": call_id,
+            "tool_input": {"file_path": "a"},
+        }
+        return subprocess.run(
+            [str(POSTTOOLUSE_HOOK)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "CLAUDE_PROJECT_DIR": str(tmp_path),
+                "AUDIT_HMAC_KEY": key,
+            },
+            timeout=30,
+        )
+
+    def _cli(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(self.VERIFIER), "--hmac-key", HMAC_KEY, *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def _three(self, tmp_path: Path) -> tuple[Path, Path]:
+        for call_id in ("toolu_1", "toolu_2", "toolu_3"):
+            assert self._call(tmp_path, call_id).returncode == 0
+        return tmp_path / ".claude" / "audit.log", tmp_path / ".claude" / "audit.head"
+
+    def test_the_hook_keeps_the_chain_end_in_a_head(self, tmp_path: Path) -> None:
+        log, head = self._three(tmp_path)
+        last = json.loads(log.read_text().splitlines()[-1])
+        kept = json.loads(head.read_text())
+        assert kept["entries"] == 3 and kept["hmac"] == last["hmac"]
+        assert kept["head_hmac"] == compute_hmac(
+            f"acs-audit-head:3:{last['hmac']}", HMAC_KEY
+        )
+        assert verify_log(log, HMAC_KEY, head) == (3, 3, [])
+        result = self._cli("--log-file", str(log))
+        assert result.returncode == 0, result.stdout
+        assert "3/3 entries verified" in result.stdout
+
+    def test_a_log_cut_short_fails_verification(self, tmp_path: Path) -> None:
+        """The verifier's report: the first two lines of three verify as a
+        chain, and no longer as the log its head anchors."""
+        log, head = self._three(tmp_path)
+        cut = tmp_path / "trunc.log"
+        cut.write_text("\n".join(log.read_text().splitlines()[:2]) + "\n")
+        total, valid, errors = verify_log(cut, HMAC_KEY, head)
+        assert (total, valid) == (2, 2)
+        assert errors == [
+            "Head: the log ends before its head: 3 entries recorded, 2 found "
+            "(its last entries were removed)"
+        ]
+        result = self._cli("--log-file", str(cut), "--head-file", str(head))
+        assert result.returncode == 1 and "ends before its head" in result.stdout
+        # By default the head beside the log is read, and there is none.
+        result = self._cli("--log-file", str(cut))
+        assert result.returncode == 1 and "Head not found" in result.stdout
+        # The chain alone, as before.
+        assert self._cli("--log-file", str(cut), "--no-head").returncode == 0
+
+    def test_the_hook_keeps_the_head_of_a_cut_log_as_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        """The last line removed, then one more call: the hook says so, and
+        the line it chains onto the shortened log does not make it verify."""
+        log, head = self._three(tmp_path)
+        before = head.read_text()
+        log.write_text("\n".join(log.read_text().splitlines()[:2]) + "\n")
+        result = self._call(tmp_path, "toolu_4")
+        assert result.returncode == 1
+        assert "no longer holds the entry its head records" in result.stderr
+        assert head.read_text() == before
+        assert [
+            json.loads(line)["call_id"] for line in log.read_text().splitlines()
+        ] == [
+            "toolu_1",
+            "toolu_2",
+            "toolu_4",
+        ]
+        total, valid, errors = verify_log(log, HMAC_KEY, head)
+        assert (total, valid) == (3, 3)
+        assert errors == [
+            "Head: entry 3 is not the one the head records "
+            "(entries were removed or replaced)"
+        ]
+        # And it stays so at every later call.
+        assert self._call(tmp_path, "toolu_5").returncode == 1
+        assert verify_log(log, HMAC_KEY, head)[2]
+
+    def test_a_removed_log_fails_verification(self, tmp_path: Path) -> None:
+        log, head = self._three(tmp_path)
+        log.unlink()
+        assert verify_log(log, HMAC_KEY, head)[2] == [
+            "Audit log not found",
+            "Audit log not found, though its head records 3 entries",
+        ]
+        assert self._call(tmp_path, "toolu_4").returncode == 1
+        errors = verify_log(log, HMAC_KEY, head)[2]
+        assert errors == [
+            "Head: the log ends before its head: 3 entries recorded, 1 found "
+            "(its last entries were removed)"
+        ]
+
+    def test_a_head_another_key_signed_is_not_used(self, tmp_path: Path) -> None:
+        """A head for the shortened log, signed with another key (the hook's
+        default one, say): the verifier refuses it, and the hook keeps it."""
+        log, head = self._three(tmp_path)
+        lines = log.read_text().splitlines()[:2]
+        log.write_text("\n".join(lines) + "\n")
+        second = json.loads(lines[1])["hmac"]
+        forged = {
+            "entries": 2,
+            "hmac": second,
+            "head_hmac": compute_hmac(f"acs-audit-head:2:{second}", "another-key"),
+        }
+        head.write_text(json.dumps(forged) + "\n")
+        assert verify_log(log, HMAC_KEY, head)[2] == [
+            "Head HMAC mismatch: the head was not signed with this key"
+        ]
+        assert self._call(tmp_path, "toolu_4").returncode == 1
+        assert json.loads(head.read_text()) == forged
+
+    def test_a_log_begun_before_the_head_is_anchored_from_then_on(
+        self, tmp_path: Path
+    ) -> None:
+        log, head = self._three(tmp_path)
+        head.unlink()
+        result = self._call(tmp_path, "toolu_4")
+        assert result.returncode == 1
+        assert "had no head" in result.stderr
+        assert json.loads(head.read_text())["entries"] == 4
+        assert verify_log(log, HMAC_KEY, head) == (4, 4, [])
+        assert self._call(tmp_path, "toolu_5").returncode == 0
+
+    def test_a_head_behind_the_log_still_anchors_it(self, tmp_path: Path) -> None:
+        """A run that appended its line and could not move the head leaves
+        it on an earlier entry, which the log still holds at its place."""
+        log, head = self._three(tmp_path)
+        second = json.loads(log.read_text().splitlines()[1])["hmac"]
+        head.write_text(
+            json.dumps(
+                {
+                    "entries": 2,
+                    "hmac": second,
+                    "head_hmac": compute_hmac(f"acs-audit-head:2:{second}", HMAC_KEY),
+                }
+            )
+            + "\n"
+        )
+        assert verify_log(log, HMAC_KEY, head) == (3, 3, [])
+        assert self._call(tmp_path, "toolu_4").returncode == 0
+        assert json.loads(head.read_text())["entries"] == 4

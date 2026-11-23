@@ -28,9 +28,10 @@
  * call adds nothing.
  *
  * An entry the hook writes is redacted (§6.7) with the default patterns,
- * the secrets registered layer-wide (`configureLayer({ secrets })`) and any
- * `secrets` the hook passes: a plain tool's error can carry the credential
- * it was refused with.
+ * the secrets registered layer-wide (`configureLayer({ secrets })` and each
+ * grounded tool's `secrets`, which join them) and any `secrets` the hook
+ * passes: a plain tool's error can carry the credential it was refused
+ * with.
  */
 import type { HookToolCall, HookToolResult, ThreadState } from '@standardagents/spec';
 import {

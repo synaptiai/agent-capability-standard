@@ -235,26 +235,37 @@ hooks:
             # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
             # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
             SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
-            SECRET_KEY='(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
+            SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
+            # A quote, or an escaped one (\" in JSON text inside a JSON string)
+            SECRET_Q="\\\\*[\"']"
+            # A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password)
+            SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
+            SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
+            SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]*:"
             secret_in() {
               printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
-              # A quoted value with no whitespace, 8 or more characters
-              printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY[\"']?[[:space:]]*[:=][[:space:]]*[\"'][^[:space:]\"']{8,}[\"']" && return 0
+              # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
+              printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']" && return 0
               # The password of a URL's userinfo, unless it is a placeholder
-              printf '%s' "$1" | grep -Eo -- '[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]+:[^[:space:]/@]+@' |
+              printf '%s' "$1" | grep -Eo -- '[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
                 sed -E 's#^[^/]*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
               # An Authorization header's value, 8 or more characters with letters and digits
-              printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization[\"']?[[:space:]]*[:=][[:space:]]*[\"']?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
-                sed -E "s/^[^:=]*[:=][[:space:]]*[\"']?//" |
+              printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
+                sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//" |
                 sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
                 grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
               # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
-              printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)[\"'][[:space:]]*,[[:space:]]*[\"']?value[\"']?[[:space:]]*[:=][[:space:]]*[\"']((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)[\"'][[:space:]]*,[[:space:]]*[\"']((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}[\"'][[:space:]]*[])]" |
-                sed -E "s/[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*[\"']//" |
+              printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+                sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*\\\\*[\"']//" |
                 sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
                 grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
-              # An unquoted value of 12 or more characters with letters and digits
-              printf '%s' "$1" | grep -Eio -- "$SECRET_KEY[\"']?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
+              # A user option's password (curl -u user:password), 8 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eo -- "$SECRET_USER[^[:space:]\"'\\\\]{8,}" |
+                sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+              # An unquoted value of 12 or more characters with letters and digits, assigned or given to a credential option
+              printf '%s' "$1" | grep -Eio -- "$SECRET_OPT[[:space:]]+[^-[:space:]\"'][^[:space:]\"']{11,}" |
+                sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+              printf '%s' "$1" | grep -Eio -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
                 sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
             }
             # END secret-scan
@@ -515,7 +526,7 @@ assumptions:
   - "No manual edits outside of tracked session"
 ```
 
-**The line step 6 appends** (with `AUDIT_HMAC_KEY=example-key`; `python tools/verify_audit_log.py --log-file .claude/audit/records.jsonl` checks the chain):
+**The line step 6 appends** (with `AUDIT_HMAC_KEY=example-key`; `python tools/verify_audit_log.py --log-file .claude/audit/records.jsonl --no-head` checks the chain, which no head anchors):
 
 ```json
 {"action_id":"audit_20240115_160000_session","timestamp":"2024-01-15T16:00:00Z","actor":"agent","intent":"audit","status":"executed","capability":"audit","details":{"event":{"type":"session_completed","actor":"claude-agent","timestamp":"2024-01-15T16:00:00Z"},"context":{"scope":"session"},"audit_record":{"actor":"claude-agent","action_type":"code_modification","targets":["src/api/handlers/user.py"],"outcome":"success"},"changes":[{"type":"modify","location":"src/api/handlers/user.py:45-62","timestamp":"2024-01-15T14:45:00Z"}],"provenance":{"inputs":["security_audit_report.md"],"outputs":["src/api/handlers/user.py"],"dependencies":[]}},"recorded_by":{"name":"audit skill"},"prev_hmac":"","hmac":"67bcae7663853fd55f9d77492b9612e9a2ee77b91331995e964eefb17db4d90a"}

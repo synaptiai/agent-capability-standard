@@ -9,24 +9,41 @@ documented loss (§3.2); :meth:`Redactor.redact` returns the JSON Pointers
 ``redactions`` (§6.2).
 
 A :class:`Redactor` replaces the values registered with it (the host's own
-secrets, longest first), then what its patterns recognise. The default
+secrets, longest first), each also in the forms text carries it in
+(:func:`encoded_forms`: JSON-escaped, once or twice, and percent-encoded),
+then what its patterns recognise. The default
 patterns (informative; ``tests/conformance/secrets/redact.json`` pins them,
 and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
 
 - ``Authorization`` and ``Proxy-Authorization`` header values;
 - ``Bearer`` tokens (8 or more token characters);
 - the password of a URL's userinfo (``scheme://user:<secret>@``, the
-  scheme a run of scheme characters that holds a letter);
-- an assignment to a credential name (``password``, ``passwd``, ``pwd``,
-  ``secret``, ``token``, ``api_key``, ``access_key``, ``client_secret``,
-  ``private_key``, alone or at the end of a longer name such as
-  ``DB_PASSWORD``, ``PGPASSWORD`` or ``access_token``) with ``=`` or ``:``,
-  of 4 or more characters, in assignments, query strings and JSON text;
+  scheme a run of scheme characters that holds a letter, the user's name
+  empty or not: ``redis://:<secret>@``);
+- an assignment to a credential name (``password``, ``passwd``,
+  ``passphrase``, ``pwd``, ``secret``, ``secret_key``, ``token``,
+  ``api_key``, ``access_key``, ``client_secret``, ``private_key``, alone or
+  at the end of a longer name such as ``DB_PASSWORD``, ``PGPASSWORD``,
+  ``DJANGO_SECRET_KEY`` or ``access_token``) with ``=`` or ``:``, of 4 or
+  more characters, in assignments, query strings and JSON text, its quotes
+  escaped or not (``{\\"password\\": \\"...\\"}``, JSON text inside a
+  JSON string or a shell's double quotes);
+- a command's user option (``curl -u user:<secret>``, ``-uuser:...``,
+  ``--user``, ``-U``, ``--proxy-user``) and an option named for a
+  credential with its value after blanks (``--password <secret>``,
+  ``--api-key <secret>``, not another option), also as a list's items
+  (``['-u', 'user:<secret>']``, as an exception's text quotes a command);
 - PEM ``PRIVATE KEY`` blocks (the body);
 - AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys and JWTs;
 - a header or credential given as a name/value pair or a ``[name, value]``
   tuple in JSON or code text (``"name": "Authorization", "value": "Basic
-  ..."``, ``('Cookie', 'sid=...')``): its value, of 4 or more characters.
+  ..."``, ``('Cookie', 'sid=...')``), its quotes escaped or not: its value,
+  of 4 or more characters.
+
+Not read: a password given to a short option with no name attached
+(``mysql -p<secret>``, ``sshpass -p <secret>``: ``-p`` means too many other
+things to redact on its own), and a secret in base64 or another encoding
+than those above, unless it is registered in that form too.
 
 In a JSON value, a member whose name ends in a credential name (as above,
 in any case and after any prefix: ``accessToken``, ``dbPassword``,
@@ -60,9 +77,12 @@ token of 20 or more characters), the password of a URL's userinfo unless it
 is a placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``,
 ``****``), an ``Authorization`` or ``Proxy-Authorization`` header's value of
 8 or more token characters mixing letters and digits (in a header line, or
-given as a pair or tuple in text, as above), and an assignment to a
-credential name whose value is quoted with no whitespace and 8 or more
-characters, or unquoted, 12 or more characters, mixing letters and digits.
+given as a pair or tuple in text, as above), a command's user option's
+password of 8 or more characters mixing letters and digits (``curl -u
+admin:<value>``; ``docker run -u 1000:1000`` passes), and an assignment to
+a credential name, or a credential option's value, that is quoted with no
+whitespace and 8 or more characters, or unquoted, 12 or more characters,
+mixing letters and digits (the quotes escaped or not, as above).
 The plugin's ``hooks/secret_scan.sh`` applies the same rule to text, and
 ``tests/conformance/secrets/credentials.json`` pins it for the three. In
 JSON data, which is not prose, it also recognises what redaction does in a
@@ -84,6 +104,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_PATTERNS",
+    "encoded_forms",
     "holds_credential",
     "DEFAULT_REDACTOR",
     "MARKER",
@@ -102,8 +123,8 @@ occurrence of a two-character value would destroy the text."""
 
 # Credential names: alone, or at the end of a longer name after `_` or `-`.
 _NAMES = (
-    r"password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key"
-    r"|client[_-]?secret|private[_-]?key"
+    r"password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key"
+    r"|access[_-]?key|client[_-]?secret|private[_-]?key"
 )
 # Whitespace, spelled out: `\s` differs between Python and ECMAScript, and
 # the TypeScript redactor must agree with this one. Every pattern is ASCII
@@ -115,22 +136,60 @@ _NOT_WS = r" \t\n\r\f\v"
 # the run's start (not after a scheme character), so a long run that is not
 # followed by `://` is read once, not again from each letter in it.
 _SCHEME = r"(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*"
+# A quote as JSON or code text writes it, or escaped (`\\"`, as JSON text
+# inside a JSON string writes it, or escaped again: `\\\\\\"`).
+_QUOTE = r"\\*[\"']"
+
+
+def _value_char(excluded: str = "") -> str:
+    """One character of a value: not whitespace, a quote, a backslash or one
+    of ``excluded``, or a run of backslashes that no quote follows (an
+    escaped quote ends the value, as a quote does)."""
+    return rf"(?:[^{_NOT_WS}\"'\\{excluded}]|\\+(?![\\\"']))"
+
+
 # A secret member's name (see _SECRET_MEMBER), quoted as JSON or code text
 # quotes it.
-_QUOTED_SECRET_NAME = rf"[\"'][^{_NOT_WS}\"']*(?:{_NAMES}|authorization|cookies?)[\"']"
+_QUOTED_SECRET_NAME = (
+    rf"[\"'][^{_NOT_WS}\"']*(?:{_NAMES}|authorization|cookies?){_QUOTE}"
+)
 # A header's scheme, which the value after it may start with.
 _VALUE_SCHEME = rf"(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
 # A header or credential given as a `[name, value]` tuple in JSON or code
 # text, up to its value: `["Authorization", "Basic ...`, `('Cookie', '...`.
 # Each attempt starts at a bracket and reads to the next quote or
 # whitespace, so a text is read once.
-_TUPLE_TEXT = rf"[\[(]{_WS}*{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*[\"']{_VALUE_SCHEME}"
+_TUPLE_TEXT = (
+    rf"[\[(]{_WS}*\\*{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*{_QUOTE}{_VALUE_SCHEME}"
+)
 # A header or credential given as a name/value pair in JSON or code text, up
 # to its value: `"Authorization", "value": "...`, as a HAR's `{"name": ...,
 # "value": ...}` reads. Each attempt starts at a quote.
 _PAIR_TEXT = (
-    rf"{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*[\"']?value[\"']?{_WS}*[:=]{_WS}*[\"']"
-    rf"{_VALUE_SCHEME}"
+    rf"{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*(?:{_QUOTE})?value(?:{_QUOTE})?{_WS}*[:=]"
+    rf"{_WS}*{_QUOTE}{_VALUE_SCHEME}"
+)
+# What separates a command's option from its value: blanks, `=`, or the
+# next item of a list (`'-u', '...`, `"--token", "...`), the value quoted
+# or not.
+_OPTION_SEPARATOR = (
+    rf"(?:{_WS}+(?:{_QUOTE})?|=(?:{_QUOTE})?|(?:{_QUOTE})?{_WS}*,{_WS}*{_QUOTE})"
+)
+# A command's user option, up to the user's password: curl's `-u
+# user:<secret>` (also `-uuser:...`), `--user`, `--proxy-user` and `-U`.
+_USER_OPTION = (
+    rf"(?<![A-Za-z0-9_-])(?:-[uU]{_OPTION_SEPARATOR}?|--(?:proxy-)?user"
+    rf"{_OPTION_SEPARATOR})[^{_NOT_WS}:\"'\\]*:"
+)
+# A command's option named for a credential (`--password`, `--api-key`,
+# `--db-token`), and what separates it from a value given after blanks or as
+# a list's next item; `--password=...` is an assignment.
+_CREDENTIAL_OPTION_NAME = rf"(?<![A-Za-z0-9_-])--(?:[A-Za-z0-9]+[_-])*(?:{_NAMES})"
+_CREDENTIAL_OPTION_SEPARATOR = rf"(?:{_WS}+|(?:{_QUOTE})?{_WS}*,{_WS}*)"
+# ... up to its value, which is not another option.
+_CREDENTIAL_OPTION = (
+    rf"{_CREDENTIAL_OPTION_NAME}(?:{_WS}+(?:{_QUOTE})?|(?:{_QUOTE})?{_WS}*,{_WS}*"
+    rf"{_QUOTE})(?!-)"
 )
 
 DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -145,15 +204,15 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
     # Authorization and Proxy-Authorization header values (after a scheme).
     re.compile(
-        rf"(?<![A-Za-z0-9])(?:proxy-)?authorization[\"']?{_WS}*[:=]{_WS}*[\"']?"
-        rf"(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
-        rf"(?P<secret>[^{_NOT_WS}\"',;]+)",
+        rf"(?<![A-Za-z0-9])(?:proxy-)?authorization(?:{_QUOTE})?{_WS}*[:=]{_WS}*"
+        rf"(?:{_QUOTE})?(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
+        rf"(?P<secret>{_value_char(',;')}+)",
         re.ASCII | re.IGNORECASE,
     ),
     # A header or credential given as a name/value pair or a [name, value]
     # tuple in text: its value, of four characters or more.
     re.compile(
-        rf"(?:{_TUPLE_TEXT}|{_PAIR_TEXT})(?P<secret>[^{_NOT_WS}\"',;]{{4,}})",
+        rf"(?:{_TUPLE_TEXT}|{_PAIR_TEXT})(?P<secret>{_value_char(',;')}{{4,}})",
         re.ASCII | re.IGNORECASE,
     ),
     # Bearer tokens.
@@ -161,16 +220,29 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         rf"(?<![A-Za-z0-9])bearer{_WS}+(?P<secret>[A-Za-z0-9._~+/=-]{{8,}})",
         re.ASCII | re.IGNORECASE,
     ),
-    # The password of a URL's userinfo.
+    # The password of a URL's userinfo, the user's name empty or not
+    # (`redis://:<secret>@`).
     re.compile(
-        rf"{_SCHEME}://[^{_NOT_WS}/:@]+:(?P<secret>[^{_NOT_WS}/@]+)@",
+        rf"{_SCHEME}://[^{_NOT_WS}/:@]*:(?P<secret>[^{_NOT_WS}/@]+)@",
         re.ASCII,
     ),
     # Assignments to a credential name, alone or at the end of a longer name
-    # (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text.
+    # (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text, its
+    # quotes escaped or not (`{\\"password\\": \\"...\\"}`).
     re.compile(
-        rf"(?:{_NAMES})[\"']?{_WS}*[=:]{_WS}*[\"']?"
-        rf"(?P<secret>[^{_NOT_WS}\"'&,;]{{4,}})",
+        rf"(?:{_NAMES})(?:{_QUOTE})?{_WS}*[=:]{_WS}*(?:{_QUOTE})?"
+        rf"(?P<secret>{_value_char('&,;')}{{4,}})",
+        re.ASCII | re.IGNORECASE,
+    ),
+    # A command's user option: the password (`curl -u user:<secret>`).
+    re.compile(
+        rf"{_USER_OPTION}(?P<secret>{_value_char()}{{4,}})",
+        re.ASCII,
+    ),
+    # A command's option named for a credential, its value after blanks
+    # (`--password <secret>`, `--api-key <secret>`).
+    re.compile(
+        rf"{_CREDENTIAL_OPTION}(?P<secret>{_value_char()}{{4,}})",
         re.ASCII | re.IGNORECASE,
     ),
     # AWS access key ids.
@@ -217,18 +289,33 @@ _CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
         re.ASCII,
     ),
 )
-_ASSIGN = rf"(?:{_NAMES})[\"']?{_WS}*[:=]{_WS}*"
-# A quoted value with no whitespace, 8 or more characters.
+_ASSIGN = rf"(?:{_NAMES})(?:{_QUOTE})?{_WS}*[:=]{_WS}*"
+# A quoted value with no whitespace, 8 or more characters (its quotes
+# escaped or not), after an assignment or a credential option.
 _QUOTED_CREDENTIAL = re.compile(
-    rf"{_ASSIGN}[\"'][^{_NOT_WS}\"']{{8,}}[\"']", re.ASCII | re.IGNORECASE
+    rf"{_ASSIGN}{_QUOTE}[^{_NOT_WS}\"']{{8,}}[\"']"
+    rf"|{_CREDENTIAL_OPTION_NAME}{_CREDENTIAL_OPTION_SEPARATOR}{_QUOTE}"
+    rf"[^{_NOT_WS}\"'-][^{_NOT_WS}\"']{{7,}}[\"']",
+    re.ASCII | re.IGNORECASE,
 )
-# An unquoted value of 12 or more characters with letters and digits.
+# An unquoted value of 12 or more characters with letters and digits, after
+# an assignment or a credential option (not another option).
 _UNQUOTED_VALUE = re.compile(
     rf"{_ASSIGN}(?P<value>[^{_NOT_WS}\"']{{12,}})", re.ASCII | re.IGNORECASE
 )
-# The password of a URL's userinfo (``scheme://user:<value>@``) ...
+_OPTION_VALUE = re.compile(
+    rf"{_CREDENTIAL_OPTION_NAME}{_WS}+(?P<value>[^{_NOT_WS}\"'-][^{_NOT_WS}\"']{{11,}})",
+    re.ASCII | re.IGNORECASE,
+)
+# A command's user option's password (``curl -u user:<value>``): 8 or more
+# characters with letters and digits.
+_USER_OPTION_VALUE = re.compile(
+    rf"{_USER_OPTION}(?P<value>[^{_NOT_WS}\"'\\]{{8,}})", re.ASCII
+)
+# The password of a URL's userinfo (``scheme://user:<value>@``, the user's
+# name empty or not) ...
 _URL_PASSWORD = re.compile(
-    rf"{_SCHEME}://[^{_NOT_WS}/:@]+:(?P<value>[^{_NOT_WS}/@]+)@",
+    rf"{_SCHEME}://[^{_NOT_WS}/:@]*:(?P<value>[^{_NOT_WS}/@]+)@",
     re.ASCII,
 )
 # ... unless it is a placeholder (``password``, ``<password>``, ``${PW}``,
@@ -239,7 +326,7 @@ _PLACEHOLDER = re.compile(
 # An Authorization or Proxy-Authorization header's value, after its scheme:
 # 8 or more token characters with letters and digits.
 _AUTHORIZATION_VALUE = re.compile(
-    rf"(?:proxy-)?authorization[\"']?{_WS}*[:=]{_WS}*[\"']?"
+    rf"(?:proxy-)?authorization(?:{_QUOTE})?{_WS}*[:=]{_WS}*(?:{_QUOTE})?"
     rf"(?:(?:basic|bearer|token|digest|negotiate){_WS}+)?"
     r"(?P<value>[A-Za-z0-9._~+/=-]{8,})",
     re.ASCII | re.IGNORECASE,
@@ -251,7 +338,7 @@ _PAIR_VALUE_TEXT = re.compile(
     rf"{_PAIR_TEXT}(?P<value>[A-Za-z0-9._~+/=-]{{8,}})", re.ASCII | re.IGNORECASE
 )
 _TUPLE_VALUE_TEXT = re.compile(
-    rf"{_TUPLE_TEXT}(?P<value>[A-Za-z0-9._~+/=-]{{8,}})[\"']{_WS}*[\])]",
+    rf"{_TUPLE_TEXT}(?P<value>[A-Za-z0-9._~+/=-]{{8,}}){_QUOTE}{_WS}*[\])]",
     re.ASCII | re.IGNORECASE,
 )
 
@@ -275,6 +362,8 @@ def _credential_text(text: str) -> bool:
         _letters_and_digits(m.group("value"))
         for pattern in (
             _UNQUOTED_VALUE,
+            _OPTION_VALUE,
+            _USER_OPTION_VALUE,
             _AUTHORIZATION_VALUE,
             _PAIR_VALUE_TEXT,
             _TUPLE_VALUE_TEXT,
@@ -357,6 +446,100 @@ def _secret_member_value(value: Any, secret: bool = False) -> bool:
     return False
 
 
+_JSON_SHORT_ESCAPES = {
+    '"': '\\"',
+    "\\": "\\\\",
+    "\b": "\\b",
+    "\f": "\\f",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
+_ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+# What each percent-encoding leaves as it is, and whether it writes a space
+# as `+`: RFC 3986's unreserved characters (a URL component), and `/` too
+# (a path), and `!*'()` too (ECMAScript's encodeURIComponent); a form's body
+# (Python's quote_plus, the WHATWG URL Standard's urlencoded serializer).
+_PERCENT_ENCODINGS: tuple[tuple[str, bool], ...] = (
+    (_ALPHANUMERIC + "-._~", False),
+    (_ALPHANUMERIC + "-._~/", False),
+    (_ALPHANUMERIC + "-._~!*'()", False),
+    (_ALPHANUMERIC + "-._~", True),
+    (_ALPHANUMERIC + "*-._", True),
+)
+
+
+def _json_escaped(value: str, ascii_only: bool) -> str:
+    """``value`` as a JSON string's contents: ``"``, ``\\`` and control
+    characters escaped (``\\n`` and the other short forms, else
+    ``\\u00XX``), and, when ``ascii_only``, each character past ASCII as
+    ``\\uXXXX`` (a pair of them past the Basic Multilingual Plane)."""
+    out: list[str] = []
+    for ch in value:
+        cp = ord(ch)
+        if ch in _JSON_SHORT_ESCAPES:
+            out.append(_JSON_SHORT_ESCAPES[ch])
+        elif cp < 0x20 or (ascii_only and 0x7F < cp <= 0xFFFF):
+            out.append(f"\\u{cp:04x}")
+        elif ascii_only and cp > 0xFFFF:
+            cp -= 0x10000
+            out.append(f"\\u{0xD800 + (cp >> 10):04x}\\u{0xDC00 + (cp & 0x3FF):04x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _percent_encoded(data: bytes, keep: str, plus: bool) -> str:
+    """UTF-8 ``data`` percent-encoded: each byte outside ``keep`` as
+    ``%XX`` (upper-case hex), a space as ``+`` when ``plus``."""
+    out: list[str] = []
+    for b in data:
+        c = chr(b)
+        if c in keep:
+            out.append(c)
+        elif plus and c == " ":
+            out.append("+")
+        else:
+            out.append(f"%{b:02X}")
+    return "".join(out)
+
+
+def encoded_forms(value: str) -> list[str]:
+    """``value`` and the forms text carries it in, each once, in this
+    order: as it is; JSON-escaped (a JSON string's contents, non-ASCII as it
+    is and as ``\\uXXXX``, then each with ``/`` as ``\\/``, then each of
+    the first two escaped again, as JSON text inside a JSON string holds
+    it); and percent-encoded (UTF-8, by each of the encodings of
+    :data:`_PERCENT_ENCODINGS`, in upper-case hex, then in lower-case hex).
+    A value with a lone surrogate has no UTF-8 and so no percent-encoded
+    form. ``packages/acs-core``'s
+    ``encodedForms`` gives the same forms in the same order."""
+    once = _json_escaped(value, ascii_only=False)
+    ascii_once = _json_escaped(value, ascii_only=True)
+    forms = [
+        value,
+        once,
+        ascii_once,
+        once.replace("/", "\\/"),
+        ascii_once.replace("/", "\\/"),
+        _json_escaped(once, ascii_only=False),
+        _json_escaped(ascii_once, ascii_only=False),
+    ]
+    try:
+        data = value.encode("utf-8")
+    except UnicodeEncodeError:
+        data = None
+    if data is not None:
+        upper = [
+            _percent_encoded(data, keep, plus) for keep, plus in _PERCENT_ENCODINGS
+        ]
+        forms += upper
+        forms += [
+            re.sub(r"%[0-9A-F]{2}", lambda m: m.group(0).lower(), f) for f in upper
+        ]
+    return list(dict.fromkeys(forms))
+
+
 def _pointer_token(key: str) -> str:
     """One JSON Pointer reference token (RFC 6901)."""
     return key.replace("~", "~0").replace("/", "~1")
@@ -380,13 +563,16 @@ class Redactor:
             self.add_secret(v)
 
     def add_secret(self, value: str) -> None:
-        """Register a secret value; one shorter than four characters is
-        ignored."""
+        """Register a secret value, and the forms text carries it in
+        (:func:`encoded_forms`: JSON-escaped, percent-encoded); one shorter
+        than four characters is ignored."""
         if not isinstance(value, str):
             raise TypeError(f"a secret value is a string, not {type(value).__name__}")
-        if len(value) < MIN_SECRET_LENGTH or value in self._values:
+        if len(value) < MIN_SECRET_LENGTH:
             return
-        self._values.append(value)
+        for form in encoded_forms(value):
+            if form not in self._values:
+                self._values.append(form)
         self._values.sort(key=len, reverse=True)
 
     def redact_text(self, text: str) -> tuple[str, bool]:

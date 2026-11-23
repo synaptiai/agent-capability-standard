@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Json } from '../src/canonical.js';
-import { DEFAULT_PATTERNS, holdsCredential, holdsSecret, MARKER, redactAnchor, redactJson, redactText } from '../src/redact.js';
+import {
+  DEFAULT_PATTERNS,
+  encodedForms,
+  holdsCredential,
+  holdsSecret,
+  MARKER,
+  redactAnchor,
+  redactJson,
+  redactText,
+} from '../src/redact.js';
 // The redaction vectors, read in place; the Python redactor
 // (grounded_agency/state/redaction.py) is held to the same file.
 import vectors from '../../../tests/conformance/secrets/redact.json' with { type: 'json' };
@@ -62,6 +71,32 @@ describe('redactor', () => {
   });
 });
 
+describe('registered values in the forms text carries them (security round 1, batch 8)', () => {
+  // The forms of a registered value, in order: tests/test_redaction.py pins
+  // the same list for the Python redactor's encoded_forms.
+  const pinned: string[] = JSON.parse(String.raw`["p@ss/w~rd é!\"", "p@ss/w~rd é!\\\"", "p@ss/w~rd \\u00e9!\\\"", "p@ss\\/w~rd é!\\\"", "p@ss\\/w~rd \\u00e9!\\\"", "p@ss/w~rd é!\\\\\\\"", "p@ss/w~rd \\\\u00e9!\\\\\\\"", "p%40ss%2Fw~rd%20%C3%A9%21%22", "p%40ss/w~rd%20%C3%A9%21%22", "p%40ss%2Fw~rd%20%C3%A9!%22", "p%40ss%2Fw~rd+%C3%A9%21%22", "p%40ss%2Fw%7Erd+%C3%A9%21%22", "p%40ss%2fw~rd%20%c3%a9%21%22", "p%40ss/w~rd%20%c3%a9%21%22", "p%40ss%2fw~rd%20%c3%a9!%22", "p%40ss%2fw~rd+%c3%a9%21%22", "p%40ss%2fw%7erd+%c3%a9%21%22"]`);
+  const value = 'p@ss/w~rd \u00e9!"';
+
+  it('gives the forms in the Python redactor\'s order', () => {
+    expect(encodedForms(value)).toEqual(pinned);
+    // A value with a lone surrogate has no UTF-8: its JSON forms only.
+    expect(encodedForms('ab\ud800cd')).toEqual(['ab\ud800cd', 'ab\\ud800cd', 'ab\\\\ud800cd']);
+    // A value of letters and digits has one form.
+    expect(encodedForms('s3cr3tValue')).toEqual(['s3cr3tValue']);
+  });
+
+  it.each([
+    ['JSON.stringify', JSON.stringify(value).slice(1, -1)],
+    ['JSON.stringify twice', JSON.stringify(JSON.stringify(value).slice(1, -1)).slice(1, -1)],
+    ['encodeURIComponent', encodeURIComponent(value)],
+    ['URLSearchParams', new URLSearchParams({ k: value }).toString().slice(2)],
+  ])('replaces the value as %s gives it', (_, encoded) => {
+    expect(encodedForms(value)).toContain(encoded);
+    expect(redactText(`x=${encoded};`, [value])).toBe(`x=${MARKER};`);
+    expect(holdsCredential({ note: `x=${encoded}` }, [value])).toBe(true);
+  });
+});
+
 describe('reading a long text (security round 1, batch 5)', () => {
   // Runs a pattern could read again from each of their positions: a URL
   // scheme's characters, JWT starts (`eyJ`, after `-`), PEM headers with no
@@ -86,6 +121,20 @@ describe('reading a long text (security round 1, batch 5)', () => {
     "['token', '",
     '"cookie", "value": "Basic ',
     '["',
+    // Escaped quotes, empty userinfo users and command options (security
+    // round 1, batch 8): a run of backslashes is read once, and an option's
+    // attempt starts at its dashes.
+    '\\',
+    'password=\\',
+    '\\"token\\", \\"value\\": \\"',
+    '[\\"token\\", \\"',
+    'a://:',
+    '-u ',
+    "'-u', '",
+    '-ua:',
+    '--a-',
+    '--password ',
+    '--password --',
   ];
   it.each(units)('reads 1 MB of %j in time in proportion to its length', (unit) => {
     const text = unit.repeat(Math.ceil(1_000_000 / unit.length)).slice(0, 1_000_000);

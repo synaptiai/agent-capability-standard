@@ -644,6 +644,8 @@ _AUDIT_HOOK_TOOLS = [
     "sha256sum",
     "mkdir",
     "sleep",
+    # The head (.claude/audit.head) is replaced whole, by renaming
+    "mv",
 ]
 
 

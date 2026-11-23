@@ -1226,6 +1226,22 @@ class TestShellHookTrustsOnlyItsOwnRecords:
                 "tool_name": "Bash",
                 "tool_input": {"command": "cp m .claude/checkpoints/ended/m"},
             },
+            # The audit log's head (security round 1, batch 8): removing or
+            # writing it would let a log cut short verify.
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "/p/.claude/audit.head"},
+            },
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "rm -f .claude/audit.head"},
+            },
+            {
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": "head -n 2 .claude/audit.log > t && mv t .claude/AUDIT.HEAD"
+                },
+            },
         ],
     )
     def test_a_call_that_writes_the_records_is_refused(
@@ -1299,6 +1315,7 @@ class TestShellHookTrustsOnlyItsOwnRecords:
         for tool_call in (
             _bash("cat .claude/checkpoint.ok"),
             _bash("ls .claude/checkpoints/used"),
+            _bash("cat .claude/audit.head"),
             {"tool_name": "Read", "tool_input": {"file_path": ".claude/checkpoint.ok"}},
         ):
             assert _gated_hook(tool_call, tmp_path).returncode == 0, tool_call
