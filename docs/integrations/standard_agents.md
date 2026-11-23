@@ -236,8 +236,11 @@ model family for a child. Two of them touch evidence:
   1.2.0 keeps secrets out of evidence, records, notifications, diagnostics
   and stored memory
   ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)): the binding
-  redacts every trace entry it writes with default patterns, and a grounded
-  tool's `secrets` option registers the deployment's own values.
+  redacts every trace entry it writes with default patterns, and
+  `configureLayer({ secrets })` registers the deployment's own values for
+  every entry, the audit hook's for plain tools included, and for the data a
+  `persist` or `audit` call would store (a grounded tool's `secrets` option,
+  and `recordToolCall`'s, add more).
 
 ## A grounded Standard Agent today
 
@@ -463,9 +466,16 @@ tool applies, as `bindingProfiles` checked them, their
 `CoreContext.profilePolicy(profiles)`, adds the destinations alone, and is
 refused when it also sets a minimum confidence or grounding policies, which
 it would not put in force). A call whose destination no policy allows, or is not a string, is
-refused with F504 before any approval is asked for. The destination is
-`args.destination` unless the tool's `destination` option says where
-(`destination: (args) => args.to`); a tool's own `profiles` add their
+refused with F504 before any approval is asked for. The tool's `destination`
+option says where the destination is: an RFC 6901 pointer into the
+arguments (`destination: '/to'`, which the annotation states as the
+binding record's `destination`) or a function of them (`(args) =>
+args.to`). A `send` tool defined without it has a destination the layer
+cannot tell, so while any policy is in force every call of it is refused
+with F504 ([§5.18.10](../../spec/STANDARD-v1.2.0.md#51810-capability-checks)):
+the layer does not guess an argument (`destination`, say) that the model can
+set to an allowed value while the tool's code sends elsewhere. A tool's own
+`profiles` add their
 policies, and a composite's reach the sends its code invokes, at any depth.
 `memoryTools()` gives a `persist` and a `recall` tool on the
 thread's store (scope `session`), which apply its `profiles` and
@@ -626,17 +636,26 @@ export default groundedTool({
 - **The list is enforced twice.** The binding passes the names as the tool's
   `uses`, so a runtime that enforces `uses` refuses an invocation outside the
   list. The wrapper refuses one itself (F504) and records it.
-- **Nesting tokens.** Each invocation the composite's own code makes issues
-  a one-shot token for that tool, those arguments and that execution. A
-  grounded tool that takes a token is covered by the composite's approval and
-  checkpoint: it needs neither again, and its trace entry names the
-  composite's (`covered_by`), when the decisions that approved the composite
-  are valid for its own approval too (its role, approvers and expiry).
-  Every other check still applies, its prerequisites included. A call that
-  finds no token, or that those decisions do not cover, is checked as a call
-  of its own, such as one an endpoint or a parallel call makes while the
-  composite runs: being in the same thread or execution is not evidence that
-  the composite made it.
+- **Nesting tokens.** Each invocation the composite's own code makes while
+  it runs issues a one-shot token for that tool, those arguments and that
+  execution, carrying what the composite's call held. A grounded tool that
+  takes a token is covered by the composite's approval and checkpoint: it
+  needs neither again, and its trace entry names the composite's
+  (`covered_by`), when the decisions that approved the composite are valid
+  for its own approval too (its role, approvers and expiry), and, if it
+  needs a checkpoint, when the composite's call used one. The runtime runs
+  whatever tool it knows under the invoked name, which need not be the one
+  listed (a copy, a wrapper, another definition), so the composite's flags
+  prove nothing about the call. Every other check still applies, its
+  prerequisites included. A call that finds no token, or that what the
+  composite held does not cover, is checked as a call of its own, such as
+  one an endpoint or a parallel call makes while the composite runs: being
+  in the same thread or execution is not evidence that the composite made
+  it.
+- **Only while it runs.** Once the composite's own code has settled, an
+  invocation through the state it was given is not a nested call: code that
+  kept the state and invokes later is refused with F504, and the token of an
+  invocation the composite did not wait for is no longer honoured.
 - **Tools defined with plain `defineTool`.** Their code runs without the
   wrapper, so the composite's nesting state checks an invocation of one
   itself: a `send`'s destination, at its record's `destination` pointer,
@@ -744,11 +763,12 @@ A grounded tool takes four more options:
   this call received (`refsIn(args)`) and what the tool's own code read
   during `execute`. Never the stored trace: a ref there was seen by an
   earlier request, not by this one.
-- **`secrets`**: values the redactor replaces besides its default patterns.
-  Redaction is always on: every trace entry's `evidence_anchors` and
-  `error`, and every notification, pass through it. A `persist` or `audit`
-  tool refuses data that holds a credential-shaped value or a registered
-  secret (F504, §5.18.10).
+- **`secrets`**: values the redactor replaces besides its default patterns
+  and those `configureLayer({ secrets })` registers for every tool and the
+  audit hook. Redaction is always on: every trace entry's `evidence_anchors`
+  and `error`, and every notification, pass through it. A `persist` or
+  `audit` tool refuses data that holds a credential-shaped value or a
+  registered secret (F504, §5.18.10).
 - **`profiles`**: the domain profiles the layer applies
   ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)), as the core
   computes them: `bindingProfiles(context, documents)` with a `CoreContext`
@@ -812,7 +832,7 @@ parent the model's text for an action that never ran. Bind a
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
 | | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint or an approval refuses there, so a deferred write is checked when it is scheduled |
 | A rejection is never lost to an approval made at the same moment, and a rejection the endpoint answers as recorded stops a call that is starting on that approval | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again. A rejection that arrives after the call used the approval is answered 409, and the change runs |
-| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it, with those arguments, in that execution. A call to a tool the composite does not list is refused | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call |
+| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call |
 | Two calls never both pass on one checkpoint or one approval: one thread's checks run one at a time in a realm (`serial.ts`), and the runtime runs a thread's tool calls in order | Across realms nothing serialises the checks; the binding relies on the runtime running one execution of a thread at a time, and refuses a call outside an execution that needs a checkpoint or an approval |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and

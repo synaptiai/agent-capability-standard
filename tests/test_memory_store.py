@@ -167,8 +167,29 @@ def test_persist_deprecated_timestamp_is_stored_at() -> None:
             "/req/headers/Authorization",
         ),
         ({"key": "pw-s3cret-value", "data": 1}, "the key"),
+        (
+            {
+                "key": "k",
+                "data": {
+                    "headers": [
+                        {"name": "Authorization", "value": "Basic dXNlcjpodW50ZXIyMDI2"}
+                    ]
+                },
+            },
+            "/headers/0/value",
+        ),
+        (
+            {"key": "k", "data": {"headers": [["X-Api-Key", "k3y9f8e7d6c5b4a3"]]}},
+            "/headers/0/1",
+        ),
     ],
-    ids=["github_token", "bearer_header", "registered_secret_key"],
+    ids=[
+        "github_token",
+        "bearer_header",
+        "registered_secret_key",
+        "header_pair",
+        "header_tuple",
+    ],
 )
 def test_a_secret_is_refused_not_stored(inputs: dict[str, Any], where: str) -> None:
     """Data or a key holding a secret the host recognises is refused

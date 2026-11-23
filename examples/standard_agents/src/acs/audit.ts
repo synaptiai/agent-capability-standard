@@ -26,6 +26,11 @@
  * it, and the cut-off entry then stops waiting; when there is none, the call
  * reported done is the cut-off one itself. A hook delivered twice for one
  * call adds nothing.
+ *
+ * An entry the hook writes is redacted (§6.7) with the default patterns,
+ * the secrets registered layer-wide (`configureLayer({ secrets })`) and any
+ * `secrets` the hook passes: a plain tool's error can carry the credential
+ * it was refused with.
  */
 import type { HookToolCall, HookToolResult, ThreadState } from '@standardagents/spec';
 import {
@@ -41,12 +46,19 @@ import {
 } from './records.js';
 import { serially } from './serial.js';
 
+/** What the hook may add to the layer's configuration. */
+export interface RecordToolCallOptions {
+  /** The host's own secrets (§6.7), beside those registered layer-wide. */
+  secrets?: readonly string[];
+}
+
 /** Record that a tool call finished. Call it from a `tool_call_done` hook. */
 export async function recordToolCall(
   state: Store & Pick<ThreadState, 'threadId' | 'execution'>,
   toolCall: HookToolCall,
   toolResult: Pick<HookToolResult, 'status' | 'error'>,
   now: number,
+  options: RecordToolCallOptions = {},
 ): Promise<TraceEntry> {
   return serially(state.threadId, async () => {
     const known = await state.getValue<number>(KEYS.call(toolCall.id));
@@ -90,16 +102,20 @@ export async function recordToolCall(
       linked = { ...match.entry, tool_call_id: toolCall.id };
       await state.setValue(KEYS.trace(linked.seq), linked);
     } else {
-      linked = await appendTrace(state, {
-        at: now,
-        ...(flow !== null ? { flow_id: flow } : {}),
-        ...(step !== null ? { step } : {}),
-        action: name,
-        capability: null,
-        status: toolResult.status === 'success' ? 'executed' : 'failed',
-        tool_call_id: toolCall.id,
-        ...(toolResult.error !== undefined ? { error: toolResult.error } : {}),
-      });
+      linked = await appendTrace(
+        state,
+        {
+          at: now,
+          ...(flow !== null ? { flow_id: flow } : {}),
+          ...(step !== null ? { step } : {}),
+          action: name,
+          capability: null,
+          status: toolResult.status === 'success' ? 'executed' : 'failed',
+          tool_call_id: toolCall.id,
+          ...(toolResult.error !== undefined ? { error: toolResult.error } : {}),
+        },
+        options.secrets ?? [],
+      );
     }
     await state.setValue(KEYS.call(toolCall.id), linked.seq);
     return linked;

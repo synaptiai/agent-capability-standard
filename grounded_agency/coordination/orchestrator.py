@@ -558,7 +558,9 @@ class OrchestrationRuntime:
             target_agent_ids=delegated_agents,
             capability_id="audit",
             metadata={
-                "task_goal": task_goal[:100],
+                # Whole, as in the audit details: the store redacts it, and a
+                # cut could keep part of a secret (STANDARD v1.2 §6.7).
+                "task_goal": task_goal,
                 "subtask_count": total_count,
                 "accepted_count": accepted_count,
             },

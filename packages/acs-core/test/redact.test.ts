@@ -76,6 +76,12 @@ describe('reading a long text (security round 1, batch 5)', () => {
     '-----BEGIN PRIVATE KEY-----',
     '-----BEGIN RSA PRIVATE KEY-----x',
     'a://b:',
+    // Pairs and tuples in text (security round 1, batch 6).
+    '"x',
+    '"token", "',
+    "['token', '",
+    '"cookie", "value": "Basic ',
+    '["',
   ];
   it.each(units)('reads 1 MB of %j in time in proportion to its length', (unit) => {
     const text = unit.repeat(Math.ceil(1_000_000 / unit.length)).slice(0, 1_000_000);

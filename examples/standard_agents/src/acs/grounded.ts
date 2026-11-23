@@ -80,7 +80,7 @@ import {
   type Json,
 } from '@synaptiai/acs-core';
 import { notifyEvidence } from './evidence.js';
-import { destinationPolicies, layerProfiles } from './layer.js';
+import { destinationPolicies, layerProfiles, layerSecrets } from './layer.js';
 import { confidenceFailure, type BindingProfiles } from './profiles.js';
 import {
   CAPABILITIES,
@@ -139,6 +139,8 @@ export interface AcsAnnotation extends SafetyFlags {
   additional_capabilities?: CapabilityId[];
   invokes?: string[];
   approval?: { min_approvers?: number; role?: string; expires?: string };
+  /** For a `send` tool: the RFC 6901 pointer to the argument that holds the destination (§5.18.1). */
+  destination?: string;
 }
 
 /** What `annotations.acs` holds for a control-only tool (§5.18.3). */
@@ -253,13 +255,18 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
   profiles?: BindingProfiles;
   /**
    * For a tool whose capabilities include `send`: where a call's
-   * destination is, `args => args.to` (default: `args.destination`). It
-   * only says where to look: the destination policies in force are the
-   * layer's (`configureLayer`) and the profiles', and a `send` tool
-   * defined without this option obeys them too (STANDARD 1.2.0 §4.4.2).
-   * A tool that does not perform `send` throws when defined with it.
+   * destination is, as an RFC 6901 pointer into its arguments (`'/to'`,
+   * which the annotation states as the record's `destination`, §5.18.1) or
+   * a function of them (`args => args.to`). It only says where to look: the
+   * destination policies in force are the layer's (`configureLayer`) and the
+   * profiles'. A `send` tool defined without it has a destination the layer
+   * cannot tell, so while any policy is in force its calls are refused with
+   * F504 (STANDARD 1.2.0 §4.4.2, §5.18.10): the layer does not guess an
+   * argument the tool's own code may not send to. A tool that does not
+   * perform `send` throws when defined with it, as does a pointer that is
+   * not one.
    */
-  destination?: (args: Record<string, unknown>) => unknown;
+  destination?: string | ((args: Record<string, unknown>) => unknown);
   /**
    * What the call's producer had (`evidence_seen`, §5.20): only what this
    * call received (`refsIn(args)`) and what the tool's own code read during
@@ -272,8 +279,10 @@ export interface GroundedToolOptions<C extends CapabilityId, Args extends ToolAr
     | Promise<readonly string[]>;
   /**
    * The host's own secrets (§6.7), registered with the redactor that every
-   * trace entry this tool writes passes through. The default patterns
-   * apply whether or not this is given.
+   * trace entry this tool writes passes through, and refused in a `persist`
+   * or `audit` call's data. The default patterns and the secrets registered
+   * layer-wide (`configureLayer({ secrets })`) apply whether or not this is
+   * given.
    */
   secrets?: readonly string[] | ((state: ThreadState) => Promise<readonly string[]>);
   /**
@@ -456,14 +465,33 @@ function atPointer(args: unknown, pointer: string): unknown {
 }
 
 /**
+ * Whether a composite's call is still running: its code's invocations are
+ * nested calls only while it runs (§5.18.4). `execute` clears it once the
+ * composite's own code has settled.
+ */
+interface CompositeScope {
+  open: boolean;
+}
+
+/**
  * One invocation of a listed tool by a running composite: a one-shot token
- * the invoked tool takes to be covered (§5.18.4).
+ * the invoked tool takes to be covered (§5.18.4). It carries what the
+ * composite's call held, since the runtime runs whatever tool it knows under
+ * the name, which need not be the one the composite listed: a nested call is
+ * covered only by an approval and a checkpoint the composite's call had.
  */
 interface NestingToken {
   composite: string;
   seq: number;
   /** The composite's approval counted only a person's decisions (§5.21.3). */
   person: boolean;
+  /**
+   * The composite's call used a checkpoint (its own, or the one of the call
+   * that covered it): only then does it cover a nested call that needs one.
+   */
+  checkpoint: boolean;
+  /** The composite's call is still running: a token is honoured only while it is. */
+  scope: CompositeScope;
   /**
    * The destination policies of the profiles given to the composite and to
    * every composite enclosing it (§4.4.2, §5.21.3): a nested send is checked
@@ -486,13 +514,14 @@ interface NestingToken {
 const TOKENS = new Map<string, NestingToken[]>();
 
 /**
- * The token of a pending invocation that matches this call, if any; taking
- * it (`used`) is the caller's, once the checks that precede coverage passed.
+ * The token of a pending invocation that matches this call, if any, while
+ * the composite that made it still runs; taking it (`used`) is the
+ * caller's, once the checks that precede coverage passed.
  */
 function findToken(thread: string, flow: string | null, tool: string, argsDigest: string): NestingToken | undefined {
   if (flow === null) return undefined;
   return (TOKENS.get(thread) ?? []).find(
-    (t) => !t.used && t.flow === flow && t.tool === tool && t.digest === argsDigest,
+    (t) => !t.used && t.scope.open && t.flow === flow && t.tool === tool && t.digest === argsDigest,
   );
 }
 
@@ -501,7 +530,11 @@ function findToken(thread: string, flow: string | null, tool: string, argsDigest
  * `invokeTool` that refuses a tool the composite does not list (F504),
  * issues a nesting token for a grounded or control tool it lists, and checks
  * and records itself a call of a listed tool defined with plain
- * `defineTool` and a binding record (`invokePlain`).
+ * `defineTool` and a binding record (`invokePlain`). Once the composite's
+ * call has ended, an invocation through it is not a nested call (§5.18.4):
+ * its code kept the state and invoked later, or did not wait for the
+ * invocation. It is refused with F504, not run uncovered: a plain tool it
+ * reaches has no wrapper to check it as a call of its own.
  */
 function nestingState(
   state: ThreadState,
@@ -509,6 +542,9 @@ function nestingState(
     name: string;
     seq: number;
     person: boolean;
+    /** The composite's call used a checkpoint, its own or its covering call's. */
+    checkpoint: boolean;
+    scope: CompositeScope;
     destinations: readonly (readonly string[])[];
     authority: ApprovalRecord | null;
     flow: string | null;
@@ -525,6 +561,42 @@ function nestingState(
   const position = {
     ...(composite.flow !== null ? { flow_id: composite.flow } : {}),
     ...(step !== null ? { step } : {}),
+  };
+
+  /**
+   * The refusal of an invocation made through the composite's state after
+   * its call ended (§5.18.4): not a nested call, so neither covered nor
+   * attributed to it (no `covered_by`), and recorded as refused.
+   */
+  const refuseLate = async (tool: string, capability: CapabilityId | null): Promise<ToolResult> => {
+    const result = refusal(
+      'F504',
+      tool,
+      capability,
+      `${composite.name}'s call has ended, so this invocation through its state is not a nested call its approval and checkpoint cover (STANDARD 1.2.0 §5.18.4).`,
+      `Invoke ${tool} while ${composite.name} runs, and wait for it; or call ${tool} as a call of its own.`,
+    );
+    await write(() =>
+      appendTrace(
+        state,
+        {
+          at: composite.now(),
+          action: tool,
+          capability,
+          ...position,
+          status: 'refused',
+          code: 'F504',
+          recorded_by: composite.recorded_by,
+          error: result.error ?? 'F504',
+        },
+        composite.secrets,
+      ),
+    ).catch(() => undefined);
+    return result;
+  };
+  const boundCapability = (tool: string): CapabilityId | null => {
+    const bound = composite.plain.get(tool)?.capabilities[0] ?? BOUND_NAMES.get(tool) ?? null;
+    return bound === null || bound === 'control' ? null : bound;
   };
 
   /**
@@ -603,12 +675,28 @@ function nestingState(
         );
       }
     }
+    if (!composite.scope.open) return refuseLate(tool, capability);
     let started: TraceEntry;
     try {
       started = await write(() => appendTrace(state, { ...base, at: composite.now(), status: 'started' }, composite.secrets));
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       return refusal('R407', tool, capability, `The nested call could not be recorded: ${message}.`, 'The call did not run.');
+    }
+    // The composite may have ended while the record was written: the call
+    // starts below, synchronously after this check, or not at all.
+    if (!composite.scope.open) {
+      const result = refusal(
+        'F504',
+        tool,
+        capability,
+        `${composite.name}'s call ended before this nested call could start (STANDARD 1.2.0 §5.18.4).`,
+        `Wait for ${tool} before ${composite.name} returns.`,
+      );
+      await write(() =>
+        completeTrace(state, started, { at: composite.now(), status: 'refused', code: 'F504', error: result.error ?? 'F504' }, composite.secrets),
+      ).catch(() => undefined);
+      return result;
     }
     let result: ToolResult;
     try {
@@ -641,6 +729,7 @@ function nestingState(
   };
 
   const invokeTool = async (tool: string, args: Record<string, unknown> = {}): Promise<ToolResult> => {
+    if (!composite.scope.open) return refuseLate(tool, boundCapability(tool));
     if (!composite.invokes.includes(tool)) {
       const bound = BOUND_NAMES.get(tool) ?? null;
       const capability = bound === null || bound === 'control' ? null : bound;
@@ -668,15 +757,21 @@ function nestingState(
     const plain = composite.plain.get(tool);
     if (plain !== undefined) return invokePlain(tool, plain, args);
     if (composite.flow === null) return state.invokeTool(tool, args);
+    const digest = await digestOf(args as Json);
+    // The composite may have ended while the digest was computed (an
+    // invocation it did not wait for): no token is issued after it has.
+    if (!composite.scope.open) return refuseLate(tool, boundCapability(tool));
     const token: NestingToken = {
       composite: composite.name,
       seq: composite.seq,
       person: composite.person,
+      checkpoint: composite.checkpoint,
+      scope: composite.scope,
       destinations: composite.destinations,
       authority: composite.authority,
       flow: composite.flow,
       tool,
-      digest: await digestOf(args as Json),
+      digest,
       used: false,
     };
     const pending = TOKENS.get(state.threadId) ?? [];
@@ -713,6 +808,8 @@ type Claim =
       enclosing: readonly (readonly string[])[];
       /** The approval request whose decisions approved the call: its own, or its composite's. */
       authority: ApprovalRecord | null;
+      /** The call used a checkpoint: its own, or the one of the composite that covered it. */
+      checkpointed: boolean;
     };
 
 /** The duration text (§5.10.1) of a policy's expiry, in its largest exact unit, for the annotation. */
@@ -843,9 +940,10 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     ...(options.grounding === undefined ? [] : groundingPolicies(options.grounding)),
     ...(fromProfiles.length > 0 ? groundingPolicies(fromProfiles) : []),
   ].filter((p) => p.require.includes(capability));
+  // The tool's own secrets and the layer's (§6.7), read at each call.
   const secretsOf = async (state: ThreadState): Promise<readonly string[]> => {
     const given = options.secrets;
-    return typeof given === 'function' ? await given(state) : (given ?? []);
+    return [...(typeof given === 'function' ? await given(state) : (given ?? [])), ...layerSecrets()];
   };
   // persist data and audit records holding a secret are refused (§5.18.10).
   const holdsRecords = capabilities.includes('persist') || capabilities.includes('audit');
@@ -857,7 +955,23 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       `groundedTool '${name}': the destination option is for a tool that performs send, and ${capabilities.join(', ')} is not (STANDARD 1.2.0 §4.4.2)`,
     );
   }
-  const destinationOf = options.destination ?? ((args: Record<string, unknown>) => args['destination']);
+  // Where a call's destination is: the option's pointer or function. A send
+  // tool defined without it has a destination the layer cannot tell, so
+  // under a policy its calls are refused (§4.4.2, §5.18.10): an argument the
+  // layer guessed (`destination`, say) need not be where the tool's own code
+  // sends.
+  const pointer = typeof options.destination === 'string' ? options.destination : undefined;
+  if (pointer !== undefined && pointer !== '' && !pointer.startsWith('/')) {
+    throw new Error(
+      `groundedTool '${name}': the destination option ${JSON.stringify(pointer)} is not an RFC 6901 pointer (one that starts with '/') (STANDARD 1.2.0 §5.18.1)`,
+    );
+  }
+  const destinationOf: ((args: Record<string, unknown>) => unknown) | null =
+    pointer !== undefined
+      ? (args) => atPointer(args, pointer)
+      : typeof options.destination === 'function'
+        ? options.destination
+        : null;
   // The tool's own profiles' destination policies; the layer's profiles'
   // are among the layer's policies (`destinationPolicies`).
   const profileDestinations = options.profiles?.policy.destinations ?? [];
@@ -872,6 +986,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     ...(options.flags !== undefined && Object.keys(options.flags).length > 0 ? { flags: options.flags } : {}),
     ...(additional.length > 0 ? { additional_capabilities: additional } : {}),
     ...(invokeNames.length > 0 ? { invokes: invokeNames } : {}),
+    ...(pointer !== undefined ? { destination: pointer } : {}),
     ...(options.approval !== undefined && Object.keys(options.approval).length > 0
       ? {
           approval: {
@@ -1004,17 +1119,21 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         const policies = [...destinationPolicies(), ...profileDestinations, ...enclosing];
         if (policies.length > 0) {
           const args = typeof argsJson === 'object' && argsJson !== null && !Array.isArray(argsJson) ? argsJson : {};
-          const destination = destinationOf(args as Record<string, unknown>);
+          const destination = destinationOf === null ? undefined : destinationOf(args as Record<string, unknown>);
           if (typeof destination !== 'string' || !allowed(policies, destination)) {
             return await refuse(
               refusal(
                 'F504',
                 name,
                 capability,
-                typeof destination === 'string'
-                  ? "This call's destination is not one the destination policies in force allow."
-                  : "This call's destination is not a string, so no destination policy in force can allow it.",
-                'Send only to an allowed destination (STANDARD 1.2.0 §4.4.2).',
+                destinationOf === null
+                  ? `${name} sends, and the layer cannot tell where: it was defined without the destination option, so no destination policy in force can allow its call.`
+                  : typeof destination === 'string'
+                    ? "This call's destination is not one the destination policies in force allow."
+                    : "This call's destination is not a string, so no destination policy in force can allow it.",
+                destinationOf === null
+                  ? `Define ${name} with the destination option, the argument its code sends to (STANDARD 1.2.0 §4.4.2, §5.18.10).`
+                  : 'Send only to an allowed destination (STANDARD 1.2.0 §4.4.2).',
               ),
               'F504',
             );
@@ -1024,19 +1143,25 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
 
       // A nested call the running composite's own code made, with these
       // exact arguments in this execution, is covered by the composite's
-      // approval and checkpoint (§5.18.4): only those two checks are skipped.
-      // A call a profile requires a person for is covered only by a
-      // composite whose approval a person gave (§5.21.3), and a call that
-      // needs approval only when the decisions that approved the composite
-      // are valid for its own approval too (its role, approvers and expiry,
-      // §5.18.7); otherwise it is checked as a call of its own. Each
-      // invocation covers at most one call: the token is taken here,
-      // synchronously after it was found.
+      // approval and checkpoint (§5.18.4): only those two checks are skipped,
+      // and only as far as the composite's call held them. The runtime runs
+      // whatever tool it knows under the invoked name, which need not be the
+      // one the composite listed (a copy, a wrapper, another definition), so
+      // the composite's own flags prove nothing about this call. A call that
+      // needs approval is covered only when decisions approved the
+      // composite's call and are valid for its own approval too (its role,
+      // approvers and expiry, §5.18.7); one that needs a checkpoint only when
+      // the composite's call used one; one a profile requires a person for
+      // only by a composite whose approval a person gave (§5.21.3).
+      // Otherwise it is checked as a call of its own. Each invocation covers
+      // at most one call: the token is taken here, synchronously after it was
+      // found.
       if (token !== undefined) token.used = true;
       const covered =
         token !== undefined &&
         (token.person || !person) &&
-        (!flags.requires_approval || (token.authority !== null && decisionsCover(token.authority, policy, now())));
+        (!flags.requires_approval || (token.authority !== null && decisionsCover(token.authority, policy, now()))) &&
+        (!flags.requires_checkpoint || token.checkpoint);
       if (covered) used.covered_by = token.seq;
 
       // 1. Approval, bound to the digest of exactly what is about to run.
@@ -1207,6 +1332,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         recorded_by,
         enclosing,
         authority: request ?? (covered && token !== undefined ? token.authority : null),
+        checkpointed: used.checkpoint_id !== undefined || (covered && token !== undefined && token.checkpoint),
         call: {
           seq: started.seq,
           ...(used.checkpoint_id !== undefined ? { checkpoint_id: used.checkpoint_id } : {}),
@@ -1256,17 +1382,22 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     }
     const claim = await serially(state.threadId, () => check(state, args as Json, secrets));
     if (claim.outcome) return claim.outcome;
-    const { started, call, flow, recorded_by, enclosing, authority } = claim;
+    const { started, call, flow, recorded_by, enclosing, authority, checkpointed } = claim;
 
     // Run with the nesting state, check the output contract (§5.18.9),
     // record the outcome.
     let text: string;
     let output: CapabilityOutput<C>;
+    // Open while the tool's own code runs: its invocations are nested calls
+    // only until it settles (§5.18.4).
+    const scope: CompositeScope = { open: true };
     try {
       const composite = nestingState(state, {
         name,
         seq: call.seq,
         person,
+        checkpoint: checkpointed,
+        scope,
         // The composite's nested sends are checked against its profiles'
         // destination policies and those enclosing it (§4.4.2, §5.21.3).
         destinations: [...enclosing, ...profileDestinations],
@@ -1278,7 +1409,11 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         secrets,
         now,
       });
-      output = await options.execute(composite, args, call);
+      try {
+        output = await options.execute(composite, args, call);
+      } finally {
+        scope.open = false;
+      }
       text = encodeCapabilityOutput(capability, output);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);

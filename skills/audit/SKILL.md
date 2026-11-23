@@ -248,6 +248,11 @@ hooks:
                 sed -E "s/^[^:=]*[:=][[:space:]]*[\"']?//" |
                 sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
                 grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+              # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
+              printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)[\"'][[:space:]]*,[[:space:]]*[\"']?value[\"']?[[:space:]]*[:=][[:space:]]*[\"']((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)[\"'][[:space:]]*,[[:space:]]*[\"']((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}[\"'][[:space:]]*[])]" |
+                sed -E "s/[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*[\"']//" |
+                sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+                grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
               # An unquoted value of 12 or more characters with letters and digits
               printf '%s' "$1" | grep -Eio -- "$SECRET_KEY[\"']?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
                 sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'

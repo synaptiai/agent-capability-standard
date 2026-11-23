@@ -1359,3 +1359,218 @@ SECURITY.md §5.4 now states what the scan does not read.
   and 1798 px, in §4.4 and the SDK guide's evidence stores, neither a part
   this batch changed.
 - Probes: none left running.
+
+### Batch 6: five reported defects
+
+Security round 1's sixth batch: five defects an independent verifier
+reproduced on 99c37dd, four in the Standard Agents binding and one in the
+redactors and refusal rule of both SDKs and the plugin's scan. Each was
+probed again on cb054f6 (batch 5) before it was fixed: batch 5 had closed
+the reported case of #31 (a copy of a profile-gated tool listed in
+`invokes` now loads as a plain tool whose nested call the wrapper of the
+tool the runtime runs checks on its own, F502/F501; the verifier's cases A
+to G and the decorator C all refuse), but not its root: a nested call
+needing a checkpoint and no approval, run under a listed name by a tool
+other than the one listed, was still covered by a composite that used no
+checkpoint. #32 to #35 reproduced as reported. Each fix has tests that fail
+on the code before it (run with the old binding sources, redactors, shell
+scan and evidence store: 13 binding tests, 5 of them only because their
+tool now passes the option's new pointer form; the new call fixture on the
+binding; 24 Python and shell tests; 6 TypeScript redaction vectors and 2
+binding memory tests; the rest are controls that pass on both).
+
+#### 31. A nested call was covered whatever the composite's call held (medium)
+
+The nesting token named the composite, its approval request and whether a
+person approved it, and `check` skipped both gates for the call that took
+it. The runtime runs whatever tool it knows under the invoked name, so the
+composite's own flags (which include the listed tool's) prove nothing
+about the tool that takes the token. On cb054f6: `batch` (`invoke`) lists a
+harmless `retrieve` tool under `deploy`, the runtime's `deploy` declares
+`requires_checkpoint`, and the nested call ran with no checkpoint, covered
+by a call that used none. Batch 5's join made the approval half hold
+(`decisionsCover` needs the composite's decisions), not the checkpoint
+half.
+
+- Fix (`grounded.ts`): the token carries `checkpoint`, whether the
+  composite's call used a checkpoint (its own, or the covering call's,
+  transitively); a nested call that needs one is covered only when it did,
+  beside the approval and person conditions; otherwise it is checked as a
+  call of its own (its own approval request and checkpoint). The claim
+  records `checkpointed` for the composite's own nested calls. Plain tools
+  listed in `invokes` need no change: their binding is the listed object's,
+  which the composite's flags already join, so the composite always held
+  what they need.
+- Tests (`test/nesting.test.ts`): a nested call that needs a checkpoint,
+  under a name the composite lists for a harmless tool, is refused F501
+  when the composite used none and, with a checkpoint of its own, runs
+  uncovered (failed before); control: the composite that lists the real
+  tool needs a checkpoint and covers the call.
+- Standard §5.18.4: the composite's approval and checkpoint cover a nested
+  call as far as its call held them; a layer whose composite's call did not
+  hold what the nested call needs checks it as a call of its own.
+
+#### 32. Header credentials as name/value pairs or tuples were neither redacted nor refused (medium; sibling of round 1 C's structured headers)
+
+A secret member was an object member whose own name ends in a credential
+or header name. A HAR's `[{"name": "Authorization", "value": "Basic
+..."}]`, a `[["X-Api-Key", "..."]]` tuple and a HAR's `cookies` array
+passed both redactors and the refusal rule (persist stored them; the
+evidence collector exported them). In text, the header rule needs `:` or
+`=` after the name, so the same JSON text passed too.
+
+- Fix (`redaction.py`, `redact.ts`, identically): an object whose `name`,
+  `key` or `header` member (any case) holds a secret member's name makes its
+  `value` member secret; a two-element array whose first element is one
+  makes its second secret; `cookies` joins the member names. Redaction and
+  `holds_credential`/`holdsCredential` (the data rule) apply it. A text
+  pattern redacts the value after a quoted secret name and `, "value":`, or
+  after `[`/`(` and a quoted secret name and a comma (four characters or
+  more, after a scheme); the refusal rule takes such a value of 8 or more
+  token characters mixing letters and digits, a tuple in text only when it
+  closes after two elements (a list of field names is not one). The
+  plugin's `hooks/secret_scan.sh` (and its copies in the `persist` and
+  `audit` skills) gains the same text rule. Each attempt starts at a quote
+  or bracket and reads to the next, so 1 MB of each new shape takes under
+  2 s in Python and the shell scan 0.1 s.
+- Sibling (Python evidence store): `_sanitize_metadata` turned metadata
+  nested deeper than two levels into `str(value)[:100]` before the store
+  redacted it, so the pair's repr reached the export, and a cut could keep
+  part of a secret (a registered one, or a token cut below its pattern's
+  length). Such a value is now its JSON text, redacted with the default
+  patterns while its structure can be read, and whole (the 1 KB limit
+  replaces a value too large whole; a reference cycle becomes
+  `"[unserializable]"`). The delegation anchor's `description` and the
+  orchestration anchor's `task_goal` were cut at 100 characters before the
+  store redacted them; they are kept whole.
+- Tests: vectors `har_header_pairs`, `pair_name_members`, `header_tuples`,
+  `har_cookies`, `pair_in_text`, `tuple_in_text` in
+  `tests/conformance/secrets/redact.json`, and `pair_member`,
+  `tuple_member`, `pair_placeholder`, `pair_other_header`, `pair_in_text`,
+  `tuple_in_text`, `name_list_in_text` in `credentials.json` (the text ones
+  run through the shell scan under sh and bash);
+  `tests/test_memory_store.py` (`header_pair`, `header_tuple`),
+  `tests/test_tool_call_approval.py::TestEvidenceToolInput::test_header_pairs_in_the_input_are_redacted`,
+  the binding's `test/memory.test.ts` (both forms refused by
+  `persistEntry`), and five new 1 MB shapes in the timing tests of both
+  SDKs. 24 Python and shell tests and 6 TypeScript vectors failed before.
+- Not read (stated in the redactors' docstrings): a pair whose `value`
+  comes before its name in text, a flat `[name, value, name, value]` list
+  (Node's `rawHeaders`), and a `Cookie:` header line in text.
+
+#### 33. A composite's state issued nesting tokens after its call ended (medium)
+
+`nestingState` returned a proxy whose `invokeTool` minted a token on every
+call, with nothing marking the composite's call as over. Code that kept the
+state (or another tool it was handed to) invoked a listed tool later in the
+execution, and the call was covered by the composite's spent approval and
+checkpoint, past the checkpoint's age too; an invocation the composite did
+not wait for was covered after its call was recorded complete.
+
+- Fix (`grounded.ts`): a `CompositeScope` (`open`) that `execute` clears in
+  a `finally` once the composite's own code settles. An invocation through
+  the state after that is refused with F504 and recorded `refused` with no
+  `covered_by` (a plain tool it reaches has no wrapper to check it as a
+  call of its own); the check is made again after the digest is computed,
+  before a token is issued, and before a plain tool's runtime call (a
+  `started` entry is then completed `refused`); `findToken` honours a token
+  only while its scope is open, so an invocation started in time whose tool
+  checks after the composite returned is checked as a call of its own.
+- Tests (`test/nesting.test.ts`): a kept state's invocation is refused F504
+  without reaching the runtime, recorded with no `covered_by`; an
+  invocation the composite did not wait for is checked on its own (F502):
+  both failed before. Test (f) of the nesting tokens (no token left once
+  the composite returns) still passes.
+- Standard §5.18.4: a call made through the composite once its call has
+  ended is no nested call; a layer checks it as a call of its own, or
+  refuses it (F504).
+
+#### 34. A send tool without the destination option was checked at args.destination (low)
+
+The binding read a `send` tool's destination from `args.destination` when
+the tool did not say where. Under a policy, a model could set
+`destination` to an allowed value while the tool's code sent to `url`
+(with a passthrough or record schema). The record (the annotation)
+declared no pointer, and §5.18.1 gives none by default; the Python adapter
+refuses such a binding under a policy ("cannot tell where").
+
+- Fix (`grounded.ts`): no default. The `destination` option is an RFC 6901
+  pointer (new; stated in the annotation as the record's `destination`,
+  and refused at definition when it is not a pointer) or a function. A
+  `send` tool defined without it has a destination the layer cannot tell,
+  so while any policy is in force every call is refused with F504 before
+  approval and the checkpoint. With no policy nothing changes. The call
+  fixtures' runner now passes the record's pointer itself.
+- Tests: call fixture `send_destination_unknown_under_policy` (32 call
+  fixtures: a `post` binding with no destination, called with an allowed
+  `destination` argument, F504 on both layers; failed on the old binding,
+  passed on the adapter); `test/layer.test.ts` (the verifier's
+  `post_webhook` refused and its code not run, the annotation's pointer,
+  a non-pointer option throwing).
+- Docs: the guide's sends section and the binding README no longer say a
+  tool without the option obeys the policy by `args.destination`.
+
+#### 35. The audit hook's own entries were redacted without the host's secrets (medium)
+
+`recordToolCall` wrote its entry for a plain tool's call with the default
+patterns only: a host's own secret in the error (`upstream rejected api key
+<secret>`) reached the trace, which `actionRecord` exports as an audit
+record. Secrets could be registered only per grounded tool.
+
+- Fix: `configureLayer({ secrets })` registers the host's secrets
+  layer-wide (`layerSecrets()`); `records.ts` redacts every entry with them
+  beside the writer's own, so the audit hook, a control tool, the nesting
+  state and every grounded tool use them; a grounded tool's
+  `persist`/`audit` refusal and `persistEntry` refuse them too.
+  `recordToolCall` takes an optional `{ secrets }`. The secrets are not
+  part of `config_sha256` (§6.7: no digest of a secret alone).
+- Tests (`test/layer.test.ts`): the hook's entry for `crm_sync` redacted
+  with the layer's secrets and with its own, a grounded tool's entry and
+  `persistEntry` refusing the layer's secret, and the option's validation:
+  3 failed before.
+- Python sibling: none; `GroundedAgentConfig.secret_values` already reaches
+  the adapter's redactor, its evidence store and the coordination audit log.
+
+#### Siblings checked
+
+- The other `appendTrace` writers (the not-listed refusal, the plain
+  path, `controlTool`) now get the layer's secrets through `records.ts`.
+- The adapter never sees nested calls (#31, #33 have no Python sibling); it
+  already refused a send binding with no destination pointer under a policy
+  (#34), which the new fixture now pins for both layers.
+- `persistEntry` and the Python memory store use the refusal rule, so #32's
+  pair rule reaches both.
+
+#### Documentation
+
+Standard §5.18.4 (the nested-call bullet); SECURITY.md (§1.5 bullets, the
+audit hook row of §5.4, the class SL paragraph); the binding's statement
+(`covers`: while the composite runs); the Standard Agents guide (secrets,
+sends, nesting tokens and the run's end, the `secrets` option, the
+guarantees row); the binding README; the persist skill's text; the
+redactors' docstrings; CHANGELOG (Upgrading: secrets as pairs, evidence
+metadata, the binding's sends, composites and secrets; the fixture count).
+No version changes.
+
+#### Checks after batch 6
+
+- Python: `pytest tests/` (5281 passed, 18 skipped); ruff check and format
+  with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; the generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1917; the WebAssembly
+  build reused); the binding's check and test (213, 2 skipped).
+- Site: `npm run check`, `npm test` (1173; the new call fixture counts once
+  tracked), `npm run build` (check-dist passed); `check-runs.mjs` on
+  `/spec/1.2.0/` and `/guides/claude-agent-sdk/` with the 1248 headless
+  shell: longest enforced runs 1795 and 1798 px, as before (§5.18.4's
+  bullet grew by five lines inside a shorter run).
+- Probes (the verifier's, pointed at this worktree): every late invocation
+  of `p4_late_invoke` and `p34_variants` (later in the step, an hour later,
+  through a helper tool, not awaited) is refused F504 and writes nothing,
+  while the composite's own nested call is still covered; `post_webhook` is
+  refused F504 with every schema; `v32`'s cases all refuse; the shipped
+  audit hook, with the secret registered by `configureLayer({ secrets })`,
+  redacts all four phrasings; `redactJson`, `holdsCredential` and
+  `redactText` redact and refuse the HAR and tuple forms. None left running.

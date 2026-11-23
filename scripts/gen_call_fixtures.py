@@ -822,6 +822,29 @@ calls(
     extra=SENDS,
 )
 
+# A send binding that names no destination argument (section 5.18.1): under a
+# policy the layer cannot tell where it sends, so it refuses the call, even
+# with an argument named `destination` that the policy allows; the tool's
+# code may send elsewhere (sections 4.4.2, 5.18.10).
+calls(
+    "send_destination_unknown_under_policy",
+    "Under a destination policy, a layer refuses with F504, before approval and the checkpoint, a call of a send binding that names no destination argument: it cannot tell where the call sends, whatever argument names a destination the policy allows.",
+    [
+        call("save", RUN),
+        call(
+            "post",
+            refuse("F504"),
+            {
+                "url": "https://elsewhere.example.net/x",
+                "destination": "https://hooks.example.com/ok",
+            },
+            approve=ALICE,
+        ),
+        call("notify", RUN, HOOK, approve=ALICE),
+    ],
+    destination_policy=POLICY,
+    extra=[rec("post", "send"), rec("notify", "send", destination="/to")],
+)
 
 # ---------------------------------------------------------------------------
 

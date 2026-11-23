@@ -23,16 +23,27 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
   ``DB_PASSWORD``, ``PGPASSWORD`` or ``access_token``) with ``=`` or ``:``,
   of 4 or more characters, in assignments, query strings and JSON text;
 - PEM ``PRIVATE KEY`` blocks (the body);
-- AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys and JWTs.
+- AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys and JWTs;
+- a header or credential given as a name/value pair or a ``[name, value]``
+  tuple in JSON or code text (``"name": "Authorization", "value": "Basic
+  ..."``, ``('Cookie', 'sid=...')``): its value, of 4 or more characters.
 
 In a JSON value, a member whose name ends in a credential name (as above,
 in any case and after any prefix: ``accessToken``, ``dbPassword``,
-``x-api-key``) or in ``authorization`` or ``cookie`` (the structured form of
-the ``Authorization``, ``Proxy-Authorization``, ``Cookie`` and
-``Set-Cookie`` headers) is a secret member: its value is redacted whole
-when it is a string of 4 or more characters or a number, and when it is a
-list or an object, each such string and number in it is (a header's list
-of values, a ``{"value": ...}`` wrapper). Booleans and null are kept. A member name is redacted as any
+``x-api-key``) or in ``authorization``, ``cookie`` or ``cookies`` (the
+structured form of the ``Authorization``, ``Proxy-Authorization``,
+``Cookie`` and ``Set-Cookie`` headers, a HAR's cookies) is a secret member,
+and so is a header given as a pair: the ``value`` member of an object whose
+``name``, ``key`` or ``header`` member (in any case) is a secret member's
+name (HAR, Postman, Kubernetes ``env``), and the second element of a
+two-element list whose first is one (``[["Authorization", "Basic ..."]]``).
+A secret member's value is redacted whole when it is a string of 4 or more
+characters or a number, and when it is a list or an object, each such
+string and number in it is (a header's list of values, a ``{"value": ...}``
+wrapper). Booleans and null are kept. Not read as a pair: one whose
+value comes before its name in text, a flat ``[name, value, name, value]``
+list (Node's ``rawHeaders``), a ``Cookie:`` header line in text. A member
+name is redacted as any
 string is: a name that holds a secret is replaced by its redacted text, and
 a name that would then repeat one already in its object gets `` (2)``,
 `` (3)``, ... so that no member is lost. The assignment rule is
@@ -48,7 +59,8 @@ above (PEM private keys, AWS, GitHub, Slack, ``sk-`` keys, JWTs, a bearer
 token of 20 or more characters), the password of a URL's userinfo unless it
 is a placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``,
 ``****``), an ``Authorization`` or ``Proxy-Authorization`` header's value of
-8 or more token characters mixing letters and digits, and an assignment to a
+8 or more token characters mixing letters and digits (in a header line, or
+given as a pair or tuple in text, as above), and an assignment to a
 credential name whose value is quoted with no whitespace and 8 or more
 characters, or unquoted, 12 or more characters, mixing letters and digits.
 The plugin's ``hooks/secret_scan.sh`` applies the same rule to text, and
@@ -103,6 +115,23 @@ _NOT_WS = r" \t\n\r\f\v"
 # the run's start (not after a scheme character), so a long run that is not
 # followed by `://` is read once, not again from each letter in it.
 _SCHEME = r"(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*"
+# A secret member's name (see _SECRET_MEMBER), quoted as JSON or code text
+# quotes it.
+_QUOTED_SECRET_NAME = rf"[\"'][^{_NOT_WS}\"']*(?:{_NAMES}|authorization|cookies?)[\"']"
+# A header's scheme, which the value after it may start with.
+_VALUE_SCHEME = rf"(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
+# A header or credential given as a `[name, value]` tuple in JSON or code
+# text, up to its value: `["Authorization", "Basic ...`, `('Cookie', '...`.
+# Each attempt starts at a bracket and reads to the next quote or
+# whitespace, so a text is read once.
+_TUPLE_TEXT = rf"[\[(]{_WS}*{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*[\"']{_VALUE_SCHEME}"
+# A header or credential given as a name/value pair in JSON or code text, up
+# to its value: `"Authorization", "value": "...`, as a HAR's `{"name": ...,
+# "value": ...}` reads. Each attempt starts at a quote.
+_PAIR_TEXT = (
+    rf"{_QUOTED_SECRET_NAME}{_WS}*,{_WS}*[\"']?value[\"']?{_WS}*[:=]{_WS}*[\"']"
+    rf"{_VALUE_SCHEME}"
+)
 
 DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     # PEM private key blocks: the body. A header with no end after it
@@ -119,6 +148,12 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
         rf"(?<![A-Za-z0-9])(?:proxy-)?authorization[\"']?{_WS}*[:=]{_WS}*[\"']?"
         rf"(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
         rf"(?P<secret>[^{_NOT_WS}\"',;]+)",
+        re.ASCII | re.IGNORECASE,
+    ),
+    # A header or credential given as a name/value pair or a [name, value]
+    # tuple in text: its value, of four characters or more.
+    re.compile(
+        rf"(?:{_TUPLE_TEXT}|{_PAIR_TEXT})(?P<secret>[^{_NOT_WS}\"',;]{{4,}})",
         re.ASCII | re.IGNORECASE,
     ),
     # Bearer tokens.
@@ -209,6 +244,16 @@ _AUTHORIZATION_VALUE = re.compile(
     r"(?P<value>[A-Za-z0-9._~+/=-]{8,})",
     re.ASCII | re.IGNORECASE,
 )
+# A header's or credential's value given as a name/value pair, or as a
+# tuple of exactly two (a list of names is not one), in text, after its
+# scheme: 8 or more token characters with letters and digits.
+_PAIR_VALUE_TEXT = re.compile(
+    rf"{_PAIR_TEXT}(?P<value>[A-Za-z0-9._~+/=-]{{8,}})", re.ASCII | re.IGNORECASE
+)
+_TUPLE_VALUE_TEXT = re.compile(
+    rf"{_TUPLE_TEXT}(?P<value>[A-Za-z0-9._~+/=-]{{8,}})[\"']{_WS}*[\])]",
+    re.ASCII | re.IGNORECASE,
+)
 
 
 def _letters_and_digits(value: str) -> bool:
@@ -228,16 +273,59 @@ def _credential_text(text: str) -> bool:
         return True
     return any(
         _letters_and_digits(m.group("value"))
-        for pattern in (_UNQUOTED_VALUE, _AUTHORIZATION_VALUE)
+        for pattern in (
+            _UNQUOTED_VALUE,
+            _AUTHORIZATION_VALUE,
+            _PAIR_VALUE_TEXT,
+            _TUPLE_VALUE_TEXT,
+        )
         for m in pattern.finditer(text)
     )
 
 
 # A member name that ends in a credential name, or names a header that
-# carries one (Authorization, Proxy-Authorization, Cookie, Set-Cookie).
+# carries one (Authorization, Proxy-Authorization, Cookie, Set-Cookie), or
+# a HAR's cookies.
 _SECRET_MEMBER = re.compile(
-    rf".*(?:{_NAMES}|authorization|cookie)", re.ASCII | re.IGNORECASE | re.DOTALL
+    rf".*(?:{_NAMES}|authorization|cookies?)", re.ASCII | re.IGNORECASE | re.DOTALL
 )
+# The member of a name/value pair that holds its name (HAR `name`, Postman
+# `key`), and the one that holds its value.
+_PAIR_NAME = re.compile(r"name|key|header", re.ASCII | re.IGNORECASE)
+_PAIR_VALUE = re.compile(r"value", re.ASCII | re.IGNORECASE)
+
+
+def _secret_pair(value: Mapping[Any, Any]) -> bool:
+    """Whether an object is a header or credential given as a name/value
+    pair: a ``name``, ``key`` or ``header`` member holds a secret member's
+    name, so its ``value`` member is a secret member."""
+    return any(
+        _PAIR_NAME.fullmatch(str(k))
+        and isinstance(v, str)
+        and _SECRET_MEMBER.fullmatch(v)
+        for k, v in value.items()
+    )
+
+
+def _secret_tuple(value: Sequence[Any]) -> bool:
+    """Whether a list is a ``[name, value]`` tuple whose name is a secret
+    member's: its second element is secret."""
+    return (
+        len(value) == 2
+        and isinstance(value[0], str)
+        and bool(_SECRET_MEMBER.fullmatch(value[0]))
+    )
+
+
+def _member_secret(key: Any, secret: bool, pair: bool) -> bool:
+    """Whether the member named ``key`` is a secret member: within one, a
+    credential's or header's name, or the value of a pair (``pair``)."""
+    name = str(key)
+    return (
+        secret
+        or bool(_SECRET_MEMBER.fullmatch(name))
+        or (pair and bool(_PAIR_VALUE.fullmatch(name)))
+    )
 
 
 def _secret_scalar(value: Any) -> bool:
@@ -255,12 +343,17 @@ def _secret_member_value(value: Any, secret: bool = False) -> bool:
     if secret and _secret_scalar(value):
         return not (isinstance(value, str) and _PLACEHOLDER.fullmatch(value))
     if isinstance(value, dict):
+        pair = not secret and _secret_pair(value)
         return any(
-            _secret_member_value(v, secret or bool(_SECRET_MEMBER.fullmatch(str(k))))
+            _secret_member_value(v, _member_secret(k, secret, pair))
             for k, v in value.items()
         )
     if isinstance(value, (list, tuple)):
-        return any(_secret_member_value(v, secret) for v in value)
+        tuple_ = not secret and _secret_tuple(value)
+        return any(
+            _secret_member_value(v, secret or (tuple_ and i == 1))
+            for i, v in enumerate(value)
+        )
     return False
 
 
@@ -367,6 +460,8 @@ class Redactor:
                 pointers.append(pointer)
             return text
         if isinstance(value, dict):
+            # A name/value pair whose name is a secret member's.
+            pair = not secret and _secret_pair(value)
             out: dict[str, Any] = {}
             for k, v in value.items():
                 name, renamed = self.redact_text(str(k))
@@ -380,7 +475,7 @@ class Redactor:
                 here = f"{pointer}/{_pointer_token(name)}"
                 if renamed:
                     pointers.append(here)
-                member_secret = secret or bool(_SECRET_MEMBER.fullmatch(str(k)))
+                member_secret = _member_secret(k, secret, pair)
                 if member_secret and _secret_scalar(v):
                     out[name] = MARKER
                     if not renamed:
@@ -389,14 +484,17 @@ class Redactor:
                     out[name] = self._walk(v, here, pointers, member_secret)
             return out
         if isinstance(value, (list, tuple)):
+            # A `[name, value]` tuple whose name is a secret member's.
+            tuple_ = not secret and _secret_tuple(value)
             items = []
             for i, v in enumerate(value):
                 here = f"{pointer}/{i}"
-                if secret and _secret_scalar(v):
+                item_secret = secret or (tuple_ and i == 1)
+                if item_secret and _secret_scalar(v):
                     items.append(MARKER)
                     pointers.append(here)
                 else:
-                    items.append(self._walk(v, here, pointers, secret))
+                    items.append(self._walk(v, here, pointers, item_secret))
             return items
         return value
 

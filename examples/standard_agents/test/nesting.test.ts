@@ -5,7 +5,7 @@
  * made, in the same execution, of the same tool, with the same arguments.
  * Same thread or execution is not evidence.
  */
-import { defineTool, type ThreadUser, type ToolResult } from '@standardagents/spec';
+import { defineTool, type ThreadState, type ThreadUser, type ToolResult } from '@standardagents/spec';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { decideApproval, requestApproval, type ApprovalPolicy } from '../src/acs/approval.js';
@@ -394,5 +394,169 @@ describe("a composite takes the approval of the tools it invokes (security round
     await both.decide('batch', [user('ann', ['admin']), user('al', ['admin'])], ADMIN);
     both.tick(61_000);
     expect((await both.t.tools.get('batch')!.execute(both.t.state, KEY)).error_code).toBe('F502');
+  });
+});
+
+// A nested call is covered only by what the composite's call held (STANDARD
+// 1.2.0 §5.18.4): the runtime runs whatever tool it knows under the invoked
+// name, which need not be the one the composite listed, so the composite's
+// own flags prove nothing about it. And only while the composite runs: an
+// invocation through its state after its call ended is not a nested call.
+describe('a nested call is covered only by what the running composite held (security round 1, batch 6)', () => {
+  const args = z.object({}).passthrough();
+
+  function heldSetup() {
+    const t = memoryThread();
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'save',
+      args,
+      execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+    });
+    // What the runtime runs as `deploy`: it needs a checkpoint, no approval.
+    const ran: unknown[] = [];
+    const deploy = groundedTool({
+      name: 'deploy',
+      capability: 'retrieve',
+      flags: { requires_checkpoint: true },
+      description: 'deploy',
+      args,
+      execute: async (_s, a) => {
+        ran.push(a);
+        return { data: 'deployed', evidence_anchors: [], confidence: 1 };
+      },
+    });
+    // What the composite lists under that name: a harmless lookup.
+    const lookup = groundedTool({
+      name: 'deploy',
+      capability: 'retrieve',
+      description: 'look up',
+      args,
+      execute: async () => ({ data: 1, evidence_anchors: [], confidence: 1 }),
+    });
+    const nested: ToolResult[] = [];
+    const batch = groundedTool({
+      name: 'batch',
+      capability: 'invoke',
+      invokes: { deploy: lookup } as never,
+      description: 'batch',
+      args,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('deploy', A));
+        return { result: true, evidence_anchors: [] };
+      },
+    });
+    for (const [name, tool] of Object.entries({ save, deploy, batch })) t.tools.set(name, tool);
+    return { t, ran, nested, save, deploy, batch };
+  }
+
+  it('checks a nested call that needs a checkpoint on its own when the composite used none', async () => {
+    const { t, ran, nested } = heldSetup();
+    // batch needs neither approval nor a checkpoint, and used neither.
+    expect((await run(t, 'batch')).status).toBe('success');
+    expect(nested[0]?.error_code).toBe('F501');
+    expect(ran).toEqual([]);
+    // With a checkpoint of its own the nested call is checked as a call of
+    // its own: it uses that checkpoint, and nothing covers it.
+    await run(t, 'save');
+    expect((await run(t, 'batch')).status).toBe('success');
+    expect(nested[1]?.status).toBe('success');
+    const trace = await readTrace(t.state);
+    const entry = trace.filter((e) => e.action === 'deploy').at(-1);
+    expect(entry).toMatchObject({ status: 'executed' });
+    expect(entry?.covered_by).toBeUndefined();
+    expect(entry?.checkpoint_id).toMatch(/^cp-/);
+  });
+
+  it('covers a nested call that needs a checkpoint when the composite used one', async () => {
+    const { t, ran, nested, deploy } = heldSetup();
+    // A composite that lists the real tool needs a checkpoint, and covers it.
+    const real = groundedTool({
+      name: 'real_batch',
+      capability: 'invoke',
+      invokes: { deploy } as never,
+      description: 'real_batch',
+      args,
+      execute: async (state) => {
+        nested.push(await state.invokeTool('deploy', A));
+        return { result: true, evidence_anchors: [] };
+      },
+    });
+    t.tools.set('real_batch', real);
+    expect((await run(t, 'real_batch')).error_code).toBe('F501');
+    await run(t, 'save');
+    expect((await run(t, 'real_batch')).status).toBe('success');
+    expect(nested[0]?.status).toBe('success');
+    expect(ran).toEqual([A]);
+    const trace = await readTrace(t.state);
+    const covering = trace.find((e) => e.action === 'real_batch' && e.status === 'executed')!;
+    expect(covering.checkpoint_id).toMatch(/^cp-/);
+    expect(trace.find((e) => e.action === 'deploy')).toMatchObject({ status: 'executed', covered_by: covering.seq });
+  });
+
+  it('refuses an invocation through the state a composite kept after its call ended', async () => {
+    const { t, nestedResults } = setup();
+    let kept: ThreadState | undefined;
+    const keeper = groundedTool({
+      name: 'keeper',
+      capability: 'invoke',
+      invokes: { write: t.tools.get('write') } as never,
+      description: 'keeper',
+      args: z.object({}).passthrough(),
+      execute: async (state) => {
+        kept = state;
+        return { result: true, evidence_anchors: [] };
+      },
+    });
+    t.tools.set('keeper', keeper);
+    await run(t, 'save');
+    await approve(t, 'keeper', 'invoke', {});
+    expect((await run(t, 'keeper')).status).toBe('success');
+    // Later in the same execution, the kept state invokes write: not a
+    // nested call, so neither keeper's approval nor its checkpoint covers it.
+    t.nextStep();
+    const late = await kept!.invokeTool('write', { path: '/etc/a' });
+    expect(late.error_code).toBe('F504');
+    expect(late.error).toContain("keeper's call has ended");
+    expect(t.invoked).toEqual([]);
+    const refused = (await readTrace(t.state)).at(-1);
+    expect(refused).toMatchObject({ action: 'write', capability: 'mutate', status: 'refused', code: 'F504' });
+    expect(refused?.covered_by).toBeUndefined();
+    expect(nestedResults).toEqual([]);
+  });
+
+  it('does not cover an invocation the composite did not wait for, once it has returned', async () => {
+    const { t } = setup();
+    const gate = deferred();
+    const reached = deferred();
+    t.beforeInvoke = async () => {
+      reached.release();
+      await gate.promise;
+    };
+    let pending: Promise<ToolResult> | undefined;
+    const hasty = groundedTool({
+      name: 'hasty',
+      capability: 'invoke',
+      invokes: { write: t.tools.get('write') } as never,
+      description: 'hasty',
+      args: z.object({}).passthrough(),
+      execute: async (state) => {
+        // The invocation starts while hasty runs; hasty returns without it.
+        pending = state.invokeTool('write', A);
+        await reached.promise;
+        return { result: true, evidence_anchors: [] };
+      },
+    });
+    t.tools.set('hasty', hasty);
+    await run(t, 'save');
+    await approve(t, 'hasty', 'invoke', {});
+    expect((await run(t, 'hasty')).status).toBe('success');
+    gate.release();
+    // The write starts after hasty's call ended: its token is not honoured,
+    // so it is checked as a call of its own (no approval of its own).
+    expect((await pending!).error_code).toBe('F502');
+    const trace = await readTrace(t.state);
+    expect(trace.find((e) => e.action === 'write')?.covered_by).toBeUndefined();
   });
 });

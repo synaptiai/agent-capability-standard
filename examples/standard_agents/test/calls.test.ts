@@ -86,15 +86,6 @@ function outputOf(capability: CapabilityId, seq: number): Record<string, unknown
   return output;
 }
 
-/** The value an RFC 6901 pointer locates in a call's arguments. */
-function atPointer(args: Record<string, unknown>, pointer: string): unknown {
-  let value: unknown = args;
-  for (const token of pointer.split('/').slice(1)) {
-    const key = token.replaceAll('~1', '/').replaceAll('~0', '~');
-    value = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
-  }
-  return value;
-}
 
 function policyOf(binding: Binding): ApprovalPolicy {
   const expires = binding.approval?.expires === undefined ? null : parseDuration(binding.approval.expires);
@@ -130,9 +121,8 @@ class Runner {
           capability: b.capability!,
           ...(b.additional_capabilities ? { additional_capabilities: b.additional_capabilities } : {}),
           ...(b.invokes ? { invokes: invokes as never } : {}),
-          ...(b.destination !== undefined
-            ? { destination: (args: Record<string, unknown>) => atPointer(args, b.destination!) }
-            : {}),
+          // The record's pointer, as the binding states it in the annotation.
+          ...(b.destination !== undefined ? { destination: b.destination } : {}),
           approval: policyOf(b),
           description: name,
           args: z.object({}).passthrough(),
@@ -242,7 +232,7 @@ describe("the binding's conformance statement", () => {
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(31);
+    expect(CASES).toHaveLength(32);
   });
 
   afterEach(() => resetLayer());

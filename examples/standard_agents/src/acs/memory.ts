@@ -32,6 +32,7 @@ import {
 } from '@synaptiai/acs-core';
 import { z } from 'zod';
 import { groundedTool } from './grounded.js';
+import { layerSecrets } from './layer.js';
 import type { BindingProfiles } from './profiles.js';
 
 /** The scope this store provides, and its default. */
@@ -76,7 +77,11 @@ export interface MemoryOptions {
   now?: () => number;
   /** The largest value, as the UTF-8 length of its JSON text. */
   max_value_bytes?: number;
-  /** The host's own secrets (§6.7), refused in data and keys beside the default patterns. */
+  /**
+   * The host's own secrets (§6.7), refused in data and keys beside the
+   * default patterns and the secrets registered layer-wide
+   * (`configureLayer({ secrets })`).
+   */
   secrets?: readonly string[];
   /** The tools' names (default `persist_memory` and `recall_memory`). */
   names?: { persist?: string; recall?: string };
@@ -124,7 +129,7 @@ export async function persistEntry(
   now: number,
   options: Pick<MemoryOptions, 'prefix' | 'max_value_bytes' | 'secrets'> = {},
 ): Promise<Record<string, Json>> {
-  const secrets = options.secrets ?? [];
+  const secrets = [...(options.secrets ?? []), ...layerSecrets()];
   const data = (input['data'] ?? null) as Json;
   const given = input['key'];
   if (given !== undefined && typeof given !== 'string') throw new MemoryRefusal('x-invalid-key', 'key must be a string');

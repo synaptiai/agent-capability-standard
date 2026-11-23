@@ -97,6 +97,9 @@ describe('secret_in_data', () => {
     ['a GitHub token in data', { key: 'k', data: { token: `ghp_${'a'.repeat(36)}` } }, '/token'],
     ['a bearer header in a nested member', { key: 'k', data: { req: { headers: { Authorization: 'Bearer abcdefghijklmnopqrstuvwx' } } } }, '/req/headers/Authorization'],
     ['a registered secret in the key', { key: 'pw-s3cret-value', data: 1 }, 'the key'],
+    // Headers as name/value pairs (a HAR) and [name, value] tuples (security round 1, batch 6).
+    ['a header pair', { key: 'k', data: { headers: [{ name: 'Authorization', value: 'Basic dXNlcjpodW50ZXIyMDI2' }] } }, '/headers/0/value'],
+    ['a header tuple', { key: 'k', data: { headers: [['X-Api-Key', 'k3y9f8e7d6c5b4a3']] } }, '/headers/0/1'],
   ] as const)('%s: refused, nothing stored', async (_name, input, where) => {
     const t = memoryThread();
     const refused = persistEntry(t.state, input, 0, { secrets: ['s3cret-value'] });

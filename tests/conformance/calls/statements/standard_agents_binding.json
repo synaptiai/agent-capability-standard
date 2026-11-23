@@ -3,7 +3,7 @@
   "host": "Standard Agent Specification 0.2.0 runtime",
   "standard": "1.2.0",
   "ontology": "2.2.0",
-  "covers": "calls of tools defined with groundedTool or controlTool, and the nested calls a grounded composite's code makes to a tool it lists that is defined with plain defineTool and carries a binding record (its acs annotation)",
+  "covers": "calls of tools defined with groundedTool or controlTool, and the nested calls a grounded composite's code makes, while it runs, to a tool it lists that is defined with plain defineTool and carries a binding record (its acs annotation)",
   "does_not_cover": "other calls of tools defined with plain defineTool; provider-executed tools; writes made by effects, hooks, handlers or endpoints",
   "scope": "one thread (threadId), executions ordered by the runtime",
   "boundaries": ["a new execution (flowId)", "a call outside an execution authorises nothing"],

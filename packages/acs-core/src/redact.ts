@@ -17,14 +17,23 @@
  * password, an assignment to a credential name (`password`, `token`,
  * `api_key`, ..., alone or ending a longer name) of four characters or more,
  * PEM private key bodies, AWS access key ids, GitHub and Slack tokens, `sk-`
- * keys and JWTs. In a JSON value, a member whose name ends in a credential
- * name (in any case, after any prefix: `accessToken`, `dbPassword`,
- * `x-api-key`) or in `authorization` or `cookie` (the structured
- * `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie`
- * headers) is a secret member: its value is redacted whole when it is a
- * string of four characters or more or a number, and when it is an array or
- * an object, each such string and number in it is. Booleans and null are
- * kept. A member name is redacted as any
+ * keys and JWTs, and a header or credential given as a name/value pair or a
+ * `[name, value]` tuple in JSON or code text (`"name": "Authorization",
+ * "value": "Basic ..."`, `('Cookie', 'sid=...')`). In a JSON value, a member
+ * whose name ends in a credential name (in any case, after any prefix:
+ * `accessToken`, `dbPassword`, `x-api-key`) or in `authorization`, `cookie`
+ * or `cookies` (the structured `Authorization`, `Proxy-Authorization`,
+ * `Cookie` and `Set-Cookie` headers, a HAR's cookies) is a secret member,
+ * and so is a header given as a pair: the `value` member of an object whose
+ * `name`, `key` or `header` member (in any case) is a secret member's name
+ * (HAR, Postman, Kubernetes `env`), and the second element of a two-element
+ * array whose first is one (`[["Authorization", "Basic ..."]]`). A secret
+ * member's value is redacted whole when it is a string of four characters or
+ * more or a number, and when it is an array or an object, each such string
+ * and number in it is. Booleans and null are kept. Not read as a pair: one
+ * whose value comes before its name in text, a flat `[name, value, name,
+ * value]` list (Node's `rawHeaders`), a `Cookie:` header line in text. A
+ * member name is redacted as any
  * string is: a name that holds a secret is replaced by its redacted text, and
  * one that would then repeat a name already in its object gets ` (2)`,
  * ` (3)`, ... so that no member is lost.
@@ -44,8 +53,10 @@
  * `Authorization` or `Proxy-Authorization` header's value of 8 or more token
  * characters mixing letters and digits, and an assignment to a credential
  * name whose value is quoted with no whitespace and 8 or more characters, or
- * unquoted, 12 or more characters, mixing letters and digits; prose such as
- * `token: rotate monthly` passes. `tests/conformance/secrets/credentials.json`
+ * unquoted, 12 or more characters, mixing letters and digits, and such a
+ * header's value of 8 or more token characters mixing letters and digits
+ * given as a pair or tuple in text; prose such as `token: rotate monthly`
+ * passes. `tests/conformance/secrets/credentials.json`
  * pins the rule for the three. In JSON data, which is not prose, it also
  * recognises what redaction replaces in a secret member, unless the string
  * is a placeholder: data holding a secret the host recognises is refused.
@@ -72,6 +83,27 @@ const char = (excluded: string): string => `(?:[^${excluded}\\uD800-\\uDFFF]|[\\
  */
 const SCHEME = '(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*';
 
+/** A secret member's name (see {@link SECRET_MEMBER}), quoted as JSON or code text quotes it. */
+const QUOTED_SECRET_NAME = `["'][^${NOT_WS}"']*(?:${NAMES}|authorization|cookies?)["']`;
+
+/** A header's scheme, which the value after it may start with. */
+const VALUE_SCHEME = `(?:(?:bearer|basic|token|digest|negotiate)${WS}+)?`;
+
+/**
+ * A header or credential given as a `[name, value]` tuple in JSON or code
+ * text, up to its value: `["Authorization", "Basic ...`, `('Cookie', '...`.
+ * Each attempt starts at a bracket and reads to the next quote or
+ * whitespace, so a text is read once.
+ */
+const TUPLE_TEXT = `[\\[(]${WS}*${QUOTED_SECRET_NAME}${WS}*,${WS}*["']${VALUE_SCHEME}`;
+
+/**
+ * A header or credential given as a name/value pair in JSON or code text, up
+ * to its value: `"Authorization", "value": "...`, as a HAR's `{"name": ...,
+ * "value": ...}` reads. Each attempt starts at a quote.
+ */
+const PAIR_TEXT = `${QUOTED_SECRET_NAME}${WS}*,${WS}*["']?value["']?${WS}*[:=]${WS}*["']${VALUE_SCHEME}`;
+
 /**
  * The default patterns; each marks the secret with the group `secret` (a
  * match in which it takes no part replaces nothing). Each reads a text in
@@ -90,6 +122,9 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
       `(?<secret>[^${NOT_WS}"',;]+)`,
     'dgi',
   ),
+  // A header or credential given as a name/value pair or a [name, value]
+  // tuple in text: its value, of four characters or more.
+  new RegExp(`(?:${TUPLE_TEXT}|${PAIR_TEXT})(?<secret>${char(`${NOT_WS}"',;`)}{4,})`, 'dgi'),
   // Bearer tokens.
   new RegExp(`(?<![A-Za-z0-9])bearer${WS}+(?<secret>[A-Za-z0-9._~+/=-]{8,})`, 'dgi'),
   // The password of a URL's userinfo.
@@ -115,8 +150,26 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   /(?<![A-Za-z0-9_-])(?:(?!eyJ)(?:[A-Za-z0-9_]|-(?!eyJ))*-)?(?<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/dg,
 ];
 
-/** A member name that ends in a credential name, or names a header that carries one. */
-const SECRET_MEMBER = new RegExp(`^[\\s\\S]*(?:${NAMES}|authorization|cookie)$`, 'i');
+/** A member name that ends in a credential name, or names a header that carries one (or a HAR's cookies). */
+const SECRET_MEMBER = new RegExp(`^[\\s\\S]*(?:${NAMES}|authorization|cookies?)$`, 'i');
+
+/** The member of a name/value pair that holds its name (HAR `name`, Postman `key`), and the one that holds its value. */
+const PAIR_NAME = /^(?:name|key|header)$/i;
+const PAIR_VALUE = /^value$/i;
+
+/**
+ * Whether an object is a header or credential given as a name/value pair:
+ * a `name`, `key` or `header` member holds a secret member's name, so its
+ * `value` member is a secret member.
+ */
+function secretPair(value: { readonly [key: string]: Json }): boolean {
+  return Object.entries(value).some(([k, v]) => PAIR_NAME.test(k) && typeof v === 'string' && SECRET_MEMBER.test(v));
+}
+
+/** Whether an array is a `[name, value]` tuple whose name is a secret member's: its second element is secret. */
+function secretTuple(value: readonly Json[]): boolean {
+  return value.length === 2 && typeof value[0] === 'string' && SECRET_MEMBER.test(value[0]);
+}
 
 /**
  * Whether a value in a secret member is redacted: a string of four
@@ -191,16 +244,21 @@ export function redactJson(value: Json, secrets: readonly string[] = []): { valu
       return text;
     }
     if (Array.isArray(v)) {
+      // A `[name, value]` tuple whose name is a secret member's.
+      const tuple = !secret && secretTuple(v);
       return v.map((item, i) => {
         const here = `${pointer}/${i}`;
-        if (secret && secretScalar(item)) {
+        const itemSecret = secret || (tuple && i === 1);
+        if (itemSecret && secretScalar(item)) {
           pointers.push(here);
           return MARKER;
         }
-        return walk(item, here, secret);
+        return walk(item, here, itemSecret);
       });
     }
     if (v !== null && typeof v === 'object') {
+      // A name/value pair whose name is a secret member's.
+      const pair = !secret && secretPair(v);
       const out: { [key: string]: Json } = {};
       for (const [k, item] of Object.entries(v)) {
         let name = redactWith(k, values, DEFAULT_PATTERNS);
@@ -215,7 +273,7 @@ export function redactJson(value: Json, secrets: readonly string[] = []): { valu
         }
         const here = `${pointer}/${pointerToken(name)}`;
         if (renamed) pointers.push(here);
-        const memberSecret = secret || SECRET_MEMBER.test(k);
+        const memberSecret = secret || SECRET_MEMBER.test(k) || (pair && PAIR_VALUE.test(k));
         if (memberSecret && secretScalar(item)) {
           out[name] = MARKER;
           if (!renamed) pointers.push(here);
@@ -264,6 +322,11 @@ const AUTHORIZATION_VALUE = new RegExp(
     `(?:(?:basic|bearer|token|digest|negotiate)${WS}+)?(?<value>[A-Za-z0-9._~+/=-]{8,})`,
   'gi',
 );
+// A header's or credential's value given as a name/value pair, or as a
+// tuple of exactly two (a list of names is not one), in text, after its
+// scheme: 8 or more token characters with letters and digits.
+const PAIR_VALUE_TEXT = new RegExp(`${PAIR_TEXT}(?<value>[A-Za-z0-9._~+/=-]{8,})`, 'gi');
+const TUPLE_VALUE_TEXT = new RegExp(`${TUPLE_TEXT}(?<value>[A-Za-z0-9._~+/=-]{8,})["']${WS}*[\\])]`, 'gi');
 
 const lettersAndDigits = (v: string): boolean => /[0-9]/.test(v) && /[A-Za-z]/.test(v);
 
@@ -273,7 +336,7 @@ function credentialText(text: string): boolean {
   for (const m of text.matchAll(URL_PASSWORD)) {
     if (!PLACEHOLDER.test(m.groups?.['value'] ?? '')) return true;
   }
-  for (const pattern of [UNQUOTED_VALUE, AUTHORIZATION_VALUE]) {
+  for (const pattern of [UNQUOTED_VALUE, AUTHORIZATION_VALUE, PAIR_VALUE_TEXT, TUPLE_VALUE_TEXT]) {
     for (const m of text.matchAll(pattern)) {
       if (lettersAndDigits(m.groups?.['value'] ?? '')) return true;
     }
@@ -287,9 +350,15 @@ function credentialText(text: string): boolean {
  */
 function secretMemberValue(value: Json, secret: boolean): boolean {
   if (secret && secretScalar(value)) return !(typeof value === 'string' && PLACEHOLDER.test(value));
-  if (Array.isArray(value)) return value.some((v) => secretMemberValue(v, secret));
+  if (Array.isArray(value)) {
+    const tuple = !secret && secretTuple(value);
+    return value.some((v, i) => secretMemberValue(v, secret || (tuple && i === 1)));
+  }
   if (value !== null && typeof value === 'object') {
-    return Object.entries(value).some(([k, v]) => secretMemberValue(v, secret || SECRET_MEMBER.test(k)));
+    const pair = !secret && secretPair(value);
+    return Object.entries(value).some(([k, v]) =>
+      secretMemberValue(v, secret || SECRET_MEMBER.test(k) || (pair && PAIR_VALUE.test(k))),
+    );
   }
   return false;
 }

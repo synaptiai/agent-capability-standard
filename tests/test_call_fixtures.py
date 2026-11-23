@@ -110,7 +110,7 @@ def test_the_statement_matches_the_adapter() -> None:
 
 
 def test_there_are_fixtures() -> None:
-    assert len(CASES) == 31
+    assert len(CASES) == 32
 
 
 def _output(capability: str, adapter: GroundedAgentAdapter, n: int) -> dict[str, Any]:

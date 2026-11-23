@@ -46,6 +46,7 @@ from grounded_agency import (
 from grounded_agency.capabilities import mapper as mapper_module
 from grounded_agency.capabilities.mapper import UNCLASSIFIED_TOOL
 from grounded_agency.hooks.evidence_collector import create_evidence_collector
+from grounded_agency.state.redaction import Redactor
 
 F501 = "F501 CHECKPOINT_REQUIRED: "
 F502 = "F502 APPROVAL_REQUIRED: "
@@ -1358,6 +1359,47 @@ class TestEvidenceToolInput:
         ):
             assert secret not in exported
         assert "https://api.example.com/v1" in exported
+
+    @pytest.mark.asyncio
+    async def test_header_pairs_in_the_input_are_redacted(self) -> None:
+        """Headers given as name/value pairs (a HAR) or as [name, value]
+        tuples, nested deeper than the metadata keeps as structure, never
+        reach the exported record, nor does a secret registered with the
+        store (§6.7; security round 1, batch 6: the deep value was cut to
+        its first 100 characters of repr before the store redacted it)."""
+        registered = "Zq8fK2mVx9LpR4tW"
+        store = EvidenceStore(redactor=Redactor([registered]))
+        hook = create_evidence_collector(store, include_tool_input=True)
+        call = {
+            "tool_name": "mcp__http__get",
+            "tool_input": {
+                "request": {
+                    "headers": [
+                        {
+                            "name": "Authorization",
+                            "value": "Basic dXNlcjpodW50ZXIyMDI2",
+                        },
+                        {"name": "Cookie", "value": "sid=8f3a9c2e7b1d4f60"},
+                    ],
+                    "pairs": [["X-Api-Key", "k3y9f8e7d6c5b4a3"]],
+                    "note": [{"padding": "p" * 120, "key": registered}],
+                },
+            },
+            "tool_response": {"ok": True},
+        }
+
+        await hook(call, "h2", None)
+
+        exported = json.dumps(store.to_list())
+        for secret in (
+            "dXNlcjpodW50ZXIyMDI2",
+            "8f3a9c2e7b1d4f60",
+            "k3y9f8e7d6c5b4a3",
+            registered,
+            registered[:8],
+        ):
+            assert secret not in exported
+        assert "[REDACTED]" in exported
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("keep", [False, True])

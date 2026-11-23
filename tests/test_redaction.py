@@ -109,6 +109,13 @@ _LONG_RUNS = [
     "-----BEGIN PRIVATE KEY-----",
     "-----BEGIN RSA PRIVATE KEY-----x",
     "a://b:",
+    # Pairs and tuples in text (security round 1, batch 6): an attempt
+    # starts at each quote or bracket and reads to the next one.
+    '"x',
+    '"token", "',
+    "['token', '",
+    '"cookie", "value": "Basic ',
+    '["',
 ]
 
 

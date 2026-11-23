@@ -15,6 +15,7 @@
  */
 import type { ThreadState } from '@standardagents/spec';
 import { redactJson, redactText, type EvidenceAnchor, type Json, type TRUST_CLASSES } from '@synaptiai/acs-core';
+import { layerSecrets } from './layer.js';
 import type { CapabilityId } from './ontology.js';
 
 /** The part of `ThreadState` the binding uses. */
@@ -284,17 +285,19 @@ export function stale(waiting: Unlinked, flow: string | null, step: number | nul
 
 /**
  * An entry's `error` and `evidence_anchors` with every secret replaced
- * (STANDARD v1.2.0 §6.7): always the default patterns, plus the registered
- * `secrets`. Nothing else in an entry holds a value a call received.
+ * (STANDARD v1.2.0 §6.7): always the default patterns and the secrets
+ * registered layer-wide (`configureLayer({ secrets })`), plus `secrets`.
+ * Nothing else in an entry holds a value a call received.
  */
 function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>>(
   entry: T,
   secrets: readonly string[],
 ): T {
+  const values = [...secrets, ...layerSecrets()];
   const out = { ...entry };
-  if (typeof out.error === 'string') out.error = redactText(out.error, secrets);
+  if (typeof out.error === 'string') out.error = redactText(out.error, values);
   if (Array.isArray(out.evidence_anchors)) {
-    out.evidence_anchors = redactJson(out.evidence_anchors as Json, secrets).value as Json[];
+    out.evidence_anchors = redactJson(out.evidence_anchors as Json, values).value as Json[];
   }
   return out;
 }
@@ -304,7 +307,7 @@ function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors
  * number. The count is advanced before the entry is written, so a write that
  * fails part-way leaves a gap in the numbering, never an entry that the next
  * one overwrites. The entry is redacted first (§6.7), always: `secrets` adds
- * the host's own values to the default patterns.
+ * the host's own values to the default patterns and the layer's.
  */
 export async function appendTrace(
   store: Store,
