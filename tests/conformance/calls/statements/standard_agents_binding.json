@@ -3,8 +3,8 @@
   "host": "Standard Agent Specification 0.2.0 runtime",
   "standard": "1.2.0",
   "ontology": "2.2.0",
-  "covers": "calls of tools defined with groundedTool or controlTool, and the nested calls a grounded composite's code makes, while it runs, to a tool it lists that is defined with plain defineTool and carries a binding record (its acs annotation)",
-  "does_not_cover": "other calls of tools defined with plain defineTool; provider-executed tools; writes made by effects, hooks, handlers or endpoints",
+  "covers": "calls of tools defined with groundedTool or controlTool, and the nested calls a grounded composite's code makes with state.invokeTool, while it runs, to a tool it lists that is defined with plain defineTool, carries a binding record (its acs annotation) and is registered with registerTools as the tool the runtime runs under that name",
+  "does_not_cover": "other calls of tools defined with plain defineTool, a call the runtime runs under a name a composite lists for a grounded tool included; provider-executed tools; writes made by effects, hooks, handlers or endpoints",
   "scope": "one thread (threadId), executions ordered by the runtime",
   "boundaries": ["a new execution (flowId)", "a call outside an execution authorises nothing"],
   "checkpoint_max_age": "PT10M",
@@ -22,6 +22,7 @@
     "A nested call is covered only when it consumes the composite's nesting token: a runtime that parses the arguments before the nested tool sees them, or runs it in a new execution, makes the call be checked on its own, against its own profiles' destination policies and not those of the composites' profiles",
     "Other code that calls a listed tool with exactly the arguments of a pending invocation, at the same moment, can take that invocation's one covered call",
     "The thread's key-value store is writable by any code in the thread",
+    "The layer cannot read the runtime's tool registry: registerTools is the deployment's statement of which tool the runtime runs under each name. A nested call of a listed plain tool runs only under a name registered as that tool, an invocation of a name registered as another tool than the one listed is refused, and so is one of a name not registered while a destination policy is in force; with no policy in force, a name not registered that a composite lists for a grounded tool is invoked, and a tool defined with plain defineTool that the runtime runs under it is not covered",
     "The runtime parses a call's arguments with JSON.parse before the tool sees them: an integer literal beyond ±2^53 reaches the binding rounded, and it checks and digests the rounded value, which is also what the tool runs with"
   ]
 }

@@ -24,6 +24,14 @@
  * `configureLayer` in the module that defines the agent's tools, before
  * them. Without a call no policy or profile is in force, and a destination
  * is the host's to check, as in 1.1.
+ *
+ * The tools registered here (`registerTools`, after they are defined) are
+ * the deployment's statement of which tool the runtime runs under each name
+ * (STANDARD 1.2.0 §5.18.4): the layer cannot read the runtime's registry,
+ * and a composite's code invokes a name, not the object it lists. A
+ * composite's nested call of a tool defined with plain `defineTool` runs
+ * only under a name registered as that very tool, and an invocation of a
+ * registered name whose tool is not the one the composite lists is refused.
  */
 import { checkPolicies } from '@synaptiai/acs-core';
 import type { BindingProfiles } from './profiles.js';
@@ -68,6 +76,13 @@ interface Config {
 }
 
 let config: Config = { destinations: [], profiles: null, secrets: [] };
+
+/**
+ * The tool the runtime runs under each name, as the deployment registered it
+ * (`registerTools`); `null` for a name registered with two different tools.
+ * `configureLayer` keeps it, since the tools stay defined.
+ */
+const registered = new Map<string, object | null>();
 
 /** The secrets grounded tools registered (§6.7); `configureLayer` keeps them, since the tools stay defined. */
 const toolSecrets = new Set<string>();
@@ -142,9 +157,47 @@ export function layerSecrets(): readonly string[] {
   return secretsInForce;
 }
 
-/** No policy, profile or secret in force: the configuration a realm starts with (for tests). */
+/**
+ * Register the tools the runtime runs, by the name it runs each under: the
+ * agent's tools, as the deployment registers them with the runtime (the
+ * default exports of `agents/tools/`, by file name), after they are defined
+ * (STANDARD 1.2.0 §5.18.4). The layer cannot see which tool the runtime runs
+ * under a name, so this is how it knows: a composite's nested call of a tool
+ * defined with plain `defineTool`, whose code runs without the wrapper, runs
+ * only under a name registered as the very object the composite lists (F504
+ * otherwise), and an invocation of a registered name whose tool is not the
+ * one the composite lists is refused (F504). Calls add to what earlier ones
+ * registered; a name registered with two different tools is one the layer
+ * cannot tell, and its invocations are refused. Throws, and registers
+ * nothing, when a value is not a tool definition (an object).
+ */
+export function registerTools(tools: Readonly<Record<string, object>>): void {
+  if (typeof tools !== 'object' || tools === null || Array.isArray(tools)) {
+    throw new Error('registerTools: tools must map each name the runtime knows a tool under to its definition (STANDARD 1.2.0 §5.18.4)');
+  }
+  const entries = Object.entries(tools);
+  const bad = entries.find(([, tool]) => typeof tool !== 'object' || tool === null);
+  if (bad !== undefined) {
+    throw new Error(`registerTools: '${bad[0]}' is not a tool definition (STANDARD 1.2.0 §5.18.4)`);
+  }
+  for (const [name, tool] of entries) {
+    const known = registered.get(name);
+    registered.set(name, known === undefined || known === tool ? tool : null);
+  }
+}
+
+/**
+ * The tool registered under `name` (`registerTools`): undefined when none
+ * was, null when two different tools were.
+ */
+export function registeredTool(name: string): object | null | undefined {
+  return registered.get(name);
+}
+
+/** No policy, profile, secret or registered tool in force: the configuration a realm starts with (for tests). */
 export function resetLayer(): void {
   config = { destinations: [], profiles: null, secrets: [] };
   toolSecrets.clear();
+  registered.clear();
   refreshSecrets();
 }

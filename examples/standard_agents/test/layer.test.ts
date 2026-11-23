@@ -11,7 +11,7 @@ import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { decideApproval, requestApproval } from '../src/acs/approval.js';
 import { recordToolCall } from '../src/acs/audit.js';
 import { acsAnnotation, groundedTool } from '../src/acs/grounded.js';
-import { configureLayer, destinationPolicies, layerSecrets, resetLayer } from '../src/acs/layer.js';
+import { configureLayer, destinationPolicies, layerSecrets, registerTools, resetLayer } from '../src/acs/layer.js';
 import { MemoryRefusal, persistEntry } from '../src/acs/memory.js';
 import { effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
 import { bindingProfiles, type ProfileCore } from '../src/acs/profiles.js';
@@ -156,6 +156,9 @@ describe('configureLayer', () => {
     const outer = composite('outer', 'inner', inner, { profiles });
     const t = memoryThread();
     for (const [name, tool] of Object.entries({ send_report: notify, batch, inner, outer })) t.tools.set(name, tool);
+    // Under a destination policy, a nested call runs only under a name
+    // registered as the tool listed (security round 2, batch 5).
+    registerTools({ send_report: notify, batch, inner, outer });
     const save = groundedTool({
       name: 'save',
       capability: 'checkpoint',

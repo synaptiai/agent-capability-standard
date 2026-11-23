@@ -1093,6 +1093,29 @@ here and marked so.
   has ended (code that kept the state, or an invocation the composite did
   not wait for) is refused with F504, or, for a grounded tool whose
   invocation had started, checked as a call of its own.
+- Standard Agents binding, composites and plain tools (Standard 1.2.0
+  §5.18.4, §5.18.10): a nested call of a listed tool defined with plain
+  `defineTool` runs only under a name the new `registerTools` (in
+  `src/acs/layer.ts`) registers as that very tool, since the runtime runs
+  whatever tool it registers under the name; call `registerTools` with the
+  agent's tools, by the names the runtime runs them under, once they are
+  defined. Without it such a call is refused (F504), as is an invocation of
+  any listed name registered as another tool than the one listed, or as two,
+  and, while a destination policy is in force (the layer's or a composite's
+  profiles'), an invocation of any listed name not registered, a grounded
+  tool's included.
+  Such a nested call is now checked as a grounded tool's call is: a
+  `persist` or `audit` call whose data holds a secret is refused (F504),
+  and what it returns is checked against its capability's output contract
+  (R402), the composite's grounding policies (F505) and its profiles'
+  minimum confidence (F504), so a plain tool must return its output's JSON
+  text (a plain `checkpoint` that returns other text takes none, and no
+  rollback runs on it). A composite's state refuses `queueTool` (it throws
+  the F504 refusal, which is recorded) for a tool the composite does not
+  list, a listed plain tool, and any tool once its call has ended; a listed
+  grounded or control tool is queued as before. A grounded tool with no
+  `invokes` now declares `uses: []`, so a runtime that enforces `uses`
+  refuses its `invokeTool` and `queueTool` calls.
 - Standard Agents binding, secrets (Standard 1.2.0 §6.7):
   `configureLayer({ secrets })` registers the host's own secrets layer-wide:
   every trace entry the binding writes, the audit hook's for plain tools

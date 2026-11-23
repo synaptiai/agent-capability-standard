@@ -3008,3 +3008,232 @@ binds a destination only under a policy. No version changes.
   that names `git stash` at once. No listener was needed (each form is
   refused before it runs); no CLI or nested agent was started; nothing was
   left running; the scratch repositories and trees were removed.
+
+### Batch 5: four reported defects
+
+Four defects, each reproduced by an independent verifier on bfb18b1, all in
+the Standard Agents binding's nested calls of tools defined with plain
+`defineTool` (`examples/standard_agents/src/acs/grounded.ts`,
+`nestingState`). None was fixed by an earlier batch: git log, round 1 (#27
+built the plain-tool path, #31 the "what the composite held" rule for
+grounded tools, #33 the late-invocation refusal) and round 2 batches 1 to 4
+checked, and each reported probe reproduced on fb50354 before the fix. The
+root they share: round 1 #27 had the composite's nesting state check a
+plain tool's nested call, which runs without the wrapper, by the binding
+listed, and it made only three of the checks a call of its own gets, for
+only one of the two routes the state offers, against a binding it could not
+tell was the one that runs. Each fix has tests that fail on the code before
+it: `test/nesting.test.ts`, `test/layer.test.ts` and `test/calls.test.ts`
+were run with fb50354's `grounded.ts` put back (the new `layer.ts` kept,
+which the old code ignores): of the 16 new tests and the one whose
+expectation changed (`uses`), 14 failed; the 3 that passed are controls (a
+listed grounded tool is queued, then checked as a call of its own; a plain
+tool registered as the one listed runs) and `registerTools`' own
+validation. The tests whose setup changed (below) pass on both.
+
+The Python adapter never sees a nested call (its statement's
+`does_not_cover`: "a tool's own nested calls") and refuses a composite that
+reaches a send under a policy (round 1 batch 3), so none of the four has a
+Python sibling; no call fixture changed, and both layers still agree on
+every fixture.
+
+#### 18. A nested plain persist or audit call stored a secret (medium)
+
+`invokePlain` checked a send's destination, the composite's decisions and
+the prerequisites, then ran the tool: no secret check, although §5.18.10's
+persist and audit rows require F504 and §5.18.4 says every other check
+still applies. A grounded `persist` tool refused the data; a composite
+invoking a plain one stored it, and the trace recorded an executed persist.
+
+- Fix: `invokePlain` refuses (F504, recorded `refused` with `covered_by`)
+  a nested call whose binding's capabilities include `persist` or `audit`
+  when `holdsCredential(args, composite.secrets)` (the composite's own
+  secrets and the layer's), first, as `check` does for a grounded tool.
+- Tests: `refuses a nested persist|audit call of a plain tool whose data
+  holds a secret, as a grounded one is` (a layer secret, and the default
+  patterns' password and AWS key; data without one is stored and recorded
+  executed).
+- Call fixture: none. The fixture schema states binding records, and each
+  runner builds every binding as its own tool (the binding's as grounded
+  tools, which already refused), so a fixture cannot say "a tool the layer
+  did not define"; the nesting tests pin the plain path instead.
+
+#### 19. queueTool through a composite's state bypassed the invokes list and every check (medium; sibling of round 1 #33)
+
+The nesting state replaced `invokeTool` only; `queueTool` was the runtime's
+own, bound to the raw state. A composite queued a listed plain `send` to an
+attacker host under a destination policy (and a grounded tool with no
+`invokes`, which declared no `uses`, queued any tool); the queued call ran
+after the composite with nothing to check it, and the trace held no entry.
+
+- Fix: the nesting state's `queueTool` refuses (throws the F504 refusal,
+  and records it) a tool the composite does not list, any tool once its call
+  has ended (no `covered_by`), a name the layer cannot tell the runtime runs
+  as the listed tool (#21), and a listed plain tool: a queued call runs
+  after the composite's call has ended, which §5.18.4 makes a call of its
+  own, and a plain tool has no wrapper to check it then. A listed grounded
+  or control tool is queued as before: it checks itself when it runs.
+  `groundedTool` now declares `uses: invokeNames` always, so a tool with no
+  `invokes` declares `uses: []` and a runtime that enforces `uses` refuses
+  both routes.
+- Tests: `refuses to queue a listed plain tool, whose queued call nothing
+  would check` (the reported route: nothing queued, nothing sent, refused
+  with `covered_by`), `refuses to queue a tool the composite does not list,
+  and declares an empty uses for a tool with no invokes`, `refuses to queue
+  through the state once the composite has returned`, and the control
+  `queues a listed grounded tool, whose queued call is checked as a call of
+  its own` (it asks for its own approval, F502).
+- Test changed to the new behaviour: `declares uses only for a tool with
+  invokes` became `declares its invokes as uses, and none for a tool with
+  no invokes` (`[]` where it was `undefined`).
+- Siblings checked: the state's other members run no tool of this thread.
+  `getChildThread`/`getParentThread` return another thread's state, a scope
+  of its own where a grounded tool checks itself and a plain tool's call is
+  not covered (the statement's `does_not_cover`); `runAgent` starts an
+  agent's execution, whose tools check themselves; `scheduleEffect` runs an
+  effect, whose writes the statement does not cover; `runCode` and the
+  network are the composite's own code, which §5.18.4 says `invokes` does
+  not bound.
+
+#### 20. A nested plain call's output was never checked (medium)
+
+`invokePlain` completed the entry `executed` whenever the result was not an
+error: no output contract (R402), no grounding policy (F505), no minimum
+confidence (F504), although SECURITY.md said the binding checks "the output
+contract [of] each result [it receives] as a capability output". So a plain
+`checkpoint` that returned "snapshot service unavailable, skipped" counted
+in `acs:executed`, and a later rollback passed its F503 check; a nested
+classify at confidence 0.12 passed a profile's 0.9 minimum.
+
+- Fix: on a success result of a binding that is not control-only,
+  `invokePlain` decodes `result.result` as the capability's output
+  (`decodeCapabilityOutput`, §5.18.9's consumer checks), then applies the
+  composite's grounding policies that require the capability (its own
+  `grounding` and its applied profiles', unfiltered by the composite's own
+  capability; `seen` is null, as a plain tool attests nothing) and the
+  composite's applied profiles' minimum confidence, in the order `execute`
+  applies them to a grounded tool. A refused output completes the entry
+  `failed` with R402, F505 or F504 (and `reason_code`), so the capability is
+  not counted as executed, and the refusal is what the composite's code
+  receives. An output that passes is recorded with its evidence anchors
+  and notified (§6.6), as a grounded tool's is. A plain tool has no options
+  of its own, so the composite's govern its nested calls; a nested grounded
+  call keeps its own.
+- Tests: `refuses a plain checkpoint whose output is not one (R402): it
+  takes none, so a rollback stays F503` (the reported route),
+  `checks the contract of each capability` (classify without `labels`,
+  retrieve that is not JSON, a send with no result), `applies the
+  composite's grounding policies (F505) and its profiles' minimum
+  confidence (F504)` (0.12 below 0.9, an out-of-range confidence the
+  contract refuses first, no anchors under a `kinds: [file]` policy, and an
+  output that passes, recorded with its anchors).
+- Tests changed to the new behaviour: round 1 #27's relay tests return a
+  send's output (`{"sent": true, "evidence_anchors": []}`) where they
+  returned `ok`, which is now R402.
+- Timing: a nested plain persist and retrieve with 1 MB of data and output
+  each run in 63 ms (64 KB 19 ms, 256 KB 23 ms): the secret scan and the
+  decoder are linear.
+
+#### 21. A nested plain call was checked against the record listed, not the tool the runtime runs (medium; plain-tool sibling of round 1 #31)
+
+The nesting state checked a plain tool's nested call by the annotation of
+the object in `invokes`, then called `state.invokeTool(name)`, which runs
+whatever tool the runtime registers under the name. A composite listing a
+plain `retrieve` as `lookup` ran a registered plain `send` to an attacker
+host under a policy, recorded as a covered retrieve; a registered send
+whose `destination` pointer differed sent where the listed pointer did not
+look. The verifier's sibling: a name listed for a grounded tool, under
+which the runtime runs a plain send, ran with no entry at all. #31's note
+("Plain tools listed in invokes need no change: their binding is the listed
+object's") assumed the runtime runs the listed object.
+
+- Fix: the layer cannot read the runtime's registry (`ThreadState` has
+  none, and names resolve in the runtime's namespace), so the deployment
+  states it: `registerTools({ name: tool })` (new, `src/acs/layer.ts`),
+  called with the agent's tools once they are defined; calls add up, a name
+  registered with two different tools is one the layer cannot tell, and
+  `resetLayer` clears it. A nested invocation (`invokeTool` or `queueTool`)
+  is refused with F504 before anything runs, recorded with `covered_by`,
+  when: the name is registered as another tool than the one listed, or as
+  two; the listed tool is plain and the name is not registered (its checks
+  are its listed binding's); or a destination policy is in force (the
+  layer's, or the composite's and enclosing composites' profiles') and the
+  name is not registered, whatever the listed tool, since the tool that runs
+  under an unregistered name may be one that sends anywhere (§4.4.2,
+  §5.18.10's "a call of an unbound tool, which may send anywhere"). With no
+  policy in force, a name listed for a grounded tool needs no registration:
+  the tool that runs checks itself if it is grounded, and a plain tool that
+  runs is a plain tool's call, which the statement does not cover (stated as
+  a host gap). Not taken: running the listed object's `execute` directly
+  (it would bypass the runtime's argument parsing, `uses` and hooks), and a
+  witness on the listed object (it would detect a mismatch only after the
+  other tool had run).
+- Tests: `refuses a nested plain call when no tool is registered under its
+  name` (the reported probe), `... when the tool registered under its name
+  is not the one listed`, `refuses a name registered with two different
+  tools`, `refuses an invocation of a name listed for a grounded tool when
+  another tool is registered under it` (the sibling, registered), `refuses,
+  under a destination policy, an invocation of a name listed for a grounded
+  tool that no tool is registered under` (the sibling as reported; it runs
+  once registered as the listed tool, and with no policy), the control
+  `runs the nested call where the registered tool is the one listed`, and
+  `validates what registerTools is given`.
+- Tests changed to the new behaviour: the relay tests of round 1 #27
+  register `notify`; `test/layer.test.ts`'s composite-profiles test
+  registers its tools (its profiles put a policy in force); the call
+  fixtures' runner registers each tool it builds under the name the memory
+  thread runs it under, as a deployment does.
+
+#### Documentation
+
+The binding's statement (`covers`: nested calls through `invokeTool` to a
+plain tool registered as the one listed; `does_not_cover`: a plain tool the
+runtime runs under a name listed for a grounded tool; a new host gap on
+`registerTools`), SECURITY.md's binding paragraph, the Standard Agents
+guide (composites: the list on both routes, plain tools' checks, the tool
+the runtime runs, queued calls; the guarantees row; the conformance
+paragraph, with its stale fixture counts corrected to 35 and 32), the
+binding README (the F504 and R402 rows, `registerTools`), the doc comments
+of `grounded.ts` and `layer.ts`, and CHANGELOG [Unreleased] Upgrading (the
+binding's composites and plain tools). The Standard's text was not
+changed: §5.18.4 already says every other check applies to a nested call,
+that the binding run under a listed name need not be the one listed, and
+that a call made through the composite once its call has ended is checked
+as a call of its own or refused; §5.18.10 already requires the persist,
+audit and output rows of every covered call and refusal under a policy of
+a call that may send anywhere. No version changes.
+
+#### Checks after batch 5
+
+- TypeScript: the binding's check and test (233 passed, 2 skipped; 217
+  before the batch, plus the 16 new tests); `packages/acs-core` build (no
+  source changed; the WebAssembly build reused), check and test (2002).
+- Python: `pytest tests/` (5967 passed, 18 skipped; no Python source
+  changed); every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators' `--check`
+  (the call fixtures unchanged); `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- Site: `npm run check`, `npm test` (1173). The Standard did not change and
+  the Standard Agents guide is not in the figure-gap sweep's enforced scope.
+- Old code: the three test files run with fb50354's `grounded.ts` (above):
+  14 failed, the controls passed.
+- Probes, each under `timeout 120` with the heap bounded (a 4 GB
+  address-space limit stops vitest's workers, which reserve more), inputs
+  of at most 1 MB: the reporters' five (`p1_plain_persist`,
+  `p2_queue_tool`, `p3_plain_output`, `p3b_plain_confidence`,
+  `p5_plain_name`) and the verifiers' five (`v18`, `q_queue`,
+  `v3_contract_grounding`, `p5b_siblings`, `p5c_pointer`), pointed at this
+  worktree, twice: as written (no `registerTools`), and with a memory thread
+  that registers each tool the runtime runs under its name, as a faithful
+  deployment does. In both runs no secret was stored, nothing was sent to a
+  host the policy does not allow or queued past the composite, no
+  checkpoint that saved nothing let a rollback run (F503 after it), and the
+  low-confidence and contract-breaking nested outputs were refused (F504,
+  R402); the registered run reached each specific check (F504 secret, R402,
+  F504 confidence, the mismatch refused, an allowed send run), the
+  unregistered run refused the plain calls for want of registration and
+  the verifiers' sibling A under its policy. Timing: a nested plain persist
+  and retrieve with 1 MB of data and output, 63 ms. No CLI or nested agent
+  was started; nothing was left running; the probe directory's
+  `node_modules` link and vite cache were removed.

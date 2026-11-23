@@ -7,7 +7,9 @@
  * past the ten-minute maximum age; an expired decision moves it past the
  * binding's `approval.expires`. Approvals are recorded before the call
  * (`requestApproval`, then `decideApproval` for each approver). A nested
- * call is made by the tool's own code with `state.invokeTool`. A tool
+ * call is made by the tool's own code with `state.invokeTool`, and each
+ * tool is registered (`registerTools`) under the name the memory thread
+ * runs it under. A tool
  * returns what its output contract requires, or what the call `returns`,
  * which the binding checks (§5.18.10). Fixtures whose `needs` the binding's
  * conformance statement lacks are skipped.
@@ -26,7 +28,7 @@ import {
   type ApprovalPolicy,
 } from '../src/acs/approval.js';
 import { CHECKPOINT_MAX_AGE_MS, LAYER_NAME, controlTool, groundedTool } from '../src/acs/grounded.js';
-import { configureLayer, resetLayer } from '../src/acs/layer.js';
+import { configureLayer, registerTools, resetLayer } from '../src/acs/layer.js';
 import { ONTOLOGY_VERSION, STANDARD_VERSION } from '../src/acs/ontology.js';
 import statement from '../../../tests/conformance/calls/statements/standard_agents_binding.json' with { type: 'json' };
 import statementSchema from '../../../tests/conformance/calls/schema/statement.schema.json' with { type: 'json' };
@@ -143,6 +145,9 @@ class Runner {
       }
       built.set(name, tool);
       this.t.tools.set(name, tool);
+      // The runner is the host: it registers each tool it runs under the
+      // name, as a deployment registers the agent's tools (§5.18.4).
+      registerTools({ [name]: tool });
       return tool;
     };
     for (const b of bindings) build(b.tool);

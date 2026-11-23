@@ -639,8 +639,9 @@ export default groundedTool({
   one with no binding the binding loads throws when the composite is
   defined (V107).
 - **The list is enforced twice.** The binding passes the names as the tool's
-  `uses`, so a runtime that enforces `uses` refuses an invocation outside the
-  list. The wrapper refuses one itself (F504) and records it.
+  `uses` (an empty list for a tool with no `invokes`), so a runtime that
+  enforces `uses` refuses `invokeTool` and `queueTool` outside the list. The
+  wrapper refuses one itself (F504) and records it.
 - **Nesting tokens.** Each invocation the composite's own code makes while
   it runs issues a one-shot token for that tool, those arguments and that
   execution, carrying what the composite's call held. A grounded tool that
@@ -663,11 +664,37 @@ export default groundedTool({
   invocation the composite did not wait for is no longer honoured.
 - **Tools defined with plain `defineTool`.** Their code runs without the
   wrapper, so the composite's nesting state checks an invocation of one
-  itself: a `send`'s destination, at its record's `destination` pointer,
-  against every policy in force; that the composite's decisions are valid
-  for its approval (no decision of its own can be asked); and its
-  prerequisites. It records the call before it runs and again with its
-  outcome, with the composite's `covered_by`.
+  itself, as a grounded tool checks its own call: that a `persist` or
+  `audit` call's data holds no secret; a `send`'s destination, at its
+  record's `destination` pointer, against every policy in force; that the
+  composite's decisions are valid for its approval (no decision of its own
+  can be asked); its prerequisites; and, once it has run, what it returned:
+  the output contract (R402), the composite's grounding policies that
+  require its capability (F505) and its profiles' minimum confidence
+  (F504), since the plain tool has no options of its own. A call whose
+  output is refused has run and failed: it is no prerequisite that ran, so
+  a plain `checkpoint` tool that saved nothing does not let a rollback run.
+  It records the call before it runs and again with its outcome, with the
+  composite's `covered_by`.
+- **The tool the runtime runs.** The runtime runs the tool it registers
+  under an invoked name, and the binding cannot read its registry.
+  `registerTools({ name: tool, ... })`, called once the agent's tools are
+  defined, with the tools the runtime registers (the default exports of
+  `agents/tools/`, by file name), tells it. A plain tool's checks are its
+  listed binding's, so a nested call of one runs only under a name
+  registered as that very tool; and an invocation of a name registered as
+  another tool than the one listed, or as two, is refused (F504). A name a
+  composite lists for a grounded tool needs registration only while a
+  destination policy is in force (the layer's, or the composite's
+  profiles'): the tool that runs checks itself if it is grounded, but under
+  a policy the binding invokes no name whose tool may be one that sends
+  anywhere (F504).
+- **Queued calls.** A call queued with `state.queueTool` runs after the
+  composite's call has ended, as a call of its own. The composite's state
+  queues a listed grounded or control tool, which checks itself when it
+  runs; it refuses to queue a listed plain tool, which nothing would check
+  then, a tool it does not list, and any tool once the composite's call has
+  ended: `queueTool` throws the F504 refusal, which is recorded.
 - **What `invokes` cannot bound.** The composite's own code can still write
   the store or reach the network directly, so the flags it takes from
   `invokes` are a lower bound. Declare `flags` or `additional_capabilities`
@@ -840,7 +867,7 @@ parent the model's text for an action that never ran. Bind a
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
 | | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint or an approval refuses there, so a deferred write is checked when it is scheduled |
 | A rejection is never lost to an approval made at the same moment, and a rejection the endpoint answers as recorded stops a call that is starting on that approval | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again. A rejection that arrives after the call used the approval is answered 409, and the change runs |
-| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call |
+| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused, as is a call it queues to a tool that would not check itself. A nested call of a plain tool runs only under a name `registerTools` registered as that tool, and is checked, its output included, as a grounded tool's call is | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call. `registerTools` is the deployment's statement of the runtime's registry, which the binding cannot read: with no destination policy in force, a tool defined with plain `defineTool` that the runtime runs under a name a composite lists for a grounded tool, and that `registerTools` does not name, runs as a plain tool's call |
 | Two calls never both pass on one checkpoint or one approval: one thread's checks run one at a time in a realm (`serial.ts`), and the runtime runs a thread's tool calls in order | Across realms nothing serialises the checks; the binding relies on the runtime running one execution of a thread at a time, and refuses a call outside an execution that needs a checkpoint or an approval |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and
@@ -864,12 +891,12 @@ rows of the table above that rest on SA behaviour the text does not state,
 and no check of §5.18.10 it does not apply: it applies the destination
 policies in force to every `send` tool (`configureLayer`, §4.4.2) and the
 secret checks of `persist` and `audit`, redacts every trace entry it
-writes (§6.7), and checks every grounded tool's output against its
-capability's output contract (R402, §5.18.10).
+writes (§6.7), and checks every grounded tool's output, and a nested plain
+call's, against its capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 30
+the 35 binding fixtures in the package's `test/bindings.test.ts`, and the 32
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). It skips two: one needs a call
