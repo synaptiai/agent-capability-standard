@@ -92,6 +92,73 @@ def test_pointers_escape_and_tuples() -> None:
     assert pointers == ["/a~0b/0", "/c/client_secret"]
 
 
+# Runs a pattern could read again from each of their positions: a URL
+# scheme's characters, JWT starts (`eyJ`, after `-`), PEM headers with no end,
+# base64url and hex text. Each took minutes or more at 1 MB before the
+# patterns read a run once (security round 1, batch 5).
+_LONG_RUNS = [
+    "a.",
+    "a-",
+    "a+",
+    "f0",
+    "x",
+    "eyJ",
+    "eyJ-",
+    "a-eyJ",
+    "eyJaaaaaaaa.",
+    "-----BEGIN PRIVATE KEY-----",
+    "-----BEGIN RSA PRIVATE KEY-----x",
+    "a://b:",
+]
+
+
+@pytest.mark.parametrize("unit", _LONG_RUNS)
+def test_a_long_text_is_read_in_time_in_proportion_to_its_length(unit: str) -> None:
+    import time
+
+    from grounded_agency.state.redaction import holds_credential
+
+    text = (unit * (1_000_000 // len(unit) + 1))[:1_000_000]
+    started = time.perf_counter()
+    holds_credential({"data": text})
+    redact_text(text)
+    holds_secret({"data": text})
+    # About 1 s here; the old patterns took 20 s at 100 KB.
+    assert time.perf_counter() - started < 20
+
+
+def test_the_patterns_read_a_run_once_and_match_as_before() -> None:
+    # A JWT starts at a word boundary: the run's start or after `-`.
+    assert redact_text("abc-eyJhbGciOi.eyJzdWIi.sig1") == ("abc-[REDACTED]", True)
+    assert redact_text("aeyJhbGciOi.eyJzdWIi.sig1") == (
+        "aeyJhbGciOi.eyJzdWIi.sig1",
+        False,
+    )
+    assert redact_text("aeyJ-eyJhbGciOi.x.y") == ("aeyJ-[REDACTED]", True)
+    # A PEM header with no end: nothing is replaced, and a key after it ...
+    assert redact_text("-----BEGIN PRIVATE KEY----- x") == (
+        "-----BEGIN PRIVATE KEY----- x",
+        False,
+    )
+    # ... is read as before, from the first header to the first end.
+    two = "-----BEGIN PRIVATE KEY-----a-----BEGIN PRIVATE KEY-----b-----END PRIVATE KEY-----"
+    assert redact_text(two) == (
+        "-----BEGIN PRIVATE KEY-----[REDACTED]-----END PRIVATE KEY-----",
+        True,
+    )
+    # A URL's scheme is a run of scheme characters holding a letter, read
+    # from its start, so a scheme inside a word is read too.
+    assert redact_text("x_https://deploy:hunter22@h") == (
+        "x_https://deploy:[REDACTED]@h",
+        True,
+    )
+    assert redact_text("1.2+https://deploy:hunter22@h") == (
+        "1.2+https://deploy:[REDACTED]@h",
+        True,
+    )
+    assert redact_text("12://deploy:hunter22@h") == ("12://deploy:hunter22@h", False)
+
+
 # ---------------------------------------------------------------------------
 # Where the SDK applies the redactor (STANDARD v1.2 §6.7)
 # ---------------------------------------------------------------------------

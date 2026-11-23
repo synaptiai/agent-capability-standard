@@ -65,10 +65,24 @@ const NOT_WS = ' \\t\\n\\r\\f\\v';
 /** One character (code point) of a class: a unit that is not a surrogate, or a surrogate pair. */
 const char = (excluded: string): string => `(?:[^${excluded}\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])`;
 
-/** The default patterns; each marks the secret with the group `secret`. */
+/**
+ * A URL's scheme: a run of scheme characters that holds a letter, read from
+ * the run's start (not after a scheme character), so a long run that is not
+ * followed by `://` is read once, not again from each letter in it.
+ */
+const SCHEME = '(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*';
+
+/**
+ * The default patterns; each marks the secret with the group `secret` (a
+ * match in which it takes no part replaces nothing). Each reads a text in
+ * time in proportion to its length: no run of characters is read again from
+ * each of its positions (test/redact.test.ts times them on 1 MB).
+ */
 export const DEFAULT_PATTERNS: readonly RegExp[] = [
-  // PEM private key blocks: the body.
-  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?<secret>[\s\S]+?)-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/dg,
+  // PEM private key blocks: the body. A header with no end after it matches
+  // the rest of the text with no secret (nothing is replaced), so the next
+  // header is not read again to the end of the text.
+  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?:(?<secret>[\s\S]+?)-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|[\s\S]*)/dg,
   // Authorization and Proxy-Authorization header values (after a scheme).
   new RegExp(
     `(?<![A-Za-z0-9])(?:proxy-)?authorization["']?${WS}*[:=]${WS}*["']?` +
@@ -79,7 +93,7 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   // Bearer tokens.
   new RegExp(`(?<![A-Za-z0-9])bearer${WS}+(?<secret>[A-Za-z0-9._~+/=-]{8,})`, 'dgi'),
   // The password of a URL's userinfo.
-  new RegExp(`\\b[A-Za-z][A-Za-z0-9+.-]*://[^${NOT_WS}/:@]+:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
+  new RegExp(`${SCHEME}://[^${NOT_WS}/:@]+:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
   // Assignments to a credential name, alone or at the end of a longer name
   // (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text.
   new RegExp(
@@ -94,8 +108,11 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   /\b(?<secret>xox[abprs]-[A-Za-z0-9-]{10,})/dg,
   // sk- keys.
   /\b(?<secret>sk-[A-Za-z0-9_-]{20,})/dg,
-  // JWTs: three base64url parts, the first a JSON object's encoding.
-  /\b(?<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/dg,
+  // JWTs: three base64url parts, the first a JSON object's encoding,
+  // starting at a word boundary. Read from the start of a run of base64url
+  // characters to its first `eyJ` at a word boundary (the run's start or
+  // after `-`), so a run is read once, not again from each `eyJ` in it.
+  /(?<![A-Za-z0-9_-])(?:(?!eyJ)(?:[A-Za-z0-9_]|-(?!eyJ))*-)?(?<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/dg,
 ];
 
 /** A member name that ends in a credential name, or names a header that carries one. */
@@ -119,7 +136,10 @@ function registered(secrets: readonly string[]): string[] {
   return kept.sort((a, b) => length(b) - length(a));
 }
 
-/** `text` with each match's `secret` group replaced by the marker (a marker already there stays). */
+/**
+ * `text` with each match's `secret` group replaced by the marker (a marker
+ * already there, or a match with no `secret`, stays).
+ */
 function replaceSecrets(text: string, pattern: RegExp): string {
   const flags = [...new Set(`${pattern.flags}dg`)].join('');
   let out = '';
@@ -226,14 +246,16 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
   /xox[abprs]-[A-Za-z0-9-]{10,}/,
   /sk-[A-Za-z0-9_-]{20,}/,
   new RegExp(`[Bb]earer${WS}+[A-Za-z0-9._~+/=-]{20,}`),
-  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+  // Read from the start of a run to its first `eyJ` (whose first part is
+  // the longest), so a run is read once.
+  /(?<![A-Za-z0-9_-])(?:(?!eyJ)[A-Za-z0-9_-])*eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
 ];
 const ASSIGN = `(?:${NAMES})["']?${WS}*[:=]${WS}*`;
 const QUOTED_CREDENTIAL = new RegExp(`${ASSIGN}["'][^${NOT_WS}"']{8,}["']`, 'i');
 const UNQUOTED_VALUE = new RegExp(`${ASSIGN}(?<value>[^${NOT_WS}"']{12,})`, 'gi');
 // The password of a URL's userinfo (`scheme://user:<value>@`), unless it is a
 // placeholder (`password`, `<password>`, `${DB_PASSWORD}`, `****`).
-const URL_PASSWORD = new RegExp(`[A-Za-z][A-Za-z0-9+.-]*://[^${NOT_WS}/:@]+:(?<value>[^${NOT_WS}/@]+)@`, 'g');
+const URL_PASSWORD = new RegExp(`${SCHEME}://[^${NOT_WS}/:@]+:(?<value>[^${NOT_WS}/@]+)@`, 'g');
 const PLACEHOLDER = /^(?:[$<{*[].*|password|passwd|pwd|pass|secret|token)$/i;
 // An Authorization or Proxy-Authorization header's value, after its scheme:
 // 8 or more token characters with letters and digits.

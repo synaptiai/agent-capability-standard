@@ -1097,3 +1097,265 @@ Standard's text is unchanged. No version changes.
   alone in under 0.5 s.
 - Probes: none left running; no listener was started (the verifiers'
   listener runs are cited above).
+
+### Batch 5: five reported defects
+
+Security round 1's fifth batch: five defects an independent verifier
+reproduced on 99c37dd: one in the persist skill's command hook, three in
+the Standard Agents binding (with a Python SDK sibling for one), and one in
+the redactors of both SDKs. None was fixed by an earlier batch (b61b3b1 to
+d3f11f9 did not touch them; batch 4 noted the persist hook's matcher left
+out NotebookEdit, which the verifier now counts a sibling, and it is
+closed here). Each fix has tests that fail on the code before it (run with
+the old hook body, binding sources, loaders and redactors: 30 hook test
+cases under sh and bash, 9 binding tests, the new call fixture on both
+layers, a Python and a TypeScript loader test, and the redaction tests and
+vector named below; the rest are controls that pass on both).
+
+#### 26. The persist hook scanned fragments, not what the file stores (medium)
+
+`skills/persist/SKILL.md` joined the call's `new_string`/`content`/
+`edits[].new_string` and scanned that text as written. A token split
+across two MultiEdit edits (or two Edit calls), a value whose key is in the
+unchanged text (`password: "CHANGEME"` edited to `s3cretpass99xyz`, the
+password of `postgres://app:DBPASS@...`), and a JSON-escaped token in a
+`memory.json` all passed, though the hook's own `secret_in` recognises the
+file as it is after each call; the audit hook already resolved escapes
+(round 2 #11). Sibling: NotebookEdit was neither matched nor scanned.
+
+- Fix: the command hook reads the file the path reaches (when it exists: a
+  regular file of at most 8 MB; any other existing target is refused F504,
+  one it cannot read R407), applies the call (Edit, MultiEdit's edits in
+  order, `replace_all` honoured, an empty `old_string` creating; an
+  `old_string` found only with curly quotes read as straight ones, as
+  Claude Code finds it), and scans, beside the text the call carries, the
+  lines of the result it does not hold now (by count, so a line repeated
+  counts); then both again with `\uXXXX`, `\UXXXXXXXX`, `\xXX`, `\/` and
+  `\"` decoded (split and join in jq, linear; a code point below 32 or a
+  surrogate is left as written). Lines the call leaves as they were are not
+  read again: skill hooks stay registered for the rest of the session, and
+  a whole-file scan would refuse every later edit of a file that holds a
+  credential-shaped example (a test fixture). The matcher is
+  `Edit|Write|MultiEdit|NotebookEdit`; a NotebookEdit's `notebook_path` is
+  checked as a path and its `new_source` scanned.
+- Timing: a 1 MB file of 30,000 lines with one Edit takes 0.4 s, an 8.7 MB
+  file 2.4 s; 1 MB of nothing but `A` escapes about 6 s (inside the
+  30 s timeout, which blocks: `onFailure: block`). jq's object update in a
+  `reduce` with a nested state copied the state each step (17 s for 30,000
+  lines), so the line counts are two flat maps compared once.
+- Tests (`TestPersistCommandHook`, sh and bash):
+  `test_blocks_a_credential_the_file_holds_after_the_call` (six: the
+  MultiEdit split, the second of two Edit calls, a password and a URL
+  password whose context is in the file, `replace_all` with a second edit,
+  a curly-quoted `old_string`), `test_blocks_a_credential_a_reader_decodes`
+  (six escapes), `test_blocks_a_credential_a_notebook_edit_carries`,
+  `test_blocks_a_target_it_will_not_read`, and the matcher test with
+  NotebookEdit: 30 failed on the old body; controls
+  `test_allows_an_edit_that_adds_no_credential` (a file with a token example
+  edited elsewhere, a key edited to prose, an `old_string` not found),
+  `test_reads_a_large_file_in_bounded_time` and
+  `test_reads_a_file_with_nul_bytes_quietly` (the scan text drops NUL
+  bytes, of which bash's command substitution warns on stderr).
+- Not read (stated in SECURITY.md §5.4, the persist row): a credential
+  split across lines (a YAML escaped line break included; the scan, like
+  `secret_in`, reads a line at a time), escapes no reader of JSON or YAML
+  resolves (octal), a file written by another tool (the skill allows `Read`
+  and `Edit`; the plugin's pre-tool-use hook gates any other write as
+  `mutate`).
+
+#### 27. Nested calls of tools the binding did not define went unchecked (medium)
+
+`groundedTool` accepted in `invokes` a tool defined with plain `defineTool`,
+annotation-only or unbound, and treated it as the strictest case; but
+`nestingState.invokeTool` only issued tokens, which such a tool never takes.
+Under `configureLayer({destinations})`, a grounded `relay` approved once
+sent through `notify` (a record with `capability: send`, `destination:
+/to`) and through an unbound `fetch` to an attacker URL, and the trace held
+neither call. The adapter refuses such a composite (F504 under a policy;
+V107 for an unbound invoked name).
+
+- Fix (`grounded.ts`): a listed tool with no binding the layer loads (no
+  `acs` annotation, or one that does not load on its own: a malformed
+  record, a record with `invokes`) makes `groundedTool` throw V107
+  (§5.18.4's table), as the Python loader and `checkBindings` do. A listed
+  tool defined with plain `defineTool` and a loadable record is seen at
+  the invocation, so the composite's nesting state checks it as a call of
+  its own where the composite's approval and checkpoint do not reach: a
+  `send`'s destination, at the record's `destination` pointer, against the
+  layer's policies, the composite's profiles' and those enclosing it (no
+  pointer, or a value that is not a string: F504); that the decisions that
+  approved the composite are valid for the record's approval (F502: no
+  decision of its own can be asked of a tool the binding does not wrap);
+  its prerequisites (F501/F503/V102). It records the call before it runs
+  (`started`, `covered_by`) and completes it (`executed`, or `failed` on an
+  error result), a record that cannot be written refusing the call (R407).
+- Tests (`test/nesting.test.ts`): the nested send under a policy (refused
+  to the attacker, run to an allowed host, both recorded with
+  `covered_by`), a record with no destination argument, a nested call
+  recorded with no policy, and V107 for an unannotated tool, a record that
+  does not load and a record with `invokes`: 4 failed before.
+- Statement: `covers` names these nested calls; `does_not_cover` the
+  other calls of plain tools.
+
+#### 28. memoryTools could not take profiles (medium)
+
+`memoryTools()` built its two grounded tools with no `profiles` or
+`grounding`, and profiles applied only per tool; `configureLayer` took
+only a profile policy's destinations. Under the shipped healthcare profile
+(`checkpoint_policy` persist always, `require_human: low`), a host
+`persist` tool was refused F502 while `persist_memory` stored patient data
+with no checkpoint, approval or person; `memoryTools({profiles})` dropped
+the option.
+
+- Fix: `MemoryOptions` gains `profiles` and `grounding`, forwarded to both
+  tools (and `recall` registers `secrets` too). The layer applies profiles
+  layer-wide: `configureLayer({ profiles })` (a `BindingProfiles`) puts
+  their destinations among the policies in force, and every `groundedTool`
+  defined after it applies them beside its own (flags, person, grounding,
+  minimum confidence); `config_sha256` covers them (`layer_profiles`). A
+  tool's flags are computed when it is defined, so a tool whose layer
+  profiles are not the ones in force at its call (configured, changed or
+  reset after it was defined) refuses the call with R407 rather than run
+  without them (§5.21.1). `configureLayer({ profilePolicy })` throws for a
+  policy that sets a minimum confidence or grounding policies, which it
+  would not put in force (§5.21.4).
+- Tests (`test/memory.test.ts`): the profiles given to `memoryTools` (F502
+  with a person required, the annotation's flags raised), the layer's (F502,
+  then R407 after `resetLayer`, and R407 for tools defined before a profile
+  was put in force), and the `profilePolicy` refusal: 3 failed before.
+- Python sibling: none; `GroundedAgentConfig.profiles` already applies to
+  every call the adapter sees.
+
+#### 29. Redaction and refusal patterns read runs again from each position (low)
+
+The URL-password patterns (`\b[A-Za-z][A-Za-z0-9+.-]*://` in redaction,
+the same with no `\b` in the refusal rule), the JWT patterns (an `eyJ` at
+each word boundary, or anywhere for the refusal shape) and the PEM pattern
+(a lazy body to the end of the text from each header with no end) were
+read from every position of a long run: 1 MB took minutes to hours in both
+SDKs (Python `holds_credential` of `'f0'*n`: 8.2 s at 100 KB; TypeScript
+`holdsCredential` of `'eyJ'*n`: 40.9 s at 200 KB), on model-chosen data in
+the binding's check, `persistEntry`, every trace entry and anchor, and the
+adapter's PreToolUse. The verifier found the hook timeout fails closed; the
+cost remained.
+
+- Fix (`redaction.py`, `redact.ts`, identically): a URL's scheme is read
+  from the start of its run (`(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z]
+  [A-Za-z0-9+.-]*://`, a run holding a letter); a JWT from the start of a
+  run of base64url characters to its first `eyJ` at a word boundary (the
+  run's start or after `-`), the refusal shape to its first `eyJ`; and a PEM
+  header with no end after it matches the rest of the text with no
+  `secret` group, which replaces nothing (`_replace_secret` and
+  `replaceSecrets` keep such a match). A differential run of the old and
+  new patterns on 200,000 to 300,000 random strings over each pattern's
+  alphabet found no difference, but one in redaction: the URL rule now
+  reads a scheme whose run starts with `_` or a digit before its letter
+  (`x_https://u:pw@h`), which the old `\b` skipped, so redaction replaces
+  that password too (a superset; the refusal rule already read it).
+  Measured after: 1 MB of each adversarial shape in 0.1 to 0.6 s per call
+  (`holds_credential`, `redact_text`, `holds_secret`), linear in a fuzz of
+  every pattern over pairs of 40 atoms.
+- The shell scan (`secret_scan.sh`) uses `grep -E`, which GNU grep runs as
+  a DFA: 1 MB of each shape in 0.03 to 0.17 s, so it is unchanged.
+- Tests: `tests/test_redaction.py::test_a_long_text_is_read_in_time_in_proportion_to_its_length`
+  (twelve 1 MB shapes through `holds_credential`, `redact_text` and
+  `holds_secret`, under 20 s; the old patterns ran past 100 s on `eyJ-`) and
+  `test_the_patterns_read_a_run_once_and_match_as_before`; the same in
+  `packages/acs-core/test/redact.test.ts` (the old patterns held the event
+  loop past 110 s); vectors `url_userinfo_scheme_in_a_word` (failed on both
+  old redactors), `jwt_after_dash` and `pem_header_without_end` (pins of
+  the rewrite) in `tests/conformance/secrets/redact.json`.
+
+#### 30. A composite's approval covered nested calls needing more (medium)
+
+`groundedTool` took a composite's approval policy from its own options, so
+bob, holding no role, approved `batch` once and its nested `write_prod`
+(`role: admin`, two approvers, 60 s expiry) ran covered; a decision two
+hours old covered it; through `outer` likewise. The adapter gave `batch` no
+approval policy at all, so one permission prompt ran a binding it can never
+allow directly.
+
+- Fix (Standard §5.18.4, a new bullet): a composite's approval covers a
+  nested call only as a decision valid for the nested binding's approval
+  too, so a composite's call asks for the strictest of its own and,
+  transitively, each binding it lists (the most `min_approvers`, the
+  shortest `expires`, a `role` one of them sets, its own first); a layer
+  that attributes a nested call the composite's decisions do not meet
+  checks it as a call of its own.
+  - Python (`bindings.py`, `join_approval`): `load_bindings` joins
+    `ToolMapping.approval` transitively, through mappings known from
+    earlier loads; the adapter's existing rules then refuse a composite
+    that reaches two approvers or a role (F502) and apply the shortest
+    expiry.
+  - TypeScript package (`joinApproval`): `checkBindings`' effective
+    `approval` is the same join.
+  - Binding: the composite's policy is the join (`POLICY` per tool, a
+    record's approval for a plain tool); the nesting token carries the
+    request whose decisions approved the composite (its own, or the one
+    that covered it), and a nested call is covered only when
+    `decisionsCover` finds them valid for its own policy at the call (the
+    role the request was asked under, enough distinct approvers counted
+    within the shorter expiry). `requestApproval` starts a new round when
+    the live request was asked under a weaker policy than the call's (a
+    request a host made with `{}`, or one made before the join), so
+    decisions given under the weaker one decide nothing.
+- Tests: call fixture `composite_takes_invoked_approval` (31 fixtures; one
+  approver for a composite whose invoked binding needs two: F502 on both
+  layers, both routes of the adapter; failed on both old layers);
+  `tests/test_tool_bindings.py::test_a_composite_takes_the_approval_of_its_invokes_transitively`;
+  the `checkBindings` join test in `packages/acs-core/test/bindings.test.ts`;
+  `test/nesting.test.ts`: the role, approvers and expiry asked of
+  `batch` and `outer` (bob's `{}` request refused, bob not allowed to decide
+  the joined one, two admins run it covered) and a nested call checked on
+  its own (an `ops` composite, and an admin approval lapsed by the nested
+  call): 2 failed before.
+
+#### Siblings checked
+
+- Plugin hooks: the pre-tool-use hook gates every Write, Edit, MultiEdit and
+  NotebookEdit as `mutate` whatever the persist hook reads; unchanged.
+- The audit skill's Edit hook refuses any edit of the records file, so it
+  needs no after-the-call scan.
+- Python adapter: nested calls are never seen; a composite reaching a send
+  under a policy is refused and an unbound invoked name is V107 (batch 3),
+  so #27 has no sibling there; #28's profiles are layer-wide already.
+- `persistEntry` and the Python memory store scan before their size check
+  (the vectors pin `secret_in_data` first); with linear patterns 1 MB takes
+  under a second, so the order stays.
+
+#### Documentation
+
+Standard §5.18.4 (the approval bullet); SECURITY.md (§5.4 persist rows and
+matcher, the redaction bullet, the class SL paragraph); the binding's
+statement (`covers`, `does_not_cover`); the Standard Agents guide (sends and
+memory, composites, `profiles`); the SDK guide (a composite's approval);
+hooks/README and the persist skill (what the hook scans); the module
+docstrings of the redactors, `layer.ts`, `memory.ts`, `grounded.ts` and
+`approval.ts`; CHANGELOG (Upgrading: SDK, redaction, plugin persist hook,
+`checkBindings`, binding composites and profiles; the fixture count). No
+version changes.
+
+#### Checks after batch 5
+
+The batch was finished in a second session (the first was cut off after
+changing code): the uncommitted changes were reviewed against the five
+defects, the tests were run again on the old hook body, binding sources and
+loaders (28 hook cases plus the 2 NotebookEdit matcher cases, and 9 binding
+tests, failed), the healthcare profile was run through `memoryTools` on the
+real WebAssembly core (persist and recall F502 with `person_required`, both
+from the tool's own profiles and the layer's), and the persist row of
+SECURITY.md §5.4 now states what the scan does not read.
+
+- Python: `pytest tests/` (5246 passed, 18 skipped); ruff check and format
+  with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; the generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check, test (1896; the
+  WebAssembly build reused); the binding's check and test (201, 2 skipped).
+- Site: `npm run check`, `npm test` (1173), `npm run build` (check-dist
+  passed); `check-runs.mjs` on `/spec/1.2.0/` and `/guides/claude-agent-sdk/`
+  with the 1248 headless shell (CI pins 1254): longest enforced runs 1795
+  and 1798 px, in §4.4 and the SDK guide's evidence stores, neither a part
+  this batch changed.
+- Probes: none left running.

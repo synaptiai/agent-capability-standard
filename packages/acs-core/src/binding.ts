@@ -51,6 +51,28 @@ export interface BindingApproval {
   expires_ms?: number;
 }
 
+/**
+ * The approval a composite's call needs (§5.18.4): its approval covers its
+ * nested calls, so it is the strictest of its own and each invoked
+ * binding's, the most approvers, the shortest expiry and a role one of them
+ * sets (the first given). Undefined when neither sets one.
+ */
+export function joinApproval(
+  a: BindingApproval | undefined,
+  b: BindingApproval | undefined,
+): BindingApproval | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  const role = a.role ?? b.role;
+  const expires =
+    a.expires_ms === undefined ? b.expires_ms : b.expires_ms === undefined ? a.expires_ms : Math.min(a.expires_ms, b.expires_ms);
+  return {
+    min_approvers: Math.max(a.min_approvers, b.min_approvers),
+    ...(role !== undefined ? { role } : {}),
+    ...(expires !== undefined ? { expires_ms: expires } : {}),
+  };
+}
+
 /** A tool binding record, as `schemas/interop/tool_binding.schema.json` describes it. */
 export interface ToolBindingRecord {
   tool: string;
@@ -87,6 +109,10 @@ export interface BoundTool extends SafetyFlags {
   control: boolean;
   domain?: string;
   classifier?: string;
+  /**
+   * The approval a call needs (§5.18.7): the record's, joined for a
+   * composite with each invoked binding's, transitively (§5.18.4).
+   */
   approval?: BindingApproval;
   destination?: string;
 }
@@ -633,10 +659,24 @@ export function checkBindings(
     return flags;
   };
 
+  // The approval a call needs: a composite's joins, transitively, that of
+  // each binding it invokes (§5.18.4), as its flags do.
+  const approvals = new Map<string, BindingApproval | undefined>();
+  const resolveApproval = (tool: string): BindingApproval | undefined => {
+    if (approvals.has(tool)) return approvals.get(tool);
+    const binding = candidates.get(tool);
+    if (!binding) return known[tool]?.approval;
+    let approval = binding.approval;
+    for (const name of binding.invokes) approval = joinApproval(approval, resolveApproval(name));
+    approvals.set(tool, approval);
+    return approval;
+  };
+
   // 7. Prerequisites of the capabilities each record names.
   const effective: Record<string, BoundTool> = {};
   for (const [tool, binding] of candidates) {
     const capabilities = capabilitiesOf(binding) as CapabilityId[];
+    const approval = resolveApproval(tool);
     effective[tool] = {
       ...resolve(tool),
       capabilities,
@@ -645,7 +685,7 @@ export function checkBindings(
       control: binding.control,
       ...(binding.domain !== undefined ? { domain: binding.domain } : {}),
       ...(binding.classifier !== undefined ? { classifier: binding.classifier } : {}),
-      ...(binding.approval !== undefined ? { approval: binding.approval } : {}),
+      ...(approval !== undefined ? { approval } : {}),
       ...(binding.destination !== undefined ? { destination: binding.destination } : {}),
     };
   }

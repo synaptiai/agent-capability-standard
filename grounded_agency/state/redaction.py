@@ -15,7 +15,8 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
 
 - ``Authorization`` and ``Proxy-Authorization`` header values;
 - ``Bearer`` tokens (8 or more token characters);
-- the password of a URL's userinfo (``scheme://user:<secret>@``);
+- the password of a URL's userinfo (``scheme://user:<secret>@``, the
+  scheme a run of scheme characters that holds a letter);
 - an assignment to a credential name (``password``, ``passwd``, ``pwd``,
   ``secret``, ``token``, ``api_key``, ``access_key``, ``client_secret``,
   ``private_key``, alone or at the end of a longer name such as
@@ -98,13 +99,19 @@ _NAMES = (
 # they are in an ECMAScript pattern without the `u` flag.
 _WS = r"[ \t\n\r\f\v]"
 _NOT_WS = r" \t\n\r\f\v"
+# A URL's scheme: a run of scheme characters that holds a letter, read from
+# the run's start (not after a scheme character), so a long run that is not
+# followed by `://` is read once, not again from each letter in it.
+_SCHEME = r"(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*"
 
 DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
-    # PEM private key blocks: the body.
+    # PEM private key blocks: the body. A header with no end after it
+    # matches the rest of the text with no secret (nothing is replaced), so
+    # the next header is not read again to the end of the text.
     re.compile(
         r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
-        r"(?P<secret>[\s\S]+?)"
-        r"-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----",
+        r"(?:(?P<secret>[\s\S]+?)"
+        r"-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|[\s\S]*)",
         re.ASCII,
     ),
     # Authorization and Proxy-Authorization header values (after a scheme).
@@ -121,7 +128,7 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
     # The password of a URL's userinfo.
     re.compile(
-        rf"\b[A-Za-z][A-Za-z0-9+.-]*://[^{_NOT_WS}/:@]+:(?P<secret>[^{_NOT_WS}/@]+)@",
+        rf"{_SCHEME}://[^{_NOT_WS}/:@]+:(?P<secret>[^{_NOT_WS}/@]+)@",
         re.ASCII,
     ),
     # Assignments to a credential name, alone or at the end of a longer name
@@ -142,12 +149,20 @@ DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(?P<secret>xox[abprs]-[A-Za-z0-9-]{10,})", re.ASCII),
     # sk- keys.
     re.compile(r"\b(?P<secret>sk-[A-Za-z0-9_-]{20,})", re.ASCII),
-    # JWTs: three base64url parts, the first a JSON object's encoding.
+    # JWTs: three base64url parts, the first a JSON object's encoding,
+    # starting at a word boundary. Read from the start of a run of base64url
+    # characters to its first `eyJ` at a word boundary (the run's start or
+    # after `-`), so a run is read once, not again from each `eyJ` in it.
     re.compile(
-        r"\b(?P<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)", re.ASCII
+        r"(?<![A-Za-z0-9_-])(?:(?!eyJ)(?:[A-Za-z0-9_]|-(?!eyJ))*-)?"
+        r"(?P<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)",
+        re.ASCII,
     ),
 )
-"""The default patterns; each marks the secret with the group ``secret``."""
+"""The default patterns; each marks the secret with the group ``secret`` (a
+match in which it takes no part replaces nothing). Each reads a text in time
+in proportion to its length: no run of characters is read again from each of
+its positions (tests/test_redaction.py times them on 1 MB)."""
 
 # Credential shapes a refusal relies on (holds_credential): the formats of
 # keys and tokens, no prose. hooks/secret_scan.sh holds the same ones.
@@ -159,7 +174,13 @@ _CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"xox[abprs]-[A-Za-z0-9-]{10,}", re.ASCII),
     re.compile(r"sk-[A-Za-z0-9_-]{20,}", re.ASCII),
     re.compile(rf"[Bb]earer{_WS}+[A-Za-z0-9._~+/=-]{{20,}}", re.ASCII),
-    re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}", re.ASCII),
+    # Read from the start of a run to its first `eyJ` (whose first part is
+    # the longest), so a run is read once.
+    re.compile(
+        r"(?<![A-Za-z0-9_-])(?:(?!eyJ)[A-Za-z0-9_-])*"
+        r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
+        re.ASCII,
+    ),
 )
 _ASSIGN = rf"(?:{_NAMES})[\"']?{_WS}*[:=]{_WS}*"
 # A quoted value with no whitespace, 8 or more characters.
@@ -172,7 +193,7 @@ _UNQUOTED_VALUE = re.compile(
 )
 # The password of a URL's userinfo (``scheme://user:<value>@``) ...
 _URL_PASSWORD = re.compile(
-    rf"[A-Za-z][A-Za-z0-9+.-]*://[^{_NOT_WS}/:@]+:(?P<value>[^{_NOT_WS}/@]+)@",
+    rf"{_SCHEME}://[^{_NOT_WS}/:@]+:(?P<value>[^{_NOT_WS}/@]+)@",
     re.ASCII,
 )
 # ... unless it is a placeholder (``password``, ``<password>``, ``${PW}``,
@@ -405,9 +426,9 @@ def _plain(value: Any) -> Any:
 
 def _replace_secret(m: re.Match[str]) -> str:
     """The match with its ``secret`` group replaced by the marker (a marker
-    already there stays as it is)."""
+    already there, or a match with no ``secret``, stays as it is)."""
     secret = m.group("secret")
-    if secret == MARKER:
+    if secret is None or secret == MARKER:
         return m.group(0)
     start, end = m.start("secret") - m.start(), m.end("secret") - m.start()
     whole = m.group(0)

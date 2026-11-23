@@ -9,7 +9,7 @@ context: fork
 agent: general-purpose
 hooks:
   PreToolUse:
-    - matcher: "Edit|Write|MultiEdit"
+    - matcher: "Edit|Write|MultiEdit|NotebookEdit"
       hooks:
         - type: prompt
           prompt: |
@@ -21,9 +21,10 @@ hooks:
             PERSIST DATA VALIDATION CHECK
 
             The tool call follows this prompt as JSON; the target file is
-            tool_input.file_path and the content to write is tool_input.new_string
-            (Edit), tool_input.content (Write) or each tool_input.edits[].new_string
-            (MultiEdit).
+            tool_input.file_path (tool_input.notebook_path for NotebookEdit) and the
+            content to write is tool_input.new_string (Edit), tool_input.content
+            (Write), each tool_input.edits[].new_string (MultiEdit) or
+            tool_input.new_source (NotebookEdit).
 
             Verify before persisting:
             1. NO credentials, API keys, or secrets in content
@@ -45,12 +46,12 @@ hooks:
           command: |
             # Code-decided checks (STANDARD 1.2.0 §5.18.10): the target file is not
             # a system or credential file, and the content holds no credential
-            # (§6.7). Claude Code passes the tool call (Edit, Write or MultiEdit)
-            # as JSON on stdin, read once here; exit 2 blocks the call and the
+            # (§6.7). Claude Code passes the tool call (Edit, Write, MultiEdit or
+            # NotebookEdit) as JSON on stdin, read once here; exit 2 blocks the call and the
             # reason on stderr is shown to Claude. A call that cannot be read is
             # blocked.
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            TARGET="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            TARGET="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             case "$TARGET" in
               "~/"*) TARGET="${HOME}/${TARGET#??}" ;;
             esac
@@ -109,9 +110,66 @@ hooks:
                 exit 2
               fi
             done
-            # The content written: an Edit's new_string, a Write's content, or
-            # each new_string of a MultiEdit's edits
-            CONTENT="$(printf '%s' "$INPUT" | jq -r '[.tool_input.new_string, .tool_input.content, (.tool_input.edits | if type == "array" then .[] | objects | .new_string else empty end)] | map(select(type == "string")) | join("\n")' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # What the call stores (§5.18.10, §6.7): the text it carries (an Edit's
+            # new_string, a Write's content, each new_string of a MultiEdit's edits,
+            # a NotebookEdit's new_source), and the lines of the file as it will be
+            # after the call that the file does not hold now (the edits applied in
+            # order, replace_all honoured, curly quotes read as straight ones when an
+            # old_string is found only so), so a credential whose key, or whose other
+            # half, is already in the file, or that two edits or calls build, is read
+            # whole; and each again with the escapes a reader resolves (\uXXXX,
+            # \UXXXXXXXX, \xXX, \/ and \") decoded. The file is read only when it is
+            # a regular file of at most 8 MB; any other existing target is refused.
+            BEFORE=/dev/null
+            if [ -n "$REAL" ] && { [ -e "$REAL" ] || [ -L "$REAL" ]; }; then
+              [ -f "$REAL" ] || { echo "F504 CONSTRAINT_VIOLATED: Cannot persist to something that is not a regular file" >&2; exit 2; }
+              SIZE="$(wc -c < "$REAL" 2>/dev/null | tr -d ' ')" || SIZE=""
+              case "$SIZE" in ''|*[!0-9]*) echo "R407 SAFETY_CHECK_FAILED: cannot read the file the call writes" >&2; exit 2 ;; esac
+              [ "$SIZE" -le 8388608 ] || { echo "F504 CONSTRAINT_VIOLATED: the file is over 8 MB, more than this check reads; persist to a smaller file" >&2; exit 2; }
+              BEFORE="$REAL"
+            fi
+            CONTENT="$(printf '%s' "$INPUT" | jq -r --rawfile before "$BEFORE" '
+              def hexval: reduce explode[] as $c (0; . * 16 + (if $c >= 97 then $c - 87 elif $c >= 65 then $c - 55 else $c - 48 end));
+              def ishex: explode | all(. >= 48 and . <= 57 or . >= 65 and . <= 70 or . >= 97 and . <= 102);
+              def unescape($mark; $n):
+                if index($mark) == null then . else
+                  split($mark) as $p
+                  | $p[0] + ([$p[1:][] | .[:$n] as $h
+                      | (if ($h | length) == $n and ($h | ishex) then $h | hexval else -1 end) as $v
+                      | if $v >= 32 and ($v < 55296 or ($v > 57343 and $v < 1114112))
+                        then ([$v] | implode) + .[$n:] else $mark + . end] | join(""))
+                end;
+              def decoded: unescape("\\u"; 4) | unescape("\\U"; 8) | unescape("\\x"; 2)
+                | split("\\/") | join("/") | split("\\\"") | join("\"");
+              def straight: split("\u2018") | join("\u0027") | split("\u2019") | join("\u0027")
+                | split("\u201c") | join("\"") | split("\u201d") | join("\"");
+              def replaced($o; $n; $all):
+                split($o) as $p
+                | if ($p | length) < 2 then null
+                  elif $all then $p | join($n)
+                  else $p[0] + $n + ($p[1:] | join($o)) end;
+              def apply($e):
+                ($e.old_string) as $o | ($e.new_string) as $n
+                | if ($o | type) != "string" or ($n | type) != "string" then .
+                  elif $o == "" then $n + .
+                  else replaced($o; $n; $e.replace_all == true)
+                    // (straight | replaced($o | straight; $n; $e.replace_all == true))
+                    // . end;
+              def counts: reduce (split("\n")[]) as $l ({}; .[$l] += 1);
+              def added($b; $a):
+                ($b | counts) as $had
+                | $a | counts | to_entries | map(select(.value > ($had[.key] // 0)) | .key) | join("\n");
+              .tool_input as $t
+              | ([$t.new_string, $t.content, $t.new_source,
+                  (($t.edits | if type == "array" then .[] else empty end) | objects | .new_string)]
+                 | map(select(type == "string")) | join("\n")) as $carried
+              | (if ($t.content | type) == "string" then $t.content
+                 elif ($t.edits | type) == "array" then reduce ($t.edits[] | objects) as $e ($before; apply($e))
+                 elif ($t.old_string | type) == "string" then $before | apply($t)
+                 else $before end) as $after
+              | ($carried + "\n" + added($before | straight; $after | straight)) as $text
+              | ($text + "\n" + ($text | decoded)) | split("\u0000") | join(" ")
+            ' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call or the file it writes (jq is required)" >&2; exit 2; }
             # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
             # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
             SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
@@ -458,7 +516,7 @@ assumptions:
 - `risk`: low
 
 **Capability-specific rules:**
-- NEVER persist credentials, API keys, or secrets. Code enforces it: the skill's PreToolUse command hook blocks an `Edit` whose content holds what looks like a credential (`F504 CONSTRAINT_VIOLATED:`, STANDARD v1.2 §6.7, §5.18.10). It matches credential shapes (key and token formats, PEM private keys, bearer tokens, a URL's userinfo password that is not a placeholder, an `Authorization` header's value mixing letters and digits) and assignments to a credential name (`password`, `token`, `api_key`, ...) whose value is quoted with no whitespace and 8 or more characters, or unquoted, 12 or more characters, mixing letters and digits; prose such as `token: rotate monthly` passes. The scan is `hooks/secret_scan.sh`, copied into the hook
+- NEVER persist credentials, API keys, or secrets. Code enforces it: the skill's PreToolUse command hook blocks an `Edit`, `Write`, `MultiEdit` or `NotebookEdit` whose content holds what looks like a credential (`F504 CONSTRAINT_VIOLATED:`, STANDARD v1.2 §6.7, §5.18.10): the text it carries, and the lines the file will hold after it that it does not hold now (so a key already in the file, or a token two edits build, counts), each also with its `\uXXXX`, `\xXX`, `\/` and `\"` escapes decoded. It matches credential shapes (key and token formats, PEM private keys, bearer tokens, a URL's userinfo password that is not a placeholder, an `Authorization` header's value mixing letters and digits) and assignments to a credential name (`password`, `token`, `api_key`, ...) whose value is quoted with no whitespace and 8 or more characters, or unquoted, 12 or more characters, mixing letters and digits; prose such as `token: rotate monthly` passes. The scan is `hooks/secret_scan.sh`, copied into the hook
 - NEVER persist PII without explicit user consent
 - Validate content does not contain executable code
 - Preserve existing file structure and formatting

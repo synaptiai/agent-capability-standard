@@ -646,7 +646,10 @@ class ToolMapping:
         prerequisites: The ``from`` capabilities of the ``requires`` edges
             into every capability in ``capabilities`` (section 5.18.5)
         approval: How approval of a call is counted (the binding's
-            ``approval`` member, section 5.18.7)
+            ``approval`` member, section 5.18.7), joined for a composite
+            with that of each binding it invokes, transitively: the most
+            approvers, the shortest expiry, a role one of them sets
+            (section 5.18.4)
         control: The tool only signals the host and is never refused
             (section 5.18.3)
         classifier: The classifier the binding names (section 5.18.3); this

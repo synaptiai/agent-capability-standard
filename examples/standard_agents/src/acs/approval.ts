@@ -194,8 +194,25 @@ async function readDecisions(store: Store, record: ApprovalRecord): Promise<Appr
 }
 
 /**
+ * Whether a request asked under one policy is at least as strict as
+ * `policy`: as many approvers or more, the same role when `policy` sets one,
+ * and an expiry no longer than its own.
+ */
+export function asStrictAs(record: Pick<ApprovalRecord, 'min_approvers' | 'role' | 'expires_ms'>, policy: ApprovalPolicy): boolean {
+  return (
+    record.min_approvers >= (policy.min_approvers ?? 1) &&
+    (policy.role === undefined || record.role === policy.role) &&
+    (policy.expires_ms === undefined || (record.expires_ms !== undefined && record.expires_ms <= policy.expires_ms))
+  );
+}
+
+/**
  * Record that `shown` needs approval, unless a live request for exactly these
- * values already exists. Returns the request.
+ * values already exists, asked under a policy at least as strict as
+ * `policy`. Returns the request. A live request asked under a weaker policy
+ * (fewer approvers, no role or another, a longer expiry: by other code, or
+ * before a composite took the approval of a tool it invokes, §5.18.4)
+ * decides nothing for a call under `policy`, so a new round starts.
  */
 export async function requestApproval(
   store: Store,
@@ -207,7 +224,7 @@ export async function requestApproval(
   const existing = await readApproval(store, digest);
   if (existing) {
     const state = approvalState(existing, now);
-    if (state === 'pending' || state === 'approved') return existing;
+    if ((state === 'pending' || state === 'approved') && asStrictAs(existing, policy)) return existing;
   }
   const history: ApprovalRound[] = existing
     ? [

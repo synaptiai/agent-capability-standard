@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Json } from '../src/canonical.js';
-import { DEFAULT_PATTERNS, holdsSecret, MARKER, redactJson, redactText } from '../src/redact.js';
+import { DEFAULT_PATTERNS, holdsCredential, holdsSecret, MARKER, redactJson, redactText } from '../src/redact.js';
 // The redaction vectors, read in place; the Python redactor
 // (grounded_agency/state/redaction.py) is held to the same file.
 import vectors from '../../../tests/conformance/secrets/redact.json' with { type: 'json' };
@@ -55,5 +55,52 @@ describe('redactor', () => {
   it('escapes pointers', () => {
     const { pointers } = redactJson({ 'a~b': ['Bearer abcdefgh12345678'], c: { client_secret: 's3cr3t!' } });
     expect(pointers).toEqual(['/a~0b/0', '/c/client_secret']);
+  });
+});
+
+describe('reading a long text (security round 1, batch 5)', () => {
+  // Runs a pattern could read again from each of their positions: a URL
+  // scheme's characters, JWT starts (`eyJ`, after `-`), PEM headers with no
+  // end, base64url and hex text. Each took minutes or more at 1 MB before
+  // the patterns read a run once.
+  const units = [
+    'a.',
+    'a-',
+    'a+',
+    'f0',
+    'x',
+    'eyJ',
+    'eyJ-',
+    'a-eyJ',
+    'eyJaaaaaaaa.',
+    '-----BEGIN PRIVATE KEY-----',
+    '-----BEGIN RSA PRIVATE KEY-----x',
+    'a://b:',
+  ];
+  it.each(units)('reads 1 MB of %j in time in proportion to its length', (unit) => {
+    const text = unit.repeat(Math.ceil(1_000_000 / unit.length)).slice(0, 1_000_000);
+    const started = performance.now();
+    holdsCredential({ data: text });
+    redactText(text);
+    holdsSecret({ data: text });
+    // Well under a second here; the old patterns took 10 s at 100 KB.
+    expect(performance.now() - started).toBeLessThan(20_000);
+  });
+
+  it('matches as before, and reads a URL scheme inside a word', () => {
+    // A JWT starts at a word boundary: the run's start or after `-`.
+    expect(redactText('abc-eyJhbGciOi.eyJzdWIi.sig1')).toBe('abc-[REDACTED]');
+    expect(redactText('aeyJhbGciOi.eyJzdWIi.sig1')).toBe('aeyJhbGciOi.eyJzdWIi.sig1');
+    expect(redactText('aeyJ-eyJhbGciOi.x.y')).toBe('aeyJ-[REDACTED]');
+    // A PEM header with no end: nothing is replaced; a key after it is read
+    // as before, from the first header to the first end.
+    expect(redactText('-----BEGIN PRIVATE KEY----- x')).toBe('-----BEGIN PRIVATE KEY----- x');
+    expect(
+      redactText('-----BEGIN PRIVATE KEY-----a-----BEGIN PRIVATE KEY-----b-----END PRIVATE KEY-----'),
+    ).toBe('-----BEGIN PRIVATE KEY-----[REDACTED]-----END PRIVATE KEY-----');
+    // A URL's scheme is a run of scheme characters holding a letter.
+    expect(redactText('x_https://deploy:hunter22@h')).toBe('x_https://deploy:[REDACTED]@h');
+    expect(redactText('12://deploy:hunter22@h')).toBe('12://deploy:hunter22@h');
+    expect(holdsCredential('x_https://deploy:hunter22@h')).toBe(true);
   });
 });

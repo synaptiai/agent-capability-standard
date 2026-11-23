@@ -2519,6 +2519,14 @@ those of each binding listed (§5.18.1).
   (§5.18.5) included. A layer that cannot attribute it checks it as a call
   of its own. A composite that lists a binding a profile requires a person
   for is asked of a person (§5.21.3).
+- The composite's approval covers a nested call only as a decision valid
+  for the nested binding's `approval` too (§5.18.7). So the approval a
+  composite's call needs is, transitively, the strictest of its own and
+  that of each binding it lists: the most `min_approvers`, the shortest
+  `expires`, and a `role` one of them sets (its own first). A layer that
+  attributes a nested call whose binding sets another `role`, more
+  approvers or a shorter `expires` than the decisions the composite's call
+  counted meet at the nested call checks it as a call of its own.
 - A layer attributes a call to a composite only on evidence that the
   composite's own code made it, such as an invocation the layer itself
   passed to the composite. That a call comes from the same thread, session

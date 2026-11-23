@@ -105,6 +105,25 @@ class ApprovalPolicy:
     expires_seconds: float | None = None
 
 
+def join_approval(
+    a: ApprovalPolicy | None, b: ApprovalPolicy | None
+) -> ApprovalPolicy | None:
+    """The approval a composite's call needs (section 5.18.4): its approval
+    covers its nested calls, so it is the strictest of its own and each
+    invoked binding's, the most approvers, the shortest expiry and a role
+    one of them sets (the first given). ``None`` when neither sets one."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    expires = [e for e in (a.expires_seconds, b.expires_seconds) if e is not None]
+    return ApprovalPolicy(
+        min_approvers=max(a.min_approvers, b.min_approvers),
+        role=a.role if a.role is not None else b.role,
+        expires_seconds=min(expires) if expires else None,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ToolBinding:
     """One tool binding record, read in full (section 5.18.1)."""
@@ -753,6 +772,21 @@ def load_bindings(
         effective[tool] = flags
         return flags
 
+    # The approval a call needs: a composite's joins, transitively, that of
+    # each binding it invokes (section 5.18.4), as its flags do.
+    approvals: dict[str, ApprovalPolicy | None] = {}
+
+    def resolve_approval(tool: str) -> ApprovalPolicy | None:
+        if tool in approvals:
+            return approvals[tool]
+        if tool not in candidates:
+            return known[tool].approval
+        approval = candidates[tool].approval
+        for name in candidates[tool].invokes:
+            approval = join_approval(approval, resolve_approval(name))
+        approvals[tool] = approval
+        return approval
+
     # 7. Prerequisites of the capabilities each record names.
     loaded: dict[str, ToolMapping] = {}
     for tool, binding in candidates.items():
@@ -771,7 +805,7 @@ def load_bindings(
             capabilities=caps,
             invokes=binding.invokes,
             prerequisites=prerequisites,
-            approval=binding.approval,
+            approval=resolve_approval(tool),
             control=binding.control,
             classifier=binding.classifier,
             destination=binding.destination,

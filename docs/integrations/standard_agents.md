@@ -456,16 +456,20 @@ cannot arise.
 
 Every grounded `send` tool obeys the destination policies the layer puts in
 force ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)):
-`configureLayer({destinations, profilePolicy})` in the module that defines
-the agent's tools (`profilePolicy` is the core's
-`CoreContext.profilePolicy(profiles)`, whose `allowed_destinations` join the
-host's). A call whose destination no policy allows, or is not a string, is
+`configureLayer({destinations, profiles})` in the module that defines
+the agent's tools, before them (`profiles` are domain profiles every grounded
+tool applies, as `bindingProfiles` checked them, their
+`allowed_destinations` joining the host's; `profilePolicy`, the core's
+`CoreContext.profilePolicy(profiles)`, adds the destinations alone, and is
+refused when it also sets a minimum confidence or grounding policies, which
+it would not put in force). A call whose destination no policy allows, or is not a string, is
 refused with F504 before any approval is asked for. The destination is
 `args.destination` unless the tool's `destination` option says where
 (`destination: (args) => args.to`); a tool's own `profiles` add their
 policies, and a composite's reach the sends its code invokes, at any depth.
 `memoryTools()` gives a `persist` and a `recall` tool on the
-thread's store (scope `session`), which pass the session cases of
+thread's store (scope `session`), which apply its `profiles` and
+`grounding` options and the layer's profiles as any grounded tool does, and pass the session cases of
 `tests/conformance/memory/store.json`. Its entries survive a restart of the
 host (the runtime MUST keep thread values across process restarts and
 redeploys), are retained while the thread lasts unless their `ttl` ends
@@ -611,9 +615,14 @@ export default groundedTool({
 });
 ```
 
-- **Flags.** The composite takes the effective flags of every tool it lists,
-  transitively, joined with its own. A listed tool with no annotation counts
-  as the strictest case.
+- **Flags and approval.** The composite takes the effective flags of every
+  tool it lists, transitively, joined with its own, and the approval they
+  need: the most approvers, the shortest expiry, and a role one of them
+  sets (its own first), since its approval covers their nested calls. A
+  listed tool is one defined with `groundedTool` or `controlTool`, or with
+  plain `defineTool` and an `acs` annotation that loads as a binding record;
+  one with no binding the binding loads throws when the composite is
+  defined (V107).
 - **The list is enforced twice.** The binding passes the names as the tool's
   `uses`, so a runtime that enforces `uses` refuses an invocation outside the
   list. The wrapper refuses one itself (F504) and records it.
@@ -621,11 +630,20 @@ export default groundedTool({
   a one-shot token for that tool, those arguments and that execution. A
   grounded tool that takes a token is covered by the composite's approval and
   checkpoint: it needs neither again, and its trace entry names the
-  composite's (`covered_by`). Every other check still applies, its
-  prerequisites included. A call that finds no token is checked as a call of
-  its own, such as one an endpoint or a parallel call makes while the
+  composite's (`covered_by`), when the decisions that approved the composite
+  are valid for its own approval too (its role, approvers and expiry).
+  Every other check still applies, its prerequisites included. A call that
+  finds no token, or that those decisions do not cover, is checked as a call
+  of its own, such as one an endpoint or a parallel call makes while the
   composite runs: being in the same thread or execution is not evidence that
   the composite made it.
+- **Tools defined with plain `defineTool`.** Their code runs without the
+  wrapper, so the composite's nesting state checks an invocation of one
+  itself: a `send`'s destination, at its record's `destination` pointer,
+  against every policy in force; that the composite's decisions are valid
+  for its approval (no decision of its own can be asked); and its
+  prerequisites. It records the call before it runs and again with its
+  outcome, with the composite's `covered_by`.
 - **What `invokes` cannot bound.** The composite's own code can still write
   the store or reach the network directly, so the flags it takes from
   `invokes` are a lower bound. Declare `flags` or `additional_capabilities`
@@ -734,7 +752,10 @@ A grounded tool takes four more options:
 - **`profiles`**: the domain profiles the layer applies
   ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)), as the core
   computes them: `bindingProfiles(context, documents)` with a `CoreContext`
-  of `@synaptiai/acs-core/wasm`, once, passed to every tool. They raise
+  of `@synaptiai/acs-core/wasm`, once, passed to every tool, or to
+  `configureLayer({ profiles })` before the tools are defined, which applies
+  them to every grounded tool beside its own (a tool defined before the
+  layer's profiles changed refuses its calls, R407). They raise
   each capability's flags at the call's effective risk, with the tools it
   `invokes`, and a composite's flags for what the tools it invokes perform,
   transitively, so profiles given to a composite alone reach its nested

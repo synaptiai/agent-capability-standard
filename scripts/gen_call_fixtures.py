@@ -593,6 +593,17 @@ calls(
     ],
 )
 calls(
+    "composite_takes_invoked_approval",
+    "A composite's approval covers its nested calls, so it takes the approval of the bindings it invokes: "
+    "one approver is not the two an invoked binding's approval.min_approvers asks for.",
+    [
+        call("save", RUN),
+        call("batch", refuse("F502"), A, approve=ALICE),
+        call("write", refuse("F502"), A, approve=ALICE),
+    ],
+    write={"approval": {"min_approvers": 2}},
+)
+calls(
     "control_tool_ungated",
     "A control-only tool is never refused.",
     [call("done", RUN)],

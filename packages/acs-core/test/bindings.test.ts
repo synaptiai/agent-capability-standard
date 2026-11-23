@@ -177,6 +177,27 @@ describe('bindings loaded earlier (known)', () => {
     expect(second.effective).toEqual({});
   });
 
+  it("joins a composite's approval with that of its invokes, transitively (§5.18.4)", () => {
+    const approval = (a: Record<string, unknown>) => ({ approval: a });
+    const { effective, diagnostics } = checkBindings([
+      { ...record('write_prod', 'mutate'), ...approval({ role: 'admin', min_approvers: 2, expires: '1m' }) },
+      { ...record('batch', 'invoke', ['write_prod']), ...approval({ expires: '10m' }) },
+      record('outer', 'invoke', ['batch']),
+      { ...record('ops', 'invoke', ['write_prod']), ...approval({ role: 'ops' }) },
+      record('plain', 'invoke'),
+    ]);
+    expect(diagnostics).toEqual([]);
+    const joined = { min_approvers: 2, role: 'admin', expires_ms: 60_000 };
+    expect(effective['batch']!.approval).toEqual(joined);
+    expect(effective['outer']!.approval).toEqual(joined);
+    expect(effective['ops']!.approval).toEqual({ ...joined, role: 'ops' });
+    expect(effective['plain']!.approval).toBeUndefined();
+    // Across two loads, from the bindings known.
+    const first = checkBindings([{ ...record('w', 'mutate'), ...approval({ min_approvers: 3 }) }]);
+    const second = checkBindings([record('batch', 'invoke', ['w'])], { known: first.effective });
+    expect(second.effective['batch']!.approval).toEqual({ min_approvers: 3 });
+  });
+
   it('resolves an invokes name among them', () => {
     const first = checkBindings([record('w', 'mutate')]);
     const { effective, diagnostics } = checkBindings([record('batch', 'invoke', ['w'])], {

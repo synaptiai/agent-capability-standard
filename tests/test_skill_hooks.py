@@ -42,8 +42,8 @@ SECRET = "sk-live-0123456789abcdef"
 
 # The persist skill's hooks see every tool that writes a file's content:
 # Claude Code matches a plain matcher string exactly, so "Edit" alone would
-# leave a Write or a MultiEdit unchecked.
-PERSIST_MATCHER = "Edit|Write|MultiEdit"
+# leave a Write, a MultiEdit or a NotebookEdit unchecked.
+PERSIST_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
 # The audit skill's hook on the tools that write a file: the records file
 # is written only by the Bash append form, whose record its Bash hook reads.
 AUDIT_EDIT_MATCHER = "Edit|Write|MultiEdit|NotebookEdit"
@@ -801,7 +801,7 @@ class TestPersistCommandHook:
             result, "Cannot persist to system or credential directories", F504
         )
 
-    @pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit"])
+    @pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit", "NotebookEdit"])
     def test_the_hooks_see_every_tool_that_writes_content(
         self, shell: str, tool: str
     ) -> None:
@@ -1021,6 +1021,207 @@ class TestPersistCommandHook:
         }
         result = run_command(hook, call, tmp_path, shell)
         assert_blocked(result, "holds what looks like a credential", F504)
+
+    @staticmethod
+    def _store(tmp_path: Path, name: str, text: str) -> str:
+        project = tmp_path / "project"
+        project.mkdir(exist_ok=True)
+        (project / name).write_text(text, encoding="utf-8")
+        return str(project / name)
+
+    @pytest.mark.parametrize(
+        ("held", "tool_input"),
+        [
+            # Two edits whose new strings make one token (security round 1,
+            # batch 5): neither fragment is one.
+            (
+                "deploy key: <<1>><<2>>\n",
+                {
+                    "edits": [
+                        {"old_string": "<<1>>", "new_string": "ghp_ABCDEFGHIJKLMNOPQR"},
+                        {"old_string": "<<2>>", "new_string": "STUVWXYZ0123456789"},
+                    ]
+                },
+            ),
+            # The second of two Edit calls that make one token.
+            (
+                "deploy key: ghp_ABCDEFGHIJKLMNOPQR<<2>>\n",
+                {"old_string": "<<2>>", "new_string": "STUVWXYZ0123456789"},
+            ),
+            # A value whose key is in the unchanged text around it.
+            (
+                'db:\n  password: "CHANGEME"\n',
+                {"old_string": "CHANGEME", "new_string": "s3cretpass99xyz"},
+            ),
+            (
+                "url: postgres://app:DBPASS@db.internal/app\n",
+                {"old_string": "DBPASS", "new_string": "s3cretpass"},
+            ),
+            # replace_all, and a MultiEdit whose second edit reads the first's.
+            (
+                "a: <<k>>\nb: <<k>>\n",
+                {
+                    "edits": [
+                        {
+                            "old_string": "<<k>>",
+                            "new_string": "AKIA<<rest>>",
+                            "replace_all": True,
+                        },
+                        {"old_string": "<<rest>>", "new_string": "ABCDEFGHIJKLMNOP"},
+                    ]
+                },
+            ),
+            # An old_string Claude Code finds only with curly quotes read as
+            # straight ones.
+            (
+                "api_key: \u201cCHANGEME\u201d\n",
+                {"old_string": '"CHANGEME"', "new_string": '"abc123def456ghi789"'},
+            ),
+        ],
+    )
+    def test_blocks_a_credential_the_file_holds_after_the_call(
+        self, tmp_path: Path, shell: str, held: str, tool_input: dict[str, Any]
+    ) -> None:
+        """Persist data that holds a secret the layer recognises is refused
+        (STANDARD 1.2.0 §5.18.10, §6.7): what the file holds after the call,
+        not only the fragments the call carries."""
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = self._store(tmp_path, "notes.md", held)
+        tool = "MultiEdit" if "edits" in tool_input else "Edit"
+        call = {"tool_name": tool, "tool_input": {"file_path": path, **tool_input}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '{"gh": "\\u0067hp_' + "T" * 36 + '"}',
+            '{"gh": "ghp_\\u0041' + "T" * 35 + '"}',
+            '{"note": "password=\\"s3cretpass99\\""}',
+            'url = "https:\\/\\/deploy:s3cretpass@git.example.com"',
+            'bots = ["\\x67hp_' + "T" * 36 + '"]',
+            'key: "\\U00000067hp_' + "T" * 36 + '"',
+        ],
+    )
+    def test_blocks_a_credential_a_reader_decodes(
+        self, tmp_path: Path, shell: str, content: str
+    ) -> None:
+        """A JSON reader of the memory file decodes escapes (as the audit
+        hook reads a record), so the scan reads the decoded text too."""
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = str(tmp_path / "project" / "memory.json")
+        call = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": path, "content": content},
+        }
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    def test_blocks_a_credential_a_notebook_edit_carries(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        call = {
+            "tool_name": "NotebookEdit",
+            "tool_input": {
+                "notebook_path": str(tmp_path / "project" / "n.ipynb"),
+                "cell_id": "c1",
+                "new_source": f'key = "{TOKEN}"',
+            },
+        }
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+        call["tool_input"]["notebook_path"] = str(tmp_path / ".ssh" / "n.ipynb")
+        call["tool_input"]["new_source"] = "print(1)"
+        home = {"HOME": str(tmp_path)}
+        result = run_command(hook, call, tmp_path, shell, home)
+        assert_blocked(
+            result, "Cannot persist to system or credential directories", F504
+        )
+
+    @pytest.mark.parametrize(
+        ("held", "tool_input"),
+        [
+            # A line the call leaves as it is is not read again: a file that
+            # already holds a credential-shaped example can still be edited.
+            (
+                f"example: {TOKEN}\nstatus: draft\n",
+                {"old_string": "status: draft", "new_string": "status: final"},
+            ),
+            (
+                'password: "CHANGEME"\n',
+                {"old_string": '"CHANGEME"', "new_string": "see the vault"},
+            ),
+            # An old_string the file does not hold changes nothing.
+            (
+                "deploy key: <<1>>\n",
+                {"old_string": "<<9>>", "new_string": "ghp_ABCDEF"},
+            ),
+        ],
+    )
+    def test_allows_an_edit_that_adds_no_credential(
+        self, tmp_path: Path, shell: str, held: str, tool_input: dict[str, Any]
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = self._store(tmp_path, "notes.md", held)
+        call = {"tool_name": "Edit", "tool_input": {"file_path": path, **tool_input}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    def test_blocks_a_target_it_will_not_read(self, tmp_path: Path, shell: str) -> None:
+        """A target that is not a regular file, or is over 8 MB, is not read,
+        so the call is refused rather than written unchecked."""
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        project = tmp_path / "project"
+        (project / "dir.md").mkdir(parents=True)
+        call = edit_call(str(project / "dir.md"))
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "not a regular file", F504)
+        big = project / "big.md"
+        with big.open("wb") as f:
+            f.truncate(8 * 1024 * 1024 + 1)
+        result = run_command(hook, edit_call(str(big)), tmp_path, shell)
+        assert_blocked(result, "over 8 MB", F504)
+
+    def test_reads_a_file_with_nul_bytes_quietly(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        project = tmp_path / "project"
+        project.mkdir()
+        # The line the edit changes holds a NUL byte, which bash would warn of.
+        (project / "data.bin").write_bytes(b"head\x00er <<1>>\n\x00\x01tail\n")
+        call = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(project / "data.bin"),
+                "old_string": "<<1>>",
+                "new_string": "value",
+            },
+        }
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    def test_reads_a_large_file_in_bounded_time(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        lines = "".join(f"line {i} of the knowledge file\n" for i in range(200_000))
+        path = self._store(tmp_path, "big.md", lines)
+        call = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": path,
+                "old_string": "line 199999 of",
+                "new_string": "the last line of",
+            },
+        }
+        started = time.monotonic()
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert time.monotonic() - started < 20
 
     @pytest.mark.parametrize(
         "content",

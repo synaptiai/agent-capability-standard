@@ -14,6 +14,7 @@ import pytest
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.capabilities.bindings import (
+    ApprovalPolicy,
     ToolBinding,
     check_offered,
     load_bindings,
@@ -303,6 +304,66 @@ class TestLoadBindings:
         assert loaded["fix"].mutation is True
         assert loaded["fix"].prerequisites == frozenset()
         assert loaded["undo"].prerequisites == frozenset({"checkpoint"})
+
+    def test_a_composite_takes_the_approval_of_its_invokes_transitively(
+        self, registry: CapabilityRegistry, mapper: ToolCapabilityMapper
+    ) -> None:
+        """A composite's approval covers its nested calls (section 5.18.4),
+        so its call asks for the strictest approval of the bindings it
+        reaches: the most approvers, the shortest expiry, a role one of them
+        sets, its own first (security round 1, batch 5)."""
+        loaded, diagnostics = _load(
+            registry,
+            [
+                _rec(
+                    tool="write_prod",
+                    capability="mutate",
+                    approval={"role": "admin", "min_approvers": 2, "expires": "1m"},
+                ),
+                _rec(
+                    tool="batch",
+                    capability="invoke",
+                    invokes=["write_prod"],
+                    approval={"expires": "10m"},
+                ),
+                _rec(tool="outer", capability="invoke", invokes=["batch"]),
+                _rec(
+                    tool="ops",
+                    capability="invoke",
+                    invokes=["write_prod"],
+                    approval={"role": "ops"},
+                ),
+                _rec(tool="plain", capability="invoke"),
+            ],
+        )
+        assert diagnostics == []
+        joined = ApprovalPolicy(min_approvers=2, role="admin", expires_seconds=60.0)
+        assert loaded["batch"].approval == joined
+        assert loaded["outer"].approval == joined
+        assert loaded["ops"].approval == ApprovalPolicy(
+            min_approvers=2, role="ops", expires_seconds=60.0
+        )
+        assert loaded["plain"].approval is None
+        # Across two loads, from the mappings known.
+        assert (
+            mapper.load_bindings(
+                [
+                    _rec(
+                        tool="write_prod",
+                        capability="mutate",
+                        approval={"min_approvers": 3},
+                    )
+                ]
+            )
+            == []
+        )
+        assert (
+            mapper.load_bindings(
+                [_rec(tool="batch", capability="invoke", invokes=["write_prod"])]
+            )
+            == []
+        )
+        assert mapper.map_tool("batch", {}).approval == ApprovalPolicy(min_approvers=3)
 
     def test_a_record_citing_an_unsupported_standard_is_v109(
         self, registry: CapabilityRegistry

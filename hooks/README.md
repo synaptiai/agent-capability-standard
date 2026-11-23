@@ -453,7 +453,11 @@ copied out of the plugin keeps working), and `tests/test_skill_hooks.py`
 keeps every copy equal to the file. The file is not a hook: `hooks.json`
 does not run it. The scan blocks content written to memory, and a record
 appended to `.claude/audit/records.jsonl`, that holds a credential-shaped
-value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7).
+value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7). The `persist`
+hook scans the text a call carries and the lines the file will hold after it
+that it does not hold now, each also with its JSON-style escapes decoded, so
+a credential whose key is already in the file, or that two edits build, is
+read whole. GNU grep reads the scan's patterns in time linear in the text.
 
 The `send` and `audit` skills' `Bash` hooks share one reader of a command's
 words, `shell_words.jq` in this directory, copied the same way between
