@@ -148,6 +148,15 @@ class MemoryStore:
         return self._path
 
     @property
+    def redactor(self) -> Redactor:
+        """What recognises a secret, which a ``persist`` may not store."""
+        return self._redactor
+
+    @redactor.setter
+    def redactor(self, redactor: Redactor) -> None:
+        self._redactor = redactor
+
+    @property
     def default_scope(self) -> str:
         return self._default
 

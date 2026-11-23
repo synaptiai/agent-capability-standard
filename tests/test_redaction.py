@@ -658,3 +658,26 @@ def test_layer_registers_the_hosts_secrets(tmp_path: Path) -> None:
     # secret enters recorded_by.
     assert adapter.evidence_store.redactor is adapter.redactor
     assert "s3cr3t-value" not in json.dumps(adapter.recorded_by)
+
+
+def test_include_takes_another_redactors_values_and_patterns() -> None:
+    """A store that writes records for a runner takes what the runner's
+    redactor recognises (§6.7): its registered values, in every form, and
+    its own patterns; the other redactor is not changed."""
+    from grounded_agency.state.redaction import DEFAULT_REDACTOR, Redactor
+
+    marker = re.compile(r"sig=(?P<secret>[A-Za-z0-9]{16,})")
+    runner = Redactor(["reg-9f8e7d6c5b4a3210"], patterns=[marker])
+    store = Redactor()
+    store.include(runner)
+    store.include(runner)
+    store.include(store)
+    assert store.redact_text("k=reg-9f8e7d6c5b4a3210")[0] == "k=[REDACTED]"
+    # A form the value travels in (JSON-escaped), as the runner registered it.
+    assert store.redact_text(json.dumps({"k": "reg-9f8e7d6c5b4a3210"}))[1]
+    assert store.redact_text("u?sig=AbCdEf0123456789XyZ")[0] == "u?sig=[REDACTED]"
+    # The store keeps its own (default) patterns.
+    assert store.redact_text("password=hunter2hunter2")[1]
+    # Nothing flows back, and the shared default learns nothing.
+    assert runner.redact_text("password=hunter2hunter2")[1] is False
+    assert DEFAULT_REDACTOR.redact_text("reg-9f8e7d6c5b4a3210")[1] is False

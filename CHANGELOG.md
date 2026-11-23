@@ -461,7 +461,24 @@ here and marked so.
   free text, or a `reason` object, no longer reaches the trace and the
   snapshot as `reason_ignored` with a secret in it; and the `Error` it
   builds when the run refuses a host's response (whose account repeats the
-  value refused) is redacted too.
+  value refused) is redacted too. Security round 3: it also redacts the
+  evidence anchors of an `Event` (the core copies them into a `receive` or
+  `wait` step's output), anchors given as a tuple (they reach the core and
+  the evidence store as a list), the `not_covered` items of a `RolledBack`
+  and the reason given to `cancel` (the R408 message, the trace and the
+  records hold the redacted reason). When the runner has a `redactor` of
+  its own, it gives what it recognises to the host's `IdempotencyLog` and
+  `MemoryStore` and to its `memory` (a store on the shared default redactor
+  gets one of its own), so the host's memory refuses a `persist` of a
+  registered value. `IdempotencyLog` and `MemoryStore` gain a `redactor`
+  property, and `Redactor` gains `include(other)`.
+- Python SDK, `IdempotencyLog` (§6.4, §6.7): the log keeps a `send`'s
+  output as the runner submits it (its anchors redacted without their
+  digest, `evidence_seen` rewritten to match) with every other secret its
+  redactor recognises replaced (a receipt's `Authorization`, a URL's
+  password), in its file and in memory; a replay answers with that output,
+  not the one the effect returned. Entries a log wrote before keep what
+  they hold: delete the file once its runs' keys are no longer needed.
 - Python SDK, evidence: anchor metadata nested deeper than two levels is
   kept as its JSON text, redacted while its structure can still be read and
   whole (the 1 KB metadata limit replaces a value too large), not as the
@@ -1283,7 +1300,13 @@ here and marked so.
   tool's `secrets` function threw (R407) is now recorded, as a `refused`
   entry with the layer's `recorded_by`, redacted with the secrets the layer
   holds, so the audit hook links it rather than writing an entry of its
-  own.
+  own. Security round 3: a nested call whose checks the layer cannot
+  complete, a read of its records that fails or arguments with no
+  canonical JSON (a cycle, nesting too deep to walk, a value that is not
+  JSON), is refused with R407 and recorded with the call that covered it,
+  where the exception reached the composite's code and nothing was
+  recorded; a nested plain call with such arguments, which ran, is refused
+  too, as a grounded tool's own call is.
 
 **Interoperability data.**
 
@@ -1366,6 +1389,13 @@ here and marked so.
   `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
   `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
   `additional_capabilities` and `invokes` with one-shot nesting tokens.
+- TypeScript package (`packages/acs-core`), security round 3:
+  `decodeCapabilityOutput`'s refusal of a text that is not JSON no longer
+  repeats the JSON parser's message, which quoted part of the text (a
+  window that cut a secret left a piece no redaction matched in the trace);
+  it says where the text stops being JSON, when the parser tells
+  (`(at character N)`). Code that matched the parser's wording (`Unexpected
+  token`) reads the R402 code instead.
 - TypeScript package (`packages/acs-core`): `decodeCapabilityOutput` accepts
   a number written in exponent form (1.8e16, 1e300) and checks integer
   literals in the text itself; `encodeCapabilityOutput` accepts a value it

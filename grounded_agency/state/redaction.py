@@ -627,6 +627,22 @@ class Redactor:
                 self._values.append(form)
         self._values.sort(key=len, reverse=True)
 
+    def include(self, other: Redactor) -> None:
+        """Recognise what ``other`` recognises too: its registered values,
+        in every form it registered them, and its patterns. ``other`` is not
+        changed. A component that writes records on behalf of another (an
+        idempotency log a runner's host keeps) takes that one's secrets this
+        way (§6.7)."""
+        if other is self:
+            return
+        for form in other._values:
+            if form not in self._values:
+                self._values.append(form)
+        self._values.sort(key=len, reverse=True)
+        for p in other._patterns:
+            if p not in self._patterns:
+                self._patterns = (*self._patterns, p)
+
     def redact_text(self, text: str) -> tuple[str, bool]:
         """``text`` with each secret replaced, and whether anything was."""
         out = text

@@ -123,6 +123,19 @@ def test_shared_decode_vectors(vector: dict[str, Any]) -> None:
         _outcome(lambda: decode_capability_output("observe", vector["text"]))
         == vector["expect"]
     )
+    quoted = vector.get("quotes_nothing_of")
+    if quoted is not None:
+        with pytest.raises(CapabilityOutputError) as refused:
+            decode_capability_output("observe", vector["text"])
+        assert _pieces_quoted(refused.value.error.message, quoted) == []
+        assert _pieces_quoted(str(refused.value), quoted) == []
+
+
+def _pieces_quoted(message: str, text: str) -> list[str]:
+    """The pieces of four or more characters of ``text`` that ``message``
+    holds: a message that quotes part of a secret escapes redaction, which
+    matches a secret whole (section 6.7)."""
+    return [text[i : i + 4] for i in range(len(text) - 3) if text[i : i + 4] in message]
 
 
 @pytest.mark.parametrize(

@@ -120,6 +120,55 @@ def test_the_destination_in_the_file_is_redacted(tmp_path: Path) -> None:
     assert "[REDACTED]" in lines[-1]["destination"]
 
 
+def test_the_output_in_the_file_is_redacted(tmp_path: Path) -> None:
+    """The log is the host's record of what it did (§6.4): it keeps a send's
+    output as a runner submits it, its anchors redacted without their digest
+    and evidence_seen rewritten to match, and every other secret in the
+    output replaced (§6.7). A replay answers with what it kept."""
+    path = tmp_path / "keys.jsonl"
+    signed = (
+        "https://bucket.s3.amazonaws.com/r.json?X-Amz-Credential="
+        "AKIAIOSFODNN7EXAMPLE%2F20261123%2Fus-east-1%2Fs3%2Faws4_request"
+    )
+    userinfo = "https://bot:Sup3rS3cretPassw0rd@status.example.com/msg/1"
+    response = {
+        "kind": "Output",
+        "value": {
+            "sent": True,
+            "receipt": {"Authorization": "Bearer abcdefghijklmnopqrstuvwxyz0123456789"},
+            "evidence_anchors": [
+                {"ref": signed, "kind": "url", "digest": "sha256:" + "ab" * 32},
+                {"ref": userinfo, "kind": "url"},
+                {"ref": "file:report.txt", "kind": "file"},
+            ],
+        },
+        "evidence_seen": [signed, userinfo, "file:report.txt"],
+    }
+    first = IdempotencyLog(path).perform(action(), Effect(response))
+    assert first == response  # what the host's effect gave, for the runner
+    blob = path.read_bytes()
+    for secret in (
+        b"AKIAIOSFODNN7EXAMPLE",
+        b"Sup3rS3cretPassw0rd",
+        b"abcdefghijklmnopqrstuvwxyz0123456789",
+    ):
+        assert secret not in blob, secret
+    effect = Effect()
+    again = IdempotencyLog(path).perform(action(), effect)
+    assert effect.calls == 0
+    anchors = again["value"]["evidence_anchors"]
+    assert [a["ref"] for a in anchors] == [
+        "https://bucket.s3.amazonaws.com/r.json?X-Amz-Credential="
+        "[REDACTED]%2F20261123%2Fus-east-1%2Fs3%2Faws4_request",
+        "https://bot:[REDACTED]@status.example.com/msg/1",
+        "file:report.txt",
+    ]
+    assert "digest" not in anchors[0]
+    assert anchors[0]["metadata"] == {"digest_omitted": "secret"}
+    assert again["evidence_seen"] == [a["ref"] for a in anchors]
+    assert again["value"]["receipt"] == {"Authorization": "[REDACTED]"}
+
+
 def test_an_unkeyed_action_passes_through() -> None:
     log, effect = IdempotencyLog(), Effect()
     log.perform({"capability": "send", "inputs": {}}, effect)

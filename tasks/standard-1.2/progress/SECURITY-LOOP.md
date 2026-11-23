@@ -4254,3 +4254,253 @@ an unknown member is S303. No version changes.
   1.6 s), a 1 MB command to the audit hook 0.36 s. No CLI or nested agent
   was started; the listener and every other process were stopped; the
   scratch tree, projects and archives were removed.
+
+### Batch 4: five reported defects
+
+Five defects, each reproduced by an independent verifier on 6004f78 and
+reproduced again here on 4cec757 (batch 3's commit) before any change: two
+in the Standard Agents binding's nested calls (a decoder message that cut a
+secret before redaction; checks that threw instead of refusing), and three
+in what the Python runner and its host write (the idempotency log, an
+event's or a tuple's anchors, a cancel's reason). None was fixed by an
+earlier batch: git log and rounds 1 to 3 checked (round 2 #20 added the
+nested output check whose decoder message leaked; round 2 #22 recorded the
+R407 of a grounded call's secrets function, not a nested call's; round 2
+#23 redacted an `Output`'s anchors given as a list, not an `Event`'s or a
+tuple; round 1's idempotency fixes kept `evidence_seen` for replay, not
+redacted). Each fix has tests that fail on the code before it (below, per
+defect, with the controls that pass on both).
+
+#### 1. A nested plain call's non-JSON output put a window of its text into the R402 entry, so part of a registered secret escaped redaction (medium)
+
+`decodeCapabilityOutput` (`packages/acs-core/src/output.ts`) appended V8's
+`JSON.parse` message, which quotes the text (all of it up to 20
+characters, else about 10 characters around the error). The binding's
+nested output check made it the R402 entry's `error`, and redaction ran
+after: a registered secret cut by the window no longer matched, so
+`"Zq8-rotati"...` stayed in the trace and in `actionRecord`'s
+`details.error`; the verifier also showed a password whose member name
+the window cut (`..."assword": Tr0ub4dor,"...`), which the name-keyed
+pattern no longer recognised.
+
+- Fix: the decoder no longer repeats the parser's message; it says the
+  text is not the JSON text of one object and nothing else, and where it
+  stops being JSON when the parser says (`(at character N)`, digits read
+  from the message, nothing else of it). Python's decoder quoted nothing
+  already (`json.loads` messages name positions only; a duplicate member
+  is quoted whole, which redaction still matches).
+- Vectors (`tests/conformance/output/vectors.json`, both runners): a
+  decode vector may state `quotes_nothing_of`, a string the text holds;
+  the refusal's message (the diagnostic's text and the thrown error's)
+  must hold no piece of four or more characters of it. Three new vectors:
+  `text_starting_with_a_secret`, `unquoted_secret_value`,
+  `unquoted_password_member`. The three fail on 4cec757's `output.ts` (the
+  Python runner passes them on both: its decoder never quoted).
+- Binding test (`test/nesting.test.ts`): `keeps no piece of a secret from
+  an output that is not JSON in the R402 entry or its action record (§6.7)`
+  (the reported probe: a registered secret leading the text, as an
+  unquoted value, and an unquoted password): fails on 4cec757's built
+  package.
+- Siblings checked: the decoder's other messages (a missing field, a
+  confidence out of range, the integer beyond ±2^53, a key with a lone
+  surrogate) name fields, the whole integer or a whole key; no other
+  binding or package path parses host text and keeps the parser's message
+  (`parseJsonExact` is used by the fixture runners only), and nothing in
+  the binding cuts text before redacting it.
+
+#### 2. A nested plain call refused because the layer could not read its records or arguments threw out of the nesting state: no R407, no record (low; sibling of round 2 #22)
+
+`invokePlain` ran the secret scan (`holdsCredential`), the destination,
+approval and prerequisite checks (`readExecuted`) outside any try: a store
+read that failed, or arguments the scan cannot walk (a cycle, 20,000
+levels of nesting), threw into the composite's code. Nothing ran, but the
+layer neither returned §9.8's R407 nor recorded the refused call
+(§5.18.8). The grounded branch of the state's `invokeTool` threw the same
+way when `digestOf(args)` failed. Found here too: a nested plain call
+whose arguments have no canonical JSON and whose capability has no secret
+scan (a `retrieve` with a cycle) ran, recorded without an `args_digest`,
+where a grounded tool's own check refuses such arguments with R407.
+
+- Fix (`examples/standard_agents/src/acs/grounded.ts`): the checks before
+  a nested plain call runs are one function (`checksBefore`), called in a
+  try; a check it cannot complete returns `refuseNested('R407', ...)`, a
+  `refused` entry with `covered_by` and `recorded_by`, written under
+  `serially` and best effort (a `refused` entry reads no `acs:executed`,
+  so it is written while that read fails). Arguments with no canonical
+  JSON are such a check: the first one, so a plain call with them never
+  runs. The grounded branch refuses with R407 too when the digest that
+  binds the nesting token cannot be computed, recorded with the covering
+  call's `covered_by` while it runs (`recordRefusal` takes the code). A
+  refusal names a listed grounded tool's own capability
+  (`boundCapability` reads `PERFORMS` of the listed definition before the
+  realm-wide name map, which is `null` once two tools of one name
+  disagree).
+- Tests (`test/nesting.test.ts`, `a nested call the layer cannot check is
+  refused and recorded`): a plain `persist` and a plain `retrieve` whose
+  `acs:executed` read fails inside the composite, a plain `persist` and a
+  plain `retrieve` with cyclic arguments and with arguments nested 20,000
+  deep (about 100 KB), a grounded `persist` with cyclic arguments and a
+  grounded `retrieve` nested 20,000 deep: each R407, one `refused` entry
+  with `covered_by` and `recorded_by`, the tool not run, nothing executed
+  but the composite. All 8 fail on 4cec757's `grounded.ts` (the retrieve
+  with a cycle ran there); the control (a plain persist the layer can
+  check runs and is recorded `executed`) passes on both.
+- Siblings checked: `queueTool` reads nothing that can fail; `controlTool`
+  is never refused by design and reports a record it cannot write; a
+  grounded tool's own `check` has caught these since round 1.
+
+#### 3. IdempotencyLog wrote a send's whole output to its file unredacted, and redacted the destination without the runner's registered secrets (medium)
+
+`perform` stored `response["value"]` and `evidence_seen` as the effect
+returned them, and `Host.send_once` calls it inside `invoke_capability`,
+before the runner redacts anchors: the log's file kept a presigned URL's
+`X-Amz-Credential`, a URL's password and a receipt's bearer token, which
+the run itself no longer held. The log redacted only the destination,
+with its own redactor (`DEFAULT_REDACTOR` unless the host passed one), so
+a secret the runner registered stayed in the destination, and the
+rollback's `not_covered` item repeated it (`_transmitted_since` used the
+default redactor).
+
+- Fix: the runner's anchor redaction is one function,
+  `grounded_agency/workflows/_responses.py` (`redact_anchors`), which the
+  runner and the log share. The log keeps a done entry's output as the
+  runner submits it (anchors redacted without their digest, `evidence_seen`
+  rewritten by the runner's rule, so two anchors one after redaction are
+  listed only when the host listed both) and then replaces every other
+  secret its redactor recognises in the output and in `evidence_seen`
+  (`_kept`); a replay answers with that output. The effect's own response
+  is still what the first attempt returns (the runner then redacts its
+  anchors as before). `IdempotencyLog.redactor` and `MemoryStore.redactor`
+  are properties; `Redactor.include(other)` takes another redactor's
+  registered forms and patterns. The runner, at each `advance`, gives what
+  its redactor recognises to the host's log, the host's memory store and
+  its own `memory` (`_share_redactor`): a store on `DEFAULT_REDACTOR` gets
+  a new redactor (the default patterns and the runner's), so the shared
+  default never learns a value; any other takes the runner's in. A runner
+  on the default redactor changes nothing. `_transmitted_since` redacts
+  with the log's redactor, and the runner redacts the strings of a
+  `RolledBack` response's `not_covered` items (host text the core writes
+  into the trace and the rollback's record), so a custom rollback's items
+  are covered too.
+- Tests: `tests/test_idempotency.py::test_the_output_in_the_file_is_redacted`
+  (the file's bytes hold no key id, password or bearer token; the replay
+  answers the redacted anchors without their digest, `evidence_seen`
+  matching, the receipt's `Authorization` replaced); in
+  `tests/test_runner_secrets.py`, the reported workflow (checkpoint,
+  constrain, send, rollback) with the log on the default redactor and on
+  its own (file bytes; one transmission; the rollback's item redacted; the
+  run's trace, records and outputs hold neither; the default redactor
+  learns nothing), a replay from the file equal to what the runner submits
+  for the first answer, two anchors one after redaction (listed only when
+  both were), and the runner's secrets reaching the host's and its own
+  memory store (with the default patterns kept); `tests/test_redaction.py::
+  test_include_takes_another_redactors_values_and_patterns`. All fail on
+  4cec757's runner, log, redactor and memory store.
+- Not changed: a secret in a plain member of an `Output` the run keeps
+  (the receipt) stays in the run's outputs: §6.7 makes not passing one a
+  host's duty (SHOULD NOT), and the runner redacts anchors and host text
+  that reaches the trace and the records. The log, an audit record, now
+  redacts it. Entries a log wrote before this fix keep what they hold. The
+  default patterns still do not recognise a signed URL's signature (round
+  2 #23): the log holds an `X-Amz-Signature` where no pattern names it, as
+  the run does. The run's snapshot keeps the run's inputs as the caller
+  gave them (a destination with a registered secret, here).
+
+#### 4. The runner redacted only an Output's anchors given as a list: an Event's anchors and a tuple of anchors kept their secrets (medium; sibling of round 2 #23)
+
+`_redact_anchors` returned any response that was not an `Output`
+unchanged, and an `Output` whose `evidence_anchors` was not a list. The
+core reads a tuple as an array, and copies an `Event`'s `anchors` into a
+`receive` or `wait` step's output (its `evidence_anchors`, and the event
+under `data` or `result`), so both reached the run's outputs, state and
+snapshot with a URL's password and a registered secret. A tuple's anchors
+were neither recorded in the evidence store nor logged as skipped.
+
+- Fix (`_responses.redact_anchors`, which the runner's `_redact_anchors`
+  now calls): an `Event`'s `event.anchors` are redacted as an `Output`'s
+  are, and an array of anchors given as a tuple, an `Output`'s or an
+  `Event`'s, is redacted and given back as a list (so the evidence store
+  records it); `evidence_seen` given as a tuple is rewritten as a list is.
+  Only the anchors of an `Event` are redacted, not its other content: an
+  event's message is the host's, as an `Output`'s plain members are (the
+  core's trace holds an event's type and drop counts only), and redacting
+  it before the core reads it could change what the event's filter
+  matches.
+- Tests (`tests/test_runner_secrets.py`): an event's anchors as a list and
+  as a tuple (outputs, trace, records, run record and snapshot hold
+  neither the password nor the registered secret; the anchor is kept
+  redacted without its digest, the same under `data`), an `Output`'s
+  anchors as a tuple (redacted, and recorded in the evidence store, with
+  and without a secret), `evidence_seen` as a tuple (the attested policy
+  passes, nothing kept holds the password). All fail on 4cec757's runner;
+  the control (an event's anchors with no secret kept as given) passes on
+  both.
+- Sibling checked: `nested_anchors` carry a nested run's step outputs,
+  which were redacted when submitted; a trigger event that starts a run
+  reaches no step output's anchors (the core reads `anchors` only on
+  receive).
+
+#### 5. WorkflowRunner.cancel put the cancel reason into the run's message, trace, records and snapshot unredacted (medium)
+
+`cancel` passed `reason` to `run.cancel` as given; the core makes it the
+R408 message and writes it into the `run_cancelled` event, the cancelled
+records and the run record.
+
+- Fix: `run.cancel(self._redactor.redact_text(reason)[0], now)` (a reason
+  that is not a string is passed as it is, for the core to refuse); the
+  docstring and the guide say so.
+- Tests: `test_a_cancel_reason_is_redacted` (a URL's password and a
+  registered secret: the message is the reason with both replaced, and no
+  place the run keeps holds either) fails on 4cec757's runner; the control
+  `test_a_cancel_reason_without_a_secret_is_kept` passes on both.
+- Sibling checked: `Host.withdraw` takes the runner's own words
+  (`"cancelled"`, `"timed out"`); the TypeScript package's `Run.cancel` is
+  the core's own call, as Python's `_core.Run.cancel` is, below any host
+  layer (the binding has no runner).
+
+#### Documentation
+
+SECURITY.md §1.5 (the runner's redaction of an `Event`'s and a tuple's
+anchors, `not_covered` and a cancel's reason; the idempotency log; the
+TypeScript decoder's message) and its binding paragraph (a nested call's
+R407), the running-workflows guide (the runner's `redactor`, the log, the
+cancel), the Standard Agents guide's §5.18.8 row, the runner's and the
+log's docstrings, and CHANGELOG [Unreleased] Upgrading (the runner and the
+log; the binding's nested R407; the package's decoder message). The
+Standard's text was not changed: §6.7 already forbids a secret in an
+evidence anchor, a diagnostic, a trace and an audit record, §6.4 counts a
+host's log of what it did among audit records, and §5.18.8 already
+requires R407 and a record of each refusal. No version changes.
+
+#### Checks after batch 4
+
+- Python: `pytest tests/` (6695 passed, 18 skipped), and again every file
+  that reads the edited docs after the last edit (2042 passed); ruff check
+  and format with CI's lists; mypy; every `tools/validate_*.py` of
+  CLAUDE.md, `validate_workflows.py --strict` and every domain catalog and
+  example `--strict`; `sync_skill_schemas.py --check` and the generators'
+  `--check` (no fixture or vector they write changed);
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: `packages/acs-core` build, check and test (2012; the three
+  new vectors; the WebAssembly build reused); the binding's check and test
+  (246 passed, 2 skipped; 236 plus the 10 new).
+- Site: `npm run check`, `npm test` (1173).
+- Old code: the three new vectors against 4cec757's `output.ts` (3 of 3
+  fail), the binding's decoder test against a package built from it (fails),
+  the binding's 9 nested-call tests against 4cec757's `grounded.ts` (8 fail,
+  the control passes), and the 14 new Python tests against 4cec757's
+  runner, log, redactor and memory store (12 fail; the 2 that pass are the
+  controls: an event's anchors with no secret, a cancel reason with none).
+- Probes, each under `timeout 120` and a 4 GB address-space limit, inputs
+  of at most 1 MB: the reporter's four Python probes pointed at this
+  worktree (the log's file holds no key id, URL password, bearer token or
+  registered secret, the rollback's item is redacted; an event's and a
+  tuple's anchors and a cancel's reason reach no place the run keeps with
+  their secrets; the S3 signature, which no default pattern names, stays
+  in the log as in the run, round 2 #23); the log's redaction of a 64 KB,
+  256 KB and 1 MB output (0.04, 0.14 and 0.55 s: linear); the binding's
+  arguments nested 20,000 deep (about 100 KB) refused at once. No CLI or
+  nested agent was started; nothing was left running; the probe copies and
+  scratch files were removed.

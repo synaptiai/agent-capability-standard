@@ -15,7 +15,7 @@ import { groundedTool } from '../src/acs/grounded.js';
 import { configureLayer, registerTools, resetLayer } from '../src/acs/layer.js';
 import { effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
 import { bindingProfiles } from '../src/acs/profiles.js';
-import { readExecuted, readTrace } from '../src/acs/records.js';
+import { actionRecord, readExecuted, readTrace } from '../src/acs/records.js';
 import { memoryThread, user, type MemoryThread } from './memory_thread.js';
 
 const A = { path: 'a' };
@@ -742,6 +742,44 @@ describe('nested calls of plain tools: secrets, outputs, queued calls, the tool 
       }
     });
 
+    it('keeps no piece of a secret from an output that is not JSON in the R402 entry or its action record (§6.7)', async () => {
+      // The parser's own message quoted a window of the text (V8: up to 10
+      // characters around the error); redaction then ran on a secret cut in
+      // two, which no longer matched, so its first characters were kept.
+      const registered = 'Zq8-rotating-db-pass-77Kx';
+      const password = 'Tr0ub4dorK3yZ';
+      try {
+        for (const result of [
+          `${registered} rejected for account 42`,
+          `{"data": ${registered}, "evidence_anchors": []}`,
+          `{"password": ${password}, "user": "svc", "evidence_anchors": []}`,
+        ]) {
+          resetLayer();
+          configureLayer({ secrets: [registered] });
+          const t = memoryThread();
+          const lookup = plainTool({ tool: 'lookup', capability: 'retrieve' }, () => ({ status: 'success', result }));
+          registerTools({ lookup });
+          const { tool, nested } = compositeOf('summary', { lookup }, 'lookup');
+          t.tools.set('lookup', lookup as never);
+          t.tools.set('summary', tool);
+          expect((await run(t, 'summary')).status).toBe('success');
+          expect(nested[0]?.error_code, result).toBe('R402');
+          const entry = (await entriesOf(t, 'lookup')).at(-1)!;
+          expect(entry).toMatchObject({ status: 'failed', code: 'R402' });
+          for (const kept of [entry.error ?? '', String(actionRecord(entry, 'run').details?.['error'] ?? '')]) {
+            expect(kept).toContain('is not the JSON text of one object');
+            for (const secret of [registered, password]) {
+              for (let i = 0; i + 4 <= secret.length; i += 1) {
+                expect(kept, result).not.toContain(secret.slice(i, i + 4));
+              }
+            }
+          }
+        }
+      } finally {
+        resetLayer();
+      }
+    });
+
     it("applies the composite's grounding policies (F505) and its profiles' minimum confidence (F504)", async () => {
       const t = memoryThread();
       const triage = plainTool({ tool: 'triage', capability: 'classify' }, (a) =>
@@ -1033,6 +1071,118 @@ describe('nested calls of plain tools: secrets, outputs, queued calls, the tool 
     it('validates what registerTools is given', () => {
       expect(() => registerTools(null as never)).toThrow(/registerTools/);
       expect(() => registerTools({ a: 'not a tool' } as never)).toThrow(/'a' is not a tool definition/);
+    });
+  });
+
+  describe('a nested call the layer cannot check is refused and recorded (R407, §5.18.8; security round 3, batch 4)', () => {
+    /** A cycle, which has no canonical JSON and which the secret scan cannot walk. */
+    const cyclic = (): Record<string, unknown> => {
+      const a: Record<string, unknown> = { data: 'x' };
+      a['self'] = a;
+      return a;
+    };
+    /** Arguments nested 20,000 levels deep (about 100 KB): no cycle, but more than the walks' stack. */
+    const deep = (): Record<string, unknown> => {
+      let v: unknown = 'x';
+      for (let i = 0; i < 20_000; i += 1) v = { v };
+      return { data: v };
+    };
+
+    /**
+     * A composite whose code invokes `invoked` with `argsOf()`; while it does,
+     * reads of `failKey` from the thread's store throw.
+     */
+    function setup(record: Record<string, unknown>, argsOf: () => Record<string, unknown>, failKey?: string, grounded = false) {
+      const t = memoryThread();
+      const ran: unknown[] = [];
+      const output = record['capability'] === 'persist' ? { stored: true, evidence_anchors: [] } : { data: 1, evidence_anchors: [] };
+      const invoked = grounded
+        ? groundedTool({
+            name: 'lookup',
+            capability: record['capability'] as 'persist',
+            description: 'lookup',
+            args,
+            execute: async (_s, a) => {
+              ran.push(a);
+              return output as never;
+            },
+          })
+        : plainTool({ tool: 'lookup', ...record }, (a) => {
+            ran.push(a);
+            return text(output);
+          });
+      if (!grounded) registerTools({ lookup: invoked });
+      const store = t.state as unknown as { getValue: (key: string) => Promise<unknown> };
+      const read = store.getValue;
+      let failing = false;
+      store.getValue = async (key: string) => {
+        if (failing && key === failKey) throw new Error('store unavailable');
+        return read(key);
+      };
+      const nested: ToolResult[] = [];
+      const summary = groundedTool({
+        name: 'summary',
+        capability: 'invoke',
+        invokes: { lookup: invoked } as never,
+        description: 'summary',
+        args,
+        execute: async (state) => {
+          failing = true;
+          try {
+            nested.push(await state.invokeTool('lookup', argsOf()));
+          } finally {
+            failing = false;
+          }
+          return { result: true, evidence_anchors: [] };
+        },
+      });
+      t.tools.set('lookup', invoked as never);
+      t.tools.set('summary', summary);
+      return { t, nested, ran };
+    }
+
+    for (const [name, record, argsOf, failKey, grounded] of [
+      ['a plain persist call whose prerequisite record cannot be read', { capability: 'persist' }, () => ({ data: { note: 'n' } }), 'acs:executed', false],
+      ['a plain retrieve call whose prerequisite record cannot be read', { capability: 'retrieve' }, () => ({ q: 'x' }), 'acs:executed', false],
+      ['a plain persist call with cyclic arguments', { capability: 'persist' }, cyclic, undefined, false],
+      ['a plain retrieve call with cyclic arguments', { capability: 'retrieve' }, cyclic, undefined, false],
+      ['a plain persist call with arguments nested 20,000 deep', { capability: 'persist' }, deep, undefined, false],
+      ['a plain retrieve call with arguments nested 20,000 deep', { capability: 'retrieve' }, deep, undefined, false],
+      ['a grounded persist call with cyclic arguments', { capability: 'persist' }, cyclic, undefined, true],
+      ['a grounded retrieve call with arguments nested 20,000 deep', { capability: 'retrieve' }, deep, undefined, true],
+    ] as const) {
+      it(`refuses ${name}, records the refusal with the call that covered it, and runs nothing`, async () => {
+        const { t, nested, ran } = setup(record, argsOf, failKey, grounded);
+        try {
+          expect((await run(t, 'summary')).status).toBe('success');
+          expect(nested[0]?.status).toBe('error');
+          expect(nested[0]?.error_code).toBe('R407');
+          expect(nested[0]?.error).toContain('could not be completed');
+          expect(ran).toEqual([]);
+          expect(t.invoked).toEqual([]);
+          const covering = (await entriesOf(t, 'summary')).map((e) => e.seq);
+          const entries = await entriesOf(t, 'lookup');
+          expect(entries.map((e) => [e.status, e.code, e.covered_by, e.capability])).toEqual([
+            ['refused', 'R407', covering[0], record.capability],
+          ]);
+          expect(entries[0]?.recorded_by).toBeDefined();
+          expect(await readExecuted(t.state)).toEqual({ invoke: 1 });
+        } finally {
+          resetLayer();
+        }
+      });
+    }
+
+    it('still runs a nested plain call the layer can check (control)', async () => {
+      const { t, nested, ran } = setup({ capability: 'persist' }, () => ({ data: { note: 'n' } }), 'acs:other');
+      try {
+        expect((await run(t, 'summary')).status).toBe('success');
+        expect(nested[0]?.status).toBe('success');
+        expect(ran).toEqual([{ data: { note: 'n' } }]);
+        expect((await entriesOf(t, 'lookup')).map((e) => [e.status, e.covered_by !== undefined])).toEqual([['executed', true]]);
+      } finally {
+        resetLayer();
+      }
     });
   });
 });

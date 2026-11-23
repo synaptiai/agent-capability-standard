@@ -41,6 +41,7 @@ from ..state.checkpoint_tracker import CheckpointTracker
 from ..state.evidence_store import EvidenceAnchor, EvidenceStoreProtocol
 from ..state.memory import MemoryContext, MemoryError, MemoryStore
 from ..state.redaction import DEFAULT_REDACTOR, Redactor
+from ._responses import redact_anchors
 from .engine import WorkflowEngine
 from .idempotency import IdempotencyLog
 from .protocol import RECORD_MODES
@@ -172,11 +173,12 @@ class Host:
         log = getattr(self, "idempotency", None)
         if log is None:
             return []
+        redactor = getattr(log, "redactor", DEFAULT_REDACTOR)
         out = []
         for entry in log.performed_since(since_ms, run_id=run_id):
             destination = entry.get("destination")
             item = (
-                f"send to {DEFAULT_REDACTOR.redact_text(destination)[0]} ({entry['key']})"
+                f"send to {redactor.redact_text(destination)[0]} ({entry['key']})"
                 if isinstance(destination, str)
                 else f"send ({entry['key']})"
             )
@@ -1038,6 +1040,7 @@ class WorkflowRunner:
         if save is not None:
             _check_durable(host)
         self._protect_records(host)
+        self._share_redactor(host)
         now = host.now_ms()
         _check_ms(now)
         before = run.next()
@@ -1057,7 +1060,9 @@ class WorkflowRunner:
             if response is None:
                 return Turn(None, run.wake_at(), action), answered
             seq = run.trace_seq
-            response = self._redact_anchors(self._redact_error(response))
+            response = self._redact_not_covered(
+                self._redact_anchors(self._redact_error(response))
+            )
             self._submit(run, action, response, host.now_ms())
             self._record_evidence(run, action, response, seq)
             answered += 1
@@ -1134,7 +1139,8 @@ class WorkflowRunner:
         key: bytes | None = None,
     ) -> RunResult:
         """Cancel ``run`` (STANDARD v1.2 §5.19.5): it ends at once with
-        ``Failed`` R408, ``reason`` as its message; no retry, failure mode,
+        ``Failed`` R408, ``reason`` as its message (redacted with the
+        runner's ``redactor``, §6.7); no retry, failure mode,
         recovery or rollback runs, and the result's ``checkpoint_id`` names
         the latest checkpoint, which you may restore yourself. A run that
         ended ``deferred`` can be cancelled too. With ``save``, the
@@ -1157,7 +1163,15 @@ class WorkflowRunner:
         _check_ms(now)
         _check_key(key)
         before = run.next()
-        run.cancel(reason, now)
+        # The core makes the reason the R408 message and writes it into the
+        # trace, the cancelled records and the run record: host text, so it
+        # is redacted as an Error's message is (§6.7).
+        run.cancel(
+            self._redactor.redact_text(reason)[0]
+            if isinstance(reason, str)
+            else reason,
+            now,
+        )
         if save is not None:
             save(run.snapshot(key))
         if host is not None and before["kind"] not in TERMINAL | {"Sleep"}:
@@ -1173,6 +1187,31 @@ class WorkflowRunner:
         protect = getattr(host, "protect", None)
         if isinstance(path, (str, os.PathLike)) and callable(protect):
             protect(os.fspath(path))
+
+    def _share_redactor(self, host: Host) -> None:
+        """Give the stores that write records for the run what the runner's
+        ``redactor`` recognises (§6.7): the host's idempotency log, which
+        keeps each ``send``'s destination and output, and its memory store
+        and the runner's, which refuse a ``persist`` of a secret. A store on
+        the shared default redactor gets one of its own (the default
+        patterns and the runner's), so the runner's values never reach a
+        redactor other runners share; any other takes them in."""
+        if self._redactor is DEFAULT_REDACTOR:
+            return
+        for store in (
+            getattr(host, "idempotency", None),
+            getattr(host, "memory", None),
+            self._memory,
+        ):
+            redactor = getattr(store, "redactor", None)
+            if not isinstance(redactor, Redactor) or redactor is self._redactor:
+                continue
+            if redactor is DEFAULT_REDACTOR:
+                own = Redactor()
+                own.include(self._redactor)
+                store.redactor = own  # type: ignore[union-attr]
+            else:
+                redactor.include(self._redactor)
 
     def _ended(
         self, run: _core.Run, action: Action, host: Host | None = None
@@ -1227,43 +1266,28 @@ class WorkflowRunner:
         return out
 
     def _redact_anchors(self, response: Any) -> Any:
-        """An ``Output`` with every evidence anchor that holds a secret
-        redacted as the evidence stores redact one (§6.5, §6.7: its secrets
-        replaced, its digest gone); any other response as it is. The core
-        keeps an output's anchors in the run's state and outputs, so they
-        are redacted before it sees them.
+        """``response`` with the evidence anchors it carries redacted
+        (:func:`~grounded_agency.workflows._responses.redact_anchors`): an
+        ``Output``'s, with its ``evidence_seen`` rewritten to match, and an
+        ``Event``'s, which the core copies into a ``receive`` or ``wait``
+        step's output (§6.5, §6.7: each anchor's secrets replaced, its digest
+        gone). The core keeps them in the run's state and outputs, so they
+        are redacted before it sees them; an array of anchors given as a
+        tuple is redacted, and given as a list, too."""
+        return redact_anchors(self._redactor, response)
 
-        ``evidence_seen`` is rewritten to match (§5.20): it lists an
-        anchor's redacted ``ref`` when the host listed the anchor's own
-        ``ref``. When two anchors' refs are one after redaction and the host
-        listed only one of them, it lists neither: the core then cannot
-        tell them apart, so the one it did not list must not pass as seen.
-        A ``seen`` that is not a list of strings is left for the core to
-        refuse."""
-        if not (isinstance(response, dict) and response.get("kind") == "Output"):
+    def _redact_not_covered(self, response: Any) -> Any:
+        """A ``RolledBack`` response with every string of its
+        ``not_covered`` items redacted (§6.7): the core writes them into the
+        trace and the rollback's record, and a host builds them from what it
+        did (a ``send``'s destination). Any other response as it is."""
+        if not (isinstance(response, dict) and response.get("kind") == "RolledBack"):
             return response
-        value = response.get("value")
-        items = value.get("evidence_anchors") if isinstance(value, dict) else None
-        if not isinstance(value, dict) or not isinstance(items, list):
+        items = response.get("not_covered")
+        if not isinstance(items, (list, tuple)):
             return response
-        redacted: list[Any] = []
-        for item in items:
-            out, pointers = self._redactor.redact_anchor_data(item)
-            redacted.append(out if pointers else item)
-        if all(a is b for a, b in zip(redacted, items, strict=True)):
-            return response
-        result = {**response, "value": {**value, "evidence_anchors": redacted}}
-        seen = response.get("evidence_seen")
-        if isinstance(seen, list) and all(isinstance(s, str) for s in seen):
-            listed = set(seen)
-            verdict: dict[str, bool] = {}
-            for raw, out in zip(items, redacted, strict=True):
-                ref = raw.get("ref") if isinstance(raw, dict) else None
-                shown = out.get("ref") if isinstance(out, dict) else None
-                if isinstance(ref, str) and isinstance(shown, str):
-                    verdict[shown] = verdict.get(shown, True) and ref in listed
-            result["evidence_seen"] = [r for r, ok in verdict.items() if ok]
-        return result
+        kept, pointers = self._redactor.redact(items)
+        return {**response, "not_covered": kept} if pointers else response
 
     def _record_evidence(
         self, run: _core.Run, action: Action, response: Any, seq: int

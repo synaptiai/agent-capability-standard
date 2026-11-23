@@ -603,8 +603,14 @@ function nestingState(
   };
   const listed = (tool: string): boolean => Object.hasOwn(composite.invokes, tool);
 
+  /**
+   * The capability a refusal of an invocation of `tool` names: the listed
+   * binding's, a listed grounded tool's own, else the one its name is bound
+   * to in this realm.
+   */
   const boundCapability = (tool: string): CapabilityId | null => {
-    const bound = composite.plain.get(tool)?.capabilities[0] ?? BOUND_NAMES.get(tool) ?? null;
+    const own = listed(tool) ? PERFORMS.get(composite.invokes[tool]!)?.[0]?.capability : undefined;
+    const bound = composite.plain.get(tool)?.capabilities[0] ?? own ?? BOUND_NAMES.get(tool) ?? null;
     return bound === null || bound === 'control' ? null : bound;
   };
 
@@ -614,7 +620,7 @@ function nestingState(
    * one made after its call ended is no nested call, so it carries none
    * (§5.18.4). Recording it never fails the refusal.
    */
-  const recordRefusal = (tool: string, result: ToolResult, attributed: boolean): Promise<unknown> => {
+  const recordRefusal = (tool: string, result: ToolResult, attributed: boolean, code: RefusalCode = 'F504'): Promise<unknown> => {
     const plain = composite.plain.get(tool);
     const control = plain?.control === true || (plain === undefined && BOUND_NAMES.get(tool) === 'control');
     return write(() =>
@@ -627,10 +633,10 @@ function nestingState(
           ...(control ? { control: true as const } : {}),
           ...position,
           status: 'refused',
-          code: 'F504',
+          code,
           ...(attributed ? { covered_by: composite.seq } : {}),
           recorded_by: composite.recorded_by,
-          error: result.error ?? 'F504',
+          error: result.error ?? code,
         },
         composite.secrets,
       ),
@@ -772,10 +778,11 @@ function nestingState(
   const invokePlain = async (tool: string, bound: BoundTool, args: Record<string, unknown>): Promise<ToolResult> => {
     const capability = bound.control ? null : (bound.capabilities[0] ?? null);
     let args_digest: string | undefined;
+    let unreadable: unknown;
     try {
       args_digest = await digestOf(args as Json);
-    } catch {
-      args_digest = undefined;
+    } catch (cause) {
+      unreadable = cause;
     }
     const base = {
       action: tool,
@@ -794,57 +801,80 @@ function nestingState(
       ).catch(() => undefined);
       return result;
     };
-    // Data a persist call would store, or a record an audit call would
-    // append, that holds a secret is refused, not redacted (§5.18.10, §6.7).
-    const records = bound.capabilities.includes('persist') || bound.capabilities.includes('audit');
-    if (records && holdsCredential(args as Json, composite.secrets)) {
-      return refuseNested(
-        'F504',
-        `The ${bound.capabilities.includes('persist') ? 'data this nested call would store' : 'record this nested call would append'} holds what looks like a credential (STANDARD 1.2.0 §6.7).`,
-        'Store where the secret is kept, or cite it by reference or digest, not the secret itself.',
-      );
-    }
-    if (bound.capabilities.includes('send')) {
-      const policies = [...destinationPolicies(), ...composite.destinations];
-      if (policies.length > 0) {
-        const destination = bound.destination === undefined ? undefined : atPointer(args, bound.destination);
-        if (typeof destination !== 'string' || !allowed(policies, destination)) {
+    /** The checks before the call runs: a refusal, or null when it may run. */
+    const checksBefore = async (): Promise<ToolResult | null> => {
+      // Arguments with no canonical JSON (not I-JSON, a cycle) cannot be
+      // recorded by their digest, so the checks cannot be completed, as a
+      // grounded tool's own check refuses them.
+      if (args_digest === undefined) {
+        const why = unreadable instanceof Error ? unreadable.message : String(unreadable);
+        throw new Error(`its arguments have no canonical JSON (${why})`);
+      }
+      // Data a persist call would store, or a record an audit call would
+      // append, that holds a secret is refused, not redacted (§5.18.10, §6.7).
+      const records = bound.capabilities.includes('persist') || bound.capabilities.includes('audit');
+      if (records && holdsCredential(args as Json, composite.secrets)) {
+        return refuseNested(
+          'F504',
+          `The ${bound.capabilities.includes('persist') ? 'data this nested call would store' : 'record this nested call would append'} holds what looks like a credential (STANDARD 1.2.0 §6.7).`,
+          'Store where the secret is kept, or cite it by reference or digest, not the secret itself.',
+        );
+      }
+      if (bound.capabilities.includes('send')) {
+        const policies = [...destinationPolicies(), ...composite.destinations];
+        if (policies.length > 0) {
+          const destination = bound.destination === undefined ? undefined : atPointer(args, bound.destination);
+          if (typeof destination !== 'string' || !allowed(policies, destination)) {
+            return refuseNested(
+              'F504',
+              typeof destination === 'string'
+                ? "This nested call's destination is not one the destination policies in force allow."
+                : `This nested call sends, and the layer cannot tell where: ${
+                    bound.destination === undefined
+                      ? 'its binding names no destination argument'
+                      : `its argument at ${bound.destination} is not a string`
+                  }, so no destination policy in force can allow it.`,
+              'Send only to an allowed destination (STANDARD 1.2.0 §4.4.2).',
+            );
+          }
+        }
+      }
+      if (bound.requires_approval) {
+        const policy = policyOf(bound.approval);
+        if (composite.authority === null || !decisionsCover(composite.authority, policy, composite.now())) {
           return refuseNested(
-            'F504',
-            typeof destination === 'string'
-              ? "This nested call's destination is not one the destination policies in force allow."
-              : `This nested call sends, and the layer cannot tell where: ${
-                  bound.destination === undefined
-                    ? 'its binding names no destination argument'
-                    : `its argument at ${bound.destination} is not a string`
-                }, so no destination policy in force can allow it.`,
-            'Send only to an allowed destination (STANDARD 1.2.0 §4.4.2).',
+            'F502',
+            `The decisions that approved ${composite.name} are not valid for the approval ${tool} needs (its role, approvers or expiry), and ${tool} is not defined with groundedTool, so no decision of its own can be asked.`,
+            `Give ${composite.name} the approval ${tool} needs, or define ${tool} with groundedTool.`,
           );
         }
       }
-    }
-    if (bound.requires_approval) {
-      const policy = policyOf(bound.approval);
-      if (composite.authority === null || !decisionsCover(composite.authority, policy, composite.now())) {
-        return refuseNested(
-          'F502',
-          `The decisions that approved ${composite.name} are not valid for the approval ${tool} needs (its role, approvers or expiry), and ${tool} is not defined with groundedTool, so no decision of its own can be asked.`,
-          `Give ${composite.name} the approval ${tool} needs, or define ${tool} with groundedTool.`,
-        );
+      const executed = await readExecuted(state);
+      for (const needed of bound.prerequisites) {
+        if (!executed[needed]) {
+          const code: RefusalCode =
+            needed !== 'checkpoint' ? 'V102' : bound.capabilities.includes('rollback') ? 'F503' : 'F501';
+          return refuseNested(
+            code,
+            `'${capability}' requires '${needed}' to have run first in this thread.`,
+            `Call a '${needed}' tool, then call ${composite.name} again.`,
+          );
+        }
       }
+      return null;
+    };
+    // A check the layer cannot complete (its records unreadable, arguments
+    // it cannot read, such as a cycle) refuses the call (R407, §5.18.8), and
+    // the refusal is recorded with the call that covered it, as a grounded
+    // tool's own check records its R407.
+    let refused: ToolResult | null;
+    try {
+      refused = await checksBefore();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return refuseNested('R407', `The safety checks of this nested call could not be completed: ${message}.`, 'The call did not run.');
     }
-    const executed = await readExecuted(state);
-    for (const needed of bound.prerequisites) {
-      if (!executed[needed]) {
-        const code: RefusalCode =
-          needed !== 'checkpoint' ? 'V102' : bound.capabilities.includes('rollback') ? 'F503' : 'F501';
-        return refuseNested(
-          code,
-          `'${capability}' requires '${needed}' to have run first in this thread.`,
-          `Call a '${needed}' tool, then call ${composite.name} again.`,
-        );
-      }
-    }
+    if (refused !== null) return refused;
     const late = refusalOf(tool);
     if (late !== null) {
       await recordRefusal(tool, late.result, late.attributed);
@@ -934,7 +964,24 @@ function nestingState(
     const plain = composite.plain.get(tool);
     if (plain !== undefined) return invokePlain(tool, plain, args);
     if (composite.flow === null) return state.invokeTool(tool, args);
-    const digest = await digestOf(args as Json);
+    let digest: string;
+    try {
+      digest = await digestOf(args as Json);
+    } catch (cause) {
+      // Arguments the layer cannot read (no canonical JSON, a cycle) bind no
+      // nesting token: the call is refused (R407, §5.18.8), and recorded
+      // with the call that covered it while that call runs.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      const result = refusal(
+        'R407',
+        tool,
+        boundCapability(tool),
+        `The safety checks of this nested call could not be completed: its arguments have no canonical JSON (${message}).`,
+        'The call did not run.',
+      );
+      await recordRefusal(tool, result, composite.scope.open, 'R407');
+      return result;
+    }
     // The composite may have ended while the digest was computed (an
     // invocation it did not wait for): no token is issued after it has.
     const late = refusalOf(tool);

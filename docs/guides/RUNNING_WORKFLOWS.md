@@ -441,12 +441,19 @@ runs; each is checked against the ontology when it is made, so a misspelt
 capability is a `ValueError` naming V101. `WorkflowRunner(...,
 redactor=Redactor([...]))` registers the host's secrets: the runner redacts
 the `message` and `reason` of every `Error` it submits, the one it builds
-when the run refuses a host's response included, and the evidence anchors
-of every `Output` it submits, so the run's state, outputs and snapshots
-keep an anchor that held a secret with it replaced and without its digest
-(§6.5, §6.7). `evidence_seen` is rewritten to match: it lists an anchor's
-redacted `ref` when it listed the anchor's own, and when two anchors are
-one after redaction it lists neither unless it listed both. A signed URL's
+when the run refuses a host's response included, the evidence anchors of
+every `Output` it submits and of every `Event` (which the core copies into
+a `receive` or `wait` step's output), given as a list or a tuple, the
+`not_covered` items of a `RolledBack`, and a `cancel`'s reason, so the
+run's state, outputs, trace, records and snapshots keep an anchor that held
+a secret with it replaced and without its digest (§6.5, §6.7).
+`evidence_seen` is rewritten to match: it lists an anchor's redacted `ref`
+when it listed the anchor's own, and when two anchors are one after
+redaction it lists neither unless it listed both. The runner gives what its
+redactor recognises to the host's `IdempotencyLog` and `MemoryStore` and to
+its own `memory` (a store on the shared default redactor gets one of its
+own), so the log's file and a refused `persist` know the registered secrets
+too. A signed URL's
 signature (`sig=`, `X-Amz-Signature=`) is not among the default patterns:
 a host that cites signed URLs adds a pattern for them
 (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) or cites them without
@@ -519,7 +526,9 @@ result.checkpoint_id    # the latest checkpoint the run knew of, if any
 ```
 
 Cancelling ends the run at once with `Failed` R408
-([§5.19.5](../../spec/STANDARD-v1.2.0.md#5195-cancelling-a-run)). No retry,
+([§5.19.5](../../spec/STANDARD-v1.2.0.md#5195-cancelling-a-run)), the reason
+as its message, redacted with the runner's `redactor` (the core writes it
+into the trace and the records). No retry,
 failure mode, recovery loop, handler or rollback runs: the executor does not
 roll back, and a host that wants the effects undone restores
 `checkpoint_id` itself. Approved and queued records become `cancelled` (a
@@ -688,7 +697,11 @@ host = Host(
 - **Sends** ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
   Call `self.send_once(action, effect)` from your `send` implementation:
   with an `IdempotencyLog`, an attempt whose key already transmitted gets
-  that output again (its `evidence_seen` included), one whose earlier
+  that output again (its `evidence_seen` included) as the log keeps it:
+  the log is the host's record of what it did, so it keeps the output as
+  the runner submits it (anchors redacted, `evidence_seen` rewritten to
+  match) with every other secret its redactor recognises replaced, and the
+  destination redacted (§6.7); one whose earlier
   attempt may have transmitted gets `outcome_unknown`, and a key reused
   with other inputs gets `key_conflict`. A host that saves runs keeps its
   keys as long:
