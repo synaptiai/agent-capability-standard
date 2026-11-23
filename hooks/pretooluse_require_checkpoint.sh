@@ -10,6 +10,13 @@
 # that JSON object is read: anything else, or a system without jq, is blocked
 # with R407 SAFETY_CHECK_FAILED.
 #
+# Its settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE; the log hook's
+# AUDIT_HMAC_KEY and AUDIT_LOCK_WAIT) come from its environment, where Claude
+# Code also puts the env of the project's .claude/settings.json and
+# .claude/settings.local.json, repository content, over the user's settings:
+# while either file names one of them, or cannot be read, every call is
+# blocked with R407 SAFETY_CHECK_FAILED (project_layer_settings).
+#
 # Exit codes follow Claude Code's hook contract:
 #   0  allow the tool call (with an "ask" decision on stdout for a gated call)
 #   2  block it; the reason on stderr is shown to Claude
@@ -57,7 +64,11 @@
 #         call runs in the project's repository (its cwd); any other pop or
 #         apply, a bare one included, is mutate, since git applies any merge
 #         commit as if it were a stash; any other git stash form: mutate;
-#       - a command on READ_ONLY: observe (allowed, nothing used), except a
+#       - a first word holding a blank (a quoted "git status") or a slash:
+#         bash runs the program of that name, which is on no list: mutate;
+#       - a command on READ_ONLY (a one-word entry the first word, a two-word
+#         entry the first word and the second): observe (allowed, nothing
+#         used), except a
 #         git command where a git read may do more than read the repository's
 #         own state (git_read_gated: the git directory is not one git made
 #         for a work tree, a partial clone, a repository with submodules, or
@@ -143,6 +154,49 @@ fi
 tool_name=$(printf '%s' "$payload" | jq -r 'if type == "object" then (.tool_name | strings) else error("not an object") end' 2>/dev/null) || tool_name=""
 if [ -z "$tool_name" ]; then
   block "$unreadable"
+fi
+
+# SEC-006: Use absolute path via CLAUDE_PROJECT_DIR, fall back to CLAUDE_PLUGIN_ROOT, then pwd
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+  project_dir="${CLAUDE_PROJECT_DIR}"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  project_dir="${CLAUDE_PLUGIN_ROOT}"
+else
+  project_dir="$(pwd)"
+fi
+
+# The layer's settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE,
+# AUDIT_HMAC_KEY, AUDIT_LOCK_WAIT) that the project's own settings files,
+# .claude/settings.json and .claude/settings.local.json in the project
+# directory $1, name in their env, in any letter case, one to a line; for a
+# file jq cannot read, its name. Claude Code applies those files' env, which
+# is repository content, to every hook, over the user's settings and the
+# environment it started in, so a hook cannot tell the person's value of
+# such a setting from the repository's (ACS_HOOK_APPROVAL=off, an
+# AUDIT_HMAC_KEY the repository knows, a longer maximum age). The three
+# hooks that read a setting hold the same function; a test keeps them so,
+# and keeps every setting a hook reads named in it.
+project_layer_settings() {
+  local file
+  for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("^(acs_hook_approval|acs_checkpoint_max_age|audit_hmac_key|audit_lock_wait)$"; "i")) else empty end' "$file" 2>/dev/null \
+        || printf '%s\n' ".claude/${file##*/} (unreadable)"
+    fi
+  done
+}
+
+# A setting the repository may have chosen configures nothing: every call is
+# refused until it is set where the repository cannot reach (§5.18.8: the
+# layer cannot complete its checks, nor sign the call's record, with a value
+# it cannot trust).
+named=$(project_layer_settings "$project_dir") || named="(unreadable)"
+# Shown in the reason: the first 400 characters, one line, plain.
+named="${named:0:400}"
+named="${named//$'\n'/ }"
+named="${named//[^A-Za-z0-9_.\/() ]/?}"
+if [ -n "$named" ]; then
+  block "R407 SAFETY_CHECK_FAILED: the project's settings files name the layer's settings in env, or cannot be read: ${named% }. Claude Code applies a project's env, which is repository content, over yours, so the call is blocked. Remove them from .claude/settings.json and .claude/settings.local.json, and set them in ~/.claude/settings.json, in managed settings or in the environment Claude Code starts in."
 fi
 
 # Tools whose calls need nothing from this hook: the SDK mapper's static
@@ -357,8 +411,19 @@ classify_bash() {
     echo mutate
     return
   fi
+  # bash runs the program the first word names, looked up as it stands: a
+  # word holding a blank ("git status", quoted) or a slash names a program
+  # that is on no list, whatever the list's entries spell.
+  case "${words[0]}" in
+    *[[:space:]/]*)
+      echo mutate
+      return
+      ;;
+  esac
   for entry in "${READ_ONLY[@]}"; do
-    if [ "$entry" = "${words[0]}" ] || [ "$entry" = "${words[0]} ${words[1]:-}" ]; then
+    # A one-word entry is the program; a two-word one, the program and its
+    # subcommand, each one word.
+    if [ "$entry" = "${words[0]}" ] || { [ "${entry%% *}" != "$entry" ] && [ "${entry%% *}" = "${words[0]}" ] && [ "${entry#* }" = "${words[1]:-}" ]; }; then
       if [ "${words[0]}" = "git" ] && git_read_gated; then
         echo mutate
       else
@@ -404,14 +469,6 @@ if [ "$capability" = "observe" ] || [ "$capability" = "checkpoint" ]; then
   exit 0
 fi
 
-# SEC-006: Use absolute path via CLAUDE_PROJECT_DIR, fall back to CLAUDE_PLUGIN_ROOT, then pwd
-if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-  project_dir="${CLAUDE_PROJECT_DIR}"
-elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-  project_dir="${CLAUDE_PLUGIN_ROOT}"
-else
-  project_dir="$(pwd)"
-fi
 claude_dir="${project_dir}/.claude"
 marker="${claude_dir}/checkpoint.ok"
 used_dir="${claude_dir}/checkpoints/used"

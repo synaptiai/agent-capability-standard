@@ -330,3 +330,103 @@ def test_a_checkpoint_stays_possible_in_a_partial_clone(
     )
     assert classified.capabilities == ("checkpoint",)
     assert _hook(tmp_path, "git stash create", partial_clone).returncode == 0
+
+
+# A first word that holds a blank names a program with that name, which bash
+# looks up in PATH as it stands: `"git status"` is no git command.
+QUOTED_NAMES = [
+    '"git status"',
+    '"git status" --output=/tmp/x',
+    '"git log" -p',
+    "'git status'",
+    'g"it status"',
+    'git" "status',
+    '"git diff"',
+    '"git show" HEAD',
+    '"git rev-parse" HEAD',
+    '"git ls-files"',
+    '"git branch"',
+    '"git remote" add o x',
+    '"pip list"',
+    '"pip show" x',
+    '"git\tstatus"',
+    "./ls",
+    "/bin/ls",
+]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize("command", QUOTED_NAMES)
+def test_a_command_name_with_a_blank_or_a_slash_is_gated_in_both(
+    tmp_path: Path, command: str
+) -> None:
+    classified = mapper.ToolCapabilityMapper().map_tool("Bash", {"command": command})
+    assert classified.capabilities == ("mutate", "send"), command
+    assert classified.requires_checkpoint and classified.requires_approval
+    result = _hook(tmp_path, command)
+    assert result.returncode == 2, command
+    assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize(
+    "command", ["git status", 'git "status"', '"git" "status"', '"ls" -la', "pip list"]
+)
+def test_a_quoted_name_without_a_blank_is_still_the_command(
+    tmp_path: Path, command: str
+) -> None:
+    classified = mapper.ToolCapabilityMapper().map_tool("Bash", {"command": command})
+    assert classified.capabilities == ("observe",), command
+    if not command.startswith("pip"):  # pip is on the mapper's list only
+        assert _hook(tmp_path, command).returncode == 0, command
+
+
+def test_bash_runs_a_program_named_with_a_blank(tmp_path: Path) -> None:
+    """The premise: bash runs `"git status"` as the program of that name
+    on PATH, not git."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    program = bin_dir / "git status"
+    program.write_text('#!/bin/sh\necho "not git: $*"\n')
+    program.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "-c", '"git status" --output=x'],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        timeout=30,
+    )
+    assert result.stdout == "not git: --output=x\n"
+
+
+# A quoted or escaped operator is a word the shell passes on (shlex gives it
+# as the bare operator): it must not hide the word after it.
+QUOTED_OPERATORS = [
+    "find in.txt '<' -execdir sh -c 'id > PWNED' sh {} +",
+    "find in.txt \\< -execdir sh {} +",
+    'find in.txt "<" -execdir sh {} +',
+    "find . ! -name '<' -delete",
+    "find . -not -name '<' -execdir rm {} +",
+    "find in.txt '<' -fprint OUTF",
+    "sort '<' -o OUT in.txt",
+    "git log '<' --output=FILE",
+    "find . -name ';' -delete",
+    "find . -name '|' -delete",
+    "find . -name '&&' -delete",
+    "find . -name \\; -delete",
+    "find . -name '>' -fprint OUT",
+    "sort ';' -o OUT f",
+]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize("command", QUOTED_OPERATORS)
+def test_a_quoted_operator_hides_no_word_in_either(
+    tmp_path: Path, command: str
+) -> None:
+    classified = mapper.ToolCapabilityMapper().map_tool("Bash", {"command": command})
+    assert classified.capability_id != "observe", command
+    assert classified.requires_checkpoint and classified.requires_approval, command
+    result = _hook(tmp_path, command)
+    assert result.returncode == 2, command
+    assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command

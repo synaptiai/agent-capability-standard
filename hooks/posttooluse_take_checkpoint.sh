@@ -32,7 +32,11 @@
 # project's tree or index differs from HEAD: HEAD would not restore that
 # state.
 # MAX_AGE is ACS_CHECKPOINT_MAX_AGE when it is an integer from 1 to 1800,
-# else 1800 seconds (30 minutes, the Standard's cap). A marker the new one
+# else 1800 seconds (30 minutes, the Standard's cap). While the project's
+# .claude/settings.json or .claude/settings.local.json names one of the
+# hooks' settings in env, or cannot be read, no marker is written: Claude
+# Code applies that env, repository content, over the user's settings
+# (project_layer_settings). A marker the new one
 # replaces is filed under .claude/checkpoints/ended/ first; its commit, entered
 # in commits/, can still be restored. A commit is entered only in a git
 # repository whose git directory git made for a work tree (a .git directory,
@@ -146,6 +150,32 @@ elif [ -z "$printed" ]; then
 else
   exit 0
 fi
+
+# The layer's settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE,
+# AUDIT_HMAC_KEY, AUDIT_LOCK_WAIT) that the project's own settings files,
+# .claude/settings.json and .claude/settings.local.json in the project
+# directory $1, name in their env, in any letter case, one to a line; for a
+# file jq cannot read, its name. Claude Code applies those files' env, which
+# is repository content, to every hook, over the user's settings and the
+# environment it started in, so a hook cannot tell the person's value of
+# such a setting from the repository's (ACS_HOOK_APPROVAL=off, an
+# AUDIT_HMAC_KEY the repository knows, a longer maximum age). The three
+# hooks that read a setting hold the same function; a test keeps them so,
+# and keeps every setting a hook reads named in it.
+project_layer_settings() {
+  local file
+  for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("^(acs_hook_approval|acs_checkpoint_max_age|audit_hmac_key|audit_lock_wait)$"; "i")) else empty end' "$file" 2>/dev/null \
+        || printf '%s\n' ".claude/${file##*/} (unreadable)"
+    fi
+  done
+}
+
+# A maximum age the repository may have chosen sets no expiry: no marker
+# (the pre-tool-use hook refuses every call meanwhile, R407).
+named=$(project_layer_settings "$project") || exit 0
+[ -z "$named" ] || exit 0
 
 max_age="${ACS_CHECKPOINT_MAX_AGE:-1800}"
 if ! [[ "$max_age" =~ ^[0-9]{1,4}$ ]] || (( 10#$max_age < 1 || 10#$max_age > 1800 )); then

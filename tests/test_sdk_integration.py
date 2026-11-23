@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -509,6 +510,41 @@ class TestGroundedAgentAdapter:
         assert "Write" in wrapped.allowed_tools
         assert "Bash" in wrapped.allowed_tools
         assert "Skill" not in wrapped.allowed_tools
+
+    @pytest.mark.parametrize(
+        "sources",
+        [
+            None,
+            [],
+            ["user"],
+            ["local"],
+            ["user", "local"],
+            ["user", "project", "local"],
+        ],
+    )
+    def test_wrap_options_keeps_the_hosts_setting_sources(
+        self, adapter: GroundedAgentAdapter, sources: list[str] | None
+    ) -> None:
+        """Which settings files the CLI loads is the host's choice: ``[]``
+        (the SDK's isolation mode, for a cwd that may be untrusted, whose
+        project settings can run hooks) stays ``[]``, and ``None`` (every
+        source) stays ``None``; nothing adds ``"project"``."""
+        given = None if sources is None else list(sources)
+        wrapped = adapter.wrap_options(ClaudeAgentOptions(setting_sources=given))
+        assert wrapped.setting_sources == sources
+        try:
+            from claude_agent_sdk._internal.transport.subprocess_cli import (
+                SubprocessCLITransport,
+            )
+
+            build = SubprocessCLITransport(
+                prompt="x", options=replace(wrapped, cli_path="/bin/false")
+            )._build_command
+        except ImportError, AttributeError, TypeError:
+            return  # an SDK whose transport this test cannot read
+        flags = [a for a in build() if a.startswith("--setting-sources")]
+        expected = [] if sources is None else [f"--setting-sources={','.join(sources)}"]
+        assert flags == expected
 
     def test_create_checkpoint_convenience(self, adapter: GroundedAgentAdapter):
         """Test adapter's create_checkpoint convenience method."""

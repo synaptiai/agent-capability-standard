@@ -52,6 +52,20 @@ CHECKPOINT_REQUIRED:`. Only Claude Code's JSON object is read: a payload that
 is not one, or a system without `jq`, is blocked with `R407
 SAFETY_CHECK_FAILED:`.
 
+The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
+`AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`) belong in `~/.claude/settings.json`
+(`env`), managed settings or the environment Claude Code starts in, never in
+the project's `.claude/settings.json` or `.claude/settings.local.json`.
+Claude Code applies a project's `env`, which is repository content, to every
+hook over the user's settings, so a hook cannot tell the person's value from
+the repository's: a cloned repository could set `ACS_HOOK_APPROVAL=off`. While
+either project file names one of them in `env` (in any letter case), or
+cannot be read, the pre-tool-use hook blocks every call with `R407
+SAFETY_CHECK_FAILED:`, the log hook writes no line and the checkpoint hook
+writes no marker. Claude Code started in the home directory reads
+`~/.claude/settings.json` as the project's too: there, set them in the
+environment instead.
+
 ```bash
 echo '{"tool_name": "Write", "tool_input": {"file_path": "a.py"}}' \
   | ./pretooluse_require_checkpoint.sh   # exit 2 without a valid marker
@@ -232,7 +246,10 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   `wc`, `pwd`, `grep`, `stat`, `file`, `du`, `df`, `which`, `whoami`,
   `uname`, `echo`, `printf`, `git status`, `git log`, `git diff`, `git show`,
   `git rev-parse`, `git ls-files`) only reads and needs nothing; anything else
-  is `mutate`. A git command that would only read (`git stash list` and
+  is `mutate`. The first word must be the listed program exactly, and a
+  two-word entry's subcommand the second word: bash runs a first word that
+  holds a blank (a quoted `"git status"`) or a slash as the program of that
+  name, which is `mutate`. A git command that would only read (`git stash list` and
   `git stash show` included) is `mutate` where the call's directory (the
   payload's `cwd`, else the project directory) is in a partial clone (a
   promisor remote, or `extensions.partialClone`), in a repository with
@@ -337,7 +354,8 @@ output (nothing to save) gives `HEAD` as the restore point only when the
 project's tracked files and index are `HEAD`'s.
 Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds when that is an integer from 1
 to 1800, else 1800 (the Standard caps a checkpoint's maximum age at 30
-minutes). Before it writes the marker, the hook enters the commit in
+minutes); while the project's settings files name one of the hooks' settings,
+it writes no marker. Before it writes the marker, the hook enters the commit in
 `<git dir>/acs/checkpoints/commits/` (an empty file named by the commit),
 where a rollback looks it up. A new marker replaces the old one, which is
 filed under `.claude/checkpoints/ended/`. `stop_end_checkpoints.sh` files the
@@ -476,7 +494,11 @@ before the hook kept a head, or a chain no head anchors (the `audit`
 skill's `.claude/audit/records.jsonl`), is checked with `--no-head`, the
 chain alone: removing its last entries is not seen.
 
-Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable.
+Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable, in
+`~/.claude/settings.json`, managed settings or the environment Claude Code
+starts in: while the project's settings files name it (or another of the
+hooks' settings), the hook writes no line (exit 1 with the reason), so no
+key the repository may know signs one.
 
 ## Hooks in Skill Frontmatter
 

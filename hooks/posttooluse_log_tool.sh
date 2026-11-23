@@ -53,11 +53,14 @@
 # chain link, it says why on standard error and exits 1, which Claude Code
 # shows as a non-blocking hook error: no jq, input jq cannot parse (nested
 # past jq's depth limit, a lone surrogate escape, or not JSON at all: such
-# input may be a tool call), a symlinked audit.log (refused, SEC-006), no
-# openssl, a line that could not be built, a last line whose hmac cannot be
-# read (the line starts a new chain), an input digest that could not be
-# computed (the line says "unavailable"), a head the log no longer matches
-# or that cannot be written (the line is written; see above). It exits 0 for a call it logged
+# input may be a tool call), project settings files that name one of the
+# hooks' settings in env or cannot be read (no key the repository may know
+# signs a line: project_layer_settings), a symlinked audit.log (refused,
+# SEC-006), no openssl, a line that could not be built, a last line whose
+# hmac cannot be read (the line starts a new chain), an input digest that
+# could not be computed (the line says "unavailable"), a head the log no
+# longer matches or that cannot be written (the line is written; see
+# above). It exits 0 for a call it logged
 # and for JSON that is not a tool call (no input, or a value that is not an
 # object with a string tool_name); a log directory or file that cannot be
 # written exits non-zero too. A lock that cannot be taken in
@@ -145,6 +148,48 @@ if input_canonical=$(printf '%s' "$input" | jq -cS '.tool_input' 2>/dev/null); t
   fi
 fi
 
+# The layer's settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE,
+# AUDIT_HMAC_KEY, AUDIT_LOCK_WAIT) that the project's own settings files,
+# .claude/settings.json and .claude/settings.local.json in the project
+# directory $1, name in their env, in any letter case, one to a line; for a
+# file jq cannot read, its name. Claude Code applies those files' env, which
+# is repository content, to every hook, over the user's settings and the
+# environment it started in, so a hook cannot tell the person's value of
+# such a setting from the repository's (ACS_HOOK_APPROVAL=off, an
+# AUDIT_HMAC_KEY the repository knows, a longer maximum age). The three
+# hooks that read a setting hold the same function; a test keeps them so,
+# and keeps every setting a hook reads named in it.
+project_layer_settings() {
+  local file
+  for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("^(acs_hook_approval|acs_checkpoint_max_age|audit_hmac_key|audit_lock_wait)$"; "i")) else empty end' "$file" 2>/dev/null \
+        || printf '%s\n' ".claude/${file##*/} (unreadable)"
+    fi
+  done
+}
+
+# Determine the project directory using CLAUDE_PROJECT_DIR or pwd
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+  project_dir="${CLAUDE_PROJECT_DIR}"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  project_dir="${CLAUDE_PLUGIN_ROOT}"
+else
+  project_dir="$(pwd)"
+fi
+
+# A key or setting the repository may have chosen signs and describes
+# nothing: no line is written (the pre-tool-use hook refuses every call
+# meanwhile, R407), and the log's chain and head are left as they are.
+named=$(project_layer_settings "$project_dir") || named="(unreadable)"
+# Shown in the reason: the first 400 characters, one line, plain.
+named="${named:0:400}"
+named="${named//$'\n'/ }"
+named="${named//[^A-Za-z0-9_.\/() ]/?}"
+if [[ -n "$named" ]]; then
+  fail "R407 SAFETY_CHECK_FAILED: the project's settings files name the layer's settings in env, or cannot be read: ${named% }; Claude Code applies a project's env, which is repository content, over yours, so no line is signed with it"
+fi
+
 # The layer and its configuration, as every line names it (§5.18.8): what a
 # reader needs to know which rules the call was held to. The settings are
 # the effective values, after defaults and the cap, of the two environment
@@ -162,14 +207,7 @@ if ! [[ "$max_age" =~ ^[0-9]{1,4}$ ]] || (( 10#$max_age < 1 || 10#$max_age > 180
 fi
 max_age=$((10#$max_age))
 
-# Determine output directory using CLAUDE_PROJECT_DIR or pwd
-if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-  log_dir="${CLAUDE_PROJECT_DIR}/.claude"
-elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-  log_dir="${CLAUDE_PLUGIN_ROOT}/.claude"
-else
-  log_dir="$(pwd)/.claude"
-fi
+log_dir="${project_dir}/.claude"
 mkdir -p "$log_dir"
 
 log_file="$log_dir/audit.log"

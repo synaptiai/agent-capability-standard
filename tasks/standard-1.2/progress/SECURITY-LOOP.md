@@ -2314,3 +2314,222 @@ changes.
   resolved), on one word of 2040 path components (0.23 s), and on a git
   read (0.04 s). No CLI or nested agent was started; nothing was left
   running; the scratch repositories were removed.
+
+### Batch 2: four reported defects
+
+Four defects, each reproduced by an independent verifier on bfb18b1: one in
+where the plugin's hooks take their settings, one in how both classifiers
+read a command's name, one in how the SDK mapper reads a quoted operator,
+and one in what `wrap_options()` does to the host's `setting_sources`. None
+was fixed by an earlier batch (git log, round 1 and batch 1 checked; batch
+1's fixes hold: its tests pass unchanged). Each fix has tests that fail on
+the code before it: the 111 new tests were run with 6cf8c5d's three hooks,
+mapper and adapter put back, and 77 failed; the 34 that passed are the
+controls (settings set elsewhere, unrelated settings, unquoted names and
+operators, `/bin/ls`), the fixtures' own checks (bash runs a program named
+`git status`; `find f '<' -execdir` runs), one passthrough case the old code
+already kept (`["user", "project", "local"]`), and sibling forms the old
+code gated by accident (`find . -name ';' -delete` was split at the `;`,
+leaving an unknown `-delete` command).
+
+#### 6. A project's settings `env` switched the hooks' settings (low)
+
+Claude Code applies the `env` of a project's `.claude/settings.json` and
+`.claude/settings.local.json`, repository content, to every hook process it
+starts, over the user's settings and the environment it started in (read
+from the installed binary: `Object.assign(process.env, ...)` for every
+enabled source; only the organization's managed hooks start without the
+repository settings' env). The hooks read `ACS_HOOK_APPROVAL`,
+`ACS_CHECKPOINT_MAX_AGE`, `AUDIT_HMAC_KEY` and `AUDIT_LOCK_WAIT` from their
+environment, so a cloned repository could switch the approval floor off
+(`ACS_HOOK_APPROVAL=off`: no F502 ask in default mode, no F502 block in
+bypassPermissions), lengthen the maximum age, or sign the audit log with a
+key it knows. No hook read the project's settings files, so none could tell
+the person's value from the repository's.
+
+- Fix (hooks): `project_layer_settings` (the same function in the
+  pre-tool-use, take and log hooks; a test keeps them equal and checks that
+  every `ACS_*` or `AUDIT_*` variable any hook reads is on its list) reads
+  both files in `$CLAUDE_PROJECT_DIR/.claude/` (where Claude Code reads
+  them: its `projectConfigDir` is the project directory it also passes as
+  `CLAUDE_PROJECT_DIR`, which it sets after the env, so a project cannot
+  move it) with jq and prints each of the four names their `env` holds, in
+  any letter case (any JSON spelling: jq decodes `ACS_...`), or the
+  file's name when jq cannot read it. While it prints anything:
+  - the pre-tool-use hook blocks every call, ungated ones included (the
+    record of any call would be signed with a key the repository may
+    know), with `R407 SAFETY_CHECK_FAILED:` naming the settings and where
+    they belong (`~/.claude/settings.json`, managed settings, the
+    environment Claude Code starts in); the marker is left in place;
+  - the log hook writes no line (exit 1 with the reason; the log and its
+    head are left as they are);
+  - the take hook writes no marker.
+- Why a refusal and not "ignore the value": the hook cannot know the
+  person's value either (the project's replaces it in the environment), so
+  any value it used would be a guess; `AUDIT_LOCK_WAIT` is on the list
+  because the test requires every setting a hook reads to be.
+- Not covered, stated in SECURITY.md §5.5 and the hooks README: Claude Code
+  started in the home directory reads `~/.claude/settings.json` as the
+  project's settings too, so there the settings must come from the
+  environment; settings Claude Code takes from elsewhere for a project are
+  not read.
+- Tests: `tests/test_project_settings.py` (each setting in either file, in
+  another letter case, as a JSON escape and named twice, in three modes:
+  R407 and the marker unused; Read, a read-only Bash and Write refused
+  alike; an unreadable file refused; unrelated settings, an `env` that is
+  not an object and a non-object file change nothing; the log hook writes
+  no line and keeps the head; the take hook writes no marker; the controls:
+  `off` from the environment still leaves approval to Claude Code, and a
+  key from the environment still signs; the function-equality and
+  coverage test).
+
+#### 7. A quoted command name with a blank read as a two-word entry (medium)
+
+The hook compared each read-only entry with `${words[0]}` and with
+`${words[0]} ${words[1]}`, and the mapper's `_is_read_only` with `words[0]`
+and `" ".join(words[:2])`: the single dequoted word `git status` (from
+`"git status"`, `'git status'`, `g"it status"`, `git" "status`) equals the
+entry "git status". Bash runs the program named `git status` from PATH, not
+git; its writes and git-directory checks (keyed on `words[0] == "git"`)
+were skipped too. The mapper also passed `"git branch"`, `"git remote" add
+o x`, `"pip list"` and `"pip show"`.
+
+- Fix (hook and mapper alike): a first word holding a blank (any
+  whitespace) or a slash names a program on no list: the worst case
+  (`mutate` in the hook, `mutate` and `send` in the mapper). A one-word
+  entry is compared with the first word, a two-word entry's program and
+  subcommand with the first and second words, each one word.
+- Tests: `test_a_command_name_with_a_blank_or_a_slash_is_gated_in_both`
+  (17 commands, hook F501 and mapper worst case),
+  `test_a_quoted_name_without_a_blank_is_still_the_command` (`git
+  "status"`, `"git" "status"`, `"ls" -la` stay read-only), and
+  `test_bash_runs_a_program_named_with_a_blank` (the premise) in
+  `tests/test_hook_lists_match_mapper.py`.
+
+#### 8. The SDK classifier dropped the word after a quoted `<` (high); sibling: quoted separators
+
+shlex in punctuation mode gives a quoted or escaped operator (`'<'`, `"<"`,
+`\<`, `';'`, `'|'`, `'&&'`, `\;`) as the bare operator. `_simple_commands`
+compared the real and masked token streams by length only, then read every
+real token that looked like an operator as one: `find in.txt '<' -execdir
+sh -c '...' sh {} +` skipped `-execdir` as a redirection's file and was
+`observe` (the shell runs it: the verifier's probe wrote `id` output), as
+were `find . ! -name '<' -delete` (deletes everything), `-fprint`, `sort
+'<' -o`, and `git log '<' --output=`. The adapter allowed them with no
+checkpoint, no approval and no destination check. Sibling (same cause):
+a quoted separator split the line, so `grep ';' f` was two commands
+(`grep`, and `f`, an unknown command: the worst case), and `find . -name
+';' -delete` was gated only because its `-delete` became a command of its
+own. The plugin's hook was not affected: it
+gates any line holding an operator character, quoted or not.
+
+- Fix (mapper): a token is an operator only when the masked reading has an
+  operator at the same position (the two readings are always the same
+  length: about 106,000 fuzzed lines of quotes, escapes and operators found no
+  difference, and an operator in the masked reading always equals the real
+  one); any other token is the word the shell passes. Should the readings
+  ever differ in length, the line is the worst case (it fell back to
+  "every word expanded", which would now have made every operator a word).
+  A redirection whose file is missing or is an operator (`cat <`, `ls >
+  ;`, a syntax error) is the worst case.
+- Effect on read-only lines: a quoted operator in an allow-listed command
+  is now a word (`grep ';' f`, `grep '|' f`, `echo '(' x` observe, where
+  the last was the worst case).
+- Tests: `TestQuotedOperators` in `tests/test_bash_classification.py` (the
+  premise: bash runs `-execdir` past `'<'`; six lines whose following word
+  is now read; seven read-only lines; unquoted operators still separate and
+  redirect; a redirection with no file; the adapter denies the `-execdir`
+  line with F501, and F504 under a destination policy), and
+  `test_a_quoted_operator_hides_no_word_in_either` (14 lines, mapper gated
+  and hook F501) in `tests/test_hook_lists_match_mapper.py`.
+
+#### 9. `wrap_options` overrode the host's `setting_sources` (high)
+
+`wrap_options` set `setting_sources` to the host's value or `["project"]`,
+then added `"project"`: `[]` (the SDK's isolation mode, which its own
+documentation names for a `cwd` that may be untrusted, since project
+settings can run hooks) became `["project"]`, so the repository's
+`.claude/settings.json` was loaded (its hooks run commands with no check,
+its `env` and permission rules apply; the SDK runs the CLI non-interactively,
+which skips the trust dialog); `None` (every source, the CLI's default)
+became the project's settings alone, dropping the user's and local deny
+rules and hooks; `["user"]` became `["user", "project"]`. The docstring,
+the guide, SECURITY.md and the conformance statement said nothing of it.
+
+- Fix: `setting_sources` is passed through unchanged (it is no longer in
+  the replaced fields). A host that wants a project's skills loaded
+  includes `"project"` itself; the docstring, the SDK guide, SECURITY.md
+  §5.5 and CHANGELOG Upgrading say so. `grounded_query` and
+  `GroundedClient`, which wrap default options, now keep `None`.
+- Tests: `test_wrap_options_keeps_the_hosts_setting_sources` in
+  `tests/test_sdk_integration.py` (`None`, `[]`, `["user"]`, `["local"]`,
+  `["user", "local"]`, all three: the wrapped options keep the value, and
+  the SDK transport's command line, built with `cli_path=/bin/false` and
+  no process started, carries the same `--setting-sources` flag, or none
+  for `None`).
+
+#### Siblings checked
+
+- Settings: the Python SDK and adapter read no layer setting from the
+  environment (they take a `GroundedAgentConfig`; the only environment
+  they touch is `GIT_NO_LAZY_FETCH` for their own git commands); the
+  TypeScript package and the binding read no `process.env`. The stop hook
+  and the skill command hooks read none of the settings (the audit skill's
+  HMAC under `AUDIT_HMAC_KEY` is a command the agent runs, which the
+  pre-tool-use hook gates). Claude Code's own lists that strip
+  `BASH_ENV`, `LD_*`, `GIT_*`, `SHELLOPTS`, `PS4` and others from some
+  environments were seen in the binary, statically; that a project's `env`
+  cannot set them for a hook was not checked at run time (the CLI may not
+  be run here).
+- Names: the take hook compares `git`, `stash` and `create` word by word;
+  the rollback skill's hook finds restores by the unquoted words `git stash
+  pop|apply` (a quoted `"git stash" apply X` is no restore it sees, and the
+  pre-tool-use hook gates it as a program on no list); the audit skill's
+  hook compares one program name; `_classify_single_command` and the stash
+  forms compare words exactly.
+- Operators: no other SDK code splits a command line (`_tokens` and
+  `_simple_commands` are its only users); the hooks refuse any operator
+  character, quoted or not, before reading words.
+- `wrap_options`' other fields: `enable_file_checkpointing` is set; output
+  format, budget, model, turns and agents are filled only when the host
+  left them unset; `allowed_tools` and the permission settings are kept.
+
+#### Documentation
+
+SECURITY.md §5.1 (the settings rule, the first-word rule, the log and take
+hooks under project settings) and §5.5 (the host gap for the home
+directory; the adapter's `setting_sources` and its reading of quoted
+operators and names), `hooks/README.md` (where the settings belong, the
+first-word rule, the HMAC key), the three hooks' header comments,
+`docs/integrations/claude_agent_sdk.md` (the classifier's reading of quoted
+operators and names; `setting_sources`), the adapter's docstring, and
+CHANGELOG [Unreleased] Upgrading (the SDK's `wrap_options` and Bash
+entries; the plugin hooks' entries). The Standard's text was not changed:
+it states the rules these fixes apply (§5.18.3 classification to the worst
+case, §5.18.7, §5.18.8 R407), not the plugin's settings or the shell's
+quoting. No version changes.
+
+#### Checks after batch 2
+
+- Python: `pytest tests/` (5633 passed, 18 skipped), and again the three
+  changed test files after the last edit (322 passed); ruff check and
+  format with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators'
+  `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build, check and test (2002; the
+  WebAssembly build reused); the binding's check and test (217, 2 skipped).
+  No TypeScript source changed: neither reads a layer setting from the
+  environment, classifies a Bash command or wraps SDK options.
+- Site: `npm run check`, `npm test` (1173).
+- Probes, each under `timeout 120` or less (and a 4 GB address-space limit
+  for the timing ones), inputs at most 564 KB: the pre-tool-use hook with a
+  project `env` naming `ACS_HOOK_APPROVAL` (R407 for Bash in
+  bypassPermissions and for Read), its time on a Read call (0.01 s a run;
+  0.15 s with a 564 KB settings file of 5000 keys); the log hook with and
+  without the project setting; the classifiers on the reported commands;
+  the mapper on 4 KB lines of quoted operators (4 to 140 ms, the same as
+  before the change: the 140 ms is the pattern checks that run before the
+  line is read). No CLI or nested agent was started; nothing was left
+  running; the scratch repositories were removed.

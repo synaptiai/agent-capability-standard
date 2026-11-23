@@ -696,3 +696,102 @@ class TestPartialClone:
 
         assert getattr(decision, "behavior", None) != "allow"
         assert decision.message.startswith("F502 APPROVAL_REQUIRED:")
+
+
+class TestQuotedOperators:
+    """shlex gives a quoted or escaped operator (`'<'`, `";"`, `\\|`) as the
+    bare operator; the shell passes it on as a word. Only a token that is an
+    operator in the masked reading too is one (section 5.18.3)."""
+
+    def test_the_shell_runs_what_follows_a_quoted_redirection_sign(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "in.txt").write_text("x")
+        subprocess.run(
+            ["bash", "-c", "find in.txt '<' -execdir sh -c 'touch PWNED' sh {} +"],
+            cwd=tmp_path,
+            capture_output=True,
+            timeout=30,
+        )
+        assert (tmp_path / "PWNED").exists()
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "find in.txt '<' -execdir sh -c 'id > PWNED' sh {} +",
+            "find . ! -name '<' -delete",
+            "find . -name \\; -delete",
+            "sort '<' -o OUT in.txt",
+            "git log '<' --output=FILE",
+            "find . -name '&&' -fprint OUT",
+        ],
+    )
+    def test_the_word_after_it_is_read(
+        self, mapper: ToolCapabilityMapper, command: str
+    ) -> None:
+        words = mapper_module._simple_commands(command)
+        assert words is not None and len(words) == 1, command
+        mapping = _bash(mapper, command)
+        assert _gated(mapping), command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep ';' f",
+            "grep '|' f",
+            "grep '<' f",
+            'grep "&&" f',
+            "echo '(' x",
+            "grep \\; f",
+            "grep a'<'b f",
+        ],
+    )
+    def test_a_quoted_operator_in_a_read_only_command_is_a_word(
+        self, mapper: ToolCapabilityMapper, command: str
+    ) -> None:
+        assert _bash(mapper, command).capabilities == ("observe",), command
+
+    @pytest.mark.parametrize(
+        ("command", "commands"),
+        [
+            ("ls; rm -rf x", [["ls"], ["rm", "-rf", "x"]]),
+            ("ls | wc -l", [["ls"], ["wc", "-l"]]),
+            ("cat < f", [["cat"]]),
+            ("cat < '<'", [["cat"]]),
+            ("ls > /dev/null", [["ls"]]),
+        ],
+    )
+    def test_unquoted_operators_still_separate_and_redirect(
+        self, command: str, commands: list[list[str]]
+    ) -> None:
+        read = mapper_module._simple_commands(command)
+        assert read is not None
+        assert [c.words for c in read] == commands
+
+    @pytest.mark.parametrize("command", ["cat <", "cat < ;", "ls >", "ls > ; rm x"])
+    def test_a_redirection_with_no_file_is_the_worst_case(
+        self, mapper: ToolCapabilityMapper, command: str
+    ) -> None:
+        assert mapper_module._simple_commands(command) is None
+        assert _bash(mapper, command).capabilities == ("mutate", "send")
+
+    @pytest.mark.parametrize("policy", [None, ["https://hooks.example.com/*"]])
+    async def test_the_adapter_refuses_it(
+        self, ontology_path: str, policy: list[str] | None
+    ) -> None:
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                approval="ask",
+                allowed_destinations=policy,
+            )
+        )
+        hook = adapter._make_pretooluse_safety_hook()
+        command = "find in.txt '<' -execdir sh -c 'id > PWNED' sh {} +"
+        result = await hook(
+            {"tool_name": "Bash", "tool_input": {"command": command}}, "b1", None
+        )
+        out = result.get("hookSpecificOutput") or {}
+        assert out.get("permissionDecision") == "deny"
+        code = "F501 CHECKPOINT_REQUIRED:" if policy is None else "F504"
+        assert str(out.get("permissionDecisionReason")).startswith(code)

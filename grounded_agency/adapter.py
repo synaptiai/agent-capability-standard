@@ -1703,8 +1703,13 @@ class GroundedAgentAdapter:
         the permission modes of :data:`PROMPTING_PERMISSION_MODES`, read
         from the hook input, else from ``base.permission_mode``.
 
-        ``allowed_tools`` is passed through unchanged; ``Skill`` is not
-        added. The SDK approves a tool listed there without consulting
+        ``setting_sources`` is passed through unchanged: ``None`` (every
+        source, as the CLI loads by default), ``[]`` (none: the SDK's
+        isolation mode, for a ``cwd`` that may be untrusted, whose project
+        settings can run hooks and set the environment) or the list given.
+        A host that wants a project's skills loaded includes ``"project"``
+        itself. ``allowed_tools`` is passed through unchanged; ``Skill`` is
+        not added. The SDK approves a tool listed there without consulting
         ``can_use_tool`` (and warns that the callback is shadowed). The
         checks run in the PreToolUse hook, so they apply to listed tools too.
 
@@ -1823,16 +1828,13 @@ class GroundedAgentAdapter:
             }
         )
 
-        # Ensure setting_sources includes project (for skills)
-        setting_sources = getattr(base, "setting_sources", None) or ["project"]
-        if "project" not in setting_sources:
-            setting_sources = list(setting_sources) + ["project"]
-
-        # Build kwargs for dataclasses.replace
+        # Build kwargs for dataclasses.replace. setting_sources is the
+        # host's, unchanged: which settings files the CLI loads is the
+        # host's choice, and `[]` keeps a cwd that may be untrusted from
+        # running its project settings' hooks.
         kwargs: dict[str, Any] = {
             "enable_file_checkpointing": True,
             "hooks": merged_hooks,
-            "setting_sources": setting_sources,
         }
 
         # The permission callback. The SDK refuses can_use_tool beside a

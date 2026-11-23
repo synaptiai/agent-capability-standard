@@ -466,37 +466,49 @@ def _simple_commands(command: str) -> list[_Command] | None:
     if tokens is None:
         return None
     # The same reading of the masked line gives the same words, each with
-    # its quoted characters masked: an unquoted glob character is one left.
-    # Should the two readings ever differ, every word counts as expanded.
+    # its quoted characters masked: an unquoted glob character is one left,
+    # and only a token that is an operator there too is one. shlex gives a
+    # quoted or escaped operator (`'<'`, `";"`, `\|`) as the bare operator,
+    # but the shell passes it as a word: `find f '<' -execdir sh {} +` runs
+    # its -execdir, and `grep ';' f` is one command. Should the two readings
+    # ever differ in length, no token can be placed: the worst case.
     shadow = _tokens(masked[0])
     if shadow is None or len(shadow) != len(tokens):
-        shadow = ["*"] * len(tokens)
+        return None
     commands: list[_Command] = [_Command([])]
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        if token in _SEPARATORS:
-            commands.append(_Command([]))
-        elif token == "<":
-            target = tokens[i + 1] if i + 1 < len(tokens) else ""
-            if target.startswith(_NETWORK_PATHS):
-                return None  # a connection to another host, not a file
-            i += 1  # reads a file: skip its name
-        elif token in _OUTPUT_REDIRECTS:
-            target = tokens[i + 1] if i + 1 < len(tokens) else ""
-            if target != "/dev/null" and not (token == ">&" and target.isdigit()):
-                return None
-            i += 1
-        elif token and set(token) <= _OPERATOR_CHARS:
-            return None  # (, ), <<, <>, ;; and the like
-        else:
+        if not _is_operator(shadow[i]):
             last = commands[-1]
             commands[-1] = _Command(
                 [*last.words, token],
                 last.globbed or any(c in "*?[" for c in shadow[i]),
             )
+        elif token != shadow[i]:
+            return None  # an operator the two readings do not agree on
+        elif token in _SEPARATORS:
+            commands.append(_Command([]))
+        elif token == "<" or token in _OUTPUT_REDIRECTS:
+            if i + 1 == len(tokens) or _is_operator(shadow[i + 1]):
+                return None  # no file named: not a line the shell runs
+            target = tokens[i + 1]
+            if token == "<":
+                if target.startswith(_NETWORK_PATHS):
+                    return None  # a connection to another host, not a file
+            elif target != "/dev/null" and not (token == ">&" and target.isdigit()):
+                return None
+            i += 1  # skip the file's name
+        else:
+            return None  # (, ), <<, <>, ;; and the like
         i += 1
     return [c for c in commands if c.words]
+
+
+def _is_operator(token: str) -> bool:
+    """Whether a token of :func:`_tokens` is an operator: shlex gives one
+    as a run of operator characters only."""
+    return bool(token) and set(token) <= _OPERATOR_CHARS
 
 
 def _option_writes(args: list[str], options: _Options) -> bool:
@@ -669,10 +681,17 @@ def git_may_fetch(cwd: str | None = None) -> bool:
 
 def _is_read_only(command: _Command) -> bool:
     """Whether a simple command is on the read-only allow-list (by its exact
-    name, or its name and subcommand) with no option that writes."""
+    name, or its name and subcommand, each one word) with no option that
+    writes. The shell runs the program the first word names as it stands:
+    one holding a blank (`"git status"`, quoted) or a slash names a program
+    on no list, whatever the list's entries spell."""
     words = command.words
-    listed = (
-        words[0] in _READ_ONLY_COMMANDS or " ".join(words[:2]) in _READ_ONLY_COMMANDS
+    if any(c.isspace() or c == "/" for c in words[0]):
+        return False
+    # With no blank in the first word, a two-word entry can only match the
+    # first word and the second.
+    listed = words[0] in _READ_ONLY_COMMANDS or (
+        len(words) > 1 and f"{words[0]} {words[1]}" in _READ_ONLY_COMMANDS
     )
     return listed and not _writes(words, command.globbed)
 

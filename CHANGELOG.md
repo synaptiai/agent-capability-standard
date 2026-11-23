@@ -59,6 +59,15 @@ here and marked so.
   options it is given is now chained to, not replaced: once the layer's
   checks pass, the adapter's callback hands the call to the host's, whose
   answer decides it, so a callback that v2.0.0 dropped now takes effect.
+- Python SDK, `wrap_options()` (Fixed): `setting_sources` is passed through
+  unchanged. It added `"project"`: `[]`, the SDK's isolation mode for a
+  `cwd` that may be untrusted, loaded that directory's project settings
+  (whose hooks run commands and whose `env` applies), `None` (every source)
+  became the project's settings alone, so the user's and local deny rules
+  and hooks were dropped, and `["user"]` became `["user", "project"]`. A
+  host that wants a project's skills or CLAUDE.md loaded includes
+  `"project"` itself (or leaves `None`, every source, on an SDK where that
+  is the default).
 - Python SDK, `register_mcp_tool` (Fixed): a capability the ontology does
   not define raises `ValueError` (V101) at registration, where v2.0.0
   registered the tool; a declared `risk` below the capability's is ignored
@@ -238,7 +247,14 @@ here and marked so.
     a recorded checkpoint keep their classes there. A command over 4096
     UTF-8 bytes is not read (the plugin hook's bound): the worst case, where
     a quoted run of 40,000 blanks took 8 seconds to classify; a quoted `>`
-    (`grep " > " f`) is now an argument, not a redirection. A git read
+    (`grep " > " f`) is now an argument, not a redirection. Any quoted or
+    escaped operator (`'<'`, `";"`, `\;`, `'&&'`) is now the word the shell
+    passes: it no longer hides the word after it (`find f '<' -execdir sh
+    -c ... {} +` and `find . ! -name '<' -delete` were `observe`) nor splits
+    the line (`grep ';' f` is one read-only command); a redirection that
+    names no file (`cat <`, `ls > ;`) is the worst case. A command whose
+    first word holds a blank or a slash (a quoted `"git status"`, which
+    bash runs as the program of that name) is on no list: the worst case. A git read
     also gets the worst case in a repository with submodules (`modules/` in
     its git directory, or a gitlink in its index: a read that looks into a
     submodule fetches into its object store), and every git command the
@@ -808,6 +824,22 @@ here and marked so.
     repository ships holding `HEAD`, `objects/` and `refs/`, whose `config`
     names programs git runs). The hooks' own git commands run with
     `core.fsmonitor` and hooks turned off and fetch nothing.
+  - The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
+    `AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`) belong in `~/.claude/settings.json`,
+    managed settings or the environment Claude Code starts in. While the
+    project's `.claude/settings.json` or `.claude/settings.local.json` names
+    one of them in `env` (any letter case), or cannot be read, the
+    PreToolUse hook blocks every call with R407, the log hook writes no line
+    and the checkpoint hook writes no marker: Claude Code applies a
+    project's `env`, which is repository content, to every hook over the
+    user's settings, so a cloned repository could set
+    `ACS_HOOK_APPROVAL=off` or an audit key it knows. Move such an entry out
+    of the project's files (Claude Code started in the home directory reads
+    `~/.claude/settings.json` as the project's too: there, set them in the
+    environment).
+  - A Bash command whose first word holds a blank or a slash (a quoted
+    `"git status"`, which bash runs as the program of that name) is a gated
+    `mutate`, not a read-only list entry.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,
