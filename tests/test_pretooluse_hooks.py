@@ -21,6 +21,7 @@ from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from grounded_agency import GroundedAgentAdapter
 from grounded_agency.adapter import SAFETY_HOOK_TIMEOUT_S
+from tests.conftest import enter_checkpoint_commit
 
 
 def _decision(result: dict) -> str | None:
@@ -648,9 +649,7 @@ def _write_marker(
         marker["commit"] = commit
         # As posttooluse_take_checkpoint.sh does: the commit is entered, in
         # the project's git directory, before the marker names it.
-        commits = project_dir / ".git" / "acs" / "checkpoints" / "commits"
-        commits.mkdir(parents=True, exist_ok=True)
-        (commits / commit).touch()
+        enter_checkpoint_commit(project_dir / ".git", commit)
     (marker_dir / "checkpoint.ok").write_text(json.dumps(marker))
 
 
@@ -1065,9 +1064,7 @@ class TestShellHookRoutesEveryTool:
         )
         assert not (tmp_path / ".claude" / "checkpoint.ok").exists()
 
-    @pytest.mark.parametrize(
-        "tool", ["Read", "Grep", "Glob", "Skill", "Agent", "Task", "TodoWrite"]
-    )
+    @pytest.mark.parametrize("tool", ["Read", "Grep", "Glob", "TodoWrite"])
     def test_a_tool_that_needs_neither_passes(self, tmp_path: Path, tool: str):
         result = _gated_hook(_bypass({"tool_name": tool, "tool_input": {}}), tmp_path)
         assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
@@ -1187,9 +1184,7 @@ class TestShellHookTrustsOnlyItsOwnRecords:
         project = _repo(tmp_path / "project")
         elsewhere = _repo(tmp_path / "elsewhere")
         sha = "0123456789abcdef0123456789abcdef01234567"
-        commits = project / ".git" / "acs" / "checkpoints" / "commits"
-        commits.mkdir(parents=True)
-        (commits / sha).touch()
+        enter_checkpoint_commit(project / ".git", sha)
         call = _bash(f"git stash apply {sha}")
         (project / "sub").mkdir()
         for cwd in (project, project / "sub"):

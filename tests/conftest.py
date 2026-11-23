@@ -149,3 +149,31 @@ def missing_objects(repository: Path) -> int:
     """How many objects a partial clone lacks (git rev-list --missing)."""
     listed = _git(repository, "rev-list", "--objects", "--missing=print", "--all")
     return sum(line.startswith("?") for line in listed.splitlines())
+
+
+def enter_checkpoint_commit(git_dir: Path, commit: str) -> Path:
+    """Enter ``commit`` in ``git_dir`` as hooks/posttooluse_take_checkpoint.sh
+    does: a file named by it in <git dir>/acs/checkpoints/commits/, holding
+    the HMAC-SHA-256 of "acs-checkpoint-commit:<commit>" under the project's
+    checkpoint key (<git dir>/acs/checkpoints/key, drawn here when there is
+    none). Returns the entry's path."""
+    import hashlib
+    import hmac
+    import secrets
+
+    records = git_dir / "acs" / "checkpoints"
+    (records / "commits").mkdir(parents=True, exist_ok=True)
+    key_file = records / "key"
+    if not key_file.exists():
+        key_file.write_text(secrets.token_hex(32), encoding="ascii")
+    key = key_file.read_text(encoding="ascii")
+    entry = records / "commits" / commit
+    entry.write_text(
+        hmac.new(
+            key.encode("ascii"),
+            f"acs-checkpoint-commit:{commit}".encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest(),
+        encoding="ascii",
+    )
+    return entry

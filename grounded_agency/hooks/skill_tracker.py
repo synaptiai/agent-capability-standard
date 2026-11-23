@@ -4,7 +4,7 @@ Checkpoint Recorder Hook
 PostToolUse hook that records a checkpoint when a call that saves the state
 completed successfully (STANDARD 1.2.0 section 5.18.6): a call the mapper
 classifies ``checkpoint``, such as ``git stash create`` or a tool bound to
-``checkpoint``. A ``Skill`` call is ``invoke`` whatever the skill: loading
+``checkpoint``. A ``Skill`` call takes none, whatever the skill: loading
 the checkpoint skill's instructions saves nothing, and the state-saving
 command it leads to is the call that takes the checkpoint.
 """
@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..capabilities.mapper import ToolCapabilityMapper
 from ..state.checkpoint_tracker import CheckpointTracker
+from ..utils.git import SAFE_GIT_OPTIONS, safe_git_environment
 
 if TYPE_CHECKING:
     from .._types import HookCallback, HookContext
@@ -36,21 +37,24 @@ def _tree_is_head(cwd: Any) -> bool:
     """Whether the tracked files and the index of the repository at ``cwd``
     (the call's working directory; this process's when it is not given) are
     ``HEAD``'s: only then does ``HEAD`` restore the state a `git stash create`
-    that printed nothing saw. Any failure answers no."""
+    that printed nothing saw. git runs as the layer runs it (no fsmonitor
+    program, no hook, no external diff or textconv). Any failure answers
+    no."""
     git = shutil.which("git")
     if git is None:
         return False
     where = cwd if isinstance(cwd, str) and cwd else os.getcwd()
     for args in (
-        ["diff", "--quiet", "HEAD", "--"],
-        ["diff", "--cached", "--quiet", "HEAD", "--"],
+        ["diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--"],
+        ["diff", "--cached", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--"],
     ):
         try:
             done = subprocess.run(
-                [git, "-C", where, *args],
+                [git, *SAFE_GIT_OPTIONS, "-C", where, *args],
                 capture_output=True,
                 timeout=30,
                 check=False,
+                env=safe_git_environment(),
             )
         except OSError, subprocess.SubprocessError:
             return False

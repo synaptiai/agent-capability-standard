@@ -8,8 +8,11 @@ directory (<git dir>/acs/checkpoints/commits/), can still be restored."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -364,7 +367,16 @@ def test_a_restore_looks_up_one_entry_not_the_history(tmp_path: Path) -> None:
     _clean_repo(tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
     entry = _commits(tmp_path) / SHA
-    assert entry.is_file() and entry.read_text() == ""
+    # It holds the commit's HMAC under the project's checkpoint key, which
+    # the take hook drew (64 hex digits, readable by the user alone).
+    key_file = _commits(tmp_path).parent / "key"
+    key = key_file.read_text()
+    assert re.fullmatch(r"[0-9a-f]{64}", key)
+    assert key_file.stat().st_mode & 0o077 == 0
+    signature = hmac.new(
+        key.encode(), f"acs-checkpoint-commit:{SHA}".encode(), hashlib.sha256
+    ).hexdigest()
+    assert entry.is_file() and entry.read_text() == signature
     _run(STOP, {"hook_event_name": "Stop"}, tmp_path)
     assert _marker(tmp_path) is None
     assert _restore(tmp_path, SHA).returncode == 0

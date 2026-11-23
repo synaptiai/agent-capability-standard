@@ -23,6 +23,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.conftest import enter_checkpoint_commit
+
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = ROOT / "skills"
 POSTTOOLUSE_HOOK = ROOT / "hooks" / "posttooluse_log_tool.sh"
@@ -1709,8 +1711,7 @@ def checkpoint(repo: Path, where: str = "marker") -> str:
     assert git(repo, "stash", "list") == ""
     record = json.dumps({"checkpoint_id": sha, "commit": sha})
     claude = repo / ".claude"
-    commits_dir(repo).mkdir(parents=True)
-    (commits_dir(repo) / sha).touch()
+    enter_checkpoint_commit(repo / ".git", sha)
     claude.mkdir()
     if where == "marker":
         (claude / "checkpoint.ok").write_text(record)
@@ -1745,6 +1746,22 @@ class TestRollbackCommandHook:
         that nothing entered restores nothing."""
         sha = checkpoint(repo, "ended")
         (commits_dir(repo) / sha).unlink()
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        result = run_command(
+            hook, bash_call(f"git stash apply {sha}"), repo, shell, ROLLBACK_ENV
+        )
+        assert result.returncode == 2
+        assert result.stderr.startswith("F503 ROLLBACK_FAILED: ")
+
+    @pytest.mark.parametrize("content", ["", "x", "0" * 64])
+    def test_an_unsigned_entry_restores_nothing(
+        self, repo: Path, shell: str, content: str
+    ) -> None:
+        """An entry holds its commit's HMAC under the project's key: a file
+        a command made there (through a link the repository ships, say)
+        restores nothing, as in the plugin's pre-tool-use hook."""
+        sha = checkpoint(repo, "ended")
+        (commits_dir(repo) / sha).write_text(content)
         hook = command_hook("rollback", "PreToolUse", "Bash")
         result = run_command(
             hook, bash_call(f"git stash apply {sha}"), repo, shell, ROLLBACK_ENV

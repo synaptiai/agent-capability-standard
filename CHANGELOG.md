@@ -174,8 +174,16 @@ here and marked so.
   - A `rollback` call is refused (F503) unless a checkpoint was taken since
     the adapter started; it uses no checkpoint, and no longer invalidates
     the others.
-  - `Skill` is always `invoke`, so `Skill(checkpoint)` takes no checkpoint:
-    the call that saves the state does. `create_checkpoint_recorder`
+  - `Skill`, `Agent` and `Task` are their own capability (`invoke`,
+    `delegate`) and Bash's worst case, `mutate` and `send`, whatever the
+    skill or agent (was `invoke` and `delegate` alone, needing nothing):
+    Claude Code runs the shell commands a skill's file embeds (``!`cmd` ``
+    and ```` ```! ```` blocks) as the skill loads, and the hooks and MCP
+    servers a subagent's definition names, with no hook event the adapter
+    sees. Each such call needs a checkpoint and approval, and a destination
+    policy refuses it. `Skill(checkpoint)` still takes no checkpoint: the
+    call that saves the state does, so take one (`git stash create`)
+    before the Skill call. `create_checkpoint_recorder`
     (`create_skill_tracker` stays as an alias) records one when a call
     classified `checkpoint`, such as `git stash create`, succeeds. It takes
     none for a `git stash create` run in the background, one whose output
@@ -230,7 +238,18 @@ here and marked so.
     a recorded checkpoint keep their classes there. A command over 4096
     UTF-8 bytes is not read (the plugin hook's bound): the worst case, where
     a quoted run of 40,000 blanks took 8 seconds to classify; a quoted `>`
-    (`grep " > " f`) is now an argument, not a redirection.
+    (`grep " > " f`) is now an argument, not a redirection. A git read
+    also gets the worst case in a repository with submodules (`modules/` in
+    its git directory, or a gitlink in its index: a read that looks into a
+    submodule fetches into its object store), and every git command the
+    classifier would let pass (a read, `git stash create`, a restore) where
+    the git directory git finds is not one git made for a work tree (a
+    directory a repository ships holding `HEAD`, `objects/` and `refs/`,
+    whose `config` names programs git runs):
+    `ToolCapabilityMapper.git_dir_may_be_content` is the new lookup beside
+    `git_may_fetch`. The adapter's own git commands run with
+    `core.fsmonitor` and hooks turned off and fetch nothing, and the
+    tracker reads no state file in such a git directory.
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
@@ -693,8 +712,11 @@ here and marked so.
     `onFailure: "block"` and a 30-second `timeout`, so a run that fails,
     cannot start or times out blocks the call where Claude Code supports
     that setting. A tool the SDK mapper maps to a capability that needs
-    neither a checkpoint nor approval (Read, Grep, Glob, WebFetch, Skill,
-    Agent, TodoWrite, ...) still needs nothing; every other tool, MCP tools,
+    neither a checkpoint nor approval (Read, Grep, Glob, WebFetch,
+    TodoWrite, ...) still needs nothing; `Skill`, `Agent` and `Task` are
+    `mutate` (a skill's embedded shell commands and a subagent's hooks and
+    MCP servers run with no hook event; take a checkpoint before each, and
+    each is asked for approval); every other tool, MCP tools,
     `Monitor`, `PowerShell` and `ExitWorktree` included, is now an unbound
     `mutate` (Standard 1.2.0 §5.18.2): take a checkpoint (`git stash
     create`) before each such call, which is asked for approval. Before,
@@ -711,13 +733,22 @@ here and marked so.
     authorise a restore (checkpoints taken before the upgrade are restored
     as a gated `mutate`), and `git stash create` outside a git repository
     writes no marker for a commit. The rollback skill's hook reads the same
-    entries.
+    entries. An entry holds the HMAC-SHA-256 of its commit under the
+    project's checkpoint key (`<git dir>/acs/checkpoints/key`, drawn at
+    random by the take hook, which needs `openssl` to enter a commit), so a
+    file a command creates there is no entry; an empty entry written before
+    the upgrade restores nothing (it is a gated `mutate`), and nothing is
+    entered in a git directory git did not make for a work tree.
   - A marker git tracks authorises nothing (F501; it is left in place:
-    remove it from the repository). A gated call whose path, or Bash,
-    Monitor or PowerShell command, names the layer's records
-    (`checkpoint.ok`, `.claude/checkpoints`, `acs/checkpoints`) is refused
-    with F504, in any spelling a path accepts: any letter case, a run of
-    slashes, `./` segments and (in a text of at most 4096 bytes) `x/../`.
+    remove it from the repository), nor does one in a directory whose git
+    directory git did not make for a work tree (a repository can ship
+    `.claude` as a git directory), nor one git cannot answer for. A gated
+    call whose path, Bash, Monitor or PowerShell command, or Skill
+    arguments, names the layer's records (`checkpoint.ok`,
+    `.claude/checkpoints`, `acs/checkpoints`) is refused with F504, in any
+    spelling a path accepts: any letter case, a run of slashes, `./`
+    segments and (in a text of at most 4096 bytes) `x/../`, and through a
+    symbolic link on a path one of its words names.
   - The audit, persist, rollback and send skills' command hooks set
     `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
     does: a check that fails or gives no verdict in time blocks the call
@@ -769,7 +800,14 @@ here and marked so.
     list|show`) is a gated `mutate` when the call's directory (the payload's
     `cwd`) is in a partial clone, or git cannot say: there git fetches what
     a read lacks from the promisor remote, sending the object id the command
-    names. `git stash create` still takes a checkpoint there.
+    names. `git stash create` still takes a checkpoint there. The same in a
+    repository with submodules (`modules/` in its git directory, or a
+    gitlink in its index). Every git command the hook would let pass (a
+    read, `git stash create`, a restore) is `mutate` where the git
+    directory git finds is not one git made for a work tree (a directory a
+    repository ships holding `HEAD`, `objects/` and `refs/`, whose `config`
+    names programs git runs). The hooks' own git commands run with
+    `core.fsmonitor` and hooks turned off and fetch nothing.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,

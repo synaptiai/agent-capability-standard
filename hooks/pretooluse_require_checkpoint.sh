@@ -21,9 +21,17 @@
 # (grounded_agency/capabilities/mapper.py: _TOOL_MAPPINGS, _READ_ONLY_COMMANDS,
 # _GIT_STASH_CLASSES, _writes); a test keeps them so.
 #   - A tool on UNGATED_TOOLS (the mapper's tools whose capability needs
-#     neither a checkpoint nor approval: Read, Grep, Skill, Agent, ...):
+#     neither a checkpoint nor approval: Read, Grep, TodoWrite, ...):
 #     allowed, nothing used.
 #   - Write, Edit, MultiEdit, NotebookEdit: mutate.
+#   - Skill, Agent, Task: mutate. Claude Code runs the shell commands a
+#     skill's file embeds (!`cmd` and ```! blocks, with the call's arguments
+#     substituted into them) when the skill loads, under the skill's
+#     allowed-tools, and the hooks and MCP servers a subagent's definition
+#     names when the subagent runs, with no PreToolUse or PostToolUse event:
+#     no hook sees those commands, and any skill or agent name may be a
+#     project's (a project's definition replaces a built-in one of the same
+#     name), so the call takes the worst case (§5.18.3).
 #   - Bash: a command over 4096 bytes is not read: mutate (checked first, so
 #     no reading of it can run long). A command with any of ; & | < > $ ` ( )
 #     { } \ or a line break may be more than one simple command or expand
@@ -36,19 +44,24 @@
 #         or --compile or --preserve-date or any abbreviation of them
 #         (--compi); and, for git and file, a word with an unquoted *, ? or
 #         [, which bash replaces with file names, options included: mutate;
+#       - any git stash form where the git directory git finds is not one git
+#         made for a work tree (git_dir_is_content: git runs what that
+#         directory's configuration names): mutate;
 #       - git stash create: checkpoint (allowed; posttooluse_take_checkpoint.sh
 #         writes the marker once it succeeded); git stash list|show: observe
-#         (mutate where git may fetch, below);
+#         (mutate where a git read may do more, below);
 #         git stash pop|apply <commit>: rollback when <commit> is the full id
-#         of a commit posttooluse_take_checkpoint.sh entered in the project's
-#         git directory (<git dir>/acs/checkpoints/commits/, a lookup of one
-#         file however many checkpoints were taken) and the call runs in the
-#         project's repository (its cwd); any other pop or apply, a bare one
-#         included, is mutate, since git applies any merge commit as if it
-#         were a stash; any other git stash form: mutate;
+#         of a commit posttooluse_take_checkpoint.sh entered, signed, in the
+#         project's git directory (<git dir>/acs/checkpoints/commits/, a
+#         lookup of one file however many checkpoints were taken) and the
+#         call runs in the project's repository (its cwd); any other pop or
+#         apply, a bare one included, is mutate, since git applies any merge
+#         commit as if it were a stash; any other git stash form: mutate;
 #       - a command on READ_ONLY: observe (allowed, nothing used), except a
-#         git command where git may fetch from another host (git_may_fetch:
-#         the call's cwd is in a partial clone, or git cannot say): mutate;
+#         git command where a git read may do more than read the repository's
+#         own state (git_read_gated: the git directory is not one git made
+#         for a work tree, a partial clone, a repository with submodules, or
+#         git cannot say): mutate;
 #       - anything else: mutate.
 #   - Any other tool (Monitor, PowerShell, ExitWorktree, every MCP tool, a
 #     tool this hook does not know): unbound, so mutate (§5.18.2: a layer
@@ -59,14 +72,20 @@
 #     was taken; allowed, and it uses none. (F503 ROLLBACK_FAILED cannot
 #     arise: a restore of anything else is mutate.) The commits are entered
 #     in the git directory, outside the work tree, so no clone, checkout or
-#     applied stash can ship an entry.
+#     applied stash can ship an entry; and each entry holds an HMAC of its
+#     commit under a key the take hook drew at random and keeps there
+#     (<git dir>/acs/checkpoints/key), so a file a command creates there,
+#     through a link the repository ships for instance, is no entry.
 #   - mutate: a call whose arguments name the layer's own records
-#     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/, in any letter
-#     case and with //, ./ and x/../ read as a path reads them) is refused
-#     (F504 CONSTRAINT_VIOLATED): only these hooks write them. Then the
+#     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/, audit.head, in
+#     any letter case and with //, ./ and x/../ read as a path reads them, or
+#     through a symbolic link: each word of a text of at most 4096 bytes is
+#     resolved as the system resolves a path) is refused (F504
+#     CONSTRAINT_VIOLATED): only these hooks write them. Then the
 #     marker (.claude/checkpoint.ok, a JSON object with checkpoint_id,
 #     created_at, expires_at) must exist, be a regular file that git does not
-#     track (a repository can ship a tracked one), have times that are whole
+#     track (a repository can ship a tracked one) in a directory whose git
+#     directory is one git made for a work tree, have times that are whole
 #     seconds of at most 12 digits, a created_at not in the future and an
 #     expires_at at most 1800 seconds (30 minutes, the Standard's cap) after
 #     it, and be within both its expires_at and the layer's maximum age,
@@ -81,6 +100,10 @@
 #     one that loses). Unless ACS_HOOK_APPROVAL is "off", the hook then
 #     answers permissionDecision "ask" with an F502 reason, so Claude Code
 #     puts the call to the person.
+#
+# git runs here as hgit runs it: with core.fsmonitor and hooks turned off and
+# no object fetched, so no repository content makes this hook run a program
+# or reach a host.
 #
 # Scope (§5.18.5): the project directory, every session in it (one marker).
 # Its execution boundaries are the ends and starts of turns and sessions
@@ -124,9 +147,9 @@ fi
 
 # Tools whose calls need nothing from this hook: the SDK mapper's static
 # mappings (_TOOL_MAPPINGS) whose capability needs neither a checkpoint nor
-# approval (retrieve, search, observe, recall, persist, delegate, invoke,
-# inquire). Every other tool but Bash is classified mutate.
-UNGATED_TOOLS=(Read Glob Grep LS WebFetch WebSearch Task Agent Skill AskUser AskUserQuestion TodoRead TodoWrite TaskList TaskGet TaskCreate TaskUpdate ToolSearch BashOutput TaskOutput ListMcpResourcesTool ReadMcpResourceTool ExitPlanMode)
+# approval (retrieve, search, observe, recall, persist, inquire). Every other
+# tool but Bash is classified mutate, Skill, Agent and Task included (below).
+UNGATED_TOOLS=(Read Glob Grep LS WebFetch WebSearch AskUser AskUserQuestion TodoRead TodoWrite TaskList TaskGet TaskCreate TaskUpdate ToolSearch BashOutput TaskOutput ListMcpResourcesTool ReadMcpResourceTool ExitPlanMode)
 
 # Commands that only read, unless given an option that writes (writes below).
 # A subset of the SDK mapper's _READ_ONLY_COMMANDS.
@@ -187,21 +210,80 @@ long_option_of() {
   return 1
 }
 
-# Whether git, run where this call runs (its cwd, else the project directory),
-# may ask another host for an object it reads: in a partial clone (a promisor
-# remote, or extensions.partialClone naming one) git fetches each object it
-# lacks from the promisor remote, so a read such as `git show <id>` or `git
-# log -p` reaches that host, and the object id the agent chose goes to it
-# (§5.18.3: a request to another system). Read from the configuration git
-# itself reads there; anything git does not answer counts as yes. The SDK
-# mapper asks the same (git_may_fetch).
-git_may_fetch() {
-  local dir found status=0
-  dir=$(printf '%s' "$payload" | jq -r '.cwd // "" | strings' 2>/dev/null) || return 0
-  dir="${dir:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+# git as these hooks run it: with what a repository's own configuration
+# could make git run turned off (core.fsmonitor, which git runs to refresh
+# the index, and hooks) and no object fetched from a promisor remote, so no
+# repository content makes this hook run a program or reach a host.
+# posttooluse_take_checkpoint.sh holds the same function.
+hgit() {
+  GIT_NO_LAZY_FETCH=1 git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+}
+
+# Whether $1, an absolute git directory, is one git makes for a work tree: a
+# .git directory, or a linked worktree's or a submodule's under one. git
+# refuses a path with a .git component in a repository, so no clone or
+# checkout writes one; but a repository can ship a directory holding HEAD,
+# objects/ and refs/, which git takes for a git directory (an embedded bare
+# repository) and whose config and hooks are then repository content.
+git_dir_is_made() {
+  case "$1" in
+    */.git | */.git/worktrees/* | */.git/modules/*) return 0 ;;
+  esac
+  return 1
+}
+
+# The directory the call runs in: its cwd, else the project directory.
+# Fails when the payload cannot be read.
+call_dir() {
+  local dir
+  dir=$(printf '%s' "$payload" | jq -r '.cwd // "" | strings' 2>/dev/null) || return 1
+  printf '%s' "${dir:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+}
+
+# Whether the git directory git finds where this call runs is repository
+# content (not one git made for a work tree, git_dir_is_made): there git
+# reads that directory's config and hooks, and runs what they name
+# (core.fsmonitor for git status, git ls-files and git stash,
+# diff.<driver>.textconv for git log -p, git show and git diff). No
+# repository there: no. The SDK mapper asks the same (git_dir_may_be_content).
+git_dir_is_content() {
+  local dir git_dir
+  dir=$(call_dir) || return 0
   command -v git > /dev/null 2>&1 || return 0
-  found=$(git -C "$dir" config --get-regexp '^(remote\..+\.promisor|extensions\.partialclone)$' 2>/dev/null) || status=$?
-  [ "$status" != 1 ] || [ -n "$found" ]
+  git_dir=$(hgit -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  ! git_dir_is_made "$git_dir"
+}
+
+# Whether a git command that only reads, run where this call runs, may do
+# more than read this repository's own state; anything git does not answer
+# counts as yes:
+#   - the git directory there is repository content (git_dir_is_content);
+#   - a partial clone (a promisor remote, or extensions.partialClone naming
+#     one): git fetches each object it lacks from the promisor remote, so a
+#     read such as `git show <id>` or `git log -p` reaches that host, and the
+#     object id the agent chose goes to it (§5.18.3: a request to another
+#     system);
+#   - a repository with submodules (<common git dir>/modules/, or a gitlink
+#     in the index): a read that looks into a submodule (`--submodule=diff`,
+#     the diff.submodule setting, `git status`) reads its object store,
+#     where a partial clone fetches the same way.
+# The SDK mapper asks the same (git_may_fetch, git_dir_may_be_content).
+git_read_gated() {
+  local dir found status=0 git_dir common links
+  dir=$(call_dir) || return 0
+  command -v git > /dev/null 2>&1 || return 0
+  git_dir=$(hgit -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || git_dir=""
+  if [ -n "$git_dir" ] && ! git_dir_is_made "$git_dir"; then return 0; fi
+  found=$(hgit -C "$dir" config --get-regexp '^(remote\..+\.promisor|extensions\.partialclone)$' 2>/dev/null) || status=$?
+  if [ "$status" != 1 ] || [ -n "$found" ]; then return 0; fi
+  if [ -n "$git_dir" ]; then
+    common=$(hgit -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 0
+    case "$common" in /*) ;; *) common="$dir/$common" ;; esac
+    if [ -e "$common/modules" ] || [ -L "$common/modules" ]; then return 0; fi
+    links=$(hgit -C "$dir" ls-files --stage -- ':/' 2>/dev/null | awk 'substr($0, 1, 7) == "160000 " { n++ } END { print n + 0 }') || return 0
+    [ "$links" = 0 ] || return 0
+  fi
+  return 1
 }
 
 # Whether one simple command, given as its words, has an option that writes:
@@ -251,9 +333,16 @@ classify_bash() {
     return
   fi
   if [ "${words[0]}" = "git" ] && [ "${words[1]:-}" = "stash" ]; then
+    # git stash create refreshes the index (core.fsmonitor) and a restore
+    # writes the tree (filters): in a git directory the repository ships,
+    # each runs what its config names.
+    if git_dir_is_content; then
+      echo mutate
+      return
+    fi
     for entry in "${GIT_STASH_CLASSES[@]}"; do
       if [ "${entry%%=*}" = "${words[2]:-}" ]; then
-        if [ "${entry#*=}" = "observe" ] && git_may_fetch; then
+        if [ "${entry#*=}" = "observe" ] && git_read_gated; then
           echo mutate
         elif [ "${entry#*=}" != "rollback" ]; then
           echo "${entry#*=}"
@@ -270,7 +359,7 @@ classify_bash() {
   fi
   for entry in "${READ_ONLY[@]}"; do
     if [ "$entry" = "${words[0]}" ] || [ "$entry" = "${words[0]} ${words[1]:-}" ]; then
-      if [ "${words[0]}" = "git" ] && git_may_fetch; then
+      if [ "${words[0]}" = "git" ] && git_read_gated; then
         echo mutate
       else
         echo observe
@@ -290,9 +379,16 @@ done
 # Unbound: a tool this hook does not know, MCP tools included, is a mutate
 # (§5.18.2), and its refusals and its approval request name no capability.
 unbound=0
+unseen=0
 case "$tool_name" in
   Write | Edit | MultiEdit | NotebookEdit)
     capability=mutate
+    ;;
+  Skill | Agent | Task)
+    # The commands the skill's file or the subagent's definition runs reach
+    # no hook: the worst case.
+    capability=mutate
+    unseen=1
     ;;
   Bash)
     command=$(printf '%s' "$payload" | jq -r '.tool_input.command | strings' 2>/dev/null) || command=""
@@ -327,21 +423,42 @@ ended_dir="${claude_dir}/checkpoints/ended"
 # nothing.
 git_dir_of() {
   command -v git > /dev/null 2>&1 || return 1
-  git -C "$1" rev-parse --absolute-git-dir 2>/dev/null
+  hgit -C "$1" rev-parse --absolute-git-dir 2>/dev/null
+}
+
+# What posttooluse_take_checkpoint.sh writes in the entry of commit $2 in
+# git directory $1: the HMAC-SHA-256, in hex, of "acs-checkpoint-commit:<commit>"
+# under the project's checkpoint key (<git dir>/acs/checkpoints/key, 64 hex
+# digits the take hook drew at random). Fails with no valid key or no
+# openssl.
+commit_signature() {
+  local key_file="$1/acs/checkpoints/key" key sig
+  [ -f "$key_file" ] && [ ! -L "$key_file" ] || return 1
+  key=$(head -c 128 "$key_file" 2>/dev/null) || return 1
+  [[ "$key" =~ ^[0-9a-f]{64}$ ]] || return 1
+  command -v openssl > /dev/null 2>&1 || return 1
+  sig=$(printf 'acs-checkpoint-commit:%s' "$2" | openssl dgst -sha256 -hmac "$key" 2>/dev/null | awk '{print $NF}') || return 1
+  [[ "$sig" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s' "$sig"
 }
 
 # Whether a checkpoint of this project recorded the commit $1 (a full commit
 # id, so a safe file name) as its restore point, for a call that runs in the
 # project's repository: posttooluse_take_checkpoint.sh enters each such
-# commit as an empty file named by it, in <git dir>/acs/checkpoints/commits/,
-# before it writes the marker. That directory is outside the work tree: a
-# clone, a checkout or an applied stash can put files in the work tree,
-# .claude/ included, but none in it. One lookup, however many checkpoints
-# were taken. A checkpoint can be restored valid or not (§5.18.6).
+# commit as a file named by it, in <git dir>/acs/checkpoints/commits/,
+# holding its commit_signature, before it writes the marker. That directory
+# is outside the work tree: a clone, a checkout or an applied stash can put
+# files in the work tree, .claude/ included, but none in it; and a file a
+# command creates there (through a symbolic link the repository ships, say)
+# holds no signature, which only a holder of the key can make. The git
+# directory must be one git made for a work tree (git_dir_is_made): a
+# directory the repository ships could hold a key and entries of its own.
+# One lookup, however many checkpoints were taken. A checkpoint can be
+# restored valid or not (§5.18.6).
 recorded_commit() {
-  local git_dir ran_in cwd entry
+  local git_dir ran_in cwd entry sig have
   git_dir=$(git_dir_of "$project_dir") || return 1
-  [ -n "$git_dir" ] || return 1
+  [ -n "$git_dir" ] && git_dir_is_made "$git_dir" || return 1
   # The call restores into the repository it runs in (its cwd): the
   # project's, or the commit is another repository's state.
   cwd=$(printf '%s' "$payload" | jq -r '.cwd // "" | strings' 2>/dev/null) || return 1
@@ -350,7 +467,10 @@ recorded_commit() {
     [ "$ran_in" = "$git_dir" ] || return 1
   fi
   entry="${git_dir}/acs/checkpoints/commits/$1"
-  [ -f "$entry" ] && [ ! -L "$entry" ]
+  [ -f "$entry" ] && [ ! -L "$entry" ] || return 1
+  sig=$(commit_signature "$git_dir" "$1") || return 1
+  have=$(head -c 128 "$entry" 2>/dev/null) || return 1
+  [ "$have" = "$sig" ]
 }
 
 if [[ "$capability" == "rollback "* ]]; then
@@ -363,29 +483,146 @@ if [[ "$capability" == "rollback "* ]]; then
 fi
 
 # The layer's records are written by these hooks alone: a Write, Edit,
-# MultiEdit or NotebookEdit of a path, or a Bash, Monitor or PowerShell
-# command, that names the marker, the checkpoint directories or the audit
-# log's head is refused (a written entry would be a permanent pass for a
-# restore, a written marker a checkpoint no call took, a written or removed
-# head a log cut short that verifies). The text is read as a path is: in any letter case
-# (a case-insensitive file system opens CHECKPOINT.OK as checkpoint.ok), with
-# a run of slashes and ./ segments as one slash, and, in a text of at most
-# 4096 bytes, each x/../ resolved (a longer path cannot be opened, and a
-# longer command is a mutate already; the resolution's cost grows faster than
-# the text). A path a command builds when it runs is not seen, and such a call
-# is still a mutate a person approves.
-records_named=$(printf '%s' "$payload" | jq -r '
+# MultiEdit or NotebookEdit of a path, a Bash, Monitor or PowerShell command,
+# or a Skill call's arguments (which Claude Code substitutes into the shell
+# commands a skill's file embeds), that names the marker, the checkpoint
+# directories (the key included) or the audit log's head is refused (a
+# written entry or key would be a pass for a restore, a written marker a
+# checkpoint no call took, a written or removed head a log cut short that
+# verifies). The text is read as a path is: in any letter case (a
+# case-insensitive file system opens CHECKPOINT.OK as checkpoint.ok), with a
+# run of slashes and ./ segments as one slash, and, in a text of at most 4096
+# bytes, each x/../ resolved (a longer path cannot be opened, and a longer
+# command is a mutate already; the resolution's cost grows faster than the
+# text).
+call_text=$(printf '%s' "$payload" | jq -r '
+  if .tool_name == "Bash" or .tool_name == "Monitor" or .tool_name == "PowerShell" then .tool_input.command
+  elif .tool_name == "Write" or .tool_name == "Edit" or .tool_name == "MultiEdit" or .tool_name == "NotebookEdit"
+  then (.tool_input.file_path // .tool_input.notebook_path)
+  elif .tool_name == "Skill" then .tool_input.args
+  else null end | strings' 2>/dev/null) || block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
+records_named=$(printf '%s' "$call_text" | jq -R -s -r '
   def records: test("checkpoint\\.ok|audit\\.head|\\.claude/+(\\./+)*checkpoints|acs/+(\\./+)*checkpoints"; "i");
   def lexical: ascii_downcase | split("/")
     | reduce .[] as $s ([]; if $s == "" or $s == "." then . elif $s == ".." then (if length > 0 then .[:-1] else . end) else . + [$s] end)
     | join("/");
-  (if .tool_name == "Bash" or .tool_name == "Monitor" or .tool_name == "PowerShell" then .tool_input.command
-   elif .tool_name == "Write" or .tool_name == "Edit" or .tool_name == "MultiEdit" or .tool_name == "NotebookEdit"
-   then (.tool_input.file_path // .tool_input.notebook_path)
-   else null end) as $text
-  | ($text | strings | records or (length <= 4096 and (lexical | records))) // false' 2>/dev/null) || records_named=true
+  records or (length <= 4096 and (lexical | records))' 2>/dev/null) || records_named=true
+records_refusal="F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write"
 if [ "$records_named" != "false" ]; then
-  block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write."
+  block "${records_refusal}."
+fi
+
+# The words of a text the shell would pass as arguments, into PATH_WORDS:
+# split at blanks, line breaks and ; & | < > ( ) { } ` $ = outside quotes,
+# with '...' and "..." quoting, a backslash keeping the character after it,
+# and the quotes removed; a word that opens with ~/ starts at $HOME. A text
+# over 4096 bytes is not read (as split_words).
+path_words() {
+  local line="$1" ch quote="" word="" esc=0 i
+  PATH_WORDS=()
+  if [ "${#line}" -gt 4096 ]; then return 1; fi
+  for ((i = 0; i < ${#line}; i++)); do
+    ch="${line:i:1}"
+    if [ "$esc" = 1 ]; then
+      word+="$ch"
+      esc=0
+    elif [ -n "$quote" ]; then
+      if [ "$ch" = "$quote" ]; then
+        quote=""
+      elif [ "$ch" = '\' ] && [ "$quote" = '"' ]; then
+        esc=1
+      else
+        word+="$ch"
+      fi
+    else
+      case "$ch" in
+        \' | \") quote="$ch" ;;
+        \\) esc=1 ;;
+        ' ' | $'\t' | $'\n' | $'\r' | \; | \& | \| | \< | \> | \( | \) | \{ | \} | \` | \$ | =)
+          if [ -n "$word" ]; then PATH_WORDS+=("$word"); fi
+          word=""
+          ;;
+        *) word+="$ch" ;;
+      esac
+    fi
+  done
+  if [ -n "$word" ]; then PATH_WORDS+=("$word"); fi
+  return 0
+}
+
+# The path $2 names, read from the physical directory $1 ("/" or a path with
+# no trailing slash), with each symbolic link on it followed as the system
+# follows it (like realpath -m: a part that does not exist is kept as
+# written), into RESOLVED. Fails past 40 links on the path, past the call's
+# budget of LINKS_LEFT links in all (one readlink each, so a command that
+# names a long chain of links many times cannot hold the hook past its time
+# limit), or for a link it cannot read. No subshell.
+resolve_path() {
+  local out="${1%/}" comp target links=0 i=0 IFS=/
+  local -a parts more
+  case "$2" in /*) out="" ;; esac
+  set -f
+  parts=($2)
+  set +f
+  while [ "$i" -lt "${#parts[@]}" ]; do
+    comp="${parts[i]}"
+    i=$((i + 1))
+    case "$comp" in
+      "" | .) continue ;;
+      ..) out="${out%/*}"; continue ;;
+    esac
+    if [ -L "$out/$comp" ]; then
+      links=$((links + 1))
+      LINKS_LEFT=$((LINKS_LEFT - 1))
+      [ "$links" -le 40 ] && [ "$LINKS_LEFT" -ge 0 ] || return 1
+      target=$(readlink -- "$out/$comp" 2>/dev/null) || return 1
+      [ -n "$target" ] || return 1
+      case "$target" in /*) out="" ;; esac
+      set -f
+      more=($target)
+      set +f
+      parts=("${more[@]}" "${parts[@]:i}")
+      i=0
+    else
+      out="$out/$comp"
+    fi
+  done
+  RESOLVED="${out:-/}"
+}
+
+# ...and through a symbolic link: each word of a text of at most 4096 bytes
+# (a file tool's path whole; a command's or a skill's arguments as the shell
+# would pass them) is resolved from the call's directory, each link on it
+# followed, and one that resolves to the records is refused the same way. A
+# link the repository ships can lead there: `touch notes/todo.md`, where
+# notes/todo.md is a link to <git dir>/acs/checkpoints/key, writes the key.
+# A link a word cannot be resolved through (a loop, a path past 40 links, a
+# call past 200 links in all) is refused too. Not seen: a path a command
+# builds when it runs, a pattern the shell expands, or a link a command
+# reaches without naming it (copying a directory that holds one); such a
+# call is still a mutate a person approves.
+if [ -n "$call_text" ] && [ "${#call_text}" -le 4096 ]; then
+  LINKS_LEFT=200
+  if base=$(call_dir) && resolve_path / "$base"; then
+    base="$RESOLVED"
+    case "$tool_name" in
+      Write | Edit | MultiEdit | NotebookEdit) PATH_WORDS=("$call_text") ;;
+      *) path_words "$call_text" || PATH_WORDS=() ;;
+    esac
+    resolved=""
+    for word in ${PATH_WORDS[@]+"${PATH_WORDS[@]}"}; do
+      case "$word" in "~/"*) word="${HOME:-/}/${word#"~/"}" ;; esac
+      if ! resolve_path "$base" "$word"; then
+        block "${records_refusal}, or a symbolic link on one of its paths could not be followed (a loop, more than 40 links on one path, or more than 200 in the call)."
+      fi
+      resolved+="$RESOLVED"$'\n'
+    done
+    if printf '%s' "$resolved" | grep -Eiq '(^|/)(checkpoint\.ok|audit\.head)(/|$)|(^|/)(\.claude|acs)/checkpoints(/|$)'; then
+      block "${records_refusal}: one of its paths leads there through a symbolic link."
+    fi
+  else
+    block "R407 SAFETY_CHECK_FAILED: cannot read the directory the call runs in, so the call is blocked."
+  fi
 fi
 
 # mutate: a valid marker for this call alone.
@@ -409,10 +646,24 @@ fi
 # A marker git tracks came with the repository (a clone or a checkout can
 # ship one), not from a checkpoint taken here: it authorises nothing, and is
 # left as it is. git is asked from the marker's own directory, so a .claude
-# that is a symbolic link or a submodule is read where it leads.
-if command -v git > /dev/null 2>&1 \
-  && git -C "$claude_dir" ls-files --error-unmatch -- checkpoint.ok > /dev/null 2>&1; then
-  f501 "the checkpoint marker is tracked by git, so a repository shipped it: it authorises nothing. Remove it from the repository and take a checkpoint (git stash create)."
+# that is a symbolic link or a submodule is read where it leads; but only
+# where the git directory git finds there is one git made for a work tree
+# (git_dir_is_made): a repository can ship .claude, or a directory above it,
+# as a git directory of its own (HEAD, objects/, refs/), whose index would
+# answer for the marker and whose config names programs git runs (hgit runs
+# none). git answers yes (0) or no (1); any other answer authorises nothing
+# either.
+if command -v git > /dev/null 2>&1 && marker_git=$(git_dir_of "$claude_dir"); then
+  if ! git_dir_is_made "$marker_git"; then
+    f501 "the checkpoint marker is in a git directory that git did not make for a work tree ($marker_git, which a repository can ship): it authorises nothing. Remove that directory's HEAD, objects/ and refs/ from the repository and take a checkpoint (git stash create)."
+  fi
+  tracked=0
+  hgit -C "$claude_dir" ls-files --error-unmatch -- checkpoint.ok > /dev/null 2>&1 || tracked=$?
+  case "$tracked" in
+    0) f501 "the checkpoint marker is tracked by git, so a repository shipped it: it authorises nothing. Remove it from the repository and take a checkpoint (git stash create)." ;;
+    1) ;;
+    *) f501 "git cannot say whether the checkpoint marker is tracked (git ls-files exited $tracked): it authorises nothing." ;;
+  esac
 fi
 
 # SEC-001: Validate timestamp freshness
@@ -502,6 +753,8 @@ rmdir "$claim"
 if [ "$approval" != "off" ]; then
   if [ "$unbound" = 1 ]; then
     reason="F502 APPROVAL_REQUIRED: ${tool_name} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
+  elif [ "$unseen" = 1 ]; then
+    reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
   else
     reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate') requires approval; it runs only if this call is approved."
   fi

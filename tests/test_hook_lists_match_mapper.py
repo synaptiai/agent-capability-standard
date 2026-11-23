@@ -209,6 +209,38 @@ def test_both_checkpoint_hooks_split_words_alike() -> None:
     assert pre_fn.group(0) == take_fn.group(0)
 
 
+def test_both_checkpoint_hooks_run_git_alike() -> None:
+    """Both hooks run git as hgit does (no fsmonitor program, no hook, no
+    lazy fetch), the same options as the SDK's SAFE_GIT_OPTIONS, and take
+    the same git directories for ones git made for a work tree."""
+    from grounded_agency.utils.git import SAFE_GIT_OPTIONS
+
+    take = (HOOK.parent / "posttooluse_take_checkpoint.sh").read_text(encoding="utf-8")
+    pattern = re.compile(r"^hgit\(\) \{\n.*?^\}\n", re.MULTILINE | re.DOTALL)
+    pre_fn, take_fn = pattern.search(TEXT), pattern.search(take)
+    assert pre_fn and take_fn
+    assert pre_fn.group(0) == take_fn.group(0)
+    assert " ".join(SAFE_GIT_OPTIONS) in pre_fn.group(0)
+    assert "GIT_NO_LAZY_FETCH=1" in pre_fn.group(0)
+    made = "*/.git | */.git/worktrees/* | */.git/modules/*)"
+    assert made in TEXT and made in take
+    rollback = (HOOK.parents[1] / "skills" / "rollback" / "SKILL.md").read_text()
+    assert made.replace(" ", "").rstrip(")") in rollback.replace(" ", "")
+    assert "git -c core.fsmonitor=false -c core.hooksPath=/dev/null" in rollback
+
+
+def test_the_tools_that_load_unseen_commands_are_gated_in_both() -> None:
+    """Skill, Agent and Task: the hook gates them (they are not on
+    UNGATED_TOOLS and its case names them), the mapper gives them the worst
+    case."""
+    listed = set(_array("UNGATED_TOOLS"))
+    classify = mapper.ToolCapabilityMapper()
+    for name in sorted(mapper._UNSEEN_COMMANDS):
+        assert name not in listed, name
+        assert classify.map_tool(name, {}).capabilities[1:] == ("mutate", "send")
+    assert "  Skill | Agent | Task)\n" in TEXT
+
+
 needs_git_and_jq = pytest.mark.skipif(
     shutil.which("jq") is None or shutil.which("git") is None,
     reason="the hook needs jq; a repository needs git",

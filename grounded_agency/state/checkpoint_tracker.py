@@ -38,6 +38,7 @@ import fnmatch
 import json
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -47,6 +48,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from ..utils.git import SAFE_GIT_OPTIONS, git_dir_is_made, safe_git_environment
 
 try:  # POSIX: trackers that share a directory serialise their writes
     import fcntl as _fcntl
@@ -192,17 +195,39 @@ class Checkpoint:
 def _tracked_by_git(path: Path) -> bool:
     """Whether git tracks ``path``, an existing file: one a repository ships,
     not one this layer wrote. git is asked from the file's own directory, so
-    a linked directory or a submodule is read where it leads. No git, or no
-    repository, reads as untracked (nothing a clone can ship); a git that
-    does not answer in time reads as tracked, so the file is not trusted."""
+    a linked directory or a submodule is read where it leads, but only where
+    the git directory it finds there is one git made for a work tree
+    (:func:`~..utils.git.git_dir_is_made`): a repository can ship the
+    directory, or one above it, as a git directory of its own, whose index
+    would answer for the file and whose configuration names programs git
+    runs (the layer's git runs none). No git, or no repository, reads as
+    untracked (nothing a clone can ship); any other git directory, any
+    answer but yes or no, and a git that does not answer in time read as
+    tracked, so the file is not trusted."""
     if not path.is_file():
         return False
+    git = shutil.which("git")
+    if git is None:
+        return False
+    where = str(path.parent)
     try:
+        found = subprocess.run(
+            [git, *SAFE_GIT_OPTIONS, "-C", where, "rev-parse", "--absolute-git-dir"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env=safe_git_environment(),
+        )
+        if found.returncode != 0:
+            return False
+        if not git_dir_is_made(found.stdout.decode("utf-8", "surrogateescape").strip()):
+            return True
         result = subprocess.run(
             [
-                "git",
+                git,
+                *SAFE_GIT_OPTIONS,
                 "-C",
-                str(path.parent),
+                where,
                 "ls-files",
                 "--error-unmatch",
                 "--",
@@ -211,12 +236,13 @@ def _tracked_by_git(path: Path) -> bool:
             capture_output=True,
             timeout=10,
             check=False,
+            env=safe_git_environment(),
         )
     except subprocess.TimeoutExpired:
         return True
     except OSError, subprocess.SubprocessError:
         return False
-    return result.returncode == 0
+    return result.returncode != 1
 
 
 class CheckpointTracker:

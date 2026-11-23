@@ -677,9 +677,8 @@ class TestHookApprovalRule:
             ("Glob", {"pattern": "*.py"}),
             ("Bash", {"command": "ls -la"}),
             ("Bash", {"command": "git status && git log"}),
-            ("Skill", {"skill": "checkpoint"}),
             ("TodoWrite", {"todos": []}),
-            ("Agent", {"prompt": "look"}),
+            ("AskUserQuestion", {"questions": []}),
         ],
     )
     async def test_call_that_requires_no_approval_does_not_ask(

@@ -192,12 +192,23 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
 `git stash` table equal to it):
 
 - A tool the mapper maps to a capability that needs neither a checkpoint nor
-  approval (`Read`, `Glob`, `Grep`, `LS`, `WebFetch`, `WebSearch`, `Task`,
-  `Agent`, `Skill`, `AskUserQuestion`, `TodoWrite`, `TaskList`, `TaskGet`,
-  `TaskCreate`, `TaskUpdate`, `ToolSearch`, `BashOutput`, `TaskOutput`,
+  approval (`Read`, `Glob`, `Grep`, `LS`, `WebFetch`, `WebSearch`,
+  `AskUserQuestion`, `TodoWrite`, `TaskList`, `TaskGet`, `TaskCreate`,
+  `TaskUpdate`, `ToolSearch`, `BashOutput`, `TaskOutput`,
   `ListMcpResourcesTool`, `ReadMcpResourceTool`, `ExitPlanMode`, and the
   older names `AskUser` and `TodoRead`): needs nothing.
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
+- `Skill`, `Agent`, `Task`: `mutate`. Claude Code runs the shell commands a
+  skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's
+  arguments substituted into them) as the skill loads, under its
+  `allowed-tools`, and the hooks and MCP servers a subagent's definition
+  names as the subagent runs; none of them reaches a hook, and a project's
+  skill or agent can take any name (a project's agent replaces a built-in
+  one of the same name). The call is asked for approval with the reason
+  `<tool> (capability 'mutate': the shell commands a skill's file embeds,
+  and the hooks and MCP servers a subagent's definition names, run with no
+  hook seeing them)`. Loading the checkpoint skill takes no checkpoint: run
+  `git stash create` first.
 - `Bash`: a command over 4096 bytes is `mutate`, decided before anything
   else is done with it, so no reading runs into the hook's time limit (a
   command padded with 50,000 blanks once took 44 seconds to trim). A command
@@ -224,10 +235,21 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   is `mutate`. A git command that would only read (`git stash list` and
   `git stash show` included) is `mutate` where the call's directory (the
   payload's `cwd`, else the project directory) is in a partial clone (a
-  promisor remote, or `extensions.partialClone`), or where git cannot say:
-  there git fetches each object it lacks from the promisor remote, so `git
-  show <id>` sends the id to that host. `git stash create` still takes a
-  checkpoint there (it reads only what the local state holds).
+  promisor remote, or `extensions.partialClone`), in a repository with
+  submodules (`modules/` in its common git directory, or a gitlink in its
+  index), or where git cannot say: there git fetches each object it lacks
+  from the promisor remote, its own or a submodule's (`--submodule=diff`,
+  `diff.submodule`, `git status`), so `git show <id>` sends the id to that
+  host. `git stash create` still takes a checkpoint there (it reads only
+  what the local state holds). Every `git` command the hook would let pass
+  (a read, `git stash create`, a restore) is `mutate` where the git
+  directory git finds is not one git made for a work tree (a `.git`
+  directory, or a linked worktree's or a submodule's under one): a
+  repository can ship a directory holding `HEAD`, `objects/` and `refs/`
+  (an embedded bare repository), and git run there reads its `config` and
+  runs what it names (`core.fsmonitor` for `git status`, a textconv driver
+  for `git log -p`). The hooks' own git commands run with `core.fsmonitor`
+  and hooks turned off and no object fetched (`hgit`).
 - Any other tool (`Monitor` and `PowerShell`, which run commands,
   `EnterWorktree`, `ExitWorktree`, every MCP tool, a tool the hook does not
   know) is unbound: `mutate`, since a layer cannot know that an unknown tool
@@ -244,24 +266,41 @@ Then:
   another repository or worktree restores other state). The entries are in
   the project's git directory, outside the work tree: a clone, a checkout
   or an applied stash can put files in the work tree, `.claude/` included,
-  but none there. The check is one lookup, however many checkpoints were
-  taken. It uses no checkpoint: one that was used, expired, ended with its
+  but none there. Each holds the HMAC-SHA-256 of
+  `acs-checkpoint-commit:<commit>` under the project's checkpoint key
+  (`<git dir>/acs/checkpoints/key`, 64 hex digits the take hook draws from
+  `/dev/urandom` the first time, mode 600), so a file a command creates
+  there, through a link the repository ships for instance, is no entry; and
+  the git directory must be one git made for a work tree (a shipped one
+  could hold a key and entries of its own). The check is one lookup,
+  however many checkpoints were taken. It uses no checkpoint: one that was used, expired, ended with its
   turn or was replaced can still be restored. Restoring anything else is a
   `mutate`.
 - **The layer's records**: a `mutate` call that names them, a `Write`,
-  `Edit`, `MultiEdit` or `NotebookEdit` of a path, or a `Bash`, `Monitor`
-  or `PowerShell` command whose text holds `checkpoint.ok`,
-  `.claude/checkpoints`, `acs/checkpoints` or `audit.head` (the audit
-  log's head, below), is blocked with
+  `Edit`, `MultiEdit` or `NotebookEdit` of a path, a `Bash`, `Monitor`
+  or `PowerShell` command, or a `Skill` call's arguments, whose text holds
+  `checkpoint.ok`, `.claude/checkpoints`, `acs/checkpoints` or `audit.head`
+  (the audit log's head, below), is blocked with
   `F504 CONSTRAINT_VIOLATED:`: only the hooks write them. The text is read
   as a path is: in any letter case, with a run of slashes and `./` segments
   as one slash, and, in a text of at most 4096 bytes, each `x/../`
-  resolved. Reading them is not refused, and a path a command builds when it
-  runs is not seen.
+  resolved; and in a text of at most 4096 bytes each word (a file tool's
+  path whole, a command's words as the shell passes them) is followed,
+  from the call's directory, through the symbolic links on its path, so
+  `touch notes/todo.md`, where the repository ships `notes/todo.md` as a
+  link to `.git/acs/checkpoints/key`, is blocked too (and a link that
+  cannot be followed, a loop or more than 40 links). Reading them is not
+  refused; a path a command builds when it runs, a pattern the shell
+  expands and a link a command reaches without naming it (copying a
+  directory that holds one) are not seen.
 - **Mutate**: the marker `.claude/checkpoint.ok` must exist, be a regular
   file (not a symlink, SEC-006) that git does not track (a repository can
   ship a tracked one; git is asked from the marker's own directory, so a
-  linked or submodule `.claude` counts too, and the file is left as it is),
+  linked or submodule `.claude` counts too, and the file is left as it is;
+  the git directory git finds there must be one git made for a work tree,
+  since a repository can ship `.claude` itself as a git directory whose
+  index would answer and whose config names a program git runs; and an
+  answer of git other than yes or no authorises nothing),
   be a JSON object with a `checkpoint_id`, a
   `created_at` and an `expires_at` in whole seconds of at most 12 digits, the
   first not in the future and the second at most 1800 seconds (30 minutes)

@@ -8,10 +8,14 @@
 # commands, no option that writes: the same reading as
 # pretooluse_require_checkpoint.sh, whose split_words this hook holds too)
 # and the response shows no error, the hook enters the printed commit in the
-# project's git directory, <git dir>/acs/checkpoints/commits/ (an empty file
-# named by it, which the pre-tool-use hook and the rollback skill look up to
+# project's git directory, <git dir>/acs/checkpoints/commits/ (a file named
+# by it, which the pre-tool-use hook and the rollback skill look up to
 # restore it; outside the work tree, so no clone, checkout or applied stash
-# can ship one) and writes .claude/checkpoint.ok atomically:
+# can ship one), holding the HMAC-SHA-256 of "acs-checkpoint-commit:<commit>"
+# under the project's checkpoint key, <git dir>/acs/checkpoints/key (64 hex
+# digits drawn from /dev/urandom the first time, readable by the user alone),
+# so that a file a command creates there is no entry; and it writes
+# .claude/checkpoint.ok atomically:
 #
 #   {"checkpoint_id": <the printed commit, or clean-<epoch>-<pid>>,
 #    "commit": <the printed commit> | "HEAD",
@@ -31,7 +35,12 @@
 # else 1800 seconds (30 minutes, the Standard's cap). A marker the new one
 # replaces is filed under .claude/checkpoints/ended/ first; its commit, entered
 # in commits/, can still be restored. A commit is entered only in a git
-# repository: with no git directory to enter it in, no marker is written.
+# repository whose git directory git made for a work tree (a .git directory,
+# or a linked worktree's or a submodule's under one; a repository can ship a
+# git directory of its own, with a key and entries in it), and only with
+# openssl to sign it: otherwise no marker is written. git runs with
+# core.fsmonitor and hooks turned off, so no repository content makes this
+# hook run a program.
 # A failed call reaches PostToolUseFailure, where this hook is not
 # registered.
 #
@@ -80,6 +89,12 @@ split_words() {
   return 0
 }
 
+# git with what a repository's own configuration could make it run turned off
+# (the pre-tool-use hook's function, kept the same by a test).
+hgit() {
+  GIT_NO_LAZY_FETCH=1 git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+}
+
 split_words "$command" || exit 0
 words=("${WORDS[@]}")
 if [ "$GLOBBED" = 1 ] || [ "${words[0]}" != "git" ] || [ "${words[1]:-}" != "stash" ] || [ "${words[2]:-}" != "create" ]; then
@@ -109,8 +124,8 @@ fi
 cwd=$(printf '%s' "$input" | jq -r '.cwd // "" | strings' 2>/dev/null) || exit 0
 if [ -n "$cwd" ]; then
   command -v git > /dev/null 2>&1 || exit 0
-  ran_in=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || exit 0
-  ours=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null) || exit 0
+  ran_in=$(hgit -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || exit 0
+  ours=$(hgit -C "$project" rev-parse --show-toplevel 2>/dev/null) || exit 0
   [ -n "$ran_in" ] && [ "$ran_in" = "$ours" ] || exit 0
 fi
 
@@ -124,8 +139,8 @@ elif [ -z "$printed" ]; then
   # Nothing to save, so HEAD restores the state: only if the project's
   # tracked files and index are HEAD's now.
   command -v git > /dev/null 2>&1 || exit 0
-  git -C "$project" diff --quiet HEAD -- 2>/dev/null || exit 0
-  git -C "$project" diff --cached --quiet HEAD -- 2>/dev/null || exit 0
+  hgit -C "$project" diff --quiet --no-ext-diff --no-textconv HEAD -- 2>/dev/null || exit 0
+  hgit -C "$project" diff --cached --quiet --no-ext-diff --no-textconv HEAD -- 2>/dev/null || exit 0
   checkpoint_id="clean-${now}-$$"
   commit="HEAD"
 else
@@ -146,14 +161,45 @@ fi
 
 # Enter the commit before the marker names it, so no marker records a
 # commit the lookup misses: in the project's git directory, outside the
-# work tree.
+# work tree, signed with the project's checkpoint key.
 if [ "$commit" != "HEAD" ]; then
   command -v git > /dev/null 2>&1 || exit 0
-  git_dir=$(git -C "$project" rev-parse --absolute-git-dir 2>/dev/null) || exit 0
-  [ -n "$git_dir" ] || exit 0
-  commits_dir="${git_dir}/acs/checkpoints/commits"
-  mkdir -p "$commits_dir" 2>/dev/null || exit 0
-  if [ -L "$commits_dir/$commit" ] || ! : > "$commits_dir/$commit" 2>/dev/null; then
+  command -v openssl > /dev/null 2>&1 || exit 0
+  git_dir=$(hgit -C "$project" rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+  case "$git_dir" in
+    */.git | */.git/worktrees/* | */.git/modules/*) ;;
+    *) exit 0 ;;
+  esac
+  records="${git_dir}/acs/checkpoints"
+  commits_dir="${records}/commits"
+  key_file="${records}/key"
+  (umask 077 && mkdir -p "$commits_dir") 2>/dev/null || exit 0
+  [ ! -L "$records" ] && [ ! -L "$commits_dir" ] || exit 0
+  # The key: drawn once, entered with ln, which fails when another run has
+  # entered one first (that one is used). One that is not 64 hex digits in
+  # a regular file is replaced.
+  key=$(head -c 128 "$key_file" 2>/dev/null) || key=""
+  if [ -L "$key_file" ] || [ ! -f "$key_file" ] || ! [[ "$key" =~ ^[0-9a-f]{64}$ ]]; then
+    new_key=$(head -c 32 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n') || exit 0
+    [[ "$new_key" =~ ^[0-9a-f]{64}$ ]] || exit 0
+    key_tmp=$(umask 077 && mktemp "${records}/key.XXXXXX") || exit 0
+    if ! printf '%s' "$new_key" > "$key_tmp"; then
+      rm -f "$key_tmp"
+      exit 0
+    fi
+    if [ -L "$key_file" ] || { [ -e "$key_file" ] && ! [[ "$key" =~ ^[0-9a-f]{64}$ ]]; }; then
+      rm -f "$key_file"
+    fi
+    ln "$key_tmp" "$key_file" 2>/dev/null || true
+    rm -f "$key_tmp"
+    key=$(head -c 128 "$key_file" 2>/dev/null) || exit 0
+    [ ! -L "$key_file" ] && [[ "$key" =~ ^[0-9a-f]{64}$ ]] || exit 0
+  fi
+  sig=$(printf 'acs-checkpoint-commit:%s' "$commit" | openssl dgst -sha256 -hmac "$key" 2>/dev/null | awk '{print $NF}') || exit 0
+  [[ "$sig" =~ ^[0-9a-f]{64}$ ]] || exit 0
+  entry_tmp=$(mktemp "${commits_dir}/.entry.XXXXXX") || exit 0
+  if ! printf '%s' "$sig" > "$entry_tmp" || ! mv -f "$entry_tmp" "${commits_dir}/${commit}"; then
+    rm -f "$entry_tmp"
     exit 0
   fi
 fi

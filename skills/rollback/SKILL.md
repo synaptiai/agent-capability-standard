@@ -56,8 +56,13 @@ hooks:
             # checkpoint recorded, entered in the project's git directory
             # (<git dir>/acs/checkpoints/commits/, one lookup; outside the work
             # tree, so no clone, checkout or applied stash can ship an entry),
-            # and run in the project's repository (the call's cwd), as the
-            # plugin's pre-tool-use hook reads it; valid or not, used or not.
+            # holding the HMAC of the commit under the project's checkpoint key
+            # (<git dir>/acs/checkpoints/key), so a file a command made there is
+            # no entry, in a git directory git made for a work tree (a
+            # repository can ship one of its own), and run in the project's
+            # repository (the call's cwd), as the plugin's pre-tool-use hook
+            # reads it; valid or not, used or not. git runs with core.fsmonitor
+            # and hooks turned off.
             # Claude Code passes the tool call as JSON on stdin; exit 2 blocks the
             # call and the reason on stderr is shown to Claude. A call that cannot
             # be read is blocked (R407).
@@ -71,14 +76,26 @@ hooks:
             if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then P="$CLAUDE_PROJECT_DIR"
             elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then P="$CLAUDE_PLUGIN_ROOT"
             else P="$(pwd)"; fi
-            GD="$(git -C "$P" rev-parse --absolute-git-dir 2>/dev/null || true)"
-            if [ -n "$GD" ] && [ -n "$CWD" ] && [ "$(git -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null || true)" != "$GD" ]; then GD=""; fi
+            G="git -c core.fsmonitor=false -c core.hooksPath=/dev/null"
+            GD="$($G -C "$P" rev-parse --absolute-git-dir 2>/dev/null || true)"
+            case "$GD" in */.git|*/.git/worktrees/*|*/.git/modules/*) ;; *) GD="" ;; esac
+            if [ -n "$GD" ] && [ -n "$CWD" ] && [ "$($G -C "$CWD" rev-parse --absolute-git-dir 2>/dev/null || true)" != "$GD" ]; then GD=""; fi
+            KEY=""
+            if [ -n "$GD" ] && [ -f "$GD/acs/checkpoints/key" ] && [ ! -L "$GD/acs/checkpoints/key" ]; then
+              KEY="$(head -c 128 "$GD/acs/checkpoints/key" 2>/dev/null || true)"
+              printf '%s\n' "$KEY" | grep -qxE '[0-9a-f]{64}' || KEY=""
+            fi
             while IFS= read -r RESTORE; do
               [ -n "$RESTORE" ] || continue
               ARG="$(printf '%s\n' "$RESTORE" | sed -E 's/^git[[:space:]]+stash[[:space:]]+(pop|apply)//; s/^[[:space:]]+//; s/[[:space:]]+$//')"
               FOUND=""
-              if [ -n "$GD" ] && printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
-                if [ -f "$GD/acs/checkpoints/commits/$ARG" ] && [ ! -L "$GD/acs/checkpoints/commits/$ARG" ]; then FOUND=1; fi
+              if [ -n "$KEY" ] && printf '%s\n' "$ARG" | grep -qE '^([0-9a-f]{40}|[0-9a-f]{64})$'; then
+                E="$GD/acs/checkpoints/commits/$ARG"
+                if [ -f "$E" ] && [ ! -L "$E" ]; then
+                  SIG="$(printf 'acs-checkpoint-commit:%s' "$ARG" | openssl dgst -sha256 -hmac "$KEY" 2>/dev/null | awk '{print $NF}' || true)"
+                  HAVE="$(head -c 128 "$E" 2>/dev/null || true)"
+                  if printf '%s\n' "$SIG" | grep -qxE '[0-9a-f]{64}' && [ "$HAVE" = "$SIG" ]; then FOUND=1; fi
+                fi
               fi
               if [ -z "$FOUND" ]; then
                 printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project. Restore with git stash apply <sha>, the full commit id a checkpoint recorded, in the project's repository.\n" "$RESTORE" >&2

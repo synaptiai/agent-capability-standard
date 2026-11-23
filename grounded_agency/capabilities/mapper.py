@@ -15,10 +15,11 @@ Tools are bound by tool binding records (section 5.18.1, see
 :mod:`grounded_agency.capabilities.bindings`); the static mappings below bind
 Claude Code's own tools, and Bash is classified by its command
 (section 5.18.3): a line of several commands takes the strictest flags and
-every prerequisite of all of them. ``Skill`` is ``invoke`` whatever the
-skill: loading a skill's instructions saves and restores nothing; the
-state-saving call the skill leads to is classified on its own
-(section 5.18.6).
+every prerequisite of all of them. ``Skill``, ``Agent`` and ``Task`` are
+their own capability (``invoke``, ``delegate``) and Bash's worst case: the
+commands a skill's file embeds and a subagent's definition names run with
+no hook seeing them. Loading the checkpoint skill takes no checkpoint; the
+state-saving call it leads to is classified on its own (section 5.18.6).
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..errors import ErrorCode, Severity, ValidationError, text_form
+from ..utils.git import SAFE_GIT_OPTIONS, git_dir_is_made, safe_git_environment
 from .registry import CapabilityNode, CapabilityRegistry
 
 if TYPE_CHECKING:
@@ -583,30 +585,86 @@ _MAX_COMMAND_BYTES = 4096
 _PROMISOR_CONFIG = r"^(remote\..+\.promisor|extensions\.partialclone)$"
 
 
-def git_may_fetch(cwd: str | None = None) -> bool:
-    """Whether git, run in ``cwd`` (this process's working directory when it
-    is None), may ask another host for an object it reads: in a partial
-    clone, git fetches each object it lacks from the promisor remote, so a
-    read such as `git show <id>` or `git log -p` reaches that host, and the
-    object id the agent chose goes to it (STANDARD 1.2.0 section 5.18.3: a
-    request to another system). Read from the configuration git itself
-    reads there; anything git does not answer (no git, no such directory, a
-    configuration it cannot read) counts as yes. The plugin's PreToolUse
-    hook asks the same question."""
+def _git(git: str, where: str, *args: str) -> subprocess.CompletedProcess[bytes]:
+    """git ``args`` run in ``where`` as the layer runs it on its own behalf:
+    no fsmonitor program, no hook, no lazy fetch (:mod:`..utils.git`)."""
+    return subprocess.run(
+        [git, *SAFE_GIT_OPTIONS, "-C", where, *args],
+        capture_output=True,
+        timeout=10,
+        check=False,
+        env=safe_git_environment(),
+    )
+
+
+def _where(cwd: str | None) -> str:
+    return cwd if isinstance(cwd, str) and cwd else os.getcwd()
+
+
+def git_dir_may_be_content(cwd: str | None = None) -> bool:
+    """Whether the git directory git finds from ``cwd`` (this process's
+    working directory when it is None) may be repository content: one git
+    did not make for a work tree (:func:`~..utils.git.git_dir_is_made`), such
+    as a directory a repository ships holding ``HEAD``, ``objects/`` and
+    ``refs/`` (an embedded bare repository). git run there reads that
+    directory's configuration and hooks and runs what they name
+    (``core.fsmonitor`` for `git status`, `git ls-files` and `git stash`, a
+    ``diff.<driver>.textconv`` for `git log -p`, `git show` and `git diff`).
+    No repository there is a no; no git, or git failing in another way, a
+    yes. The plugin's PreToolUse hook asks the same (git_dir_is_content)."""
     git = shutil.which("git")
     if git is None:
         return True
     try:
-        where = cwd if isinstance(cwd, str) and cwd else os.getcwd()
-        done = subprocess.run(
-            [git, "-C", where, "config", "--get-regexp", _PROMISOR_CONFIG],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
+        done = _git(git, _where(cwd), "rev-parse", "--absolute-git-dir")
     except OSError, ValueError, subprocess.SubprocessError:
         return True
-    return not (done.returncode == 1 and not done.stdout)
+    if done.returncode != 0:
+        return False
+    found = done.stdout.decode("utf-8", "surrogateescape").strip()
+    return not git_dir_is_made(found)
+
+
+def git_may_fetch(cwd: str | None = None) -> bool:
+    """Whether git, run in ``cwd`` (this process's working directory when it
+    is None), may ask another host for an object it reads:
+
+    - in a partial clone, git fetches each object it lacks from the promisor
+      remote, so a read such as `git show <id>` or `git log -p` reaches that
+      host, and the object id the agent chose goes to it (STANDARD 1.2.0
+      section 5.18.3: a request to another system);
+    - in a repository with submodules (``modules/`` in its common git
+      directory, or a gitlink in its index), a read that looks into one
+      (`--submodule=diff`, the ``diff.submodule`` setting, `git status`)
+      reads that submodule's object store, where a partial clone fetches the
+      same way.
+
+    Read from the configuration and index git itself reads there; anything
+    git does not answer (no git, no such directory, a configuration it
+    cannot read) counts as yes. The plugin's PreToolUse hook asks the same
+    question."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    where = _where(cwd)
+    try:
+        done = _git(git, where, "config", "--get-regexp", _PROMISOR_CONFIG)
+        if not (done.returncode == 1 and not done.stdout):
+            return True
+        found = _git(git, where, "rev-parse", "--git-common-dir")
+        if found.returncode != 0:
+            return False  # no repository: nothing to fetch for
+        common = os.path.join(
+            where, found.stdout.decode("utf-8", "surrogateescape").strip()
+        )
+        if os.path.lexists(os.path.join(common, "modules")):
+            return True
+        index = _git(git, where, "ls-files", "--stage", "--", ":/")
+        if index.returncode != 0:
+            return True
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
+    return any(line.startswith(b"160000 ") for line in index.stdout.splitlines())
 
 
 def _is_read_only(command: _Command) -> bool:
@@ -734,13 +792,9 @@ _TOOL_MAPPINGS: dict[str, str] = {
     "Edit": "mutate",
     "MultiEdit": "mutate",
     "NotebookEdit": "mutate",
-    # COORDINATE layer. "Agent" and "AskUserQuestion" are the current
-    # Claude Code names of the tools once called "Task" and "AskUser".
-    "Task": "delegate",
-    "Agent": "delegate",
-    # A skill's instructions save and restore nothing: the calls the skill
-    # leads to are classified on their own (STANDARD 1.2.0 section 5.18.6).
-    "Skill": "invoke",
+    # COORDINATE layer. "AskUserQuestion" is the current Claude Code name
+    # of the tool once called "AskUser". Task, Agent and Skill are in
+    # _UNSEEN_COMMANDS.
     "AskUser": "inquire",
     "AskUserQuestion": "inquire",
     # REMEMBER layer
@@ -759,6 +813,25 @@ _TOOL_MAPPINGS: dict[str, str] = {
     "ListMcpResourcesTool": "observe",
     "ReadMcpResourceTool": "retrieve",
     "ExitPlanMode": "inquire",
+}
+
+# Tools whose call loads a definition that runs commands no hook sees, with
+# their own capability:
+# Claude Code runs the shell commands a skill's file embeds (!`cmd` and ```!
+# blocks, the call's arguments substituted into them) as the skill loads,
+# under its allowed-tools, and starts the hooks and MCP servers a subagent's
+# definition names as the subagent runs, with no PreToolUse or PostToolUse
+# event for any of them; and a project's skill or agent can take any name,
+# a built-in one's included. A call of one is its own capability and Bash's
+# worst case, a gated `mutate` and `send` (STANDARD 1.2.0 section
+# 5.18.3: what the classifier cannot see). Loading the checkpoint skill
+# takes no checkpoint: the `git stash create` it leads to does (section
+# 5.18.6). The plugin's PreToolUse hook gates them too. "Agent" is the
+# current Claude Code name of the tool once called "Task".
+_UNSEEN_COMMANDS: dict[str, str] = {
+    "Task": "delegate",
+    "Agent": "delegate",
+    "Skill": "invoke",
 }
 
 # The registry behind a mapper constructed without an ontology: the
@@ -879,9 +952,17 @@ class ToolCapabilityMapper:
         # Whether git, run in a directory (the call's, or None for this
         # process's), may ask another host for an object it reads: a git
         # command the allow-list reads as `observe` takes the worst case
-        # there (:func:`git_may_fetch`, a partial clone). A lookup that
-        # fails is a yes.
+        # there (:func:`git_may_fetch`: a partial clone, or a repository
+        # with submodules). A lookup that fails is a yes.
         self.git_may_fetch: Callable[[str | None], bool] = git_may_fetch
+        # Whether the git directory git finds from a directory may be
+        # repository content, whose configuration names programs git runs:
+        # every git command the classifier would let pass (a read, `git
+        # stash create`, a restore) takes the worst case there
+        # (:func:`git_dir_may_be_content`). A lookup that fails is a yes.
+        self.git_dir_may_be_content: Callable[[str | None], bool] = (
+            git_dir_may_be_content
+        )
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -1258,7 +1339,8 @@ class ToolCapabilityMapper:
             tool_input: Tool input parameters
             cwd: The directory the call runs in (a hook input's ``cwd``);
                 None: this process's working directory. Only a git
-                command's class depends on it (:attr:`git_may_fetch`).
+                command's class depends on it (:attr:`git_may_fetch`,
+                :attr:`git_dir_may_be_content`).
 
         Returns:
             ToolMapping with capability metadata, raised by the applied
@@ -1281,6 +1363,11 @@ class ToolCapabilityMapper:
         # Check dynamic mappings (MCP tools, etc.)
         if tool_name in self._dynamic_mappings:
             return self._dynamic_mappings[tool_name]
+
+        # A call that loads a definition whose commands no hook sees: its
+        # own capability, and the worst case of what it may run.
+        if tool_name in _UNSEEN_COMMANDS:
+            return self._unseen(tool_name)
 
         # Static mapping for known tools
         if tool_name in _TOOL_MAPPINGS:
@@ -1462,8 +1549,14 @@ class ToolCapabilityMapper:
                 and words[2] in _GIT_STASH_CLASSES
                 and not _writes(words, commands[0].globbed)
             ):
+                # `git stash create` refreshes the index (core.fsmonitor)
+                # and a restore writes the tree (filters): in a git
+                # directory the repository ships, each runs what its
+                # configuration names.
+                if self._git_dir_may_be_content(cwd):
+                    return worst
                 capability = _GIT_STASH_CLASSES[words[2]]
-                if capability == "observe" and self._git_may_fetch(cwd):
+                if capability == "observe" and self._git_read_gated(cwd):
                     return worst
                 if capability != "rollback" or self._restores_checkpoint(words):
                     return self._builtin("Bash", capability)
@@ -1475,13 +1568,41 @@ class ToolCapabilityMapper:
             return self._builtin("Bash", "observe")
         return self._combine(gated)
 
-    def _git_may_fetch(self, cwd: str | None) -> bool:
-        """:attr:`git_may_fetch` for ``cwd``; a lookup that fails is a yes."""
+    def _git_dir_may_be_content(self, cwd: str | None) -> bool:
+        """:attr:`git_dir_may_be_content` for ``cwd``; a lookup that fails is
+        a yes."""
+        try:
+            return bool(self.git_dir_may_be_content(cwd))
+        except Exception:
+            logger.exception("Could not tell which git directory serves %s", cwd)
+            return True
+
+    def _git_read_gated(self, cwd: str | None) -> bool:
+        """Whether a git command that only reads may do more in ``cwd``: run
+        what repository content names (:attr:`git_dir_may_be_content`) or
+        fetch from another host (:attr:`git_may_fetch`). A lookup that fails
+        is a yes."""
+        if self._git_dir_may_be_content(cwd):
+            return True
         try:
             return bool(self.git_may_fetch(cwd))
         except Exception:
             logger.exception("Could not tell whether git may fetch in %s", cwd)
             return True
+
+    def _unseen(self, tool_name: str) -> ToolMapping:
+        """A ``Skill``, ``Agent`` or ``Task`` call: its own capability
+        (``invoke``, ``delegate``) and Bash's worst case (a gated ``mutate``
+        and ``send``), since the commands the skill's file embeds or the
+        subagent's definition names run with no hook seeing them (section
+        5.18.3)."""
+        return self._combine(
+            [
+                self._builtin(tool_name, _UNSEEN_COMMANDS[tool_name]),
+                self._builtin(tool_name, "mutate", checkpoint_gated=True),
+                self._builtin(tool_name, "send", checkpoint_gated=True),
+            ]
+        )
 
     def _restores_checkpoint(self, words: list[str]) -> bool:
         """Whether `git stash pop|apply <commit>` (``words``) names, as its
@@ -1573,7 +1694,7 @@ class ToolCapabilityMapper:
             return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
         if _is_read_only(command):
-            if command.words[0] == "git" and self._git_may_fetch(cwd):
+            if command.words[0] == "git" and self._git_read_gated(cwd):
                 # A read of an object a partial clone lacks fetches it from
                 # the promisor remote: a request to another host, carrying
                 # the object id the command names.

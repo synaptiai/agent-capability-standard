@@ -2061,3 +2061,256 @@ data was not affected: a secret member's value is replaced whole.
   redactors and the shell scan (sh and bash), the timing shapes at 100 KB
   and 1 MB against HEAD's redactor, and the fuzz parity run above. None
   left running; the scratch files were removed.
+
+## Round 2
+
+### Batch 1: five reported defects
+
+Five defects, each reproduced by an independent verifier on bfb18b1: one in
+how the layers treat a call that loads commands no hook sees, four in how
+repository content steers the plugin's hooks and the SDK through git. None
+was fixed by an earlier batch (git log and round 1 checked). Each fix has
+tests that fail on the code before it: the 90 tests of the two new files
+were run with bfb18b1's hooks, rollback skill, mapper, tracker and recorder
+put back, and 73 failed; the 17 that passed are the controls (an ordinary
+marker, reads in the project, a repository without submodules, a signed
+entry, other paths) and the fixtures' own checks (the shipped config runs
+its programs; a read fetches into the submodule).
+
+#### 1. A skill's shell commands ran with no hook (high); sibling: a subagent's hooks and MCP servers
+
+Claude Code 2.1.330 runs the shell commands a skill's file embeds
+(``!`cmd` `` and ```` ```! ```` blocks) as the skill loads: read from the
+installed binary, the loader substitutes the call's arguments into the body
+first (its error text names "the arguments or options substituted into
+it"), then each command goes through the permission check, under the
+skill's `allowed-tools`, and straight to the Bash tool's `call`, with no
+PreToolUse or PostToolUse event (`tengu_prompt_shell_permission`). The
+plugin's hook had `Skill` on UNGATED_TOOLS and the mapper mapped it to
+`invoke` alone, so every command a skill embeds ran with no marker, no
+approval and no log line, in bypassPermissions mode too. A skill preloaded
+into a subagent does not run them (`isSkillPreload` sets
+`readOnlySkillLoad`).
+
+Sibling, same premise ("the calls it leads to are classified on their
+own"): a subagent's definition can name `hooks` and `mcpServers` (both in
+the binary's agent schema), commands Claude Code runs with no hook event
+while the subagent runs; and a project's agent replaces a built-in one of
+the same name (the binary merges built-in, plugin, user, project, flag and
+policy agents by name, later ones winning), so no agent name is safe. Agent
+and Task were ungated too.
+
+- Fix (hook): `Skill`, `Agent` and `Task` leave UNGATED_TOOLS and are
+  `mutate`, with an approval reason that says why ("the shell commands a
+  skill's file embeds, and the hooks and MCP servers a subagent's
+  definition names, run with no hook seeing them"). A Skill call's
+  arguments are read by the records guard as a command's text is.
+- Fix (SDK): `_UNSEEN_COMMANDS` (`Skill`, `Agent`, `Task`): the tool's own
+  capability (`invoke`, `delegate`) and Bash's worst case, `mutate` and
+  `send` (high risk, a checkpoint, approval), so a destination policy
+  refuses the call (STANDARD 1.2.0 §4.4.2: the layer cannot tell where the
+  commands send). The recorder still takes no checkpoint for a Skill call.
+- Not covered, stated in SECURITY.md §5.5: a skill or command the person
+  runs from the prompt (`/name`) is no tool call; Claude Code's
+  `disableSkillShellExecution` setting turns its embedded commands off.
+- Tests: `tests/test_unseen_commands.py` (the hook: F501 without a marker
+  in every mode, the ask with the reason, F502 in bypassPermissions, F504
+  for Skill arguments naming the records; the mapper's capabilities and
+  flags for each tool and skill name; the adapter: F501, then ask with a
+  checkpoint, and F504 under a destination policy), and
+  `test_the_tools_that_load_unseen_commands_are_gated_in_both` in
+  `tests/test_hook_lists_match_mapper.py`. Tests that stated the old
+  behaviour were changed to the new one: `Skill`, `Agent` and `Task` left
+  `test_a_tool_that_needs_neither_passes` (`test_pretooluse_hooks.py`) and
+  `test_call_that_requires_no_approval_does_not_ask`
+  (`test_tool_call_approval.py`), and `test_skill_is_invoke_whatever_the_skill`
+  (`test_tool_bindings.py`) became a test of the worst case; the rate-limit
+  tests of `test_sdk_e2e.py` that used Skill as a medium-risk tool use
+  another one.
+
+#### 2. A repository could make .claude a git directory: the hook ran its fsmonitor and the tracked-marker check was bypassed (high)
+
+`git -C .claude ls-files --error-unmatch -- checkpoint.ok` asked whatever
+git directory git found from `.claude`. A repository can ship `.claude`
+itself as one (HEAD, objects/, refs/, an index, a config): git then read
+the shipped config, ran its `core.fsmonitor` program inside the hook
+(before any approval), and answered from the shipped index; with no config,
+git took `.claude` for a bare repository, `ls-files` failed, and a tracked
+marker the project shipped passed as untracked.
+
+- Fix (hooks): `hgit` runs every git command of the pre-tool-use and take
+  hooks with `-c core.fsmonitor=false -c core.hooksPath=/dev/null` and
+  `GIT_NO_LAZY_FETCH=1` (a test keeps the two copies and the SDK's options
+  the same); the rollback skill's command hook runs git with the same
+  options. The marker check still asks from `.claude` (a linked or
+  submodule `.claude` is read where it leads), but only when the git
+  directory git finds there is one git made for a work tree
+  (`git_dir_is_made`: `*/.git`, `*/.git/worktrees/*`, `*/.git/modules/*`;
+  git refuses a path with a `.git` component in a repository, so no clone
+  writes one): any other is F501 before `ls-files` runs. `ls-files` answers
+  yes (F501) or no; any other answer is F501 too (it was "untracked").
+  The take hook's `git diff --quiet HEAD` adds `--no-ext-diff
+  --no-textconv`.
+- The verifier's suggestion was to ask the project's repository instead;
+  the git-directory rule closes both reproductions (the fsmonitor never
+  runs, the bare `.claude` is refused) and keeps a linked `.claude`
+  working.
+- Fix (SDK): `grounded_agency/utils/git.py` (`SAFE_GIT_OPTIONS`,
+  `safe_git_environment`, `git_dir_is_made`); the tracker's
+  `_tracked_by_git` asks the same way (a state file in a git directory git
+  did not make, or one git cannot answer for, is not loaded), and the
+  recorder's `_tree_is_head` and the mapper's lookups run git with the same
+  options.
+- Tests: `TestShippedClaudeGitDir` in `tests/test_repository_content.py`
+  (the fsmonitor sentinel is never written and the marker is refused, F501;
+  the bare `.claude` with a tracked fresh marker, F501 in
+  bypassPermissions; the tracker's state file in a shipped git directory is
+  not trusted, and its fsmonitor does not run; an ordinary untracked marker
+  still passes), and `test_both_checkpoint_hooks_run_git_alike`.
+
+#### 3. git reads in an embedded git directory ran its config as observe (medium); sibling: `git stash create` there
+
+The hook and the mapper classified `git status`, `git log -p`, `git show`,
+`git diff`, `git ls-files` (and `git stash list|show`) as observe wherever
+the call ran. In a directory of the work tree that a repository ships as a
+git directory (`vendor/evil.git` with HEAD, objects/, refs/, a config and
+info/attributes), git reads that config and runs its `core.fsmonitor`
+(status, ls-files) and its textconv driver (log -p, show, diff). Sibling:
+`git stash create` refreshes the index, so it ran the fsmonitor too, as a
+`checkpoint` call, which needs nothing.
+
+- Fix: `git_dir_is_content` (hook) and `git_dir_may_be_content` (mapper,
+  a new attribute beside `git_may_fetch`, a failed lookup a yes): where the
+  git directory git finds from the call's directory is not one git made for
+  a work tree, every `git stash` form and every read-only git command is
+  the worst case (the hook: `mutate`; the mapper: `mutate` and `send`).
+  No repository there is a no, as before (`git status` outside a
+  repository fails on its own).
+- Why the name rule, not "differs from the project's git directory": the
+  SDK knows no project directory, and a shipped git directory can never be
+  a `.git` one; the rule gives the hook and the mapper the same answer.
+- Tests: `TestEmbeddedGitDir` (the fixture's config runs its programs; each
+  read and `git stash create`, from the git directory and from a directory
+  inside it, is F501 in the hook and the worst case in the mapper, and no
+  program runs; in the project they still observe; the lookup's answers).
+
+#### 4. A shipped symbolic link let one approved `touch` forge a permanent rollback entry (medium)
+
+The rollback check trusted any regular file in
+`<git dir>/acs/checkpoints/commits/`, and the records guard read only the
+call's text. A repository ships a stash-shaped merge commit M and a link
+`notes/todo.md -> ../.git/acs/checkpoints/commits/M`; `touch notes/todo.md`
+is an ordinary gated mutate, and once approved it creates the entry, after
+which `git stash apply M` passes as a rollback, with no checkpoint and no
+approval, every time.
+
+- Fix (entries): the take hook writes in each entry the HMAC-SHA-256 of
+  `acs-checkpoint-commit:<commit>` under the project's checkpoint key,
+  `<git dir>/acs/checkpoints/key` (64 hex digits from `/dev/urandom`, drawn
+  once and entered with `ln` so two runs agree, mode 600; a malformed key is
+  replaced). The pre-tool-use hook's `recorded_commit` and the rollback
+  skill's command hook pass a restore only for an entry that holds that
+  HMAC (`openssl`; without it nothing is entered or recognised), and only
+  in a git directory git made for a work tree (a shipped one could hold a
+  key and entries of its own). An empty entry written before the upgrade
+  restores nothing (a gated `mutate`; CHANGELOG Upgrading says so).
+- Fix (guard): in a text of at most 4096 bytes, each word (a file tool's
+  path whole; a command's or a skill's arguments as the shell passes them:
+  `path_words`, quotes removed, split at blanks and `;&|<>(){}`$=`) is
+  resolved from the call's directory with each symbolic link on it followed
+  (`resolve_path`, no subshell, one `readlink` per link), and one that
+  leads into the records is F504; so is a word whose links cannot be
+  followed (a loop, more than 40 on one path, more than 200 in the call, so
+  a chain named many times cannot hold the hook past its time limit). This
+  closes the two-step variant: an approved `cp x notes/key.md` replacing
+  the key through a link, then an entry.
+- Not seen, stated in SECURITY.md §5.5: a path a command builds when it
+  runs, a pattern the shell expands, a link a command reaches without
+  naming it (copying a directory over one); such a command can read and
+  replace the key, and is still a `mutate` a person approves.
+- SDK: no sibling; the adapter's `has_commit` counts only checkpoints its
+  own tracker took since it started, in memory.
+- Tests: `TestCommitEntries` (a signed entry restores; an empty, junk or
+  wrongly signed entry is F501 in two modes; eight commands and three file
+  paths through links into the records, relative and absolute, are F504; a
+  link loop; the 200-link budget, refused quickly; other paths still ask;
+  400 words resolve quickly; the take hook enters nothing, writes no key
+  and runs no program in a shipped git directory), and the lifecycle test
+  that checks the entry's content and the key's mode;
+  `test_an_unsigned_entry_restores_nothing` for the rollback skill's hook
+  under sh and bash (bfb18b1's hook allowed an empty entry, exit 0, under
+  both; now F503). The tests that entered commits by hand use
+  `tests/conftest.py::enter_checkpoint_commit`, which signs them as the
+  take hook does.
+
+#### 5. A git read fetched from a partial-clone submodule's promisor as observe (medium; sibling of round 1 #12)
+
+`git_may_fetch` read only the call's repository's configuration, but `git
+log -p --submodule=diff` (or `diff.submodule=diff`, or `git status`) reads
+a submodule's object store, where a partial clone fetches each missing
+object from its promisor remote.
+
+- Fix (hook and mapper alike): a git read also takes the worst case in a
+  repository with submodules: `modules/` in its common git directory, or a
+  gitlink (mode 160000) in its index (`git ls-files --stage -- :/`, run
+  with `hgit`), initialised or not. The simplest fail-closed form: a read
+  in a repository with submodules needs a checkpoint and approval;
+  `git stash create` and a recorded restore keep their classes, as in a
+  partial clone.
+- Tests: `TestSubmodules` (the fixture: a full clone whose submodule was
+  updated with `--filter=blob:none` from a file:// upstream, where `git log
+  -p --submodule=diff` fetches; seven reads, `--sub=diff` included, are
+  F501 in the hook and the worst case in the mapper; a gitlink with no
+  submodule set up counts; a repository without submodules observes).
+
+#### Siblings checked
+
+- The other skill command hooks (audit, checkpoint, persist, send,
+  transform) run no git; the log and stop hooks run none.
+- The TypeScript package and the binding classify no git command and have
+  no Skill or Agent tool.
+- A restore into a shipped git directory: `recorded_commit` requires the
+  call's git directory to equal the project's, which must be one git made.
+- The take hook in a project whose git directory is shipped content writes
+  no key, no entry and no marker naming a commit (tested).
+- Round 1's fixes hold: the partial-clone rule (#12), the records guard's
+  spellings, the tracked-marker rule, the shipped-records tests all pass
+  unchanged.
+
+#### Documentation
+
+SECURITY.md §5.1 (classification of Skill, Agent and Task; git reads with
+submodules and in shipped git directories; the records guard through links
+and Skill arguments; the marker's git directory; signed entries) and §5.5
+(the host gaps: what the guard does not see, the key, the person's own
+slash commands; the adapter's classifier), `hooks/README.md`, the hooks'
+header comments, the rollback skill's hook comment,
+`docs/integrations/claude_agent_sdk.md` (the mapping table, the Skill
+flow, git reads), and CHANGELOG [Unreleased] Upgrading (the SDK's Skill,
+Agent and Task and Bash entries; the plugin hooks' entries). No version
+changes.
+
+#### Checks after batch 1
+
+- Python: `pytest tests/` (5516 passed, 18 skipped), and again
+  `tests/test_skill_hooks.py` after its last test was added (799 passed);
+  ruff check and format with CI's lists; mypy; every `tools/validate_*.py`
+  of CLAUDE.md, `validate_workflows.py --strict` and every domain catalog
+  and example `--strict`; `sync_skill_schemas.py --check` and the
+  generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun.
+- TypeScript: `packages/acs-core` build and test (2002; the WebAssembly
+  build reused); the binding's check and test (217, 2 skipped). No
+  TypeScript source changed: neither classifies git commands nor has a
+  Skill or Agent tool.
+- Site: `npm run check`, `npm test` (1173).
+- Probes, each under `timeout 120` (and a 4 GB address-space limit for the
+  timing ones), inputs at most 7 KB: the `.claude` git-directory
+  reproduction against bfb18b1's hook (its fsmonitor ran inside the hook)
+  and the fixed one (refused, F501, nothing run); bfb18b1's and the fixed
+  rollback skill hook on an empty entry under sh and bash (0, then F503);
+  the pre-tool-use hook's time on a gated `touch` of 10, 400 and 900
+  words (0.08 s, 0.14 s, and 0.07 s for the 4398-byte line, which is not
+  resolved), on one word of 2040 path components (0.23 s), and on a git
+  read (0.04 s). No CLI or nested agent was started; nothing was left
+  running; the scratch repositories were removed.

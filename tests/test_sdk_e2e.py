@@ -64,6 +64,18 @@ def adapter(tmp_path: Path) -> GroundedAgentAdapter:
     )
 
 
+def _medium_risk_call(adapter: GroundedAgentAdapter) -> dict[str, Any]:
+    """A call of a medium-risk tool that needs neither a checkpoint nor
+    approval: an MCP tool bound to `delegate`. (Skill and Agent take the
+    worst case: the commands a skill or a subagent's definition runs reach
+    no hook.)"""
+    adapter.mapper.register_mcp_tool("mcp__team__handoff", capability_id="delegate")
+    mapping = adapter.mapper.map_tool("mcp__team__handoff", {})
+    assert mapping.risk == "medium"
+    assert not mapping.requires_checkpoint and not mapping.requires_approval
+    return {"tool_name": "mcp__team__handoff", "tool_input": {"task": "t"}}
+
+
 class TestWrapOptions:
     async def test_wrapping_twice_charges_the_rate_limit_once(
         self, tmp_path: Path
@@ -81,7 +93,7 @@ class TestWrapOptions:
         assert twice.hooks == once.hooks
         assert len(twice.hooks["PreToolUse"]) == 1
 
-        call = {"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}
+        call = _medium_risk_call(adapter)
         for n in range(2):
             for entry in twice.hooks["PreToolUse"]:
                 for hook in entry.hooks:
@@ -130,17 +142,19 @@ class TestWrapOptions:
     async def test_listed_tools_are_rate_limited(self, tmp_path: Path) -> None:
         # The SDK approves a tool in allowed_tools without calling
         # can_use_tool, but PreToolUse still runs for it, and that is
-        # where the rate limit lives. Skill is medium-risk; one token, so
-        # the second call is denied.
+        # where the rate limit lives. A delegate tool is medium-risk; one
+        # token, so the second call is denied.
         adapter = GroundedAgentAdapter(
             GroundedAgentConfig(
                 checkpoint_dir=str(tmp_path / ".checkpoints"),
                 rate_limit=RateLimitConfig(medium_rpm=1, burst_multiplier=1.0),
             )
         )
-        wrapped = adapter.wrap_options(ClaudeAgentOptions(allowed_tools=["Skill"]))
+        call = _medium_risk_call(adapter)
+        wrapped = adapter.wrap_options(
+            ClaudeAgentOptions(allowed_tools=[call["tool_name"]])
+        )
         pre = wrapped.hooks["PreToolUse"][-1].hooks[0]
-        call = {"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}
         assert _pre_decision(await pre(call, "s1", None)) is None
         second = await pre(call, "s2", None)
         assert _pre_decision(second) == "deny"
@@ -168,9 +182,9 @@ class TestWrapOptions:
         adapter.rate_limiter.allow = counting_allow  # type: ignore[method-assign]
         pre = adapter._make_pretooluse_safety_hook()
         callback = adapter._make_permission_callback()
-        call = {"tool_name": "Skill", "tool_input": {"skill": "checkpoint"}}
+        call = _medium_risk_call(adapter)
         assert _pre_decision(await pre(call, "s1", None)) is None
-        assert _is_allowed(await callback("Skill", call["tool_input"], None))
+        assert _is_allowed(await callback(call["tool_name"], call["tool_input"], None))
         assert charged == ["medium"]
 
     async def test_rate_limited_call_reserves_no_checkpoint(

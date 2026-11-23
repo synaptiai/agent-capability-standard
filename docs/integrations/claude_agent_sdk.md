@@ -159,8 +159,8 @@ The adapter is a safety layer on a tool-calling host ([Standard 1.2.0 §5.18](..
 | **Edit** | **mutate** | **high** | **Yes** | **Yes** |
 | **MultiEdit** | **mutate** | **high** | **Yes** | **Yes** |
 | **NotebookEdit** | **mutate** | **high** | **Yes** | **Yes** |
-| Task, Agent | delegate | medium | No | No |
-| Skill | invoke | medium | No | No |
+| **Task, Agent** | **delegate, mutate, send** | **high** | **Yes** | **Yes** |
+| **Skill** | **invoke, mutate, send** | **high** | **Yes** | **Yes** |
 | AskUser, AskUserQuestion | inquire | low | No | No |
 | TodoRead, TaskList, TaskGet | recall | low | No | No |
 | TodoWrite, TaskCreate, TaskUpdate | persist | low | No | No |
@@ -170,7 +170,7 @@ The adapter is a safety layer on a tool-calling host ([Standard 1.2.0 §5.18](..
 | ExitPlanMode | inquire | low | No | No |
 | **any other tool** | **unbound** | **high** | **Yes** | **Yes** |
 
-`Skill` is `invoke` whatever the skill: loading a skill's instructions saves and restores nothing. The state-saving or restoring call the skill leads to is classified on its own, so `Skill(checkpoint)` takes no checkpoint; the skill's `git stash create` does ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). Claude Code tools that run a command or stop a process (`Monitor`, `KillShell`, `TaskStop`) are not in the table on purpose: they are unbound.
+`Skill`, `Agent` and `Task` are their own capability (`invoke`, `delegate`) and Bash's worst case, `mutate` and `send`, whatever the skill or agent: Claude Code runs the shell commands a skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's arguments substituted into them) as the skill loads, under its `allowed-tools`, and the hooks and MCP servers a subagent's definition names as the subagent runs, and none of these reaches the adapter's hooks; a project's skill or agent can take any name, a built-in agent's included ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). So each such call needs a checkpoint and approval, and a destination policy refuses it. Loading a skill's instructions saves and restores nothing: `Skill(checkpoint)` takes no checkpoint, the skill's `git stash create` does ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)), so run `git stash create` before the Skill call too. Claude Code tools that run a command or stop a process (`Monitor`, `KillShell`, `TaskStop`) are not in the table on purpose: they are unbound.
 
 Each mapping carries the capabilities the call performs (`capabilities`, primary first) and its **prerequisites**, the `from` capabilities of the `requires` edges into them: `checkpoint` for `mutate`, `send` and `rollback`.
 
@@ -199,18 +199,20 @@ The command line is read with the shell's quoting rules and split into simple co
 | Pattern | Capability | Risk | Checkpoint | Approval |
 |---------|-----------|------|------------|----------|
 | `ls`, `cat`, `head`, `pwd` | observe | low | No | No |
-| `git status`, `git log`, `git rev-parse`, `git ls-files` (not in a partial clone) | observe | low | No | No |
+| `git status`, `git log`, `git rev-parse`, `git ls-files` (not in a partial clone, a repository with submodules or a shipped git directory) | observe | low | No | No |
 | `git stash create` | checkpoint | low | No | No |
 | `git stash pop <commit>`, `git stash apply <commit>`, a commit a checkpoint recorded | rollback | medium | No (one taken earlier) | No |
 | `git stash pop`, `git stash apply` of anything else | mutate | high | Yes | Yes |
 | `rm`, `mv`, `chmod`, `git stash push` | mutate | high | Yes | Yes |
 | `curl -X POST`, `ssh` | send | high | Yes | Yes |
 | `git push`, `npm publish`, `docker push`, `kubectl apply` | mutate, send | high | Yes | Yes |
-| Asking another host: `npm view`, `npm list`, `kubectl get`, `docker ps`, `git remote show`, `pip list --outdated`, `cat < /dev/tcp/…`, a git read in a partial clone | mutate, send | high | Yes | Yes |
+| Asking another host: `npm view`, `npm list`, `kubectl get`, `docker ps`, `git remote show`, `pip list --outdated`, `cat < /dev/tcp/…`, a git read in a partial clone or a repository with submodules | mutate, send | high | Yes | Yes |
 | `python -c`, `node -e`, `python script.py` | execute, send | high | Yes | Yes |
 | any other command (`sed`, `awk`, `env`, `less`, `curl URL`, `gh`, `make`), and one over 4096 bytes | mutate, send | high | Yes | Yes |
 
-**In a partial clone** git fetches what a read lacks from the promisor remote, sending it the object id the command names: there, or where git cannot say, a git command that would only read (`git log`, `git stash show`, ...) gets the worst case. The adapter asks about the call's directory, the hook input's `cwd`, which `mapper.map_tool(tool, args, cwd)` also takes. `git stash create` and the restore of a recorded checkpoint keep their classes.
+**In a partial clone** git fetches what a read lacks from the promisor remote, sending it the object id the command names, and **in a repository with submodules** (`modules/` in its git directory, or a gitlink in its index) a read that looks into one (`--submodule=diff`, `diff.submodule`, `git status`) fetches into that submodule's object store, a partial clone's included: there, or where git cannot say, a git command that would only read (`git log`, `git stash show`, ...) gets the worst case (`mapper.git_may_fetch`). The adapter asks about the call's directory, the hook input's `cwd`, which `mapper.map_tool(tool, args, cwd)` also takes. `git stash create` and the restore of a recorded checkpoint keep their classes there.
+
+**In a git directory a repository may have shipped** (one git did not make for a work tree: not a `.git` directory, nor a linked worktree's or a submodule's under one; a repository can ship a directory holding `HEAD`, `objects/` and `refs/`, which git takes for a git directory), git reads that directory's `config` and runs what it names (`core.fsmonitor` for `git status` and `git stash create`, a textconv driver for `git log -p`): there every git command the mapper would let pass, a read, `git stash create` or a restore, gets the worst case (`mapper.git_dir_may_be_content`). The adapter's own git commands run with `core.fsmonitor` and hooks turned off and fetch nothing.
 
 ### MCP Tool Mapping
 
@@ -349,7 +351,8 @@ checkpoint_id = adapter.checkpoint_tracker.create_checkpoint(
 
 # Method 3: Autonomous. Claude invokes the checkpoint skill, whose
 # instructions have it run one Bash call, git stash create "checkpoint:<id>".
-# The Skill call takes no checkpoint; the checkpoint recorder (a PostToolUse
+# The Skill call takes no checkpoint (it needs one, and approval, as the
+# commands a skill's file embeds run unseen); the checkpoint recorder (a PostToolUse
 # hook for every tool) records one when git stash create succeeds, with the
 # commit it printed, or HEAD for a clean tree, as the restore point.
 ```
@@ -916,7 +919,8 @@ options = adapter.wrap_options(
 ```
 User: "Make a backup before editing the config"
           ↓
-Claude: Invokes Skill(skill="checkpoint"): an invoke call, no checkpoint
+Claude: Invokes Skill(skill="checkpoint"): invoke and the worst case, so it
+        needs a checkpoint taken before it and approval, and takes none
           ↓
 Claude: Runs Bash(git stash create "checkpoint:config"), as the skill says
           ↓

@@ -637,13 +637,15 @@ class TestMapperRegistration:
         assert mapping.capabilities == ("observe",)
 
     @pytest.mark.parametrize("skill", ["checkpoint", "rollback", "anything"])
-    def test_skill_is_invoke_whatever_the_skill(
+    def test_skill_is_invoke_and_the_worst_case_whatever_the_skill(
         self, mapper: ToolCapabilityMapper, skill: str
     ) -> None:
+        """The shell commands a skill's file embeds run as it loads, with no
+        hook seeing them (STANDARD 1.2.0 section 5.18.3)."""
         mapping = mapper.map_tool("Skill", {"skill": skill})
         assert mapping.capability_id == "invoke"
-        assert mapping.capabilities == ("invoke",)
-        assert not mapping.requires_checkpoint
+        assert mapping.capabilities == ("invoke", "mutate", "send")
+        assert mapping.requires_checkpoint and mapping.requires_approval
 
     def test_static_mutate_carries_its_prerequisite(
         self, mapper: ToolCapabilityMapper
