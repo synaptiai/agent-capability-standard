@@ -48,6 +48,20 @@ def test_ungated_tools_need_neither_a_checkpoint_nor_approval_in_the_mapper() ->
         assert not mapping.requires_checkpoint and not mapping.requires_approval, name
 
 
+def test_persist_tools_are_the_ungated_tools_the_mapper_says_store() -> None:
+    """The hook scans what a tool on PERSIST_TOOLS would store (STANDARD
+    1.2.0 §5.18.10): every tool it lets pass whose capabilities in the
+    mapper include persist or audit, and no other."""
+    listed = _array("PERSIST_TOOLS")
+    classify = mapper.ToolCapabilityMapper()
+    storing = [
+        name
+        for name in _array("UNGATED_TOOLS")
+        if {"persist", "audit"} & set(classify.map_tool(name, {}).capabilities)
+    ]
+    assert listed == storing == ["TodoWrite", "TaskCreate", "TaskUpdate"]
+
+
 def test_every_tool_the_mapper_gates_is_gated_by_the_hook() -> None:
     """A tool the mapper gates (Write, Edit, ..., and every tool it does not
     know: Monitor, PowerShell, MCP tools) is not on UNGATED_TOOLS, so the

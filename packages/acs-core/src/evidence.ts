@@ -46,6 +46,31 @@ export function isKind(kind: unknown): kind is AnchorKind {
   return typeof kind === 'string' && ((ANCHOR_KINDS as readonly string[]).includes(kind) || VENDOR.test(kind));
 }
 
+/**
+ * How a diagnostic names a JSON value a host returned (the core's
+ * `shown_value`): a number, a boolean or null as it is, anything else by its
+ * type, since a string may hold a secret (STANDARD v1.2 §6.7).
+ */
+export function shownValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'boolean' || typeof value === 'number') return String(value);
+  if (typeof value === 'string') return 'a string';
+  if (Array.isArray(value)) return 'an array';
+  if (typeof value === 'object') return 'an object';
+  return 'absent';
+}
+
+/**
+ * How a diagnostic names an anchor's kind (the core's `kind_shown`): one of
+ * §6.5's, or only what sort of kind it is, since a kind is the host's text
+ * (§6.7).
+ */
+function kindShown(kind: string | undefined): string {
+  if (kind === undefined) return 'no kind';
+  if ((ANCHOR_KINDS as readonly string[]).includes(kind)) return `kind '${kind}'`;
+  return VENDOR.test(kind) ? 'a vendor (x-) kind' : "a kind outside §6.5's vocabulary";
+}
+
 /** Whether `method` is an inference method of §4.1.1's vocabulary (or a vendor one). */
 export function isMethod(method: unknown): boolean {
   return (
@@ -332,38 +357,41 @@ export function checkGrounding(
   let excluded = 0;
   let unattested = 0;
   let withheld = 0;
+  // A message names an anchor by its index and kind, never by its `ref`:
+  // the output may cite a URL or a path that carries a credential (a
+  // presigned or signed URL, say), and a diagnostic reaches traces and
+  // records (§6.7).
   for (const [i, item] of items.entries()) {
     const ref = isObject(item) && typeof item['ref'] === 'string' ? item['ref'] : undefined;
     const kind = isObject(item) && typeof item['kind'] === 'string' ? item['kind'] : undefined;
     let established: boolean;
     if (ref !== undefined && ref.startsWith('acs:')) {
       if (kind !== 'record') {
-        const k = kind === undefined ? 'no kind' : `kind '${kind}'`;
         return refused(
-          `evidence_anchors[${i}] cites a workflow value ('${ref}') with ${k}; an acs: anchor is of kind record (§6.5)`,
+          `evidence_anchors[${i}] is an acs: anchor, which cites a workflow value, with ${kindShown(kind)}; an acs: anchor is of kind record (§6.5)`,
         );
       }
       let cited: Reference;
       try {
         cited = parseRef(ref.slice(4));
       } catch {
-        return refused(`evidence_anchors[${i}] cites '${ref}', whose rest is not a reference body (§5.3) (§6.5)`);
+        return refused(`evidence_anchors[${i}] is an acs: anchor whose rest is not a reference body (§5.3) (§6.5)`);
       }
       if (cited.annotation !== null) {
-        return refused(`evidence_anchors[${i}] cites '${ref}', whose rest is not a reference body (§5.3) (§6.5)`);
+        return refused(`evidence_anchors[${i}] is an acs: anchor whose rest is not a reference body (§5.3) (§6.5)`);
       }
       if (!bound.some((b) => covers(b, cited))) {
         const binds =
           bound.length === 0 ? 'no reference is bound' : `the bound references are ${bound.map(bodyOf).join(', ')}`;
         return refused(
-          `evidence_anchors[${i}] cites '${ref}', which no reference bound for the output's producer covers (${binds}) (§3.1, §5.20)`,
+          `evidence_anchors[${i}] cites a workflow value that no reference bound for the output's producer covers (${binds}) (§3.1, §5.20)`,
         );
       }
       established = true;
     } else if (isEvidenceAnchor(item)) {
       if (seen !== null && !seen.includes(item.ref)) {
         return refused(
-          `evidence_anchors[${i}] cites '${item.ref}', which the host's evidence_seen does not list: its producer did not have it (§3.1, §5.20)`,
+          `evidence_anchors[${i}] (${kindShown(kind)}) cites a ref the host's evidence_seen does not list: its producer did not have it (§3.1, §5.20)`,
         );
       }
       established = seen !== null;
@@ -396,9 +424,9 @@ export function checkGrounding(
   if (withheld > 0) why.push(`${withheld} anchor${plural(withheld)} whose availability is not established`);
   const marking: string[] = [];
   if (method === undefined) marking.push('no inference_method');
-  else if (!methodOk) marking.push(`an inference_method ${JSON.stringify(method)} outside §4.1.1's vocabulary`);
+  else if (!methodOk) marking.push("an inference_method outside §4.1.1's vocabulary");
   if (confidence === undefined) marking.push('no confidence');
-  else if (!confidenceOk) marking.push(`a confidence ${JSON.stringify(confidence)} that is not from 0 to 1`);
+  else if (!confidenceOk) marking.push(`a confidence (${shownValue(confidence)}) that is not from 0 to 1`);
   return refused(
     `no evidence anchor counts toward the grounding policy (${why.join('; ')}), and the output is not marked inferred: it has ${marking.join(' and ')} (an inference_method of §4.1.1's vocabulary and a confidence from 0 to 1, §3.1)`,
   );

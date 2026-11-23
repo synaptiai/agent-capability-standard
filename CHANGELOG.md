@@ -540,6 +540,17 @@ here and marked so.
 - Python SDK (Fixed): an evidence metadata key with a final newline is
   refused like any other key outside `[a-zA-Z_][a-zA-Z0-9_]*`, and a trust
   model's `half_life` written with digits other than ASCII ones is refused.
+- Python SDK, workflow runner (Fixed; Standard 1.2.0 §6.5, §6.7): the runner
+  redacts the evidence anchors of every `Output` it submits with its
+  `redactor` (registered secrets included), as the evidence stores do, so
+  an anchor whose `ref`, `excerpt` or metadata held a secret is kept in the
+  run's state, outputs and snapshots with it replaced and without its
+  `digest` (`metadata.digest_omitted: secret`). `evidence_seen` is
+  rewritten to match: it lists an anchor's redacted `ref` when it listed the
+  anchor's own, and when two anchors are one after redaction it lists
+  neither unless it listed both (fail closed). A signed URL's signature
+  (`sig=`, `X-Amz-Signature=`) is not a default pattern: add a pattern
+  (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) where a host cites them.
 
 **Across components (validator, executor, Python SDK, binding).**
 
@@ -713,6 +724,19 @@ here and marked so.
   `capability` with `field` relative to the step (`gates[0].phase`, not
   `steps[0].gates[0].phase`), and is sorted with that step's findings; its
   code and `location.path` are unchanged.
+- Executor, Python SDK, TypeScript package and binding (Fixed; Standard
+  1.2.0 §6.7): a diagnostic repeats no text of a host's output. A grounding
+  refusal (F505) names an anchor by its index and kind (`evidence_anchors[0]
+  (kind 'url') cites a ref the host's evidence_seen does not list`), never
+  by the `ref` it cites, which a presigned or signed URL makes a
+  credential, and reached the trace, the run record and the snapshot; an
+  `acs:` anchor's reference is not repeated either, nor a vendor kind. A
+  confidence that is not a number from 0 to 1 (R402, F504
+  `invalid_confidence`, F505) is named by its type (`the output's
+  confidence (a string) ...`) unless it is a number, a boolean or null, and
+  an `inference_method` outside the vocabulary is not repeated. Match on codes and
+  reason tokens, not on these messages. `@synaptiai/acs-core` exports
+  `shownValue`, how a diagnostic names such a value.
 
 **Plugin: hooks and skills (released with plugin 3.0.0).**
 
@@ -987,6 +1011,21 @@ here and marked so.
   expiry (Changed), and the persist, rollback and send skills' command hooks
   now block (exit 2) a call they refuse, which they let through before
   (Fixed).
+- Plugin, pre-tool-use hook (Fixed; Standard 1.2.0 §5.18.10, §6.7): a
+  `TodoWrite`, `TaskCreate` or `TaskUpdate` call (`persist`) whose input
+  holds a secret the layer recognises is blocked with `F504
+  CONSTRAINT_VIOLATED:` in every permission mode, as the SDK adapter
+  refuses it: the shared scan over every string of the input and its JSON
+  text, and a value under a member named for a credential (`{"password":
+  "..."}`, an `Authorization` name/value pair, a `["Cookie", ...]` tuple).
+  Keep credentials out of todos and tasks; cite them by reference.
+- Plugin, `tools/verify_audit_log.py` (Fixed): each line is verified as the
+  bytes the hook signed, the compact JSON `jq -c` writes ending in its
+  `hmac` member, with each member named once. A line edited without the key
+  so that it parses to the signed entry (a member named twice, a blank or a
+  `\u` escape inserted, the `hmac` moved) now fails, as does a blank line;
+  a line the hook wrote verifies as before. `verify_entry` checks a parsed
+  entry; `verify_line` checks a line.
 
 **Standard Agents binding and TypeScript package.**
 
@@ -1127,7 +1166,11 @@ here and marked so.
   function's values at each call) and `configureLayer` keeps them, so the
   audit hook's entry for a plain tool, and `persist` data, are redacted and
   refused with every secret any tool registered; `resetLayer` forgets them. An evidence anchor that held a
-  secret loses its `digest` in the trace (above).
+  secret loses its `digest` in the trace (above). A call refused because a
+  tool's `secrets` function threw (R407) is now recorded, as a `refused`
+  entry with the layer's `recorded_by`, redacted with the secrets the layer
+  holds, so the audit hook links it rather than writing an entry of its
+  own.
 
 **Interoperability data.**
 

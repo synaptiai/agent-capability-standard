@@ -210,7 +210,18 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   `AskUserQuestion`, `TodoWrite`, `TaskList`, `TaskGet`, `TaskCreate`,
   `TaskUpdate`, `ToolSearch`, `BashOutput`, `TaskOutput`,
   `ListMcpResourcesTool`, `ReadMcpResourceTool`, `ExitPlanMode`, and the
-  older names `AskUser` and `TodoRead`): needs nothing.
+  older names `AskUser` and `TodoRead`): needs neither. Those of them the
+  mapper maps to `persist` (`TodoWrite`, `TaskCreate`, `TaskUpdate`) store
+  what they are given, so a call whose input holds a secret the layer
+  recognises is refused with `F504 CONSTRAINT_VIOLATED:` in every
+  permission mode (STANDARD 1.2.0 §5.18.10, §6.7), as the SDK adapter
+  refuses it: the shared scan (`secret_scan.sh`, copied into the hook) over
+  every string of the input and its JSON text, and the SDK redactor's rule
+  for data, a value of 4 or more characters (or a number) that is not a
+  placeholder under a member named for a credential, the value of a
+  `{"name": "Authorization", "value": ...}` pair, or the second of a
+  `["Cookie", ...]` tuple. A test keeps the hook's verdict the adapter's on
+  the credential vectors and on data forms.
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
 - `Skill`, `Agent`, `Task`: `mutate`. Claude Code runs the shell commands a
   skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's
@@ -489,7 +500,15 @@ python tools/verify_audit_log.py
 ```
 
 It checks the chain and that the log still holds the entry its head
-records, at its place (`--head-file` names another head). A log begun
+records, at its place (`--head-file` names another head). Each line is
+checked as the bytes the hook signed: the compact JSON `jq -c` writes,
+ending in its `hmac` member, with each member named once, the HMAC taken
+over the line without that member. A line that parses to the entry signed
+but is not those bytes fails: one edited to name a member twice (most JSON
+readers keep the last value, so `"status":"executed","status":"failed"`
+parses to the signed `failed` and reads as `executed` to a reader that
+keeps the first, or to grep), one with a blank or a `\u` escape inserted, one whose
+`hmac` is not last, and a blank line. A log begun
 before the hook kept a head, or a chain no head anchors (the `audit`
 skill's `.claude/audit/records.jsonl`), is checked with `--no-head`, the
 chain alone: removing its last entries is not seen.
@@ -523,11 +542,12 @@ with `F503 ROLLBACK_FAILED:`; it reads the command's words as the shell
 passes them, and any spelling of a stash restore but `git stash apply|pop
 <id>`, those four words alone, is blocked the same way.
 
-The `persist` skill's command hook and the `audit` skill's `Bash` hook share
-one secret scan, `secret_scan.sh` in this directory: each copies it verbatim
-between its `# BEGIN secret-scan` and `# END secret-scan` lines (a skill
-copied out of the plugin keeps working), and `tests/test_skill_hooks.py`
-keeps every copy equal to the file. The file is not a hook: `hooks.json`
+The `persist` skill's command hook, the `audit` skill's `Bash` hook and
+`pretooluse_require_checkpoint.sh` (for `TodoWrite`, `TaskCreate` and
+`TaskUpdate`) share one secret scan, `secret_scan.sh` in this directory:
+each copies it verbatim between its `# BEGIN secret-scan` and `# END
+secret-scan` lines (a skill copied out of the plugin keeps working), and
+`tests/test_skill_hooks.py` keeps every copy equal to the file. The file is not a hook: `hooks.json`
 does not run it. The scan blocks content written to memory, and a record
 appended to `.claude/audit/records.jsonl`, that holds a credential-shaped
 value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7). The `persist`

@@ -291,6 +291,19 @@ class TestFrontmatterHooks:
         end = command.index("# END secret-scan") + len("# END secret-scan")
         assert command[start:end] == source
 
+    def test_the_pre_tool_use_hook_copies_the_secret_scan(self) -> None:
+        """The plugin's pre-tool-use hook scans what a persist tool
+        (TodoWrite, TaskCreate, TaskUpdate) would store with the same scan
+        (STANDARD 1.2.0 §5.18.10), copied verbatim."""
+        hook = (ROOT / "hooks" / "pretooluse_require_checkpoint.sh").read_text(
+            encoding="utf-8"
+        )
+        source = SECRET_SCAN.read_text(encoding="utf-8").strip()
+        start = hook.index("# BEGIN secret-scan")
+        end = hook.index("# END secret-scan") + len("# END secret-scan")
+        assert hook[start:end] == source
+        assert hook.count("# BEGIN secret-scan") == 1
+
     @pytest.mark.parametrize("skill", ["audit", "rollback", "send"])
     def test_shell_words_copies_are_equal(self, skill: str) -> None:
         """The send, audit and rollback hooks read a command's words with

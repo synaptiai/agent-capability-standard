@@ -10,7 +10,7 @@
  * `allowed_destinations` are destination policies a grounded `send` tool
  * applies beside the layer's (§4.4.2, `configureLayer`).
  */
-import type { Json } from '@synaptiai/acs-core';
+import { shownValue, type Json } from '@synaptiai/acs-core';
 import type { Diagnostic, ProfileFlags, ProfilePolicy, Report } from '@synaptiai/acs-core/wasm';
 import type { CapabilityId, DeclaredFlags } from './ontology.js';
 
@@ -94,10 +94,10 @@ export function confidenceFailure(
   if (!Object.prototype.hasOwnProperty.call(output, 'confidence')) return null;
   const c = output['confidence'];
   if (typeof c !== 'number' || !(c >= 0 && c <= 1)) {
-    const text = (JSON.stringify(c) ?? String(c)).slice(0, 64);
+    // The host's text is not repeated (§6.7).
     return {
       reason: 'invalid_confidence',
-      message: `the output's confidence ${text} is not a number from 0 to 1, and an applied profile sets a minimum confidence`,
+      message: `the output's confidence (${shownValue(c)}) is not a number from 0 to 1, and an applied profile sets a minimum confidence`,
     };
   }
   return c < minimum

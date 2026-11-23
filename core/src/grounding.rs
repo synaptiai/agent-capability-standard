@@ -378,20 +378,23 @@ pub fn check(
     for (i, item) in items.iter().enumerate() {
         let r = item.get("ref").and_then(Value::as_str);
         let kind = item.get("kind").and_then(Value::as_str);
+        // A message names an anchor by its index and kind, never by its
+        // `ref`: the host's output may cite a URL or a path that carries a
+        // credential (a presigned or signed URL, say), and a diagnostic
+        // reaches the trace, the run's records and its snapshots (§6.7).
         let established = if let Some(cited) = r.and_then(|r| r.strip_prefix("acs:")) {
             // Item 2: a citation of a workflow value.
-            let r = r.unwrap_or_default();
             if kind != Some("record") {
-                let k = kind.map_or_else(|| "no kind".to_string(), |k| format!("kind '{k}'"));
                 return Err(format!(
-                    "evidence_anchors[{i}] cites a workflow value ('{r}') with {k}; an acs: anchor is of kind record (§6.5)"
+                    "evidence_anchors[{i}] is an acs: anchor, which cites a workflow value, with {}; an acs: anchor is of kind record (§6.5)",
+                    kind_shown(kind)
                 ));
             }
             let cited = match crate::refs::parse_ref(cited) {
                 Ok(c) if c.annotation.is_none() && indices_ok(&c) => c,
                 _ => {
                     return Err(format!(
-                        "evidence_anchors[{i}] cites '{r}', whose rest is not a reference body (§5.3, without ${{, }}, a type annotation and an index above 2^53 - 1) (§6.5)"
+                        "evidence_anchors[{i}] is an acs: anchor whose rest is not a reference body (§5.3, without ${{, }}, a type annotation and an index above 2^53 - 1) (§6.5)"
                     ));
                 }
             };
@@ -403,7 +406,7 @@ pub fn check(
                     format!("the bound references are {}", list.join(", "))
                 };
                 return Err(format!(
-                    "evidence_anchors[{i}] cites '{r}', which no reference bound for the output's producer covers ({binds}) (§3.1, §5.20)"
+                    "evidence_anchors[{i}] cites a workflow value that no reference bound for the output's producer covers ({binds}) (§3.1, §5.20)"
                 ));
             }
             true
@@ -413,7 +416,8 @@ pub fn check(
             match seen {
                 Some(seen) if !seen.iter().any(|s| s == r) => {
                     return Err(format!(
-                        "evidence_anchors[{i}] cites '{r}', which the host's evidence_seen does not list: its producer did not have it (§3.1, §5.20)"
+                        "evidence_anchors[{i}] ({}) cites a ref the host's evidence_seen does not list: its producer did not have it (§3.1, §5.20)",
+                        kind_shown(kind)
                     ));
                 }
                 Some(_) => true,
@@ -486,16 +490,17 @@ pub fn check(
     let mut marking = Vec::new();
     match method {
         None => marking.push("no inference_method".to_string()),
-        Some(m) if !method_ok => marking.push(format!(
-            "an inference_method {m} outside §4.1.1's vocabulary"
-        )),
+        Some(_) if !method_ok => {
+            marking.push("an inference_method outside §4.1.1's vocabulary".to_string())
+        }
         _ => {}
     }
     match confidence {
         None => marking.push("no confidence".to_string()),
-        Some(c) if !confidence_ok => {
-            marking.push(format!("a confidence {c} that is not from 0 to 1"))
-        }
+        Some(c) if !confidence_ok => marking.push(format!(
+            "a confidence ({}) that is not from 0 to 1",
+            shown_value(c)
+        )),
         _ => {}
     }
     Err(format!(
@@ -503,6 +508,32 @@ pub fn check(
         why.join("; "),
         marking.join(" and ")
     ))
+}
+
+/// How a diagnostic names an anchor's kind: one of §6.5's, or only what
+/// sort of kind it is. A kind is the host's text, so it is not repeated
+/// (§6.7).
+fn kind_shown(kind: Option<&str>) -> String {
+    match kind {
+        None => "no kind".to_string(),
+        Some(k) if KINDS.contains(&k) => format!("kind '{k}'"),
+        Some(k) if is_kind(k) => "a vendor (x-) kind".to_string(),
+        Some(_) => "a kind outside §6.5's vocabulary".to_string(),
+    }
+}
+
+/// How a diagnostic names a JSON value a host returned: a number, a
+/// boolean or null as it is, anything else by its type, since a string may
+/// hold a secret (§6.7).
+pub fn shown_value(v: &Value) -> String {
+    match v {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(_) => "a string".to_string(),
+        Value::Array(_) => "an array".to_string(),
+        Value::Object(_) => "an object".to_string(),
+    }
 }
 
 fn plural(n: usize) -> &'static str {
@@ -704,11 +735,13 @@ mod tests {
             "1 item that is not an",
             "1 anchor of kinds",
             "1 anchor whose availability",
-            "\"guess\" outside",
-            "confidence 2 that",
+            "an inference_method outside",
+            "confidence (2) that",
         ] {
             assert!(e.contains(part), "{part}: {e}");
         }
+        // The host's inference_method is not repeated (§6.7).
+        assert!(!e.contains("guess"), "{e}");
         let e = check(
             &json!({"evidence_anchors": [{"ref": "acs:s.results[7]", "kind": "record"}]}),
             &p,
@@ -720,6 +753,63 @@ mod tests {
             e.contains("s.results[0:3]") && e.contains("evidence_anchors[0]"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn messages_never_repeat_what_an_anchor_cites() {
+        // A presigned URL, a signed URL and a URL with a password: a
+        // diagnostic names the anchor by its index and kind (§6.7).
+        const SECRET: &str = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY99";
+        let refs = [
+            format!(
+                "https://bucket.s3.amazonaws.com/r.csv?X-Amz-Credential=AKIAIOSFODNN7EXAMPLE&X-Amz-Signature={SECRET}"
+            ),
+            format!("https://acct.blob.core.windows.net/c/r.csv?sv=2022-11-02&sig={SECRET}"),
+            format!("https://user:{SECRET}@example.com/r.csv"),
+        ];
+        let any = Policy::new(vec!["retrieve".into()], None, true).unwrap();
+        for r in &refs {
+            for kind in ["url", "x-signed", "Not A Kind"] {
+                let out = json!({"evidence_anchors": [{"ref": r, "kind": kind}]});
+                let e = check(&out, &any, &[], Some(&[])).unwrap_err();
+                assert!(!e.contains(SECRET) && !e.contains("AKIA"), "{e}");
+                // An item whose kind is not one is a legacy form, which no
+                // message cites.
+                if kind != "Not A Kind" {
+                    assert!(e.starts_with("evidence_anchors[0] ("), "{e}");
+                }
+                assert!(!e.contains(kind) || kind == "url", "{e}");
+            }
+        }
+        // An acs: anchor's rest is the host's text too.
+        for (anchor, bound) in [
+            (
+                json!({"ref": format!("acs:inputs.{SECRET}"), "kind": "url"}),
+                vec![],
+            ),
+            (
+                json!({"ref": format!("acs:inputs.{SECRET}"), "kind": SECRET}),
+                vec![],
+            ),
+            (
+                json!({"ref": format!("acs:inputs.k {SECRET}"), "kind": "record"}),
+                vec![],
+            ),
+            (
+                json!({"ref": format!("acs:inputs.{SECRET}"), "kind": "record"}),
+                vec![r("inputs.other")],
+            ),
+        ] {
+            let e = check(&json!({"evidence_anchors": [anchor]}), &any, &bound, None).unwrap_err();
+            assert!(!e.contains(SECRET), "{e}");
+            assert!(e.starts_with("evidence_anchors[0] "), "{e}");
+        }
+        // A confidence or inference_method that is a string is named by its
+        // type.
+        let out = json!({"evidence_anchors": [], "inference_method": SECRET, "confidence": SECRET});
+        let e = check(&out, &any, &[], None).unwrap_err();
+        assert!(!e.contains(SECRET), "{e}");
+        assert!(e.contains("a confidence (a string)"), "{e}");
     }
 
     #[test]

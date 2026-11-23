@@ -441,7 +441,17 @@ runs; each is checked against the ontology when it is made, so a misspelt
 capability is a `ValueError` naming V101. `WorkflowRunner(...,
 redactor=Redactor([...]))` registers the host's secrets: the runner redacts
 the `message` and `reason` of every `Error` it submits, the one it builds
-when the run refuses a host's response included (§6.7).
+when the run refuses a host's response included, and the evidence anchors
+of every `Output` it submits, so the run's state, outputs and snapshots
+keep an anchor that held a secret with it replaced and without its digest
+(§6.5, §6.7). `evidence_seen` is rewritten to match: it lists an anchor's
+redacted `ref` when it listed the anchor's own, and when two anchors are
+one after redaction it lists neither unless it listed both. A signed URL's
+signature (`sig=`, `X-Amz-Signature=`) is not among the default patterns:
+a host that cites signed URLs adds a pattern for them
+(`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) or cites them without
+their query. The core's grounding refusal (F505)
+names an anchor by its index and kind, never by its `ref`.
 
 ## Hosting runs
 

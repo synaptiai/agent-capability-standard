@@ -128,6 +128,11 @@ describe('bindingProfiles', () => {
     expect(confidenceFailure({ confidence: 1.5 }, 0.9)?.reason).toBe('invalid_confidence');
     expect(confidenceFailure({ confidence: 0.9 }, 0.9)).toBeNull();
     expect(confidenceFailure({}, 0.9)).toBeNull();
+    // The host's text is not repeated (§6.7): a string is named by its type.
+    const secret = confidenceFailure({ confidence: 'AKIAIOSFODNN7EXAMPLE' }, 0.9)?.message;
+    expect(secret).not.toContain('AKIA');
+    expect(secret).toMatch(/^the output's confidence \(a string\) is not a number from 0 to 1/);
+    expect(confidenceFailure({ confidence: 1.5 }, 0.9)?.message).toMatch(/confidence \(1\.5\) is not/);
   });
 });
 

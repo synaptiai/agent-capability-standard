@@ -29,7 +29,10 @@
 # _GIT_STASH_CLASSES, _writes); a test keeps them so.
 #   - A tool on UNGATED_TOOLS (the mapper's tools whose capability needs
 #     neither a checkpoint nor approval: Read, Grep, TodoWrite, ...):
-#     allowed, nothing used.
+#     allowed, nothing used; except that a tool on PERSIST_TOOLS (the
+#     mapper's tools whose capability is persist: TodoWrite, TaskCreate,
+#     TaskUpdate) whose input holds a secret the layer recognises is refused
+#     (below).
 #   - Write, Edit, MultiEdit, NotebookEdit: mutate.
 #   - Skill, Agent, Task: mutate. Claude Code runs the shell commands a
 #     skill's file embeds (!`cmd` and ```! blocks, with the call's arguments
@@ -79,6 +82,14 @@
 #     cannot know that an unknown tool only reads).
 #
 # Rules.
+#   - persist (§5.18.10, §6.7): the data a call of a tool on PERSIST_TOOLS
+#     would store holds no secret the layer recognises: the shared scan's
+#     credential shapes (hooks/secret_scan.sh, copied below), read in every
+#     string of its input and in the input's JSON text, and the SDK
+#     redactor's rule for data (SECRET_MEMBER_JQ: a value under a member
+#     named for a credential). Refused, not redacted, since memory is read
+#     back as fact (F504 CONSTRAINT_VIOLATED), whatever the permission mode;
+#     the SDK adapter refuses the same calls.
 #   - rollback: restores a checkpoint this project recorded, so a checkpoint
 #     was taken; allowed, and it uses none. (F503 ROLLBACK_FAILED cannot
 #     arise: a restore of anything else is mutate.) The commits are entered
@@ -204,6 +215,50 @@ fi
 # approval (retrieve, search, observe, recall, persist, inquire). Every other
 # tool but Bash is classified mutate, Skill, Agent and Task included (below).
 UNGATED_TOOLS=(Read Glob Grep LS WebFetch WebSearch AskUser AskUserQuestion TodoRead TodoWrite TaskList TaskGet TaskCreate TaskUpdate ToolSearch BashOutput TaskOutput ListMcpResourcesTool ReadMcpResourceTool ExitPlanMode)
+
+# The tools of UNGATED_TOOLS whose capability is persist (the mapper's
+# _TOOL_MAPPINGS; a test keeps them so): what they store is scanned for
+# secrets (§5.18.10).
+PERSIST_TOOLS=(TodoWrite TaskCreate TaskUpdate)
+
+# BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
+# secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
+SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
+# A quote, or an escaped one (\" in JSON text inside a JSON string)
+SECRET_Q="\\\\*[\"']"
+# A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password)
+SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
+SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
+SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]*:"
+secret_in() {
+  printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
+  # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
+  printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']" && return 0
+  # The password of a URL's userinfo, unless it is a placeholder
+  printf '%s' "$1" | grep -Eo -- '[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
+    sed -E 's#^[^/]*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+  # An Authorization header's value, 8 or more characters with letters and digits
+  printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
+    sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//" |
+    sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
+  printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+    sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*\\\\*[\"']//" |
+    sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # A user option's password (curl -u user:password), 8 or more characters with letters and digits
+  printf '%s' "$1" | grep -Eo -- "$SECRET_USER[^[:space:]\"'\\\\]{8,}" |
+    sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # An unquoted value of 12 or more characters with letters and digits, assigned or given to a credential option
+  printf '%s' "$1" | grep -Eio -- "$SECRET_OPT[[:space:]]+[^-[:space:]\"'][^[:space:]\"']{11,}" |
+    sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  printf '%s' "$1" | grep -Eio -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
+    sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
+}
+# END secret-scan
+
 
 # Commands that only read, unless given an option that writes (writes below).
 # A subset of the SDK mapper's _READ_ONLY_COMMANDS.
@@ -434,6 +489,53 @@ classify_bash() {
   done
   echo mutate
 }
+
+# Whether JSON data holds, in a member named for a credential, a value
+# redaction replaces that is not a placeholder: the SDK redactor's rule for
+# data (grounded_agency/state/redaction.py, _secret_member_value; a test
+# keeps the two in agreement). A member is secret when its name ends in a
+# credential's name or names a header that carries one (Authorization,
+# Cookie), when it is the value of a name/value pair whose name is such a
+# name ({"name": "Authorization", "value": ...}), the second of a [name,
+# value] tuple, or inside a secret member. Its value counts when it is a
+# number, or a string of 4 or more characters other than [REDACTED] that is
+# not a placeholder (<...>, ${...}, ****, password, token, ...). jq's case
+# folding is Unicode's where the SDK's is ASCII's, so the hook finds a name
+# the SDK does not in rare spellings, never the reverse.
+SECRET_MEMBER_JQ='
+def acs_name: test("\\A[\\s\\S]*(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|authorization|cookies?)\\z"; "i");
+def acs_scalar: (type == "string" and length >= 4 and . != "[REDACTED]") or type == "number";
+def acs_placeholder: type == "string" and test("\\A([$<{*\\[][^\\n]*|password|passwd|pwd|pass|secret|token)\\z"; "i");
+def acs_held($secret):
+  if $secret and acs_scalar then (acs_placeholder | not)
+  elif type == "object" then
+    (($secret | not) and any(to_entries[]; (.key | test("\\A(name|key|header)\\z"; "i")) and (.value | type == "string" and acs_name))) as $pair
+    | any(to_entries[]; .key as $k | .value | acs_held($secret or ($k | acs_name) or ($pair and ($k | test("\\Avalue\\z"; "i")))))
+  elif type == "array" then
+    (($secret | not) and length == 2 and (.[0] | type == "string" and acs_name)) as $tuple
+    | any(to_entries[]; .key as $i | .value | acs_held($secret or ($tuple and $i == 1)))
+  else false end;
+'
+
+# persist: the data the call would store holds no secret the layer
+# recognises (§5.18.10, §6.7), as the SDK adapter decides it
+# (Redactor.holds_credential): a credential-shaped value in any string of
+# the input or in the input's JSON text (secret_in), or a value in a member
+# named for a credential (SECRET_MEMBER_JQ). NUL bytes, which a shell
+# variable cannot hold, are read as blanks. The scan runs without pipefail:
+# a grep -q that stops at a match ends the printf feeding it, and with
+# pipefail that would read as no match.
+for entry in "${PERSIST_TOOLS[@]}"; do
+  if [ "$tool_name" = "$entry" ]; then
+    unread="R407 SAFETY_CHECK_FAILED: cannot read the data $tool_name would store, so the call is blocked."
+    held=$(printf '%s' "$payload" | jq -r "$SECRET_MEMBER_JQ"' .tool_input | acs_held(false)' 2>/dev/null) || block "$unread"
+    stored=$(printf '%s' "$payload" | jq -r '.tool_input | ([.. | strings] | join("\n")) + "\n" + tojson | split("\u0000") | join(" ")' 2>/dev/null) || block "$unread"
+    if [ "$held" = "true" ] || { [ "$held" = "false" ] && (set +o pipefail; secret_in "$stored"); }; then
+      block "F504 CONSTRAINT_VIOLATED: $tool_name (persist): the data it would store holds what looks like a credential; persist where the secret is kept, or cite it by reference, not the secret (STANDARD 1.2.0 §5.18.10, §6.7)"
+    fi
+    [ "$held" = "false" ] || block "$unread"
+  fi
+done
 
 for entry in "${UNGATED_TOOLS[@]}"; do
   if [ "$tool_name" = "$entry" ]; then

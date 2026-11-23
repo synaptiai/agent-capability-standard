@@ -676,3 +676,147 @@ class TestHead:
         assert verify_log(log, HMAC_KEY, head) == (3, 3, [])
         assert self._call(tmp_path, "toolu_4").returncode == 0
         assert json.loads(head.read_text())["entries"] == 4
+
+
+@pytest.mark.skipif(
+    shutil.which("jq") is None or shutil.which("openssl") is None,
+    reason="the hook needs jq and openssl",
+)
+class TestTheBytesSigned:
+    """A line verifies only as the bytes the hook signed (hooks/
+    posttooluse_log_tool.sh: "hmac: HMAC-SHA-256 of the line without hmac,
+    as written"). Without the key, a line edited so that it parses to the
+    same entry (a member named twice, whose last value is the signed one;
+    a blank; an escape) used to pass, while a reader that keeps the first of
+    two members, or greps the text, read another status or tool."""
+
+    KEY = "op-secret-7f3a9c"
+
+    def _log(self, tmp_path: Path) -> Path:
+        """Two lines the hook writes: a failed Bash call, a Read."""
+        for event, tool, tool_input in (
+            ("PostToolUseFailure", "Bash", {"command": "make deploy"}),
+            ("PostToolUse", "Read", {"file_path": "a.txt"}),
+        ):
+            payload = {
+                "hook_event_name": event,
+                "tool_name": tool,
+                "tool_input": tool_input,
+                "tool_use_id": f"toolu_{tool}",
+            }
+            result = subprocess.run(
+                [str(POSTTOOLUSE_HOOK)],
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "CLAUDE_PROJECT_DIR": str(tmp_path),
+                    "AUDIT_HMAC_KEY": self.KEY,
+                },
+                timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+        log = tmp_path / ".claude" / "audit.log"
+        assert verify_log(log, self.KEY, tmp_path / ".claude" / "audit.head") == (
+            2,
+            2,
+            [],
+        )
+        return log
+
+    def _edit(self, log: Path, old: str, new: str) -> None:
+        """Replace ``old`` in the first line (the failed Bash call)."""
+        first, rest = log.read_text(encoding="utf-8").split("\n", 1)
+        assert first.count(old) == 1, old
+        log.write_text(first.replace(old, new) + "\n" + rest, encoding="utf-8")
+
+    def _fails(self, log: Path, why: str) -> None:
+        total, valid, errors = verify_log(log, self.KEY, log.with_suffix(".head"))
+        assert (total, valid) == (2, 1), errors
+        assert any(why in e for e in errors), errors
+
+    def test_a_member_named_twice_is_refused(self, tmp_path: Path) -> None:
+        """The reported edit: the failed Bash call reads as an executed Read
+        to a reader that keeps the first member."""
+        log = self._log(tmp_path)
+        self._edit(
+            log,
+            '"status":"failed","tool":"Bash"',
+            '"status":"executed","status":"failed","tool":"Read","tool":"Bash"',
+        )
+        self._fails(log, "'status' named twice")
+
+    @pytest.mark.parametrize(
+        ("old", "new", "why"),
+        [
+            # A forged note before the line's own hmac.
+            (
+                '{"action_id"',
+                '{"hmac":"reviewed: approved by security on-call","action_id"',
+                "'hmac' named twice",
+            ),
+            # Forged details just before the real ones.
+            (
+                '"details":{"event":"PostToolUseFailure"',
+                '"details":{"event":"PostToolUse","approved_by":"alice"},"details":{"event":"PostToolUseFailure"',
+                "'details' named twice",
+            ),
+            # A member named twice inside a nested object.
+            (
+                '"details":{"event":"PostToolUseFailure"',
+                '"details":{"event":"PostToolUse","event":"PostToolUseFailure"',
+                "'event' named twice",
+            ),
+        ],
+    )
+    def test_forged_members_are_refused(
+        self, tmp_path: Path, old: str, new: str, why: str
+    ) -> None:
+        log = self._log(tmp_path)
+        self._edit(log, old, new)
+        self._fails(log, why)
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ('"status":"failed"', '"status": "failed"'),
+            ('"status":"failed"', '"status":"f\\u0061iled"'),
+            ('"tool":"Bash"', '"tool":"Bas\\u0068"'),
+        ],
+    )
+    def test_a_blank_or_an_escape_inserted_is_refused(
+        self, tmp_path: Path, old: str, new: str
+    ) -> None:
+        log = self._log(tmp_path)
+        self._edit(log, old, new)
+        self._fails(log, "not the compact JSON the hook writes")
+
+    def test_a_line_whose_hmac_is_not_last_is_refused(self, tmp_path: Path) -> None:
+        log = self._log(tmp_path)
+        lines = log.read_text(encoding="utf-8").split("\n")
+        entry = json.loads(lines[0])
+        moved = {"hmac": entry.pop("hmac"), **entry}
+        lines[0] = json.dumps(moved, separators=(",", ":"), ensure_ascii=False)
+        log.write_text("\n".join(lines), encoding="utf-8")
+        self._fails(log, "does not end with its hmac member")
+
+    def test_blanks_around_a_line_are_refused(self, tmp_path: Path) -> None:
+        log = self._log(tmp_path)
+        text = log.read_text(encoding="utf-8")
+        log.write_text(" " + text, encoding="utf-8")
+        self._fails(log, "not the compact JSON the hook writes")
+
+    def test_a_blank_line_is_reported(self, tmp_path: Path) -> None:
+        """The hook writes none; the entries around it still verify."""
+        log = self._log(tmp_path)
+        log.write_text(
+            log.read_text(encoding="utf-8").replace("\n", "\n \n", 1), encoding="utf-8"
+        )
+        total, valid, errors = verify_log(
+            log,
+            self.KEY,
+            log.with_suffix(".head"),
+        )
+        assert (total, valid) == (3, 2)
+        assert any("Line 2: a blank line" in e for e in errors), errors

@@ -632,8 +632,12 @@ class WorkflowRunner:
                 (:meth:`Host.protect`): no rollback reaches evidence
                 (§4.4.1).
             redactor: Applied to the ``Error`` messages the runner builds
-                from a host's exceptions and to the message of every
-                ``Error`` it submits (§6.7). The default patterns when None.
+                from a host's exceptions, to the message of every ``Error``
+                it submits, and to the evidence anchors of every ``Output``
+                it submits (§6.5, §6.7): an anchor that held a secret is
+                submitted with it replaced and without its digest, so the
+                run's state, outputs, trace and snapshots never hold it.
+                The default patterns when None.
             memory: The memory store whose ``run`` scope instance the
                 runner ends when a run ends (§4.5), whether or not a host
                 is at hand, as when :meth:`cancel` is called without one.
@@ -1053,7 +1057,7 @@ class WorkflowRunner:
             if response is None:
                 return Turn(None, run.wake_at(), action), answered
             seq = run.trace_seq
-            response = self._redact_error(response)
+            response = self._redact_anchors(self._redact_error(response))
             self._submit(run, action, response, host.now_ms())
             self._record_evidence(run, action, response, seq)
             answered += 1
@@ -1221,6 +1225,45 @@ class WorkflowRunner:
             if changed:
                 out = {**out, "reason": kept}
         return out
+
+    def _redact_anchors(self, response: Any) -> Any:
+        """An ``Output`` with every evidence anchor that holds a secret
+        redacted as the evidence stores redact one (§6.5, §6.7: its secrets
+        replaced, its digest gone); any other response as it is. The core
+        keeps an output's anchors in the run's state and outputs, so they
+        are redacted before it sees them.
+
+        ``evidence_seen`` is rewritten to match (§5.20): it lists an
+        anchor's redacted ``ref`` when the host listed the anchor's own
+        ``ref``. When two anchors' refs are one after redaction and the host
+        listed only one of them, it lists neither: the core then cannot
+        tell them apart, so the one it did not list must not pass as seen.
+        A ``seen`` that is not a list of strings is left for the core to
+        refuse."""
+        if not (isinstance(response, dict) and response.get("kind") == "Output"):
+            return response
+        value = response.get("value")
+        items = value.get("evidence_anchors") if isinstance(value, dict) else None
+        if not isinstance(value, dict) or not isinstance(items, list):
+            return response
+        redacted: list[Any] = []
+        for item in items:
+            out, pointers = self._redactor.redact_anchor_data(item)
+            redacted.append(out if pointers else item)
+        if all(a is b for a, b in zip(redacted, items, strict=True)):
+            return response
+        result = {**response, "value": {**value, "evidence_anchors": redacted}}
+        seen = response.get("evidence_seen")
+        if isinstance(seen, list) and all(isinstance(s, str) for s in seen):
+            listed = set(seen)
+            verdict: dict[str, bool] = {}
+            for raw, out in zip(items, redacted, strict=True):
+                ref = raw.get("ref") if isinstance(raw, dict) else None
+                shown = out.get("ref") if isinstance(out, dict) else None
+                if isinstance(ref, str) and isinstance(shown, str):
+                    verdict[shown] = verdict.get(shown, True) and ref in listed
+            result["evidence_seen"] = [r for r, ok in verdict.items() if ok]
+        return result
 
     def _record_evidence(
         self, run: _core.Run, action: Action, response: Any, seq: int

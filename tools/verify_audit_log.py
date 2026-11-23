@@ -2,12 +2,21 @@
 """Verify audit log integrity via HMAC chain validation.
 
 Reads .claude/audit.log and verifies that:
-1. Each entry is valid JSON with required fields
-2. Each entry's HMAC matches its content
+1. Each entry is valid JSON with required fields, naming each member once
+2. Each entry's HMAC matches the bytes the hook signed: the line is the
+   compact JSON the hook writes (jq -c), ending in its hmac member, and the
+   HMAC is taken over the line with that member left out
 3. Each entry's prev_hmac matches the previous entry's HMAC (chain integrity)
 4. The log still holds the entry its head records, at its place: the head,
    .claude/audit.head, is the chain's end as the hook last wrote it (the
    number of entries and the last one's hmac, signed with the same key).
+
+A line is checked as the bytes it holds, not as what a parser reads from
+it: JSON that names a member twice parses, in most readers, to the last
+value at the first name's place, so a line edited to name `status` twice
+would read one way to a reader that keeps the first and verify by the
+other; and blanks or Unicode escapes inserted into a line change no parsed
+value. Each of those is refused.
 
 The chain alone shows a changed or removed entry by the link of the entry
 after it; removing the last entries, or the whole log, breaks no link, and
@@ -44,9 +53,11 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import socket
 import sys
 from pathlib import Path
+from typing import Any
 
 # Every entry carries the chain fields, and the fields of one generation: an
 # action record (what the hook writes), a tool call of the hook before
@@ -81,40 +92,118 @@ def compute_hmac(content: str, key: str) -> str:
     ).hexdigest()
 
 
-def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[str]:
-    """Verify a single audit log entry. Returns list of error messages."""
-    errors: list[str] = []
+# The end of every line the hook writes: jq -c appends the hmac member last.
+_HMAC_SUFFIX = re.compile(r',"hmac":"([0-9a-f]{64})"\}\Z')
 
-    # Check required fields: the chain's, and those of the generation the
-    # entry is closest to (the first, when it fits none)
+
+class DuplicateMember(ValueError):
+    """A JSON object names a member twice."""
+
+
+def _members_once(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise DuplicateMember(key)
+        out[key] = value
+    return out
+
+
+def parse_line(line: str) -> Any:
+    """A log line's JSON value. An object that names a member twice, at
+    any depth, is refused (:class:`DuplicateMember`, a ValueError), as is
+    text that is not JSON (json.JSONDecodeError)."""
+    return json.loads(line, object_pairs_hook=_members_once)
+
+
+def compact(value: Any) -> str:
+    """``value`` as jq -c prints it: compact, members in their order,
+    non-ASCII text as is, and DEL (U+007F) escaped, which json.dumps leaves
+    as is."""
+    return json.dumps(
+        value, separators=(",", ":"), sort_keys=False, ensure_ascii=False
+    ).replace("\x7f", "\\u007f")
+
+
+def verify_fields(entry: dict, expected_prev_hmac: str) -> list[str]:
+    """The required fields of a parsed entry, and its chain link."""
+    # The chain's fields, and those of the generation the entry is closest
+    # to (the first, when it fits none)
     keys = set(entry.keys())
     missing = CHAIN_FIELDS - keys
     if all(fields - keys for fields in GENERATIONS):
         missing |= min((fields - keys for fields in GENERATIONS), key=len)
     if missing:
-        errors.append(f"Missing fields: {sorted(missing)}")
-        return errors
-
-    # Check chain linkage
+        return [f"Missing fields: {sorted(missing)}"]
     if entry["prev_hmac"] != expected_prev_hmac:
-        errors.append(
+        return [
             f"Chain break: prev_hmac={entry['prev_hmac']!r} "
             f"but expected={expected_prev_hmac!r}"
+        ]
+    return []
+
+
+def verify_line(
+    line: str, expected_prev_hmac: str, hmac_key: str
+) -> tuple[list[str], str]:
+    """Verify one line of a log as the bytes the hook wrote: the errors,
+    and the hmac the next line's prev_hmac must equal (empty when the line
+    has none that can be read).
+
+    The line must name each member once and be the compact JSON the hook
+    writes (jq -c), ending in its hmac member; the HMAC is taken over the
+    line with that member left out, which is the text the hook signed."""
+    match = _HMAC_SUFFIX.search(line)
+    try:
+        entry = parse_line(line)
+    except DuplicateMember as e:
+        # The chain goes on from the hmac the line ends with, so only this
+        # line is reported.
+        return [
+            f"Member {e.args[0]!r} named twice: a reader that keeps the first "
+            "would read another entry than the one that verifies"
+        ], match.group(1) if match else ""
+    except json.JSONDecodeError as e:
+        return [f"Invalid JSON: {e}"], ""
+    if not isinstance(entry, dict):
+        return ["Not a JSON object"], ""
+    recorded = entry.get("hmac")
+    following = recorded if isinstance(recorded, str) else ""
+    errors = verify_fields(entry, expected_prev_hmac)
+    if errors and errors[0].startswith("Missing fields"):
+        return errors, following
+    if match is None:
+        errors.append(
+            "The line does not end with its hmac member as the hook writes it "
+            '(,"hmac":"<64 hex digits>"})'
         )
+    elif compact(entry) != line:
+        errors.append(
+            "The line is not the compact JSON the hook writes (its blanks, "
+            "escapes or number forms differ): its bytes are not the ones signed"
+        )
+    elif not hmac.compare_digest(
+        match.group(1), compute_hmac(line[: match.start()] + "}", hmac_key)
+    ):
+        errors.append(f"HMAC mismatch: recorded={recorded!r}")
+    return errors, following
+
+
+def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[str]:
+    """Verify a single parsed audit log entry. Returns list of error
+    messages. A parsed entry no longer holds the bytes the hook signed (a
+    member named twice, a blank or an escape leave no trace in it): a log's
+    lines are verified with :func:`verify_line`, as :func:`verify_log`
+    does."""
+    errors = verify_fields(entry, expected_prev_hmac)
+    if errors and errors[0].startswith("Missing fields"):
+        return errors
 
     # Reconstruct the content the hook signed: every field but `hmac`, in the
-    # order recorded, as jq -c prints it: compact, non-ASCII text as is, and
-    # DEL (U+007F) escaped, which json.dumps leaves as is
-    content_dict = {key: value for key, value in entry.items() if key != "hmac"}
-    content = json.dumps(
-        content_dict, separators=(",", ":"), sort_keys=False, ensure_ascii=False
-    ).replace("\x7f", "\\u007f")
-
-    # Verify HMAC
-    expected_hmac = compute_hmac(content, hmac_key)
-    if entry["hmac"] != expected_hmac:
+    # order recorded, as jq -c prints it
+    content = compact({key: value for key, value in entry.items() if key != "hmac"})
+    if entry["hmac"] != compute_hmac(content, hmac_key):
         errors.append(f"HMAC mismatch: recorded={entry['hmac']!r}")
-
     return errors
 
 
@@ -179,8 +268,11 @@ def verify_log(
 
     # One entry per "\n": the hook writes no other line break between
     # entries, and str.splitlines() would also split at U+0085, U+2028 and
-    # U+2029, which jq -c writes raw inside a JSON string.
-    text = log_path.read_text(encoding="utf-8").strip()
+    # U+2029, which jq -c writes raw inside a JSON string. Each line is
+    # verified as it is, blanks and all; the hook ends every line with "\n"
+    # and writes no blank one.
+    text = log_path.read_text(encoding="utf-8")
+    text = text.removesuffix("\n")
     lines = text.split("\n") if text else []
     if not lines:
         return 0, 0, ["Audit log is empty", *head_errors]
@@ -194,8 +286,8 @@ def verify_log(
         held: object = None
         if total >= entries:
             try:
-                held = json.loads(lines[entries - 1]).get("hmac")
-            except json.JSONDecodeError, AttributeError:
+                held = parse_line(lines[entries - 1]).get("hmac")
+            except ValueError, AttributeError:
                 held = None
         if total < entries:
             all_errors.append(
@@ -209,25 +301,15 @@ def verify_log(
             )
 
     for i, line in enumerate(lines, 1):
-        line = line.strip()
-        if not line:
+        if not line.strip():
+            all_errors.append(f"Line {i}: a blank line, which the hook never writes")
             continue
-
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError as e:
-            all_errors.append(f"Line {i}: Invalid JSON: {e}")
-            prev_hmac = ""  # Chain is broken
-            continue
-
-        errors = verify_entry(entry, prev_hmac, hmac_key)
+        errors, prev_hmac = verify_line(line, prev_hmac, hmac_key)
         if errors:
             for err in errors:
                 all_errors.append(f"Line {i}: {err}")
         else:
             valid += 1
-
-        prev_hmac = entry.get("hmac", "")
 
     return total, valid, all_errors
 

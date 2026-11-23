@@ -3401,13 +3401,11 @@ fn contract_value_problem(output: &Value, required: &[String]) -> Option<String>
             .and_then(Value::as_f64)
             .is_some_and(|x| (0.0..=1.0).contains(&x))
         {
-            let shown: String = c
-                .map(Value::to_string)
-                .unwrap_or_default()
-                .chars()
-                .take(64)
-                .collect();
-            return Some(format!("'confidence' {shown} is not a number from 0 to 1"));
+            // The host's text is not repeated (§6.7).
+            let shown = c.map_or_else(|| "absent".to_string(), crate::grounding::shown_value);
+            return Some(format!(
+                "'confidence' ({shown}) is not a number from 0 to 1"
+            ));
         }
     }
     None

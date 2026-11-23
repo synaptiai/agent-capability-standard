@@ -9,6 +9,7 @@ import {
   isMethod,
   parseRef,
   refsIn,
+  shownValue,
 } from '../src/evidence.js';
 import { holdsCredential } from '../src/redact.js';
 // The grounding vectors (normative for §5.20), read in place; the Rust core
@@ -136,6 +137,58 @@ describe('grounding policies', () => {
     [{ require: ['retrieve'], atested: true }, /^S303 SCHEMA_VALIDATION_FAILED: grounding\[0\]: 'atested'/],
   ])('refuses %j', (policy, message) => {
     expect(() => groundingPolicies(policy as never)).toThrow(message);
+  });
+});
+
+describe('grounding messages repeat nothing an anchor cites (§6.7)', () => {
+  // A presigned URL, a signed URL and a URL with a password: a message names
+  // the anchor by its index and kind, as the core's does.
+  const SECRET = 'wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY99';
+  const refs = [
+    `https://bucket.s3.amazonaws.com/r.csv?X-Amz-Credential=AKIAIOSFODNN7EXAMPLE&X-Amz-Signature=${SECRET}`,
+    `https://acct.blob.core.windows.net/c/r.csv?sv=2022-11-02&sig=${SECRET}`,
+    `https://user:${SECRET}@example.com/r.csv`,
+  ];
+  const policy = { attested: true };
+
+  it.each(refs)('an anchor evidence_seen does not list: %s', (ref) => {
+    for (const kind of ['url', 'x-signed']) {
+      const r = checkGrounding({ evidence_anchors: [{ ref, kind }] }, policy, { seen: [] });
+      expect(r.code).toBe('F505');
+      expect(r.message).not.toContain(SECRET);
+      expect(r.message).not.toContain('AKIA');
+      expect(r.message).not.toContain(kind === 'url' ? 'x-signed' : 'signed');
+      expect(r.message.startsWith('evidence_anchors[0] (')).toBe(true);
+    }
+  });
+
+  it('an acs: anchor, and the inference marking', () => {
+    for (const [anchor, bound] of [
+      [{ ref: `acs:inputs.${SECRET}`, kind: 'url' }, []],
+      [{ ref: `acs:inputs.${SECRET}`, kind: SECRET }, []],
+      [{ ref: `acs:inputs.k ${SECRET}`, kind: 'record' }, []],
+      [{ ref: `acs:inputs.${SECRET}`, kind: 'record' }, ['inputs.other']],
+    ] as const) {
+      const r = checkGrounding({ evidence_anchors: [anchor] }, policy, { bound: [...bound] });
+      expect(r.code).toBe('F505');
+      expect(r.message).not.toContain(SECRET);
+      expect(r.message.startsWith('evidence_anchors[0] ')).toBe(true);
+    }
+    const r = checkGrounding({ evidence_anchors: [], inference_method: SECRET, confidence: SECRET }, policy);
+    expect(r.message).not.toContain(SECRET);
+    expect(r.message).toContain('a confidence (a string)');
+  });
+
+  it('names a value by its type unless it is a number, a boolean or null', () => {
+    expect([SECRET, [SECRET], { k: SECRET }, 1.5, true, null, undefined].map(shownValue)).toEqual([
+      'a string',
+      'an array',
+      'an object',
+      '1.5',
+      'true',
+      'null',
+      'absent',
+    ]);
   });
 });
 

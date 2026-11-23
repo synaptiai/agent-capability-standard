@@ -3237,3 +3237,243 @@ a call that may send anywhere. No version changes.
   and retrieve with 1 MB of data and output, 63 ms. No CLI or nested agent
   was started; nothing was left running; the probe directory's
   `node_modules` link and vite cache were removed.
+
+### Batch 6: four reported defects
+
+Four defects, each reproduced by an independent verifier on bfb18b1: the
+binding's record of one refusal, the core's diagnostics and the runner's
+redaction of a host's anchors, the plugin hook's persist row, and the audit
+log verifier. None was fixed by an earlier batch: git log, round 1 (#43
+covered a tool's `secrets` function as a source of redaction values, not
+its failure; #34 and #36 redacted the runner's own `Error`s, not the core's
+diagnostics or an `Output`; #39 anchored the log's end, not its lines' bytes)
+and round 2 batches 1 to 5 checked, and each reported route reproduced on
+102d310 before its fix. Each fix has tests that fail on the code before it
+(below, per defect, with the controls that pass on both).
+
+#### 22. A grounded call refused because its secrets function failed (R407) was not recorded (low)
+
+`execute` read the tool's `secrets` (`secretsOf`) before `check` and, when
+the function threw, returned the R407 refusal straight away: no trace entry,
+no `recorded_by`, so the audit hook wrote its own entry for the call
+(`capability: null`, `failed`, no code). §5.18.8 records each call a layer
+refuses. Fail-closed held: the tool's code never ran.
+
+- Fix (`examples/standard_agents/src/acs/grounded.ts`): that path appends a
+  `refused` entry with code R407, the call's identity (tool, capability,
+  domain, position, `person_required`; now `identityOf`, shared with
+  `check`), the arguments' digest when they have one, and `recorded_by`,
+  under `serially`, redacted with the secrets the layer holds
+  (`layerSecrets()`: the layer's and those tools registered, plus the
+  default patterns). A record the store refuses leaves the call refused
+  (`.catch`), as `check`'s own R407 path does. `refused`, not `failed`: the
+  call never started, as the R407 for changed layer profiles is recorded.
+- Tests (`test/evidence.test.ts`): `refuses and records a retrieve|mutate
+  call whose secrets function fails (R407, §5.18.8)`: one `refused` R407
+  entry with `recorded_by` (name, version, config digest) and the args
+  digest, the layer's secret in the thrown message redacted, the tool's code
+  not run, and the audit hook linking that entry (`tool_call_id`) instead of
+  writing one. Both fail on 102d310's `grounded.ts` (no entry).
+- Sibling: the Python adapter's secrets are values (`secret_values`), never
+  a function that can fail; `controlTool` and `memoryTools` read no secrets
+  function. None to fix.
+
+#### 23. The core's F505 diagnostic copied an anchor's ref (a presigned or signed URL) into the trace, result, run record and snapshot (medium)
+
+`grounding::check` built its F505 messages with the anchor's `ref`
+(`evidence_anchors[0] cites 'https://...&X-Amz-Signature=...'`), and the
+executor put the message in `step_failed`/`run_failed`, `RunResult.message`,
+the run record and the snapshot; nothing redacts the core's own diagnostic,
+and the runner submitted an `Output` unredacted, so a registered secret
+leaked too. The other `acs:` messages did the same; the TypeScript port
+(`packages/acs-core/src/evidence.ts`, which the binding's grounding check
+uses) said the same.
+
+- Fix, core (`core/src/grounding.rs`): every message names the anchor by
+  its index and kind (`evidence_anchors[0] (kind 'url') cites a ref the
+  host's evidence_seen does not list`; an `acs:` anchor "whose rest is not a
+  reference body", "cites a workflow value that no reference bound ...
+  covers"), as the destination refusal (`exec/machine.rs`) leaves the
+  destination out. A kind is named only when it is one of §6.5's; a vendor
+  kind is "a vendor (x-) kind", anything else "a kind outside §6.5's
+  vocabulary", since a kind is host text too.
+- Siblings, core: the same rule for every value of a host's output a
+  diagnostic repeated. `inference_method` outside the vocabulary is no
+  longer quoted; a confidence that is not a number from 0 to 1 is named by
+  `grounding::shown_value` (a number, a boolean or null as it is, anything
+  else by its type: `(a string)`), in the grounding message, the contract
+  check (`contract_value_problem`, R402: it showed 64 characters of the
+  value) and the minimum-confidence fault (`ConfidenceFault::Invalid`, F504
+  `invalid_confidence`: the same 64 characters). Checked and left: the
+  memory-scope mismatch names the scope the step bound and the one returned
+  (scopes are names, §4.5), and the delegation identity errors name no
+  value of the output beyond its member names.
+- Fix, TypeScript: `checkGrounding` and the binding's `confidenceFailure`
+  say what the core says; `@synaptiai/acs-core` exports `shownValue`.
+- Fix, runner (`grounded_agency/workflows/runner.py`,
+  `_redact_anchors`): every `Output` is submitted with each evidence anchor
+  that holds a secret redacted by the runner's `redactor`
+  (`redact_anchor_data`, registered secrets included: the ref, excerpt and
+  metadata replaced, the digest dropped with `digest_omitted: secret`), so
+  the run's state, outputs, trace and snapshots never hold it, an accepted
+  output's included. `evidence_seen` is rewritten to match: each anchor's
+  redacted ref is listed when its own ref was; when two anchors are one
+  after redaction (two signed URLs differing in the signature) it is listed
+  only when both were, so an anchor the host did not list never passes as
+  seen (fail closed; with `evidence_seen` given, an unlisted anchor fails
+  F505 either way, so no outcome changes). A `seen` that is not a list of
+  strings is left for the core to refuse. Not taken: redacting the core's
+  message after the fact (the trace and snapshot are the core's, and the
+  message would still be built from the raw ref).
+- Tests: Rust `grounding::tests::messages_never_repeat_what_an_anchor_cites`
+  (three credential-bearing refs under three kinds, four `acs:` forms, a
+  string confidence and method), `messages_say_why` changed to the new
+  wording (it asserted the quoted method and confidence), and
+  `profile::tests::confidence_checks` changed likewise (it asserted the
+  64-character cut; it now asserts each type's name and that the message
+  holds no key): the three fail on 102d310's `grounding.rs` and
+  `profile.rs`. TypeScript `grounding messages repeat nothing an anchor
+  cites (§6.7)` (5 tests; all fail on 102d310's `evidence.ts`, with a stub
+  for the new export), and the binding's `applies the minimum confidence as
+  the core does` (the message names the type). Python
+  (`tests/test_runner_evidence.py`): `test_no_secret_from_an_anchor_in_a_step_refused_with_f505`
+  (the reported probe: S3 presigned, Azure SAS and userinfo refs, with the
+  default redactor and with the secret registered: trace, message, outputs,
+  action records, run record and snapshot hold neither the signature nor
+  the key id; 102d310's core leaks with the default redactor),
+  `test_an_accepted_anchor_is_kept_redacted_and_still_attested` (the host
+  lists the anchor: the attested policy passes and the outputs hold the
+  redacted anchor without its digest; fails on 102d310's runner), and the
+  control `test_anchors_one_after_redaction_are_attested_only_when_both_were`.
+- Not changed: the default patterns do not recognise a signed URL's
+  signature (`sig=`, `X-Amz-Signature=`, `X-Goog-Signature=`); a
+  `X-Amz-Credential` key id, a URL's userinfo password and `api_key=` are.
+  How a host recognises secrets is its choice (§6.7); the F505 path no
+  longer depends on it, and the guide says how to add a pattern. Widening
+  the defaults would change the Python, TypeScript and shell redactors and
+  the shared vectors together, a change of its own.
+
+#### 24. The plugin's pre-tool-use hook let TodoWrite, TaskCreate and TaskUpdate (persist) store a credential (medium)
+
+The three are on `UNGATED_TOOLS` (persist needs neither a checkpoint nor
+approval), and the hook exited 0 for them before any check: §5.18.10's
+persist row (no secret the layer recognises, F504, decided by code) was
+never applied, although the plugin holds the scan and the SDK adapter
+refuses the same calls.
+
+- Fix (`hooks/pretooluse_require_checkpoint.sh`): `PERSIST_TOOLS=(TodoWrite
+  TaskCreate TaskUpdate)`; before the ungated exit, a call of one is blocked
+  with `F504 CONSTRAINT_VIOLATED: <tool> (persist): ...`, in every
+  permission mode, when its input holds a secret as the adapter decides it
+  (`Redactor.holds_credential`): the shared scan (`secret_scan.sh`, copied
+  between its BEGIN and END lines) over every string of `tool_input` and
+  over its JSON text, and the SDK redactor's rule for data
+  (`SECRET_MEMBER_JQ`, a jq port of `_secret_member_value`: a value of 4 or
+  more characters other than `[REDACTED]`, or a number, that is not a
+  placeholder, under a member whose name ends in a credential's or names
+  `Authorization`/`Cookie`, as the value of such a name/value pair, or the
+  second of such a `[name, value]` tuple). Input jq cannot read is R407.
+  The scan runs with pipefail off: a `grep -q` that stops at a match ends
+  the `printf` feeding it, which pipefail would read as no match. jq folds
+  case by Unicode where the SDK folds ASCII only, so the hook finds a
+  credential name in rare spellings the SDK does not, never the reverse.
+- Tests (`tests/test_pretooluse_hooks.py`, `TestShellHookPersistSecrets`):
+  the reported payload for each tool in `default` and `bypassPermissions`
+  (F504, nothing written); the hook's verdict equal to the adapter's on 20
+  inputs (text and data forms, placeholders, prose, the marker) and on the
+  55 credential vectors that register no value (each also equal to the
+  vector's `holds`); 1 MB of todos before an AWS key refused in under 5 s
+  (0.17 s measured; 0.37 s for 1 MB with no secret, 0.07 s for 100 KB).
+  `test_the_pre_tool_use_hook_copies_the_secret_scan`
+  (`tests/test_skill_hooks.py`) keeps the copy equal to the file, and
+  `test_persist_tools_are_the_ungated_tools_the_mapper_says_store`
+  (`tests/test_hook_lists_match_mapper.py`) keeps the list the mapper's.
+  On 102d310's hook, 21 of the 30 fail; the 9 that pass are the inputs both
+  layers allow (controls).
+- Siblings checked: no other tool on `UNGATED_TOOLS` maps to `persist` or
+  `audit` (the list test says so); the persist skill's hook covers file
+  writes, the audit skill's its records file.
+
+#### 25. The audit log verifier checked a line's parsed content, not its bytes (low)
+
+`verify_entry` took the HMAC over `json.dumps(json.loads(line) minus
+hmac)`. JSON that names a member twice parses to the last value at the
+first name's place, so without the key a line could be edited
+(`"status":"executed","status":"failed","tool":"Read","tool":"Bash"`) to
+read as an executed Read to grep or a reader that keeps the first, and
+still verify; a forged earlier `hmac` member, a forged `details` before the
+real one, blanks and `\u` escapes passed too.
+
+- Fix (`tools/verify_audit_log.py`): `verify_log` checks each line with the
+  new `verify_line`, as the bytes the hook signed: parsed with a
+  duplicate-refusing `object_pairs_hook` (at any depth); the line must end
+  with `,"hmac":"<64 hex>"}` (jq -c appends it last, in every generation:
+  git history checked), must equal the compact re-serialisation of what it
+  parses to (so no blank, escape or number form differs), and the HMAC is
+  taken over the line with that suffix replaced by `}`. A line refused for
+  a duplicate still hands the chain the hmac it ends with, so only that
+  line is reported. Lines are no longer stripped: blanks around a line
+  fail, and a blank line is reported (the hook writes none) and counted, as
+  the hook's head counts lines. `verify_entry` still checks a parsed entry
+  (the audit skill's tests use it) and says it cannot see bytes.
+- Tests (`tests/test_verify_audit_log.py`, `TestTheBytesSigned`, on lines
+  the hook writes with `AUDIT_HMAC_KEY` set): the reported edit, a forged
+  leading `hmac`, forged `details` before the real ones, a member named
+  twice inside `details`, a blank and two `\u` escapes inserted, the `hmac`
+  moved first, a blank before the first line, and a blank line between two
+  entries: all 10 fail on 102d310's verifier. The 182 existing verifier,
+  hook and pipeline tests pass unchanged (every line the hook writes
+  verifies).
+- Sibling: the log hook reads its last line's `hmac` with jq (last wins);
+  with hmac last and duplicates refused by the verifier, that is the value
+  the verifier continues the chain from, so the two agree. The audit
+  skill's chain is verified by the same `verify_log` (`--no-head`).
+
+#### Documentation
+
+SECURITY.md (§1.5: the runner's anchor redaction and the core's
+diagnostics; the plugin hook's persist row; the log's byte-level check),
+hooks/README.md (the persist row, the shared scan's third copy, the
+verifier), the running-workflows guide (the runner's `redactor`, the F505
+message, the signature patterns), the Standard Agents guide (the R407
+record), the acs-core README (`shownValue`), the hook's header, and
+CHANGELOG [Unreleased] Upgrading (the runner, the core's diagnostics, the
+plugin hook and verifier, the binding's record). The Standard's text was
+not changed: §6.7 already forbids a secret in a diagnostic, a trace and a
+record, §5.18.8 already records each refusal, and §5.18.10 already requires
+the persist row of every layer. No version changes.
+
+#### Checks after batch 6
+
+- Python: `pytest tests/` (6017 passed, 18 skipped; 5967 before the
+  batch), and again the five test files changed after the last doc edits
+  (1401 passed); ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; `sync_skill_schemas.py
+  --check` and the generators' `--check` (no fixture or vector changed: the
+  vectors do not compare messages); `scripts/run_conformance.py`.
+- Rust: `cargo fmt --check`, `cargo clippy --all-targets` with no
+  features, `python` (against the worktree's interpreter) and `wasm`, all
+  `-D warnings`; `cargo test` (all binaries pass; 258 unit tests) and
+  `cargo test --features wasm --test wasm` (13). The extension was rebuilt
+  (`uv pip install -e`) and the WebAssembly core rebuilt into
+  `packages/acs-core/dist/` once, after the Rust change; no other copy was
+  built.
+- TypeScript: `packages/acs-core` build, check and test (2007; 2002 plus
+  the 5 new); the binding's check and test (235 passed, 2 skipped; 233 plus
+  the 2 new).
+- Site: `npm run check`, `npm test` (1173).
+- Old code: each fix's tests run against 102d310's file (above, per
+  defect): the binding's 2, the Rust 3, the TypeScript 5, the runner's
+  accepted-anchor 3 and F505 cases, the hook's 21 of 30 and the verifier's
+  10 fail; the rest are controls.
+- Probes, each under `timeout 120` and a 4 GB address-space limit, inputs
+  of at most 1 MB: the reporter's F505 probes (`p2/f505.py`,
+  `p2/f505_registered.py`) pointed at this worktree (F505 still, and the
+  trace, message, run record, snapshot and store hold neither the key id
+  nor the signature, registered or not; the attested run passes); the
+  hook repro for the three tools (exit 2, F504) and the clean todo (exit
+  0); a 16-input comparison of the hook and the adapter (all equal); the
+  hook's timing at 100 KB and 1 MB (0.04 to 0.37 s). No CLI or nested
+  agent was started; nothing was left running; the probe copies and the
+  scratch project were removed.

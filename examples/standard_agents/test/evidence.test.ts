@@ -19,7 +19,9 @@ import {
   findEvidence,
   getEvidence,
 } from '../src/acs/evidence.js';
+import { recordToolCall } from '../src/acs/audit.js';
 import { groundedTool } from '../src/acs/grounded.js';
+import { configureLayer, resetLayer } from '../src/acs/layer.js';
 import { readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH, fileAnchor, readSettings } from '../src/example/settings.js';
 import evidenceSchema from '../../../schemas/interop/evidence.schema.json' with { type: 'json' };
@@ -199,6 +201,51 @@ describe('secrets (§6.7)', () => {
     expect((await tool.execute(t.state, {})).status).toBe('success');
     expect(JSON.stringify(await readTrace(t.state))).not.toContain('s3cr3t-value');
     expect(JSON.stringify(t.emitted)).not.toContain('s3cr3t-value');
+  });
+
+  it.each([
+    ['retrieve', 'fetch'],
+    ['mutate', 'write_config'],
+  ] as const)('refuses and records a %s call whose secrets function fails (R407, §5.18.8)', async (capability, name) => {
+    // The layer's own secret in the thrown message is redacted in the record.
+    configureLayer({ secrets: ['vault-token-7f3a9c'] });
+    try {
+      let ran = false;
+      const tool = groundedTool({
+        name,
+        capability,
+        description: 'x',
+        args,
+        secrets: async () => {
+          throw new Error('vault unreachable with vault-token-7f3a9c');
+        },
+        execute: async () => {
+          ran = true;
+          // The output of either capability (the parameter is a union).
+          return (capability === 'retrieve' ? { data: 1, evidence_anchors: [], confidence: 1 } : { success: true, evidence_anchors: [] }) as never;
+        },
+      });
+      const t = memoryThread();
+      const result = await tool.execute(t.state, { key: 'retries' });
+      expect(result).toMatchObject({ status: 'error', error_code: 'R407' });
+      expect(result.error).toMatch(/^R407 SAFETY_CHECK_FAILED: The host's secrets could not be read/);
+      expect(ran).toBe(false);
+      const trace = await readTrace(t.state);
+      expect(trace).toHaveLength(1);
+      expect(trace[0]).toMatchObject({ action: name, capability, status: 'refused', code: 'R407' });
+      expect(trace[0]?.args_digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(trace[0]?.recorded_by).toMatchObject({ name: '@acs/standard-agents-binding', version: '1.2.0' });
+      expect(trace[0]?.recorded_by?.config_sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(trace[0]?.error).toMatch(/secrets could not be read/);
+      expect(JSON.stringify(trace)).not.toContain('vault-token-7f3a9c');
+      // The audit hook links that entry: it writes no entry of its own.
+      const call = { id: 'call_1', type: 'function' as const, function: { name, arguments: '{}' } };
+      const linked = await recordToolCall(t.state, call, { status: 'error', error: result.error ?? '' }, 2);
+      expect(linked).toMatchObject({ seq: trace[0]?.seq, status: 'refused', code: 'R407', tool_call_id: 'call_1' });
+      expect(await readTrace(t.state)).toHaveLength(1);
+    } finally {
+      resetLayer();
+    }
   });
 
   it('keeps no digest of what an anchor that held a secret cites', async () => {

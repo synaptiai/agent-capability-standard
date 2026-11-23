@@ -168,8 +168,9 @@ pub struct Raise {
 /// Why an output's `confidence` fails an applied minimum (§5.21.3).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfidenceFault {
-    /// Not a number from 0 to 1: the member's JSON text, cut to 64
-    /// characters (F504, `invalid_confidence`).
+    /// Not a number from 0 to 1: the member as a diagnostic names it (a
+    /// number, a boolean or null as it is, anything else by its type, since
+    /// the host's text may hold a secret, §6.7) (F504, `invalid_confidence`).
     Invalid(String),
     /// A number below the minimum (F504, `below_minimum_confidence`).
     Below(f64),
@@ -192,8 +193,8 @@ impl ConfidenceFault {
                     "confidence {c} is below the minimum confidence {min} of the applied profiles"
                 )
             }
-            ConfidenceFault::Invalid(text) => format!(
-                "the output's confidence {text} is not a number from 0 to 1, and an applied profile sets a minimum confidence"
+            ConfidenceFault::Invalid(shown) => format!(
+                "the output's confidence ({shown}) is not a number from 0 to 1, and an applied profile sets a minimum confidence"
             ),
         }
     }
@@ -931,9 +932,7 @@ impl Profile {
 pub fn check_confidence(output: &Value, min: f64) -> Option<ConfidenceFault> {
     let c = output.as_object()?.get("confidence")?;
     match unit(c) {
-        None => Some(ConfidenceFault::Invalid(
-            c.to_string().chars().take(64).collect(),
-        )),
+        None => Some(ConfidenceFault::Invalid(crate::grounding::shown_value(c))),
         Some(x) if x < min => Some(ConfidenceFault::Below(x)),
         Some(_) => None,
     }
@@ -1133,9 +1132,26 @@ mod tests {
         assert_eq!(fault(json!(1)), None);
         assert_eq!(check_confidence(&json!({"x": 1}), 0.9), None);
         assert_eq!(check_confidence(&json!([1]), 0.9), None);
-        let Some(ConfidenceFault::Invalid(t)) = fault(json!("x".repeat(100))) else {
-            panic!("a long string is invalid")
-        };
-        assert_eq!(t.chars().count(), 64);
+        // The host's text is never repeated (§6.7): a string, an array or an
+        // object is named by its type.
+        for (bad, shown) in [
+            (json!("AKIAIOSFODNN7EXAMPLE"), "a string"),
+            (json!(["sk-live"]), "an array"),
+            (json!({"token": "x"}), "an object"),
+            (json!(1.5), "1.5"),
+            (json!(true), "true"),
+            (Value::Null, "null"),
+        ] {
+            assert_eq!(
+                fault(bad),
+                Some(ConfidenceFault::Invalid(shown.to_string()))
+            );
+        }
+        let message = fault(json!("AKIAIOSFODNN7EXAMPLE")).unwrap().message(0.9);
+        assert!(!message.contains("AKIA"), "{message}");
+        assert!(
+            message.contains("(a string) is not a number from 0 to 1"),
+            "{message}"
+        );
     }
 }

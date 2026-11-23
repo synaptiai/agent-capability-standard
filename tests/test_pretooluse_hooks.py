@@ -1070,6 +1070,159 @@ class TestShellHookRoutesEveryTool:
         assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
 
 
+# What a persist tool's input may hold (STANDARD 1.2.0 §5.18.10, §6.7): the
+# SDK adapter's verdict on each is the hook's. Text forms, and data forms
+# (a value under a member named for a credential, a name/value pair, a
+# tuple) that the SDK redactor's data rule finds.
+PERSIST_INPUTS = [
+    {"todos": [{"content": "buy milk", "status": "pending"}]},
+    {"todos": [{"content": "deploy key AKIAIOSFODNN7EXAMPLE", "status": "pending"}]},
+    {
+        "todos": [
+            {
+                "content": "deploy with AWS_SECRET_ACCESS_KEY="
+                "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "status": "pending",
+            }
+        ]
+    },
+    {"subject": "token: rotate monthly", "description": "and the password policy"},
+    {"subject": "ghp_" + "a" * 36},
+    {"subject": "connect postgres://app:Hunter2Secret@db/prod"},
+    {"subject": "connect postgres://app:<password>@db/prod"},
+    {"subject": "x", "metadata": {"password": "hunter2"}},
+    {"subject": "x", "metadata": {"password": "<your password>"}},
+    {"subject": "x", "metadata": {"token": "rotate monthly"}},
+    {"subject": "x", "metadata": {"api_key": 12345678901234}},
+    {"subject": "x", "metadata": {"secret": True}},
+    {"subject": "x", "metadata": {"client_secret": "abc"}},
+    {"subject": "x", "metadata": {"apiKey": "[REDACTED]"}},
+    {
+        "subject": "x",
+        "metadata": {
+            "headers": [{"name": "Authorization", "value": "Basic Zm9vOmJhcg"}]
+        },
+    },
+    {"subject": "x", "metadata": {"headers": [["Cookie", "sid=abc123"]]}},
+    {"subject": "x", "metadata": {"headers": [["Accept", "text/html"]]}},
+    {"subject": "x", "metadata": {"db": {"password": {"value": "s3cr3t-v4lue"}}}},
+    {"taskId": "1", "status": "completed"},
+    {},
+]
+
+
+@needs_bash_and_jq
+class TestShellHookPersistSecrets:
+    """§5.18.10: the data a persist call stores holds no secret the layer
+    recognises (F504), decided by code. TodoWrite, TaskCreate and TaskUpdate
+    are persist (the SDK mapper's _TOOL_MAPPINGS) and need neither a
+    checkpoint nor approval, so the hook checked nothing of theirs: the
+    adapter refused a credential they would store, the plugin let it pass."""
+
+    @pytest.mark.parametrize("mode", ["default", "bypassPermissions"])
+    @pytest.mark.parametrize("tool", ["TodoWrite", "TaskCreate", "TaskUpdate"])
+    def test_a_credential_a_persist_tool_would_store_is_refused(
+        self, tmp_path: Path, tool: str, mode: str
+    ):
+        """The reported route: an AWS key in a todo's content and in a
+        task's subject."""
+        tool_call = {
+            "tool_name": tool,
+            "tool_input": {
+                "todos": [
+                    {"content": "deploy with AKIAIOSFODNN7EXAMPLE", "status": "pending"}
+                ],
+                "subject": "key AKIAIOSFODNN7EXAMPLE",
+            },
+            "permission_mode": mode,
+            "tool_use_id": "tu1",
+        }
+        result = _gated_hook(tool_call, tmp_path)
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert result.stderr.startswith(
+            f"F504 CONSTRAINT_VIOLATED: {tool} (persist): the data it would store "
+            "holds what looks like a credential"
+        )
+        # Nothing was used or written.
+        assert not (tmp_path / ".claude").exists()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "tool_input", PERSIST_INPUTS, ids=lambda v: json.dumps(v)[:60]
+    )
+    async def test_the_hook_and_the_adapter_agree(
+        self, tmp_path: Path, strict_adapter: GroundedAgentAdapter, tool_input: dict
+    ):
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        for tool in ("TodoWrite", "TaskCreate"):
+            tool_call = {"tool_name": tool, "tool_input": tool_input}
+            out = await hook(
+                {**tool_call, "permission_mode": "bypassPermissions"}, "t1", None
+            )
+            sdk = _decision(out) == "deny"
+            if sdk:
+                assert _reason(out).startswith("F504"), _reason(out)
+            result = _gated_hook(_bypass(tool_call), tmp_path)
+            assert result.returncode in (0, 2), result.stderr
+            assert (result.returncode == 2) == sdk, (tool, result.stderr, _reason(out))
+            if result.returncode == 2:
+                assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: "), (
+                    result.stderr
+                )
+
+    @pytest.mark.asyncio
+    async def test_they_agree_on_the_credential_vectors(
+        self, tmp_path: Path, strict_adapter: GroundedAgentAdapter
+    ):
+        """The refusal rule's vectors (tests/conformance/secrets/
+        credentials.json) that register no value, text and data alike, as a
+        todo's content: both refuse what the vector says holds one."""
+        path = (
+            SHELL_HOOK.parents[1]
+            / "tests"
+            / "conformance"
+            / "secrets"
+            / "credentials.json"
+        )
+        vectors = [
+            v
+            for v in json.loads(path.read_text(encoding="utf-8"))["vectors"]
+            if not v["secret_values"]
+        ]
+        assert len(vectors) > 40
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        for v in vectors:
+            tool_call = {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": [{"content": v["input"], "status": "pending"}]},
+            }
+            out = await hook(
+                {**tool_call, "permission_mode": "bypassPermissions"}, "t1", None
+            )
+            result = _gated_hook(_bypass(tool_call), tmp_path)
+            refused = result.returncode == 2
+            assert refused == (_decision(out) == "deny"), (v["name"], result.stderr)
+            assert refused == v["expect"]["holds"], (v["name"], result.stderr)
+
+    def test_a_large_input_is_decided_well_within_the_time_limit(self, tmp_path: Path):
+        """The scan reads the input in time linear in its length: 1 MB of
+        todos before an AWS key is refused in well under the hook's 30
+        seconds (hooks.json)."""
+        todos = [
+            {"content": "a b token: " * 90_000, "status": "pending"},
+            {"content": "deploy key AKIAIOSFODNN7EXAMPLE", "status": "pending"},
+        ]
+        started = time.perf_counter()
+        result = _gated_hook(
+            _bypass({"tool_name": "TodoWrite", "tool_input": {"todos": todos}}),
+            tmp_path,
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 2 and result.stderr.startswith("F504")
+        assert elapsed < 5
+
+
 def _ship_records(upstream: Path, victim: Path) -> str:
     """An upstream repository whose history holds a merge commit M that
     adds files its main branch never shows, and whose main branch tracks

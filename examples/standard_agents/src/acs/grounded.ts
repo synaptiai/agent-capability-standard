@@ -1241,6 +1241,21 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       config_sha256,
     })));
 
+  /** What every entry of this tool's call names: the tool, its capability and where the call was made. */
+  const identityOf = (state: ThreadState) => {
+    const flow = flowOf(state);
+    const step = stepOf(state);
+    return {
+      action: name,
+      capability,
+      ...(domain !== undefined ? { domain } : {}),
+      ...(flow !== null ? { flow_id: flow } : {}),
+      ...(step !== null ? { step } : {}),
+      // An applied profile requires a person for the call (§5.21.3).
+      ...(person ? { person_required: true as const } : {}),
+    };
+  };
+
   /**
    * Everything before the tool's own code runs: the checks, then using up
    * what the call needs, then the `started` entry. It runs under `serially`,
@@ -1249,16 +1264,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
    */
   const check = async (state: ThreadState, argsJson: Json, secrets: readonly string[]): Promise<Claim> => {
     const flow = flowOf(state);
-    const step = stepOf(state);
-    const position = { ...(flow !== null ? { flow_id: flow } : {}), ...(step !== null ? { step } : {}) };
-    const identity = {
-      action: name,
-      capability,
-      ...(domain !== undefined ? { domain } : {}),
-      ...position,
-      // An applied profile requires a person for the call (§5.21.3).
-      ...(person ? { person_required: true as const } : {}),
-    };
+    const identity = identityOf(state);
     // What is known of the call so far, for the record if a write fails.
     const used: Pick<TraceEntry, 'args_digest' | 'approval' | 'checkpoint_id' | 'covered_by'> = {};
     let layerRecord: RecordedBy | undefined;
@@ -1601,8 +1607,32 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
     try {
       secrets = await secretsOf(state);
     } catch (cause) {
+      // The layer cannot tell what the call's data may hold, so it refuses
+      // the call (R407, §5.18.8) and records the refusal as it records any
+      // other: the tool, its capability, the layer and the diagnostic,
+      // redacted with the secrets it can still read (the default patterns,
+      // the layer's and those tools registered). A record it cannot write
+      // leaves the call refused.
       const message = cause instanceof Error ? cause.message : String(cause);
-      return refusal('R407', name, capability, `The host's secrets could not be read: ${message}.`, 'The call did not run.');
+      const result = refusal('R407', name, capability, `The host's secrets could not be read: ${message}.`, 'The call did not run.');
+      await serially(state.threadId, async () => {
+        const recorded_by = await recordedBy().catch(() => undefined);
+        const args_digest = await digestOf(args as Json).catch(() => undefined);
+        await appendTrace(
+          state,
+          {
+            ...identityOf(state),
+            ...(args_digest !== undefined ? { args_digest } : {}),
+            ...(recorded_by !== undefined ? { recorded_by } : {}),
+            at: now(),
+            status: 'refused',
+            code: 'R407',
+            error: result.error ?? 'R407',
+          },
+          layerSecrets(),
+        );
+      }).catch(() => undefined);
+      return result;
     }
     const claim = await serially(state.threadId, () => check(state, args as Json, secrets));
     if (claim.outcome) return claim.outcome;
