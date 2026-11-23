@@ -323,7 +323,31 @@ here and marked so.
     `printf` with an option (`printf -v NAME`, which sets a shell variable
     the later commands of the line run with), or with a word bash expands,
     is the worst case, where a line of read-only commands could run code
-    as `observe`.
+    as `observe`. Security round 3, batch 2: a class narrower than the
+    worst case now comes only from the command's program (its first word as
+    the shell passes it), never from text in an argument: `curl URL -A 'git
+    reset'`, `bash -c '...' x 'git clean'` and `node x.js 'docker rm'` were
+    `mutate` alone, so a destination policy let them through; a read-only
+    command whose argument holds such text (`grep 'git reset' f`) now
+    observes. `sed -i` (GNU sed's `e` command runs one) and `docker
+    rm|rmi|prune` (the daemon `DOCKER_HOST` names receives the request) get
+    the worst case. A local git change (`git reset`, `git checkout --`,
+    `git clean`, `git branch -d`, `git stash ...`) gets it in a partial clone
+    or a repository with submodules (`git reset` fetched the objects it
+    lacked), and where the repository's configuration names a program or
+    its hooks hold `post-index-change`, `reference-transaction` or
+    `post-checkout` (`ToolCapabilityMapper.git_change_may_run` is the new
+    lookup); a recorded restore where the configuration names a program
+    gets it too (it was `mutate`). Every worst case now holds `mutate`: an
+    interpreter is `execute`, `mutate` and `send` (it was `execute` and
+    `send`, found anywhere in the command), and `curl -X POST`, `ssh`,
+    `scp` and `rsync` are `send` and `mutate` (they were `send`), so a
+    profile's rule for `mutate` applies to them. A line with a backslash
+    right after a character outside ASCII gets the worst case (in a GBK,
+    GB18030, BIG5 or Shift JIS locale bash reads that backslash as the
+    character's second byte, so `ls ぁ\;touch f` is two commands), and so
+    does `pip` with a word the shell expands (`pip show *` became `pip
+    show --log=FILE`).
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
@@ -1046,7 +1070,16 @@ here and marked so.
   escapes decoded. So a value whose key or other half is already in the
   file (`password: "CHANGEME"` edited to a password, a token built by two
   edits or calls) or a JSON-escaped token is refused (F504). An existing
-  target that is not a regular file, or is over 8 MB, is refused.
+  target that is not a regular file, or is over 8 MB, is refused. Security
+  round 3: the hook reads the file and applies the edits as Claude Code's
+  Edit does: a file opening with FF FE as UTF-16LE (with `iconv`; without
+  it, refused, R407), CRLF line ends as LF, and an empty `new_string`
+  removing `old_string` with the line break after it. An Edit or MultiEdit
+  whose `old_string` an existing file does not hold as written, nor with
+  curly quotes read as straight ones, is refused (R407): Claude Code may
+  still find it (as a `\uXXXX` escape in the file, or the character of
+  one in `old_string`), and the hook cannot tell what the file will hold;
+  give `old_string` as the file spells it.
 - Skills: the `send`, `rollback`, `checkpoint`, `persist` and `transform`
   skills' prompt hooks no longer judge approval, checkpoints, rate limits or
   expiry (Changed), and the persist, rollback and send skills' command hooks

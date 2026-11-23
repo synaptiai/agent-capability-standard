@@ -113,13 +113,21 @@ hooks:
             # What the call stores (§5.18.10, §6.7): the text it carries (an Edit's
             # new_string, a Write's content, each new_string of a MultiEdit's edits,
             # a NotebookEdit's new_source), and the lines of the file as it will be
-            # after the call that the file does not hold now (the edits applied in
-            # order, replace_all honoured, curly quotes read as straight ones when an
-            # old_string is found only so), so a credential whose key, or whose other
-            # half, is already in the file, or that two edits or calls build, is read
-            # whole; and each again with the escapes a reader resolves (\uXXXX,
-            # \UXXXXXXXX, \xXX, \/ and \") decoded. The file is read only when it is
-            # a regular file of at most 8 MB; any other existing target is refused.
+            # after the call that the file does not hold now, so a credential whose
+            # key, or whose other half, is already in the file, or that two edits or
+            # calls build, is read whole; and each again with the escapes a reader
+            # resolves (\uXXXX, \UXXXXXXXX, \xXX, \/ and \") decoded. The file is
+            # read only when it is a regular file of at most 8 MB; any other existing
+            # target is refused. It is read as Claude Code's Edit reads it: a file
+            # opening with the bytes FF FE as UTF-16LE (converted with iconv; without
+            # it, refused), and CRLF line ends as LF. The edits are applied in order
+            # as Claude Code applies them: old_string found as written, else with
+            # curly quotes read as straight ones; replace_all honoured; and an empty
+            # new_string removes old_string with the line break after it when the
+            # file holds that. An old_string the file holds in neither form (Claude
+            # Code may still find it, as a \uXXXX escape of a character or the
+            # character of one) is refused: this check cannot tell what the file will
+            # hold.
             BEFORE=/dev/null
             if [ -n "$REAL" ] && { [ -e "$REAL" ] || [ -L "$REAL" ]; }; then
               [ -f "$REAL" ] || { echo "F504 CONSTRAINT_VIOLATED: Cannot persist to something that is not a regular file" >&2; exit 2; }
@@ -127,8 +135,21 @@ hooks:
               case "$SIZE" in ''|*[!0-9]*) echo "R407 SAFETY_CHECK_FAILED: cannot read the file the call writes" >&2; exit 2 ;; esac
               [ "$SIZE" -le 8388608 ] || { echo "F504 CONSTRAINT_VIOLATED: the file is over 8 MB, more than this check reads; persist to a smaller file" >&2; exit 2; }
               BEFORE="$REAL"
+              BOM="$(od -An -tx1 -N2 "$REAL" 2>/dev/null | tr -d ' \n')" || BOM=""
+              if [ "$BOM" = "fffe" ]; then
+                UTF8="$(mktemp 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the file the call writes" >&2; exit 2; }
+                trap 'rm -f "$UTF8"' EXIT
+                iconv -f UTF-16LE -t UTF-8 < "$REAL" > "$UTF8" 2>/dev/null || { echo "R407 SAFETY_CHECK_FAILED: cannot read the file the call writes as UTF-16 text (iconv is required)" >&2; exit 2; }
+                BEFORE="$UTF8"
+              fi
             fi
-            CONTENT="$(printf '%s' "$INPUT" | jq -r --rawfile before "$BEFORE" '
+            EXISTS=false
+            [ "$BEFORE" = /dev/null ] || EXISTS=true
+            STATUS=0
+            CONTENT="$(printf '%s' "$INPUT" | jq -r --rawfile before "$BEFORE" --argjson exists "$EXISTS" '
+              # join, in time linear in the text (the builtin join copies the text
+              # it has built at each piece: 3.4 s for a 1 MB file of CRLF lines)
+              def joined($s): (.[0:1] + (.[1:] | map($s + .))) | add // "";
               def hexval: reduce explode[] as $c (0; . * 16 + (if $c >= 97 then $c - 87 elif $c >= 65 then $c - 55 else $c - 48 end));
               def ishex: explode | all(. >= 48 and . <= 57 or . >= 65 and . <= 70 or . >= 97 and . <= 102);
               def unescape($mark; $n):
@@ -137,39 +158,49 @@ hooks:
                   | $p[0] + ([$p[1:][] | .[:$n] as $h
                       | (if ($h | length) == $n and ($h | ishex) then $h | hexval else -1 end) as $v
                       | if $v >= 32 and ($v < 55296 or ($v > 57343 and $v < 1114112))
-                        then ([$v] | implode) + .[$n:] else $mark + . end] | join(""))
+                        then ([$v] | implode) + .[$n:] else $mark + . end] | joined(""))
                 end;
               def decoded: unescape("\\u"; 4) | unescape("\\U"; 8) | unescape("\\x"; 2)
-                | split("\\/") | join("/") | split("\\\"") | join("\"");
-              def straight: split("\u2018") | join("\u0027") | split("\u2019") | join("\u0027")
-                | split("\u201c") | join("\"") | split("\u201d") | join("\"");
+                | split("\\/") | joined("/") | split("\\\"") | joined("\"");
+              def straight: split("\u2018") | joined("\u0027") | split("\u2019") | joined("\u0027")
+                | split("\u201c") | joined("\"") | split("\u201d") | joined("\"");
               def replaced($o; $n; $all):
                 split($o) as $p
                 | if ($p | length) < 2 then null
-                  elif $all then $p | join($n)
-                  else $p[0] + $n + ($p[1:] | join($o)) end;
+                  elif $all then $p | joined($n)
+                  else $p[0] + $n + ($p[1:] | joined($o)) end;
+              def edited($o; $n; $all):
+                (if $n == "" and ($o | endswith("\n") | not) and index($o + "\n") != null
+                 then $o + "\n" else $o end) as $l
+                | replaced($l; $n; $all);
               def apply($e):
-                ($e.old_string) as $o | ($e.new_string) as $n
+                ($e.old_string) as $o | ($e.new_string) as $n | ($e.replace_all == true) as $all
                 | if ($o | type) != "string" or ($n | type) != "string" then .
                   elif $o == "" then $n + .
-                  else replaced($o; $n; $e.replace_all == true)
-                    // (straight | replaced($o | straight; $n; $e.replace_all == true))
-                    // . end;
+                  else edited($o; $n; $all)
+                    // (straight | edited($o | straight; $n; $all))
+                    // (if $exists then "" | halt_error(3) else . end) end;
               def counts: reduce (split("\n")[]) as $l ({}; .[$l] += 1);
               def added($b; $a):
                 ($b | counts) as $had
-                | $a | counts | to_entries | map(select(.value > ($had[.key] // 0)) | .key) | join("\n");
-              .tool_input as $t
+                | $a | counts | to_entries | map(select(.value > ($had[.key] // 0)) | .key) | joined("\n");
+              ($before | split("\r\n") | joined("\n")) as $before
+              | .tool_input as $t
               | ([$t.new_string, $t.content, $t.new_source,
                   (($t.edits | if type == "array" then .[] else empty end) | objects | .new_string)]
-                 | map(select(type == "string")) | join("\n")) as $carried
+                 | map(select(type == "string")) | joined("\n")) as $carried
               | (if ($t.content | type) == "string" then $t.content
                  elif ($t.edits | type) == "array" then reduce ($t.edits[] | objects) as $e ($before; apply($e))
                  elif ($t.old_string | type) == "string" then $before | apply($t)
                  else $before end) as $after
               | ($carried + "\n" + added($before | straight; $after | straight)) as $text
-              | ($text + "\n" + ($text | decoded)) | split("\u0000") | join(" ")
-            ' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call or the file it writes (jq is required)" >&2; exit 2; }
+              | ($text + "\n" + ($text | decoded)) | split("\u0000") | joined(" ")
+            ' 2>/dev/null)" || STATUS=$?
+            case "$STATUS" in
+              0) ;;
+              3) echo "R407 SAFETY_CHECK_FAILED: the file does not hold old_string as written (nor with curly quotes read as straight ones), so this check cannot tell what the file will hold; give old_string as the file spells it" >&2; exit 2 ;;
+              *) echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call or the file it writes (jq is required)" >&2; exit 2 ;;
+            esac
             # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
             # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
             SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'

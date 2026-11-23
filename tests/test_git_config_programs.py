@@ -304,12 +304,14 @@ class TestSdkMapper:
         mapping = ToolCapabilityMapper().map_tool(
             "Bash", {"command": "git stash create"}, str(project)
         )
-        assert mapping.capabilities == ("checkpoint", "execute", "send")
+        assert mapping.capabilities == ("checkpoint", "execute", "mutate", "send")
         assert mapping.requires_checkpoint and mapping.requires_approval
 
-    def test_a_recorded_restore_is_a_gated_mutation(
+    def test_a_recorded_restore_takes_the_worst_case(
         self, home: Path, tmp_path: Path
     ) -> None:
+        """The program it runs may send anywhere: `send` beside `mutate`,
+        so a destination policy refuses it (it was `mutate` alone)."""
         project, _ = delivered(tmp_path, CONFIGS["merge driver"])
         classify = ToolCapabilityMapper()
         classify.is_checkpoint_commit = lambda commit: True
@@ -317,7 +319,7 @@ class TestSdkMapper:
         mapping = classify.map_tool(
             "Bash", {"command": f"git stash apply {commit}"}, str(project)
         )
-        assert mapping.capability_id == "mutate"
+        assert mapping.capabilities == ("mutate", "send")
         assert mapping.requires_checkpoint and mapping.requires_approval
 
     def test_the_lookup_answers_as_the_hook_does(

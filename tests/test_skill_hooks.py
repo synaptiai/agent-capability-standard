@@ -1223,10 +1223,13 @@ class TestPersistCommandHook:
         assert_blocked(result, "holds what looks like a credential", F504)
 
     @staticmethod
-    def _store(tmp_path: Path, name: str, text: str) -> str:
+    def _store(tmp_path: Path, name: str, text: str | bytes) -> str:
         project = tmp_path / "project"
         project.mkdir(exist_ok=True)
-        (project / name).write_text(text, encoding="utf-8")
+        if isinstance(text, bytes):
+            (project / name).write_bytes(text)
+        else:
+            (project / name).write_text(text, encoding="utf-8", newline="")
         return str(project / name)
 
     @pytest.mark.parametrize(
@@ -1352,15 +1355,24 @@ class TestPersistCommandHook:
                 'password: "CHANGEME"\n',
                 {"old_string": '"CHANGEME"', "new_string": "see the vault"},
             ),
-            # An old_string the file does not hold changes nothing.
+            # The same edits on a file with CRLF line ends, and on one in
+            # UTF-16LE, which Claude Code reads as text too.
             (
-                "deploy key: <<1>>\n",
-                {"old_string": "<<9>>", "new_string": "ghp_ABCDEF"},
+                "status: draft\r\nowner: ops\r\n",
+                {"old_string": "draft\nowner", "new_string": "final\nowner"},
+            ),
+            (
+                "\ufeffstatus: draft\n".encode("utf-16-le"),
+                {"old_string": "status: draft", "new_string": "status: final"},
             ),
         ],
     )
     def test_allows_an_edit_that_adds_no_credential(
-        self, tmp_path: Path, shell: str, held: str, tool_input: dict[str, Any]
+        self,
+        tmp_path: Path,
+        shell: str,
+        held: str | bytes,
+        tool_input: dict[str, Any],
     ) -> None:
         hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
         path = self._store(tmp_path, "notes.md", held)
@@ -1368,6 +1380,178 @@ class TestPersistCommandHook:
         result = run_command(hook, call, tmp_path, shell)
         assert result.returncode == 0, result.stderr
         assert result.stderr == ""
+
+    @pytest.mark.parametrize(
+        ("held", "calls"),
+        [
+            # A file with CRLF line ends: Claude Code matches old_string in
+            # the text with LF line ends, and writes CRLF back (security
+            # round 3, batch 2; the hook read the raw bytes, found nothing
+            # and scanned only the carried text).
+            (
+                'db:\r\n  password: "CHANGEME"\r\n  host: db.internal\r\n',
+                [
+                    {
+                        "old_string": 'CHANGEME"\n  host: db.internal',
+                        "new_string": 's3cretpass99xyz"\n  host: db.internal',
+                    }
+                ],
+            ),
+            # A file in UTF-16LE with its byte order mark.
+            (
+                '\ufeffdb:\n  password: "CHANGEME"\n'.encode("utf-16-le"),
+                [{"old_string": "CHANGEME", "new_string": "s3cretpass99xyz"}],
+            ),
+            # An empty new_string removes old_string and the line break after
+            # it: the second call joins a key and a value the first call put
+            # on two lines.
+            (
+                "Use the staging database.\n",
+                [
+                    {
+                        "old_string": "Use the staging database.\n",
+                        "new_string": "Use the staging database.\n"
+                        'db password: "DELETE-ME\nk7Rq2vXw9pLm4zT"\n',
+                    },
+                    {"old_string": "DELETE-ME", "new_string": ""},
+                ],
+            ),
+        ],
+        ids=["crlf", "utf-16le", "empty-new-string"],
+    )
+    def test_reads_the_file_as_claude_code_edits_it(
+        self,
+        tmp_path: Path,
+        shell: str,
+        held: str | bytes,
+        calls: list[dict[str, Any]],
+    ) -> None:
+        """Each call of the sequence is checked against the file as Claude
+        Code's Edit leaves it (the file is written here as Claude Code would
+        write it): the last call stores a credential the layer recognises,
+        and is refused (STANDARD 1.2.0 §5.18.10, §6.7)."""
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        project = tmp_path / "project"
+        project.mkdir()
+        path = project / "CLAUDE.md"
+        if isinstance(held, bytes):
+            path.write_bytes(held)
+        else:
+            path.write_text(held, encoding="utf-8", newline="")
+        for n, tool_input in enumerate(calls):
+            call = {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(path), **tool_input},
+            }
+            result = run_command(hook, call, tmp_path, shell)
+            if n < len(calls) - 1:
+                assert result.returncode == 0, result.stderr
+                text = path.read_text(encoding="utf-8")
+                old, new = tool_input["old_string"], tool_input["new_string"]
+                path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    def test_the_last_reading_finds_the_joined_value(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """Control for the empty new_string rule: a new_string that is not
+        empty leaves the line break, so the value stays on its own line."""
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = self._store(
+            tmp_path, "notes.md", 'db password: "DELETE-ME\nk7Rq2vXw9pLm4zT"\n'
+        )
+        call = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": path,
+                "old_string": "DELETE-ME",
+                "new_string": "see the vault",
+            },
+        }
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        ("held", "tool_input"),
+        [
+            # Claude Code finds old_string's non-ASCII characters as the
+            # file's \uXXXX escapes, and escapes new_string to match: the
+            # hook cannot tell what the file will hold.
+            (
+                '{"password": "CHANGEME", "note": "caf\\u00e9"}\n',
+                {
+                    "old_string": 'CHANGEME", "note": "caf\u00e9',
+                    "new_string": 's3cretpass99xyz", "note": "caf\u00e9',
+                },
+            ),
+            # And the other way: an escape in old_string, the character in
+            # the file.
+            (
+                '{"password": "CHANGEME", "note": "caf\u00e9"}\n',
+                {
+                    "old_string": 'CHANGEME", "note": "caf\\u00e9',
+                    "new_string": 's3cretpass99xyz", "note": "caf\\u00e9',
+                },
+            ),
+            # An old_string the file does not hold: Claude Code fails the
+            # edit, and so does the check (it allowed it before).
+            (
+                "deploy key: <<1>>\n",
+                {"old_string": "<<9>>", "new_string": "ghp_ABCDEF"},
+            ),
+        ],
+        ids=["escape-in-file", "escape-in-old-string", "absent"],
+    )
+    def test_refuses_an_old_string_it_does_not_find(
+        self, tmp_path: Path, shell: str, held: str, tool_input: dict[str, Any]
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = self._store(tmp_path, "memory.json", held)
+        call = {"tool_name": "Edit", "tool_input": {"file_path": path, **tool_input}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "does not hold old_string", OPENS["persist"])
+        multi = {
+            "tool_name": "MultiEdit",
+            "tool_input": {"file_path": path, "edits": [tool_input]},
+        }
+        result = run_command(hook, multi, tmp_path, shell)
+        assert_blocked(result, "does not hold old_string", OPENS["persist"])
+
+    def test_a_file_that_is_not_there_is_read_as_empty(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """Claude Code fails an Edit of a file that does not exist; the
+        check scans what the call carries and lets it fail there."""
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        call = edit_call(str(tmp_path / "project" / "new.md"))
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+    def test_a_utf16_file_needs_iconv(self, tmp_path: Path, shell: str) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        project = tmp_path / "project"
+        project.mkdir()
+        path = project / "notes.md"
+        path.write_bytes("\ufeffstatus: draft\n".encode("utf-16-le"))
+        # Every program the hook runs but iconv.
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for tool in ("jq", "grep", "sed", "readlink", "mktemp", "od", "tr", "wc", "rm"):
+            found = shutil.which(tool)
+            assert found is not None, tool
+            (bin_dir / tool).symlink_to(found)
+        call = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(path),
+                "old_string": "draft",
+                "new_string": "final",
+            },
+        }
+        program = shutil.which(shell)
+        assert program is not None
+        result = run_command(hook, call, tmp_path, program, {"PATH": str(bin_dir)})
+        assert_blocked(result, "iconv is required", OPENS["persist"])
 
     def test_blocks_a_target_it_will_not_read(self, tmp_path: Path, shell: str) -> None:
         """A target that is not a regular file, or is over 8 MB, is not read,
@@ -1422,6 +1606,37 @@ class TestPersistCommandHook:
         result = run_command(hook, call, tmp_path, shell)
         assert result.returncode == 0, result.stderr
         assert time.monotonic() - started < 20
+
+    def test_reads_a_large_crlf_file_and_write_in_bounded_time(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        """Every join is linear: jq's own join copied the text it had built
+        at each piece, so a 1 MB file of CRLF lines took 3.4 s to read as
+        LF and a 4 MB one about a minute (past the hook's time limit, which
+        blocks the call), and so did a Write of as many new lines."""
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        lines = "".join(f"line {i} of the knowledge file\r\n" for i in range(128_000))
+        path = self._store(tmp_path, "big.md", lines)
+        edit = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": path,
+                "old_string": "line 127999 of",
+                "new_string": "the last line of",
+            },
+        }
+        write = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(tmp_path / "project" / "new.md"),
+                "content": lines.replace("\r\n", "\n"),
+            },
+        }
+        for call in (edit, write):
+            started = time.monotonic()
+            result = run_command(hook, call, tmp_path, shell)
+            assert result.returncode == 0, result.stderr
+            assert time.monotonic() - started < 15
 
     @pytest.mark.parametrize(
         "content",

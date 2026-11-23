@@ -50,22 +50,46 @@ logger = logging.getLogger("grounded_agency.capabilities.mapper")
 RISK_LEVELS: tuple[str, ...] = ("low", "medium", "high")
 _RISK_ORDER: dict[str, int] = {level: n for n, level in enumerate(RISK_LEVELS)}
 
-# Patterns for Bash command classification, matched against one simple
-# command's words joined by spaces. Redirections are not among them:
-# _simple_commands reads them, and gives an output redirection to anything
-# but /dev/null the worst case first. (An alternative `\s+(>|>>)\s` here was
+# How the Bash classifier reads one simple command (_classify_single_command).
+# A class narrower than the worst case (`mutate` and `send`) is given only by
+# the command's own program, its first word as the shell passes it: the
+# words of _LOCAL_FILE_PROGRAMS and _local_git_change, and the patterns
+# below matched from the start of the words joined by spaces. Text that
+# matches one further on is an argument (`curl URL -A 'git reset'`), which
+# never narrows the class. Redirections are not read here: _simple_commands
+# reads them, and gives an output redirection to anything but /dev/null the
+# worst case first. (An alternative `\s+(>|>>)\s` of an earlier pattern was
 # retried from every blank of a run and backtracked over the whole run, so a
 # quoted run of 40,000 blanks took 8 s to classify.)
-_DESTRUCTIVE_PATTERNS = re.compile(
-    r"""
-    ^\s*(rm|rmdir|mv|cp\s+.*\s+/|chmod|chown|ln|unlink|shred)\s |  # File ops
-    \|\s*(rm|tee|dd)\s |                                           # Piped destructive
-    \bsed\s+-i |                                                   # In-place sed
-    \bgit\s+(reset|checkout\s+--|clean|stash\s+drop|branch\s+-[dD]) |  # Git mutations
-    \bdocker\s+(rm|rmi|prune)                                      # Docker mutations
-    """,
-    re.VERBOSE | re.IGNORECASE,
+
+# Programs that change local files only, whatever their arguments: `mutate`.
+# Not here, because they run a command or reach another host: `sed`, whose
+# `e` command and `s///e` flag run one (`-i` or not), `docker rm|rmi|prune`
+# (the daemon DOCKER_HOST or the docker context names receives the
+# request), `tee`, `dd` and `cp` (which take the worst case, as any program
+# on no list).
+_LOCAL_FILE_PROGRAMS: frozenset[str] = frozenset(
+    {"rm", "rmdir", "mv", "chmod", "chown", "ln", "unlink", "shred"}
 )
+
+
+def _local_git_change(words: list[str]) -> bool:
+    """Whether a simple command is one of the git commands that change the
+    local repository or work tree only (`git reset`, `git checkout --`,
+    `git clean`, `git branch -d|-D`, and every `git stash` form), each word
+    as the shell passes it: `mutate` in a repository where git neither
+    fetches nor runs a program the repository names
+    (``ToolCapabilityMapper._git_change``). A git option before the
+    subcommand (`git -c ...`) is not recognised."""
+    if len(words) < 2 or words[0] != "git":
+        return False
+    sub, rest = words[1], words[2:]
+    if sub in ("reset", "clean", "stash"):
+        return True
+    if sub == "checkout":
+        return rest[:1] == ["--"]
+    return sub == "branch" and bool(rest) and rest[0][:2] in ("-d", "-D")
+
 
 # Mutations of a system the command reaches by an argument or its
 # configuration (a remote, a registry, a cluster): `mutate`, and `send` as
@@ -74,16 +98,19 @@ _DESTRUCTIVE_PATTERNS = re.compile(
 # binding does not know is `send`), so a destination policy applies to it.
 _REMOTE_MUTATION_PATTERNS = re.compile(
     r"""
-    \bgit\s+push\b |                                               # Pushes
-    \bnpm\s+(publish|unpublish)\b |                                # Registries
-    \bdocker\s+push\b |
-    \bkubectl\s+(delete|apply|patch|edit)\b                        # Clusters
+    git\s+push\b |                                                 # Pushes
+    npm\s+(publish|unpublish)\b |                                  # Registries
+    docker\s+push\b |
+    kubectl\s+(delete|apply|patch|edit)\b                          # Clusters
     """,
-    re.VERBOSE | re.IGNORECASE,
+    re.VERBOSE,
 )
 
 # SEC-002: Interpreter invocation patterns that can execute arbitrary code.
-# These bypass other checks because the outer command looks benign.
+# These bypass other checks because the outer command looks benign. Matched
+# anywhere in the words (a program that runs another, `env` or `xargs`, may
+# run the interpreter): a match puts `execute` first in the worst case, and
+# takes nothing from it.
 _INTERPRETER_PATTERNS = re.compile(
     r"""
     \bpython[23]?\s+(-c|--command)\s |          # Python one-liners
@@ -108,18 +135,22 @@ _PROCESS_SUBSTITUTION_PATTERNS = re.compile(
     re.VERBOSE,
 )
 
+# Programs that send, matched from the start of the words: `send` first,
+# with `mutate` beside it, since each also changes files or another system
+# (`curl -o`, `scp` and `rsync` write local files, `ssh` runs a command
+# there).
 _NETWORK_SEND_PATTERNS = re.compile(
     r"""
-    \bcurl\s+.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--form|-d\s) |  # curl with data
-    \bwget\s+--post |                                               # wget POST
-    \bssh\s |                                                       # SSH connections
-    \bscp\s |                                                       # SCP transfers
-    \brsync\s |                                                     # rsync
-    \bnc\s |                                                        # netcat
-    \btelnet\s |                                                    # telnet
-    \bftp\s                                                         # ftp
+    curl\s+.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--form|-d\s) |  # curl with data
+    wget\s+--post |                                               # wget POST
+    ssh\s |                                                       # SSH connections
+    scp\s |                                                       # SCP transfers
+    rsync\s |                                                     # rsync
+    nc\s |                                                        # netcat
+    telnet\s |                                                    # telnet
+    ftp\s                                                         # ftp
     """,
-    re.VERBOSE | re.IGNORECASE,
+    re.VERBOSE,
 )
 
 # Patterns that are ALWAYS dangerous regardless of context.
@@ -361,9 +392,12 @@ _READ_ONLY_OPTIONS: dict[str, _Options] = {
 
 # Commands whose arguments can make them write: a word the shell expands
 # (an unquoted `*`, `?` or `[`) may become any file name, an option
-# included, so such a word makes the command write.
+# included, so such a word makes the command write. Every command whose
+# options are read (_writes) is here: `pip show *` became `pip show
+# --log=FILE ...` (pip wrote the log) and `pip list *` became `--proxy=...`
+# (pip asked the host it named).
 _ARGUMENT_WRITERS: frozenset[str] = frozenset(
-    {*_READ_ONLY_OPTIONS, "find", "git", "printf"}
+    {*_READ_ONLY_OPTIONS, "find", "git", "printf", "pip"}
 )
 
 # A brace expansion, `{a,b}` or `{1..3}`, in a line whose quoted characters
@@ -440,6 +474,11 @@ def _mask_quoted(command: str) -> tuple[str, bool] | None:
     return "".join(out), expands
 
 
+# A backslash right after a character outside ASCII: in a double-byte locale
+# bash may read it as that character's second byte (_simple_commands).
+_BACKSLASH_AFTER_NON_ASCII = re.compile(r"[^\x00-\x7f]\\")
+
+
 def _tokens(command: str) -> list[str] | None:
     """The shell words and operators of a line (POSIX rules, operators as
     their own tokens); None when they cannot be read."""
@@ -458,11 +497,23 @@ def _simple_commands(command: str) -> list[_Command] | None:
 
     Returns None when the line holds something this reading cannot show to be
     harmless: an unbalanced quote, a parameter or brace expansion, a subshell
-    or group, a here-document, or an output redirection to anything but
-    /dev/null. Redirections are dropped from the words. Comments are not
-    recognised, so `ls # ; rm x` reads as two commands: a reading that errs
-    splits a command into more commands to check, never fewer.
+    or group, a here-document, an output redirection to anything but
+    /dev/null, or a backslash right after a character outside ASCII.
+    Redirections are dropped from the words. Comments are not recognised, so
+    `ls # ; rm x` reads as two commands: a reading that errs splits a command
+    into more commands to check, never fewer.
+
+    The line is read as Unicode text; bash reads its bytes in the user's
+    locale. In a double-byte locale (GBK, GB18030, BIG5, Shift JIS) the
+    last byte of such a character's UTF-8 form can open a character whose
+    second byte is the backslash's, 0x5C, so bash sees no backslash: `ls
+    ぁ\\;touch f` and `ls "ぁ\\";touch f #"` are two commands there, one
+    here. Every other byte that can be a second byte only takes an operator
+    or quote from bash, never adds one (no quote, `$` or blank is a second
+    byte), so this reading sees at least the commands bash runs.
     """
+    if _BACKSLASH_AFTER_NON_ASCII.search(command):
+        return None
     masked = _mask_quoted(command)
     if masked is None or masked[1] or _BRACE_EXPANSION.search(masked[0]):
         return None
@@ -728,19 +779,26 @@ def _names_program(listing: bytes) -> bool:
     return False
 
 
-def git_config_may_run(cwd: str | None = None) -> bool:
+# The hooks git runs on a read that writes the index (`git status`), and
+# those it runs on a change of the work tree, the index or a ref: `git
+# reset` and `git stash` run post-index-change and reference-transaction,
+# `git branch -d` and `git stash drop` reference-transaction, `git checkout
+# --` post-checkout and post-index-change (probed with every hook git
+# documents present; `git clean` ran none).
+_READ_HOOKS: tuple[str, ...] = ("post-index-change",)
+_CHANGE_HOOKS: tuple[str, ...] = (
+    "post-index-change",
+    "reference-transaction",
+    "post-checkout",
+)
+
+
+def _repository_runs(cwd: str | None, hooks: tuple[str, ...]) -> bool:
     """Whether git, run in ``cwd`` (this process's working directory when
     it is None), may run a program the repository itself names: its own
-    configuration (the local and worktree scopes, with the files they
-    include) sets a key of :data:`_PROGRAM_CONFIG`, or its hooks directory
-    holds ``post-index-change``, which git runs when a read such as `git
-    status` writes the index. A repository delivered with its ``.git`` (an
-    archive, a copied checkout) brings that configuration and those hooks,
-    and one approved `git config core.fsmonitor ./x` writes it; the user's
-    own settings (global, system, the command line) are not repository
-    content. No repository there is a no; no git, or git failing in another
-    way, a yes. The plugin's PreToolUse hook asks the same
-    (git_runs_configured)."""
+    configuration sets a key of :data:`_PROGRAM_CONFIG`, or its hooks
+    directory holds one of ``hooks``. No repository there is a no; no git,
+    or git failing in another way, a yes."""
     git = shutil.which("git")
     if git is None:
         return True
@@ -757,7 +815,7 @@ def git_config_may_run(cwd: str | None = None) -> bool:
             return True
         # Where git looks for hooks (core.hooksPath, else <git dir>/hooks):
         # asked without the layer's options, which point it at /dev/null.
-        hooks = subprocess.run(
+        found = subprocess.run(
             [
                 git,
                 "-c",
@@ -773,12 +831,39 @@ def git_config_may_run(cwd: str | None = None) -> bool:
             check=False,
             env=safe_git_environment(),
         )
-        if hooks.returncode != 0 or not hooks.stdout.strip():
+        if found.returncode != 0 or not found.stdout.strip():
             return True
-        path = os.path.join(where, os.fsdecode(hooks.stdout.strip()))
-        return os.path.lexists(os.path.join(path, "post-index-change"))
+        path = os.path.join(where, os.fsdecode(found.stdout.strip()))
+        return any(os.path.lexists(os.path.join(path, hook)) for hook in hooks)
     except OSError, ValueError, subprocess.SubprocessError:
         return True
+
+
+def git_config_may_run(cwd: str | None = None) -> bool:
+    """Whether git, run in ``cwd`` (this process's working directory when
+    it is None), may run a program the repository itself names: its own
+    configuration (the local and worktree scopes, with the files they
+    include) sets a key of :data:`_PROGRAM_CONFIG`, or its hooks directory
+    holds ``post-index-change``, which git runs when a read such as `git
+    status` writes the index. A repository delivered with its ``.git`` (an
+    archive, a copied checkout) brings that configuration and those hooks,
+    and one approved `git config core.fsmonitor ./x` writes it; the user's
+    own settings (global, system, the command line) are not repository
+    content. No repository there is a no; no git, or git failing in another
+    way, a yes. The plugin's PreToolUse hook asks the same
+    (git_runs_configured)."""
+    return _repository_runs(cwd, _READ_HOOKS)
+
+
+def git_change_may_run(cwd: str | None = None) -> bool:
+    """:func:`git_config_may_run` for a git command that changes the local
+    repository or work tree (`git reset`, `git checkout --`, `git branch
+    -d`, `git stash`): its hooks directory may also hold
+    ``reference-transaction`` or ``post-checkout``, which git runs on such
+    a change (:data:`_CHANGE_HOOKS`; git-lfs's ``post-checkout`` fetches
+    from the LFS server). No repository there is a no; no git, or git
+    failing in another way, a yes."""
+    return _repository_runs(cwd, _CHANGE_HOOKS)
 
 
 def _is_read_only(command: _Command) -> bool:
@@ -1087,9 +1172,14 @@ class ToolCapabilityMapper:
         # Whether git, run in a directory, may run a program the
         # repository's own configuration or hooks name: a git read takes the
         # worst case there, `git stash create` the worst case beside its
-        # checkpoint, and a restore is a gated mutation
+        # checkpoint, and a restore the worst case
         # (:func:`git_config_may_run`). A lookup that fails is a yes.
         self.git_config_may_run: Callable[[str | None], bool] = git_config_may_run
+        # The same for a git command that changes the local repository or
+        # work tree (`git reset`, `git checkout --`, `git branch -d`, `git
+        # stash`), whose hooks are more (:func:`git_change_may_run`): it
+        # takes the worst case there. A lookup that fails is a yes.
+        self.git_change_may_run: Callable[[str | None], bool] = git_change_may_run
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -1623,9 +1713,11 @@ class ToolCapabilityMapper:
            as if it were a stash. Where the repository's own configuration
            or hooks name a program git runs (:attr:`git_config_may_run`),
            `create` takes a checkpoint beside the worst case (a host takes
-           the first checkpoint with ``create_checkpoint``) and a restore is
-           a gated mutation. A git option before `stash` (`git -C dir stash
-           ...`) is not recognised.
+           the first checkpoint with ``create_checkpoint``) and a restore
+           takes the worst case. Any other restore is the worst case where
+           git may fetch or run what the repository names
+           (`_git_change_gated`). A git option before `stash` (`git -C dir
+           stash ...`) is not recognised.
         3. Otherwise each simple command is classified on its own. A line
            whose every command is allow-listed as read-only is an
            observation; any other line takes the strictest flags and every
@@ -1636,7 +1728,9 @@ class ToolCapabilityMapper:
            a program the repository names (:attr:`git_dir_may_be_content`,
            :attr:`git_config_may_run`). `printf` with an option (`-v NAME`
            sets a shell variable the later commands of the line run with)
-           is not read-only (`_writes`).
+           is not read-only (`_writes`). A class narrower than the worst
+           case comes only from the command's program, never from text in
+           its arguments (:meth:`_classify_single_command`).
 
         Security principle: fail-safe defaults. A command is high-risk until
         it is shown to be on the read-only allow-list, and a command the
@@ -1691,13 +1785,16 @@ class ToolCapabilityMapper:
                 if self._git_dir_may_be_content(cwd):
                     return worst
                 capability = _GIT_STASH_CLASSES[words[2]]
-                if capability == "observe" and self._git_read_gated(cwd):
-                    return worst
-                if capability != "observe" and self._git_config_may_run(cwd):
-                    # It runs what the repository's own configuration names:
-                    # a checkpoint taken with the worst case beside it (a
-                    # host takes the first with create_checkpoint), and a
-                    # restore that is a gated mutation.
+                if capability == "observe":
+                    if self._git_read_gated(cwd):
+                        return worst
+                    return self._builtin("Bash", capability)
+                if self._git_config_may_run(cwd):
+                    # It runs what the repository's own configuration names,
+                    # which may do anything, sending included: a checkpoint
+                    # taken with the worst case beside it (a host takes the
+                    # first with create_checkpoint), and a restore that is
+                    # the worst case.
                     if capability == "checkpoint":
                         return self._combine(
                             [
@@ -1705,10 +1802,12 @@ class ToolCapabilityMapper:
                                 self._worst_case("execute"),
                             ]
                         )
-                    return self._builtin("Bash", "mutate", checkpoint_gated=True)
-                if capability != "rollback" or self._restores_checkpoint(words):
+                    return worst
+                if capability == "checkpoint" or self._restores_checkpoint(words):
+                    # Neither reads an object the local state lacks: a probe
+                    # in a partial clone fetched nothing for either.
                     return self._builtin("Bash", capability)
-                return self._builtin("Bash", "mutate", checkpoint_gated=True)
+                return self._git_change(cwd)
 
         results = [self._classify_single_command(c, cwd) for c in commands]
         gated = [r for r in results if r.risk != "low"]
@@ -1735,6 +1834,31 @@ class ToolCapabilityMapper:
                 "Could not tell whether git runs configured programs in %s", cwd
             )
             return True
+
+    def _git_change_gated(self, cwd: str | None) -> bool:
+        """Whether a git command that changes the local repository or work
+        tree may do more in ``cwd``: what :meth:`_git_read_gated` asks, or
+        run a hook git runs on such a change (:attr:`git_change_may_run`:
+        `reference-transaction` on `git reset`, `git branch -d` and `git
+        stash drop`, `post-checkout` on `git checkout --`). A lookup that
+        fails is a yes."""
+        if self._git_read_gated(cwd):
+            return True
+        try:
+            return bool(self.git_change_may_run(cwd))
+        except Exception:
+            logger.exception("Could not tell which hooks git runs in %s", cwd)
+            return True
+
+    def _git_change(self, cwd: str | None) -> ToolMapping:
+        """The class of a git command that changes the local repository or
+        work tree: a gated `mutate`, or the worst case where git may fetch
+        an object it lacks (`git reset` in a partial clone fetched the
+        objects of the commit it moved to) or run a program the repository
+        names (:meth:`_git_change_gated`)."""
+        if self._git_change_gated(cwd):
+            return self._worst_case()
+        return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
     def _git_read_gated(self, cwd: str | None) -> bool:
         """Whether a git command that only reads may do more in ``cwd``: run
@@ -1809,13 +1933,16 @@ class ToolCapabilityMapper:
         return combined
 
     def _worst_case(self, capability: str = "mutate") -> ToolMapping:
-        """Bash's worst case (section 5.18.3): ``capability`` (a gated
-        mutation) and ``send``, for a command whose effect the classifier
-        does not know. It may transmit anywhere, so a destination policy in
-        force refuses it: this layer cannot tell where (section 4.4.2)."""
+        """Bash's worst case (section 5.18.3): a gated ``mutate`` and
+        ``send``, for a command whose effect the classifier does not know,
+        with ``capability`` first (`execute` for an interpreter, `send` for
+        a program that sends). It may transmit anywhere, so a destination
+        policy in force refuses it: this layer cannot tell where (section
+        4.4.2)."""
         return self._combine(
             [
                 self._builtin("Bash", capability, checkpoint_gated=True),
+                self._builtin("Bash", "mutate", checkpoint_gated=True),
                 self._builtin("Bash", "send", checkpoint_gated=True),
             ]
         )
@@ -1826,31 +1953,40 @@ class ToolCapabilityMapper:
         """
         Classify one simple command.
 
-        Checks in order: interpreter → network → remote mutation →
-        destructive → `git stash` → read-only allowlist → the worst case. It
-        never returns a `git stash` class: those need a line of one command
-        (`_classify_bash_command`), so here every `git stash` form is a
-        gated mutation of the local repository. A read-only git command
-        where git may fetch from another host (``cwd`` in a partial clone)
-        takes the worst case.
+        Checks in order: interpreter → network → remote mutation → local
+        change → `git stash` → read-only allowlist → the worst case. Every
+        class but the last two is the worst case with a capability first,
+        or a gated `mutate`; only the command's program gives one narrower
+        than the worst case (a gated `mutate` for `rm` and the local git
+        changes, `observe` for the allow-list), never text in its
+        arguments: `curl URL -A 'git reset'` is curl. An interpreter found
+        anywhere in the words puts `execute` first, and takes nothing away.
+        It never returns a `git stash` class: those need a line of one
+        command (`_classify_bash_command`), so here every `git stash` form
+        is a change of the local repository. A git command takes the worst
+        case where git may fetch from another host (``cwd`` in a partial
+        clone) or run a program the repository names.
         """
-        text = " ".join(command.words)
+        words = command.words
+        text = " ".join(words)
         # SEC-002: an interpreter runs code this classifier does not see,
         # which may transmit (python -c, node -e, a script).
         if _INTERPRETER_PATTERNS.search(text):
             return self._worst_case("execute")
 
-        # Check for network send operations
-        if _NETWORK_SEND_PATTERNS.search(text):
-            return self._builtin("Bash", "send", checkpoint_gated=True)
+        # A program that sends, from the start of the words.
+        if _NETWORK_SEND_PATTERNS.match(text):
+            return self._worst_case("send")
 
         # A change to a system the command names: it cannot tell which.
-        if _REMOTE_MUTATION_PATTERNS.search(text):
+        if _REMOTE_MUTATION_PATTERNS.match(text):
             return self._worst_case()
 
-        # Check for destructive operations
-        if _DESTRUCTIVE_PATTERNS.search(text) or command.words[:2] == ["git", "stash"]:
+        # A local change, by the program's own words.
+        if len(words) > 1 and words[0] in _LOCAL_FILE_PROGRAMS:
             return self._builtin("Bash", "mutate", checkpoint_gated=True)
+        if _local_git_change(words):
+            return self._git_change(cwd)
 
         if _is_read_only(command):
             if command.words[0] == "git" and self._git_read_gated(cwd):

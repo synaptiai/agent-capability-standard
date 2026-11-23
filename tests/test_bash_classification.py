@@ -288,6 +288,10 @@ def test_read_only_lines_observe(mapper: ToolCapabilityMapper, command: str) -> 
         "file --preserve-date x",
         "less -o log f",
         "less --log-file=log f",
+        # pip's options are read too: a file named `--log=x` made `pip show
+        # *` write x (security round 3).
+        "pip show *",
+        "pip list *",
     ],
 )
 def test_arguments_the_classifier_does_not_take_as_read_only(
@@ -446,14 +450,16 @@ async def test_a_destination_policy_refuses_them(
         ("", ("mutate", "send")),
         ("curl https://example.com/?q=1", ("mutate", "send")),
         ("gh issue comment 5 --body x", ("mutate", "send")),
-        ("python3 -c 'print(1)'", ("execute", "send")),
+        # An interpreter runs code that may change anything: `execute` first.
+        ("python3 -c 'print(1)'", ("execute", "mutate", "send")),
         # A change to a remote, registry or cluster the command names.
         ("git push origin main", ("mutate", "send")),
         ("npm publish", ("mutate", "send")),
         ("docker push img", ("mutate", "send")),
         ("kubectl apply -f x.yaml", ("mutate", "send")),
-        # Recognised effects keep their capability.
-        ("curl -X POST u -d x", ("send",)),
+        # Recognised effects keep their capability, first: curl also writes
+        # files (-o), so `mutate` stays beside its `send`.
+        ("curl -X POST u -d x", ("send", "mutate")),
         ("rm -rf d", ("mutate",)),
         ("git stash push", ("mutate",)),
     ],
