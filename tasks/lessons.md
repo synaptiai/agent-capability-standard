@@ -286,3 +286,49 @@ the integration guide, after the review that added the two.
 Where prose must state one, grep for the old number in every document when
 a change alters it, and recount every stated number before the records are
 closed.
+
+## Bound every probe an agent runs; a restart loses all work in flight (security loop)
+
+**What happened.** The cloud container restarted three times during the
+security loop while attack agents ran unbounded probes: a nested Claude Code
+client started through `claude_agent_sdk`, timing probes on inputs of many
+megabytes. Each restart lost every agent in flight. The third came while
+two lenses ran whose prompts lacked the probe limits the others had.
+
+**Rule.** Put the limits in every agent's prompt, not only some: no nested
+Claude Code process or SDK client; every probe, hook run and test command
+under `timeout` and `prlimit --as` (or `ulimit -v`); generated inputs at or
+under 1 MB, timing measured on bounded inputs and extrapolated; no command
+whose input or output can grow without bound; stop every server started.
+
+## A workflow resumes only up to its first failed call (security loop)
+
+**What happened.** A resume replays cached agent results only up to the
+first call that ever failed in the run, even when an in-script retry of it
+later succeeded; everything after it runs live. Resuming a five-round loop
+whose round-2 verifier had once failed (a safety-classifier flag returns
+`null`, like a terminal API error) started round 2's verifiers again. It
+was stopped at once: verifiers are read-only, fixers are not.
+
+**Rule.** Retry an agent call that returns `null`, and count what is still
+lost or unverified after the retries instead of dropping it. To continue a
+long run with an early failed call, write a continuation script that starts
+at the next stage and seeds its state (the findings seen, the confirmed
+ones) from the journal, rather than resuming. Check the journal for failed
+entries before choosing.
+
+## Keep made-up tokens out of a provider's format in files you push (security loop)
+
+**What happened.** The loop's merge was refused at the push by the host's
+secret scanning: the redaction vectors held a Discord bot token, a Stripe
+live key and a Slack webhook URL, made up but in each provider's own
+format. Formats with no checksum are matched on shape alone. In a public
+repository they also reach the providers' programs that revoke leaked
+tokens. The loop's commits had to be rewritten before the push.
+
+**Rule.** Write an example token in a provider's format with one character
+escaped (a JSON `\u` escape, which every reader decodes), and say why in the
+file. `test_the_vector_files_hold_no_raw_provider_token` checks the secrets
+vectors; scan a new fixture of another kind for these shapes before
+committing it. Never ask for the push protection to be bypassed for test
+data that can be written another way.
