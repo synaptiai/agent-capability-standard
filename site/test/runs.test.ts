@@ -25,6 +25,37 @@ import {
 
 const fixture = JSON.parse(readFileSync('test/fixtures/runs-page.json', 'utf8')) as { geometry: PageGeometry };
 
+/**
+ * `text` with its HTML comments cut out, read once from left to right: a
+ * comment runs from `<!--` to the next `-->` or `--!>`, and one left open
+ * runs to the end. It checks Markdown the repository holds, and whatever
+ * remains counts as text, so a cut never hides anything from the check.
+ */
+function withoutComments(text: string): string {
+  let kept = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', at);
+    if (open < 0) return kept + text.slice(at);
+    kept += text.slice(at, open);
+    const ends = [text.indexOf('-->', open + 4), text.indexOf('--!>', open + 4)].filter((i) => i >= 0);
+    if (ends.length === 0) return kept;
+    const end = Math.min(...ends);
+    at = end + (text.startsWith('--!>', end) ? 4 : 3);
+  }
+}
+
+describe('withoutComments', () => {
+  it('cuts comments on one line or several, and one left open', () => {
+    expect(withoutComments('a<!-- x -->b')).toBe('ab');
+    expect(withoutComments('a<!-- x\ny -->b\nc')).toBe('ab\nc');
+    expect(withoutComments('a<!-- x --!>b')).toBe('ab');
+    expect(withoutComments('a<!-- x')).toBe('a');
+    // Text either side of a cut stays text, even where it spells a comment.
+    expect(withoutComments('<!<!-- x -->-- y -->')).toBe('<!-- y -->');
+  });
+});
+
 describe('measureRuns on the fixture page', () => {
   const runs = measureRuns(fixture.geometry);
 
@@ -170,11 +201,9 @@ describe('exempt runs and scope', () => {
         if (h !== null && h[1]!.length <= level) break;
         if (h === null) section.push(l);
       }
-      // Comments (on one line or several, ended by --> or --!>), blank lines
-      // and thematic breaks are not text.
-      const body = section
-        .join('\n')
-        .replace(/<!--[\s\S]*?--!?>/g, '')
+      // Comments (on one line or several), blank lines and thematic breaks
+      // are not text.
+      const body = withoutComments(section.join('\n'))
         .split('\n')
         .filter((l) => !/^\s*$|^---\s*$/.test(l));
       expect(body, `${source} #${e.anchor} has text: remove its unwritten entry from EXEMPT_RUNS`).toEqual([]);
