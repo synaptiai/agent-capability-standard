@@ -91,6 +91,14 @@ def _local_git_change(words: list[str]) -> bool:
     return sub == "branch" and bool(rest) and rest[0][:2] in ("-d", "-D")
 
 
+def _writes_tree(words: list[str]) -> bool:
+    """Whether a local git change (:func:`_local_git_change`) may write
+    files of the work tree from objects, through any smudge filter
+    configured (`git reset`, `git checkout --`, `git stash`); `git clean`
+    and `git branch -d` write none."""
+    return words[1] in ("reset", "checkout", "stash")
+
+
 # Mutations of a system the command reaches by an argument or its
 # configuration (a remote, a registry, a cluster): `mutate`, and `send` as
 # well, since the classifier cannot tell which system receives the change
@@ -196,11 +204,16 @@ _FD_NUMBER = re.compile(r"[0-9]+")
 # `kubectl get|describe|logs` (a server, which --server or --kubeconfig
 # names, and a kubeconfig's `exec` runs a command) and `docker
 # ps|images|logs` (a daemon, which DOCKER_HOST or the docker context names,
-# over tcp or ssh; a container name or filter goes to it). `git` reads local
-# state only where it cannot fetch (git_may_fetch), and `git remote`, `pip
-# list` and `pip show` only with the arguments _writes allows. `printf` only
-# without an option: `printf -v NAME` sets a shell variable that the later
-# commands of the line run with (_writes).
+# over tcp or ssh; a container name or filter goes to it). Nor `pip list`
+# and `pip show`: pip runs the program the site configuration's `python =`
+# names (sys.prefix/pip.conf, read even with --isolated: an in-project
+# virtual environment keeps the one a repository ships there), and the
+# interpreter it starts runs the `.pth` files of its site-packages, which an
+# editable install of the project, or a shipped environment, puts there
+# (security round 5). `git` reads local state only where it cannot fetch
+# (git_may_fetch), and `git remote` only with the arguments _writes allows.
+# `printf` only without an option: `printf -v NAME` sets a shell variable
+# that the later commands of the line run with (_writes).
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "ls",
@@ -241,8 +254,6 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "git ls-files",
         "git branch",
         "git remote",
-        "pip list",
-        "pip show",
     }
 )
 
@@ -395,11 +406,10 @@ _READ_ONLY_OPTIONS: dict[str, _Options] = {
 # Commands whose arguments can make them write: a word the shell expands
 # (an unquoted `*`, `?` or `[`) may become any file name, an option
 # included, so such a word makes the command write. Every command whose
-# options are read (_writes) is here: `pip show *` became `pip show
-# --log=FILE ...` (pip wrote the log) and `pip list *` became `--proxy=...`
-# (pip asked the host it named).
+# options are read (_writes) is here (security round 3: `pip show *`, when
+# pip was listed, became `pip show --log=FILE ...` and wrote the log).
 _ARGUMENT_WRITERS: frozenset[str] = frozenset(
-    {*_READ_ONLY_OPTIONS, "find", "git", "printf", "pip"}
+    {*_READ_ONLY_OPTIONS, "find", "git", "printf"}
 )
 
 # bash's blanks, which end a word: a space and a tab, never another
@@ -433,29 +443,6 @@ def _names_a_variable(word: str) -> bool:
     shell itself). Any word that opens with `{` and closes with `}` counts,
     a name bash would refuse included."""
     return len(word) >= 2 and word[0] == "{" and word[-1] == "}"
-
-
-# The options with which these subcommands read local state only. Any other
-# option (an index, a proxy, a configuration file) can make them ask another
-# host, and takes the worst case: `pip list --outdated` and pip's own version
-# check ask the index the option names. pip takes any unambiguous prefix of a
-# long option.
-_SUBCOMMAND_OPTIONS: dict[tuple[str, str], _Options] = {
-    ("pip", "list"): _Options(
-        flags="levq",
-        long=frozenset(
-            "local user editable exclude-editable include-editable not-required "
-            "verbose quiet disable-pip-version-check no-color isolated".split()
-        ),
-        long_with_arg=frozenset({"format", "exclude", "path"}),
-    ),
-    ("pip", "show"): _Options(
-        flags="fvq",
-        long=frozenset(
-            "files verbose quiet disable-pip-version-check no-color isolated".split()
-        ),
-    ),
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,8 +522,9 @@ def _simple_commands(command: str) -> list[_Command] | None:
     harmless: an unbalanced quote, a parameter or brace expansion, a subshell
     or group, a here-document, an output redirection to anything but
     /dev/null or `>&N` (N in ASCII digits), a redirection after a
-    `{varname}` word, or a character outside ASCII right before a
-    backslash or another character bash treats specially.
+    `{varname}` word, a redirection in a simple command with no words, or a
+    character outside ASCII right before a backslash or another character
+    bash treats specially.
     Redirections are dropped from the words. Comments are not recognised, so
     `ls # ; rm x` reads as two commands: a reading that errs splits a command
     into more commands to check, never fewer.
@@ -576,6 +564,8 @@ def _simple_commands(command: str) -> list[_Command] | None:
     if shadow is None or len(shadow) != len(tokens):
         return None
     commands: list[_Command] = [_Command([])]
+    # The simple commands (by index) that hold a redirection.
+    redirected: set[int] = set()
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -605,10 +595,20 @@ def _simple_commands(command: str) -> list[_Command] | None:
                 token == ">&" and _FD_NUMBER.fullmatch(target)
             ):
                 return None
+            redirected.add(len(commands) - 1)
             i += 1  # skip the file's name
         else:
             return None  # (, ), <<, <>, ;; and the like
         i += 1
+    if any(not commands[n].words for n in redirected):
+        # A redirection with no command (`ls; <f`) runs nothing in bash, but
+        # zsh, the Bash tool's shell where it is the user's (macOS's
+        # default), runs `$READNULLCMD <f` for it, a pager (less on macOS,
+        # Debian's `pager`), which a LESSOPEN or lesskey `|-` preprocessor
+        # makes run code, and `$NULLCMD` for an output one: the worst case
+        # (security round 5). A command with neither words nor a
+        # redirection (`ls;`, `ls &`) runs nothing in either.
+        return None
     return [c for c in commands if c.words]
 
 
@@ -694,9 +694,6 @@ def _writes(words: list[str], globbed: bool = False) -> bool:
             # `git remote show NAME|URL` asks that remote: a request to
             # another host. `get-url` only reads the configuration.
             return not (rest in ([], ["-v"], ["--verbose"]) or rest[0] == "get-url")
-    if name == "pip" and args:
-        options = _SUBCOMMAND_OPTIONS.get((name, args[0]))
-        return options is None or _option_writes(args[1:], options)
     return False
 
 
@@ -723,6 +720,17 @@ _PROGRAM_CONFIG = (
     r"^(core\.fsmonitor|core\.pager|pager\..+|diff\.external"
     r"|diff\..+\.(textconv|command)|filter\..+\.(clean|smudge|process)"
     r"|merge\..+\.driver|gpg\.program|gpg\..+\.program)$"
+)
+# The configuration keys of a filter git runs when it writes a file of the
+# work tree from an object: a filter driver's smudge or process command.
+# The plugin's PreToolUse hook holds the same pattern (GIT_SMUDGE_KEYS).
+_SMUDGE_CONFIG = r"^filter\..+\.(smudge|process)$"
+# The commands `git lfs install --skip-smudge` writes, as they are: they
+# write the pointer file and ask no server (a probe logged no request for a
+# `git reset --hard` that the plain commands made ask the LFS server). The
+# plugin's PreToolUse hook holds the same two (git_filter_runs).
+_SKIPPING_SMUDGE = frozenset(
+    {b"git-lfs smudge --skip -- %f", b"git-lfs filter-process --skip"}
 )
 # The configuration scopes a repository's own files give (`git config
 # --show-scope`; an included file takes the scope of the file that
@@ -916,6 +924,43 @@ def git_change_may_run(cwd: str | None = None) -> bool:
     from the LFS server). No repository there is a no; no git, or git
     failing in another way, a yes."""
     return _repository_runs(cwd, _CHANGE_HOOKS)
+
+
+def git_filter_may_run(cwd: str | None = None) -> bool:
+    """Whether git, writing files of the work tree from objects in ``cwd``
+    (this process's working directory when it is None), may run a filter
+    that reaches another host: a filter driver's smudge or process command
+    configured in any scope, the user's own included. git runs it for each
+    file whose attributes name the driver, which the repository chooses
+    (its `.gitattributes`, or those of the commit written), and git-lfs,
+    whose `git lfs install` writes its filter to the global configuration,
+    asks the LFS server the repository's `.lfsconfig` or remote names for
+    each object its store lacks, sending the object's id: `git reset --hard`
+    to a commit holding an LFS pointer, and a restore of a checkpoint that
+    holds one, did (security round 5). Reads run no smudge. Only the
+    commands `git lfs install --skip-smudge` writes (:data:`_SKIPPING_SMUDGE`)
+    count as none. No repository there is a no; no git, or git failing in
+    another way, a yes. The plugin's PreToolUse hook asks the same
+    (git_filter_runs)."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    where = _where(cwd)
+    try:
+        if _git(git, where, "rev-parse", "--absolute-git-dir").returncode != 0:
+            return False
+        done = _git(git, where, "config", "-z", "--get-regexp", _SMUDGE_CONFIG)
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
+    if done.returncode == 1 and not done.stdout:
+        return False
+    if done.returncode != 0:
+        return True
+    # -z: each entry is the key, a line break, the value, then a NUL.
+    for entry in done.stdout.split(b"\0"):
+        if entry and entry.partition(b"\n")[2] not in _SKIPPING_SMUDGE:
+            return True
+    return False
 
 
 def _home_directory() -> str:
@@ -1301,6 +1346,14 @@ class ToolCapabilityMapper:
         # stash`), whose hooks are more (:func:`git_change_may_run`): it
         # takes the worst case there. A lookup that fails is a yes.
         self.git_change_may_run: Callable[[str | None], bool] = git_change_may_run
+        # Whether git, writing files of the work tree in a directory, may
+        # run a filter configured in any scope, the user's git-lfs included,
+        # which asks the LFS server the repository names for an object it
+        # lacks: a git change that writes the tree (`git reset`, `git
+        # checkout --`, `git stash`) and a restore of a recorded checkpoint
+        # take the worst case there (:func:`git_filter_may_run`). A lookup
+        # that fails is a yes.
+        self.git_filter_may_run: Callable[[str | None], bool] = git_filter_may_run
         # The PATH the classified commands run with (None: this process's)
         # and the project's directory (None: this process's working
         # directory). The adapter sets them from the options it wraps (the
@@ -1847,10 +1900,13 @@ class ToolCapabilityMapper:
            or hooks name a program git runs (:attr:`git_config_may_run`),
            `create` takes a checkpoint beside the worst case (a host takes
            the first checkpoint with ``create_checkpoint``) and a restore
-           takes the worst case. Any other restore is the worst case where
-           git may fetch or run what the repository names
-           (`_git_change_gated`). A git option before `stash` (`git -C dir
-           stash ...`) is not recognised.
+           takes the worst case; so does a restore where a smudge filter is
+           configured in any scope (:attr:`git_filter_may_run`: git-lfs's
+           asks the LFS server for an object the store lacks). Any other
+           restore is the worst case where git may fetch or run what the
+           repository names (`_git_change_gated`), or run such a filter. A
+           git option before `stash` (`git -C dir stash ...`) is not
+           recognised.
         3. Otherwise each simple command is classified on its own. A line
            whose every command is allow-listed as read-only is an
            observation; any other line takes the strictest flags and every
@@ -1943,11 +1999,18 @@ class ToolCapabilityMapper:
                             ]
                         )
                     return worst
-                if capability == "checkpoint" or self._restores_checkpoint(words):
-                    # Neither reads an object the local state lacks: a probe
-                    # in a partial clone fetched nothing for either.
+                if capability == "checkpoint":
+                    # It reads no object the local state lacks (a probe in a
+                    # partial clone fetched nothing), and writes no file.
                     return self._builtin("Bash", capability)
-                return self._git_change(cwd)
+                if self._restores_checkpoint(words):
+                    # It writes the tree, through any smudge filter
+                    # configured: git-lfs's asks the LFS server for each
+                    # object of a pointer the store lacks.
+                    if self._git_filter_may_run_in(cwd):
+                        return worst
+                    return self._builtin("Bash", capability)
+                return self._git_change(cwd, writes_tree=True)
 
         results = [self._classify_single_command(c, cwd) for c in commands]
         gated = [r for r in results if r.risk != "low"]
@@ -2004,13 +2067,27 @@ class ToolCapabilityMapper:
             logger.exception("Could not tell which hooks git runs in %s", cwd)
             return True
 
-    def _git_change(self, cwd: str | None) -> ToolMapping:
+    def _git_filter_may_run_in(self, cwd: str | None) -> bool:
+        """:attr:`git_filter_may_run` for ``cwd``; a lookup that fails is a
+        yes."""
+        try:
+            return bool(self.git_filter_may_run(cwd))
+        except Exception:
+            logger.exception("Could not tell which filters git runs in %s", cwd)
+            return True
+
+    def _git_change(self, cwd: str | None, writes_tree: bool) -> ToolMapping:
         """The class of a git command that changes the local repository or
         work tree: a gated `mutate`, or the worst case where git may fetch
         an object it lacks (`git reset` in a partial clone fetched the
-        objects of the commit it moved to) or run a program the repository
-        names (:meth:`_git_change_gated`)."""
-        if self._git_change_gated(cwd):
+        objects of the commit it moved to), run a program the repository
+        names (:meth:`_git_change_gated`) or, for one that writes files of
+        the work tree (``writes_tree``), run a smudge filter configured in
+        any scope (:attr:`git_filter_may_run`: git-lfs's asked the LFS
+        server for the objects of `git reset --hard`'s commit)."""
+        if self._git_change_gated(cwd) or (
+            writes_tree and self._git_filter_may_run_in(cwd)
+        ):
             return self._worst_case()
         return self._builtin("Bash", "mutate", checkpoint_gated=True)
 
@@ -2140,7 +2217,7 @@ class ToolCapabilityMapper:
         if len(words) > 1 and words[0] in _LOCAL_FILE_PROGRAMS:
             return self._builtin("Bash", "mutate", checkpoint_gated=True)
         if _local_git_change(words):
-            return self._git_change(cwd)
+            return self._git_change(cwd, writes_tree=_writes_tree(words))
 
         if _is_read_only(command):
             if self._program_may_be_content(command.words[0], cwd):

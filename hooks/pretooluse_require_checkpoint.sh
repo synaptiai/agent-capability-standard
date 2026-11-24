@@ -79,8 +79,12 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #         of a commit posttooluse_take_checkpoint.sh entered, signed, in the
 #         project's git directory (<git dir>/acs/checkpoints/commits/, a
 #         lookup of one file however many checkpoints were taken), the call
-#         runs in the project's repository (its cwd) and the repository's
-#         own configuration and hooks name no program git runs; any other
+#         runs in the project's repository (its cwd), the repository's
+#         own configuration and hooks name no program git runs, and no
+#         scope configures a filter's smudge or process command (but the
+#         two `git lfs install --skip-smudge` writes) that writing the tree
+#         would run (git_filter_runs: git-lfs's asks the LFS server the
+#         repository names for each object its store lacks); any other
 #         pop or apply, a bare one included, is mutate, since git applies
 #         any merge commit as if it were a stash; any other git stash form:
 #         mutate;
@@ -375,6 +379,35 @@ secret_in() (
 )
 # END secret-scan
 
+# BEGIN plain-name (the same in the pre-tool-use hook and the log hook; tests/test_hooks_unit.py keeps them so)
+# A tool's or a skill's name as a record or a diagnostic shows it (STANDARD
+# 1.2.0 §6.7, §6.4, §9.8): the model chooses a skill's name (an MCP skill
+# address is any text after a server's name), and an MCP server its tools'.
+# The name itself when it is 1 to 128 ASCII letters, digits, `.`, `_`, `:`
+# or `-` and the secret scan (secret_in) finds no credential in it; else
+# [REDACTED], the whole name: a digest of a name that is a secret alone could
+# be inverted by guessing. A scan that cannot answer (no grep: a status other
+# than 0 or 1) counts as one that found a credential. Claude Code's own
+# tools' names, which hold none, are shown without the scan's time.
+plain_name() {
+  local status=0
+  case "$1" in
+    Bash | Read | Write | Edit | MultiEdit | NotebookEdit | Glob | Grep | LS | WebFetch | WebSearch | Skill | Agent | Task | TodoRead | TodoWrite | TaskList | TaskGet | TaskCreate | TaskUpdate | TaskOutput | BashOutput | ToolSearch | ExitPlanMode | AskUserQuestion)
+      printf '%s' "$1"
+      return 0
+      ;;
+  esac
+  if (LC_ALL=C; [[ "$1" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]); then
+    (set +o pipefail; secret_in "$1") || status=$?
+    if [ "$status" = 1 ]; then
+      printf '%s' "$1"
+      return 0
+    fi
+  fi
+  printf '%s' '[REDACTED]'
+}
+# END plain-name
+
 
 # Commands that only read, unless given an option that writes (writes below).
 # A subset of the SDK mapper's _READ_ONLY_COMMANDS.
@@ -652,6 +685,49 @@ git_runs_configured() {
   [ -e "$hooks/post-index-change" ] || [ -L "$hooks/post-index-change" ]
 }
 
+# The configuration keys of a filter git runs when it writes a file of the
+# work tree from an object: a filter driver's smudge or process command. The
+# SDK mapper holds the same pattern (_SMUDGE_CONFIG).
+GIT_SMUDGE_KEYS='^filter\..+\.(smudge|process)$'
+
+# Whether git, writing files of the work tree where this call runs (a
+# restore), may run a filter that reaches another host: a filter driver's
+# smudge or process command configured in any scope, the user's own
+# included. git runs it for each file whose attributes name the driver,
+# which the repository chooses (its .gitattributes, or those of the commit
+# written), and git-lfs, whose `git lfs install` writes its filter to the
+# global configuration, asks the LFS server the repository's .lfsconfig or
+# remote names for each object its store lacks, sending the object's id: a
+# restore of a checkpoint holding such a pointer did (security round 5).
+# Only the two commands `git lfs install --skip-smudge` writes, exactly,
+# count as none (they ask no server). No repository there: no. Anything git
+# does not answer: yes. The SDK mapper asks the same (git_filter_may_run).
+git_filter_runs() {
+  local dir status=0 found
+  call_dir || return 0
+  dir="$CALL_DIR"
+  git_dir_at "$dir" || status=$?
+  case "$status" in
+    0) ;;
+    1) return 1 ;;
+    *) return 0 ;;
+  esac
+  # -z: each entry is the key, a line break, the value, then a NUL; as lines
+  # of the key, a tab and the value (a value holding a tab or a line break
+  # is then no command listed below).
+  found=$(hgit -C "$dir" config -z --get-regexp "$GIT_SMUDGE_KEYS" 2> /dev/null | tr '\n\0' '\t\n') || status=$?
+  case "$status" in
+    0) ;;
+    1) return 1 ;;
+    *) return 0 ;;
+  esac
+  printf '%s\n' "$found" | awk '
+    $0 == "" { next }
+    { value = substr($0, index($0, "\t") + 1) }
+    index($0, "\t") == 0 || (value != "git-lfs smudge --skip -- %f" && value != "git-lfs filter-process --skip") { runs = 1 }
+    END { exit runs ? 0 : 1 }'
+}
+
 # Whether a git command that only reads, run where this call runs, may do
 # more than read this repository's own state; anything git does not answer
 # counts as yes:
@@ -771,7 +847,7 @@ classify_bash() {
           echo checkpoint-ask
         elif [ "${entry#*=}" != "rollback" ]; then
           echo "${entry#*=}"
-        elif [ "${#words[@]}" -eq 4 ] && [[ "${words[3]}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && ! git_runs_configured; then
+        elif [ "${#words[@]}" -eq 4 ] && [[ "${words[3]}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] && ! git_runs_configured && ! git_filter_runs; then
           echo "rollback ${words[3]}"
         else
           echo mutate
@@ -876,6 +952,10 @@ for entry in "${UNGATED_TOOLS[@]}"; do
     exit 0
   fi
 done
+
+# The tool's name as the refusals and approval requests below show it
+# (plain_name): a diagnostic holds no secret (§6.7).
+shown_tool=$(plain_name "$tool_name")
 
 # Unbound: a tool this hook does not know, MCP tools included, is a mutate
 # (§5.18.2), and its refusals and its approval request name no capability.
@@ -1045,10 +1125,10 @@ records_named=$(printf '%s' "$payload" | jq -r "$RECORD_TEXTS_JQ"'
   | if ($t | length) > 4096 or ([$t[] | utf8bytelength | select(. <= 4096)] | add // 0) > 65536 then "over"
     elif any($t[]; records or (length <= 4096 and (lexical | records))) then "named"
     else "no" end' 2>/dev/null) || block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
-records_refusal="F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write"
+records_refusal="F504 CONSTRAINT_VIOLATED: ${shown_tool} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write"
 case "$records_named" in
   no) ;;
-  over) block "F504 CONSTRAINT_VIOLATED: ${tool_name}'s input holds more than 4096 strings and member names, or more than 65536 bytes of strings of at most 4096 bytes, more than this hook reads for paths into the layer's records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/, .claude/audit.head) in its time limit, so the call is blocked." ;;
+  over) block "F504 CONSTRAINT_VIOLATED: ${shown_tool}'s input holds more than 4096 strings and member names, or more than 65536 bytes of strings of at most 4096 bytes, more than this hook reads for paths into the layer's records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/, .claude/audit.head) in its time limit, so the call is blocked." ;;
   *) block "${records_refusal}." ;;
 esac
 
@@ -1637,7 +1717,7 @@ if command -v git > /dev/null 2>&1; then
   esac
 fi
 if [ "${#holders[@]}" -gt 0 ] && [ "${#resolved[@]}" -gt 0 ] && resolved_match -Fxi "${holders[@]}"; then
-  block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the directory that holds the layer's records (the project's .claude, its git directory's acs/), which only the plugin's hooks write: moving or removing it, or writing into it, removes or replaces the checkpoint marker and the audit log's head."
+  block "F504 CONSTRAINT_VIOLATED: ${shown_tool} names the directory that holds the layer's records (the project's .claude, its git directory's acs/), which only the plugin's hooks write: moving or removing it, or writing into it, removes or replaces the checkpoint marker and the audit log's head."
 fi
 
 # mutate: a valid marker for this call alone.
@@ -1764,11 +1844,11 @@ mv "${claim}/marker" "${used_dir}/$(safe "$checkpoint_id").$(safe "$call_id").${
 rmdir "$claim"
 
 if [ "$unbound" = 1 ]; then
-  reason="F502 APPROVAL_REQUIRED: ${tool_name} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
+  reason="F502 APPROVAL_REQUIRED: ${shown_tool} (unbound: treated as a mutation, STANDARD 1.2.0 §5.18.2) requires approval; it runs only if this call is approved."
 elif [ "$unseen" = 1 ]; then
-  reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
+  reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate': the shell commands a skill's file embeds, and the hooks and MCP servers a subagent's definition names, run with no hook seeing them) requires approval; it runs only if this call is approved."
 else
-  reason="F502 APPROVAL_REQUIRED: ${tool_name} (capability 'mutate') requires approval; it runs only if this call is approved."
+  reason="F502 APPROVAL_REQUIRED: ${shown_tool} (capability 'mutate') requires approval; it runs only if this call is approved."
 fi
 ask_person "$reason"
 exit 0

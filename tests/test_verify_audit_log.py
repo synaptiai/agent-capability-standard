@@ -240,11 +240,13 @@ class TestVerifyLog:
         shutil.which("bash") is None or shutil.which("jq") is None,
         reason="the hook needs bash and jq",
     )
-    def test_line_separators_inside_a_name_verify(self, tmp_path: Path) -> None:
-        """U+0085, U+2028 and U+2029 inside a logged name are not line breaks.
+    def test_line_separators_inside_a_value_verify(self, tmp_path: Path) -> None:
+        """U+0085, U+2028 and U+2029 inside a logged value are not line breaks.
 
         jq -c writes them raw, and the hook chains on lines split at "\\n"
-        only; str.splitlines() would split the entry in two.
+        only; str.splitlines() would split the entry in two. The value is a
+        call id: a skill's name holding them is written [REDACTED] (security
+        round 5: a name outside the plain grammar may hold a secret).
         """
         env = {
             **os.environ,
@@ -253,7 +255,11 @@ class TestVerifyLog:
         }
         calls = [
             {"tool_name": "Read", "tool_input": {"file_path": "/work/a.md"}},
-            {"tool_name": "Skill", "tool_input": {"skill": "x\u2028y\u0085z\u2029"}},
+            {
+                "tool_name": "Skill",
+                "tool_use_id": "x\u2028y\u0085z\u2029",
+                "tool_input": {"skill": "x\u2028y\u0085z\u2029"},
+            },
             {"tool_name": "Read", "tool_input": {"file_path": "/work/b.md"}},
         ]
         for call in calls:
@@ -269,7 +275,8 @@ class TestVerifyLog:
         log_file = tmp_path / ".claude" / "audit.log"
         raw = log_file.read_text(encoding="utf-8")
         assert raw.count("\n") == 3
-        assert "\u2028" in raw, "the name is written raw, as the test intends"
+        assert "\u2028" in raw, "the call id is written raw, as the test intends"
+        assert '"skill":"[REDACTED]"' in raw
         assert verify_log(log_file, HMAC_KEY) == (3, 3, [])
 
     def test_valid_chain_passes(self, tmp_path: Path) -> None:

@@ -17,6 +17,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,29 @@ from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 # =============================================================================
 # Shared fixtures
 # =============================================================================
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_git_configuration_but_the_tests() -> Iterator[None]:
+    """Every test, and every git, hook and adapter it runs, sees no system
+    and no user git configuration (GIT_CONFIG_NOSYSTEM, and an empty
+    GIT_CONFIG_GLOBAL), as on a machine where none is set: the classifiers
+    read configuration in any scope (a smudge filter there, git-lfs's from
+    `git lfs install`, gives a git change that writes the tree, and a
+    restore, the worst case), so a test's classes would otherwise depend on
+    the machine. A test that needs a user configuration sets its own
+    (``GIT_CONFIG_GLOBAL``, or ``HOME`` with the variable removed)."""
+    patch = pytest.MonkeyPatch()
+    with tempfile.TemporaryDirectory(prefix="acs-git-config-") as where:
+        empty = Path(where) / "config"
+        empty.write_text("", encoding="utf-8")
+        patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        patch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+        patch.delenv("GIT_CONFIG_SYSTEM", raising=False)
+        try:
+            yield
+        finally:
+            patch.undo()
 
 
 @pytest.fixture

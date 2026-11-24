@@ -19,13 +19,16 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #   - action_id: the call's tool_use_id, or <timestamp>-<pid>-<8 hex digits>
 #   - timestamp: ISO 8601 (UTC)
 #   - actor: "agent"
-#   - intent: "<tool> call"
+#   - intent: "<tool> call", the tool's name as tool shows it
 #   - status: "executed" (PostToolUse) or "failed" (PostToolUseFailure)
-#   - tool: the tool's name
+#   - tool: the tool's name, as plain_name shows it (below: the name when it
+#     is plain and holds no credential the secret scan recognises, else
+#     [REDACTED])
 #   - call_id: the call's tool_use_id, when the input names one
 #   - details: {"event": the hook event, "skill": the skill name (on a Skill
-#     call only), "input_sha256": SHA-256 of the tool input, taken over its
-#     compact JSON with sorted keys (jq -cS .tool_input), or "unavailable"}
+#     call only; the model chooses it, so plain_name shows it too),
+#     "input_sha256": SHA-256 of the tool input, taken over its compact JSON
+#     with sorted keys (jq -cS .tool_input), or "unavailable"}
 #   - recorded_by: the layer and the configuration that decided the call
 #     (STANDARD 1.2.0 §5.18.8): {name: "agent-capability-standard plugin
 #     hooks", version: the plugin.json version (or "unknown"), config_sha256:
@@ -36,7 +39,8 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #   - hmac: HMAC-SHA-256 of the line without hmac, as written
 #
 # The tool input itself is never written: a command, a file's content or a
-# skill's arguments can hold a credential. The digest lets a reader who holds
+# skill's arguments can hold a credential, and so can the skill's name, which
+# is written only as plain_name shows it. The digest lets a reader who holds
 # an input confirm that it is the one that ran.
 #
 # The HMAC chain makes a change detectable: changing or removing an entry
@@ -241,11 +245,95 @@ status="executed"
 [[ "$event" == "PostToolUseFailure" ]] && status="failed"
 call_id=$(printf '%s' "$input" | jq -r '.tool_use_id | strings' 2>/dev/null || echo "")
 
-# The skill name is recorded for a Skill call only
+# BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
+# secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
+SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
+# A quote, or an escaped one (\" in JSON text inside a JSON string)
+SECRET_Q="\\\\*[\"']"
+# A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions)
+SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
+SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
+SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+# The rules are ASCII, read byte by byte (LC_ALL=C, in a subshell): a multibyte locale sends some of them to a matcher whose time grows with the square of the text
+secret_in() (
+  LC_ALL=C
+  export LC_ALL
+  printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
+  # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
+  printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']" && return 0
+  # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once)
+  printf '%s' "$1" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
+    sed -E 's#^.*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+  # An Authorization header's value, 8 or more characters with letters and digits
+  printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
+    sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//" |
+    sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # ... or after any other scheme (ApiKey, SSWS, Bot) and spaces: the first word may be the scheme or the credential, so both readings count
+  printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}" |
+    sed -E 's/^.* //' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
+  printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+    sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*\\\\*[\"']//" |
+    sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
+    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # ... and the same after any other scheme
+  printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+    sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.* //" |
+    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # A user option's password (curl -u user:password), 8 or more characters with letters and digits
+  printf '%s' "$1" | grep -Eo -- "$SECRET_USER[^[:space:]\"'\\\\]{8,}" |
+    sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  # An unquoted value of 12 or more characters with letters and digits, assigned or given to a credential option
+  printf '%s' "$1" | grep -Eio -- "$SECRET_OPT[[:space:]]+[^-[:space:]\"'][^[:space:]\"']{11,}" |
+    sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+  printf '%s' "$1" | grep -Eio -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
+    sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
+)
+# END secret-scan
+
+# BEGIN plain-name (the same in the pre-tool-use hook and the log hook; tests/test_hooks_unit.py keeps them so)
+# A tool's or a skill's name as a record or a diagnostic shows it (STANDARD
+# 1.2.0 §6.7, §6.4, §9.8): the model chooses a skill's name (an MCP skill
+# address is any text after a server's name), and an MCP server its tools'.
+# The name itself when it is 1 to 128 ASCII letters, digits, `.`, `_`, `:`
+# or `-` and the secret scan (secret_in) finds no credential in it; else
+# [REDACTED], the whole name: a digest of a name that is a secret alone could
+# be inverted by guessing. A scan that cannot answer (no grep: a status other
+# than 0 or 1) counts as one that found a credential. Claude Code's own
+# tools' names, which hold none, are shown without the scan's time.
+plain_name() {
+  local status=0
+  case "$1" in
+    Bash | Read | Write | Edit | MultiEdit | NotebookEdit | Glob | Grep | LS | WebFetch | WebSearch | Skill | Agent | Task | TodoRead | TodoWrite | TaskList | TaskGet | TaskCreate | TaskUpdate | TaskOutput | BashOutput | ToolSearch | ExitPlanMode | AskUserQuestion)
+      printf '%s' "$1"
+      return 0
+      ;;
+  esac
+  if (LC_ALL=C; [[ "$1" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]); then
+    (set +o pipefail; secret_in "$1") || status=$?
+    if [ "$status" = 1 ]; then
+      printf '%s' "$1"
+      return 0
+    fi
+  fi
+  printf '%s' '[REDACTED]'
+}
+# END plain-name
+
+# The tool's name, and a Skill call's skill name (recorded for a Skill call
+# only), as plain_name shows them: the line is signed, so a secret written
+# into it could not be taken out without breaking the chain.
+shown_tool=$(plain_name "$tool_name")
 skill=""
 if [[ "$tool_name" == "Skill" ]]; then
   skill=$(printf '%s' "$input" | jq -r '.tool_input.skill | strings' 2>/dev/null || echo "")
-  skill="${skill:-unknown}"
+  if [ -n "$skill" ]; then
+    skill=$(plain_name "$skill")
+  else
+    skill="unknown"
+  fi
 fi
 
 # SHA-256 (hex) of stdin, by whichever tool the system has
@@ -437,7 +525,7 @@ _do_append() {
     --arg action_id "$action_id" \
     --arg ts "$ts" \
     --arg status "$status" \
-    --arg tool "$tool_name" \
+    --arg tool "$shown_tool" \
     --arg call_id "$call_id" \
     --arg event "$event" \
     --arg skill "$skill" \

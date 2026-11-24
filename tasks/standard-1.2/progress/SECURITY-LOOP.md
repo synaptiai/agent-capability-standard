@@ -526,7 +526,10 @@ approval, no destination check.
   `test_a_command_that_reaches_another_host_gets_the_worst_case`, and `npm
   list` joins `test_a_destination_policy_refuses_them`; all failed before.
   `pip list` and `pip show` stay as round 2 left them: pip reads no
-  project-level configuration.
+  project-level configuration. (Wrong, as security round 5, batch 2 #2
+  showed: pip reads the site configuration `sys.prefix/pip.conf`, which an
+  in-project virtual environment keeps from the repository, and runs the
+  program its `python =` names; both are now off the list.)
 
 #### 15. docker ps, images and logs reach the daemon DOCKER_HOST names (medium; sibling of 12)
 
@@ -6326,3 +6329,246 @@ check that cannot complete to refuse.
   each now refuses or gates in time. No CLI or nested agent was started;
   the git and jq processes the old hooks left waiting on FIFOs were
   killed; the scratch repositories were removed.
+
+### Batch 2: four reported defects
+
+Four defects, each reproduced by an independent verifier on 4d17c00, and
+reproduced again here on cd2a2d0 before any change (probes under `timeout
+120` and a 4 GB address-space limit, in scratch directories since
+removed): the log hook wrote a `Skill` call's skill name `ghp_...`
+verbatim into a signed line (the chain verified with the token in it);
+`ToolCapabilityMapper` gave `pip list` and `pip show pip` `observe` (the
+plugin hook gated both); with git-lfs's filter in a scratch `HOME`'s
+configuration and a repository whose `.lfsconfig` names a local listener,
+`git reset --hard origin/data` was `mutate` alone and POSTed the object id
+to `/lfs/objects/batch` twice, and a restore of a recorded checkpoint
+holding a pointer the store lacks passed the plugin's hook with no marker
+and no approval; and `ls in.txt; <in.txt` was `observe`. None was fixed by
+an earlier batch: round 4 batch 5 #1 redacted tool names in the binding
+and the Python adapter, not in the plugin's log hook; round 1 #14 kept
+`pip list` and `pip show` on the list ("pip reads no project-level
+configuration", corrected there); round 3's git configuration rule read
+the repository's own scopes only; and `_simple_commands` dropped every
+command with no words. Each fix has tests that fail on the code before it
+(below).
+
+#### 1. The log hook wrote the model-chosen skill name verbatim into every action record (low); siblings: the tool's name in the record and in the pre-tool-use hook's diagnostics
+
+`posttooluse_log_tool.sh` read `.tool_input.skill` and wrote it into
+`details.skill` unchecked, though its own header says the input is never
+written because it can hold a credential, and the line is HMAC-signed, so
+a secret there cannot be taken out without breaking the chain (§6.7: no
+secret in an audit record). The verifier showed that in Claude Code the
+name is a registered skill's but for the feature-gated MCP skill address
+(`<server>:<scheme>:...`), any text after a connected server's name.
+
+- Fix: `plain_name` (one block in the log hook and the pre-tool-use hook,
+  kept equal by a test) shows a name as written only when it is plain (1
+  to 128 ASCII letters, digits, `.`, `_`, `:` or `-`, checked in the C
+  locale) and the plugin's secret scan (`secret_in`, now also copied into
+  the log hook, run without pipefail) answers no (status 1); otherwise,
+  and when the scan cannot answer (no grep: 127), `[REDACTED]`, the whole
+  name (§6.7 forbids the digest of a secret alone, which a name may be).
+  Claude Code's own tools' names skip the scan (it cost 40 ms a call).
+- Sibling (found here): the record's `tool` and `intent` (an MCP server
+  names its tools) go through `plain_name` too; and the pre-tool-use
+  hook's diagnostics (§9.8, §6.7) named the tool verbatim (the F502
+  reason for an unbound tool, the records guard's F504s): they name
+  `shown_tool`, computed once after the ungated tools have passed.
+- Checked, not changed: `call_id` and `action_id` (the API's
+  `tool_use_id`), the take hook's marker (a validated commit id), the
+  stop hook (writes no name); the Python adapter and the binding redact
+  tool names already (round 4 batch 5 #1; the adapter records no skill
+  name).
+- Tests: `test_hooks_unit.py` `TestNamesHoldNoSecret`: the two blocks and
+  the scan copy equal; a skill name holding a GitHub token, an AWS key id,
+  an Anthropic key, an MCP skill address with a token, `x_<token>`, a
+  `token:` pair, and names outside the grammar (129 characters, a blank,
+  a slash, an `@`, `prüfen`) are `[REDACTED]`, the log holds none and the
+  chain verifies; an empty name stays `unknown`; an MCP tool name with a
+  token is `[REDACTED]` in `tool` and `intent`; plain names kept (control);
+  a scan with no grep redacts (Claude Code's tools need no scan); the
+  grammar is ASCII in a UTF-8 locale; the pre-tool-use hook's F502 reason
+  for `mcp__srv__<token>` holds no token, and a plain tool is named
+  (control). `test_non_ascii_skill_name_verifies` and
+  `test_line_separators_inside_a_name_verify` keep their purpose (the
+  verifier recomputes the HMAC of non-ASCII text and of U+2028 inside a
+  value) with the text in the call id; the skill name is now
+  `[REDACTED]` there. On cd2a2d0's hooks 21 fail and the 6 controls pass.
+- Cost: a gated MCP call's pre-tool-use run 51 to 55 ms, a log run 171 to
+  192 ms (a built-in tool; a `Skill` call adds one scan).
+
+#### 2. `pip list` and `pip show` were `observe`, but pip runs code the repository's virtual environment names (medium)
+
+pip reads the site configuration `sys.prefix/pip.conf` (even with
+`--isolated`), which an activated in-project `.venv` keeps from the
+repository (`python -m venv .venv` does not replace it), and re-runs itself
+under the program its `[global] python =` names; the interpreter it starts
+runs every `.pth` file of its site-packages (a shipped one, or the one an
+editable install of the project writes). The mapper's allow-list held
+both, so the repository's program ran with no checkpoint, no approval and
+no destination check; the plugin hook never listed pip.
+
+- Fix: both entries are off `_READ_ONLY_COMMANDS` (the worst case, as
+  `npm list` in round 1), with `_SUBCOMMAND_OPTIONS` (now empty) and the
+  `pip` branch of `_writes` and `pip` in `_ARGUMENT_WRITERS` (dead code).
+  The round-1 note in this record is corrected; the SDK guide, SECURITY.md
+  §5.5 and CHANGELOG say so.
+- Siblings checked: no other read-only entry is a program an interpreter
+  of the environment runs (`which` and `locate` are shell or C programs
+  that read no project configuration); `python -m pip` was already the
+  worst case (an interpreter); `pip3` was never listed.
+- Tests: `test_bash_classification.py`: `pip list` (plain, `--format`,
+  `--isolated`, `--disable-pip-version-check --isolated -l`) and `pip show`
+  (`-f`, `--isolated`) moved to the worst case, `pip list` and `pip show
+  pip` refused F504 under a policy, and the premise
+  `test_pip_runs_the_program_a_shipped_venv_configuration_names` (a venv
+  made over a shipped `.venv/pip.conf`; `pip list`, `pip show pip`, `pip
+  list --isolated` run `tools/py`); `test_hook_lists_match_mapper.py`
+  `test_pip_is_gated_in_both` (the hook and the mapper gate `pip list`,
+  `pip show pip`, `pip list --isolated`, `"pip" list`, and `pip3 list`, a
+  control). On cd2a2d0's mapper 15 fail and the control passes.
+
+#### 3. A git change that writes the tree, and a recorded restore, ran git-lfs's smudge filter from the user's configuration, which asks the LFS server the repository names (medium)
+
+`git lfs install` writes `filter.lfs.smudge` and `process` to the user's
+configuration; the repository's attributes decide that the filter runs
+and its `.lfsconfig` where git-lfs connects; for each pointer whose object
+the store lacks, a write of the work tree POSTs the object id (which the
+agent can choose by writing a pointer before `git stash create`) to that
+server. The mapper read the local and worktree scopes only, so `git reset
+--hard` was `mutate` (no `send`: no destination check), and a restore of a
+recorded checkpoint was `rollback` in the mapper and passed the plugin's
+hook with no marker and no approval. Reads run no smudge (the verifier
+measured none).
+
+- Fix (mapper): `git_filter_may_run(cwd)` (a replaceable
+  `ToolCapabilityMapper.git_filter_may_run`; a lookup that fails is a yes)
+  asks `git config -z --get-regexp '^filter\..+\.(smudge|process)$'` in
+  every scope; any value but the two `git lfs install --skip-smudge`
+  writes, as written (`_SKIPPING_SMUDGE`; probed: they ask no server), is
+  a yes, as is no git, a git error or a timeout; no repository is a no. A
+  local change that writes the tree (`git reset`, `git checkout --`, every
+  `git stash` form: `_writes_tree`) and a recorded restore take the worst
+  case there; `git clean`, `git branch -d`, the reads and `git stash
+  create` keep their classes.
+- Fix (hook): `git_filter_runs` asks the same (the NUL-separated listing
+  turned into lines, so a value with a line break or a tab is no skip
+  command), and a restore is `rollback` only where it says no; the hook's
+  other git changes are a gated `mutate` already. A test keeps the
+  pattern and the two commands the mapper's.
+- Checked: `git stash apply <commit>` runs `post-index-change` alone of
+  git's hooks (probed with every hook present), which the restore check
+  reads; git-lfs's `post-checkout` gates a change already. The user's
+  global merge, diff and textconv drivers stay ungated (they run the
+  user's programs, which reach no host a repository names).
+- Test isolation (found here): this machine's system configuration holds
+  git-lfs's `--skip` filter, and a GitHub runner's the plain one; with the
+  plain one, 51 existing tests of restores and tree-writing changes
+  failed. `tests/conftest.py` now gives every test an empty user and no
+  system configuration (`GIT_CONFIG_NOSYSTEM`, an empty
+  `GIT_CONFIG_GLOBAL`), and `test_git_config_programs.py`'s `home`
+  fixture removes `GIT_CONFIG_GLOBAL` so its `HOME` is the user's; with a
+  plain git-lfs system configuration in the outer environment the git
+  test files then pass (1273).
+- Tests: `test_git_config_programs.py` `TestFiltersInAnyScope`: the
+  premise with git-lfs and a local LFS server (classified before the
+  write, with no git-lfs hook yet: `git reset --hard origin/data` asks
+  `POST /lfs/objects/batch` with the oid; with `--skip-smudge`, nothing);
+  eight tree-writing changes the worst case; a recorded restore the worst
+  case for git-lfs's smudge, its process, another smudge, an empty one,
+  and a skip smudge beside another process; the system and command scopes
+  count; the controls (skip-smudge restore `rollback`, `git reset`
+  `mutate`; with git-lfs, `git clean`, `git branch -d`, reads and `git
+  stash create` unchanged); no repository a no, a failed lookup a yes;
+  F504 under a destination policy (and no decision without the filter);
+  the hook gates the recorded restore F501 as the mapper does (git-lfs,
+  another smudge; skip-smudge passes, a control); a value with a line
+  break is no skip command; one pattern and one exception in both. On
+  cd2a2d0's mapper and hook 22 fail and the 2 controls pass (the pattern
+  test was added after that run).
+
+#### 4. A simple command of a redirection alone was dropped, but zsh runs READNULLCMD for it (medium)
+
+`_simple_commands` returned only the commands with words, so `ls; <f`,
+`ls | <f` and `cat f && <f` were `observe`. bash runs nothing for `<f`;
+zsh, the Bash tool's shell where it is the user's (macOS's default), runs
+`$READNULLCMD <f`, a pager (less on macOS, Debian's `pager`), which a
+`LESSOPEN` or lesskey `|-` preprocessor makes run code, and `$NULLCMD`
+for an output redirection.
+
+- Fix: the reading keeps the indices of the simple commands that hold a
+  redirection; a line where one of them has no words takes the worst case.
+  A command with neither (`ls;`, `ls &`) still runs nothing.
+- The plugin's hook gated these already (it refuses `<`, `;`, `|` and `&`
+  anywhere).
+- Siblings checked (zsh with its default options): `<(...)`, `=(...)`,
+  glob qualifiers and `<1-5>` need parentheses or angle brackets the
+  reading refuses; `&!`, `&|` and `|&` read as an unlisted word or an
+  operator it refuses; `=cmd` expands to a command's absolute path, never
+  an option. Not seen, as before (now said in SECURITY.md §5.1 and the
+  hooks' README): the options, aliases and functions the user's startup
+  files set; with `EXTENDED_GLOB`, `^`, `#` and `~` are pattern
+  characters too (`find . -delete#`, `uniq a#`), read as text.
+- Tests: `test_bash_redirections_and_braces.py`
+  `TestRedirectionWithNoCommand` (bash runs nothing for `<in.txt`; zsh
+  runs `$READNULLCMD`, skipped without zsh; eleven lines the worst case:
+  after or before an allow-listed command, behind `|`, `&&`, `||`, `&`,
+  and the output forms `>/dev/null`, `2>/dev/null`, `>&2`), five controls
+  in `CONTROLS` (`ls;`, `ls &`, `<in.txt cat`, `>/dev/null ls`, `cat
+  in.txt < in.txt`), the adapter's F501 and F504 and the hook's F501 for
+  the first. On cd2a2d0's mapper 11 fail (`ls; 2>/dev/null` passes: its
+  `2` was already read as a command) and the controls pass.
+
+#### Documentation
+
+SECURITY.md §5.1 (a restore and the user's filters; the tool named as
+the log hook records it; the user's shell options), §5.2 (the names in
+the log line) and §5.5 (`pip`, a redirection with no command, a change
+that writes the tree and a restore where a smudge filter is configured);
+the hooks' README (the record's fields, the restore, the shell options);
+the log hook's and the pre-tool-use hook's headers; the SDK guide
+(`docs/integrations/claude_agent_sdk.md`: the classifier's text and
+table); CHANGELOG [Unreleased] Upgrading (the SDK classifier entry and
+the plugin's round-5 entry). The Standard's text was not changed:
+§5.18.3 already classifies by effect, with the worst case where the layer
+cannot tell, and §6.7 already forbids a secret in an audit record or a
+diagnostic.
+
+#### Checks after batch 2
+
+- Python: `pytest tests/` file by file, each run under `timeout 120` and a
+  4 GB address-space limit (`tests/test_redaction.py` and
+  `tests/test_skill_hooks.py` in chunks of 100 node ids, a chunk that ran
+  out of time again in chunks of 20): 7682 passed, 19 skipped, of 7701
+  collected (7616 before, plus the 85 new; the new skip is the zsh premise,
+  no zsh here). The git test files also pass with a plain git-lfs filter
+  in the outer environment's system configuration (1273). ruff check and
+  format with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the five generators'
+  `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed; not rebuilt.
+- TypeScript: the package's build and test (2056 passed); the binding's
+  check and test (263 passed, 2 skipped). No TypeScript source changed:
+  neither classifies shell commands nor runs a hook, and the binding and
+  the adapter redact tool names already.
+- Old code: the new tests against cd2a2d0's `hooks/` and
+  `grounded_agency/capabilities/mapper.py` (copied in place, then
+  restored): #1 21 of 27 fail (6 controls pass), #2 15 of 16 (`pip3
+  list`, a control, passes), #3 22 of 24 (2 controls pass; the
+  one-pattern test, added after, was not run there), #4 11 of 12 worst-case
+  and adapter tests fail (`ls; 2>/dev/null` passes), and its controls and
+  hook tests pass.
+- Probes, each under `timeout 120` and a 4 GB address-space limit: the
+  log hook with a skill name holding a GitHub token, an AWS key id, an
+  Anthropic key and an MCP skill address, and an MCP tool name with a
+  token (each `[REDACTED]`, no token in the log, the chain verifies); `pip
+  list` and `pip show pip` (the worst case); with git-lfs's filter in a
+  scratch `HOME` and a local LFS listener, `git reset --hard origin/data`
+  (the worst case; run, it POSTed the object id to the listener) and a
+  recorded restore of a pointer the store lacks (the hook: F501, was
+  allowed in `default` and `bypassPermissions`; with `--skip-smudge`
+  nothing was asked of the server); `ls in.txt; <in.txt` and its forms
+  (the worst case). No CLI or nested agent was started; the listener was
+  stopped; the scratch repositories were removed.

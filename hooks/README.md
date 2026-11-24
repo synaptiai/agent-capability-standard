@@ -288,8 +288,9 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   options included; `git stash create` takes a
   checkpoint; `git stash list` and `git stash show` only read; `git stash pop
   <commit>` and `git stash apply <commit>` restore one (`rollback`) when
-  `<commit>` is the full id of a commit a checkpoint recorded and the call
-  runs in the project's repository; any
+  `<commit>` is the full id of a commit a checkpoint recorded, the call
+  runs in the project's repository and no smudge filter is configured
+  (below); any
   other `pop` or `apply`, a bare one included, is `mutate`, since git applies
   any merge commit as if it were a stash; any other `git stash` form
   is `mutate`; a command on the read-only list (`ls`, `cat`, `head`, `tail`,
@@ -309,7 +310,9 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   environment, direnv's `PATH_add`; not where the project is the home
   directory, or holds it), or nowhere. The entries the Bash tool adds from
   the user's shell startup files (its shell snapshot) reach no hook and are
-  not seen; the SDK mapper reads the CLI's `PATH` the same way. A git command that would only read (`git stash list` and
+  not seen, nor are the aliases, functions and shell options those files
+  set (with zsh's `EXTENDED_GLOB`, `^`, `#` and `~` are pattern characters
+  too, read here as text); the SDK mapper reads the CLI's `PATH` the same way. A git command that would only read (`git stash list` and
   `git stash show` included) is `mutate` where the call's directory (the
   payload's `cwd`, else the project directory) is in a partial clone (a
   promisor remote, or `extensions.partialClone`), in a repository with
@@ -335,8 +338,16 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   `.git`, or one approved `git config core.fsmonitor ./x`, brings them. There
   a read and a restore are `mutate`, and `git stash create` is put to a
   person with no marker asked for (only it makes one; `F502` in a mode that
-  asks no one). The user's own configuration (global, system) gates
-  nothing. The hooks' own git commands run with `core.fsmonitor` and hooks
+  asks no one). The user's own configuration (global, system) gates no
+  read and no `git stash create`, but a restore is `mutate` wherever any
+  scope, the user's included, configures a filter's `smudge` or `process`
+  command (security round 5): git runs it when it writes the tree, and
+  git-lfs's, which `git lfs install` writes to the user's configuration,
+  asks the LFS server the repository's `.lfsconfig` or remote names for each
+  object its store lacks, sending the object's id. The two commands `git
+  lfs install --skip-smudge` writes (`git-lfs smudge --skip -- %f`,
+  `git-lfs filter-process --skip`), which ask no server, count as none.
+  The hooks' own git commands run with `core.fsmonitor` and hooks
   turned off and no object fetched (`hgit`), and the take hook's clean-tree
   check with the repository's filters turned off.
 - Any other tool (`Monitor` and `PowerShell`, which run commands,
@@ -540,11 +551,11 @@ Each entry is an action record with these fields, in this order:
 | `action_id` | The call's `tool_use_id`, or `<timestamp>-<pid>-<8 hex digits>` when the input names none |
 | `timestamp` | Time of the entry, ISO 8601 in UTC |
 | `actor` | `agent` |
-| `intent` | `<tool> call` |
+| `intent` | `<tool> call`, the tool's name as `tool` shows it |
 | `status` | `executed` (the call succeeded, `PostToolUse`) or `failed` (`PostToolUseFailure`) |
-| `tool` | Tool name |
+| `tool` | Tool name, as written when it is plain (1 to 128 ASCII letters, digits, `.`, `_`, `:` or `-`) and the secret scan (`hooks/secret_scan.sh`) finds no credential in it, else `[REDACTED]` (STANDARD 1.2.0 §6.7: an MCP server names its tools) |
 | `call_id` | The call's `tool_use_id`, when the input names one |
-| `details` | `event` (the hook event), `skill` (the skill name, on a `Skill` call only) and `input_sha256`: SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (no SHA-256 tool, or the one used fails) |
+| `details` | `event` (the hook event), `skill` (the skill name, on a `Skill` call only, shown as `tool` is: the model chooses it, and an MCP skill address is any text after a server's name, so one that is not plain or holds a credential is `[REDACTED]`) and `input_sha256`: SHA-256 of the tool input as compact JSON with sorted keys (`jq -cS .tool_input`), or `unavailable` when it cannot be computed (no SHA-256 tool, or the one used fails) |
 | `recorded_by` | The layer and the configuration that decided the call (STANDARD 1.2.0 §5.18.8): `name`, `version` (from `.claude-plugin/plugin.json`), `config_sha256` (SHA-256 of `hooks/hooks.json`) and `settings`, the effective `approval` (`ask`, or `off` with `ACS_HOOK_APPROVAL=off`) and `checkpoint_max_age_s` (`ACS_CHECKPOINT_MAX_AGE`, 1 to 1800, default 1800) |
 | `prev_hmac` | HMAC of the previous entry, empty on the first |
 | `hmac` | HMAC of this entry's other fields, as written |

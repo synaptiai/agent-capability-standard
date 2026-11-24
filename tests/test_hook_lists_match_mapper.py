@@ -384,15 +384,33 @@ def test_a_command_name_with_a_blank_or_a_slash_is_gated_in_both(
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
 @pytest.mark.parametrize(
-    "command", ["git status", 'git "status"', '"git" "status"', '"ls" -la', "pip list"]
+    "command", ["git status", 'git "status"', '"git" "status"', '"ls" -la', 'git "log"']
 )
 def test_a_quoted_name_without_a_blank_is_still_the_command(
     tmp_path: Path, command: str
 ) -> None:
     classified = mapper.ToolCapabilityMapper().map_tool("Bash", {"command": command})
     assert classified.capabilities == ("observe",), command
-    if not command.startswith("pip"):  # pip is on the mapper's list only
-        assert _hook(tmp_path, command).returncode == 0, command
+    assert _hook(tmp_path, command).returncode == 0, command
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="the hook needs jq")
+@pytest.mark.parametrize(
+    "command",
+    ["pip list", "pip show pip", "pip list --isolated", '"pip" list', "pip3 list"],
+)
+def test_pip_is_gated_in_both(tmp_path: Path, command: str) -> None:
+    """pip runs the program its site configuration's `python =` names (an
+    in-project virtual environment's pip.conf, repository content) and its
+    interpreter runs the site-packages' .pth files: neither list holds a pip
+    command (security round 5: the mapper's held `pip list` and `pip show`,
+    which were `observe` there and gated by the hook)."""
+    classified = mapper.ToolCapabilityMapper().map_tool("Bash", {"command": command})
+    assert classified.capabilities == ("mutate", "send"), command
+    assert classified.requires_checkpoint and classified.requires_approval
+    result = _hook(tmp_path, command)
+    assert result.returncode == 2, command
+    assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
 
 
 def test_bash_runs_a_program_named_with_a_blank(tmp_path: Path) -> None:

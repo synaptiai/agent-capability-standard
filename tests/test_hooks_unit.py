@@ -466,17 +466,25 @@ class TestPostToolUseExitCodes:
         assert entry["details"]["input_sha256"] == input_digest(tool_input)
 
     @pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl needed")
-    def test_non_ascii_skill_name_verifies(self, tmp_path: Path) -> None:
-        """The verifier recomputes the HMAC the hook wrote for a non-ASCII name."""
+    def test_non_ascii_text_verifies(self, tmp_path: Path) -> None:
+        """The verifier recomputes the HMAC the hook wrote for non-ASCII text
+        (a call id holds it as given; a skill name outside the plain name
+        grammar is written [REDACTED], security round 5)."""
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "AUDIT_HMAC_KEY": "unit-test-key"}
         # characters jq and json.dumps could print differently: non-ASCII text,
         # a quote, a backslash, a control character and DEL
         names = ["prüfen", 'q"uo\\te', "tab\there", "del\x7fete"]
         for name in names:
-            payload = {"tool_name": "Skill", "tool_input": {"skill": name}}
+            payload = {
+                "tool_name": "Skill",
+                "tool_use_id": name,
+                "tool_input": {"skill": name},
+            }
             assert run_hook(POSTTOOLUSE_HOOK, payload, env).returncode == 0
 
-        assert [entry["details"]["skill"] for entry in read_entries(tmp_path)] == names
+        entries = read_entries(tmp_path)
+        assert [entry["call_id"] for entry in entries] == names
+        assert [entry["details"]["skill"] for entry in entries] == ["[REDACTED]"] * 4
         log_file = tmp_path / ".claude" / "audit.log"
         assert verify_log(log_file, "unit-test-key") == (4, 4, [])
 
@@ -1222,3 +1230,172 @@ class TestHookPatternParity:
         assert group["matcher"] == "*", "`*` matches every tool"
         (hook,) = group["hooks"]
         assert hook["type"] == "command"
+
+
+# ─── Names in records and diagnostics (security round 5, batch 2) ───
+
+# Credential shapes the secret scan recognises, as a skill or tool name.
+GITHUB_TOKEN = "ghp_A1b2C3d4E5A1b2C3d4E5A1b2C3d4E5A1b2C3d4E5AbCdEf"
+SECRET_NAMES = [
+    GITHUB_TOKEN,
+    "AKIAIOSFODNN7EXAMPLE",
+    "sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345",
+    f"docs-srv:skill://x/{GITHUB_TOKEN}/SKILL.md",
+    f"x_{GITHUB_TOKEN}",
+    "token:abcdef123456789",
+]
+# Names outside the plain grammar: shown [REDACTED] whatever they hold.
+ODD_NAMES = ["a" * 129, "two words", "a/b", "user@host", "prüfen", ""]
+PLAIN_NAMES = ["checkpoint", "anthropic-skills:pdf", "my.skill_v2", "a" * 128]
+
+
+def _block(path: Path, begin: str, end: str) -> str:
+    text = path.read_text(encoding="utf-8")
+    assert text.count(begin) == 1, path
+    start = text.index(begin)
+    return text[start : text.index(end, start) + len(end)]
+
+
+def _plain_name(name: str, path: str | None = None) -> str:
+    """plain_name of the log hook, with its copy of the secret scan."""
+    scan = _block(POSTTOOLUSE_HOOK, "# BEGIN secret-scan", "# END secret-scan")
+    plain = _block(POSTTOOLUSE_HOOK, "# BEGIN plain-name", "# END plain-name")
+    env = {**os.environ, "LC_ALL": "C.UTF-8"}
+    if path is not None:
+        env["PATH"] = path
+    bash = shutil.which("bash")
+    assert bash is not None
+    done = subprocess.run(
+        [bash, "-c", f'set -euo pipefail\n{scan}\n{plain}\nplain_name "$1"', "x", name],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+class TestNamesHoldNoSecret:
+    """The log hook wrote the Skill call's skill name, which the model
+    chooses (an MCP skill address is any text after a server's name), into
+    details.skill unchecked, and the tool's name into tool and intent: a
+    credential there reached an HMAC-signed line of .claude/audit.log
+    (STANDARD 1.2.0 §6.7, §6.4). Both now show a name only when it is
+    plain (1 to 128 ASCII letters, digits, `.`, `_`, `:`, `-`) and the
+    secret scan finds nothing in it, else [REDACTED]; the pre-tool-use
+    hook's diagnostics name the tool the same way."""
+
+    def test_the_two_hooks_hold_one_rule(self) -> None:
+        log = _block(POSTTOOLUSE_HOOK, "# BEGIN plain-name", "# END plain-name")
+        pre = _block(PRETOOLUSE_HOOK, "# BEGIN plain-name", "# END plain-name")
+        assert log == pre
+        source = (ROOT / "hooks" / "secret_scan.sh").read_text(encoding="utf-8")
+        scan = source[source.index("# BEGIN secret-scan") :].strip()
+        assert (
+            _block(POSTTOOLUSE_HOOK, "# BEGIN secret-scan", "# END secret-scan") == scan
+        )
+
+    @pytest.mark.parametrize("name", SECRET_NAMES + ODD_NAMES)
+    def test_a_skill_name_that_may_hold_a_secret_is_redacted(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "AUDIT_HMAC_KEY": "unit-test-key"}
+        payload = {
+            "hook_event_name": "PostToolUseFailure",
+            "tool_name": "Skill",
+            "tool_use_id": "toolu_01",
+            "tool_input": {"skill": name, "args": "x"},
+            "tool_response": "Unknown skill",
+        }
+        assert run_hook(POSTTOOLUSE_HOOK, payload, env).returncode == 0
+        (entry,) = read_entries(tmp_path)
+        expected = "unknown" if name == "" else "[REDACTED]"
+        assert entry["details"]["skill"] == expected
+        assert entry["tool"] == "Skill"
+        log_file = tmp_path / ".claude" / "audit.log"
+        if name:
+            assert name not in log_file.read_text(encoding="utf-8")
+        assert GITHUB_TOKEN not in log_file.read_text(encoding="utf-8")
+        assert verify_log(log_file, "unit-test-key") == (1, 1, [])
+
+    @pytest.mark.parametrize(
+        "name", [f"mcp__srv__{GITHUB_TOKEN}", "mcp__s__AKIAIOSFODNN7EXAMPLE"]
+    )
+    def test_a_tool_name_that_holds_a_secret_is_redacted(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "AUDIT_HMAC_KEY": "unit-test-key"}
+        payload = {"tool_name": name, "tool_use_id": "toolu_02", "tool_input": {}}
+        assert run_hook(POSTTOOLUSE_HOOK, payload, env).returncode == 0
+        (entry,) = read_entries(tmp_path)
+        assert entry["tool"] == "[REDACTED]"
+        assert entry["intent"] == "[REDACTED] call"
+        log_file = tmp_path / ".claude" / "audit.log"
+        assert name not in log_file.read_text(encoding="utf-8")
+        assert verify_log(log_file, "unit-test-key") == (1, 1, [])
+
+    @pytest.mark.parametrize("name", PLAIN_NAMES)
+    def test_a_plain_name_is_kept(self, tmp_path: Path, name: str) -> None:
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "AUDIT_HMAC_KEY": "unit-test-key"}
+        for payload in (
+            {"tool_name": "Skill", "tool_input": {"skill": name}},
+            {"tool_name": f"mcp__srv__{name}"[:128], "tool_input": {}},
+        ):
+            assert run_hook(POSTTOOLUSE_HOOK, payload, env).returncode == 0
+        skill, tool = read_entries(tmp_path)
+        assert skill["details"]["skill"] == name
+        assert tool["tool"] == f"mcp__srv__{name}"[:128]
+
+    def test_a_scan_that_cannot_run_redacts(self) -> None:
+        """With no grep the scan cannot answer (status 127): the name is
+        [REDACTED], never shown unscanned; Claude Code's own tools' names
+        need no scan."""
+        assert _plain_name("checkpoint") == "checkpoint"
+        assert _plain_name("checkpoint", path="/nonexistent") == "[REDACTED]"
+        assert _plain_name("Bash", path="/nonexistent") == "Bash"
+        assert _plain_name(GITHUB_TOKEN) == "[REDACTED]"
+
+    @pytest.mark.parametrize("name", ["prüfen", "ａbc", "ǅx"])
+    def test_the_grammar_is_ascii_in_any_locale(self, name: str) -> None:
+        assert _plain_name(name) == "[REDACTED]"
+
+    def test_the_pre_tool_use_hooks_approval_request_names_no_secret(
+        self, tmp_path: Path
+    ) -> None:
+        """The F502 reason for an unbound tool named its name verbatim."""
+        marker_dir = tmp_path / ".claude"
+        marker_dir.mkdir()
+        now = int(time.time())
+        (marker_dir / "checkpoint.ok").write_text(
+            json.dumps(
+                {"checkpoint_id": "chk_1", "created_at": now, "expires_at": now + 1800}
+            )
+        )
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        name = f"mcp__srv__{GITHUB_TOKEN}"
+        result = run_hook(PRETOOLUSE_HOOK, call(name, x="y"), env)
+        assert result.returncode == 0, result.stderr
+        reason = json.loads(result.stdout)["hookSpecificOutput"][
+            "permissionDecisionReason"
+        ]
+        assert reason.startswith("F502 APPROVAL_REQUIRED: [REDACTED] (unbound")
+        assert GITHUB_TOKEN not in result.stdout + result.stderr
+
+    def test_the_pre_tool_use_hook_names_a_plain_tool(self, tmp_path: Path) -> None:
+        marker_dir = tmp_path / ".claude"
+        marker_dir.mkdir()
+        now = int(time.time())
+        (marker_dir / "checkpoint.ok").write_text(
+            json.dumps(
+                {"checkpoint_id": "chk_1", "created_at": now, "expires_at": now + 1800}
+            )
+        )
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_hook(PRETOOLUSE_HOOK, call("mcp__github__push_files"), env)
+        assert result.returncode == 0, result.stderr
+        reason = json.loads(result.stdout)["hookSpecificOutput"][
+            "permissionDecisionReason"
+        ]
+        assert reason.startswith("F502 APPROVAL_REQUIRED: mcp__github__push_files (")

@@ -23,6 +23,15 @@ Security round 4, batch 2:
    at a `}` after its first comma (`sort {a},-o}x` is `sort a}x -ox`, in
    every locale), which the brace pattern missed, as it missed a group
    holding a space Unicode has but bash does not split at.
+
+Security round 5, batch 2:
+
+4. A simple command with a redirection and no words (`ls; <f`) runs
+   nothing in bash, and the classifier dropped it. zsh, the Bash tool's
+   shell where it is the user's (macOS's default), runs `$READNULLCMD <f`
+   for it, a pager (less on macOS, `pager` on Debian), which a LESSOPEN or
+   lesskey `|-` preprocessor makes run code, and `$NULLCMD` for an output
+   one. Such a line now takes the worst case.
 """
 
 from __future__ import annotations
@@ -109,6 +118,22 @@ BRACE_LINES = [
     "sort {'a',-o}x",
 ]
 
+# A simple command with a redirection and no words, after or before
+# allow-listed commands (the reported lines and the verifier's).
+REDIRECTION_ONLY_LINES = [
+    "ls in.txt; <in.txt",
+    "ls | <in.txt",
+    "cat in.txt && <in.txt",
+    "cat in.txt; < in.txt; ls",
+    "ls || <in.txt",
+    "ls & <in.txt",
+    "<in.txt; ls",
+    "ls; <in.txt >/dev/null",
+    "ls; >/dev/null",
+    "ls; 2>/dev/null",
+    "ls; >&2",
+]
+
 # Lines that read as before: no such form, or a harmless one.
 CONTROLS = [
     "git rev-parse @{u}",
@@ -124,6 +149,13 @@ CONTROLS = [
     "echo '{a,b}'",
     "echo {a\\,b}",
     "ls x}{a",
+    # A command with neither words nor a redirection runs nothing, and a
+    # redirection before a command's words is that command's.
+    "ls;",
+    "ls &",
+    "<in.txt cat",
+    ">/dev/null ls",
+    "cat in.txt < in.txt",
 ]
 
 
@@ -264,6 +296,50 @@ class TestBraceGroups:
             assert time.monotonic() - start < 2.0
 
 
+class TestRedirectionWithNoCommand:
+    """Defect 4 (security round 5, batch 2): a redirection with no command
+    runs READNULLCMD or NULLCMD in zsh."""
+
+    @needs_bash
+    def test_bash_runs_nothing_for_it(self, tmp_path: Path) -> None:
+        """In bash the redirection is made and nothing runs: why the
+        classifier, which reads bash's grammar, dropped it."""
+        (tmp_path / "in.txt").write_text("x\n", encoding="utf-8")
+        done = _run("<in.txt", tmp_path, {"READNULLCMD": "touch"})
+        assert done.returncode == 0 and done.stdout == ""
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["in.txt"]
+
+    @pytest.mark.skipif(shutil.which("zsh") is None, reason="needs zsh")
+    def test_zsh_runs_readnullcmd(self, tmp_path: Path) -> None:
+        """The premise: zsh runs `$READNULLCMD <in.txt` for `<in.txt`."""
+        (tmp_path / "in.txt").write_text("x\n", encoding="utf-8")
+        pager = tmp_path / "bin" / "pager"
+        pager.parent.mkdir()
+        pager.write_text(
+            f"#!/bin/sh\necho ran > {tmp_path / 'RAN'}\n", encoding="utf-8"
+        )
+        pager.chmod(0o755)
+        subprocess.run(
+            ["zsh", "-f", "-c", "ls in.txt; <in.txt"],
+            cwd=tmp_path,
+            env={**os.environ, "READNULLCMD": str(pager)},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert (tmp_path / "RAN").read_text(encoding="utf-8") == "ran\n"
+
+    @pytest.mark.parametrize("line", REDIRECTION_ONLY_LINES)
+    def test_the_line_takes_the_worst_case(
+        self, classify: ToolCapabilityMapper, line: str
+    ) -> None:
+        """They were `observe` (the first seven, and the last four, whose
+        redirection is to /dev/null or a descriptor: zsh runs NULLCMD), but
+        `ls; 2>/dev/null`, whose `2` this reading takes for a command."""
+        assert _worst(_bash(classify, line)), line
+
+
 @pytest.mark.parametrize("line", CONTROLS)
 def test_other_lines_still_read(classify: ToolCapabilityMapper, line: str) -> None:
     assert _bash(classify, line).capabilities == ("observe",), line
@@ -271,7 +347,13 @@ def test_other_lines_still_read(classify: ToolCapabilityMapper, line: str) -> No
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line", [VARIABLE_LINES[0], UNICODE_DIGIT_LINES[2], DOUBLE_BYTE_LINES[0]]
+    "line",
+    [
+        VARIABLE_LINES[0],
+        UNICODE_DIGIT_LINES[2],
+        DOUBLE_BYTE_LINES[0],
+        REDIRECTION_ONLY_LINES[0],
+    ],
 )
 async def test_the_adapter_gates_it(
     ontology_path: str, tmp_path: Path, line: str
@@ -299,6 +381,9 @@ async def test_the_adapter_gates_it(
         DOUBLE_BYTE_LINES[1],
         DOUBLE_BYTE_LINES[2],
         BRACE_LINES[2],
+        REDIRECTION_ONLY_LINES[0],
+        REDIRECTION_ONLY_LINES[1],
+        REDIRECTION_ONLY_LINES[6],
     ],
 )
 def test_the_plugin_hook_gated_it_already(tmp_path: Path, line: str) -> None:

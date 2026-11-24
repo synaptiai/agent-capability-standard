@@ -59,6 +59,24 @@ here and marked so.
   (`env["PATH"]`, `cwd`). A project settings file that is not a regular
   file (a FIFO, a link to `/dev/ptmx`) is unreadable, so every call is
   refused with R407, as the plugin's hooks refuse it.
+- Python SDK, the Bash classifier (security round 5, batch 2): `pip list`
+  and `pip show` are off the read-only list and get Bash's worst case
+  (`mutate` and `send`: a checkpoint, approval, and F504 under a
+  destination policy), since pip runs the program its site configuration's
+  `python =` names (`.venv/pip.conf`, which `python -m venv` keeps from the
+  repository, read even with `--isolated`) and its interpreter runs the
+  `.pth` files of its site-packages. So does a line with a simple command
+  that holds a redirection and no words (`ls; <f`: zsh runs
+  `$READNULLCMD <f`, a pager, for it). A local git change that writes the
+  work tree (`git reset`, `git checkout --`, `git stash ...`; it was
+  `mutate`) and the restore of a recorded checkpoint (it was `rollback`,
+  needing nothing) get the worst case wherever any scope, the user's
+  included, configures a filter's `smudge` or `process` command
+  (`ToolCapabilityMapper.git_filter_may_run`): git-lfs's, which `git lfs
+  install` writes, asks the LFS server the repository's `.lfsconfig` names
+  for each object its store lacks. With git-lfs installed, take a
+  checkpoint and approve a restore, or install it with `git lfs install
+  --skip-smudge`, whose two commands count as none.
 - Python SDK, `wrap_options()` (Changed): tools pre-approved in
   `allowed_tools` now count against the rate limit (raise
   `GroundedAgentConfig(rate_limit=...)` if an agent needs more); an error in
@@ -1261,6 +1279,20 @@ here and marked so.
     `cwd` and git's answers exactly; the persist, audit, send and rollback
     skills' hooks read a `file_path`, a `cwd` and a link target exactly
     too.
+  - Security round 5, batch 2. A restore of a recorded checkpoint (`git
+    stash pop|apply <commit>`) is a gated `mutate` (a marker and approval),
+    not a rollback, wherever any scope, the user's included, configures a
+    filter's `smudge` or `process` command: git-lfs's, which `git lfs
+    install` writes to the user's configuration, asks the LFS server the
+    repository's `.lfsconfig` names for each object its store lacks,
+    sending the object's id. The two commands `git lfs install
+    --skip-smudge` writes count as none. The log hook writes a tool's name
+    (`tool`, `intent`) and a `Skill` call's skill name (`details.skill`)
+    only when it is plain (1 to 128 ASCII letters, digits, `.`, `_`, `:`
+    or `-`) and the plugin's secret scan finds no credential in it, else
+    `[REDACTED]`: the model chooses a skill's name, and the line is signed,
+    so a secret in it could not be taken out. The pre-tool-use hook's
+    refusals and approval requests name the tool the same way.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,

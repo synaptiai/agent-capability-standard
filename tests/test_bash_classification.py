@@ -11,6 +11,8 @@ if it were a stash, so anything else is a gated mutation.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -372,6 +374,16 @@ def test_read_only_arguments_stay_read_only(
         "docker ps",
         "docker images 'leak*'",
         "docker logs secret-data-leaked",
+        # pip runs the program the site configuration's `python =` names
+        # (an in-project virtual environment's pip.conf, which a repository
+        # ships) and its interpreter runs the site-packages' .pth files, with
+        # any options, --isolated included (security round 5).
+        "pip list",
+        "pip list --format=json --not-required",
+        "pip list --isolated",
+        "pip list --disable-pip-version-check --isolated -l",
+        "pip show -f requests",
+        "pip show pip --isolated",
     ],
 )
 def test_a_command_that_reaches_another_host_gets_the_worst_case(
@@ -394,15 +406,92 @@ def test_a_command_that_reaches_another_host_gets_the_worst_case(
         "git remote get-url origin",
         "git remote get-url --push origin",
         "cat < notes.txt",
-        "pip list",
-        "pip list --format=json --not-required",
-        "pip show -f requests",
     ],
 )
 def test_local_forms_of_those_commands_stay_read_only(
     mapper: ToolCapabilityMapper, command: str
 ) -> None:
     assert _bash(mapper, command).capabilities == ("observe",), command
+
+
+def _python_with_pip() -> str | None:
+    """An interpreter on PATH, other than this one, that imports pip 22.3 or
+    later (the first with the `python` setting)."""
+    for directory in os.get_exec_path():
+        for name in ("python3", "python"):
+            program = shutil.which(name, path=directory)
+            if program is None:
+                continue
+            probe = subprocess.run(
+                [program, "-c", "import pip; print(pip.__version__)"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            parts = probe.stdout.strip().split(".")
+            if probe.returncode == 0 and len(parts) >= 2 and parts[0].isdigit():
+                if (int(parts[0]), int(parts[1].split("rc")[0] or 0)) >= (22, 3):
+                    return program
+    return None
+
+
+@pytest.mark.parametrize("command", [["list"], ["show", "pip"], ["list", "--isolated"]])
+def test_pip_runs_the_program_a_shipped_venv_configuration_names(
+    tmp_path: Path, command: list[str]
+) -> None:
+    """The premise of `pip list` and `pip show` taking the worst case
+    (security round 5): pip reads the site configuration,
+    sys.prefix/pip.conf, even with --isolated, and runs itself again under
+    the program its `python =` names. `python -m venv .venv` keeps a
+    pip.conf a repository ships there, so the repository's program runs."""
+    base = _python_with_pip()
+    if base is None:
+        pytest.skip("no interpreter with pip 22.3 or later on PATH")
+    project = tmp_path / "proj"
+    (project / ".venv").mkdir(parents=True)
+    (project / "tools").mkdir()
+    (project / ".venv" / "pip.conf").write_text("[global]\npython = tools/py\n")
+    program = project / "tools" / "py"
+    program.write_text('#!/bin/sh\necho "ran: $*" > "$(dirname "$0")/../RAN"\n')
+    program.chmod(0o755)
+    made = subprocess.run(
+        [base, "-m", "venv", "--without-pip", "--system-site-packages", ".venv"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert made.returncode == 0, made.stderr
+    assert (project / ".venv" / "pip.conf").read_text().endswith("tools/py\n")
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("PIP_", "PYTHON", "VIRTUAL_ENV"))
+    }
+    env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    env["PIP_NO_INDEX"] = "1"
+    subprocess.run(
+        [str(project / ".venv" / "bin" / "python"), "-m", "pip", *command],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    ran = project / "RAN"
+    assert ran.exists(), "pip did not run the configured program"
+    assert ran.read_text().rstrip().endswith(" ".join(command))
+    classify = ToolCapabilityMapper()
+    classify.project_dir = str(project)
+    classify.command_path = f"{project / '.venv' / 'bin'}{os.pathsep}{env['PATH']}"
+    classified = classify.map_tool(
+        "Bash", {"command": "pip " + " ".join(command)}, cwd=str(project)
+    )
+    assert classified.capabilities == ("mutate", "send")
+    assert classified.requires_checkpoint and classified.requires_approval
 
 
 @pytest.mark.asyncio
@@ -416,6 +505,8 @@ def test_local_forms_of_those_commands_stay_read_only(
         LESSKEY_PIPE,
         "npm list",
         "docker logs secret-data-leaked",
+        "pip list",
+        "pip show pip",
     ],
 )
 async def test_a_destination_policy_refuses_them(
