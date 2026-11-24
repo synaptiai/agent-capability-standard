@@ -676,18 +676,28 @@ secret-scan` lines (a skill copied out of the plugin keeps working), and
 `tests/test_skill_hooks.py` keeps every copy equal to the file. The file is not a hook: `hooks.json`
 does not run it. The scan blocks content written to memory, and a record
 appended to `.claude/audit/records.jsonl`, that holds a credential-shaped
-value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7). The `persist`
+value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7). `secret_in`
+reads a text line by line and again with its line breaks read as blanks, as
+the SDK's and the TypeScript rules read whitespace (a value on the line after
+its name); `secret_lines` reads each line on its own, for a hook that joins
+texts read apart (each string of a persist tool's input or of an audit
+record, given once as it is and once with its own line breaks read as
+blanks); `secret_values` lists what the rules whose match may hold whitespace
+find, for the `persist` hook's comparison. The `persist`
 hook scans the text a call carries and the lines the file will hold after it
 that it does not hold now, each also with its JSON-style escapes decoded, so
 a credential whose key is already in the file, or that two edits build, is
-read whole. Each of the scan's patterns reads the text in time linear in
+read whole; it reads the lines a call changes with the six lines that are
+not blank on each side, before and after the call, and refuses a value the
+rules read there more often after it (a value put under a name the file
+holds), and a change to a line of a private key block. Each of the scan's patterns reads the text in time linear in
 its length: `grep -o`, which prints each match, looks for one from each
 position of a line that matches, so its patterns start where no earlier
 attempt's run can hold another (a URL's scheme from the start of its run)
 or read a bounded run (a user option's name, at most 256 characters); time
 it with grep's output to a pipe, as the scan reads it, not to `/dev/null`,
 where grep stops at the first match, and in a multibyte locale too: the
-scan reads bytes (`secret_in` sets `LC_ALL=C` in the subshell it runs in),
+scan reads bytes (its functions set `LC_ALL=C` in the subshells they run in),
 since in UTF-8 GNU grep reads a pattern whose class follows a repeated one
 (the scheme rule, `[A-Za-z][A-Za-z0-9._-]* +`) with a matcher whose time
 grows with the square of the line, and the skills' hooks run in the user's

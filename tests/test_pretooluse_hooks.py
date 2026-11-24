@@ -1208,6 +1208,63 @@ class TestShellHookPersistSecrets:
             assert refused == (_decision(out) == "deny"), (v["name"], result.stderr)
             assert refused == v["expect"]["holds"], (v["name"], result.stderr)
 
+    # Security round 5, batch 4: the scan read one line at a time, so a
+    # value on the line after its name passed the hook (TodoWrite is
+    # ungated: stored with no approval) while the adapter refused it.
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("todos", "holds"),
+        [
+            (
+                [
+                    {
+                        "content": "Set the DB config:\ndb:\n  password:\n"
+                        "    Xyz12345abcdef",
+                        "status": "pending",
+                        "activeForm": "Configuring",
+                    }
+                ],
+                True,
+            ),
+            ([{"content": "Authorization:\nBearer Xyz12345abcdef"}], True),
+            ([{"content": "Bearer\nabcdefghijklmnopqrstuvwxyz"}], True),
+            ([{"content": 'API_KEY=\r\n"Xyz12345abc"'}], True),
+            # Two strings, a name ending one and a value opening the next:
+            # each is read on its own, as the adapter reads each.
+            (
+                [
+                    {"content": "rotate the api_key:", "status": "pending"},
+                    {"content": "abc123def456ghi", "status": "pending"},
+                ],
+                False,
+            ),
+            ([{"content": "buy milk\nand eggs", "status": "pending"}], False),
+        ],
+        ids=["reported", "authorization", "bearer", "crlf", "apart", "prose"],
+    )
+    async def test_a_value_on_the_next_line(
+        self,
+        tmp_path: Path,
+        strict_adapter: GroundedAgentAdapter,
+        todos: list[dict],
+        holds: bool,
+    ):
+        tool_call = {"tool_name": "TodoWrite", "tool_input": {"todos": todos}}
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        out = await hook(
+            {**tool_call, "permission_mode": "bypassPermissions"}, "t1", None
+        )
+        assert (_decision(out) == "deny") == holds
+        result = _gated_hook(
+            {**tool_call, "permission_mode": "default", "tool_use_id": "t1"},
+            tmp_path,
+        )
+        assert result.returncode == (2 if holds else 0), result.stderr
+        if holds:
+            assert result.stderr.startswith(
+                "F504 CONSTRAINT_VIOLATED: TodoWrite (persist)"
+            )
+
     def test_a_large_input_is_decided_well_within_the_time_limit(self, tmp_path: Path):
         """The scan reads the input in time linear in its length: 1 MB of
         todos before an AWS key is refused in well under the hook's 30

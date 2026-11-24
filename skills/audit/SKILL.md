@@ -79,8 +79,9 @@ hooks:
             case "$RECORD" in *\'* | *"$NL"*) RECORD="" ;; esac
             if [ -n "$RECORD" ]; then
               # The record as a reader decodes it: its JSON text with escapes
-              # resolved (g is g) and each of its strings
-              DECODED="$(printf '%s' "$RECORD" | jq -rs 'if length == 1 and (.[0] | type) == "object" then .[0] | (tojson, (.. | strings)) else error("not one object") end' 2>/dev/null)" || {
+              # resolved (g is g) and each of its strings, each read on its own,
+              # as it is and with its line breaks read as blanks (secret_lines)
+              DECODED="$(printf '%s' "$RECORD" | jq -rs 'def joined($s): (.[0:1] + (.[1:] | map($s + .))) | add // ""; if length == 1 and (.[0] | type) == "object" then .[0] | (tojson, (.. | strings | ., (select(index("\n") != null or index("\r") != null) | split("\r") | joined(" ") | split("\n") | joined(" ")))) else error("not one object") end' 2>/dev/null)" || {
                 echo "F504 CONSTRAINT_VIOLATED: the audit record is not one JSON object; append it as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\"" >&2
                 exit 2
               }
@@ -515,10 +516,26 @@ hooks:
             # curl names a file from the server with -J, reads its options from a file
             # with -K, builds them from files or variables with --variable, and reads
             # ~/.curlrc (which may set remote-header-name or output-dir) unless -q is
-            # its first word.
+            # its first word. curl 8.13 and later reads URLs from a file given as --url
+            # @file (--url=@file from 8.16, an abbreviation read alike) or as an operand
+            # @file (@- its input), and names the files it writes after them
+            # (--remote-name): a word that starts with @ is refused unless it is the
+            # value of a short option that takes one or of an option that reads data,
+            # a header or a form from a file.
+            def curl_at_values: ["--data", "--data-ascii", "--data-binary", "--data-raw", "--data-urlencode", "--json", "--form", "--form-string", "--header", "--proxy-header", "--url-query", "--write-out"];
+            def takes_next($values): test("^-[^-]") and ((.[1:] | explode | map([.] | implode)) as $ls
+              | (first(range(0; $ls | length) as $j | select($values | contains($ls[$j])) | $j) // null) as $at
+              | $at != null and $at == ($ls | length) - 1);
+            def curl_url_file($rest):
+              first(range(0; $rest | length) as $i | $rest[$i]
+                | select((.d | startswith("--")) and (.d | test("^[^=]*=@"))
+                         and ((.d | sub("=.*$"; "")) as $n | ($n | length) >= 4 and ("--url" | startswith($n)))
+                         or ((.d | startswith("@"))
+                             and ((if $i > 0 then $rest[$i - 1].d else "" end)
+                                  | (takes_next("ECbcdDFPHhmoUQreXYytzTuAwxK") or IN(curl_at_values[])) | not)))) // null;
             def curl_refusal($rest):
               if (($rest[0].d // "") | IN("-q", "--disable")) | not then "curl without -q first (its configuration file may name the files it writes)"
-              else (first($rest[] | select(sets("JK"; "ECbcdDFPHhmoUQreXYytzTuAwxK"; ["--remote-header-name", "--config", "--variable"]; 5) or (.d | startswith("--expand-")))) // null) as $w
+              else (first($rest[] | select(sets("JK"; "ECbcdDFPHhmoUQreXYytzTuAwxK"; ["--remote-header-name", "--config", "--variable"]; 5) or (.d | startswith("--expand-")))) // curl_url_file($rest)) as $w
               | if $w != null then "curl \($w.d)" else null end end;
             # wget names files from the server (--content-disposition,
             # --trust-server-names), from the pages it follows (-r, -m, -p) or the URLs
@@ -699,7 +716,7 @@ hooks:
               case "$KIND" in
                 ok) ;;
                 writes) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command writes a file only in the one append form, whose record this check reads; it does not redirect output to '$WORD' (a name quoted, globbed, braced, linked or built when the command runs may be the records file): $ONE_FORM" >&2; exit 2 ;;
-                writer) echo "F504 CONSTRAINT_VIOLATED: in the audit skill no command runs a program that writes files its input names, which could write the records file unread: '$WORD' (an archive or patch tool, a recursive copy (cp -r, -R or -a, scp, rsync, rclone), git apply, am, update-index, read-tree, checkout-index, mktree or fast-import, a git alias or another command than git's own, a git command that writes the work tree from a commit (checkout and restore but of literal paths after -- that do not hold the records, switch, reset but --soft or --mixed, merge, pull, rebase, cherry-pick, revert, stash but list, show, create, store, drop or clear, worktree, submodule, clone, ...), find -exec or xargs running a program other than a reader, gunzip -N, curl but as curl -q without -J, -K or --variable, wget but with --no-config first and without -r, -m, -p, -x, -i or --content-disposition, HTTPie, aria2c, dpkg -x or -i, rpm -i; tar only creates or lists, with short options, and unzip only lists), wherever it stands: after !, if or while, and after any program but one read here (prlimit, setpriv, a loader): $ONE_FORM" >&2; exit 2 ;;
+                writer) echo "F504 CONSTRAINT_VIOLATED: in the audit skill no command runs a program that writes files its input names, which could write the records file unread: '$WORD' (an archive or patch tool, a recursive copy (cp -r, -R or -a, scp, rsync, rclone), git apply, am, update-index, read-tree, checkout-index, mktree or fast-import, a git alias or another command than git's own, a git command that writes the work tree from a commit (checkout and restore but of literal paths after -- that do not hold the records, switch, reset but --soft or --mixed, merge, pull, rebase, cherry-pick, revert, stash but list, show, create, store, drop or clear, worktree, submodule, clone, ...), find -exec or xargs running a program other than a reader, gunzip -N, curl but as curl -q without -J, -K, --variable or URLs read from a file (--url @file, an @file operand), wget but with --no-config first and without -r, -m, -p, -x, -i or --content-disposition, HTTPie, aria2c, dpkg -x or -i, rpm -i; tar only creates or lists, with short options, and unzip only lists), wherever it stands: after !, if or while, and after any program but one read here (prlimit, setpriv, a loader): $ONE_FORM" >&2; exit 2 ;;
                 program) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command runs only programs that write no file but by a redirection and run no other code (cat, echo, printf, jq, ls, head, tail, wc, grep, cut, tr, base64, sha256sum, shasum, md5sum, date, hostname, sleep, test, true, false, pwd, cd, stat, basename, dirname, mkdir, mv to move the records file aside, openssl dgst), each by its name; it does not run '$WORD', which could write the records file unread: $ONE_FORM" >&2; exit 2 ;;
                 mv) echo "F504 CONSTRAINT_VIOLATED: in the audit skill mv only moves the records file aside, in the project's audit directory, as mv <project>/.claude/audit/records.jsonl <project>/.claude/audit/records.<UTC time>.jsonl with literal paths (no .., ~ or expansion); it does not run '$WORD', which could put another file in its place or take the records out: $ONE_FORM" >&2; exit 2 ;;
                 assign) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command does not set a variable for one command (NAME=value cmd), nor run printf with an option (printf -v NAME sets a variable for the rest of the line), nor name PATH, IFS, ENV, BASH_ENV, CDPATH, BASH_CMDS, BASH_ALIASES, LD_*, DYLD_* or OPENSSL_* (alone, as -vNAME, NAME[key] or NAME=value), which change what a program runs or writes: '$WORD'" >&2; exit 2 ;;
@@ -716,8 +733,15 @@ hooks:
               esac
             fi
             # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
-            # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
-            SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+            # secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7), read line by line and again with
+            # its line breaks read as blanks, as the SDK's and the TypeScript rules read whitespace (password:<newline>value).
+            # secret_lines TEXT: the same rules, each line read on its own; a caller that joins texts read apart joins them with line
+            # breaks, each text given once as it is and once with its own line breaks read as blanks.
+            # secret_values TEXT: what the rules whose match may hold whitespace find in TEXT, one per line, each line read on its own:
+            # the match, or the value a rule reads out of it (a caller compares what two texts hold).
+            # The shapes of keys and tokens (the first two may hold whitespace)
+            SECRET_SPACED='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
+            SECRET_ERE="$SECRET_SPACED"'|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
             SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
             # A quote, or an escaped one (\" in JSON text inside a JSON string)
             SECRET_Q="\\\\*[\"']"
@@ -725,41 +749,55 @@ hooks:
             SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
             SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
             SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+            # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
+            SECRET_QUOTED="$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']"
             # The rules are ASCII, read byte by byte (LC_ALL=C, in a subshell): a multibyte locale sends some of them to a matcher whose time grows with the square of the text
-            secret_in() (
+            secret_values() (
               LC_ALL=C
               export LC_ALL
-              printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
-              # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
-              printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']" && return 0
-              # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once)
-              printf '%s' "$1" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
-                sed -E 's#^.*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+              printf '%s' "$1" | grep -Eo -- "$SECRET_SPACED"
+              printf '%s' "$1" | grep -Eio -- "$SECRET_QUOTED"
               # An Authorization header's value, 8 or more characters with letters and digits
               printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
                 sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//" |
                 sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
-                grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+                grep -E '[0-9]' | grep -E '[A-Za-z]'
               # ... or after any other scheme (ApiKey, SSWS, Bot) and spaces: the first word may be the scheme or the credential, so both readings count
               printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}" |
-                sed -E 's/^.* //' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+                sed -E 's/^.* //' | grep -E '[0-9]' | grep -E '[A-Za-z]'
               # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
               printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
                 sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*\\\\*[\"']//" |
                 sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
-                grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+                grep -E '[0-9]' | grep -E '[A-Za-z]'
               # ... and the same after any other scheme
               printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
                 sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.* //" |
-                grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+                grep -E '[0-9]' | grep -E '[A-Za-z]'
               # A user option's password (curl -u user:password), 8 or more characters with letters and digits
               printf '%s' "$1" | grep -Eo -- "$SECRET_USER[^[:space:]\"'\\\\]{8,}" |
-                sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+                sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -E '[A-Za-z]'
               # An unquoted value of 12 or more characters with letters and digits, assigned or given to a credential option
               printf '%s' "$1" | grep -Eio -- "$SECRET_OPT[[:space:]]+[^-[:space:]\"'][^[:space:]\"']{11,}" |
-                sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+                sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
               printf '%s' "$1" | grep -Eio -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
-                sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
+                sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+              return 0
+            )
+            secret_lines() (
+              LC_ALL=C
+              export LC_ALL
+              printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
+              # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once)
+              printf '%s' "$1" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
+                sed -E 's#^.*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+              # The rules that read a quoted value, or a value out of a match
+              secret_values "$1" | grep -q .
+            )
+            secret_in() (
+              secret_lines "$1" && return 0
+              SECRET_FOLDED="$(printf '%s' "$1" | LC_ALL=C tr '\n\r' '  ')" || return 0
+              [ "$SECRET_FOLDED" != "$1" ] && secret_lines "$SECRET_FOLDED"
             )
             # END secret-scan
             # A value under a member named for a credential, in the record's data:
@@ -812,7 +850,7 @@ hooks:
             if [ -n "$RECORD" ]; then
               HELD="$(printf '%s' "$RECORD" | jq -r "$SECRET_MEMBER_JQ"' acs_held(false)' 2>/dev/null)" || HELD=unread
             fi
-            if [ "$HELD" = true ] || secret_in "$CMD" || secret_in "$DECODED"; then
+            if [ "$HELD" = true ] || secret_in "$CMD" || secret_lines "$DECODED"; then
               echo "F504 CONSTRAINT_VIOLATED: the audit record holds what looks like a credential; cite it by reference or digest (STANDARD 1.2.0 §6.7)" >&2
               exit 2
             fi

@@ -3,14 +3,15 @@
 // binding runs on the plain entry, so these tests give `bindingProfiles` a
 // core of their own computing what `CoreContext` computes for the profiles
 // they use; `packages/acs-core` tests the core's answers.
-import type { ToolResult } from '@standardagents/spec';
-import { describe, expect, it } from 'vitest';
+import { defineTool, type ToolResult } from '@standardagents/spec';
+import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Json } from '@synaptiai/acs-core';
 import type { CoreContext, Diagnostic, ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { decideApproval } from '../src/acs/approval.js';
 import { acsAnnotation, groundedTool } from '../src/acs/grounded.js';
 import { effectiveFlags, type CapabilityId, type DeclaredFlags, type Risk } from '../src/acs/ontology.js';
+import { registerTools, resetLayer } from '../src/acs/layer.js';
 import { bindingProfiles, confidenceFailure, type ProfileCore } from '../src/acs/profiles.js';
 import { actionRecord, readTrace } from '../src/acs/records.js';
 import { memoryThread, user, type MemoryThread } from './memory_thread.js';
@@ -408,6 +409,162 @@ const RULES: ProfileCore = {
   },
   profilePolicy: () => NO_RULES,
 };
+
+describe("a nested call is covered only by the decisions the composite's call counted (§5.18.4, §5.21.3)", () => {
+  // Security round 5, batch 4: the composite's call counted only a person's
+  // approval, but a nested call that needs one was covered by any approval
+  // in the request still valid when it ran, so an agent's approval given
+  // after the person's renewed it once the person's had expired.
+  afterEach(() => resetLayer());
+  const args = z.object({}).passthrough();
+  const documents = [{ domain: 'd', version: '1.0.0', risk_thresholds: { block_autonomous: ['mutate'] } }];
+
+  /**
+   * `save`, `write` (mutate, its approval valid for a minute) and `batch`
+   * (invoke, `invokes: {write}`, which works 10 s before its nested call).
+   * `plain`: `write` is a plain tool with a binding record, registered, and
+   * only `batch` is given the profiles. A person approves `batch` at T0;
+   * with `agent`, an approver attested as an agent approves it 50 s later;
+   * `batch` runs at T0 + 55 s, so the person's approval has lapsed when
+   * `write` runs at T0 + 65 s and the agent's has not.
+   */
+  async function scenario(kind: 'grounded' | 'plain', agent: boolean) {
+    let T = 1_000_000;
+    const now = () => T;
+    const profiles = bindingProfiles(THRESHOLDS, documents);
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'save',
+      args,
+      now,
+      execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+    });
+    let wrote = 0;
+    const write =
+      kind === 'grounded'
+        ? groundedTool({
+            name: 'write',
+            capability: 'mutate',
+            description: 'write',
+            args,
+            now,
+            profiles,
+            approval: { expires_ms: 60_000 },
+            execute: async () => {
+              wrote += 1;
+              return { success: true, evidence_anchors: [] };
+            },
+          })
+        : defineTool({
+            description: 'write',
+            args,
+            annotations: {
+              acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'mutate', approval: { expires: '1m' } },
+            },
+            execute: async () => {
+              wrote += 1;
+              return { status: 'success', result: JSON.stringify({ success: true, evidence_anchors: [] }) };
+            },
+          });
+    const nested: ToolResult[] = [];
+    const batch = groundedTool({
+      name: 'batch',
+      capability: 'invoke',
+      invokes: { write } as never,
+      description: 'batch',
+      args,
+      now,
+      profiles,
+      execute: async (state) => {
+        T += 10_000;
+        nested.push(await state.invokeTool('write', { path: 'a' }));
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const t = memoryThread();
+    for (const [n, tool] of Object.entries({ save, write, batch })) t.tools.set(n, tool as never);
+    if (kind === 'plain') registerTools({ save, write, batch });
+    const asked = await t.tools.get('batch')!.execute(t.state, {});
+    expect(asked.error_code).toBe('F502');
+    const digest = asked.error_data?.['digest'] as string;
+    await decideApproval(t.state, user('alice'), digest, 'approved', T);
+    if (agent) await decideApproval(t.state, user('review-bot'), digest, 'approved', T + 50_000, undefined, { kind: 'agent' });
+    T += 55_000;
+    expect((await t.tools.get('save')!.execute(t.state, {})).status).toBe('success');
+    const result = await t.tools.get('batch')!.execute(t.state, {});
+    return { result, nested, wrote, trace: await readTrace(t.state) };
+  }
+
+  for (const kind of ['grounded', 'plain'] as const) {
+    it(`refuses a ${kind} nested call an agent's later approval would cover once the person's expired`, async () => {
+      const { result, nested, wrote, trace } = await scenario(kind, true);
+      expect(result.status).toBe('success');
+      const composite = trace.find((e) => e.action === 'batch' && e.status === 'executed')!;
+      expect(composite.approval?.approvers).toEqual(['sa-user:alice']);
+      expect(nested.map((r) => r.error_code)).toEqual(['F502']);
+      expect(wrote).toBe(0);
+      expect(trace.some((e) => e.action === 'write' && e.status === 'executed')).toBe(false);
+    });
+
+    it(`refuses the same ${kind} nested call with no agent's approval (control)`, async () => {
+      const { nested, wrote } = await scenario(kind, false);
+      expect(nested.map((r) => r.error_code)).toEqual(['F502']);
+      expect(wrote).toBe(0);
+    });
+  }
+
+  it("covers a nested call while the person's approval the composite's call counted is valid (control)", async () => {
+    let T = 1_000_000;
+    const now = () => T;
+    const profiles = bindingProfiles(THRESHOLDS, documents);
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'save',
+      args,
+      now,
+      execute: async (_s, _a, call) => ({ checkpoint_id: `cp-${call.seq}`, evidence_anchors: [] }),
+    });
+    const write = groundedTool({
+      name: 'write',
+      capability: 'mutate',
+      description: 'write',
+      args,
+      now,
+      profiles,
+      approval: { expires_ms: 60_000 },
+      execute: async () => ({ success: true, evidence_anchors: [] }),
+    });
+    const nested: ToolResult[] = [];
+    const batch = groundedTool({
+      name: 'batch',
+      capability: 'invoke',
+      invokes: { write } as never,
+      description: 'batch',
+      args,
+      now,
+      profiles,
+      execute: async (state) => {
+        T += 10_000;
+        nested.push(await state.invokeTool('write', { path: 'a' }));
+        return { result: true, evidence_anchors: [] } as never;
+      },
+    });
+    const t = memoryThread();
+    for (const [n, tool] of Object.entries({ save, write, batch })) t.tools.set(n, tool as never);
+    const asked = await t.tools.get('batch')!.execute(t.state, {});
+    const digest = asked.error_data?.['digest'] as string;
+    await decideApproval(t.state, user('alice'), digest, 'approved', T);
+    T += 5_000;
+    expect((await t.tools.get('save')!.execute(t.state, {})).status).toBe('success');
+    expect((await t.tools.get('batch')!.execute(t.state, {})).status).toBe('success');
+    expect(nested.map((r) => r.status)).toEqual(['success']);
+    const trace = await readTrace(t.state);
+    const composite = trace.find((e) => e.action === 'batch' && e.status === 'executed')!;
+    expect(trace.find((e) => e.action === 'write')).toMatchObject({ status: 'executed', covered_by: composite.seq });
+  });
+});
 
 describe('the call vectors (tests/conformance/profiles/effective.json, §5.21.3)', () => {
   // Each applied profile raises for every capability the call performs, at

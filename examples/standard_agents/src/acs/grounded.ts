@@ -477,10 +477,12 @@ function joinPolicy(a: ApprovalPolicy, b: ApprovalPolicy | undefined): ApprovalP
 
 /**
  * Whether the decisions that approved a composite's call (`authority`, the
- * request it counted) are valid for a nested call's own approval as well
- * (§5.18.4, §5.18.7): the role it sets, at least its approvers, each still
- * within its expiry at `now`. Only then does the composite's approval cover
- * the nested call.
+ * request with only the decisions that call counted) are valid for a nested
+ * call's own approval as well (§5.18.4, §5.18.7): the role it sets, at least
+ * its approvers, each still within its expiry at `now`. Only then does the
+ * composite's approval cover the nested call; a decision the composite's
+ * call did not count (an agent's, where a person's was required, §5.21.3)
+ * is not in `authority`, so it covers nothing.
  */
 function decisionsCover(authority: ApprovalRecord, policy: ApprovalPolicy, now: number): boolean {
   if (policy.role !== undefined && authority.role !== policy.role) return false;
@@ -559,8 +561,9 @@ interface NestingToken {
   minimumConfidence: number | null;
   /**
    * The approval request whose decisions approved the composite's call (its
-   * own, or the one that covered it): a nested call is covered only when
-   * they are valid for its own approval too (§5.18.4).
+   * own, or the one that covered it), holding only the decisions that call
+   * counted (under a person requirement, a person's): a nested call is
+   * covered only when they are valid for its own approval too (§5.18.4).
    */
   authority: ApprovalRecord | null;
   flow: string;
@@ -1629,6 +1632,10 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
       // Every check has passed. Only now are the approval and the checkpoint
       // used up, so a call refused above leaves both as they were.
       let approvers: string[] | undefined;
+      // The request with only the decisions this call counted: what its
+      // nested calls are covered by (§5.18.4), so a decision it did not count
+      // (an agent's, where a person's was required) covers none of them.
+      let counts: ApprovalRecord | null = null;
       if (request) {
         // The approvers that counted (§5.17): those whose approvals made
         // the request approved, as principals, with their identities when
@@ -1638,6 +1645,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         const counted = countedDecisions(request, approvedAt).filter(
           (d) => !person || d.approver_identity?.kind === 'human',
         );
+        counts = { ...request, decisions: counted };
         approvers = [...new Set(counted.map((d) => principalOf(d.approver)))];
         const identities = new Map<string, AgentIdentity>();
         for (const d of counted) {
@@ -1686,7 +1694,7 @@ export function groundedTool<C extends CapabilityId, Args extends ToolArgs>(
         enclosing,
         enclosingGrounding,
         enclosingMinimum,
-        authority: request ?? (covered && token !== undefined ? token.authority : null),
+        authority: counts ?? (covered && token !== undefined ? token.authority : null),
         checkpointed: used.checkpoint_id !== undefined || (covered && token !== undefined && token.checkpoint),
         call: {
           seq: started.seq,

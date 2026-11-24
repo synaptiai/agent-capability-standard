@@ -1326,6 +1326,31 @@ here and marked so.
     restore beside a command that does more than read (`printf -v PATH ...;
     git stash apply <sha>`, `cd`, `alias`, a function, a file written):
     restore on a line of its own, or after `git status` and other reads.
+  - Security round 5, batch 4. The shared secret scan reads a text line by
+    line and again with its line breaks read as blanks, as the SDK's and the
+    TypeScript rules do, so a value on the line after its name
+    (`password:` then the value, a YAML value indented under its key,
+    `Authorization:` or `Bearer` then the token) is now refused: in what
+    `TodoWrite`, `TaskCreate` and `TaskUpdate` store (each string read on
+    its own), in an audit record and in what the persist skill writes. The
+    persist skill's hook also refuses an edit that builds a credential with
+    the lines around it (a value put under a name the file holds, a name put
+    over a value, a line taken out from between them: the changed lines and
+    six lines that are not blank on each side are compared before and after
+    the call), and any change to a line of a private key block (from its
+    BEGIN line to its END line, or the end of the file), such as a key's
+    body put into a template. The send skill's hook reads curl's `--url`
+    value as a URL (`--url=VALUE` too) and refuses an operand or a `--url`
+    value that starts with `@` (curl 8.13 and later reads URLs from that
+    file; pass the URLs on the command line), and refuses `/etc/hosts` and
+    the other files that set where a request goes in any spelling
+    (`/etc//hosts`, `/etc/./hosts`, a `..` segment) and by their last
+    component where the command may change the directory (`cd /etc && ...
+    >> hosts`, `curl --output-dir /etc -o hosts`, `wget -P /etc
+    .../hosts`); its Edit/Write hook refuses a path with a `..` segment
+    whose last component is such a file's. The audit skill's hook refuses
+    curl's URLs read from a file (`--url @file`, an `@file` operand), whose
+    file names curl takes from them.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,
@@ -1548,7 +1573,13 @@ here and marked so.
   call of its own. An invocation through a composite's state once its call
   has ended (code that kept the state, or an invocation the composite did
   not wait for) is refused with F504, or, for a grounded tool whose
-  invocation had started, checked as a call of its own.
+  invocation had started, checked as a call of its own. Security round 5,
+  batch 4: a nested call is covered only by the decisions the composite's
+  call counted (under a person requirement, a person's), so an approval the
+  deployment attests as an agent's, given to the composite's request, no
+  longer covers a nested call that needs a person once the person's
+  approval has expired: the nested call is checked as a call of its own
+  (F502 for a plain tool, or its own request for a grounded one).
 - Standard Agents binding, composites and plain tools (Standard 1.2.0
   §5.18.4, §5.18.10): a nested call of a listed tool defined with plain
   `defineTool` runs only under a name the new `registerTools` (in

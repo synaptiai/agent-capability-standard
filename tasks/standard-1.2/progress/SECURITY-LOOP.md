@@ -6806,3 +6806,228 @@ checks.
   fuzz of the glob reader against bash (no name missed) and its time on 16
   KB words (about a second). No CLI or nested agent was started; the
   scratch repositories and fuzz files were removed.
+
+### Batch 4: five reported defects
+
+Five defects, each reproduced by an independent verifier on 4d17c00, and
+reproduced again here on b5e4174 before any change (probes under `timeout
+120` and a 4 GB address-space limit, Node with its heap bounded, inputs of
+at most 1 MB, in scratch directories since removed): the bare scan
+(`secret_in`) said no to `password:\nXyz12345abcdef`, `API_KEY=\r\n"..."`,
+`Authorization:\nBearer ...` and `Bearer\n...`, which the SDK's
+`holds_credential` and the built TypeScript `holdsCredential` refuse, and
+the plugin hook let the reported `TodoWrite` (a YAML value under
+`password:`) pass with no ask while the adapter refused it, as did the
+persist hook a `Write` of it and the audit hook a record holding it; an
+Edit that put a key body into `DEPLOY.md` between its BEGIN and END lines
+exited 0, as did the body before an END line and the MultiEdit form; the
+send hook let `curl -q --url @urls`, `--url @-`, `--url=@urls`, `curl -q
+@urls`, `-- @urls` and `--url=169.254.169.254/...` pass; it let `curl ...
+--output-dir /etc -o hosts`, `cd /etc && ... -O`, `wget -P /etc`, `tee -a
+/etc//hosts`, `cp x /etc/./hosts` and `cp x /etc/nonexistent/../hosts`
+pass, and its Write hook `/etc/nonexistent/../hosts`; and in the binding
+an approval attested as an agent's, given 50 s after the person's, covered
+a nested `write` that needs a person once the person's had expired
+(grounded and plain). None was fixed by an earlier batch: round 4 batch 1
+#4 bounded the scan's `-o` stages per line, and every rule stayed a
+line-at-a-time `grep`; round 1 batch 5 and round 3 batch 2 made the persist
+hook read the added lines, not the lines around them; round 3 batch 3 and
+round 4 batch 4 read curl's options from a table with no `--url`; the setting
+files were read as one regular expression per word; SECURITY-LOOP round 1
+#36 and round 4 batch 5 made `decisionsCover` read the composite's request,
+not the decisions its call counted. Each fix has tests that fail on the
+code before it (below).
+
+#### 1. The shared secret scan read one line at a time, so a value on the line after its name passed (medium); siblings: the audit hook's record strings, the persist hook's texts
+
+Every rule was a `grep` over the text, which reads a line at a time, so
+`[[:space:]]*` after `password:`, `=` or `Bearer` never crossed a line
+break, where the SDK's `_WS` and the TypeScript `WS` do.
+
+- Fix (`hooks/secret_scan.sh`, copied into the pre-tool-use and log hooks
+  and the persist and audit skills): `secret_lines` holds the rules, each
+  line read on its own; `secret_in` reads the text with it and again with
+  `\n` and `\r` read as blanks (`tr`). `secret_values` lists what the rules
+  whose match may hold whitespace find (`SECRET_SPACED`, the bearer and
+  key-header shapes; `SECRET_QUOTED`, the quoted rule, now a variable; and
+  the value rules, ending in output, not `-q`); `secret_lines` runs
+  `SECRET_ERE` and the URL rule with `-q` and then `secret_values | grep -q
+  .`. The per-run bounds stay: no new `-o` stage reads a run again from
+  each position (the folded reading is one line, as any one-line input
+  already was).
+- Callers that join texts read apart keep them apart: the plugin's persist
+  check gives each string of the input once as it is and once folded, each
+  on a line of its own, then the JSON text, to `secret_lines` (as the
+  adapter reads each string; a name ending one todo and a value opening
+  the next pass both); the audit hook gives each decoded string of the
+  record the same way; the persist hook its texts (below). The log hook's
+  names hold no line break.
+- Vectors: nine added to `tests/conformance/secrets/credentials.json`
+  (seven holding, among them a YAML value, a credential option and a
+  name/value pair with each part on its own line; two prose), run by the
+  Python, TypeScript and shell tests and, as a todo's content, by the
+  hook-and-adapter agreement test.
+- Tests: `test_skill_hooks.py` `TestCredentialsAcrossLines` (the scan on the
+  six reported shapes, `secret_lines` reading lines apart, the folded
+  reading in linear time on 400 KB of line breaks in six shapes, the
+  persist `Write` and the audit record refused, two records passed) and
+  `test_pretooluse_hooks.py` `test_a_value_on_the_next_line` (the reported
+  `TodoWrite` and three more refused by the hook and the adapter alike; two
+  controls pass both). On b5e4174's hooks and skills 30 of 46 of the
+  first fail (the 12 timing tests and the 4 controls pass), and 5 of 27 of
+  the plugin hook's persist tests (the four line-spanning todos and the
+  vector agreement test; the controls pass).
+
+#### 2. The persist hook read a key's body, or a value under a name the file holds, one added line at a time (medium); siblings: a name put over a value, a line taken out, a pair split over six lines
+
+The hook scanned the lines the file would hold that it did not hold
+before, each on its own; a private key is recognised by its BEGIN line,
+which the edit left as it was, and a value put under `password:` matched
+no rule alone.
+
+- Fix: the jq stage keeps the added lines and computes the lines the call
+  changes (from the first that differs to the last, counted from each end),
+  with the six lines that are not blank on each side, after the call and
+  before it (the same context lines): no rule's match spans more than five
+  runs of whitespace (the pair and tuple rules), so one the change builds
+  with the lines around it lies in the window. Each window is read folded
+  (and decoded, on both sides alike where either changes), and a value
+  `secret_values` reads more often after the call than before is refused
+  (F504; `awk` compares the lists, and a missing `awk` is R407). A
+  credential the window held already is listed as often on both sides, so
+  a file that holds an example can still be edited beside it (the round 1
+  test that keeps that passes).
+- A changed line within a private key block, from a BEGIN line (`-----BEGIN
+  [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----`) to its END line (the SDK's form) or
+  the end of the text, is refused (jq exit 4, F504): the body lines match
+  no rule. A line is tested with a regular expression only where it holds
+  `PRIVATE KEY` and the marker, and a text without `PRIVATE KEY` skips the
+  pass; a block removed whole, or a change below its END line, passes.
+- Each text (each carried string, the added lines) is read on its own,
+  line by line and folded (`secret_lines`), so two edits' strings are not
+  read as one.
+- Time: an Edit at either end of a 1 MB file (whole-file windows) takes
+  about 1.4 s; 900,000 blank lines about 10 s (7 s before); the 4 MB test
+  of round 3 passes within its 15 s.
+- Tests: `TestPersistReadsTheLinesAroundAChange` (four key-block changes,
+  six credentials built with the lines around them, five controls). On
+  b5e4174's persist hook 18 of 30 fail; the 10 controls pass, and the
+  Authorization case, whose added line holds `Bearer` and the token whole.
+
+#### 3. The send hook read curl's `--url @file` as a host named `file`, and never read a `--url=` value (medium); siblings: an `@file` operand, the audit hook
+
+curl 8.13 and later reads the URLs of `--url @file` (`@-` its input) from
+that file, and of an operand `@file` too (every operand goes through
+`--url`); 8.16 and later reads `--url=VALUE`. The hook's curl table had no
+`--url`, so `@urls` was an operand whose host after `@` was `urls`, and
+`--url=127.1:18777` an option with no value read.
+
+- Fix (send): `operand`, shared by every operand, refuses a curl operand
+  that starts with `@` (kind `redirect`, the message naming `--url @file`);
+  `--url=VALUE` (or an abbreviation of `--url` of 4 or more characters with
+  `=`) is read as an operand, so its host is checked; `--url VALUE` was
+  already read so. Data, header and form files (`-d @f`, `-H @h`) are
+  option values and pass.
+- Fix (audit): curl with `--url @file`, `--url=@file` or an `@file` word that
+  is not the value of a short option that takes one or of a data, header
+  or form option is refused (`--url @file` implies `--remote-name`: curl
+  names the files it writes after URLs this check does not read).
+- Checked: the SDK adapter refuses every Bash send under a destination
+  policy and reads no URL; the plugin's pre-tool-use hook gates every such
+  call; this container's curl is 8.5.0, so curl's reading was checked in
+  its source by the verifier, not run.
+- Tests: `TestCurlUrlsFromAFile` (send: ten refused as URL files, seven
+  `--url` values read as internal hosts, six controls; audit: seven
+  refused, four controls). On b5e4174's skills 46 of 68 fail; the 20
+  controls pass, and `--url 127.0.0.1`, which the old reading took as an
+  operand.
+
+#### 4. The send hooks read `/etc/hosts` only as written (low); siblings: `//`, `/./` and `..` in any command, a name written after `cd`, the Edit hook's `/././`
+
+The Bash rule matched each word against `/etc/hosts` as one string, with
+no tidying and no directory a command changes to; the gate did not read a
+command naming `/etc//hosts` at all; the Write hook's `sed` took out one
+`/./` of a run and did not read `..`.
+
+- Fix (Bash): a word is also matched tidied (repeated slashes and `.`
+  segments taken out), a word with a `..` segment whose last component is
+  a setting file's (`hosts`, `resolv.conf`, `gateway`, `config.json`,
+  `curlrc`, `wgetrc`) is refused, and where any word of the line may change
+  the directory (`cd`, `pushd`, `popd`, `--output-dir`, `-P`,
+  `--directory-prefix`, `--chdir`, a cluster with `C`, `D` or `P`) or the
+  call's `cwd` is `/etc`, `~/.ipfs` or HTTPie's directory, a word or a URL
+  whose last component is one is refused (kind `file`). The gate reads a
+  command naming `hosts` as a word or a path's last component.
+- Fix (Edit/Write): the `/./` substitution loops, and a path with a `..`
+  segment whose last component is a setting file's is refused (links on
+  its way decide what it reaches; the verifier found Claude Code
+  normalises a file tool's path first, so this matters on another host).
+- Tests: `TestSettingFilesInOtherSpellings` (twelve commands, the call run
+  in `/etc`, four paths refused; six controls). On b5e4174's send skill 30
+  of 46 fail; the 12 controls pass, and `/etc//hosts` and `/etc/./././hosts`
+  in the Write hook, whose parent exists, so `readlink -f` resolved them.
+
+#### 5. The binding covered a nested call by an approval the composite's call did not count (medium)
+
+`decisionsCover` counted every approval in the composite's request still
+valid at the nested call, though the composite's call, under a person
+requirement, counted only a person's: an agent's approval given after the
+person's covered a nested call that needs a person once the person's had
+expired (§5.18.4, §5.21.3).
+
+- Fix: the claim's `authority`, which the nesting token and `invokePlain`
+  read, is the request with only the decisions the call counted
+  (`counted`, person-filtered), or the covering token's, so
+  `decisionsCover` counts no other on either path, at any depth.
+- Python: the adapter does not see nested calls (its statement), so it has
+  no sibling; no call fixture holds approver kinds or a clock, so the
+  binding's tests carry the case.
+- Tests: `profiles.test.ts` "a nested call is covered only by the decisions
+  the composite's call counted" (grounded and plain: refused with F502,
+  nothing written; controls with no agent's approval, and a person's
+  approval still valid, which covers). On b5e4174's `grounded.ts` the two
+  probes fail and the three controls pass.
+
+#### Documentation
+
+SECURITY.md (the secrets section: the scan's line breaks, the persist
+hook's windows and key blocks; the pre-tool-use hook's persist check; the
+audit, persist, send and send-Edit rows; the binding's coverage by counted
+decisions), the hooks' README (the scan's three functions), the send,
+persist and audit hooks' headers, CHANGELOG [Unreleased] Upgrading (the
+plugin's round-5 batch-4 entry, the binding's composites entry). The
+Standard's text was not changed: §6.7 lets a host choose its recogniser and
+§5.18.10 requires the persist check; §5.18.4 already covers a nested call
+by "the decisions the composite's call counted".
+
+#### Checks after batch 4
+
+- Python: `pytest tests/` file by file, each run under `timeout 120` and a
+  4 GB address-space limit (`tests/test_skill_hooks.py` and
+  `tests/test_redaction.py` by test function, in runs of at most 120
+  tests, the long-text redaction test in runs of 8; `tests/test_discovery`
+  as one run): 8096 passed, 19 skipped, of 8115 collected
+  (`test_evidence_performance`'s 1 s insert test, which ran beside the
+  TypeScript suites, passed alone). ruff check and format with CI's lists;
+  mypy; every `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py
+  --strict` and every domain catalog and example `--strict`;
+  `sync_skill_schemas.py --check` and the five generators' `--check`;
+  `scripts/run_conformance.py`.
+- Rust: no Rust source changed; not rebuilt.
+- TypeScript: the package's build and test (2074 passed: the nine new
+  credential vectors, as text and as a todo); the binding's check and test
+  (268 passed, 2 skipped).
+- Old code: the new tests against b5e4174's `hooks/`, skills and
+  `grounded.ts` (copied in place, then restored): #1 30 of 46 and 5 of 27,
+  #2 18 of 30, #3 46 of 68, #4 30 of 46, #5 2 of 5 fail; the controls pass
+  (and the few refusals the old reading made by luck, above).
+- Probes, each under `timeout 120` and a 4 GB address-space limit (Node
+  with its heap bounded), inputs of at most 1 MB: the reported texts
+  through the scan, the plugin hook (a scratch git repository) and the
+  adapter; the persist hook on the reported `DEPLOY.md` edit, its siblings
+  and controls, and its time on 1 MB files (whole-file windows about 1.4
+  s; 900,000 blank lines about 10 s, 7 s before); the send hook's 19
+  `--url` refusals and 8 controls, and its 14 setting-file refusals, 7
+  controls and 7 Write paths; the audit hook's curl lines and records; the
+  binding's two scenarios and controls. No CLI or nested agent was
+  started; the scratch directories were removed.

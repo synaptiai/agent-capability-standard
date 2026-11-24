@@ -4499,3 +4499,486 @@ def test_printf_v_rebinds_a_reader(tmp_path: Path) -> None:
     )
     assert done.returncode == 0, done.stderr
     assert "AKIAIOSFODNN7EXAMPLE" in records.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Security round 5, batch 4: a credential across line breaks, and one the
+# changed lines build with the lines around them
+# ---------------------------------------------------------------------------
+
+# The texts the report gave: each holds a credential whose value follows its
+# name on the next line. The SDK's and the TypeScript rules read whitespace
+# with line breaks in it; grep reads one line at a time.
+SPANNING = [
+    "password:\nXyz12345abcdef",
+    'API_KEY=\r\n"Xyz12345abc"',
+    "Authorization:\nBearer Xyz12345abcdef",
+    "Bearer\nabcdefghijklmnopqrstuvwxyz",
+    "db:\n  host: db.internal\n  password:\n    Xyz12345abcdef\n",
+    "--api-key\nabc123def456ghi",
+]
+
+
+def _scan(shell: str, function: str, text: str) -> str:
+    script = SECRET_SCAN.read_text(encoding="utf-8") + (
+        f'\nif {function} "$1"; then echo yes; else echo no; fi\n'
+    )
+    result = subprocess.run(
+        [shell, "-c", script, "scan", text],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestCredentialsAcrossLines:
+    @pytest.mark.parametrize("text", SPANNING)
+    def test_the_scan_reads_a_value_on_the_next_line(
+        self, shell: str, text: str
+    ) -> None:
+        """secret_in reads the text again with its line breaks read as
+        blanks, as Redactor.holds_credential and holdsCredential read it."""
+        from grounded_agency.state.redaction import holds_credential
+
+        assert holds_credential(text)
+        assert _scan(shell, "secret_in", text) == "yes"
+
+    def test_secret_lines_reads_each_line_on_its_own(self, shell: str) -> None:
+        """A caller that joins texts read apart joins them with line breaks:
+        secret_lines reads each line on its own, secret_in reads across."""
+        text = "rotate the api_key:\nabc123def456ghi"
+        assert _scan(shell, "secret_lines", text) == "no"
+        assert _scan(shell, "secret_in", text) == "yes"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "authorization:\n" * 27_000,
+            "authorization: a" + "\n" * 400_000 + "x",
+            '"token",\n"value":\n"' + "a\n" * 200_000,
+            "['token',\n'a\n" * 30_000,
+            ".-u\n" * 100_000,
+            "password:\n" * 40_000,
+        ],
+        ids=["names", "blank_lines", "pair", "tuples", "user", "keys"],
+    )
+    def test_the_folded_reading_is_linear(self, shell: str, text: str) -> None:
+        """About 400 KB of line breaks, read again as one line, in well
+        under a second (the bounds that keep each -o stage linear hold)."""
+        script = SECRET_SCAN.read_text(encoding="utf-8") + (
+            '\nif secret_in "$(cat)"; then echo yes; else echo no; fi\n'
+        )
+        started = time.perf_counter()
+        result = subprocess.run(
+            [shell, "-c", script],
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            env={**os.environ, "LC_ALL": "C.UTF-8"},
+        )
+        assert result.stdout.strip() == "no", result.stderr
+        assert time.perf_counter() - started < 5
+
+    @pytest.mark.parametrize("text", SPANNING)
+    def test_persist_refuses_a_write_of_one(
+        self, tmp_path: Path, shell: str, text: str
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        call = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/work/app/notes.md", "content": text},
+        }
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    @pytest.mark.parametrize(
+        "note",
+        ["password:\\n  Xyz12345abcdef", "Authorization:\\nBearer Xyz12345abcdef"],
+    )
+    def test_audit_refuses_a_record_that_holds_one(
+        self, tmp_path: Path, shell: str, note: str
+    ) -> None:
+        """The reported record: its JSON escape \\n decodes to a line break."""
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = (
+            'printf \'%s\\n\' \'{"event":"config","note":"' + note + "\"}' >> "
+            '"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"'
+        )
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "cite it by reference or digest", F504)
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            # Two strings, a name ending one and a value opening the next,
+            # are read apart, as the SDK reads each string of a record.
+            '{"event":"config","a":"rotate the api_key:","b":"abc123def456ghi"}',
+            '{"event":"config","note":"token:\\nrotate monthly"}',
+        ],
+    )
+    def test_audit_passes_a_record_that_holds_none(
+        self, tmp_path: Path, shell: str, record: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        command = (
+            f"printf '%s\\n' '{record}' >> "
+            '"${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl"'
+        )
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+
+KEY_BODY = "\n".join("MIIEowIBAAKCAQEAx" + chr(ord("A") + i) * 47 for i in range(6))
+KEY_TEMPLATE = (
+    "# Deploy key\n\n-----BEGIN OPENSSH PRIVATE KEY-----\n"
+    "<paste the key body here>\n-----END OPENSSH PRIVATE KEY-----\n"
+)
+RSA_SHELL = "-----BEGIN RSA PRIVATE KEY-----\n-----END RSA PRIVATE KEY-----\n"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestPersistReadsTheLinesAroundAChange:
+    """The persist hook read the lines a call adds one at a time: a key's
+    body put into a template whose BEGIN line the file holds, and a value
+    put under a name the file holds, passed (security round 5, batch 4)."""
+
+    @pytest.mark.parametrize(
+        ("held", "tool_input"),
+        [
+            # The reported case: the body of an OpenSSH key, its BEGIN and
+            # END lines already in the file.
+            (
+                KEY_TEMPLATE,
+                {"old_string": "<paste the key body here>", "new_string": KEY_BODY},
+            ),
+            # The body put before an END line, under a BEGIN line.
+            (
+                RSA_SHELL,
+                {
+                    "old_string": "-----END RSA PRIVATE KEY-----",
+                    "new_string": KEY_BODY + "\n-----END RSA PRIVATE KEY-----",
+                },
+            ),
+            # The same as a MultiEdit.
+            (
+                KEY_TEMPLATE,
+                {
+                    "edits": [
+                        {
+                            "old_string": "<paste the key body here>",
+                            "new_string": KEY_BODY,
+                        }
+                    ]
+                },
+            ),
+            # A block with no END line runs to the end of the file.
+            (
+                "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n<body>\n",
+                {"old_string": "<body>", "new_string": KEY_BODY},
+            ),
+        ],
+        ids=["template", "before_end", "multiedit", "no_end"],
+    )
+    def test_refuses_a_change_inside_a_private_key_block(
+        self, tmp_path: Path, shell: str, held: str, tool_input: dict[str, Any]
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = TestPersistCommandHook._store(tmp_path, "DEPLOY.md", held)
+        tool = "MultiEdit" if "edits" in tool_input else "Edit"
+        call = {"tool_name": tool, "tool_input": {"file_path": path, **tool_input}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "changes a line of a private key block", F504)
+
+    @pytest.mark.parametrize(
+        ("held", "tool_input"),
+        [
+            # A value put under a name the file holds.
+            (
+                "db:\n  host: db.internal\n  password:\n    CHANGEME\n",
+                {"old_string": "CHANGEME", "new_string": "Xyz12345abcdef"},
+            ),
+            # A name put over a value the file holds.
+            (
+                "db:\n  note:\n    Xyz12345abcdef\n",
+                {"old_string": "note:", "new_string": "password:"},
+            ),
+            # A line taken out from between them.
+            (
+                "password:\n# remove me\nXyz12345abcdef\n",
+                {"old_string": "# remove me\n", "new_string": ""},
+            ),
+            # A pair whose six parts are each on a line of their own: the
+            # widest a match of the scan reaches.
+            (
+                '"token"\n,\n"value"\n:\n"bearer\n<placeholder>"\n',
+                {"old_string": "<placeholder>", "new_string": "abc123def456"},
+            ),
+            # An Authorization header's value on the line under it.
+            (
+                "headers:\n  Authorization:\n    Bearer <token>\n",
+                {"old_string": "<token>", "new_string": "Xyz12345abcdefghijklmn"},
+            ),
+            # A second copy of a value the lines around it hold already.
+            (
+                "password:\n  Xyz12345abcdef\nbackup: <x>\n",
+                {
+                    "old_string": "backup: <x>",
+                    "new_string": "password:\n  Xyz12345abcdef",
+                },
+            ),
+        ],
+        ids=["value", "name", "removed_line", "pair", "authorization", "copy"],
+    )
+    def test_refuses_a_credential_the_change_builds_with_the_lines_around_it(
+        self, tmp_path: Path, shell: str, held: str, tool_input: dict[str, Any]
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = TestPersistCommandHook._store(tmp_path, "config.md", held)
+        call = {"tool_name": "Edit", "tool_input": {"file_path": path, **tool_input}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "holds what looks like a credential", F504)
+
+    @pytest.mark.parametrize(
+        ("held", "tool_input"),
+        [
+            # A credential the file holds across lines already, beside the
+            # change: it is read as often before the call as after it.
+            (
+                "password:\n  Xyz12345abcdef\nstatus: draft\n",
+                {"old_string": "status: draft", "new_string": "status: final"},
+            ),
+            # A key block the file holds, and a change below its END line.
+            (
+                RSA_SHELL + "\nnext: <x>\n",
+                {"old_string": "<x>", "new_string": "done"},
+            ),
+            # A key block taken out whole.
+            (
+                "-----BEGIN RSA PRIVATE KEY-----\nAAAABBBB\n"
+                "-----END RSA PRIVATE KEY-----\nrest\n",
+                {
+                    "old_string": "-----BEGIN RSA PRIVATE KEY-----\nAAAABBBB\n"
+                    "-----END RSA PRIVATE KEY-----\n",
+                    "new_string": "",
+                },
+            ),
+            # A change far below an example block.
+            (
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n"
+                "-----END OPENSSH PRIVATE KEY-----\n"
+                + "".join(f"line {i}\n" for i in range(12))
+                + "tail: <x>\n",
+                {"old_string": "<x>", "new_string": "done"},
+            ),
+            # Prose under a credential name.
+            (
+                "token:\n  <x>\n",
+                {"old_string": "<x>", "new_string": "rotate monthly"},
+            ),
+        ],
+        ids=["held_across_lines", "after_end", "removed_block", "far", "prose"],
+    )
+    def test_allows_a_change_that_builds_none(
+        self, tmp_path: Path, shell: str, held: str, tool_input: dict[str, Any]
+    ) -> None:
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        path = TestPersistCommandHook._store(tmp_path, "config.md", held)
+        call = {"tool_name": "Edit", "tool_input": {"file_path": path, **tool_input}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+
+# ---------------------------------------------------------------------------
+# Security round 5, batch 4: curl's URLs read from a file, and the files
+# that set where a request goes in other spellings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestCurlUrlsFromAFile:
+    """curl 8.13 and later reads the URLs of `--url @file` (and an operand
+    `@file`, `@-` its input) from that file, and 8.16 and later reads
+    `--url=VALUE`: the send hook read `@urls` as a host named urls and never
+    read a `--url=` value."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q --url @urls",
+            "curl -q --url @urls.txt",
+            "curl -q --url @-",
+            "curl -q -s --url @urls --max-time 3",
+            "curl -q --url=@urls",
+            "curl -q --ur @urls",
+            "curl -q --url @urls -o out",
+            "curl -q @urls",
+            "curl -q -- @urls",
+            "curl -q '@urls'",
+        ],
+    )
+    def test_send_refuses_urls_read_from_a_file(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "--url @file or an @file operand", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q --url=localhost:8080",
+            "curl -q --url=127.1:18777",
+            "curl -q --url=10.0.0.1/x",
+            "curl -q --url=169.254.169.254/latest/meta-data/",
+            "curl -q --url=2130706433",
+            "curl -q --ur=127.0.0.1/",
+            "curl -q --url 127.0.0.1",
+        ],
+    )
+    def test_send_reads_a_url_value_as_a_url(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "internal network access", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q --url https://example.com/",
+            "curl -q --url=https://example.com/",
+            "curl -q -d @payload.json https://example.com/api",
+            "curl -q -H @headers.txt https://example.com/",
+            "curl -q --data-binary @f https://example.com/",
+            "curl -q --url-query a=b https://example.com/",
+        ],
+    )
+    def test_send_passes_a_url_and_data_read_from_a_file(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q --url @urls",
+            "curl -q --url=@urls",
+            "curl -q @urls",
+            "curl -q -- @urls",
+            "curl -q -s @urls",
+            "curl -q --ur @urls",
+            "curl -q --url @-",
+        ],
+    )
+    def test_audit_refuses_urls_read_from_a_file(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        """--url @file implies --remote-name: curl names the files it writes
+        after URLs this check does not read."""
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert_blocked(result, "URLs read from a file", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q -d @payload.json https://example.com/api -o out.json",
+            "curl -q -sd @p.json https://example.com/",
+            "curl -q --data-binary @f https://example.com/",
+            "curl -q -H @h.txt https://example.com/",
+        ],
+    )
+    def test_audit_passes_data_read_from_a_file(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestSettingFilesInOtherSpellings:
+    """/etc/hosts written as /etc//hosts, /etc/./hosts or through a ..
+    segment, or as the name a command writes in a directory it changes to
+    (cd, --output-dir, wget -P), passed the send hooks."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q https://example.com/ --output-dir /etc -o hosts",
+            "cd /etc && curl -q https://example.com/hosts -O",
+            "wget --no-config -P /etc https://example.com/hosts",
+            "wget --no-config --directory-prefix=/etc https://example.com/hosts",
+            "pushd /etc; curl -q https://example.com/hosts -O",
+            "tee -a /etc//hosts < x",
+            "cp x /etc/./hosts",
+            "printf '203.0.113.5 a.example' >> /etc//hosts",
+            "cd /etc && printf '203.0.113.5 a.example' >> hosts",
+            "curl -q https://example.com/ -o /etc//hosts",
+            "curl -q https://example.com/ -o /etc/./hosts",
+            "cp x /etc/nonexistent/../hosts",
+        ],
+    )
+    def test_bash_refuses_them(self, tmp_path: Path, shell: str, command: str) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        call = {**bash_call(command), "cwd": str(tmp_path)}
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "a file that sets where a request goes", F504)
+
+    def test_bash_refuses_a_name_written_where_the_call_runs_in_etc(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        call = {**bash_call("curl -q https://example.com/hosts -O"), "cwd": "/etc"}
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "a file that sets where a request goes", F504)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "curl -q https://example.com/hosts",
+            "cat ~/.ssh/known_hosts",
+            "cd src && curl -q https://example.com/api -o data.json",
+            "ls hosts.txt",
+        ],
+    )
+    def test_bash_passes_other_names(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        call = {**bash_call(command), "cwd": str(tmp_path)}
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/etc/nonexistent/../hosts",
+            "/root/.ipfs/x/../gateway",
+            "/etc/./././hosts",
+            "/etc//hosts",
+        ],
+    )
+    def test_write_refuses_them(self, tmp_path: Path, shell: str, path: str) -> None:
+        hook = command_hook("send", "PreToolUse", "Edit|Write|MultiEdit|NotebookEdit")
+        call = {"tool_name": "Write", "tool_input": {"file_path": path, "content": "x"}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert_blocked(result, "a file that sets where a request goes", F504)
+
+    @pytest.mark.parametrize("path", ["/tmp/x/../notes.md", "/work/app/hosts.md"])
+    def test_write_passes_other_paths(
+        self, tmp_path: Path, shell: str, path: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Edit|Write|MultiEdit|NotebookEdit")
+        call = {"tool_name": "Write", "tool_input": {"file_path": path, "content": "x"}}
+        result = run_command(hook, call, tmp_path, shell)
+        assert result.returncode == 0, result.stderr

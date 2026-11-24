@@ -66,7 +66,11 @@ hooks:
             # enable, which give a program another name, a copy or a link of the tool
             # (whatever comes before the copier), xargs feeding it, code a shell or
             # an interpreter runs from a word, a pipe or a file, and any URL a
-            # program is given. In every command, a word the shell may expand (a
+            # program is given, curl's --url value (and no URL read from a file,
+            # --url @file or an operand @file), a setting file in any spelling
+            # (/etc//hosts, a .. segment) or by its last component where the line
+            # may change the directory (cd, --output-dir, -P) or runs in /etc.
+            # In every command, a word the shell may expand (a
             # glob, in any letter case, a brace, an extglob pattern) to the name of
             # curl, wget or http, or to a file that sets where a request goes (a
             # leading dot matched by a glob too where the command may turn on
@@ -86,7 +90,7 @@ hooks:
             # after a line continuation, $\<newline>'...'), and /dev/${t}cp is /dev/tcp
             JOINED="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // "" | split("\\\n") | add // ""' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
             NAMED=false
-            printf '%s\n' "$CMD" | tr -d "\"'\\\\\n" | grep -qiE "(curl|wget|http|ipfs|dev/tcp|dev/udp|etc/hosts|resolv\.conf)" && NAMED=true
+            printf '%s\n' "$CMD" | tr -d "\"'\\\\\n" | grep -qiE "(curl|wget|http|ipfs|dev/tcp|dev/udp|etc/hosts|resolv\.conf|(^|[^A-Za-z0-9_.-])hosts($|[^A-Za-z0-9_.-]))" && NAMED=true
             case "$CMD$JOINED" in *"\$'"* | *'$"'*) NAMED=true ;; esac
             printf '%s\n' "$CMD" | grep -qE '/dev/[^[:space:];&|<>/]*[$`\\]|[$`][^[:space:];&|<>]*/(tcp|udp)/' && NAMED=true
             if [ "$NAMED" = false ]; then
@@ -340,6 +344,22 @@ hooks:
             # may name, by their last components: a pattern must match each, a
             # leading dot only by a dot.
             def setting_paths: [[".curlrc"], [".config", "curlrc"], [".wgetrc"], ["etc", "wgetrc"], ["etc", "hosts"], ["etc", "resolv.conf"], ["resolve", "resolv.conf"], [".ipfs", "gateway"], ["httpie", "config.json"], [".httpie", "config.json"]];
+            # A word read as a path: repeated slashes and . segments taken out
+            # (/etc//hosts and /etc/./hosts are /etc/hosts), its last component, and
+            # whether it climbs (a .. segment, which a link may send anywhere).
+            def tidy: startswith("/") as $abs | split("/") | map(select(. != "" and . != ".")) | join("/") | if $abs then "/" + . else . end;
+            def last_name: sub("[?#].*$"; "") | tidy | split("/") | .[-1] // "" | ascii_downcase;
+            def climbs: split("/") | any(. == "..");
+            # The last components of the files that set where a request goes.
+            def setting_names: ["hosts", "resolv.conf", "gateway", "config.json", "curlrc", ".curlrc", "wgetrc", ".wgetrc"];
+            # A word that names such a file: as written, tidied, or by its last
+            # component past a .. segment.
+            def setting_word: (.d | test(setting_files; "i")) or (.d | tidy | test(setting_files; "i"))
+              or ((.d | climbs) and (.d | last_name | IN(setting_names[])));
+            # A word that may change the directory a later name, or a name a tool takes
+            # from a URL, is read in: cd, pushd and popd, curl's --output-dir, wget's
+            # -P and --directory-prefix, a wrapper's --chdir, -C or -D.
+            def moves_dir: IN("cd", "pushd", "popd") or test("^--(output-dir|directory-prefix|chdir)") or test("^-[A-Za-z]*[PCD]");
             # Variables that send a request elsewhere or change the program that runs:
             # curl's and wget's configuration directories and files, a CA bundle, the
             # resolver's, a proxy, git's (GIT_CONFIG_*, GIT_SSH_COMMAND, ...) and the
@@ -492,10 +512,24 @@ hooks:
                         (any($rest[]; test("^-[A-Za-z]*[cemErpn]") or startswith("--eval")) or any($rest[]; startswith("-") | not)) | not
                       else false end; .);
 
+            # An operand: a URL, read as the tool reads one. curl 8.13 and later reads
+            # the URLs of an operand or a --url value that starts with @ from that file
+            # (@- from its input), which this check does not read.
+            def operand($tool; $d; $m):
+              .pos += 1
+              | if $tool == "http" and .pos > 2 and (($d | test("^[^@/]*?(==|:=@|:=|=@|=)") and ($d | split("=")[0] | test("@") | not)) or ($d | test("^[A-Za-z0-9_-]+:[^0-9/@][^@]*$"))) then .
+                # an IPFS URL goes to the gateway IPFS_GATEWAY or a file names
+                elif $d | test("^ip[fn]s:"; "i") then .out = {kind: "redirect", word: $d}
+                elif $tool == "curl" and ($d | startswith("@")) then .out = {kind: "redirect", word: $d}
+                else destination($m; $tool) as $why | if $why != null then .out = {kind: $why, word: $d} else . end
+                end;
             # The words of a request: curl's, wget's or HTTPie's, after the tool's name.
             # Every word after -- is an operand (a URL), and wget's --no-config counts
             # only where wget reads it as an option: not as an option's value (-O
-            # --no-config) nor after --.
+            # --no-config) nor after --. curl's --url takes the next word as a URL (an
+            # operand here), and curl 8.16 and later reads --url=VALUE (or an
+            # abbreviation of --url, which an earlier curl reads as an unknown or an
+            # ambiguous option) as one too.
             def check_request($tool; $words; $runs):
               tables[$tool] as $t
               | reduce $words[] as $w ({skip: false, end: false, noconfig: false, pos: 0, out: null};
@@ -506,6 +540,8 @@ hooks:
                     if $w.d | startswith("--") then ($w.d | sub("=.*$"; "")) as $name
                       | if [$t.danger_long[] | . as $dl | ($name | startswith($dl)) or (($name | length) >= 3 and ($dl | startswith($name)))] | any
                         then .out = {kind: "redirect", word: $w.d}
+                        elif $tool == "curl" and ($name | length) >= 4 and ("--url" | startswith($name)) and ($w.d | contains("=")) then
+                          operand("curl"; $w.d | sub("^[^=]*="; ""); $w.m | sub("^[^=]*="; ""))
                         else .skip = (($w.d | contains("=") | not) and any($t.arg_long[]; . == $name))
                           | .noconfig = (.noconfig or $w.d == "--no-config")
                         end
@@ -517,12 +553,7 @@ hooks:
                         then .out = {kind: "redirect", word: $w.d}
                         else .skip = ($at != null and $at == ($letters | length) - 1) end
                     end
-                  else .pos += 1
-                  | if $tool == "http" and .pos > 2 and (($w.d | test("^[^@/]*?(==|:=@|:=|=@|=)") and ($w.d | split("=")[0] | test("@") | not)) or ($w.d | test("^[A-Za-z0-9_-]+:[^0-9/@][^@]*$"))) then .
-                    # an IPFS URL goes to the gateway IPFS_GATEWAY or a file names
-                    elif $w.d | test("^ip[fn]s:"; "i") then .out = {kind: "redirect", word: $w.d}
-                    else destination($w.m; $tool) as $why | if $why != null then .out = {kind: $why, word: $w.d} else . end
-                    end
+                  else operand($tool; $w.d; $w.m)
                   end)
               # curl reads ~/.curlrc (a proxy, a host) unless -q is its first word; wget
               # reads ~/.wgetrc and /etc/wgetrc unless given --no-config; HTTPie its
@@ -570,8 +601,8 @@ hooks:
               | $reads[0] as $at
               | (if $runs_tool then $p else $tool_words[-1] end) as $last
               | if $p != null and $args[$p].assign then {kind: "assign", word: $args[$p].d}
-                elif any($words[]; .d | test(setting_files; "i")) then
-                  {kind: "file", word: first($words[] | select(.d | test(setting_files; "i")) | .d)}
+                elif any($words[]; setting_word) then
+                  {kind: "file", word: first($words[] | select(setting_word) | .d)}
                 elif any($words[]; .d | sensitive_var) then
                   {kind: "assign", word: first($words[] | select(.d | sensitive_var) | .d)}
                 # alias, hash and enable give a program another name, unread (a
@@ -612,7 +643,8 @@ hooks:
                     end
                 end;
 
-            .tool_input.command // ""
+            (.cwd // "") as $cwd
+            | .tool_input.command // ""
             | if utf8bytelength > 16384 then "long "
               # In every command: a word the shell may expand to a request tool's name,
               # or to a file that sets where a request goes, in the command as written
@@ -641,6 +673,13 @@ hooks:
                     "nested \(first($c.cmds[][] | select(.d | embedded) | .d) | .[:200])"
                   elif any(fed_commands[]; .fed and runs_its_input) then
                     "nested \(first(fed_commands[] | select(.fed and runs_its_input) | .words | map(.d) | join(" ")) | .[:200])"
+                  # A name of such a file (or a URL ending in one, which curl -O and
+                  # wget write under it) where the line may change the directory it is
+                  # read in, or the call runs in /etc, ~/.ipfs or HTTPie's: cd /etc &&
+                  # ... >> hosts, curl --output-dir /etc -o hosts, wget -P /etc
+                  elif (any($c.cmds[][]; .d | moves_dir) or ($cwd | ascii_downcase | tidy | test("(^|/)(etc|\\.ipfs|\\.?httpie)$")))
+                       and any($c.cmds[][]; .d | last_name | IN(setting_names[])) then
+                    "file \(first($c.cmds[][] | select(.d | last_name | IN(setting_names[]))) | .d | .[:200])"
                   else (first($c.cmds[] | check_command(.) | select(. != null)) // null) as $r
                   | if $r == null then "ok" else "\($r.kind) \($r.word | .[:200])" end
                   end
@@ -659,8 +698,8 @@ hooks:
             case "$KIND" in
               ok) exit 0 ;;
               internal) echo "$INTERNAL: $WORD" >&2 ;;
-              redirect) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose connection an option or a proxy setting redirects ($WORD), in any spelling (quoted, abbreviated, --proxy1.0, git -c http.*), nor curl's --variable and --expand-* options, which build text when the command runs, nor an ipfs:// or ipns:// URL, which goes to the gateway IPFS_GATEWAY or a file names: the address it reaches is not the one this check reads" >&2 ;;
-              file) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command that names bash's /dev/tcp or /dev/udp, which open a connection, or a file that sets where a request goes (.curlrc, .wgetrc, /etc/hosts, resolv.conf, ~/.ipfs/gateway, HTTPie's config.json), by its name or by a glob or a brace the shell may expand to it: $WORD" >&2 ;;
+              redirect) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request whose connection an option or a proxy setting redirects ($WORD), in any spelling (quoted, abbreviated, --proxy1.0, git -c http.*), nor curl's --variable and --expand-* options, which build text when the command runs, nor an ipfs:// or ipns:// URL, which goes to the gateway IPFS_GATEWAY or a file names, nor curl's --url @file or an @file operand, which curl 8.13 and later reads URLs from: the address it reaches is not the one this check reads" >&2 ;;
+              file) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command that names bash's /dev/tcp or /dev/udp, which open a connection, or a file that sets where a request goes (.curlrc, .wgetrc, /etc/hosts, resolv.conf, ~/.ipfs/gateway, HTTPie's config.json), by its name in any spelling (/etc//hosts, a .. segment), by a glob or a brace the shell may expand to it, or by its last component (or a URL's, which curl -O and wget name a file after) where the command may change the directory it is read in (cd, --output-dir, -P) or runs in /etc: $WORD" >&2 ;;
               config) echo "F504 CONSTRAINT_VIOLATED: the send skill runs curl only with -q as its first option and wget only with --no-config read as an option (not an option's value, not after --), wherever the tool runs (after !, if, while, a wrapper or a program this check does not know), so no configuration file (.curlrc, .wgetrc, /etc/wgetrc) sets a proxy or a host this check does not read, and HTTPie only where its configuration file sets no default options: $WORD" >&2 ;;
               assign) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a command with a variable set on its line, nor one that names CURL_HOME, HOME, XDG_CONFIG_HOME, WGETRC, SYSTEM_WGETRC, IPFS_GATEWAY, IPFS_PATH, HTTPIE_CONFIG_DIR, PATH, a CA bundle, a proxy, git's or the loader's variables, with or without a value (export NAME, read NAME, for NAME in, printf -v NAME): '$WORD': a setting changes where the request goes, unseen by this check" >&2 ;;
               nested) echo "F504 CONSTRAINT_VIOLATED: the send skill does not run a request inside a command line given as a word (sh -c, trap, awk's system, sed's e, an interpreter's code, git rebase -x), nor code a shell or an interpreter reads from a pipe or a file, in a command that names curl, wget or http: '$WORD', whose destination this check cannot read; run curl, wget or http directly" >&2 ;;
@@ -689,7 +728,8 @@ hooks:
             # resolver's (/etc/hosts, resolv.conf), curl's IPFS gateway
             # (.ipfs/gateway) and HTTPie's (httpie/config.json), by the path as
             # written and the file it reaches (links followed; a link that cannot be
-            # followed is refused), in any letter case. Claude Code passes the tool
+            # followed is refused), in any letter case, and a path through a ..
+            # segment whose last component is such a file's. Claude Code passes the tool
             # call as JSON on stdin; exit 2 blocks the call and the reason on stderr
             # is shown to Claude. A call that cannot be read is blocked (R407).
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
@@ -708,8 +748,21 @@ hooks:
             fi
             for P in "$TARGET" "$REACHED"; do
               # In lower case (a file system may ignore case), repeated slashes and ./
-              # segments removed
-              SEEN="$(printf '%s\n' "$P" | tr 'A-Z' 'a-z' | sed -e 's#//*#/#g' -e 's#/\./#/#g' -e 's#^\./##')"
+              # segments removed (each of /././, read until none is left)
+              SEEN="$(printf '%s\n' "$P" | tr 'A-Z' 'a-z' | sed -e 's#//*#/#g' -e ':a' -e 's#/\./#/#g' -e 'ta' -e 's#^\./##')"
+              # A path with a .. segment reaches what the links on its way decide
+              # (/etc/x/../hosts, a parent that does not exist yet): one whose last
+              # component is such a file's is refused
+              case "$SEEN" in
+                */.. | */../* | ../* | ..)
+                  case "${SEEN##*/}" in
+                    hosts | resolv.conf | gateway | config.json | *curlrc | *wgetrc)
+                      echo "$REFUSE" >&2
+                      exit 2
+                      ;;
+                  esac
+                  ;;
+              esac
               case "$SEEN" in
                 *curlrc | *wgetrc | */etc/hosts | etc/hosts | *resolv.conf | */.ipfs/gateway | .ipfs/gateway | */httpie/config.json | httpie/config.json | */.httpie/config.json | .httpie/config.json)
                   echo "$REFUSE" >&2

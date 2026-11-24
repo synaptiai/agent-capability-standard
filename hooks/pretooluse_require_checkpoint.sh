@@ -332,8 +332,15 @@ UNGATED_TOOLS=(Read Glob Grep LS WebFetch WebSearch AskUser AskUserQuestion Todo
 PERSIST_TOOLS=(TodoWrite TaskCreate TaskUpdate)
 
 # BEGIN secret-scan (source: hooks/secret_scan.sh; tests/test_skill_hooks.py keeps every copy equal)
-# secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7).
-SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
+# secret_in TEXT: status 0 when TEXT holds a credential-shaped value (STANDARD 1.2.0 §6.7), read line by line and again with
+# its line breaks read as blanks, as the SDK's and the TypeScript rules read whitespace (password:<newline>value).
+# secret_lines TEXT: the same rules, each line read on its own; a caller that joins texts read apart joins them with line
+# breaks, each text given once as it is and once with its own line breaks read as blanks.
+# secret_values TEXT: what the rules whose match may hold whitespace find in TEXT, one per line, each line read on its own:
+# the match, or the value a rule reads out of it (a caller compares what two texts hold).
+# The shapes of keys and tokens (the first two may hold whitespace)
+SECRET_SPACED='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
+SECRET_ERE="$SECRET_SPACED"'|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
 SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
 # A quote, or an escaped one (\" in JSON text inside a JSON string)
 SECRET_Q="\\\\*[\"']"
@@ -341,41 +348,55 @@ SECRET_Q="\\\\*[\"']"
 SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
 SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
 SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+# A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
+SECRET_QUOTED="$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']"
 # The rules are ASCII, read byte by byte (LC_ALL=C, in a subshell): a multibyte locale sends some of them to a matcher whose time grows with the square of the text
-secret_in() (
+secret_values() (
   LC_ALL=C
   export LC_ALL
-  printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
-  # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
-  printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']" && return 0
-  # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once)
-  printf '%s' "$1" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
-    sed -E 's#^.*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+  printf '%s' "$1" | grep -Eo -- "$SECRET_SPACED"
+  printf '%s' "$1" | grep -Eio -- "$SECRET_QUOTED"
   # An Authorization header's value, 8 or more characters with letters and digits
   printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
     sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//" |
     sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
-    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+    grep -E '[0-9]' | grep -E '[A-Za-z]'
   # ... or after any other scheme (ApiKey, SSWS, Bot) and spaces: the first word may be the scheme or the credential, so both readings count
   printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}" |
-    sed -E 's/^.* //' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+    sed -E 's/^.* //' | grep -E '[0-9]' | grep -E '[A-Za-z]'
   # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
   printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
     sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*\\\\*[\"']//" |
     sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
-    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+    grep -E '[0-9]' | grep -E '[A-Za-z]'
   # ... and the same after any other scheme
   printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
     sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.* //" |
-    grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+    grep -E '[0-9]' | grep -E '[A-Za-z]'
   # A user option's password (curl -u user:password), 8 or more characters with letters and digits
   printf '%s' "$1" | grep -Eo -- "$SECRET_USER[^[:space:]\"'\\\\]{8,}" |
-    sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+    sed -E 's/^[^:]*://' | grep -E '[0-9]' | grep -E '[A-Za-z]'
   # An unquoted value of 12 or more characters with letters and digits, assigned or given to a credential option
   printf '%s' "$1" | grep -Eio -- "$SECRET_OPT[[:space:]]+[^-[:space:]\"'][^[:space:]\"']{11,}" |
-    sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]' && return 0
+    sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
   printf '%s' "$1" | grep -Eio -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
-    sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -Eq '[A-Za-z]'
+    sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+  return 0
+)
+secret_lines() (
+  LC_ALL=C
+  export LC_ALL
+  printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
+  # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once)
+  printf '%s' "$1" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
+    sed -E 's#^.*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+  # The rules that read a quoted value, or a value out of a match
+  secret_values "$1" | grep -q .
+)
+secret_in() (
+  secret_lines "$1" && return 0
+  SECRET_FOLDED="$(printf '%s' "$1" | LC_ALL=C tr '\n\r' '  ')" || return 0
+  [ "$SECRET_FOLDED" != "$1" ] && secret_lines "$SECRET_FOLDED"
 )
 # END secret-scan
 
@@ -932,17 +953,25 @@ def acs_held($secret):
 # persist: the data the call would store holds no secret the layer
 # recognises (§5.18.10, §6.7), as the SDK adapter decides it
 # (Redactor.holds_credential): a credential-shaped value in any string of
-# the input or in the input's JSON text (secret_in), or a value in a member
-# named for a credential (SECRET_MEMBER_JQ). NUL bytes, which a shell
-# variable cannot hold, are read as blanks. The scan runs without pipefail:
-# a grep -q that stops at a match ends the printf feeding it, and with
-# pipefail that would read as no match.
+# the input or in the input's JSON text, or a value in a member named for a
+# credential (SECRET_MEMBER_JQ). Each string is read on its own (as the
+# adapter reads each), line by line and again with its line breaks read as
+# blanks (a value on the line after its name), and the JSON text after them
+# (secret_lines). NUL bytes, which a shell variable cannot hold, are read as
+# blanks. The scan runs without pipefail: a grep -q that stops at a match
+# ends the printf feeding it, and with pipefail that would read as no match.
 for entry in "${PERSIST_TOOLS[@]}"; do
   if [ "$tool_name" = "$entry" ]; then
     unread="R407 SAFETY_CHECK_FAILED: cannot read the data $tool_name would store, so the call is blocked."
     held=$(printf '%s' "$payload" | jq -r "$SECRET_MEMBER_JQ"' .tool_input | acs_held(false)' 2>/dev/null) || block "$unread"
-    stored=$(printf '%s' "$payload" | jq -r '.tool_input | ([.. | strings] | join("\n")) + "\n" + tojson | split("\u0000") | join(" ")' 2>/dev/null) || block "$unread"
-    if [ "$held" = "true" ] || { [ "$held" = "false" ] && (set +o pipefail; secret_in "$stored"); }; then
+    stored=$(printf '%s' "$payload" | jq -r '
+      # join, in time linear in the text (the builtin join copies what it has built at each piece)
+      def joined($s): (.[0:1] + (.[1:] | map($s + .))) | add // "";
+      def blanked: split("\r") | joined(" ") | split("\n") | joined(" ");
+      .tool_input | [.. | strings] as $s
+      | $s + [$s[] | select(index("\n") != null or index("\r") != null) | blanked] + [tojson]
+      | joined("\n") | split("\u0000") | joined(" ")' 2>/dev/null) || block "$unread"
+    if [ "$held" = "true" ] || { [ "$held" = "false" ] && (set +o pipefail; secret_lines "$stored"); }; then
       block "F504 CONSTRAINT_VIOLATED: $tool_name (persist): the data it would store holds what looks like a credential; persist where the secret is kept, or cite it by reference, not the secret (STANDARD 1.2.0 §5.18.10, §6.7)"
     fi
     [ "$held" = "false" ] || block "$unread"
