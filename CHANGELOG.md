@@ -1287,10 +1287,11 @@ here and marked so.
     it exited 0 with nothing logged; input that is not JSON at all is
     reported the same way. The limit is the installed jq's (1.7: 256
     levels; 1.8: 10 000): a call the jq on `PATH` parses is logged. Its
-    input digest is taken only over text that is JSON: a jq that prints a
-    value nested past its print limit as `<skipped: too deep>` gives the
-    digest `unavailable` (reported, as any digest it cannot compute), never
-    a digest of the cut text.
+    input digest is taken only over text that is JSON: jq prints a value
+    nested past 256 levels as `<skipped: too deep>`, so a tool input that a
+    jq parses but cannot print (the CI runner's jq parses 300 levels) is
+    logged with the digest `unavailable` (reported, as any digest the hook
+    cannot compute), never with a digest of the cut text.
   - A git command on the read-only list (`git status`, `git log`, `git
     show`, `git diff`, `git rev-parse`, `git ls-files`, `git stash
     list|show`) is a gated `mutate` when the call's directory (the payload's

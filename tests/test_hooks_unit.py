@@ -75,6 +75,39 @@ def _jq_parses(text: str) -> bool:
     )
 
 
+def _jq_prints_again(text: str, path: str) -> bool:
+    """Whether the jq on PATH prints the value at ``path`` in ``text`` as
+    JSON, as the log hook checks before it digests the tool input: jq
+    prints a value nested past 256 levels as ``<skipped: too deep>``, and
+    a jq whose parser reads deeper input (the CI runner's reads 300
+    levels) prints such a value cut."""
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq not installed")
+    env = {**os.environ, "HOME": ""}
+    printed = subprocess.run(
+        [jq, "-cS", path],
+        input=text,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    if printed.returncode != 0:
+        return False
+    return (
+        subprocess.run(
+            [jq, "empty"],
+            input=printed.stdout,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        ).returncode
+        == 0
+    )
+
+
 def call(tool: str, **tool_input: Any) -> dict[str, Any]:
     """Claude Code's PreToolUse payload for a tool call (the hook reads only
     this JSON object, STANDARD 1.2.0 §5.18.8)."""
@@ -595,7 +628,10 @@ class TestPostToolUseExitCodes:
         jq's: 1.7 refuses past 256 levels, 1.8 past 10 000. So each depth
         is checked against the jq on PATH: a call it parses is logged (200
         levels: every jq), one it refuses is reported (100 000 levels, past
-        every jq's limit: the report is tested whatever jq runs)."""
+        every jq's limit: the report is tested whatever jq runs). jq prints
+        no more than 256 levels, so a tool input this jq parses but cannot
+        print is logged with the digest `unavailable`, and that is reported
+        (the CI runner's jq does so at 300 levels)."""
         nested = "[" * depth + "]" * depth
         stdin = (
             '{"hook_event_name": "PostToolUse", "tool_name": "mcp__x__y", '
@@ -609,13 +645,21 @@ class TestPostToolUseExitCodes:
             assert not jq_parses, "this jq reads 100 000 levels: deepen the test"
         result = run_hook(POSTTOOLUSE_HOOK, env_override=log_env, stdin=stdin)
         if jq_parses:
-            assert (result.returncode, result.stderr) == (0, "")
+            digested = _jq_prints_again(stdin, ".tool_input")
+            if where == "tool_response" or depth == 200:
+                assert digested, "a shallow tool input prints whole"
+            if digested:
+                assert (result.returncode, result.stderr) == (0, "")
+            else:
+                assert result.returncode == 1
+                assert "the input digest could not be computed" in result.stderr
             (entry,) = read_entries(tmp_path)
             assert (entry["tool"], entry["call_id"], entry["status"]) == (
                 "mcp__x__y",
                 "toolu_deep",
                 "executed",
             )
+            assert (entry["details"]["input_sha256"] == "unavailable") is (not digested)
         else:
             assert result.returncode == 1
             assert "could not be parsed" in result.stderr
