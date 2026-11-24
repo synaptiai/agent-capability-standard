@@ -7458,3 +7458,26 @@ which the plugin now does.
 - Old code: as listed above (86 Python, 57 TypeScript and 48 shell and hook
   tests fail on da18a8f's files, copied in place, then restored).
 - No CLI or nested agent was started; the scratch outputs were removed.
+
+## After the loop: push protection
+
+The merge of the loop into the integration branch was refused at the push:
+the host's secret scanning (push protection) found three example tokens in
+a provider's own format in the secrets vectors, added in round 4 batch 5
+and round 5 batch 6: a Discord bot token (`authorization_bot`,
+`authorization_other_schemes`), a Stripe live key (`stripe_key`,
+`service_tokens`) and a Slack webhook URL (`slack_webhook`,
+`service_tokens`). They are made up, but a public file holding them would
+also reach the providers' programs that revoke tokens found in public code.
+
+- **Fix:** the loop's commits were rewritten before anything was pushed, so
+  that each of those tokens is written with one character as a JSON `\u`
+  escape (`.` for a dot, `_` for an underscore). Every reader
+  (`json.load`, `JSON.parse`, `jq`) decodes it, so the vectors test the same
+  text: in each of the 35 rewritten commits, every changed file decodes to
+  the same JSON value as before, and no other file changed.
+- **Record:** both files' `description` says why the escape is there.
+- **Test:** `test_the_vector_files_hold_no_raw_provider_token`
+  (`tests/test_redaction.py`) fails when either file's raw text holds one of
+  the three shapes, and when the decoded vectors no longer hold each of them.
+  It fails on the files as they were.

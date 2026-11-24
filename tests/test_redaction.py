@@ -765,6 +765,32 @@ def test_the_credential_vector_file() -> None:
     assert BLOCKED and ALLOWED
 
 
+# Provider token shapes that secret scanning acts on: a host's push
+# protection refuses a push holding one, and the providers revoke tokens
+# found in public code. The vector files hold examples of each, written with
+# one character as a JSON \u escape (their descriptions say so).
+_SCANNED_TOKEN_SHAPES = {
+    "Discord bot token": re.compile(
+        r"[MNO][A-Za-z0-9_-]{23,25}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}"
+    ),
+    "Stripe live key": re.compile(r"[rs]k_live_[0-9A-Za-z]{10,}"),
+    "Slack webhook URL": re.compile(
+        r"hooks\.slack\.com/(?:services|workflows)/T[A-Za-z0-9]+/B[A-Za-z0-9]+/"
+        r"[A-Za-z0-9]+"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", ["redact.json", "credentials.json"])
+def test_the_vector_files_hold_no_raw_provider_token(name: str) -> None:
+    raw = (VECTORS.parent / name).read_text(encoding="utf-8")
+    decoded = json.dumps(json.loads(raw), ensure_ascii=False)
+    for shape, pattern in _SCANNED_TOKEN_SHAPES.items():
+        assert not pattern.search(raw), f"{name}: a raw {shape}"
+        # The decoded vectors still hold the shape they test.
+        assert pattern.search(decoded), f"{name}: no {shape} once decoded"
+
+
 @pytest.mark.parametrize("vector", CREDENTIALS["vectors"], ids=lambda v: v["name"])
 def test_holds_credential_vector(vector: dict[str, Any]) -> None:
     redactor = Redactor(vector["secret_values"])
