@@ -4023,3 +4023,109 @@ def test_the_rollback_hook_refuses_a_globbed_restore_before_it_runs(
     assert_blocked(result, "", "F503 ROLLBACK_FAILED: ")
     run_as_claude_code(text, repo, GIT_ENV)
     assert (repo / "a.txt").read_text() == "changed\n"
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestPathsReadExactly:
+    """Security round 5, batch 1, #2: a command substitution strips the
+    line breaks that end its output, so a path or a link target ending in
+    one (`k\\n`, a link to `evil\\n`) was read as another file: the persist
+    hook followed `notes.md -> 'a\\n'` to `a`, not to the credential file
+    `a\\n` leads to, and every file-tool hook read a `file_path` ending in a
+    line break as the file without it."""
+
+    def test_persist_follows_a_link_to_a_name_ending_in_a_line_break(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        home = tmp_path / "home"
+        (home / ".ssh").mkdir(parents=True)
+        (tmp_path / "notes.md").symlink_to("a\n")
+        (tmp_path / "a\n").symlink_to(home / ".ssh" / "authorized_keys")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        result = run_command(
+            hook,
+            edit_call(str(tmp_path / "notes.md")),
+            tmp_path,
+            shell,
+            {"HOME": str(home)},
+        )
+        assert_blocked(result, "system or credential directories", F504)
+
+    def test_persist_reads_a_file_path_ending_in_a_line_break(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        home = tmp_path / "home"
+        (home / ".ssh").mkdir(parents=True)
+        (tmp_path / "k\n").symlink_to(home / ".ssh" / "authorized_keys")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        result = run_command(
+            hook, edit_call(str(tmp_path / "k\n")), tmp_path, shell, {"HOME": str(home)}
+        )
+        assert_blocked(result, "system or credential directories", F504)
+
+    def test_persist_still_allows_a_name_ending_in_a_line_break(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        (tmp_path / "notes.md").symlink_to("a\n")
+        (tmp_path / "a\n").write_text("a\n")
+        (tmp_path / "a").symlink_to(home / ".ssh" / "authorized_keys")
+        hook = command_hook("persist", "PreToolUse", PERSIST_MATCHER)
+        result = run_command(
+            hook,
+            edit_call(str(tmp_path / "notes.md")),
+            tmp_path,
+            shell,
+            {"HOME": str(home)},
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_audit_reads_a_file_path_ending_in_a_line_break(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        records = tmp_path / ".claude" / "audit"
+        records.mkdir(parents=True)
+        (records / "records.jsonl").write_text("")
+        (tmp_path / "x\n").symlink_to(records / "records.jsonl")
+        hook = command_hook("audit", "PreToolUse", AUDIT_EDIT_MATCHER)
+        result = run_command(
+            hook,
+            edit_call(str(tmp_path / "x\n")),
+            tmp_path,
+            shell,
+            {"CLAUDE_PROJECT_DIR": str(tmp_path)},
+        )
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith(F504), result.stderr
+
+    def test_send_reads_a_file_path_ending_in_a_line_break(
+        self, tmp_path: Path, shell: str
+    ) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".curlrc").write_text("")
+        (tmp_path / "x\n").symlink_to(home / ".curlrc")
+        hook = command_hook("send", "PreToolUse", "Edit|Write|MultiEdit|NotebookEdit")
+        result = run_command(
+            hook, edit_call(str(tmp_path / "x\n")), tmp_path, shell, {"HOME": str(home)}
+        )
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith(F504), result.stderr
+
+    def test_rollback_reads_the_cwd_exactly(self, repo: Path, shell: str) -> None:
+        """The restore runs in `r\\n`, a repository of its own: no
+        checkpoint of the project's, though `r` is the project's."""
+        sha = checkpoint(repo, "ended")
+        (repo / "r").mkdir()
+        other = repo / "r\n"
+        git(repo, "clone", "-q", str(repo), str(other))
+        git(other, "fetch", "-q", str(repo), sha)
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        call = {**bash_call(f"git stash apply {sha}"), "cwd": str(other)}
+        env = {**ROLLBACK_ENV, "CLAUDE_PROJECT_DIR": str(repo)}
+        result = run_command(hook, call, repo, shell, env)
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith("F503 ROLLBACK_FAILED: "), result.stderr
+        here = {**bash_call(f"git stash apply {sha}"), "cwd": str(repo / "r")}
+        assert run_command(hook, here, repo, shell, env).returncode == 0

@@ -47,6 +47,18 @@ here and marked so.
   MCP tool registered without a `risk` takes its capability's risk (was
   `"medium"`), so a `retrieve` or `search` tool counts against the low-risk
   rate limit.
+- Python SDK, the Bash classifier (security round 5): a command the
+  read-only list would let pass, `git stash create` and a recorded restore
+  take the worst case where the program the shell finds for the first word
+  may be the repository's own: on `ToolCapabilityMapper.command_path` (the
+  PATH the commands run with; `None`, this process's) it is found under an
+  empty or relative entry, in a file in `ToolCapabilityMapper.project_dir`
+  (`None`, this process's working directory; links followed, not where the
+  project is the home directory, or holds it), or nowhere
+  (`command_may_be_content`). `wrap_options()` sets both from the options
+  (`env["PATH"]`, `cwd`). A project settings file that is not a regular
+  file (a FIFO, a link to `/dev/ptmx`) is unreadable, so every call is
+  refused with R407, as the plugin's hooks refuse it.
 - Python SDK, `wrap_options()` (Changed): tools pre-approved in
   `allowed_tools` now count against the rate limit (raise
   `GroundedAgentConfig(rate_limit=...)` if an agent needs more); an error in
@@ -1226,6 +1238,29 @@ here and marked so.
   - A Bash command whose first word holds a blank or a slash (a quoted
     `"git status"`, which bash runs as the program of that name) is a gated
     `mutate`, not a read-only list entry.
+  - Security round 5. A command on the read-only list, `git stash create`
+    and a recorded restore are a gated `mutate` where the program bash finds
+    for the first word on the `PATH` Claude Code gives the hook may be the
+    repository's own: found under an empty or relative entry
+    (`PATH=node_modules/.bin:$PATH`, a leading colon), in a file in the
+    project (links followed: an activated virtual environment, direnv's
+    `PATH_add`; not where the project is the home directory, or holds it),
+    or nowhere. A project whose `PATH` holds such an entry gets a checkpoint
+    and an approval for `ls` or `git status` only where that entry has a
+    file of that name. Each git command the hooks run, and each read of a
+    project settings file, stops after 5 seconds (a repository's
+    configuration can include a FIFO or `/dev/ptmx`, which held the hook
+    past its 30-second limit): a call whose project or marker git directory
+    git cannot name in time is blocked (R407, F501), a git read or
+    checkpoint there is a gated `mutate`, the take hook writes no marker
+    and the log hook writes its line without the anchor and says why; a
+    settings file that is not a regular file is unreadable (R407). The
+    records guard compares every path it resolves however many there are
+    (past about 64 KB of them, a match was read as none), follows a link
+    to a name that ends in a line break to that name, and reads the call's
+    `cwd` and git's answers exactly; the persist, audit, send and rollback
+    skills' hooks read a `file_path`, a `cwd` and a link target exactly
+    too.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,

@@ -51,10 +51,18 @@ hooks:
             # reason on stderr is shown to Claude. A call that cannot be read is
             # blocked.
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            TARGET="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # Each path is read exactly: a command substitution strips the line
+            # breaks that end its output, and a file's name may end in one
+            # (notes/k and notes/k<newline> are two files), so an x is printed
+            # after the path and taken off (with the line break pwd or readlink
+            # prints, which every such output must end in).
+            TARGET="$(printf '%s' "$INPUT" | jq -j '(.tool_input.file_path // .tool_input.notebook_path // empty), "x"' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            TARGET="${TARGET%x}"
             case "$TARGET" in
               "~/"*) TARGET="${HOME}/${TARGET#??}" ;;
             esac
+            NL="$(printf '\nx')"
+            NL="${NL%x}"
             # The file the write reaches: symbolic links followed. The deepest
             # directory of the path that exists, as `cd -P` resolves it, then the
             # rest of the path; a target that is itself a link is followed (at
@@ -63,26 +71,39 @@ hooks:
               R_PATH="$1"
               R_LINKS=0
               while :; do
-                case "$R_PATH" in /*) ;; *) R_PATH="$(pwd -P)/$R_PATH" ;; esac
+                case "$R_PATH" in
+                  /*) ;;
+                  *)
+                    R_HERE="$(pwd -P && printf x)" || return 1
+                    R_HERE="${R_HERE%x}"
+                    case "$R_HERE" in *"$NL") R_HERE="${R_HERE%?}" ;; *) return 1 ;; esac
+                    R_PATH="$R_HERE/$R_PATH"
+                    ;;
+                esac
                 R_DIR="${R_PATH%/*}"
                 R_REST="${R_PATH##*/}"
                 while [ -n "$R_DIR" ] && [ ! -d "$R_DIR" ]; do
                   R_REST="${R_DIR##*/}/$R_REST"
                   R_DIR="${R_DIR%/*}"
                 done
-                R_DIR="$(cd -P "${R_DIR:-/}" 2>/dev/null && pwd -P)" || return 1
+                R_DIR="$(cd -P "${R_DIR:-/}" 2>/dev/null && pwd -P && printf x)" || return 1
+                R_DIR="${R_DIR%x}"
+                case "$R_DIR" in *"$NL") R_DIR="${R_DIR%?}" ;; *) return 1 ;; esac
                 R_PATH="${R_DIR%/}/$R_REST"
                 [ -L "$R_PATH" ] || break
                 R_LINKS=$((R_LINKS + 1))
                 [ "$R_LINKS" -le 8 ] || return 1
-                R_TO="$(readlink "$R_PATH" 2>/dev/null)" || return 1
+                R_TO="$(readlink "$R_PATH" 2>/dev/null && printf x)" || return 1
+                R_TO="${R_TO%x}"
+                case "$R_TO" in *"$NL") R_TO="${R_TO%?}" ;; *) return 1 ;; esac
                 case "$R_TO" in /*) R_PATH="$R_TO" ;; *) R_PATH="${R_PATH%/*}/$R_TO" ;; esac
               done
-              printf '%s\n' "$R_PATH"
+              printf '%sx' "$R_PATH"
             }
             REAL="$TARGET"
             if [ -n "$TARGET" ]; then
               REAL="$(resolve "$TARGET")" || { echo "F504 CONSTRAINT_VIOLATED: Cannot persist through a symbolic link that cannot be followed" >&2; exit 2; }
+              REAL="${REAL%x}"
             fi
             HOME_REAL="$(cd -P "${HOME:-/}" 2>/dev/null && pwd -P)" || HOME_REAL="${HOME:-}"
             # Each check reads the path as written and the file it reaches

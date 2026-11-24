@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 from collections.abc import Sequence
 
 __all__ = ["ALLOWED_PROJECT_ENV", "PROJECT_SETTINGS_FILES", "refused_project_env"]
@@ -56,6 +57,25 @@ PROJECT_SETTINGS_FILES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _read_regular_file(path: str) -> bytes:
+    """The bytes of the regular file at ``path`` (links followed). Opened
+    without blocking, so a FIFO or a terminal there (``/dev/ptmx``), which
+    holds a read until someone writes, is refused (OSError) instead of
+    holding the call; the plugin's hooks bound their read in time alike."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        if hasattr(os, "set_blocking"):
+            os.set_blocking(fd, True)
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            return handle.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def refused_project_env(
     project_dir: str | os.PathLike[str], setting_sources: Sequence[str] | None
 ) -> list[str]:
@@ -77,9 +97,7 @@ def refused_project_env(
         if not os.path.lexists(path):
             continue
         try:
-            with open(path, "rb") as handle:
-                # UTF-8 only, as jq reads it.
-                document = json.loads(handle.read().decode("utf-8"))
+            document = json.loads(_read_regular_file(path).decode("utf-8"))
         except OSError, ValueError, RecursionError:
             found.append(f".claude/{name} (unreadable)")
             continue

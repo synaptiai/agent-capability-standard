@@ -648,7 +648,11 @@ hooks:
             # call as JSON on stdin; exit 2 blocks the call and the reason on stderr
             # is shown to Claude. A call that cannot be read is blocked (R407).
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            TARGET="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # The path exactly as given: a command substitution strips the line
+            # breaks that end its output, and a file's name may end in one (x and
+            # x<newline> are two files), so an x is printed after it and taken off.
+            TARGET="$(printf '%s' "$INPUT" | jq -j '(.tool_input.file_path // .tool_input.notebook_path // empty), "x"' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            TARGET="${TARGET%x}"
             [ -n "$TARGET" ] || exit 0
             REFUSE="F504 CONSTRAINT_VIOLATED: the send skill does not edit or write a file that sets where a request goes (.curlrc, .wgetrc, /etc/hosts, resolv.conf, ~/.ipfs/gateway, HTTPie's config.json): '$TARGET'"
             REACHED="$TARGET"

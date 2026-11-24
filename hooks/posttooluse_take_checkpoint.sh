@@ -99,6 +99,32 @@ hook_path() {
 PATH=$(hook_path)
 export PATH
 jq() { HOME= command jq "$@"; }
+# A program ("$@", found on PATH: not a function) run with no input for at
+# most 5 seconds: git reads the files a repository's configuration includes,
+# and jq the project's settings files, and a FIFO or a terminal there
+# (/dev/ptmx) holds the read until someone writes, past the hook's time
+# limit, after which a Claude Code without onFailure "block" runs the call.
+# Status 124 when it was stopped (or sleep, which times it, cannot run),
+# else the program's.
+bounded() {
+  local pid watch status=0 stopped=0
+  (exec "$@") < /dev/null &
+  pid=$!
+  (
+    trap 'kill "${sleeper:-}" 2> /dev/null; exit 0' TERM
+    sleep 5 &
+    sleeper=$!
+    wait "$sleeper" || true
+    kill -KILL "$pid" 2> /dev/null && exit 124
+    exit 0
+  ) > /dev/null 2>&1 &
+  watch=$!
+  wait "$pid" || status=$?
+  kill -TERM "$watch" 2> /dev/null || true
+  wait "$watch" || stopped=$?
+  [ "$stopped" != 124 ] || return 124
+  return "$status"
+}
 # END hook-environment
 
 input=$(cat)
@@ -128,7 +154,9 @@ project_layer_settings() {
   local file
   for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
     if [ -e "$file" ] || [ -L "$file" ]; then
-      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("\\A(ANTHROPIC_[A-Z0-9_]+|OTEL_[A-Z0-9_]+|CLAUDE_CODE_(ENABLE_TELEMETRY|MAX_OUTPUT_TOKENS|USE_BEDROCK|USE_VERTEX|DISABLE_NONESSENTIAL_TRAFFIC)|DISABLE_(TELEMETRY|ERROR_REPORTING|AUTOUPDATER)|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH)\\z") | not) else empty end' "$file" 2>/dev/null \
+      # A file that is not a regular one (a FIFO, a link to /dev/ptmx) is
+      # unreadable: a read of it waits for a writer.
+      [ -f "$file" ] && HOME= bounded jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("\\A(ANTHROPIC_[A-Z0-9_]+|OTEL_[A-Z0-9_]+|CLAUDE_CODE_(ENABLE_TELEMETRY|MAX_OUTPUT_TOKENS|USE_BEDROCK|USE_VERTEX|DISABLE_NONESSENTIAL_TRAFFIC)|DISABLE_(TELEMETRY|ERROR_REPORTING|AUTOUPDATER)|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH)\\z") | not) else empty end' "$file" 2>/dev/null \
         || printf '%s\n' ".claude/${file##*/} (unreadable)"
     fi
   done
@@ -177,10 +205,11 @@ split_words() {
   return 0
 }
 
-# git with what a repository's own configuration could make it run turned off
-# (the pre-tool-use hook's function, kept the same by a test).
+# git with what a repository's own configuration could make it run turned
+# off, for at most 5 seconds (the pre-tool-use hook's function, kept the same
+# by a test).
 hgit() {
-  GIT_NO_LAZY_FETCH=1 git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+  GIT_NO_LAZY_FETCH=1 bounded git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
 }
 
 split_words "$command" || exit 0
@@ -202,13 +231,18 @@ skip=$(printf '%s' "$input" | jq -r '(.tool_response.is_error == true) or (.tool
 project="$project_dir"
 
 # The call ran in the project's repository: Claude Code sends the cwd it
-# ran in; a stash of another repository restores nothing here.
-cwd=$(printf '%s' "$input" | jq -r '.cwd // "" | strings' 2>/dev/null) || exit 0
+# ran in; a stash of another repository restores nothing here. The cwd and
+# git's answers are read exactly: a command substitution strips the line
+# breaks that end its output, and a directory's name may end in one (d and
+# $'d\n' are two directories), so an x is printed after each and compared
+# with it.
+cwd=$(printf '%s' "$input" | jq -j '(.cwd // "" | strings), "x"' 2>/dev/null) || exit 0
+cwd="${cwd%x}"
 if [ -n "$cwd" ]; then
   command -v git > /dev/null 2>&1 || exit 0
-  ran_in=$(hgit -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || exit 0
-  ours=$(hgit -C "$project" rev-parse --show-toplevel 2>/dev/null) || exit 0
-  [ -n "$ran_in" ] && [ "$ran_in" = "$ours" ] || exit 0
+  ran_in=$(hgit -C "$cwd" rev-parse --show-toplevel 2>/dev/null && printf x) || exit 0
+  ours=$(hgit -C "$project" rev-parse --show-toplevel 2>/dev/null && printf x) || exit 0
+  [ "$ran_in" != x ] && [ "$ran_in" = "$ours" ] || exit 0
 fi
 
 printed=$(printf '%s' "$input" | jq -r '.tool_response.stdout // "" | strings' 2>/dev/null) || printed=""
@@ -260,7 +294,10 @@ fi
 if [ "$commit" != "HEAD" ]; then
   command -v git > /dev/null 2>&1 || exit 0
   command -v openssl > /dev/null 2>&1 || exit 0
-  git_dir=$(hgit -C "$project" rev-parse --absolute-git-dir 2>/dev/null) || exit 0
+  git_dir=$(hgit -C "$project" rev-parse --absolute-git-dir 2>/dev/null && printf x) || exit 0
+  git_dir="${git_dir%x}"
+  [[ "$git_dir" == *$'\n' ]] || exit 0
+  git_dir="${git_dir%$'\n'}"
   case "$git_dir" in
     */.git | */.git/worktrees/* | */.git/modules/*) ;;
     *) exit 0 ;;

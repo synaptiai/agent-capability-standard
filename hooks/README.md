@@ -86,7 +86,17 @@ absolute directories outside the project directory (all of them where the
 project is the user's home directory, as the password database gives it,
 or holds it), run `jq` with no `HOME`
 (jq loads `$HOME/.jq` as a library), and read the settings files before
-they run any other program. What they cannot reach: Claude Code starts each
+they run any other program. Each git command they run, and each read of a
+settings file, is stopped after 5 seconds: git reads the files a
+repository's configuration includes, and a FIFO or a terminal there
+(`include.path = /dev/ptmx`) holds the read until someone writes, past the
+30-second limit after which a Claude Code without `onFailure` runs the
+call. A git that did not answer counts as one that cannot say: the
+pre-tool-use hook blocks the call (`R407`, or `F501` for the marker's git
+directory) or gates it (a git read, `git stash create` or a restore is
+`mutate`), the checkpoint hook writes no marker, and the log hook writes
+its line without the anchor and says why; a settings file that is not a
+regular file is unreadable (`R407`). What they cannot reach: Claude Code starts each
 hook through `/bin/sh -c` with that env applied, so where `/bin/sh` is bash
 (macOS, Fedora, Arch, Git Bash) `SHELLOPTS=noexec` or an exported function
 stops that shell first, and anywhere a `PATH` naming a repository directory
@@ -289,7 +299,17 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   is `mutate`. The first word must be the listed program exactly, and a
   two-word entry's subcommand the second word: bash runs a first word that
   holds a blank (a quoted `"git status"`) or a slash as the program of that
-  name, which is `mutate`. A git command that would only read (`git stash list` and
+  name, which is `mutate`. Each of these commands (the read-only list, `git
+  stash create`, a restore) is `mutate` where the program bash finds for its
+  first word, on the `PATH` Claude Code gives the hook and the agent's
+  commands, may be the repository's own: the name is found under an empty
+  or relative entry (bash reads it from the working directory:
+  `PATH=node_modules/.bin:$PATH`, a leading colon), or in a file that lies,
+  links followed, in the project (an entry in it: an activated virtual
+  environment, direnv's `PATH_add`; not where the project is the home
+  directory, or holds it), or nowhere. The entries the Bash tool adds from
+  the user's shell startup files (its shell snapshot) reach no hook and are
+  not seen; the SDK mapper reads the CLI's `PATH` the same way. A git command that would only read (`git stash list` and
   `git stash show` included) is `mutate` where the call's directory (the
   payload's `cwd`, else the project directory) is in a partial clone (a
   promisor remote, or `extensions.partialClone`), in a repository with
@@ -361,7 +381,9 @@ Then:
   string whole and as words) is then followed, from the call's directory,
   through the symbolic links on it, so `touch notes/todo.md`, where the
   repository ships `notes/todo.md` as a link to
-  `.git/acs/checkpoints/key`, is blocked too. So are the paths the shell
+  `.git/acs/checkpoints/key`, is blocked too. Each link target, the call's
+  directory and git's answers are read exactly, line breaks that end a
+  name included (a link to `evil<newline>` leads there, not to `evil`). So are the paths the shell
   reads differently from their text: a `~` it expands (`~`, `~+`, `~user`;
   `~-` and `~N`, which name a directory the hook cannot know, are blocked
   outright), a brace group it expands, found as bash finds it (the first

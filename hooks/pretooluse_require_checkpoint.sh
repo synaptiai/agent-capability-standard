@@ -86,6 +86,10 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #         mutate;
 #       - a first word holding a blank (a quoted "git status") or a slash:
 #         bash runs the program of that name, which is on no list: mutate;
+#       - a first word whose program, as bash finds it on the PATH the
+#         agent's commands run with, may be the repository's own (found
+#         under an empty or relative entry, in a file in the project, or
+#         nowhere: command_may_be_content): mutate, before any class below;
 #       - a command on READ_ONLY (a one-word entry the first word, a two-word
 #         entry the first word and the second): observe (allowed, nothing
 #         used), except a
@@ -150,7 +154,9 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 #
 # git runs here as hgit runs it: with core.fsmonitor and hooks turned off and
 # no object fetched, so no repository content makes this hook run a program
-# or reach a host.
+# or reach a host, and for at most 5 seconds (bounded), so none holds it
+# past its time limit: a git that did not answer cannot say, which blocks
+# the call or gates it, never reads as "no repository".
 #
 # Scope (§5.18.5): the project directory, every session in it (one marker).
 # Its execution boundaries are the ends and starts of turns and sessions
@@ -186,6 +192,11 @@ else
   project_dir="$(pwd)"
 fi
 
+# The PATH the agent's commands run with, before the block below narrows it
+# for this hook's own programs: Claude Code gives each hook and each command
+# it runs the same environment (command_may_be_content reads it).
+agent_path="${PATH-}"
+
 # BEGIN hook-environment (the same in the three hooks that read a setting; tests/test_project_settings.py keeps them so)
 # The env of the project's settings files, repository content, reaches this
 # hook's programs too (project_layer_settings). Before any runs, PATH keeps
@@ -216,6 +227,32 @@ hook_path() {
 PATH=$(hook_path)
 export PATH
 jq() { HOME= command jq "$@"; }
+# A program ("$@", found on PATH: not a function) run with no input for at
+# most 5 seconds: git reads the files a repository's configuration includes,
+# and jq the project's settings files, and a FIFO or a terminal there
+# (/dev/ptmx) holds the read until someone writes, past the hook's time
+# limit, after which a Claude Code without onFailure "block" runs the call.
+# Status 124 when it was stopped (or sleep, which times it, cannot run),
+# else the program's.
+bounded() {
+  local pid watch status=0 stopped=0
+  (exec "$@") < /dev/null &
+  pid=$!
+  (
+    trap 'kill "${sleeper:-}" 2> /dev/null; exit 0' TERM
+    sleep 5 &
+    sleeper=$!
+    wait "$sleeper" || true
+    kill -KILL "$pid" 2> /dev/null && exit 124
+    exit 0
+  ) > /dev/null 2>&1 &
+  watch=$!
+  wait "$pid" || status=$?
+  kill -TERM "$watch" 2> /dev/null || true
+  wait "$watch" || stopped=$?
+  [ "$stopped" != 124 ] || return 124
+  return "$status"
+}
 # END hook-environment
 
 if [ "$#" -gt 0 ]; then
@@ -257,7 +294,9 @@ project_layer_settings() {
   local file
   for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
     if [ -e "$file" ] || [ -L "$file" ]; then
-      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("\\A(ANTHROPIC_[A-Z0-9_]+|OTEL_[A-Z0-9_]+|CLAUDE_CODE_(ENABLE_TELEMETRY|MAX_OUTPUT_TOKENS|USE_BEDROCK|USE_VERTEX|DISABLE_NONESSENTIAL_TRAFFIC)|DISABLE_(TELEMETRY|ERROR_REPORTING|AUTOUPDATER)|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH)\\z") | not) else empty end' "$file" 2>/dev/null \
+      # A file that is not a regular one (a FIFO, a link to /dev/ptmx) is
+      # unreadable: a read of it waits for a writer.
+      [ -f "$file" ] && HOME= bounded jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("\\A(ANTHROPIC_[A-Z0-9_]+|OTEL_[A-Z0-9_]+|CLAUDE_CODE_(ENABLE_TELEMETRY|MAX_OUTPUT_TOKENS|USE_BEDROCK|USE_VERTEX|DISABLE_NONESSENTIAL_TRAFFIC)|DISABLE_(TELEMETRY|ERROR_REPORTING|AUTOUPDATER)|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH)\\z") | not) else empty end' "$file" 2>/dev/null \
         || printf '%s\n' ".claude/${file##*/} (unreadable)"
     fi
   done
@@ -398,11 +437,116 @@ long_option_of() {
 
 # git as these hooks run it: with what a repository's own configuration
 # could make git run turned off (core.fsmonitor, which git runs to refresh
-# the index, and hooks) and no object fetched from a promisor remote, so no
-# repository content makes this hook run a program or reach a host.
-# posttooluse_take_checkpoint.sh holds the same function.
+# the index, and hooks), no object fetched from a promisor remote, so no
+# repository content makes this hook run a program or reach a host, and for
+# at most 5 seconds (bounded: status 124 when stopped, which every caller
+# reads as git cannot say). posttooluse_take_checkpoint.sh holds the same
+# function.
 hgit() {
-  GIT_NO_LAZY_FETCH=1 git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+  GIT_NO_LAZY_FETCH=1 bounded git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+}
+
+# The git directory git finds from the directory $1, into GIT_DIR_FOUND:
+# absolute, and exactly as git prints it (a command substitution strips the
+# line breaks that end its output, and a directory's name may end in one, so
+# an x is printed after git's line and taken off with git's line break).
+# Status 0: found; 1: no repository there (git exits 128: there is none, or
+# git refuses it, as it refuses the agent's commands there); 2: git cannot
+# say (no git, stopped at its time bound, or any other answer).
+git_dir_at() {
+  local status=0
+  GIT_DIR_FOUND=""
+  command -v git > /dev/null 2>&1 || return 2
+  GIT_DIR_FOUND=$(hgit -C "$1" rev-parse --absolute-git-dir 2> /dev/null && printf x) || status=$?
+  case "$status" in
+    0) ;;
+    128) GIT_DIR_FOUND="" && return 1 ;;
+    *) GIT_DIR_FOUND="" && return 2 ;;
+  esac
+  GIT_DIR_FOUND="${GIT_DIR_FOUND%x}"
+  GIT_DIR_FOUND="${GIT_DIR_FOUND%$'\n'}"
+  [ -n "$GIT_DIR_FOUND" ] || return 2
+}
+
+# git's one-line answer ($@: hgit's arguments), into GIT_LINE, exactly as
+# git_dir_at reads it. Fails with git's status, or 1 for no line.
+git_line() {
+  GIT_LINE=$(hgit "$@" 2> /dev/null && printf x) || return $?
+  GIT_LINE="${GIT_LINE%x}"
+  [[ "$GIT_LINE" == *$'\n' ]] || return 1
+  GIT_LINE="${GIT_LINE%$'\n'}"
+}
+
+# The physical path of the directory $1, into PHYSICAL, exactly (the x keeps
+# the line breaks that may end a name from the command substitution).
+physical_dir() {
+  PHYSICAL=$(cd -P -- "$1" 2> /dev/null && pwd -P && printf x) || return 1
+  PHYSICAL="${PHYSICAL%x}"
+  [[ "$PHYSICAL" == *$'\n' ]] || return 1
+  PHYSICAL="${PHYSICAL%$'\n'}"
+}
+
+# Whether the program the agent's shell runs for the command name $1 may be
+# repository content (§5.18.3: a call is classified by its effect, and a
+# layer that cannot tell which program runs takes the worst case). bash runs
+# a name with no slash as the first executable file of that name in a
+# directory of its PATH (agent_path): the repository's own git, cat or ls
+# runs in place of the system's when PATH holds an empty or relative entry
+# (bash reads it from the working directory: PATH=node_modules/.bin:$PATH,
+# or a leading colon) under which the name is found, or an entry in the
+# project directory (an activated virtual environment, direnv's PATH_add)
+# whose file of that name lies, links followed, in the project (as
+# hook_path reads the project: not where it is the user's home directory, or
+# holds it). Yes then, when no such file is found, and when anything here
+# cannot be read. Not seen: the entries Claude Code's Bash tool adds to PATH
+# from the user's shell startup files (its shell snapshot), which reach no
+# hook. The SDK mapper asks the same (command_may_be_content).
+command_may_be_content() {
+  local name="$1" rest found="" entry dir target links=0 project="" home=""
+  case "$name" in "" | */*) return 0 ;; esac
+  [ -n "$agent_path" ] || return 0
+  call_dir || return 0
+  rest="${agent_path}:"
+  while [ -n "$rest" ]; do
+    entry="${rest%%:*}"
+    rest="${rest#*:}"
+    case "$entry" in
+      /*) found="${entry%/}/$name" ;;
+      *) found="${CALL_DIR%/}/${entry:+${entry%/}/}$name" ;;
+    esac
+    if [ -f "$found" ] && [ -x "$found" ]; then
+      case "$entry" in /*) break ;; *) return 0 ;; esac
+    fi
+    found=""
+  done
+  [ -n "$found" ] || return 0
+  # The file it names, each link followed.
+  while :; do
+    dir="${found%/*}"
+    physical_dir "${dir:-/}" || return 0
+    found="${PHYSICAL%/}/${found##*/}"
+    [ -L "$found" ] || break
+    links=$((links + 1))
+    [ "$links" -le 40 ] || return 0
+    target=$(readlink -- "$found" 2> /dev/null && printf x) || return 0
+    target="${target%x}"
+    [[ "$target" == *$'\n' ]] || return 0
+    target="${target%$'\n'}"
+    case "$target" in /*) found="$target" ;; *) found="${PHYSICAL%/}/$target" ;; esac
+  done
+  physical_dir "$project_dir" || return 0
+  project="$PHYSICAL"
+  # The home directory as the password database gives it, not HOME.
+  if home=$(unset HOME && cd -P ~ 2> /dev/null && pwd -P && printf x); then
+    home="${home%x}"
+    home="${home%$'\n'}"
+  else
+    home=""
+  fi
+  # A project that is the home directory, or holds it, is no repository's.
+  case "$home/" in "$project"/*) [ -z "$home" ] || return 1 ;; esac
+  case "$found" in "$project"/*) return 0 ;; esac
+  return 1
 }
 
 # Whether $1, an absolute git directory, is one git makes for a work tree: a
@@ -418,12 +562,20 @@ git_dir_is_made() {
   return 1
 }
 
-# The directory the call runs in: its cwd, else the project directory.
-# Fails when the payload cannot be read.
+# The payload's cwd, into PAYLOAD_CWD, exactly as given (empty when there is
+# none): a command substitution strips the line breaks that end its output,
+# and a directory's name may end in one (`cd $'d\n'` is not d), so an x is
+# printed after the cwd and taken off. Fails when the payload cannot be read.
+payload_cwd() {
+  PAYLOAD_CWD=$(printf '%s' "$payload" | jq -j '(.cwd // "" | strings), "x"' 2>/dev/null) || return 1
+  PAYLOAD_CWD="${PAYLOAD_CWD%x}"
+}
+
+# The directory the call runs in, into CALL_DIR: its cwd, else the project
+# directory. Fails when the payload cannot be read.
 call_dir() {
-  local dir
-  dir=$(printf '%s' "$payload" | jq -r '.cwd // "" | strings' 2>/dev/null) || return 1
-  printf '%s' "${dir:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+  payload_cwd || return 1
+  CALL_DIR="${PAYLOAD_CWD:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 }
 
 # Whether the git directory git finds where this call runs is repository
@@ -433,11 +585,14 @@ call_dir() {
 # diff.<driver>.textconv for git log -p, git show and git diff). No
 # repository there: no. The SDK mapper asks the same (git_dir_may_be_content).
 git_dir_is_content() {
-  local dir git_dir
-  dir=$(call_dir) || return 0
-  command -v git > /dev/null 2>&1 || return 0
-  git_dir=$(hgit -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || return 1
-  ! git_dir_is_made "$git_dir"
+  local found=0
+  call_dir || return 0
+  git_dir_at "$CALL_DIR" || found=$?
+  case "$found" in
+    0) ! git_dir_is_made "$GIT_DIR_FOUND" ;;
+    1) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 # The configuration keys that name a program git runs: core.fsmonitor (to
@@ -462,9 +617,14 @@ GIT_PROGRAM_KEYS='^(core\.fsmonitor|core\.pager|pager\..+|diff\.external|diff\..
 # mapper asks the same (git_config_may_run).
 git_runs_configured() {
   local dir found status=0 hooks
-  dir=$(call_dir) || return 0
-  command -v git > /dev/null 2>&1 || return 0
-  hgit -C "$dir" rev-parse --absolute-git-dir > /dev/null 2>&1 || return 1
+  call_dir || return 0
+  dir="$CALL_DIR"
+  git_dir_at "$dir" || status=$?
+  case "$status" in
+    0) ;;
+    1) return 1 ;;
+    *) return 0 ;;
+  esac
   found=$(hgit -C "$dir" config --show-scope --get-regexp "$GIT_PROGRAM_KEYS" 2>/dev/null) || status=$?
   case "$status" in
     0) ;;
@@ -483,7 +643,10 @@ git_runs_configured() {
   fi
   # Where git looks for hooks (core.hooksPath, else <git dir>/hooks): asked
   # without hgit, which points it at /dev/null.
-  hooks=$(GIT_NO_LAZY_FETCH=1 git -c core.fsmonitor=false -C "$dir" rev-parse --git-path hooks 2>/dev/null) || return 0
+  hooks=$(GIT_NO_LAZY_FETCH=1 bounded git -c core.fsmonitor=false -C "$dir" rev-parse --git-path hooks 2> /dev/null && printf x) || return 0
+  hooks="${hooks%x}"
+  [[ "$hooks" == *$'\n' ]] || return 0
+  hooks="${hooks%$'\n'}"
   [ -n "$hooks" ] || return 0
   case "$hooks" in /*) ;; *) hooks="$dir/$hooks" ;; esac
   [ -e "$hooks/post-index-change" ] || [ -L "$hooks/post-index-change" ]
@@ -508,15 +671,21 @@ git_runs_configured() {
 # git_config_may_run).
 git_read_gated() {
   local dir found status=0 git_dir common links
-  dir=$(call_dir) || return 0
-  command -v git > /dev/null 2>&1 || return 0
-  git_dir=$(hgit -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || git_dir=""
+  call_dir || return 0
+  dir="$CALL_DIR"
+  git_dir_at "$dir" || status=$?
+  case "$status" in
+    0) git_dir="$GIT_DIR_FOUND" ;;
+    1) git_dir="" && status=0 ;;
+    *) return 0 ;;
+  esac
   if [ -n "$git_dir" ] && ! git_dir_is_made "$git_dir"; then return 0; fi
   if git_runs_configured; then return 0; fi
   found=$(hgit -C "$dir" config --get-regexp '^(remote\..+\.promisor|extensions\.partialclone)$' 2>/dev/null) || status=$?
   if [ "$status" != 1 ] || [ -n "$found" ]; then return 0; fi
   if [ -n "$git_dir" ]; then
-    common=$(hgit -C "$dir" rev-parse --git-common-dir 2>/dev/null) || return 0
+    git_line -C "$dir" rev-parse --git-common-dir || return 0
+    common="$GIT_LINE"
     case "$common" in /*) ;; *) common="$dir/$common" ;; esac
     if [ -e "$common/modules" ] || [ -L "$common/modules" ]; then return 0; fi
     links=$(hgit -C "$dir" ls-files --stage -- ':/' 2>/dev/null | awk 'substr($0, 1, 7) == "160000 " { n++ } END { print n + 0 }') || return 0
@@ -574,6 +743,12 @@ classify_bash() {
   fi
   words=("${WORDS[@]}")
   if writes "${words[@]}"; then
+    echo mutate
+    return
+  fi
+  # Every class below but mutate names the program the first word names:
+  # where that may be the repository's own, mutate.
+  if command_may_be_content "${words[0]}"; then
     echo mutate
     return
   fi
@@ -770,13 +945,6 @@ used_dir="${claude_dir}/checkpoints/used"
 # checkpoint replaced them), kept like used/.
 ended_dir="${claude_dir}/checkpoints/ended"
 
-# The git directory of the repository a directory is in (absolute), or
-# nothing.
-git_dir_of() {
-  command -v git > /dev/null 2>&1 || return 1
-  hgit -C "$1" rev-parse --absolute-git-dir 2>/dev/null
-}
-
 # What posttooluse_take_checkpoint.sh writes in the entry of commit $2 in
 # git directory $1: the HMAC-SHA-256, in hex, of "acs-checkpoint-commit:<commit>"
 # under the project's checkpoint key (<git dir>/acs/checkpoints/key, 64 hex
@@ -807,15 +975,17 @@ commit_signature() {
 # One lookup, however many checkpoints were taken. A checkpoint can be
 # restored valid or not (§5.18.6).
 recorded_commit() {
-  local git_dir ran_in cwd entry sig have
-  git_dir=$(git_dir_of "$project_dir") || return 1
-  [ -n "$git_dir" ] && git_dir_is_made "$git_dir" || return 1
+  local git_dir cwd entry sig have
+  git_dir_at "$project_dir" || return 1
+  git_dir="$GIT_DIR_FOUND"
+  git_dir_is_made "$git_dir" || return 1
   # The call restores into the repository it runs in (its cwd): the
   # project's, or the commit is another repository's state.
-  cwd=$(printf '%s' "$payload" | jq -r '.cwd // "" | strings' 2>/dev/null) || return 1
+  payload_cwd || return 1
+  cwd="$PAYLOAD_CWD"
   if [ -n "$cwd" ]; then
-    ran_in=$(git_dir_of "$cwd") || return 1
-    [ "$ran_in" = "$git_dir" ] || return 1
+    git_dir_at "$cwd" || return 1
+    [ "$GIT_DIR_FOUND" = "$git_dir" ] || return 1
   fi
   entry="${git_dir}/acs/checkpoints/commits/$1"
   [ -f "$entry" ] && [ ! -L "$entry" ] || return 1
@@ -1237,7 +1407,15 @@ resolve_path() {
       links=$((links + 1))
       LINKS_LEFT=$((LINKS_LEFT - 1))
       [ "$links" -le 40 ] && [ "$LINKS_LEFT" -ge 0 ] || return 1
-      target=$(readlink -- "$out/$comp" 2>/dev/null) || return 1
+      # readlink prints the target and a line break. A command
+      # substitution strips every line break that ends its output, and a
+      # target may end in one (a link to $'evil\n' does not lead to evil),
+      # so an x is printed after it; the x and readlink's line break are
+      # taken off, and an output without that line break is not read.
+      target=$(readlink -- "$out/$comp" 2>/dev/null && printf x) || return 1
+      target="${target%x}"
+      [[ "$target" == *$'\n' ]] || return 1
+      target="${target%$'\n'}"
       [ -n "$target" ] || return 1
       case "$target" in /*) out="" ;; esac
       set -f
@@ -1379,7 +1557,7 @@ RESOLVE_LEFT=262144
 BRACE_LEFT=8192
 BRACE_SCAN_LEFT=65536
 READ_WORDS=()
-if base=$(call_dir) && resolve_path / "$base"; then
+if call_dir && resolve_path / "$CALL_DIR"; then
   base="$RESOLVED"
 else
   block "R407 SAFETY_CHECK_FAILED: cannot read the directory the call runs in, so the call is blocked."
@@ -1426,17 +1604,39 @@ for word in ${READ_WORDS[@]+"${READ_WORDS[@]}"}; do
     resolved+=("$RESOLVED")
   done
 done
-if [ "${#resolved[@]}" -gt 0 ] && printf '%s\n' "${resolved[@]}" | grep -Eiq '(^|/)(checkpoint\.ok|audit\.head)(/|$)|(^|/)(\.claude|acs)/checkpoints(/|$)'; then
+# Whether a line of the resolved paths matches grep's options and pattern
+# ($@): status 0 yes, 1 no. grep -c reads every line: grep -q stops at the
+# first match, and printf, with more paths than a pipe holds still to
+# write, then fails (SIGPIPE), which pipefail reads as the pipeline's status,
+# a match read as none. Any other answer of grep blocks the call.
+resolved_match() {
+  local count status=0
+  count=$(printf '%s\n' "${resolved[@]}" | grep -c "$@") || status=$?
+  case "$status:$count" in
+    0:[1-9]*) return 0 ;;
+    1:0) return 1 ;;
+  esac
+  block "R407 SAFETY_CHECK_FAILED: the checkpoint hook could not compare the call's paths with the layer's records (grep exited $status), so the call is blocked."
+}
+if [ "${#resolved[@]}" -gt 0 ] && resolved_match -Ei -- '(^|/)(checkpoint\.ok|audit\.head)(/|$)|(^|/)(\.claude|acs)/checkpoints(/|$)'; then
   block "${records_refusal}: one of its paths leads there, through a symbolic link, a ~ the shell expands or a path attached to an option."
 fi
 # The directories that hold the records: the project's .claude, and the
 # project's git directory's acs/ (both as the system resolves them).
+# Where git cannot say which git directory is the project's, the call is
+# blocked: its acs/ cannot be told apart from the call's paths.
 holders=()
 if resolve_path / "${project_dir}/.claude"; then holders+=(-e "$RESOLVED"); fi
-if records_git_dir=$(git_dir_of "$project_dir") && [ -n "$records_git_dir" ] && resolve_path / "${records_git_dir}/acs"; then
-  holders+=(-e "$RESOLVED")
+if command -v git > /dev/null 2>&1; then
+  found=0
+  git_dir_at "$project_dir" || found=$?
+  case "$found" in
+    0) if resolve_path / "${GIT_DIR_FOUND}/acs"; then holders+=(-e "$RESOLVED"); fi ;;
+    1) ;;
+    *) block "R407 SAFETY_CHECK_FAILED: git did not say in time which git directory is the project's (one whose configuration includes a FIFO or a terminal holds git), so the call's paths cannot be compared with the layer's records and the call is blocked." ;;
+  esac
 fi
-if [ "${#holders[@]}" -gt 0 ] && [ "${#resolved[@]}" -gt 0 ] && printf '%s\n' "${resolved[@]}" | grep -Fxiq "${holders[@]}"; then
+if [ "${#holders[@]}" -gt 0 ] && [ "${#resolved[@]}" -gt 0 ] && resolved_match -Fxi "${holders[@]}"; then
   block "F504 CONSTRAINT_VIOLATED: ${tool_name} names the directory that holds the layer's records (the project's .claude, its git directory's acs/), which only the plugin's hooks write: moving or removing it, or writing into it, removes or replaces the checkpoint marker and the audit log's head."
 fi
 
@@ -1468,7 +1668,14 @@ fi
 # answer for the marker and whose config names programs git runs (hgit runs
 # none). git answers yes (0) or no (1); any other answer authorises nothing
 # either.
-if command -v git > /dev/null 2>&1 && marker_git=$(git_dir_of "$claude_dir"); then
+found=0
+if command -v git > /dev/null 2>&1; then git_dir_at "$claude_dir" || found=$?; else found=1; fi
+case "$found" in
+  0 | 1) ;;
+  *) f501 "git did not say in time which git directory holds the checkpoint marker (one whose configuration includes a FIFO or a terminal holds git): it authorises nothing." ;;
+esac
+if [ "$found" = 0 ]; then
+  marker_git="$GIT_DIR_FOUND"
   if ! git_dir_is_made "$marker_git"; then
     f501 "the checkpoint marker is in a git directory that git did not make for a work tree ($marker_git, which a repository can ship): it authorises nothing. Remove that directory's HEAD, objects/ and refs/ from the repository and take a checkpoint (git stash create)."
   fi

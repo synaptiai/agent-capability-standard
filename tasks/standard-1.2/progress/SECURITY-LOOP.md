@@ -6078,3 +6078,251 @@ executor's trace and a diagnostic, and §6.4 asks only for the chain.
   `printenv` (F501); the verifier's replay script with a witness. No CLI
   or nested agent was started; nothing was left running; the scratch
   copies were removed.
+
+## Round 5
+
+### Batch 1: four reported defects
+
+Four defects, each reproduced by an independent verifier on 4d17c00, and
+reproduced again here before any change (probes under `timeout 120` and a
+4 GB address-space limit, in scratch repositories since removed): `cp
+t.json notes && echo {1..4000} > /dev/null`, with `notes` a shipped link to
+the marker, was asked as an ordinary mutate (F504 without the padding); a
+link to `evil\n` was followed to `evil`, so `touch notes` and `cat k.txt >
+notes` were asked though `evil\n` leads to the checkpoint key, and so was
+`touch n` from a cwd `d\n`; `git status` and `cat README.md` with
+`PATH=node_modules/.bin:$PATH`, and `ls` with a leading colon, exited 0 and
+the repository's programs ran; and with `include.path = inc.fifo` (a FIFO)
+in the project's git configuration, a Write and `rm -rf src` gave no
+verdict in 35 s. None was fixed by an earlier batch: the persist secret
+scan's pipefail note (round 2) covered `secret_in` alone; the link
+following of round 2 #4 and round 3 read every target with `$(readlink)`;
+round 4 batch 1 #1 refused a `PATH` the project's settings set, and
+`hook_path` filtered the hook's own `PATH`, not the agent's; and no hook
+bounded a git call. Each fix has tests that fail on the code before it
+(below).
+
+#### 1. The records guard's resolved-path checks read a match as none past a pipe's worth of paths (medium)
+
+Both checks ran `printf '%s\n' "${resolved[@]}" | grep -q ...` under
+`set -o pipefail`. grep stopped at the first match; printf, with more than
+a pipe holds still to write (about 64 KB of resolved paths: `echo
+{1..2000}` with a typical project path), died of SIGPIPE, and pipefail made
+the pipeline's status 141, read as no match. Every link, brace, tilde and
+`$'...'` reading of the guard was then skipped: one approved command could
+write the key and a signed `commits/<C>` entry, after which `git stash
+apply <C>` passed as a rollback.
+
+- Fix: `resolved_match` runs `grep -c`, which reads every line (no
+  SIGPIPE), for both checks (the records paths, and the directories that
+  hold them), and takes status 0 with a count as a match and 1 with 0 as
+  none; any other answer of grep blocks the call (R407): the guard cannot
+  tell.
+- Siblings: no other pipeline in the hooks ends in a reader that stops
+  early (`awk` and `jq` read all their input; the log hook's `head -n 1`
+  only shortens a message). `secret_in` keeps the round-2 rule: the
+  pre-tool-use hook calls it with pipefail off; the skills' hooks run under
+  `/bin/sh` with no pipefail (dash has none, and bash as `sh` takes it only
+  from a `SHELLOPTS` the user exports, which the project's settings cannot
+  set without every call being refused).
+- Tests: `test_records_guard.py` `TestManyResolvedPaths`: a records path
+  among 4000 padding words (`cp ... notes/todo.md`, `cp -r ... notes/k/`,
+  `cat ... > .claude/check{p,q}oint.ok` with 12 brace groups, `cp ...
+  .git/acs/check{points,}/key`, `touch ~+/notes/todo.md`), the directory
+  that holds them (`rm -rf .clau{d,x}e` with 12 groups, `rm -rf lnk`, `rm
+  -rf .git/acs`), an MCP tool with 4000 more arguments, a grep that exits 2
+  (R407), and the control (padding with a harmless path is asked). On
+  4d17c00's hook 10 fail and the control passes.
+
+#### 2. A link target that ends in a line break was followed to another file (medium); siblings: the call's cwd, git's answers, the take hook's cwd, the persist, audit, send and rollback skills' hooks
+
+`target=$(readlink ...)` strips every line break that ends the output, so
+`notes -> 'evil\n'` was followed to `evil`, another file (none, here), while
+the kernel follows it to `evil\n -> .git/acs/checkpoints/key`; git stores
+such names and targets, so a clone ships them. One approved write to the
+shipped name forged the key and an entry; the round-2 #4 defence was
+bypassed.
+
+- Fix (pre-tool-use hook): `resolve_path` prints an x after readlink's
+  output and takes it off with readlink's own line break (an output without
+  that line break is not read: a link that cannot be followed is refused).
+- Sibling (found here): the call's cwd was read with `jq -r` into a command
+  substitution, so a cwd `d\n` was resolved as `d`: `touch n` from it, with
+  `d\n/n` a link to the key, was asked. `payload_cwd` and `call_dir` now
+  read it with `jq -j` and an x, and set variables (a substitution of the
+  function's output would strip it again). `recorded_commit` reads the
+  same cwd: a restore run in a repository `r\n` beside the project's plain
+  directory `r` was a rollback of the project's commit; it is a mutate.
+- Sibling (found here): git's answers. `git_dir_at` (which replaces
+  `git_dir_of` and the inline `rev-parse --absolute-git-dir` calls),
+  `git_line` (`--git-common-dir`) and the hooks path of `git_runs_configured`
+  read git's line with an x. A `core.hooksPath` ending in a line break named
+  another directory than the one git runs `post-index-change` from.
+- Sibling (found here): the take hook compared the stripped cwd's and the
+  project's toplevels, so a `git stash create` run in a repository `r\n`
+  wrote a marker for the project; it reads the cwd, both toplevels and the
+  git directory exactly, and writes none.
+- Sibling (reported unverified; confirmed): the persist skill's hook read
+  `R_TO=$(readlink ...)`, `$(pwd -P)` and `$(cd -P ... && pwd -P)` the same
+  way, and returned the resolved path through a substitution: `notes.md ->
+  'a\n'`, `'a\n' -> ~/.ssh/authorized_keys` passed. Each is read with an x
+  (POSIX sh: `${v%x}`, then the line break pwd or readlink prints).
+- Sibling (found here): the persist, audit and send skills' file-tool hooks
+  read `file_path` with `jq -r`, so a `file_path` ending in a line break was
+  checked as the name without it: `k\n`, a link to
+  `~/.ssh/authorized_keys`, `.claude/audit/records.jsonl` or `~/.curlrc`,
+  passed. They read it with `jq -j` and an x; the audit skill's Bash hook
+  reads its cwd so, and the rollback skill's hook, which removed every line
+  break from the cwd (another directory), reads it exactly.
+- Checked, not changed: the audit and send hooks' `readlink -f` gives the
+  canonical path of the file reached; stripping a final line break from it
+  can only make a pattern match (each tests the end of a name), never hide
+  one. A tool name or a command read with `jq -r` names no file.
+- Tests: `test_records_guard.py` `TestPathsReadExactly` (the link chain to
+  the key and to an entry: `touch nl`, `cat ... > nl; cat ... > nl2`, `cp
+  a.txt ./nl2`; Write and an MCP write; a cwd `d\n`; a restore in `r\n`; a
+  take in `r\n`; the control, a link to a regular file `plain\n` beside a
+  link `plain` to the key, is asked) and `test_skill_hooks.py`
+  `TestPathsReadExactly` (persist: a link to `a\n`, a `file_path` `k\n`,
+  the control; audit and send: a `file_path` `x\n`; rollback: a cwd `r\n`;
+  each under sh and bash). On 4d17c00's hooks and skills all 21 fail (the
+  two controls too: the old code refused them, reading `plain` and `a`).
+
+#### 3. A command the hook lets pass ran whatever program PATH found for its name (medium)
+
+`classify_bash` compared the first word's text with `READ_ONLY` and the
+`git stash` forms; bash runs the first executable file of that name on its
+`PATH`. With a relative entry (`PATH=node_modules/.bin:$PATH`, a common
+setup), an empty one (`$EXTRA:$PATH`, a leading colon: the working
+directory) or an absolute one in the project (an activated virtual
+environment, direnv's `PATH_add`), a repository file named `git`, `cat` or
+`ls` ran as `observe`, `checkpoint` or a recorded `rollback`, with no
+checkpoint and no approval. `hook_path` guarded the hook's own programs
+only.
+
+- Fix (pre-tool-use hook): the hook saves the `PATH` Claude Code gives it
+  (the agent's commands get the same environment) before `hook_path`
+  narrows its own, and `command_may_be_content` walks it as bash does:
+  the first entry holding an executable file of the name decides; an empty
+  or relative entry (read from the call's directory) that holds one, a
+  file that lies in the project (its entry's directory and each link
+  followed exactly; not where the project is the home directory, or holds
+  it, as `hook_path` reads the project), or no file anywhere (or anything
+  unreadable) makes the call `mutate`, before any narrower class. A name
+  found first in a system directory is unchanged.
+- Fix (SDK mapper, which must agree): `command_may_be_content(name, cwd,
+  search_path, project_dir)`, the same walk; `ToolCapabilityMapper` gains
+  `command_path` (None: this process's `PATH`) and `project_dir` (None:
+  this process's working directory) and a replaceable
+  `command_may_be_content`; a read-only command and the single-command
+  `git stash` forms take the worst case where it says yes (a lookup that
+  fails is a yes). `wrap_options()` sets both from the options it wraps
+  (`env["PATH"]`, `cwd`: the CLI runs its commands with this process's
+  environment and `options.env` over it).
+- Not seen (documented in SECURITY.md §5.1, §5.5 and hooks/README.md): the
+  entries the Bash tool adds to `PATH` from the user's shell startup files
+  (its shell snapshot) reach no hook.
+- Tests: `test_command_programs.py`: hook (started as Claude Code starts
+  it, `/bin/sh -c`) and mapper agree on 10 gated cases (relative,
+  `./`-prefixed and absolute in-project entries for `git status`, `git log
+  -1`, `cat`, `git stash create`, `git stash list`; a leading and a middle
+  empty entry for `ls`), a link outside the project into it, a name found
+  nowhere (a `PATH` holding only the hook's programs), 7 controls (the
+  system's programs; a relative or in-project entry without that name; an
+  empty entry after the system's), the home-directory rule, and
+  `wrap_options()` setting and clearing both attributes. On 4d17c00's hook,
+  mapper and adapter 14 fail and the 7 controls pass.
+
+#### 4. The hooks' own git calls had no time bound (medium); siblings: the log hook's git, the settings files' reads, the SDK's settings read
+
+git reads the files a repository's configuration includes (`include.path`),
+and opening a FIFO, or reading a terminal such as `/dev/ptmx`, waits for a
+writer: every gated call then got no verdict within hooks.json's 30
+seconds, and a Claude Code without `onFailure: "block"` runs it. The
+verifier also delivered it with a plain clone: `.claude` shipped as a git
+directory (`HEAD`, `objects/`, `refs/`) whose `config` includes `/dev/ptmx`
+stalled the marker's check (round 2 #2's refusal became no verdict).
+
+- Fix (the block the three hooks share, kept equal by a test): `bounded`
+  runs a program (by `exec`, so the process killed is the program) with
+  no input, and a watchdog that kills it after 5 seconds; status 124 when
+  stopped (or when `sleep` cannot time it). `hgit` (pre and take hooks,
+  kept equal by a test) runs git through it, as do the hooks path lookup
+  and the log hook's anchor lookup.
+- Fix (callers): a git that did not answer counts as one that cannot say,
+  never as "no repository": `git_dir_at` tells found (0), no repository
+  (git's 128) and cannot say (2); `git_dir_is_content`,
+  `git_runs_configured` and `git_read_gated` answer yes (the call is
+  gated); the records guard blocks with R407 when it cannot name the
+  project's git directory (its `acs/` cannot be compared), the marker check
+  with F501 when it cannot name the marker's; `recorded_commit` restores
+  nothing (a mutate); the take hook writes no marker; the log hook writes
+  its line without the anchor and says why (exit 1). Every chain of
+  stalled reads ends in a decision within about 15 seconds (two stalls in
+  the classification, one in the restore lookup, then a final one), well
+  inside 30; measured: 5 s for a Write, 10 s for `git status`.
+- Sibling (found here): `jq` read the project's settings files with no
+  bound: a FIFO, or a link to `/dev/ptmx`, at `.claude/settings.json` held
+  each hook. A settings file that is not a regular file is now unreadable
+  (R407 at once), and the read is bounded too. The SDK adapter's
+  `refused_project_env` opened it with a blocking `open()`: it now opens
+  it non-blocking and refuses one that is not a regular file (fstat).
+- Checked, not changed: the SDK mapper bounds every git call (`timeout=10`,
+  a timeout is a yes), as the verifier found. The rollback skill's hook
+  runs git without a bound (POSIX sh, no `timeout` on macOS): the
+  pre-tool-use hook, which sees every call, decides the same restores in
+  time (a restore it cannot check is a gated mutate), so a stall there is
+  no pass; SECURITY.md §5.5 says so. The marker, the key and an entry are
+  read only once a test shows a regular file.
+- Tests: `test_hook_git_bound.py`: with a FIFO included, a Write, `rm -rf
+  src`, `git status` and `git stash create` are blocked with R407 in under
+  20 s, the marker kept; the control without the include is asked in under
+  5 s; the shipped `.claude` git directory including `/dev/ptmx` gives
+  F501 in time; the take hook writes no marker and the log hook logs the
+  call and says why, in time; a FIFO and a `/dev/ptmx` link at
+  `.claude/settings.json` are unreadable at once in each of the three hooks
+  (6), and the SDK's `refused_project_env` reads both as unreadable (in a
+  process of its own, under 20 s); and every git command after the shared
+  block goes through `bounded`. On 4d17c00's hooks 13 fail (each held past
+  the 35 seconds the check gave it, with no verdict) and the control
+  passes; on its SDK both settings reads fail (held past 20 s).
+
+#### Documentation
+
+SECURITY.md §5.1 (the program rule, exact link following, the bounded
+reads) and §5.5 (`onFailure` and the bound; a user's `PATH`); the hooks'
+README; the pre-tool-use hook's header; CHANGELOG [Unreleased] Upgrading
+(the plugin's round-5 entry and the SDK classifier entry). The Standard's
+text was not changed: §5.18.3 already classifies by effect, with the
+worst case where the layer cannot tell, and §5.18.8 already requires a
+check that cannot complete to refuse.
+
+#### Checks after batch 1
+
+- Python: `pytest tests/` in bounded groups (each under `timeout 120` and a
+  4 GB address-space limit: each file, `tests/test_skill_hooks.py` in
+  chunks of 150 node ids, and `tests/test_redaction.py` in chunks of 50,
+  its slow chunk again in chunks of 10): 7598 passed, 18 skipped, of 7616
+  collected (7546 before, plus the 70 new). ruff check and format with CI's
+  lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the five generators'
+  `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed; not rebuilt.
+- TypeScript: the package's build, check and test (2056 passed); the
+  binding's check and test (263 passed, 2 skipped). No TypeScript source
+  changed: neither classifies shell commands nor runs a hook.
+- Old code: the new tests against 4d17c00's `hooks/`, `skills/`,
+  `grounded_agency/` (copied in place, or, for the stalls, run from a copy
+  of the old hooks with a 35-second cut-off): of the 69 run, 60 fail and
+  the 9 controls pass (#1: 10 of 11 fail; #2: 21 of 21; #3: 14 of 21; #4:
+  15 of 16); #4's check that every git goes through `bounded` was not run
+  there (the old hooks have no such function).
+- Probes, each under `timeout 120` and a 4 GB address-space limit: each
+  reported route rerun on the fixed hooks (padding after a records path,
+  a shipped `notes -> 'evil\n'`, a cwd `d\n`, `node_modules/.bin`, a
+  leading colon and an in-project entry on `PATH`, a FIFO include for a
+  Write, `rm -rf src`, `git status` and `git stash create`, the log hook);
+  each now refuses or gates in time. No CLI or nested agent was started;
+  the git and jq processes the old hooks left waiting on FIFOs were
+  killed; the scratch repositories were removed.

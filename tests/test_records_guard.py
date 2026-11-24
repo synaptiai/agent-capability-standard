@@ -30,6 +30,8 @@ from typing import Any
 
 import pytest
 
+from tests.conftest import enter_checkpoint_commit
+
 ROOT = Path(__file__).resolve().parents[1]
 PRE = ROOT / "hooks" / "pretooluse_require_checkpoint.sh"
 TAKE = ROOT / "hooks" / "posttooluse_take_checkpoint.sh"
@@ -758,3 +760,212 @@ class TestTheReadingsTime:
             "rm -" + "f" * 300 + "r.claude",
         ):
             assert refused_f504(run_pre(project, "Bash", {"command": command})), command
+
+
+# Words enough that the resolved paths (each <project>/<word>) pass the 64 KB
+# a pipe holds, whatever the temporary directory's length.
+PAD = " && echo {1..4000} > /dev/null"
+GROUPS = " z{a,b}" + "z{a,b}" * 11
+
+
+class TestManyResolvedPaths:
+    """Security round 5, batch 1, #1: the guard piped the resolved paths
+    into `grep -q` under pipefail. grep stopped at the first match, printf
+    (more than a pipe holds still to write) died of SIGPIPE, and pipefail
+    read the pipeline as no match: a call that names a records path and a
+    few thousand more words was asked as an ordinary mutate."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cp fixtures/key notes/todo.md" + PAD,
+            "cp -r fixtures/key fixtures/commits notes/k/" + PAD,
+            "cat a.txt > .claude/check{p,q}oint.ok" + GROUPS,
+            "cp a.txt .git/acs/check{points,}/key" + PAD,
+            "touch ~+/notes/todo.md" + PAD,
+        ],
+    )
+    def test_a_records_path_among_many_is_refused(
+        self, project: Path, command: str
+    ) -> None:
+        marker = fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), (command, result.stdout, result.stderr)
+        assert "leads there" in result.stderr
+        assert marker.exists()
+
+    @pytest.mark.parametrize(
+        "command",
+        ["rm -rf .clau{d,x}e" + GROUPS, "rm -rf lnk" + PAD, "rm -rf .git/acs" + PAD],
+    )
+    def test_the_directory_that_holds_them_among_many_is_refused(
+        self, project: Path, command: str
+    ) -> None:
+        marker = fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), (command, result.stdout, result.stderr)
+        assert "holds the layer's records" in result.stderr
+        assert marker.exists()
+
+    def test_an_mcp_tools_many_arguments_are_read_alike(self, project: Path) -> None:
+        marker = fresh_marker(project)
+        tool_input = {"path": "notes/todo.md", "pad": [str(i) for i in range(4000)]}
+        result = run_pre(project, "mcp__filesystem__write_file", tool_input)
+        assert refused_f504(result), result.stderr
+        assert marker.exists()
+
+    def test_many_other_paths_are_asked(self, project: Path) -> None:
+        fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": "cp a.txt notes/x.txt" + PAD})
+        assert asked(result), result.stderr
+
+    def test_a_grep_that_cannot_answer_blocks(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        """Any answer of grep but a match or none (here an error, 2)
+        blocks: the guard cannot tell."""
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        grep = tools / "grep"
+        grep.write_text("#!/bin/sh\nexit 2\n")
+        grep.chmod(0o755)
+        fresh_marker(project)
+        result = run_pre(
+            project,
+            "Bash",
+            {"command": "touch notes/x.txt"},
+            PATH=f"{tools}:{os.environ['PATH']}",
+        )
+        assert result.returncode == 2, result.stdout
+        assert result.stderr.startswith("R407 SAFETY_CHECK_FAILED: "), result.stderr
+
+
+class TestPathsReadExactly:
+    """Security round 5, batch 1, #2: `$(readlink ...)` strips every line
+    break that ends the output, so a link to `evil\\n` was followed to `evil`,
+    another file: one approved write to a shipped name forged the key and a
+    commit entry. The same stripping read a cwd, and git's answers, as
+    another directory."""
+
+    def _links(self, project: Path) -> None:
+        os.symlink("evil\n", project / "nl")
+        os.symlink(".git/acs/checkpoints/key", project / "evil\n")
+        os.symlink("e2\n", project / "nl2")
+        os.symlink(f".git/acs/checkpoints/commits/{M}", project / "e2\n")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "touch nl",
+            "cat fixtures/key > nl; cat fixtures/commits/* > nl2",
+            "cp a.txt ./nl2",
+        ],
+    )
+    def test_a_link_to_a_name_ending_in_a_line_break_is_followed(
+        self, project: Path, command: str
+    ) -> None:
+        self._links(project)
+        marker = fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), (command, result.stdout, result.stderr)
+        assert "leads there" in result.stderr
+        assert marker.exists()
+
+    @pytest.mark.parametrize("tool", ["Write", "mcp__filesystem__write_file"])
+    def test_other_tools_follow_it_alike(self, project: Path, tool: str) -> None:
+        self._links(project)
+        fresh_marker(project)
+        key = "file_path" if tool == "Write" else "path"
+        result = run_pre(project, tool, {key: str(project / "nl"), "content": "a" * 64})
+        assert refused_f504(result), result.stderr
+
+    def test_a_link_to_another_such_name_is_asked(self, project: Path) -> None:
+        os.symlink("plain\n", project / "nl")
+        (project / "plain\n").write_text("x")
+        (project / "plain").symlink_to(".git/acs/checkpoints/key")
+        fresh_marker(project)
+        assert asked(run_pre(project, "Bash", {"command": "touch nl"}))
+
+    def test_a_cwd_ending_in_a_line_break_is_that_directory(
+        self, project: Path
+    ) -> None:
+        here = project / "d\n"
+        here.mkdir()
+        (here / "n").symlink_to("../.git/acs/checkpoints/key")
+        fresh_marker(project)
+        payload_cwd = {"cwd": str(here)}
+        result = subprocess.run(
+            ["bash", str(PRE)],
+            input=json.dumps(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "touch n"},
+                    "permission_mode": "default",
+                    "tool_use_id": "toolu_x",
+                    **payload_cwd,
+                }
+            ),
+            capture_output=True,
+            text=True,
+            env={**os.environ, **ENV, "CLAUDE_PROJECT_DIR": str(project)},
+            timeout=120,
+        )
+        assert refused_f504(result), result.stderr
+
+    def _other_repository(self, project: Path) -> tuple[Path, str]:
+        """`r\\n`, a repository of its own holding the project's recorded
+        commit, beside a plain directory `r` of the project."""
+        (project / "r").mkdir()
+        other = project / "r\n"
+        git(project, "clone", "-q", str(project), str(other))
+        (other / "app.txt").write_text("other\n")
+        commit = git(other, "stash", "create")
+        enter_checkpoint_commit(project / ".git", commit)
+        return other, commit
+
+    def test_a_restore_run_in_another_repository_is_no_rollback(
+        self, project: Path
+    ) -> None:
+        """The commit is recorded in the project, but the call runs in `r\\n`,
+        another repository: a mutate (here F501, no marker), not a rollback."""
+        other, commit = self._other_repository(project)
+        result = subprocess.run(
+            ["bash", str(PRE)],
+            input=json.dumps(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": f"git stash apply {commit}"},
+                    "cwd": str(other),
+                    "permission_mode": "bypassPermissions",
+                    "tool_use_id": "toolu_x",
+                }
+            ),
+            capture_output=True,
+            text=True,
+            env={**os.environ, **ENV, "CLAUDE_PROJECT_DIR": str(project)},
+            timeout=120,
+        )
+        assert result.returncode == 2, result.stdout
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), result.stderr
+
+    def test_a_checkpoint_taken_in_another_repository_writes_no_marker(
+        self, project: Path
+    ) -> None:
+        other, commit = self._other_repository(project)
+        taken = subprocess.run(
+            ["bash", str(TAKE)],
+            input=json.dumps(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "git stash create"},
+                    "tool_response": {"stdout": commit},
+                    "cwd": str(other),
+                }
+            ),
+            capture_output=True,
+            text=True,
+            env={**os.environ, **ENV, "CLAUDE_PROJECT_DIR": str(project)},
+            timeout=60,
+        )
+        assert taken.returncode == 0
+        assert not (project / ".claude" / "checkpoint.ok").exists()

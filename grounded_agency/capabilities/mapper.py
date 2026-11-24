@@ -918,6 +918,75 @@ def git_change_may_run(cwd: str | None = None) -> bool:
     return _repository_runs(cwd, _CHANGE_HOOKS)
 
 
+def _home_directory() -> str:
+    """The user's home directory as the password database gives it (not
+    HOME, as the plugin's hooks read it), physical; ``""`` where there is
+    none."""
+    try:
+        import pwd
+
+        return os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    except ImportError, KeyError, OSError:
+        return ""
+
+
+def command_may_be_content(
+    name: str,
+    cwd: str | None = None,
+    search_path: str | None = None,
+    project_dir: str | None = None,
+) -> bool:
+    """Whether the program the shell runs for the command name ``name`` may
+    be repository content (STANDARD 1.2.0 section 5.18.3: a call is
+    classified by its effect, and a layer that cannot tell which program
+    runs takes the worst case). bash runs a name with no slash as the first
+    executable file of that name in a directory of its PATH
+    (``search_path``: the PATH the commands run with; None for this
+    process's): the repository's own `git`, `cat` or `ls` runs in place of
+    the system's when PATH holds an empty or relative entry (read from the
+    working directory, ``cwd``: ``PATH=node_modules/.bin:$PATH``, a leading
+    colon) under which the name is found, or an entry in the project
+    directory (``project_dir``, None for this process's working directory:
+    an activated virtual environment, direnv's ``PATH_add``) whose file of
+    that name lies, links followed, in the project (not where the project is
+    the user's home directory, or holds it). Yes then, when no such file is
+    found, and when the lookup fails. The plugin's PreToolUse hook asks the
+    same (command_may_be_content)."""
+    if not name or "/" in name:
+        return True
+    path = os.environ.get("PATH", "") if search_path is None else search_path
+    if not path:
+        return True
+    where = _where(cwd)
+    found = None
+    for entry in path.split(os.pathsep):
+        relative = not os.path.isabs(entry)
+        candidate = (
+            os.path.join(where, entry, name) if relative else os.path.join(entry, name)
+        )
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            # The first that bash would run: an empty or relative entry is
+            # read from the working directory, repository content.
+            if relative:
+                return True
+            found = candidate
+            break
+    if found is None:
+        return True
+    try:
+        project = os.path.realpath(project_dir if project_dir else os.getcwd())
+        real = os.path.realpath(found, strict=True)
+    except OSError, ValueError:
+        return True
+    within = project.rstrip(os.sep) + os.sep
+    home = _home_directory()
+    if home and (home + os.sep).startswith(within):
+        # A project that is the home directory, or holds it, is no
+        # repository's.
+        return False
+    return real.startswith(within)
+
+
 def _is_read_only(command: _Command) -> bool:
     """Whether a simple command is on the read-only allow-list (by its exact
     name, or its name and subcommand, each one word) with no option that
@@ -1232,6 +1301,18 @@ class ToolCapabilityMapper:
         # stash`), whose hooks are more (:func:`git_change_may_run`): it
         # takes the worst case there. A lookup that fails is a yes.
         self.git_change_may_run: Callable[[str | None], bool] = git_change_may_run
+        # The PATH the classified commands run with (None: this process's)
+        # and the project's directory (None: this process's working
+        # directory). The adapter sets them from the options it wraps (the
+        # CLI's ``env`` and ``cwd``). A command the allow-list would let pass
+        # takes the worst case where its program may be the repository's own
+        # (:func:`command_may_be_content`: a relative or empty PATH entry,
+        # or one in the project, that holds a file of its name).
+        self.command_path: str | None = None
+        self.project_dir: str | None = None
+        self.command_may_be_content: Callable[
+            [str, str | None, str | None, str | None], bool
+        ] = command_may_be_content
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -1782,7 +1863,11 @@ class ToolCapabilityMapper:
            sets a shell variable the later commands of the line run with)
            is not read-only (`_writes`). A class narrower than the worst
            case comes only from the command's program, never from text in
-           its arguments (:meth:`_classify_single_command`).
+           its arguments (:meth:`_classify_single_command`), and only where
+           the program the shell finds for its name, on
+           :attr:`command_path`, cannot be the repository's own
+           (:func:`command_may_be_content`; the `git stash` forms of step 2
+           alike).
 
         Security principle: fail-safe defaults. A command is high-risk until
         it is shown to be on the read-only allow-list, and a command the
@@ -1833,8 +1918,11 @@ class ToolCapabilityMapper:
                 # `git stash create` refreshes the index (core.fsmonitor)
                 # and a restore writes the tree (filters): in a git
                 # directory the repository ships, each runs what its
-                # configuration names.
-                if self._git_dir_may_be_content(cwd):
+                # configuration names. And the git the shell finds may be
+                # the repository's own.
+                if self._git_dir_may_be_content(cwd) or self._program_may_be_content(
+                    "git", cwd
+                ):
                     return worst
                 capability = _GIT_STASH_CLASSES[words[2]]
                 if capability == "observe":
@@ -1866,6 +1954,20 @@ class ToolCapabilityMapper:
         if not gated:
             return self._builtin("Bash", "observe")
         return self._combine(gated)
+
+    def _program_may_be_content(self, name: str, cwd: str | None) -> bool:
+        """:attr:`command_may_be_content` for the command name ``name`` run
+        in ``cwd`` with :attr:`command_path` in :attr:`project_dir`; a
+        lookup that fails is a yes."""
+        try:
+            return bool(
+                self.command_may_be_content(
+                    name, cwd, self.command_path, self.project_dir
+                )
+            )
+        except Exception:
+            logger.exception("Could not tell which program %s names", name)
+            return True
 
     def _git_dir_may_be_content(self, cwd: str | None) -> bool:
         """:attr:`git_dir_may_be_content` for ``cwd``; a lookup that fails is
@@ -2041,6 +2143,10 @@ class ToolCapabilityMapper:
             return self._git_change(cwd)
 
         if _is_read_only(command):
+            if self._program_may_be_content(command.words[0], cwd):
+                # The shell may run the repository's own program of that
+                # name: what it does is unknown.
+                return self._worst_case()
             if command.words[0] == "git" and self._git_read_gated(cwd):
                 # A read of an object a partial clone lacks fetches it from
                 # the promisor remote: a request to another host, carrying

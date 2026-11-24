@@ -103,7 +103,10 @@ hooks:
               # directory on its way), that redirects output and expands text, or that
               # names a program that writes files its input names (read below), as
               # written or with its line continuations joined (pat\<newline>ch)
-              RUNS_IN="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)" || RUNS_IN=""
+              # (the cwd exactly as given: the x keeps the line breaks that may end
+              # a directory's name from the command substitution)
+              RUNS_IN="$(printf '%s' "$INPUT" | jq -j '(.cwd // empty), "x"' 2>/dev/null)" || RUNS_IN="x"
+              RUNS_IN="${RUNS_IN%x}"
               [ -n "$RUNS_IN" ] || RUNS_IN="$(pwd)"
               JOINED="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // "" | split("\\\n") | add // ""' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
               NAMED=false
@@ -765,7 +768,11 @@ hooks:
             # the call and the reason on stderr is shown to Claude. A call that cannot
             # be read is blocked.
             INPUT="$(jq -c . 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
-            TARGET="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # The path exactly as given: a command substitution strips the line
+            # breaks that end its output, and a file's name may end in one (x and
+            # x<newline> are two files), so an x is printed after it and taken off.
+            TARGET="$(printf '%s' "$INPUT" | jq -j '(.tool_input.file_path // .tool_input.notebook_path // empty), "x"' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            TARGET="${TARGET%x}"
             [ -n "$TARGET" ] || exit 0
             REFUSE="F504 CONSTRAINT_VIOLATED: in the audit skill the records file is written only by appending a record with Bash, as printf '%s\n' '<json>' >> \"\${CLAUDE_PROJECT_DIR:-.}/.claude/audit/records.jsonl\", whose record is checked for credentials; an edit or a write of '$TARGET' could change it unread (STANDARD 1.2.0 §6.7)"
             REACHED="$TARGET"

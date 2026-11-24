@@ -90,7 +90,11 @@ hooks:
               *"\$'"* | *'$"'* | *'*'* | *'?'* | *'['* | *'{'* | *'@('* | *'!('* | *'+('*) ;;
               *) printf '%s\n' "$CMD" | tr -d "\"'\\\\\$\n" | grep -q stash || exit 0 ;;
             esac
-            CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // "" | strings | gsub("[\n\r]"; "")' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            # The cwd exactly as given: a command substitution strips the line
+            # breaks that end its output, and a directory's name may end in one,
+            # so an x is printed after it and taken off.
+            CWD="$(printf '%s' "$INPUT" | jq -j '(.cwd // "" | strings), "x"' 2>/dev/null)" || { echo "R407 SAFETY_CHECK_FAILED: cannot read the tool call (jq is required)" >&2; exit 2; }
+            CWD="${CWD%x}"
             # The restores of the command: "restore <id>" for each `git stash
             # pop|apply <id>`, "refuse <words>" for any other spelling of one.
             READER="$(cat <<'JQ'

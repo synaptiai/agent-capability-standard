@@ -1869,6 +1869,17 @@ class GroundedAgentAdapter:
         already_wrapped = self._already_wrapped(existing_hooks)
         post_hooks = list(existing_hooks.get("PostToolUse", []))
 
+        # Where the CLI these options start runs its commands: its PATH
+        # (this process's environment with options.env over it) and its
+        # project directory. A command name the allow-list would let pass
+        # is the worst case where the program the shell finds for it may be
+        # the repository's own (STANDARD 1.2.0 section 5.18.3).
+        env = getattr(base, "env", None)
+        path = env.get("PATH") if isinstance(env, Mapping) else None
+        self.mapper.command_path = path if isinstance(path, str) else None
+        cwd_option = getattr(base, "cwd", None)
+        self.mapper.project_dir = os.fspath(cwd_option) if cwd_option else None
+
         # Add evidence collector
         evidence_hook = create_evidence_collector(
             store=self.evidence_store,
