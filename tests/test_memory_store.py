@@ -305,3 +305,61 @@ def test_an_unrepresentable_ttl_stores_nothing(on_file: bool, tmp_path: Path) ->
         assert not path.exists()
     assert store.persist({"key": "k", "data": 2, "ttl": "P1D"}, ctx)["stored"]
     assert store.recall({"key": "k"}, ctx)["data"] == 2
+
+
+def test_a_memory_file_nested_too_deeply_is_malformed(
+    tmp_path: Path, deep_json: str
+) -> None:
+    """json.loads raised RecursionError, no ValueError, out of the load; or
+    (with a larger C stack) returned the nested lists, on which the load
+    raised AttributeError."""
+    path = tmp_path / "memory.json"
+    path.write_text(deep_json)
+    with pytest.raises(ValueError, match="memory file"):
+        MemoryStore(path)
+
+
+_ROW = {"scope": "session", "instance": "s", "key": "k", "data": 1, "stored_at": 5}
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        [1],
+        3,
+        "x",
+        None,
+        {"entries": {}},
+        {"entries": [[1]]},
+        {"entries": [{k: v for k, v in _ROW.items() if k != "data"}]},
+        {"entries": [{**_ROW, "key": 1}]},
+        {"entries": [{**_ROW, "stored_at": "5"}]},
+        {"entries": [{**_ROW, "stored_at": True}]},
+        {"entries": [{**_ROW, "expires_at": "never"}]},
+    ],
+)
+def test_a_file_that_is_no_memory_file_is_malformed(
+    tmp_path: Path, document: Any
+) -> None:
+    """A file that is not what the store writes raised AttributeError,
+    TypeError or KeyError out of the load, or kept a row a recall then
+    failed on; it is a ValueError, as a file that does not parse."""
+    path = tmp_path / "memory.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="memory file"):
+        MemoryStore(path)
+
+
+def test_a_file_the_store_writes_reads_back(tmp_path: Path) -> None:
+    """The control: a row that never expires, and one that does."""
+    path = tmp_path / "memory.json"
+    ctx = MemoryContext(session="s")
+    MemoryStore(path).persist({"key": "a", "data": {"x": [1]}}, ctx)
+    MemoryStore(path).persist({"key": "b", "data": 2, "ttl": "P1D"}, ctx)
+    store = MemoryStore(path)
+    assert store.recall({"key": "a"}, ctx)["data"] == {"x": [1]}
+    assert store.recall({"key": "b"}, ctx)["data"] == 2
+    rows = json.loads(path.read_text())["entries"]
+    rows[0]["expires_at"] = None
+    path.write_text(json.dumps({"version": 1, "entries": rows}))
+    assert MemoryStore(path).recall({"key": "a"}, ctx)["found"]

@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.brace_readings import BY_VERSION, assert_reading
 from tests.conftest import enter_checkpoint_commit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -3383,34 +3384,41 @@ BRACE_WORDS = [
     "}{a,b}",
     "{{{a,b}",
     "a{b,c,d{e,f}}g",
-    "{a..b{c,d}}",
     '{"a":{"b":1},"c":2}',
 ]
+
+_BRACE_END = "if length > 256 then null else . end end;"
 
 
 def _brace_block(skill: str) -> str:
     """The brace expansion functions of a skill's command hook."""
     text = command_hook(skill, "PreToolUse", "Bash")
     start = text.index("# Brace expansion, as bash makes it of a word")
-    end = text.index("def brace_words: brace_expand(0);") + len(
-        "def brace_words: brace_expand(0);"
-    )
+    end = text.index(_BRACE_END, text.index("def brace_words:")) + len(_BRACE_END)
     return text[start:end]
+
+
+def _jq_words(program: str, word: str) -> list[str]:
+    """The words ``program`` gives of ``word`` with its quotes removed (as
+    run_words removes them), sorted, the empty ones left out."""
+    ours = subprocess.run(
+        ["jq", "-nc", "--arg", "w", word.replace('"', ""), program],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert ours.returncode == 0, (word, ours.stderr)
+    return json.loads(ours.stdout)
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="needs jq")
 def test_the_brace_reading_is_bashs() -> None:
-    """The skills' brace_words gives the words bash gives, of a word whose
-    quotes the hook removed first (as run_words does)."""
+    """The skills' brace_words gives the words the installed bash gives, of
+    a word whose quotes the hook removed first (as run_words does); for a
+    word bash 5.2 and 5.3 read differently, the words of both, which hold
+    the installed bash's (brace_readings)."""
     program = _brace_block("send") + '\n$w | brace_words | map(select(. != "")) | sort'
-    for word in BRACE_WORDS:
-        ours = subprocess.run(
-            ["jq", "-nc", "--arg", "w", word.replace('"', ""), program],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert ours.returncode == 0, (word, ours.stderr)
+    for word in [*BRACE_WORDS, *BY_VERSION]:
         theirs = subprocess.run(
             ["bash", "-c", "printf '%s\\n' " + word],
             capture_output=True,
@@ -3418,8 +3426,26 @@ def test_the_brace_reading_is_bashs() -> None:
             env={**os.environ, "LC_ALL": "C.UTF-8"},
             timeout=30,
         ).stdout
-        expected = sorted(w for w in theirs.split("\n") if w)
-        assert json.loads(ours.stdout) == expected, word
+        installed = sorted(w for w in theirs.split("\n") if w)
+        assert_reading(word, _jq_words(program, word), installed)
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="needs jq")
+def test_each_brace_pass_is_one_versions_reading() -> None:
+    """brace_expand read as bash 5.2 ($v 52) and as bash 5.3 ($v 53): each
+    version's words of a word the two read differently, and the same words
+    of every other word (so brace_words gives bash's own there, whichever
+    bash is installed)."""
+    block = _brace_block("send")
+    passes = {
+        v: block + f'\n$w | brace_expand(0; {v}) | map(select(. != "")) | sort'
+        for v in (52, 53)
+    }
+    for word in BRACE_WORDS:
+        assert _jq_words(passes[52], word) == _jq_words(passes[53], word), word
+    for word, (v52, v53) in BY_VERSION.items():
+        assert _jq_words(passes[52], word) == sorted(v52), word
+        assert _jq_words(passes[53], word) == sorted(v53), word
 
 
 def test_the_audit_and_send_skills_read_braces_alike() -> None:

@@ -404,7 +404,10 @@ Then:
   outright), a brace group it expands, found as bash finds it (the first
   `{` a `}` closes, at the first `}` after a comma at its own level, so
   `{a},.claude/check}point.ok` names the marker:
-  `{fixtures/,.git/acs/check}points`, `audit.he{ad,x}`, `.claud{e..e}`), a
+  `{fixtures/,.git/acs/check}points`, `audit.he{ad,x}`, `.claud{e..e}`)
+  and expanded as bash 5.2 and bash 5.3 both expand it (they differ on a
+  group with no comma at its own level that is no sequence:
+  `{a..b{c,d}}` is `a..bc a..bd` to 5.2, `{a..bc} {a..bd}` to 5.3), a
   `$'...'` it decodes
   (`$'.git/acs/check\x70oints'`, and octal, `\u`, `\U` and `\c`
   escapes; `$"..."` as `"..."`), a path attached to a short option

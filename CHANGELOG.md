@@ -661,7 +661,16 @@ here and marked so.
   RecursionError) is an unreadable line: `JsonlEvidenceStore` skips and
   counts it, `IdempotencyLog` cuts it off as a torn last line and raises
   `ValueError` for one anywhere else, and the snapshot store keeps every
-  object while a manifest is one.
+  object while a manifest is one. After the loop: whether the parser raises
+  RecursionError there depends on the stack size (on a larger one it returns
+  the nested lists), so a line or file that parses to anything but what its
+  reader writes (a list, a number, a string, null, an object short of a
+  member the reader needs) is read as one that does not parse: the
+  checkpoint archive skips such a line (it raised AttributeError, and the
+  archive could not be read), `IdempotencyLog` reads it as above, a
+  `MemoryStore` file or a snapshot manifest that is not what the store
+  writes is a `ValueError` (a manifest before a restore puts anything back;
+  an entry's SHA-256 must be one, so it names no file outside the store).
 - Python SDK, the output contract of a tool's result (Standard 1.2.0
   §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
   `create_grounded_mcp_server` serves or one of another server bound with
@@ -1096,7 +1105,14 @@ here and marked so.
     expansions read more than 65536 braces, commas and characters. The
     audit and send skills' hooks read brace groups the same way
     (`env {-u},cu{r,r}l} ...` runs curl; `tee -a .cl{x},a}ude/...` appends
-    to the audit records).
+    to the audit records). After the loop: bash 5.3 expands a group with no
+    comma at its own level that is no sequence otherwise than bash 5.2
+    (`{a..b{c,d}}` is `a..bc a..bd` to 5.2, `{a..bc} {a..bd}` to 5.3), and
+    the hooks run under whichever bash the user has, so the guard and the
+    audit and send skills' hooks read each word as both versions expand it
+    (`touch {x..y{a..b}}/key`, through a shipped link `{x..ya}` to the git
+    directory's `acs/checkpoints/`, writes the key on bash 5.3 and is
+    refused).
   - The audit, persist, rollback and send skills' command hooks set
     `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
     does: a check that fails or gives no verdict in time blocks the call
@@ -1250,7 +1266,8 @@ here and marked so.
   - The log hook reports (exit 1) input `jq` cannot parse, which may be a
     tool call (nested past jq's depth limit, a lone surrogate escape), where
     it exited 0 with nothing logged; input that is not JSON at all is
-    reported the same way.
+    reported the same way. The limit is the installed jq's (1.7: 256
+    levels; 1.8: 10 000): a call the jq on `PATH` parses is logged.
   - A git command on the read-only list (`git status`, `git log`, `git
     show`, `git diff`, `git rev-parse`, `git ls-files`, `git stash
     list|show`) is a gated `mutate` when the call's directory (the payload's

@@ -20,6 +20,15 @@ parse), a persist never raises, the merge skips a state file git tracks
 unless it is the one the tracker wrote last, the boundary ends validity
 whatever resolving the holds did, and the hook releases whatever the call
 holds when its check fails.
+
+Whether the decoder raises RecursionError on that text depends on the C
+stack size: on GitHub's ubuntu-latest runner of November 2026 it returned
+the nested lists, and the archive reader, which handed whatever a line
+parsed to to `Checkpoint.from_dict`, raised AttributeError on a list. A
+line or entry that parses to anything but an object is now read as one
+that does not parse, and the tests that read the deep text take the
+`deep_json` fixture (tests/conftest.py), which runs each both ways on any
+machine.
 """
 
 from __future__ import annotations
@@ -35,9 +44,8 @@ import pytest
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.state.checkpoint_tracker import CheckpointTracker
-from tests.conftest import pre_tool_use
+from tests.conftest import DEEP_JSON, pre_tool_use
 
-DEEP = "[" * 100_000 + "]" * 100_000
 WRITE = {"file_path": "x.txt", "content": "y"}
 
 
@@ -83,20 +91,30 @@ def _decision(result: dict[str, Any]) -> tuple[str | None, str]:
     return out.get("permissionDecision"), str(out.get("permissionDecisionReason"))
 
 
-def test_the_premise_is_a_recursion_error_not_a_value_error() -> None:
-    with pytest.raises(RecursionError):
-        json.loads(DEEP)
+def test_the_premise_is_one_of_the_two_readings() -> None:
+    """The decoder installed here either raises RecursionError on the deep
+    text, which no `except ValueError` catches, or returns the nested
+    lists, which are no object: the two readings `deep_json` gives, and
+    the code must read either as text that does not parse."""
+    try:
+        value = json.loads(DEEP_JSON)
+    except RecursionError:
+        pass
+    else:
+        assert isinstance(value, list)
     assert not issubclass(RecursionError, ValueError)
 
 
 class TestTheTracker:
-    @pytest.mark.parametrize("text", [DEEP, '{"history": ' + DEEP + "}"])
+    @pytest.mark.parametrize("wrap", ["{}", '{{"history": {}}}'])
     def test_an_untracked_deep_file_starts_fresh(
-        self, tmp_path: Path, text: str
+        self, tmp_path: Path, wrap: str, deep_json: str
     ) -> None:
         """The construction raised RecursionError; every persist after it
         too."""
-        (tmp_path / "tracker_state.json").write_text(text, encoding="utf-8")
+        (tmp_path / "tracker_state.json").write_text(
+            wrap.format(deep_json), encoding="utf-8"
+        )
         tracker = CheckpointTracker(checkpoint_dir=tmp_path)
         assert tracker.checkpoint_count == 0
         checkpoint = tracker.create_checkpoint(scope=["*"], reason="t")
@@ -104,17 +122,19 @@ class TestTheTracker:
         state = json.loads((tmp_path / "tracker_state.json").read_text("utf-8"))
         assert state["active"]["id"] == checkpoint
 
-    def test_the_adapter_starts(self, tmp_path: Path) -> None:
+    def test_the_adapter_starts(self, tmp_path: Path, deep_json: str) -> None:
         (tmp_path / "tracker_state.json").write_text(
-            '{"history": ' + DEEP + "}", encoding="utf-8"
+            '{"history": ' + deep_json + "}", encoding="utf-8"
         )
         adapter = _adapter(tmp_path)
         assert not adapter.has_valid_checkpoint()
 
-    def test_a_tracked_deep_file_cuts_no_transition_short(self, tmp_path: Path) -> None:
+    def test_a_tracked_deep_file_cuts_no_transition_short(
+        self, tmp_path: Path, deep_json: str
+    ) -> None:
         """Each of these raised RecursionError at its persist, after the
         change was made in memory."""
-        tracker = CheckpointTracker(checkpoint_dir=_shipped(tmp_path / "r", DEEP))
+        tracker = CheckpointTracker(checkpoint_dir=_shipped(tmp_path / "r", deep_json))
         checkpoint = tracker.create_checkpoint(scope=["*"], reason="t")
         assert tracker.validate_and_reserve("c1", scope=("s", None)) == (
             True,
@@ -178,25 +198,46 @@ class TestTheTracker:
         assert tracker.release_reservation("c1")
         assert tracker.end_validity("boundary") == [checkpoint]
 
-    def test_a_deep_archive_line_is_skipped(self, tmp_path: Path) -> None:
+    def test_a_deep_archive_line_is_skipped(
+        self, tmp_path: Path, deep_json: str
+    ) -> None:
+        self._an_archive_line_is_skipped(tmp_path, deep_json)
+
+    @pytest.mark.parametrize(
+        "line", ["[1]", "3", '"x"', "null", "true", "{}", '{"id": "c"}']
+    )
+    def test_an_archive_line_that_is_no_checkpoint_is_skipped(
+        self, tmp_path: Path, line: str
+    ) -> None:
+        """A line that parses to a list, a number, a string or null was
+        handed to `Checkpoint.from_dict`, which raised AttributeError, which
+        the reader did not catch: the archive could not be read at all."""
+        self._an_archive_line_is_skipped(tmp_path, line)
+
+    @staticmethod
+    def _an_archive_line_is_skipped(tmp_path: Path, line: str) -> None:
         tracker = CheckpointTracker(checkpoint_dir=tmp_path, max_history=1)
         for n in range(3):
             tracker.create_checkpoint(scope=["*"], reason=f"t{n}")
         archive = tmp_path / "archive" / "pruned_checkpoints.jsonl"
-        kept = len(tracker.get_archived_checkpoints())
-        assert kept >= 1
+        kept = [c.id for c in tracker.get_archived_checkpoints()]
+        assert kept
         with archive.open("a", encoding="utf-8") as f:
-            f.write(DEEP + "\n")
-        assert len(tracker.get_archived_checkpoints()) == kept
+            f.write(line + "\n")
+        assert [c.id for c in tracker.get_archived_checkpoints()] == kept
+        # A line after it is read too.
+        tracker.create_checkpoint(scope=["*"], reason="t3")
+        after = [c.id for c in tracker.get_archived_checkpoints()]
+        assert after[: len(kept)] == kept and len(after) == len(kept) + 1
 
 
 class TestTheAdapter:
     @pytest.mark.asyncio
-    async def test_the_reported_route(self, tmp_path: Path) -> None:
+    async def test_the_reported_route(self, tmp_path: Path, deep_json: str) -> None:
         """A tracked deep file: the Write of turn 1 was R407 and kept its
         hold, the Stop left every checkpoint valid, and once the file was
         gone a Write of turn 2 ran on a checkpoint from before the Stop."""
-        where = _shipped(tmp_path / "r", DEEP)
+        where = _shipped(tmp_path / "r", deep_json)
         adapter = _adapter(where, approval="off")
         adapter.create_checkpoint(["*"], "t")
         adapter.create_checkpoint(["*"], "t2")

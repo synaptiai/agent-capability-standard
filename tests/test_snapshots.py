@@ -4,6 +4,7 @@ what a rollback restores, and what it never reaches."""
 from __future__ import annotations
 
 import filecmp
+import json
 import os
 import stat
 from datetime import UTC, datetime, timedelta
@@ -434,18 +435,75 @@ def test_the_tracker_keeps_the_capture_and_prunes_content(tmp_path: Path) -> Non
         plain.restore_checkpoint(taken)
 
 
-def test_a_manifest_nested_too_deeply_keeps_every_object(root: Path) -> None:
+def test_a_manifest_nested_too_deeply_keeps_every_object(
+    root: Path, deep_json: str
+) -> None:
     """Security round 4, batch 2 (a sibling of defect 4): json.loads raises
     RecursionError on it, which the collection of unused objects did not
-    catch, so discarding a checkpoint raised."""
+    catch, so discarding a checkpoint raised. With a larger C stack it
+    returns the nested lists instead: `deep_json` runs both."""
     s = store(root)
     s.capture("cp1", ["*"])
     s.capture("cp2", ["*"])
     manifests = root.parent / "store" / "manifests"
     deep = next(m for m in manifests.glob("*.json") if "cp1" in m.name)
-    deep.write_bytes(b"[" * 100_000 + b"]" * 100_000)
+    deep.write_text(deep_json)
     objects = sorted(p.name for p in (root.parent / "store" / "objects").iterdir())
     s.discard("cp2")
     assert sorted(p.name for p in (root.parent / "store" / "objects").iterdir()) == (
         objects
     )
+
+
+_SHA = "0" * 64
+
+
+def _no_manifest(root: Path, text: str) -> None:
+    """A manifest that is no manifest capture writes: a restore refuses it
+    whole (ValueError) and puts nothing back."""
+    s = store(root)
+    s.capture("cp1", ["*"])
+    write(root, "a.txt", "a1")
+    write(root, "src/b.py", "b1")
+    (root.parent / "store" / "manifests" / "cp1.json").write_text(text)
+    with pytest.raises(ValueError, match="manifest"):
+        s.restore("cp1")
+    assert (root / "a.txt").read_text() == "a1"
+    assert (root / "src/b.py").read_text() == "b1"
+    assert sorted(p.name for p in (root / "src").iterdir()) == ["b.py", "c.py"]
+
+
+def test_a_manifest_nested_too_deeply_is_malformed(root: Path, deep_json: str) -> None:
+    """json.loads raised RecursionError, no ValueError, out of the restore;
+    or (with a larger C stack) returned the nested lists."""
+    _no_manifest(root, deep_json)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[1]",
+        "3",
+        '"x"',
+        "null",
+        '{"files": {"a.txt": []}}',
+        '{"files": {}, "excluded": [1]}',
+        '{"files": {}, "scope": "*"}',
+        '{"files": {"a.txt": {"sha256": "../../a.txt", "mode": 420}}}',
+        '{"files": {"a.txt": {"sha256": "' + _SHA + '", "mode": true}}}',
+        '{"files": {"a.txt": {"sha256": "' + _SHA + '", "mode": -1}}}',
+    ],
+)
+def test_a_manifest_that_is_no_manifest_is_malformed(root: Path, text: str) -> None:
+    _no_manifest(root, text)
+
+
+def test_a_restore_never_stops_part_way_on_a_manifest_entry(root: Path) -> None:
+    """The restore read each entry as it came to it: one without its mode
+    raised TypeError after the files before it were put back."""
+    s = store(root)
+    s.capture("cp1", ["*"])
+    path = root.parent / "store" / "manifests" / "cp1.json"
+    manifest = json.loads(path.read_text())
+    manifest["files"]["src/b.py"]["mode"] = "rw"
+    _no_manifest(root, json.dumps(manifest))

@@ -274,15 +274,25 @@ def test_jsonl_skips_and_counts_an_unreadable_line(tmp_path: Path) -> None:
         assert appended.record_id == "ev-1"
 
 
-def test_jsonl_skips_a_line_nested_too_deeply(tmp_path: Path) -> None:
+def test_jsonl_skips_a_line_nested_too_deeply(tmp_path: Path, deep_json: str) -> None:
     """Security round 4, batch 2 (a sibling of defect 4): json.loads raises
     RecursionError on it, which the load did not catch, so the store did
-    not open."""
+    not open. With a larger C stack it returns the nested lists instead,
+    which are no record: `deep_json` runs both."""
+    _jsonl_skips(tmp_path, deep_json.encode())
+
+
+@pytest.mark.parametrize("line", [b"[1]", b"3", b'"x"', b"null", b"{}"])
+def test_jsonl_skips_a_line_that_is_no_record(tmp_path: Path, line: bytes) -> None:
+    _jsonl_skips(tmp_path, line)
+
+
+def _jsonl_skips(tmp_path: Path, line: bytes) -> None:
     path = tmp_path / "e.jsonl"
     with JsonlEvidenceStore(path) as store:
         store.append(anchor())
     with open(path, "ab") as f:
-        f.write(b"[" * 100_000 + b"]" * 100_000 + b"\n")
+        f.write(line + b"\n")
     with JsonlEvidenceStore(path) as store:
         assert store.info().to_dict()["x-unreadable_lines"] == 1
         assert len(store.records()) == 1

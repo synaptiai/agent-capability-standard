@@ -103,6 +103,25 @@ def _ijson_problem(value: Any, at: str = "") -> str | None:
     return f"{at or '/'}: a {type(value).__name__}, which JSON has no form for"
 
 
+def _is_ms(value: Any) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_row(row: Any) -> bool:
+    """Whether a row of a memory file is one :meth:`MemoryStore._save`
+    writes: its scope, instance and key strings, its data, and its times in
+    milliseconds (``expires_at`` absent or null when it never expires)."""
+    return (
+        isinstance(row, dict)
+        and all(isinstance(row.get(m), str) for m in ("scope", "instance", "key"))
+        and "data" in row
+        and _is_ms(row.get("stored_at"))
+        and (row.get("expires_at") is None or _is_ms(row["expires_at"]))
+    )
+
+
 class MemoryStore:
     """A memory host's store (§4.5): ``persist`` and ``recall`` on inputs as
     the capabilities take them, in the scope instances a
@@ -382,8 +401,20 @@ class MemoryStore:
             text = f.read(_MAX_FILE_BYTES + 1)
         if len(text) > _MAX_FILE_BYTES:
             raise ValueError(f"memory file {self._path} is too large")
-        value = json.loads(text)
-        for row in value.get("entries", []):
+        # A file that is not what _save writes is one that does not parse
+        # (ValueError): not an object (a list, a number, a string, null),
+        # nested deeper than the parser allows (RecursionError, raised or
+        # not according to the stack size), or a row short of a member.
+        try:
+            value = json.loads(text)
+        except RecursionError:
+            raise ValueError(
+                f"memory file {self._path} nests too deeply to parse"
+            ) from None
+        rows = value.get("entries", []) if isinstance(value, dict) else None
+        if not isinstance(rows, list) or not all(map(_is_row, rows)):
+            raise ValueError(f"memory file {self._path} is malformed")
+        for row in rows:
             entry = {"data": row["data"], "stored_at": int(row["stored_at"])}
             if row.get("expires_at") is not None:
                 entry["expires_at"] = int(row["expires_at"])

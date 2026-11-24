@@ -138,10 +138,14 @@ class Checkpoint:
         """Deserialize checkpoint from a dict.
 
         Raises:
-            ValueError: If required fields have wrong types.
+            ValueError: If ``data`` is not a dict (a line or entry that
+                parsed to a list, a number, a string or null reads as one
+                that does not parse), or required fields have wrong types.
             KeyError: If required fields are missing.
         """
         # Validate types to catch crafted/corrupt state files early.
+        if not isinstance(data, dict):
+            raise ValueError("a checkpoint is a JSON object")
         if not isinstance(data.get("id"), str):
             raise ValueError("checkpoint id must be a string")
         if not isinstance(data.get("scope"), list):
@@ -1158,7 +1162,11 @@ class CheckpointTracker:
         """SEC-011: Retrieve archived (pruned) checkpoints from JSONL.
 
         Per-line error handling: corrupt lines are skipped with a warning
-        rather than aborting the entire archive read. File-level errors
+        rather than aborting the entire archive read. A line that parses to
+        anything but a checkpoint's object (a list, a number, a string,
+        null) is one, as is a line nested deeper than the parser allows
+        (RecursionError, raised or not according to the stack size; the
+        parser can return the nested lists instead). File-level errors
         (permissions, missing file) are caught at the outer level. The
         archive is read as it is written (:meth:`_archive_checkpoints`):
         never through a symbolic link, a regular file only, and not when

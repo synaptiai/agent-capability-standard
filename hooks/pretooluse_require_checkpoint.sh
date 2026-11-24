@@ -1386,13 +1386,21 @@ brace_group() {
 
 # The words bash makes of the marked word $1 by brace expansion, into
 # BRACED (marks kept), as bash makes them: the first group (brace_group)
-# gives, if it holds a comma, the words of each of its parts (split at its
-# own commas, each expanded again), else, if it is a sequence ({a..e},
-# {1..10..3}, {01..10}), each of its elements, else itself as written; the
-# text before it is kept, and the text after it is expanded again. Each word
-# made is charged to the call's budgets, BRACE_LEFT words and RESOLVE_LEFT
-# bytes; fails (2) past either or past BRACE_SCAN_LEFT, rather than hold the
-# hook past its time limit.
+# gives, if it is a list, the words of each of its parts (split at its own
+# commas, each expanded again), else, if it is a sequence ({a..e},
+# {1..10..3}, {01..10}), each of its elements; the text before it is kept,
+# and the text after it is expanded again. Bash 5.2 and 5.3 differ on the
+# rest (BRACE_MODE, which brace_words sets, says which is read). Bash 5.2
+# reads a group as a list when a comma is anywhere in it, nested included
+# ({a..b{c,d}}: one part, a..b{c,d}, so a..bc and a..bd), and keeps a group
+# with no comma that is no sequence as written. Bash 5.3 reads a group as a
+# list only when a comma is at its own level, and of a group that is
+# neither, keeps the { as written and expands what follows it, the group's
+# own text included ({a..bc} and {a..bd}). Reading as 5.2, it sets
+# BRACE_SPLIT to 1 at a group 5.3 reads otherwise. Each word made is charged
+# to the call's budgets, BRACE_LEFT words and RESOLVE_LEFT bytes; fails (2)
+# past either or past BRACE_SCAN_LEFT, rather than hold the hook past its
+# time limit.
 brace_expand() {
   local w="$1" pre amble post part m t from to step width n e x start cut status=0
   local -a mid=() tail=() cuts=()
@@ -1406,7 +1414,8 @@ brace_expand() {
   amble="${w:BG_OPEN+1:BG_CLOSE-BG_OPEN-1}"
   post="${w:BG_CLOSE+1}"
   cuts=(${BG_CUTS[@]+"${BG_CUTS[@]}"})
-  if [[ "$amble" == *$'\002'* ]]; then
+  if [[ "$amble" == *$'\002'* ]] && { [ "$BRACE_MODE" = 5.2 ] || [ "${#cuts[@]}" -gt 0 ]; }; then
+    [ "${#cuts[@]}" -gt 0 ] || BRACE_SPLIT=1
     start=0
     for cut in ${cuts[@]+"${cuts[@]}"} "${#amble}"; do
       part="${amble:start:cut-start}"
@@ -1448,9 +1457,22 @@ brace_expand() {
       fi
       mid+=("$e")
     done
-  else
-    # A group bash leaves as it is: its braces as written.
+  elif [ "$BRACE_MODE" = 5.2 ]; then
+    # A group bash 5.2 leaves as it is: its braces as written.
+    BRACE_SPLIT=1
     mid=("{${amble}}")
+  else
+    # Bash 5.3: the { as written, then the words of what follows it.
+    brace_expand "${w:BG_OPEN+1}" || return 2
+    tail=("${BRACED[@]}")
+    BRACED=()
+    for t in "${tail[@]}"; do
+      BRACE_LEFT=$((BRACE_LEFT - 1))
+      RESOLVE_LEFT=$((RESOLVE_LEFT - ${#pre} - 1 - ${#t}))
+      [ "$BRACE_LEFT" -ge 0 ] && [ "$RESOLVE_LEFT" -ge 0 ] || return 2
+      BRACED+=("$pre{$t")
+    done
+    return 0
   fi
   brace_expand "$post" || return 2
   tail=("${BRACED[@]}")
@@ -1466,15 +1488,48 @@ brace_expand() {
 }
 
 # The words bash makes of the word $1 by brace expansion (brace_expand),
-# appended to PATH_WORDS with their marks read back as the characters.
+# with their marks read back as the characters, appended to PATH_WORDS: the
+# words of bash 5.2's reading and of bash 5.3's (the hook runs under
+# whichever bash the user has, and a word either makes may name the
+# records). Two whole passes, both charged to the call's budgets; the
+# second only when the first met a group 5.3 reads otherwise (BRACE_SPLIT),
+# since with none it is the first again. When their words differ, sort
+# merges them, each once (both lists whole, should sort fail).
 brace_words() {
-  local w
+  local w k=0 BRACE_MODE=5.2 BRACE_SPLIT=0
+  local -a first=() words=()
   brace_expand "$1" || return 2
   for w in "${BRACED[@]}"; do
     w="${w//$'\001'/\{}"
     w="${w//$'\002'/,}"
-    PATH_WORDS+=("${w//$'\003'/\}}")
+    first+=("${w//$'\003'/\}}")
   done
+  if [ "$BRACE_SPLIT" = 0 ]; then
+    PATH_WORDS+=("${first[@]}")
+    return 0
+  fi
+  BRACE_MODE=5.3
+  brace_expand "$1" || return 2
+  for w in "${BRACED[@]}"; do
+    w="${w//$'\001'/\{}"
+    w="${w//$'\002'/,}"
+    words+=("${w//$'\003'/\}}")
+  done
+  if [ "${#first[@]}" -eq "${#words[@]}" ]; then
+    for w in "${first[@]}"; do
+      [ "$w" = "${words[k]}" ] || break
+      k=$((k + 1))
+    done
+  fi
+  if [ "$k" -lt "${#first[@]}" ] || [ "$k" -lt "${#words[@]}" ]; then
+    BRACED=("${first[@]}" "${words[@]}")
+    words=()
+    while IFS= read -r -d '' w; do
+      words+=("$w")
+    done < <(printf '%s\0' "${BRACED[@]}" | LC_ALL=C sort -zu)
+    [ "${#words[@]}" -gt 0 ] || words=("${BRACED[@]}")
+  fi
+  PATH_WORDS+=("${words[@]}")
 }
 
 # The words of a text the shell would pass as arguments, into PATH_WORDS:

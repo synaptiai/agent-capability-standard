@@ -7481,3 +7481,83 @@ also reach the providers' programs that revoke tokens found in public code.
   (`tests/test_redaction.py`) fails when either file's raw text holds one of
   the three shapes, and when the decoded vectors no longer hold each of them.
   It fails on the files as they were.
+
+## After the loop: CI on a newer runner
+
+The pull request's Python job failed the same 9 tests on Python 3.14 and
+3.15 on GitHub's ubuntu-latest of November 2026, all of which passed where
+the loop ran. The runner differs in three ways.
+
+- **JSON nested 100 000 levels deep parses there.** Python's json C decoder
+  raises RecursionError on `"[" * 100_000 + "]" * 100_000` or returns the
+  nested lists, according to the C stack size. Where it returned them, the
+  checkpoint archive handed a line's list to `Checkpoint.from_dict`, whose
+  AttributeError the reader did not catch (the archive could not be read),
+  and `IdempotencyLog` called `entry.get` on it. **Fix:** a line or file
+  that parses to anything but what its reader writes (a list, a number, a
+  string, null, an object short of a member the reader needs) is read as
+  one that does not parse: `Checkpoint.from_dict` raises ValueError for a
+  non-object; `IdempotencyLog` checks each entry's members (`_read_entry`)
+  and reads any other line as a torn last line or, anywhere else, a
+  ValueError. The audit of every other `json.loads` of file content in
+  `grounded_agency/` found two more: a `MemoryStore` file (a non-object or a
+  row short of a member raised AttributeError, TypeError or KeyError, and a
+  deep file RecursionError) and a snapshot manifest (a deep one raised
+  RecursionError out of a restore, and an entry without its mode stopped a
+  restore part way, after files before it were put back; an entry's
+  `sha256`, a path under `objects/`, could name a file outside the store).
+  Both are a ValueError now, the manifest's before anything is restored.
+  The evidence stores (`EvidenceRecord.from_dict`), the tracker's state
+  file and the project settings reader already checked. **Test:** the
+  tests that read the deep text take `deep_json` (`tests/conftest.py`),
+  which makes `json.loads` raise RecursionError on it or return what it
+  parses to, so each runs both ways on any machine; the premise test holds
+  on any runner (the installed decoder does one of the two); non-object
+  lines (`[1]`, `3`, `"x"`, `null`, objects short of a member) for the
+  archive, the idempotency log, the evidence store, the memory file and the
+  manifest. They fail on the code as it was.
+- **jq 1.8 parses deeper input than jq 1.7.** The runner's jq accepts the
+  253- and 300-level calls jq 1.7 refuses at 256 levels (it refuses past
+  10 000), so the log hook parsed and logged them, as it should; the test
+  assumed jq 1.7's limit. **Fix (test only):**
+  `test_a_call_nested_past_jqs_limit_is_reported` asks the jq on `PATH`
+  whether it parses each call (`_jq_parses`) and expects the call logged
+  when it does and reported (exit 1, jq's depth message, no log) when it
+  does not; 200 levels, which every jq parses, and 100 000, which every jq
+  refuses, keep both paths tested whatever jq runs.
+- **Bash 5.3 expands some brace groups otherwise than bash 5.2.** Bash 5.2
+  reads a group as a list when a comma is anywhere in it, nested included,
+  and keeps a group with no comma that is no sequence as written; bash 5.3
+  reads a group as a list only when a comma is at its own level, and of a
+  group that is neither keeps the `{` as written and expands what follows
+  it: `{a..b{c,d}}` is `a..bc a..bd` to 5.2 and `{a..bc} {a..bd}` to 5.3
+  (the runner's bash; its source was not at hand, so the 5.3 rule is the
+  best reading of that evidence). The readers (the records guard's bash
+  functions, the send and audit skills' jq) gave 5.2's words only, and the
+  hooks run under whichever bash the user has: on bash 5.3,
+  `touch {x..y{a..b}}/key` with a shipped link `{x..ya}` to the git
+  directory's `acs/checkpoints/` writes the checkpoint key, and was asked.
+  **Fix:** each reader gives both versions' words: two whole passes, a mode
+  through `brace_expand` (bash `BRACE_MODE`, jq `$v`), never a branch per
+  group. In bash the second pass runs only when the first met a group 5.3
+  reads otherwise (`BRACE_SPLIT`; with none it is the first again), both
+  charged to `BRACE_LEFT`, `RESOLVE_LEFT` and `BRACE_SCAN_LEFT`, and words
+  that differ are merged by `sort -zu`; jq's `brace_words` returns the
+  first pass's list when the two agree, else their union, null past 256
+  words together or when either pass is. Both SKILL.md copies are the
+  same. A model of both rules in Python (bash 5.2's from its `braces.c`,
+  matching the installed bash 5.2 on 13 549 random words) gave the bash
+  reader's words for 8 549 random words (499 of them read differently by
+  the two versions) and the jq reader's for 5 604 (612; no number
+  sequences, which jq writes as one placeholder). Nothing else in `hooks/` or `skills/` expands braces: the
+  rollback skill and `shell_words.jq` refuse or flag any unquoted brace,
+  and the SDK mapper's `_brace_expansion` only detects a group, which both
+  versions close alike. **Test:** `tests/brace_readings.py` lists words the
+  versions read differently with each version's words (`p{a..b{c,d}}q`,
+  `{a..b{c,d}}z{e,f}`, `{ab..c{d,e}}`, `{x..y{a..b}}`, ...); the readers
+  must give the union of both, which must hold the installed bash's, and
+  exactly the installed bash's words for every other word of `BRACE_CASES`
+  and `BRACE_WORDS`; each pass on its own gives its version's words of the
+  listed ones and the same words as the other on every other word;
+  `test_a_records_path_one_bash_version_builds_is_refused` refuses the
+  link route above (asked before) and its 5.2 twin.

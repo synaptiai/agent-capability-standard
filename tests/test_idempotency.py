@@ -273,24 +273,79 @@ def test_a_torn_last_line_is_skipped(tmp_path: Path) -> None:
     assert effect.calls == 0
 
 
-def test_a_line_nested_too_deeply_is_one_that_does_not_parse(tmp_path: Path) -> None:
-    """Security round 4, batch 2 (a sibling of defect 4): json.loads raises
-    RecursionError, no ValueError, on such a line; last, it is skipped as a
-    torn line, and anywhere else it is a ValueError, as any line that does
-    not parse."""
-    deep = b"[" * 100_000 + b"]" * 100_000
-    path = tmp_path / "keys.jsonl"
+def _a_line_is_one_that_does_not_parse(path: Path, line: bytes) -> None:
+    """Last, ``line`` is skipped as a torn line and cut off; anywhere else
+    it is a ValueError, as any line that does not parse."""
     IdempotencyLog(path).perform(action(), Effect())
     entry = path.read_bytes()
     with path.open("ab") as f:
-        f.write(deep)
+        f.write(line)
     effect = Effect()
     assert IdempotencyLog(path).perform(action(), effect)["kind"] == "Output"
     assert effect.calls == 0
     assert path.read_bytes() == entry
-    path.write_bytes(entry + deep + b"\n" + entry)
-    with pytest.raises(ValueError, match="nests too deeply"):
+    path.write_bytes(entry + line + b"\n" + entry)
+    with pytest.raises(ValueError, match="line 3: a line "):
         IdempotencyLog(path)
+
+
+def test_a_line_nested_too_deeply_is_one_that_does_not_parse(
+    tmp_path: Path, deep_json: str
+) -> None:
+    """Security round 4, batch 2 (a sibling of defect 4): json.loads raises
+    RecursionError, no ValueError, on such a line, or (with a larger C
+    stack, as on GitHub's ubuntu-latest runner of November 2026) returns
+    the nested lists, which the load then read as an entry and raised
+    AttributeError on. Either way it is a line that does not parse."""
+    _a_line_is_one_that_does_not_parse(tmp_path / "keys.jsonl", deep_json.encode())
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        b"[1]",
+        b"3",
+        b'"x"',
+        b"null",
+        b"{}",
+        b'{"key": 3, "state": "cleared"}',
+        b'{"key": "r1:4", "state": "gone"}',
+        b'{"key": "r1:4", "state": "started"}',
+        b'{"key": "r1:4", "state": "started", "capability": "send", '
+        b'"inputs_sha256": "x", "at": true}',
+        b'{"key": "r1:4", "state": "done", "capability": "send", '
+        b'"inputs_sha256": "x", "at": 1}',
+    ],
+)
+def test_a_line_that_is_no_entry_is_one_that_does_not_parse(
+    tmp_path: Path, line: bytes
+) -> None:
+    """A line that parses to anything but an entry the log writes (a list,
+    a number, a string, null, or an object short of a member a lookup
+    reads) was read as an entry: entry.get or entry["key"] raised, or a
+    later lookup did."""
+    _a_line_is_one_that_does_not_parse(tmp_path / "keys.jsonl", line)
+
+
+def test_every_entry_the_log_writes_reads_back(tmp_path: Path) -> None:
+    """The control: started, done (with evidence_seen) and cleared."""
+    path = tmp_path / "keys.jsonl"
+    log = IdempotencyLog(path)
+    with pytest.raises(TimeoutError):
+        log.perform(action("r:1"), Effect(TimeoutError("no answer")))
+    log.perform(
+        action("r:2"),
+        Effect({"kind": "Output", "value": {"sent": True}, "evidence_seen": []}),
+    )
+    log.perform(action("r:3"), Effect({"kind": "Error", "code": "R402"}))
+    states = [json.loads(line)["state"] for line in path.read_bytes().splitlines()]
+    assert states == ["started", "started", "done", "started", "cleared"]
+    reloaded = IdempotencyLog(path)
+    effect = Effect()
+    assert reloaded.perform(action("r:1"), effect)["reason"] == "outcome_unknown"
+    assert reloaded.perform(action("r:2"), effect)["kind"] == "Output"
+    assert reloaded.perform(action("r:3"), effect)["kind"] == "Output"
+    assert effect.calls == 1
 
 
 def test_an_entry_after_a_torn_line_survives_a_restart(tmp_path: Path) -> None:

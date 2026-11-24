@@ -39,6 +39,44 @@ def inputs_sha256(inputs: Any) -> str:
     return hashlib.sha256(_core.canonical_json(inputs).encode()).hexdigest()
 
 
+_STATES = ("started", "done", "cleared")
+
+
+def _read_entry(line: bytes) -> dict[str, Any]:
+    """The entry a line of the log records: an object with a string
+    ``key`` and a ``state`` the log writes; unless the key was cleared, a
+    string ``capability`` and ``inputs_sha256`` and a numeric ``at``; once
+    done, a ``value``. ValueError for any other line, as for one that does
+    not parse: a list, a number, a string, null, an object short of what a
+    lookup reads, and a line nested deeper than the parser allows
+    (RecursionError, raised or not according to the stack size; the
+    parser can return the nested lists instead)."""
+    try:
+        entry = json.loads(line)
+    except RecursionError:
+        raise ValueError("a line nests too deeply to parse") from None
+    if not isinstance(entry, dict):
+        raise ValueError(f"a line holds a {type(entry).__name__}, not an entry")
+    state = entry.get("state")
+    at = entry.get("at")
+    if (
+        not isinstance(entry.get("key"), str)
+        or state not in _STATES
+        or (
+            state != "cleared"
+            and (
+                not isinstance(entry.get("capability"), str)
+                or not isinstance(entry.get("inputs_sha256"), str)
+                or not isinstance(at, int | float)
+                or isinstance(at, bool)
+            )
+        )
+        or (state == "done" and "value" not in entry)
+    ):
+        raise ValueError("a line holds an object that is no entry of this log")
+    return entry
+
+
 def _replay(entry: Mapping[str, Any]) -> dict[str, Any]:
     """The ``Output`` a done entry answers with: its value and, when the
     effect's response carried one, its ``evidence_seen``."""
@@ -246,25 +284,21 @@ class IdempotencyLog:
             raise ValueError(f"idempotency log {self._path} is too large")
         # The last entry per key wins. A torn last line (a crash while it
         # was appended) is skipped and cut off, so that the next entry is
-        # appended on a line of its own; one anywhere else is an error.
+        # appended on a line of its own; one anywhere else is an error. A
+        # line that is no entry (_read_entry) is read as one that does not
+        # parse.
         chunks = text.split(b"\n")
         offset = 0
         torn_at: int | None = None
         for i, chunk in enumerate(chunks):
             if chunk.strip():
                 try:
-                    entry = json.loads(chunk)
-                except (ValueError, RecursionError) as e:
-                    # RecursionError: nested deeper than the parser allows,
-                    # which no entry this log writes is; a line that does
-                    # not parse, as any other.
+                    entry = _read_entry(chunk)
+                except ValueError as e:
                     if any(c.strip() for c in chunks[i + 1 :]):
-                        if isinstance(e, RecursionError):
-                            raise ValueError(
-                                f"idempotency log {self._path}: a line nests "
-                                f"too deeply to parse"
-                            ) from None
-                        raise
+                        raise ValueError(
+                            f"idempotency log {self._path}: line {i + 1}: {e}"
+                        ) from None
                     torn_at = offset
                     break
                 if entry.get("state") == "cleared":

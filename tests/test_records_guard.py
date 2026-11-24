@@ -30,6 +30,7 @@ from typing import Any
 
 import pytest
 
+from tests.brace_readings import BY_VERSION, assert_reading
 from tests.conftest import enter_checkpoint_commit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -570,7 +571,6 @@ BRACE_CASES = [
     "}{a,b}",
     "{{{a,b}",
     "a{b,c,d{e,f}}g",
-    "{a..b{c,d}}",
     "{1..3}",
     "{01..10..3}",
     "{z..a..5}",
@@ -624,10 +624,11 @@ class TestLateClosingBraceGroups:
         ):
             assert path in out, (path, out)
 
-    def test_the_reading_is_bashs(self, tmp_path: Path) -> None:
-        """The hook's brace_words gives the words bash gives, for each
-        case (the functions run on their own, a word with its unquoted
-        braces and commas marked as path_words marks them)."""
+    @staticmethod
+    def _driver(tmp_path: Path, call: str) -> Path:
+        """The hook's brace functions on their own, then ``call`` on the
+        word $1 with its unquoted braces and commas marked as path_words
+        marks them (in ``m``)."""
         text = PRE.read_text(encoding="utf-8")
         functions = []
         for name in (
@@ -647,19 +648,47 @@ class TestLateClosingBraceGroups:
             + "PATH_WORDS=()\n"
             + "m=\"${1//\\{/$'\\001'}\"; m=\"${m//,/$'\\002'}\"; "
             + "m=\"${m//\\}/$'\\003'}\"\n"
-            + 'brace_words "$m"\nprintf \'%s\\n\' "${PATH_WORDS[@]}"\n',
+            + call,
             encoding="utf-8",
         )
+        return driver
+
+    @staticmethod
+    def _run(driver: Path, *args: str) -> list[str]:
+        ours = subprocess.run(
+            ["bash", str(driver), *args], capture_output=True, text=True, timeout=30
+        )
+        assert ours.returncode == 0, (args, ours.stderr)
+        return sorted(w for w in ours.stdout.split("\n") if w)
+
+    def test_the_reading_is_bashs(self, tmp_path: Path) -> None:
+        """The hook's brace_words gives the words the installed bash gives,
+        for each case; for a word bash 5.2 and 5.3 read differently, the
+        words of both, which hold the installed bash's (brace_readings)."""
+        driver = self._driver(
+            tmp_path, 'brace_words "$m"\nprintf \'%s\\n\' "${PATH_WORDS[@]}"\n'
+        )
+        for word in [*BRACE_CASES, *BY_VERSION]:
+            assert_reading(word, self._run(driver, word), _bash_words(word))
+
+    def test_each_pass_is_one_versions_reading(self, tmp_path: Path) -> None:
+        """brace_expand read as bash 5.2 and as bash 5.3: each version's
+        words of a word the two read differently, and the same words of
+        every other case (so brace_words gives bash's own there, whichever
+        bash is installed)."""
+        driver = self._driver(
+            tmp_path,
+            'BRACE_MODE="$2"\nbrace_expand "$m"\n'
+            + 'for w in "${BRACED[@]}"; do w="${w//$\'\\001\'/\\{}"; '
+            + "w=\"${w//$'\\002'/,}\"; printf '%s\\n' \"${w//$'\\003'/\\}}\"; done\n",
+        )
         for word in BRACE_CASES:
-            ours = subprocess.run(
-                ["bash", str(driver), word],
-                capture_output=True,
-                text=True,
-                timeout=30,
+            assert self._run(driver, word, "5.2") == self._run(driver, word, "5.3"), (
+                word
             )
-            assert ours.returncode == 0, (word, ours.stderr)
-            got = sorted(w for w in ours.stdout.split("\n") if w)
-            assert got == _bash_words(word), word
+        for word, (v52, v53) in BY_VERSION.items():
+            assert self._run(driver, word, "5.2") == sorted(v52), word
+            assert self._run(driver, word, "5.3") == sorted(v53), word
 
     @pytest.mark.parametrize(
         "command",
@@ -676,6 +705,31 @@ class TestLateClosingBraceGroups:
         self, project: Path, command: str
     ) -> None:
         """They were asked (the ordinary approval)."""
+        marker = fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), (command, result.stdout, result.stderr)
+        assert marker.exists()
+
+    @pytest.mark.parametrize(
+        ("link", "command"),
+        [
+            # Bash 5.3: {x..ya}/key (and {x..yb}/key); 5.2 keeps the word
+            # as written.
+            ("{x..ya}", "touch {x..y{a..b}}/key"),
+            # Bash 5.2: x..yc/key (and x..yd/key); 5.3 keeps the braces:
+            # {x..yc}/key.
+            ("x..yc", "touch {x..y{c,d}}/key"),
+        ],
+    )
+    def test_a_records_path_one_bash_version_builds_is_refused(
+        self, project: Path, link: str, command: str
+    ) -> None:
+        """The hook runs under whichever bash the user has, so a word is
+        read as bash 5.2 and as bash 5.3 expand it. Read as 5.2 alone, the
+        first was asked: on bash 5.3 it writes the checkpoint key through
+        the link to the git directory's acs/checkpoints/ the repository
+        ships."""
+        (project / link).symlink_to(".git/acs/checkpoints")
         marker = fresh_marker(project)
         result = run_pre(project, "Bash", {"command": command})
         assert refused_f504(result), (command, result.stdout, result.stderr)

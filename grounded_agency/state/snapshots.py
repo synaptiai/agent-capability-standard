@@ -92,6 +92,32 @@ MECHANISM = "file_copy"
 _ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 _GLOB = re.compile(r"[*?\[]")
 _MAX_MANIFEST_BYTES = 64 * 1024 * 1024
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _is_manifest(value: Any) -> bool:
+    """Whether a manifest file's JSON is one :meth:`FileSnapshotStore.capture`
+    writes, as far as a restore reads it: an object whose ``files`` maps
+    each path to an object with the SHA-256 that names its object (so no
+    file outside the store) and its permission bits, and whose ``scope``
+    and ``excluded``, when present, are lists of strings. A restore that met
+    anything else part way would stop with some files put back."""
+    if not isinstance(value, dict) or not isinstance(value.get("files"), dict):
+        return False
+    for member in ("scope", "excluded"):
+        items = value.get(member)
+        if items is not None and not (
+            isinstance(items, list) and all(isinstance(i, str) for i in items)
+        ):
+            return False
+    return all(
+        isinstance(entry, dict)
+        and isinstance(entry.get("sha256"), str)
+        and _SHA256.fullmatch(entry["sha256"]) is not None
+        and type(entry.get("mode")) is int
+        and 0 <= entry["mode"] <= 0o7777
+        for entry in value["files"].values()
+    )
 
 
 def _iso(t: datetime) -> str:
@@ -486,8 +512,14 @@ class FileSnapshotStore:
             text = f.read(_MAX_MANIFEST_BYTES + 1)
         if len(text) > _MAX_MANIFEST_BYTES:
             raise ValueError(f"manifest {path} is too large")
-        value = json.loads(text)
-        if not isinstance(value, dict) or not isinstance(value.get("files"), dict):
+        # Nested deeper than the parser allows: RecursionError, raised or
+        # not according to the stack size (the parser can return the
+        # nested lists instead), and malformed either way.
+        try:
+            value = json.loads(text)
+        except RecursionError:
+            raise ValueError(f"manifest {path} nests too deeply to parse") from None
+        if not _is_manifest(value):
             raise ValueError(f"manifest {path} is malformed")
         return value
 

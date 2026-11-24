@@ -136,6 +136,41 @@ def fake_clock() -> FakeClock:
     return FakeClock()
 
 
+DEEP_JSON = "[" * 100_000 + "]" * 100_000
+"""JSON text nested deeper than Python's json C decoder reads on some
+machines: whether ``json.loads`` raises RecursionError on it or returns the
+nested lists depends on the C stack size, so on the machine and the
+interpreter's build, not on the code under test."""
+
+
+@pytest.fixture(params=["raises", "parses"])
+def deep_json(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """:data:`DEEP_JSON`, with ``json.loads`` made to do with any text that
+    holds it what one decoder or the other does: raise RecursionError
+    (``raises``: as the decoder did where this code was written), or return
+    what it parses to (``parses``: as the decoder of GitHub's ubuntu-latest
+    runner did in November 2026), the nested lists stood in for by
+    ``[[[]]]`` so that no test walks 100 000 levels of them. A test that
+    takes the fixture runs both ways on every machine; other text is
+    parsed by ``json.loads`` itself."""
+    import json
+
+    real = json.loads
+
+    def loads(s: str | bytes | bytearray, *args: Any, **kw: Any) -> Any:
+        text = s.decode("utf-8") if isinstance(s, bytes | bytearray) else s
+        if DEEP_JSON not in text:
+            return real(s, *args, **kw)
+        if request.param == "raises":
+            raise RecursionError(
+                "maximum recursion depth exceeded while decoding a JSON array"
+            )
+        return real(text.replace(DEEP_JSON, "[[[]]]"), *args, **kw)
+
+    monkeypatch.setattr(json, "loads", loads)
+    return DEEP_JSON
+
+
 def _git(cwd: Path, *args: str) -> str:
     env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
     done = subprocess.run(

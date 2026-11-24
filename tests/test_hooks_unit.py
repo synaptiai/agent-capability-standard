@@ -55,6 +55,26 @@ def read_entries(project_dir: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in log_file.read_text().splitlines()]
 
 
+def _jq_parses(text: str) -> bool:
+    """Whether the jq on PATH, which the hooks run, parses ``text``: its
+    depth limit is the installed version's (1.7: 256 levels; 1.8:
+    10 000)."""
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq not installed")
+    return (
+        subprocess.run(
+            [jq, "empty"],
+            input=text,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "HOME": ""},
+            timeout=30,
+        ).returncode
+        == 0
+    )
+
+
 def call(tool: str, **tool_input: Any) -> dict[str, Any]:
     """Claude Code's PreToolUse payload for a tool call (the hook reads only
     this JSON object, STANDARD 1.2.0 §5.18.8)."""
@@ -565,23 +585,42 @@ class TestPostToolUseExitCodes:
         assert not (tmp_path / ".claude" / "audit.log").exists()
 
     @pytest.mark.parametrize("where", ["tool_input", "tool_response"])
-    @pytest.mark.parametrize("depth", [253, 300, 10_000])
+    @pytest.mark.parametrize("depth", [200, 253, 300, 10_000, 100_000])
     def test_a_call_nested_past_jqs_limit_is_reported(
         self, log_env: dict[str, str], tmp_path: Path, where: str, depth: int
     ) -> None:
         """jq refuses input nested past its depth limit; Claude Code passes a
         call's arguments and result as they are, so a tool call nested that
-        deep was dropped with exit 0 and nothing on stderr."""
+        deep was dropped with exit 0 and nothing on stderr. The limit is
+        jq's: 1.7 refuses past 256 levels, 1.8 past 10 000. So each depth
+        is checked against the jq on PATH: a call it parses is logged (200
+        levels: every jq), one it refuses is reported (100 000 levels, past
+        every jq's limit: the report is tested whatever jq runs)."""
         nested = "[" * depth + "]" * depth
         stdin = (
             '{"hook_event_name": "PostToolUse", "tool_name": "mcp__x__y", '
             '"tool_use_id": "toolu_deep", "tool_input": {"batch": []}, '
             f'"{where}": {{"value": {nested}}}}}'
         )
+        jq_parses = _jq_parses(stdin)
+        if depth == 200:
+            assert jq_parses, "every jq reads 200 levels"
+        if depth == 100_000:
+            assert not jq_parses, "this jq reads 100 000 levels: deepen the test"
         result = run_hook(POSTTOOLUSE_HOOK, env_override=log_env, stdin=stdin)
-        assert result.returncode == 1
-        assert "could not be parsed" in result.stderr
-        assert "depth" in result.stderr
+        if jq_parses:
+            assert (result.returncode, result.stderr) == (0, "")
+            (entry,) = read_entries(tmp_path)
+            assert (entry["tool"], entry["call_id"], entry["status"]) == (
+                "mcp__x__y",
+                "toolu_deep",
+                "executed",
+            )
+        else:
+            assert result.returncode == 1
+            assert "could not be parsed" in result.stderr
+            assert "depth" in result.stderr
+            assert not (tmp_path / ".claude" / "audit.log").exists()
 
     def test_a_call_with_a_lone_surrogate_is_reported(
         self, log_env: dict[str, str], tmp_path: Path
