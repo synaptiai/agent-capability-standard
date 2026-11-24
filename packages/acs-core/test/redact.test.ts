@@ -114,6 +114,7 @@ describe('reading a long text (security round 1, batch 5)', () => {
     'eyJaaaaaaaa.',
     '-----BEGIN PRIVATE KEY-----',
     '-----BEGIN RSA PRIVATE KEY-----x',
+    '-----BEGIN PGP PRIVATE KEY BLOCK-----',
     'a://b:',
     // Pairs and tuples in text (security round 1, batch 6).
     '"x',
@@ -153,6 +154,14 @@ describe('reading a long text (security round 1, batch 5)', () => {
     "['token', 'a ",
     "-u 'a:b ",
     '--password "a ',
+    // Authorization headers with any scheme, quoted or not (security round
+    // 4, batch 5): an attempt starts at the header's name, or at the start
+    // of a run of backslashes before its quote.
+    'authorization: a b ',
+    '"authorization: a',
+    '\\"authorization: ',
+    'authorization: "a ',
+    "['authorization', 'a ",
   ];
   it.each(units)('reads 1 MB of %j in time in proportion to its length', (unit) => {
     const text = unit.repeat(Math.ceil(1_000_000 / unit.length)).slice(0, 1_000_000);
@@ -174,6 +183,8 @@ describe('reading a long text (security round 1, batch 5)', () => {
     ['[\'cookie\', "', 'a ; '],
     ["-u 'a:", 'b c '],
     ['--password "', 'x\\y '],
+    ['"Authorization: ', 'a '],
+    ['Authorization: "', 'a b '],
   ];
   it.each(unclosed)('reads 1 MB of %j then %j with no closing quote in linear time', (prefix, tail) => {
     const text = (prefix + tail.repeat(Math.ceil(1_000_000 / tail.length))).slice(0, 1_000_000);
@@ -199,9 +210,11 @@ describe('reading a long text (security round 1, batch 5)', () => {
     expect(redactText('abc-eyJhbGciOi.eyJzdWIi.sig1')).toBe('abc-[REDACTED]');
     expect(redactText('aeyJhbGciOi.eyJzdWIi.sig1')).toBe('aeyJhbGciOi.eyJzdWIi.sig1');
     expect(redactText('aeyJ-eyJhbGciOi.x.y')).toBe('aeyJ-[REDACTED]');
-    // A PEM header with no end: nothing is replaced; a key after it is read
-    // as before, from the first header to the first end.
-    expect(redactText('-----BEGIN PRIVATE KEY----- x')).toBe('-----BEGIN PRIVATE KEY----- x');
+    // A PEM header with no end: the rest of the text is replaced, since an
+    // excerpt of a key keeps its body (security round 4, batch 5: nothing
+    // was replaced); a key after it is read as before, from the first header
+    // to the first end.
+    expect(redactText('-----BEGIN PRIVATE KEY----- x')).toBe('-----BEGIN PRIVATE KEY-----[REDACTED]');
     expect(
       redactText('-----BEGIN PRIVATE KEY-----a-----BEGIN PRIVATE KEY-----b-----END PRIVATE KEY-----'),
     ).toBe('-----BEGIN PRIVATE KEY-----[REDACTED]-----END PRIVATE KEY-----');

@@ -367,6 +367,42 @@ class TestFrontmatterHooks:
 
     @pytest.mark.parametrize("shell", SHELLS)
     @pytest.mark.parametrize(
+        "text",
+        [
+            "authorization: " + "a" * 400_000,
+            "authorization: a" + " " * 400_000 + "x",
+            '"token", "value": "' + "a" * 400_000,
+            "['token', 'a " * 30_000,
+        ],
+        ids=["scheme_run", "blank_run", "pair_run", "tuples"],
+    )
+    def test_secret_scan_reads_in_linear_time_in_a_multibyte_locale(
+        self, shell: str, text: str
+    ) -> None:
+        """The persist and audit hooks run in the user's locale: in UTF-8,
+        GNU grep reads a pattern whose class follows a repeated one with a
+        matcher whose time grows with the square of the text (2.5 s at
+        200 KB for the scheme rule added in security round 4, batch 5). The
+        scan reads bytes (LC_ALL=C) and decides 400 KB in well under a
+        second."""
+        script = SECRET_SCAN.read_text(encoding="utf-8") + (
+            '\nif secret_in "$(cat)"; then echo yes; else echo no; fi\n'
+        )
+        started = time.perf_counter()
+        result = subprocess.run(
+            [shell, "-c", script],
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            env={**os.environ, "LC_ALL": "C.UTF-8"},
+        )
+        assert result.stdout.strip() == "no", result.stderr
+        assert time.perf_counter() - started < 5
+
+    @pytest.mark.parametrize("shell", SHELLS)
+    @pytest.mark.parametrize(
         ("skill", "matcher"),
         [
             ("audit", "Bash"),

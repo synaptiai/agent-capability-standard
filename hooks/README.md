@@ -628,7 +628,12 @@ position of a line that matches, so its patterns start where no earlier
 attempt's run can hold another (a URL's scheme from the start of its run)
 or read a bounded run (a user option's name, at most 256 characters); time
 it with grep's output to a pipe, as the scan reads it, not to `/dev/null`,
-where grep stops at the first match.
+where grep stops at the first match, and in a multibyte locale too: the
+scan reads bytes (`secret_in` sets `LC_ALL=C` in the subshell it runs in),
+since in UTF-8 GNU grep reads a pattern whose class follows a repeated one
+(the scheme rule, `[A-Za-z][A-Za-z0-9._-]* +`) with a matcher whose time
+grows with the square of the line, and the skills' hooks run in the user's
+locale.
 
 The `audit` skill's `Bash` hook and `pretooluse_require_checkpoint.sh` also
 share the SDK redactor's rule for JSON data, `secret_member.jq` in this

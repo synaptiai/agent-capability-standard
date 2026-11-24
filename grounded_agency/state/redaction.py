@@ -11,11 +11,20 @@ documented loss (§3.2); :meth:`Redactor.redact` returns the JSON Pointers
 A :class:`Redactor` replaces the values registered with it (the host's own
 secrets, longest first), each also in the forms text carries it in
 (:func:`encoded_forms`: JSON-escaped, once or twice, and percent-encoded),
-then what its patterns recognise. The default
+then what its patterns recognise. In a JSON value, a number whose JSON text
+holds a registered value (a PIN, an account or card number given as a
+number) is replaced whole, as the JSON text's redaction would replace it.
+The default
 patterns (informative; ``tests/conformance/secrets/redact.json`` pins them,
 and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
 
-- ``Authorization`` and ``Proxy-Authorization`` header values;
+- ``Authorization`` and ``Proxy-Authorization`` header values: after a
+  ``Bearer``, ``Basic``, ``Token``, ``Digest`` or ``Negotiate`` scheme, the
+  credential; after any other first word (``ApiKey``, ``SSWS``, ``Bot``,
+  ``Splunk``, a credential with no scheme), that word and the one after it
+  on its line; and a quoted value (``"Authorization": "..."``, ``-H
+  "Authorization: ..."``) read to its closing quote, whitespace and all,
+  after a scheme of the five;
 - ``Bearer`` tokens (8 or more token characters);
 - the password of a URL's userinfo (``scheme://user:<secret>@``, the
   scheme a run of scheme characters that holds a letter, the user's name
@@ -37,7 +46,9 @@ and ``packages/acs-core/src/redact.ts`` holds the same ones) recognise:
   ``--api-key <secret>``, not another option), also as a list's items
   (``['-u', 'user:<secret>']``, as an exception's text quotes a command),
   a quoted value or password read to its closing quote as above;
-- PEM ``PRIVATE KEY`` blocks (the body);
+- PEM ``PRIVATE KEY`` and OpenPGP ``PRIVATE KEY BLOCK`` blocks: the body,
+  or, after a header with no end (an excerpt, a truncated line), the rest of
+  the text;
 - AWS access key ids, GitHub tokens, Slack tokens, ``sk-`` keys and JWTs;
 - a header or credential given as a name/value pair or a ``[name, value]``
   tuple in JSON or code text (``"name": "Authorization", "value": "Basic
@@ -76,14 +87,16 @@ A refusal is another matter: ``persist`` data or an ``audit`` record that
 holds a secret is refused, not redacted (§6.7), and a refusal of ordinary
 project knowledge (``token: rotate monthly``) would cost much.
 :meth:`Redactor.holds_credential` therefore recognises only
-credential-shaped values: a registered value, the key and token formats
-above (PEM private keys, AWS, GitHub, Slack, ``sk-`` keys, JWTs, a bearer
-token of 20 or more characters), the password of a URL's userinfo unless it
-is a placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``,
-``****``), an ``Authorization`` or ``Proxy-Authorization`` header's value of
-8 or more token characters mixing letters and digits (in a header line, or
-given as a pair or tuple in text, as above), a command's user option's
-password of 8 or more characters mixing letters and digits (``curl -u
+credential-shaped values: a registered value (in a string, a member name
+or a number's JSON text), the key and token formats above (PEM and OpenPGP
+private keys, AWS, GitHub, Slack, ``sk-`` keys, JWTs, a bearer token of 20
+or more characters), the password of a URL's userinfo unless it is a
+placeholder (``password``, ``<password>``, ``${DB_PASSWORD}``, ``****``),
+an ``Authorization`` or ``Proxy-Authorization`` header's value of 8 or more
+token characters mixing letters and digits, with no scheme or after any
+scheme (``ApiKey``, ``SSWS``, ...; in a header line, or given as a pair or
+tuple in text, as above), a command's user option's password of 8 or more
+characters mixing letters and digits (``curl -u
 admin:<value>``; ``docker run -u 1000:1000`` passes), and an assignment to
 a credential name, or a credential option's value, that is quoted with no
 whitespace and 8 or more characters, or unquoted, 12 or more characters,
@@ -168,8 +181,20 @@ def _quoted_value(quote: str) -> str:
 _QUOTED_SECRET_NAME = (
     rf"[\"'][^{_NOT_WS}\"']*(?:{_NAMES}|authorization|cookies?){_QUOTE}"
 )
+# The header schemes a redacted value keeps in view: what follows one is the
+# credential. Any other first word may be the credential itself.
+_SCHEMES = r"(?:bearer|basic|token|digest|negotiate)"
 # A header's scheme, which the value after it may start with.
-_VALUE_SCHEME = rf"(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
+_VALUE_SCHEME = rf"(?:{_SCHEMES}{_WS}+)?"
+# Any header scheme (`ApiKey`, `SSWS`, `Bot`, `AWS4-HMAC-SHA256`): a word
+# and the spaces after it (RFC 9110 puts one or more there), before the
+# credential; hooks/secret_scan.sh reads the same.
+_ANY_SCHEME = r"[A-Za-z][A-Za-z0-9._-]* +"
+# An Authorization or Proxy-Authorization header, up to its value (a JSON
+# member's or a code's quote before the separator, and blanks).
+_AUTHORIZATION = (
+    rf"(?<![A-Za-z0-9])(?:proxy-)?authorization(?:{_QUOTE})?{_WS}*[:=]{_WS}*"
+)
 # A header or credential given as a `[name, value]` tuple in JSON or code
 # text, up to its value: `["Authorization", "Basic ...`, `('Cookie', '...`.
 # Each attempt starts at a bracket and reads to the next quote or
@@ -236,19 +261,40 @@ def _quoted_forms(
 
 
 DEFAULT_PATTERNS: tuple[re.Pattern[str], ...] = (
-    # PEM private key blocks: the body. A header with no end after it
-    # matches the rest of the text with no secret (nothing is replaced), so
-    # the next header is not read again to the end of the text.
+    # PEM private key blocks and OpenPGP private key blocks (`PRIVATE KEY
+    # BLOCK`): the body, to the first end line. A header with no end after
+    # it (an excerpt, a truncated line) keeps its body: the rest of the text
+    # is replaced, so the next header is not read again to the end of the
+    # text either.
     re.compile(
-        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
-        r"(?:(?P<secret>[\s\S]+?)"
-        r"-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|[\s\S]*)",
+        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
+        r"(?P<secret>[\s\S]+?)"
+        r"(?:-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|\Z)",
         re.ASCII,
     ),
-    # Authorization and Proxy-Authorization header values (after a scheme).
+    # Authorization and Proxy-Authorization header values: a quoted value
+    # (`"Authorization": "..."`) read to its closing quote, whitespace and
+    # all, after one of the five schemes ...
+    *_quoted_forms(_AUTHORIZATION, _VALUE_SCHEME),
+    # ... and a header line quoted whole (`-H "Authorization: ..."`, its
+    # quotes escaped or not) read to its closing quote, the same way; an
+    # attempt starts at the start of a run of backslashes, so a run is read
+    # once ...
+    *_quoted_forms(
+        r"(?<!\\)", rf"(?:proxy-)?authorization{_WS}*:{_WS}*{_VALUE_SCHEME}"
+    ),
+    # ... or, unquoted: after any other first word (a scheme such as
+    # `ApiKey`, `SSWS` or `Bot`, or a credential with no scheme), that word
+    # and the one after it on its line, so the credential is replaced
+    # whether or not the word was a scheme ...
     re.compile(
-        rf"(?<![A-Za-z0-9])(?:proxy-)?authorization(?:{_QUOTE})?{_WS}*[:=]{_WS}*"
-        rf"(?:{_QUOTE})?(?:(?:bearer|basic|token|digest|negotiate){_WS}+)?"
+        rf"{_AUTHORIZATION}(?:{_QUOTE})?(?!{_SCHEMES}{_WS})"
+        rf"(?P<secret>{_value_char(',;')}+(?:[ \t]+{_value_char(',;')}+)?)",
+        re.ASCII | re.IGNORECASE,
+    ),
+    # ... and after one of the five schemes, the credential.
+    re.compile(
+        rf"{_AUTHORIZATION}(?:{_QUOTE})?(?:{_SCHEMES}{_WS}+)?"
         rf"(?P<secret>{_value_char(',;')}+)",
         re.ASCII | re.IGNORECASE,
     ),
@@ -331,7 +377,7 @@ its positions (tests/test_redaction.py times them on 1 MB)."""
 # Credential shapes a refusal relies on (holds_credential): the formats of
 # keys and tokens, no prose. hooks/secret_scan.sh holds the same ones.
 _CREDENTIAL_SHAPES: tuple[re.Pattern[str], ...] = (
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.ASCII),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----", re.ASCII),
     re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}", re.ASCII),
     re.compile(r"gh[pousr]_[A-Za-z0-9]{36}", re.ASCII),
     re.compile(r"github_pat_[A-Za-z0-9_]{22,}", re.ASCII),
@@ -379,12 +425,21 @@ _URL_PASSWORD = re.compile(
 _PLACEHOLDER = re.compile(
     r"[$<{*\[].*|password|passwd|pwd|pass|secret|token", re.ASCII | re.IGNORECASE
 )
-# An Authorization or Proxy-Authorization header's value, after its scheme:
-# 8 or more token characters with letters and digits.
+# An Authorization or Proxy-Authorization header's value, with no scheme or
+# after one of the five: 8 or more token characters with letters and
+# digits ...
 _AUTHORIZATION_VALUE = re.compile(
     rf"(?:proxy-)?authorization(?:{_QUOTE})?{_WS}*[:=]{_WS}*(?:{_QUOTE})?"
-    rf"(?:(?:basic|bearer|token|digest|negotiate){_WS}+)?"
+    rf"(?:{_SCHEMES}{_WS}+)?"
     r"(?P<value>[A-Za-z0-9._~+/=-]{8,})",
+    re.ASCII | re.IGNORECASE,
+)
+# ... or after any other scheme (`ApiKey`, `SSWS`, `Bot`, `Splunk`). Both
+# readings are tried: the first word of a value may be its scheme or its
+# credential.
+_AUTHORIZATION_SCHEME_VALUE = re.compile(
+    rf"(?:proxy-)?authorization(?:{_QUOTE})?{_WS}*[:=]{_WS}*(?:{_QUOTE})?"
+    rf"{_ANY_SCHEME}(?P<value>[A-Za-z0-9._~+/=-]{{8,}})",
     re.ASCII | re.IGNORECASE,
 )
 # A header's or credential's value given as a name/value pair, or as a
@@ -395,6 +450,16 @@ _PAIR_VALUE_TEXT = re.compile(
 )
 _TUPLE_VALUE_TEXT = re.compile(
     rf"{_TUPLE_TEXT}(?P<value>[A-Za-z0-9._~+/=-]{{8,}}){_QUOTE}{_WS}*[\])]",
+    re.ASCII | re.IGNORECASE,
+)
+# ... and the same after any other scheme.
+_PAIR_SCHEME_VALUE_TEXT = re.compile(
+    rf"{_PAIR_HEAD}{_QUOTE}{_ANY_SCHEME}(?P<value>[A-Za-z0-9._~+/=-]{{8,}})",
+    re.ASCII | re.IGNORECASE,
+)
+_TUPLE_SCHEME_VALUE_TEXT = re.compile(
+    rf"{_TUPLE_HEAD}{_QUOTE}{_ANY_SCHEME}(?P<value>[A-Za-z0-9._~+/=-]{{8,}})"
+    rf"{_QUOTE}{_WS}*[\])]",
     re.ASCII | re.IGNORECASE,
 )
 
@@ -421,8 +486,11 @@ def _credential_text(text: str) -> bool:
             _OPTION_VALUE,
             _USER_OPTION_VALUE,
             _AUTHORIZATION_VALUE,
+            _AUTHORIZATION_SCHEME_VALUE,
             _PAIR_VALUE_TEXT,
             _TUPLE_VALUE_TEXT,
+            _PAIR_SCHEME_VALUE_TEXT,
+            _TUPLE_SCHEME_VALUE_TEXT,
         )
         for m in pattern.finditer(text)
     )
@@ -672,10 +740,13 @@ class Redactor:
         """Whether ``value`` (a string or JSON data) holds a registered
         value or a credential-shaped value (the module's rule for refusals:
         no prose such as ``token: rotate monthly``). A JSON value is read as
-        its JSON text, so ``{"api_key": "..."}`` is an assignment."""
+        its JSON text, so ``{"api_key": "..."}`` is an assignment, and a
+        registered value is looked for in its strings, its member names and
+        the JSON text of its numbers (``{"card": 4111111111111111}``)."""
         strings: list[str] = []
-        _strings_in(value, strings)
-        if any(v in s for v in self._values for s in strings):
+        numbers: list[str] = []
+        _strings_in(value, strings, numbers)
+        if any(v in s for v in self._values for s in (*strings, *numbers)):
             return True
         if any(_credential_text(s) for s in strings):
             return True
@@ -787,20 +858,39 @@ class Redactor:
                 else:
                     items.append(self._walk(v, here, pointers, item_secret))
             return items
+        # A number whose JSON text holds a registered value: replaced whole,
+        # as the redaction of the JSON text would replace it.
+        number = _number_text(value)
+        if number is not None and any(v in number for v in self._values):
+            pointers.append(pointer)
+            return MARKER
         return value
 
 
-def _strings_in(value: Any, out: list[str]) -> None:
-    """Every string in a JSON value, member names included."""
+def _number_text(value: Any) -> str | None:
+    """A number's JSON text (``json.dumps``, as a store writes it), or None
+    for anything that is not a number (a boolean is not one)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return json.dumps(value)
+
+
+def _strings_in(value: Any, out: list[str], numbers: list[str] | None = None) -> None:
+    """Every string in a JSON value, member names included; and, given
+    ``numbers``, the JSON text of every number in it."""
     if isinstance(value, str):
         out.append(value)
     elif isinstance(value, Mapping):
         for k, v in value.items():
             out.append(str(k))
-            _strings_in(v, out)
+            _strings_in(v, out, numbers)
     elif isinstance(value, (list, tuple)):
         for v in value:
-            _strings_in(v, out)
+            _strings_in(v, out, numbers)
+    elif numbers is not None:
+        text = _number_text(value)
+        if text is not None:
+            numbers.append(text)
 
 
 def _plain(value: Any) -> Any:

@@ -217,14 +217,14 @@ class MemoryStore:
         key = inputs.get("key")
         if key is not None and not isinstance(key, str):
             raise MemoryError("x-invalid-key", "key must be a string")
-        # Secrets first (§4.5, §6.7): the message names where, not what.
-        pointers = (
-            [p or "/" for p in self._redactor.redact(data)[1]]
-            if self._redactor.holds_credential(data)
-            else []
-        )
+        # Secrets first (§4.5, §6.7): the message names where, not what. The
+        # refusal rule decides; redaction only names where, and a credential
+        # it does not replace (a private key's header with no body after it)
+        # is refused all the same.
+        held = self._redactor.holds_credential(data)
+        pointers = [p or "/" for p in self._redactor.redact(data)[1]] if held else []
         key_hit = key is not None and self._redactor.holds_credential(key)
-        if pointers or key_hit:
+        if held or key_hit:
             where = ", ".join(pointers + (["the key"] if key_hit else []))
             raise MemoryError(
                 "secret_in_data",

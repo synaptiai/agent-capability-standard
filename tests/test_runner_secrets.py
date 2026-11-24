@@ -455,3 +455,65 @@ def test_the_runner_gives_its_secrets_to_the_hosts_memory_stores(
         assert store.redactor.holds_credential({"note": REGISTERED})
         # The default patterns still apply.
         assert store.redactor.holds_credential({"api_key": "sk-live-0123456789abcdef"})
+
+
+class RaisingHost(Host):
+    """A host whose call fails with an exception quoting what it was given."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(None)
+        self.error = error
+
+    def now_ms(self) -> int:
+        return 1_000
+
+    def invoke_capability(self, action: dict[str, Any]) -> dict[str, Any]:
+        raise self.error
+
+
+APIKEY = "VnVhQ2ZHY0JDZGJrUXctN1A6dWkybGp0YjU0"
+PGP_BODY = "lQOYBGVhY2sBCADKx3mYq7vT2bN9cW4pLk8sR1fJ0dE6aH3gU5iO2yM7nB4"
+PEM_BODY = "MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gunVTLw"
+
+
+@pytest.mark.parametrize(
+    ("error", "secret"),
+    [
+        (
+            RuntimeError(
+                "401 from GET https://es.internal:9200/_search with headers "
+                f"{{'Authorization': 'ApiKey {APIKEY}'}}"
+            ),
+            APIKEY,
+        ),
+        (RuntimeError(f"curl -H 'Authorization: SSWS {APIKEY}' failed"), APIKEY),
+        (
+            ValueError(
+                "cannot import signing key: -----BEGIN PGP PRIVATE KEY BLOCK-----"
+                f"\n\n{PGP_BODY}\n=AbCd\n-----END PGP PRIVATE KEY BLOCK-----"
+            ),
+            PGP_BODY,
+        ),
+        (
+            ValueError(
+                f"cannot import key: -----BEGIN RSA PRIVATE KEY-----\n{PEM_BODY}"
+            ),
+            PEM_BODY,
+        ),
+    ],
+    ids=["apikey_header", "ssws_header_line", "pgp_block", "pem_without_end"],
+)
+def test_a_host_error_quoting_a_header_or_a_key_keeps_none_of_it(
+    tmp_path: Path, error: Exception, secret: str
+) -> None:
+    """An Authorization header with a scheme other than the five, an
+    OpenPGP private key block and a PEM key cut before its end line are
+    redacted in the R402 message, the trace, the records and the snapshot
+    (security round 4, batch 5: the credential and the key bodies were
+    kept)."""
+    runner = WorkflowRunner(engine_for(tmp_path, LOOK))
+    run = runner.start("look", {}, records="actions", now_ms=1_000)
+    result = runner.drive(run, RaisingHost(error))
+    assert result.code == "R402", result
+    assert "[REDACTED]" in result.message
+    assert holding(kept(run, result), secret) == []

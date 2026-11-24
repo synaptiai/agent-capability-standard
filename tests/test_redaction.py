@@ -166,6 +166,7 @@ _LONG_RUNS = [
     "eyJaaaaaaaa.",
     "-----BEGIN PRIVATE KEY-----",
     "-----BEGIN RSA PRIVATE KEY-----x",
+    "-----BEGIN PGP PRIVATE KEY BLOCK-----",
     "a://b:",
     # Pairs and tuples in text (security round 1, batch 6): an attempt
     # starts at each quote or bracket and reads to the next one.
@@ -206,6 +207,14 @@ _LONG_RUNS = [
     "['token', 'a ",
     "-u 'a:b ",
     '--password "a ',
+    # Authorization headers with any scheme, quoted or not (security round
+    # 4, batch 5): an attempt starts at the header's name, or at the start of
+    # a run of backslashes before its quote.
+    "authorization: a b ",
+    '"authorization: a',
+    '\\"authorization: ',
+    'authorization: "a ',
+    "['authorization', 'a ",
 ]
 
 
@@ -234,6 +243,8 @@ _UNCLOSED_QUOTES = [
     ("['cookie', \"", "a ; "),
     ("-u 'a:", "b c "),
     ('--password "', "x\\y "),
+    ('"Authorization: ', "a "),
+    ('Authorization: "', "a b "),
 ]
 
 
@@ -275,10 +286,12 @@ def test_the_patterns_read_a_run_once_and_match_as_before() -> None:
         False,
     )
     assert redact_text("aeyJ-eyJhbGciOi.x.y") == ("aeyJ-[REDACTED]", True)
-    # A PEM header with no end: nothing is replaced, and a key after it ...
+    # A PEM header with no end: the rest of the text is replaced, since an
+    # excerpt of a key keeps its body (security round 4, batch 5: nothing
+    # was replaced), and a key after it ...
     assert redact_text("-----BEGIN PRIVATE KEY----- x") == (
-        "-----BEGIN PRIVATE KEY----- x",
-        False,
+        "-----BEGIN PRIVATE KEY-----[REDACTED]",
+        True,
     )
     # ... is read as before, from the first header to the first end.
     two = "-----BEGIN PRIVATE KEY-----a-----BEGIN PRIVATE KEY-----b-----END PRIVATE KEY-----"
@@ -542,6 +555,33 @@ def test_collector_omits_the_digest_of_a_secret(content: str, secret: bool) -> N
     assert "AKIAABCDEFGHIJKLMNOP" not in exported and "s3cr3t-value" not in exported
 
 
+def test_no_digest_of_a_response_holding_a_registered_number() -> None:
+    """A registered PIN given as a number in a response: no digest of it
+    is kept, as of its string form, and an anchor citing it loses its own
+    (§6.7; security round 4, batch 5): a digest of a short PIN is inverted
+    by guessing."""
+    from grounded_agency.hooks.evidence_collector import response_digest
+
+    redactor = Redactor(["4821"])
+    assert response_digest({"pin": 4821}, redactor) is None
+    assert response_digest({"pin": "4821"}, redactor) is None
+    assert response_digest({"pin": 1234}, redactor) is not None
+    anchor = {
+        "ref": "tool:verify:call-3",
+        "kind": "tool",
+        "digest": "sha256:" + "0" * 64,
+        "metadata": {"pin": 4821},
+    }
+    assert redactor.redact_anchor_data(anchor) == (
+        {
+            "ref": "tool:verify:call-3",
+            "kind": "tool",
+            "metadata": {"pin": MARKER, "digest_omitted": "secret"},
+        },
+        ["/metadata/pin"],
+    )
+
+
 # ---------------------------------------------------------------------------
 # The layer refuses persist and audit data that holds a credential
 # (§5.18.10) and redacts what it records
@@ -641,6 +681,39 @@ def test_layer_refuses_persist_data_that_holds_a_credential(
     # The refusal and the record it leaves hold no secret either.
     assert text not in reason or text.startswith("-----BEGIN")
     assert "AKIAABCDEFGHIJKLMNOP" not in json.dumps(list(adapter.call_records))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
+        "mcp__srv__hk_live_9f8e7d6c5b4a39281706",
+    ],
+)
+def test_layer_redacts_a_tool_name_that_holds_a_secret(
+    tmp_path: Path, name: str
+) -> None:
+    """The name of a call is the model's (or an MCP server's): its call
+    record, the audit record exported from it and the diagnostic hold the
+    redacted name, as the binding's trace does (§6.7; security round 4,
+    batch 5)."""
+    import asyncio
+
+    adapter = _adapter(tmp_path, secret_values=("hk_live_9f8e7d6c5b4a39281706",))
+    hook = adapter._make_pretooluse_safety_hook()
+    out = asyncio.run(hook({"tool_name": name, "tool_input": {}}, "t1", None))
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    kept = (
+        reason
+        + json.dumps(list(adapter.call_records))
+        + json.dumps([[d.message, d.location] for d in adapter.diagnostics])
+        + json.dumps(adapter.export_action_records("s"))
+    )
+    assert "ghp_aBc" not in kept and "hk_live" not in kept
+    (record,) = adapter.export_action_records("s")
+    assert "[REDACTED]" in record["tool"]
+    assert record["intent"] == f"{record['tool']} call"
 
 
 @pytest.mark.parametrize("text", ALLOWED)

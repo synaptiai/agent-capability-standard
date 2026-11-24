@@ -5619,3 +5619,268 @@ implementation to what §5.18.10, §5.21.3, §4.4.2 and §6.7 already say.
   TodoWrite of 50,000 members (1.9 s, 22.4 s before). No CLI or nested
   agent was started; nothing was left running; the scratch copies were
   removed.
+
+### Batch 5: four reported defects
+
+Four defects, each reproduced by an independent verifier on 7d04aea, and
+reproduced again here on 4678d0e before any change, with the new tests run
+against 4678d0e's `grounded_agency/`, `hooks/`, `skills/`,
+`packages/acs-core/src/redact.ts` and the binding's `src/acs/` (under
+`timeout 120` and a 4 GB address-space limit): the binding kept the name
+the model called in `action`, the audit record's `tool` and `intent` and
+`acs:trace:unlinked` while its `error` read `[REDACTED]`; a registered
+`4111111111111111` given as a JSON number was stored by both
+`MemoryStore.persist` and the binding's persist tool; `Authorization:
+ApiKey <key>` (and SSWS, Bot, Splunk, GenieKey, Key, Api-Key) was redacted
+to `[REDACTED] <key>` and not refused by any of the three refusal rules; an
+OpenPGP private key block was neither redacted nor refused, and a PEM key
+cut before its end line kept its body. None was fixed by an earlier batch:
+round 1 batches 6 and 8 redacted `error`, anchors and checkpoint ids only,
+the registered values were compared with strings only, the Authorization
+rule's scheme list dates from S4, and the PEM pattern's `|[\s\S]*` branch
+(round 1 batch 5) replaced nothing by design, pinned by the
+`pem_header_without_end` vector. Each fix has tests that fail on the code
+before it (below).
+
+#### 1. The binding's trace kept a secret the model put in a tool name: `action`, the audit record's `tool` and `intent`, the waiting list (medium); siblings: a nested call's refusal diagnostic, the Python adapter's records
+
+`redacted()` in `examples/standard_agents/src/acs/records.ts` replaced
+secrets in `error`, `checkpoint_id` and `evidence_anchors` only, though
+`action` is the name the model called (`recordToolCall`) or the one a
+composite's code passed to `state.invokeTool`, which its arguments can
+choose (`recordRefusal`); `actionRecord` copied it into `tool` and
+`intent` (§6.4), and the entry waiting for its call id kept it too. §6.7
+forbids a secret in an audit record or a safety layer's record of a call.
+
+- Fix: `redacted()` redacts `action` with the same values (the default
+  patterns, the layer's secrets and the call's), which covers
+  `appendTrace`, `completeTrace`, `actionRecord` and the `acs:trace:unlinked`
+  copy (taken from the stored entry); `redactedName` is exported. The audit
+  hook compares names redacted, with the same secrets on both sides (an
+  entry a grounded tool wrote was redacted with its own secrets, which join
+  the layer's), so a grounded tool whose name holds a secret is still
+  linked to its call and no second entry is written.
+- Sibling found here (binding): the refusal a composite's state returns for
+  a nested call (`refusalOf`, the nested plain call's checks, the R402 of
+  its output) is a diagnostic (§6.7) that reaches the composite's code and
+  often the model: its `error`, `message`, `suggestion` and
+  `location.tool` named the invoked tool verbatim, and so did the error
+  `queueTool` throws. Every refusal built in `nestingState` now goes through
+  `redactedRefusal` (`error` by `redactText`, `error_data` by
+  `redactJson`).
+- Sibling found here (Python adapter): `_record` wrote `tool` as given and
+  `_refuse` put it in the diagnostic's `location`, so an MCP tool named with
+  a registered secret (`mcp__srv__<secret>`) reached `call_records`,
+  `export_action_records()` (`tool`, `intent`) and `diagnostics`, while the
+  message was redacted. Both now redact the name. The default patterns
+  still need a word boundary before a token (`\bghp_`), so
+  `mcp__srv__ghp_...` is recognised only when registered.
+- Tests: `layer.test.ts` "a tool name that holds a secret (security round
+  4, batch 5)": the audit hook's entry and audit record for a GitHub token,
+  an AWS key id, a registered secret and `x_<registered>` as the called
+  name, the store holding none of them; a grounded tool named
+  `sync_<registered>` recorded as `sync_[REDACTED]`, waiting under that
+  name, and linked by its hook with no second entry. `nesting.test.ts` "a
+  nested tool name that holds a secret": a composite invoking a name its
+  arguments give (registered, a GitHub token, `x_<registered>`): F504, the
+  refusal, its `location.tool`, the entry, the audit record and the store
+  hold no secret; a queued call's thrown error likewise; the control (a
+  listed name runs and is named as it is). `test_redaction.py`
+  `test_layer_redacts_a_tool_name_that_holds_a_secret` (a bare GitHub
+  token, `mcp__srv__<registered>`: the hook's reason, the call records,
+  the diagnostics and the exported audit record). On 4678d0e the six
+  binding refusal tests and the two adapter tests fail; the control
+  passes.
+
+#### 2. A registered secret given as a JSON number was neither refused nor redacted (medium; hardening); siblings: the evidence collector's digest, an anchor's digest
+
+`holds_credential` / `holdsCredential` compared the registered values with
+strings and member names only, and the redactors' walk returned a number
+outside a secret member as it was; the canonical JSON the stores write held
+the value verbatim, though `redactText` of the same JSON text replaced it.
+
+- Fix (Python `Redactor._walk`, `holds_credential`; TypeScript
+  `redactJson`, `holdsCredential`): a number whose JSON text (`json.dumps`,
+  `JSON.stringify`: what each implementation's stores write) holds a
+  registered value, in any of its forms, is replaced whole by the marker,
+  with its pointer, and is refused. A secret member's number was already
+  replaced.
+- Siblings (verifier, Python): `response_digest({'pin': 4821})` kept a
+  digest of a response holding a registered PIN, and `redact_anchor_data`
+  kept a PIN in metadata with its digest; both follow from the walk and now
+  keep neither.
+- Tests: `redact.json` `registered_value_as_number` (a card number and a
+  PIN containing a registered value, in a member and a list; other numbers
+  and a boolean kept) and `anchor_registered_number_drops_digest`;
+  `credentials.json` `registered_value_as_number`,
+  `registered_value_in_nested_number` and the control
+  `number_without_registered_value`; `test_memory_store.py`
+  `test_a_registered_secret_given_as_a_number_is_refused` (member, list
+  item, whole value; a number holding none is stored); `test_redaction.py`
+  `test_no_digest_of_a_response_holding_a_registered_number`; the binding's
+  `memory.test.ts` "a registered secret given as a number" (`persistEntry`
+  and the persist tool with the layer's secrets, as the string form is).
+  On 4678d0e every one of them fails but the control vector.
+
+#### 3. An Authorization header with a scheme other than the five kept its credential, and no refusal rule recognised it (medium); siblings: the pair and tuple refusal, the scan's time in a multibyte locale
+
+The scheme group `(?:bearer|basic|token|digest|negotiate)` was optional, so
+for any other scheme the `secret` group matched the scheme word and stopped
+at the blank; the refusal rule (`_AUTHORIZATION_VALUE`, `AUTHORIZATION_VALUE`,
+`secret_scan.sh`) wanted 8 token characters right after the colon or one of
+the five schemes. A curl line, an HTTP client's error, a HAR or a header
+tuple with `ApiKey`, `SSWS` (Okta), `Bot` (Discord), `Splunk`, `GenieKey`
+(Opsgenie), `Key` or `Api-Key` kept the key in the runner's R402 message,
+trace, records and snapshot, was stored by `MemoryStore.persist`, and
+passed the plugin's pre-tool-use hook as a TodoWrite.
+
+- Fix (Python and TypeScript redaction): after `Authorization` /
+  `Proxy-Authorization`, a quoted value (`"Authorization": "..."`, escaped
+  or not) is read to its closing quote, whitespace and all, after one of
+  the five schemes when it starts with one; a header line quoted whole (`-H
+  "Authorization: ..."`, escaped or not) the same way, an attempt starting
+  at the start of a run of backslashes so a run is read once; unquoted,
+  when the first word is not one of the five, that word and the next on its
+  line (`[ \t]+`) are replaced, since the layer cannot tell a scheme from a
+  credential with no scheme (`Authorization: abcd1234 (rotated)` loses
+  both words); after one of the five, the credential as before.
+- Fix (refusal rule, all three): a second reading of the header value
+  after any scheme word and spaces (`[A-Za-z][A-Za-z0-9._-]* +`, RFC 9110's
+  `1*SP`), 8 or more token characters mixing letters and digits, besides
+  the old reading; the same for a pair's and a tuple's value in text.
+  Both readings are tried, so a credential with no scheme followed by a word
+  is still refused. Prose passes (`Authorization: handled by the Okta
+  gateway`, `Authorization: required for the admin API`, `Basic auth is
+  used ...`).
+- Sibling (verifier): the HAR pair and tuple text with another scheme was
+  redacted whole but not refused (holds False in Python and TypeScript, the
+  scan passed it); the pair and tuple readings above refuse it.
+- Sibling found here: the scan's new header rule, measured under Python's
+  subprocess environment (which exports `LC_CTYPE=C.UTF-8`), read 200 KB of
+  `authorization: aaa...` in 2.5 s (50 KB 0.24 s, 100 KB 0.66 s): in a
+  UTF-8 locale GNU grep 3.11 sends a pattern in which a class follows a
+  repeated class across a space or a `[[:space:]]` to its regex matcher,
+  whose time grows with the square of the line, with `-o` or without. The
+  pre-tool-use hook exports `LC_ALL=C`; the persist and audit skills' hooks
+  run in the user's locale. `secret_in` now runs in a subshell
+  (`secret_in() ( ... )`) that sets `LC_ALL=C`, so every copy reads bytes,
+  as the pre-tool-use hook's copy already did (the rules are ASCII; a value
+  outside ASCII counts its bytes, so the scan refuses a superset there);
+  the scheme separator is a space (` +`), which is fast in either locale.
+  The same 200 KB now take 0.08 s, and every shape tried (scheme runs,
+  blank runs, repeated headers, pairs, tuples, PEM and PGP headers) reads
+  100 KB in at most 0.1 s.
+- Tests: `redact.json` `authorization_other_schemes` (a curl line, a header
+  line, `Proxy-Authorization: Bot`, a JSON member, a Python repr, an
+  assignment, and a Bearer control that keeps its scheme),
+  `authorization_quoted_multi_param` (`-H "Authorization: AWS4-HMAC-SHA256
+  Credential=..., Signature=..."`, replaced to the closing quote),
+  `authorization_without_scheme_and_a_word`,
+  `authorization_other_scheme_pair_and_tuple`; `credentials.json`
+  `authorization_apikey`, `_ssws`, `_bot`, `_splunk`, `_geniekey`, `_key`,
+  `_other_scheme_pair`, `_other_scheme_tuple` and the control
+  `authorization_two_word_prose`, which the Python, TypeScript and shell
+  rules run, the scan under sh and bash, and the plugin's pre-tool-use
+  hook and the SDK adapter as a TodoWrite
+  (`test_they_agree_on_the_credential_vectors`);
+  `test_runner_secrets.py` `test_a_host_error_quoting_a_header_or_a_key_keeps_none_of_it`
+  (`apikey_header`, `ssws_header_line`: R402, nothing kept in the message,
+  outputs, trace, records or snapshot); `test_memory_store.py`
+  `apikey_header`; five new 1 MB long-run units and two unclosed-quote
+  shapes in Python and TypeScript (at most 4.6 s and 0.4 s at 1 MB, about
+  a quarter over the old patterns); `test_skill_hooks.py`
+  `test_secret_scan_reads_in_linear_time_in_a_multibyte_locale` (400 KB in
+  `C.UTF-8`, four shapes, sh and bash, under 5 s; the scheme and blank runs
+  fail under bash with the subshell's `LC_ALL=C` removed). On 4678d0e the
+  new vectors fail in Python (`test_vector`, `test_holds_credential_vector`,
+  `test_holds_credential_blocks`, `test_layer_refuses_persist_data_that_holds_a_credential`),
+  in TypeScript, in the scan (9 vectors, sh and bash) and in the hook
+  agreement test; the prose control passes.
+
+#### 4. An OpenPGP private key block was not recognised, and a PEM key cut before its end line kept its body (medium); sibling: `MemoryStore` stored what the refusal rule recognised when redaction changed nothing
+
+Every pattern wanted `PRIVATE KEY-----` right after the label, so RFC 4880
+armor (`PRIVATE KEY BLOCK-----`) never matched in the redactors, the
+refusal shapes or `SECRET_ERE`; and a header with no end line matched the
+redaction pattern's `|[\s\S]*` branch, which has no `secret` group, so an
+excerpt (`head -n 2 key.pem`, a truncated log line) kept its body: for an
+Ed25519 key the seed decodes back from the "redacted" text (verifier).
+
+- Fix (Python, TypeScript, the scan): `PRIVATE KEY(?: BLOCK)?` in the
+  header and the end line, the refusal shape and `SECRET_ERE`; after a
+  header with no end line the rest of the text is the secret
+  (`(?P<secret>[\s\S]+?)(?:-----END ...-----|\Z)`, `$` in TypeScript), still
+  read once: the first header with no end consumes the text. A header with
+  nothing after it holds no body and is unchanged (the refusal rule still
+  refuses it).
+- Sibling (verifier): `MemoryStore.persist` refused only when redaction
+  returned pointers, so data the refusal rule recognised but redaction did
+  not change (a key's opening line alone; before this fix, a cut key) was
+  stored. It now refuses whenever `holds_credential` holds, naming the
+  pointers redaction gives, or "the data". The binding's `persistEntry`
+  already decided by `holdsCredential`.
+- Expectations changed to the stricter behaviour (not weakened): the
+  vector `pem_header_without_end` (`-----BEGIN PRIVATE KEY----- (truncated)`)
+  and the two in-code assertions of `"-----BEGIN PRIVATE KEY----- x"`
+  (Python `test_the_patterns_read_a_run_once_and_match_as_before`,
+  TypeScript "matches as before") pinned "nothing is replaced"; they now
+  expect the rest replaced.
+- Tests: `redact.json` `pgp_private_key_block` (armor headers and body),
+  `pem_body_without_end`, `pgp_block_without_end` and the control
+  `pem_header_alone`; `credentials.json` `pgp_private_key_block` (Python,
+  TypeScript, the scan, the hooks); `test_runner_secrets.py` `pgp_block`
+  and `pem_without_end` (R402, no body kept anywhere);
+  `test_memory_store.py` `test_a_credential_the_refusal_rule_recognises_is_refused`
+  (`pgp_block`, `key_without_end`, `key_header_alone`); the 1 MB unit
+  `-----BEGIN PGP PRIVATE KEY BLOCK-----`. On 4678d0e each fails but the
+  control and the timing unit.
+
+#### Documentation
+
+SECURITY.md §1.5 (the binding's and the adapter's tool names, numbers
+holding a registered value, any Authorization scheme, PEM and OpenPGP keys
+and a header with no end, a store refusing what the rule recognises, the
+scan reading bytes) and the §5.4 audit row (PEM and OpenPGP keys, any
+scheme); `hooks/README.md` (the scan's locale); the persist skill's
+constraint line; the redactors' module documentation (Python, TypeScript),
+`records.ts`, `audit.ts` and `grounded.ts`; the binding guide
+(`docs/integrations/standard_agents.md`, secrets); CHANGELOG [Unreleased]
+Upgrading (the credential-forms entry and the binding's secrets entry). The
+Standard's text was not changed: §6.7 already names a private key, a
+credential in a header, an audit record, a safety layer's record of a call
+and a diagnostic.
+
+#### Checks after batch 5
+
+- Python: `pytest tests/` in 59 bounded groups (each under `timeout 120`
+  and a 4 GB address-space limit, the node ids of every file, the large
+  files and `tests/test_skill_hooks.py` by class split so each group stays
+  well under the limit): 7505 passed, 18 skipped (7412 before, plus the 93
+  new). ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; `sync_skill_schemas.py
+  --check` and the five generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: the package's build, check and test (2056 passed; 2015
+  before); the binding's check and test (263 passed, 2 skipped; 254
+  before).
+- Old code: the new tests against 4678d0e's `grounded_agency/`, `hooks/`,
+  `skills/` and `packages/acs-core/src/redact.ts` (the package rebuilt from
+  it for the binding) and 4678d0e's binding `src/acs/`: 53 Python tests
+  fail (`tests/test_redaction.py`, `test_memory_store.py`,
+  `test_runner_secrets.py`), 18 runs of the scan's vectors (9 vectors, sh
+  and bash) and the hook agreement test fail, 30 TypeScript package tests
+  fail, and 8 binding tests fail (6 tool-name, 2 numeric); the controls and
+  the timing units pass. The multibyte-locale timing test fails with the
+  subshell's `LC_ALL=C` removed (scheme and blank runs under bash).
+- Probes, each under `timeout 120` and a 4 GB address-space limit: each
+  reported input through the Python and TypeScript redactors and refusal
+  rules and the scan (7 schemes in 8 text forms, the PGP block, the cut PEM
+  key, the numbers); the plugin's pre-tool-use hook given a TodoWrite with
+  the ApiKey curl line or the PGP block (exit 2, F504) and with prose (exit
+  0); the scan on 100 to 200 KB adversarial shapes in a UTF-8 locale before
+  and after `LC_ALL=C`; the Python redactor on 1 MB of each new shape (at
+  most 4.6 s, linear from 250 KB) and the TypeScript one (at most 0.4 s).
+  No CLI or nested agent was started; nothing was left running; the
+  scratch copies were removed.

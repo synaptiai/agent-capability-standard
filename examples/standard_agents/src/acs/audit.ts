@@ -31,13 +31,17 @@
  * the secrets registered layer-wide (`configureLayer({ secrets })` and each
  * grounded tool's `secrets`, which join them) and any `secrets` the hook
  * passes: a plain tool's error can carry the credential it was refused
- * with.
+ * with, and the name the model called can be one (a model under a prompt
+ * injection can name a tool with a secret to put it in the records). Names
+ * are matched redacted: an entry keeps only the redacted name, and so does
+ * the list of entries waiting for their call id.
  */
 import type { HookToolCall, HookToolResult, ThreadState } from '@standardagents/spec';
 import {
   KEYS,
   appendTrace,
   flowOf,
+  redactedName,
   samePosition,
   stale,
   stepOf,
@@ -68,12 +72,17 @@ export async function recordToolCall(
 
     const flow = flowOf(state);
     const step = stepOf(state);
-    const name = toolCall.function.name;
+    // The name the model called, which may hold a secret (§6.7): entries
+    // keep it redacted, so it is compared redacted, with the same secrets
+    // on both sides (an entry a grounded tool wrote was redacted with its
+    // own, which joined the layer's).
+    const secrets = options.secrets ?? [];
+    const name = redactedName(toolCall.function.name, secrets);
     const unlinked = (await state.getValue<Unlinked[]>(KEYS.unlinked)) ?? [];
     const here = unlinked.filter((u) => samePosition(u, flow, step));
     const cutOff: Unlinked[] = [];
     let match: { waiting: Unlinked; entry: TraceEntry } | undefined;
-    for (const waiting of here.filter((u) => u.action === name)) {
+    for (const waiting of here.filter((u) => redactedName(u.action, secrets) === name)) {
       const entry = await state.getValue<TraceEntry>(KEYS.trace(waiting.seq));
       if (entry && entry.status !== 'started') {
         match = { waiting, entry };
@@ -115,7 +124,7 @@ export async function recordToolCall(
           tool_call_id: toolCall.id,
           ...(toolResult.error !== undefined ? { error: toolResult.error } : {}),
         },
-        options.secrets ?? [],
+        secrets,
       );
     }
     await state.setValue(KEYS.call(toolCall.id), linked.seq);

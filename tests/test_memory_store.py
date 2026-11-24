@@ -208,6 +208,56 @@ def test_a_secret_is_refused_not_stored(inputs: dict[str, Any], where: str) -> N
     assert not store.recall({"key": key}, ctx)["found"]
 
 
+@pytest.mark.parametrize(
+    "data",
+    [{"card": 4111111111111111}, {"cards": [7, 4111111111111111]}, 4111111111111111],
+    ids=["member", "list_item", "whole"],
+)
+def test_a_registered_secret_given_as_a_number_is_refused(data: Any) -> None:
+    """A registered secret given as a JSON number (a card number, a PIN) is
+    refused as its string form is: the JSON text the store keeps would hold
+    it (§6.7; security round 4, batch 5)."""
+    store = MemoryStore(redactor=Redactor(secret_values=["4111111111111111"]))
+    ctx = MemoryContext(session="s1")
+    with pytest.raises(MemoryError) as refused:
+        store.persist({"key": "card", "data": data}, ctx)
+    assert refused.value.reason == "secret_in_data"
+    assert "4111111111111111" not in refused.value.message
+    assert not store.recall({"key": "card"}, ctx)["found"]
+    # A number that holds none is stored.
+    assert store.persist({"key": "n", "data": {"count": 4111}}, ctx)["stored"]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {
+            "how_to_query": "curl -H 'Authorization: ApiKey VnVhQ2ZHY0JDZGJrUXctN1A6dWkybGp0YjU0' https://es.example.com"
+        },
+        {
+            "key": "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOYBGVhY2sBCADKx3mYq\n=AbCd\n-----END PGP PRIVATE KEY BLOCK-----"
+        },
+        {
+            "key": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ"
+        },
+        {"key": "-----BEGIN OPENSSH PRIVATE KEY-----"},
+    ],
+    ids=["apikey_header", "pgp_block", "key_without_end", "key_header_alone"],
+)
+def test_a_credential_the_refusal_rule_recognises_is_refused(data: Any) -> None:
+    """Data the refusal rule says holds a credential is refused whether or
+    not redaction would replace part of it (security round 4, batch 5: a
+    key's opening line alone, which redaction leaves as it is, was stored),
+    an Authorization header with any scheme and an OpenPGP key included."""
+    store = MemoryStore()
+    ctx = MemoryContext(session="s1")
+    with pytest.raises(MemoryError) as refused:
+        store.persist({"key": "k", "data": data}, ctx)
+    assert refused.value.reason == "secret_in_data"
+    assert "VnVh" not in refused.value.message and "lQOY" not in refused.value.message
+    assert not store.recall({"key": "k"}, ctx)["found"]
+
+
 def test_a_scope_with_no_instance_is_refused() -> None:
     with pytest.raises(MemoryError) as refused:
         MemoryStore().persist({"key": "k", "data": 1, "scope": "user"}, MemoryContext())

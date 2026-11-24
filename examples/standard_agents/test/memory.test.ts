@@ -1,6 +1,6 @@
 // The memory tools (STANDARD 1.2.0 §4.5): the session cases of the memory
 // vectors, read in place, and the refusal of secrets (§6.7).
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { Json } from '@synaptiai/acs-core';
 import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import vectors from '../../../tests/conformance/memory/store.json' with { type: 'json' };
@@ -109,6 +109,39 @@ describe('secret_in_data', () => {
     expect(message).toContain(where);
     expect(message).not.toMatch(/ghp_|abcdefghijklmnop|s3cret/);
     expect([...t.values.keys()].filter((k) => k.startsWith('acs:memory:'))).toEqual([]);
+  });
+});
+
+// A registered secret given as a JSON number (a card number, a PIN) is
+// refused as its string form is: the JSON text the store keeps holds it
+// (§6.7; security round 4, batch 5).
+describe('a registered secret given as a number', () => {
+  afterEach(() => resetLayer());
+  const CARD = '4111111111111111';
+
+  it('is refused by persistEntry, at its member, and nothing is stored', async () => {
+    const t = memoryThread();
+    for (const data of [{ card: 4111111111111111 }, { cards: [7, 4111111111111111] }, 4111111111111111]) {
+      const refused = persistEntry(t.state, { key: 'k', data }, 0, { secrets: [CARD] });
+      await expect(refused).rejects.toMatchObject({ reason: 'secret_in_data' });
+      expect(await refused.catch((e: Error) => e.message)).not.toContain(CARD);
+    }
+    expect([...t.values.keys()].filter((k) => k.startsWith('acs:memory:'))).toEqual([]);
+    // A number that holds none is stored.
+    expect(await persistEntry(t.state, { key: 'k', data: { count: 4111 } }, 1, { secrets: [CARD] })).toMatchObject({ stored: true });
+  });
+
+  it('is refused by the persist tool, with the layer secrets, as the string is', async () => {
+    configureLayer({ secrets: [CARD] });
+    const { persist } = memoryTools();
+    const t = memoryThread();
+    for (const data of [{ card: CARD }, { card: 4111111111111111 }]) {
+      const result = await persist.execute(t.state, { key: 'card', data });
+      expect(result.status).toBe('error');
+      expect(result.error_code).toBe('F504');
+    }
+    expect([...t.values.entries()].filter(([k]) => k.startsWith('acs:memory:'))).toEqual([]);
+    expect([...t.values.values()].join('\n')).not.toContain(CARD);
   });
 });
 

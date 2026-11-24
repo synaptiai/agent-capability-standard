@@ -79,6 +79,8 @@ import {
   holdsCredential,
   iJsonProblem,
   joinFlags,
+  redactJson,
+  redactText,
   type BindingApproval,
   type BoundTool,
   type GroundingPolicy,
@@ -344,6 +346,21 @@ function refusal(
     error_code: code,
     error_data: { ...diagnostic, ...extra },
   };
+}
+
+/**
+ * A refusal or failure the layer returns with every secret in its `error`
+ * and its diagnostic replaced (STANDARD 1.2.0 §6.7: no secret in a
+ * diagnostic): the default patterns, the secrets registered layer-wide and
+ * `secrets`. A nested call's refusal names the tool a composite's code
+ * invoked, a name its arguments or a prompt can choose.
+ */
+function redactedRefusal(result: ToolResult, secrets: readonly string[]): ToolResult {
+  const values = [...secrets, ...layerSecrets()];
+  const out: ToolResult = { ...result };
+  if (typeof out.error === 'string') out.error = redactText(out.error, values);
+  if (out.error_data !== undefined) out.error_data = redactJson(out.error_data as Json, values).value as typeof out.error_data;
+  return out;
 }
 
 /** The name each tool defined here states for itself; see `statedName`. */
@@ -638,6 +655,12 @@ function nestingState(
     ...(step !== null ? { step } : {}),
   };
   const listed = (tool: string): boolean => Object.hasOwn(composite.invokes, tool);
+  /**
+   * A refusal of an invocation through the composite's state, redacted
+   * (§6.7): it names the tool the composite's code invoked, and its
+   * diagnostic reaches that code and the record of the call.
+   */
+  const refuse = (...a: Parameters<typeof refusal>): ToolResult => redactedRefusal(refusal(...a), composite.secrets);
 
   /**
    * The capability a refusal of an invocation of `tool` names: the listed
@@ -692,7 +715,7 @@ function nestingState(
     if (!composite.scope.open) {
       return {
         attributed: false,
-        result: refusal(
+        result: refuse(
           'F504',
           tool,
           capability,
@@ -704,7 +727,7 @@ function nestingState(
     if (!listed(tool)) {
       return {
         attributed: true,
-        result: refusal('F504', tool, capability, `${composite.name} does not list ${tool} in invokes.`, `Add ${tool} to the invokes of ${composite.name}.`),
+        result: refuse('F504', tool, capability, `${composite.name} does not list ${tool} in invokes.`, `Add ${tool} to the invokes of ${composite.name}.`),
       };
     }
     const registered = registeredTool(tool);
@@ -722,7 +745,7 @@ function nestingState(
     if (why === null) return null;
     return {
       attributed: true,
-      result: refusal(
+      result: refuse(
         'F504',
         tool,
         capability,
@@ -754,12 +777,15 @@ function nestingState(
       if (!(cause instanceof CapabilityOutputError)) throw cause;
       return {
         code: 'R402',
-        failure: {
-          status: 'error',
-          error: cause.message,
-          error_code: 'R402',
-          error_data: { ...cause.diagnostic, location: { tool, capability } },
-        },
+        failure: redactedRefusal(
+          {
+            status: 'error',
+            error: cause.message,
+            error_code: 'R402',
+            error_data: { ...cause.diagnostic, location: { tool, capability } },
+          },
+          composite.secrets,
+        ),
       };
     }
     const policies = composite.grounding.filter((p) => p.require.includes(capability));
@@ -770,7 +796,7 @@ function nestingState(
         if (grounding.code !== null) {
           return {
             code: 'F505',
-            failure: refusal(
+            failure: refuse(
               'F505',
               tool,
               capability,
@@ -786,7 +812,7 @@ function nestingState(
       return {
         code: 'F504',
         reason_code: low.reason,
-        failure: refusal(
+        failure: refuse(
           'F504',
           tool,
           capability,
@@ -832,7 +858,7 @@ function nestingState(
       recorded_by: composite.recorded_by,
     };
     const refuseNested = async (code: RefusalCode, message: string, suggestion: string): Promise<ToolResult> => {
-      const result = refusal(code, tool, capability, message, suggestion);
+      const result = refuse(code, tool, capability, message, suggestion);
       await write(() =>
         appendTrace(state, { ...base, at: composite.now(), status: 'refused', code, error: result.error ?? code }, composite.secrets),
       ).catch(() => undefined);
@@ -922,12 +948,12 @@ function nestingState(
       started = await write(() => appendTrace(state, { ...base, at: composite.now(), status: 'started' }, composite.secrets));
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      return refusal('R407', tool, capability, `The nested call could not be recorded: ${message}.`, 'The call did not run.');
+      return refuse('R407', tool, capability, `The nested call could not be recorded: ${message}.`, 'The call did not run.');
     }
     // The composite may have ended while the record was written: the call
     // starts below, synchronously after this check, or not at all.
     if (!composite.scope.open) {
-      const result = refusal(
+      const result = refuse(
         'F504',
         tool,
         capability,
@@ -960,7 +986,7 @@ function nestingState(
         await write(() =>
           completeTrace(state, started, { at: composite.now(), status: 'failed', code: 'R407', error: message }, composite.secrets),
         ).catch(() => undefined);
-        return refusal('R407', tool, capability, `The output check of the nested call could not be completed: ${message}.`, 'It ran.');
+        return refuse('R407', tool, capability, `The output check of the nested call could not be completed: ${message}.`, 'It ran.');
       }
     }
     const anchors = checked?.failure === undefined ? checked?.output['evidence_anchors'] : undefined;
@@ -984,7 +1010,7 @@ function nestingState(
       completed = await write(() => completeTrace(state, started, outcome, composite.secrets));
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      return refusal('R407', tool, capability, `The nested call ran, but its record could not be completed: ${message}.`, 'Check the thread store.');
+      return refuse('R407', tool, capability, `The nested call ran, but its record could not be completed: ${message}.`, 'Check the thread store.');
     }
     if (checked?.failure !== undefined) return checked.failure;
     // A notification of the evidence recorded (§6.6), at most once.
@@ -1009,7 +1035,7 @@ function nestingState(
       // nesting token: the call is refused (R407, §5.18.8), and recorded
       // with the call that covered it while that call runs.
       const message = cause instanceof Error ? cause.message : String(cause);
-      const result = refusal(
+      const result = refuse(
         'R407',
         tool,
         boundCapability(tool),
@@ -1070,7 +1096,7 @@ function nestingState(
       (composite.plain.has(tool)
         ? {
             attributed: true,
-            result: refusal(
+            result: refuse(
               'F504',
               tool,
               boundCapability(tool),

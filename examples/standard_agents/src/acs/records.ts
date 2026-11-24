@@ -202,7 +202,7 @@ export interface TraceEntry {
   flow_id?: string;
   /** The model step of that execution (`state.execution.stepCount`). */
   step?: number;
-  /** The tool's name. */
+  /** The tool's name, with every secret replaced (§6.7, `redactedName`). */
   action: string;
   /**
    * `null` for a tool call the audit hook saw that no grounded tool
@@ -265,6 +265,7 @@ export interface TraceEntry {
 /** A trace entry waiting for the audit hook to supply its tool call id. */
 export interface Unlinked {
   seq: number;
+  /** The entry's `action`, redacted as the entry's is (§6.7). */
   action: string;
   /** The execution and model step the call was made in: only a hook of the same step may link it. */
   flow_id: string | null;
@@ -289,19 +290,34 @@ export function stale(waiting: Unlinked, flow: string | null, step: number | nul
 }
 
 /**
- * An entry's `error`, `evidence_anchors` and `checkpoint_id` with every
- * secret replaced (STANDARD v1.2.0 §6.7): always the default patterns and
- * the secrets registered layer-wide (`configureLayer({ secrets })`), plus
- * `secrets`. An anchor that held a secret loses its `digest`
- * (`redactAnchor`). Nothing else in an entry holds a value a call received
- * (a checkpoint's id is what a `checkpoint` call returned).
+ * A tool's name with every secret replaced (STANDARD v1.2.0 §6.7), as
+ * {@link appendTrace} writes it into an entry's `action`: the default
+ * patterns, the secrets registered layer-wide and `secrets`. The name is the
+ * one the model called (the audit hook's) or the one a composite's code
+ * invoked, either of which the call's arguments or a prompt can choose.
  */
-function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors' | 'checkpoint_id'>>>(
+export function redactedName(name: string, secrets: readonly string[] = []): string {
+  return redactText(name, [...secrets, ...layerSecrets()]);
+}
+
+/**
+ * An entry's `action`, `error`, `evidence_anchors` and `checkpoint_id` with
+ * every secret replaced (STANDARD v1.2.0 §6.7): always the default patterns
+ * and the secrets registered layer-wide (`configureLayer({ secrets })`),
+ * plus `secrets`. An anchor that held a secret loses its `digest`
+ * (`redactAnchor`). Nothing else in an entry holds a value a call received
+ * or a model chose: the tool's name is the one the model called, or the one
+ * a composite's code invoked, and a checkpoint's id is what a `checkpoint`
+ * call returned. The audit record exported from an entry (`actionRecord`)
+ * takes its `tool` and `intent` from the redacted `action`.
+ */
+function redacted<T extends Partial<Pick<TraceEntry, 'action' | 'error' | 'evidence_anchors' | 'checkpoint_id'>>>(
   entry: T,
   secrets: readonly string[],
 ): T {
   const values = [...secrets, ...layerSecrets()];
   const out = { ...entry };
+  if (typeof out.action === 'string') out.action = redactText(out.action, values);
   if (typeof out.error === 'string') out.error = redactText(out.error, values);
   if (typeof out.checkpoint_id === 'string') out.checkpoint_id = redactText(out.checkpoint_id, values);
   // An anchor that held a secret keeps no digest of what it cites
@@ -330,6 +346,7 @@ export async function appendTrace(
   await store.setValue(KEYS.traceCount, seq);
   await store.setValue(KEYS.trace(seq), stored);
   if ((stored.capability !== null || stored.control) && stored.tool_call_id === undefined) {
+    // The redacted name: the list is a record of the layer's too (§6.7).
     const waiting: Unlinked = { seq, action: stored.action, flow_id: stored.flow_id ?? null, step: stored.step ?? null };
     // An entry of an earlier step can no longer be linked (see audit.ts).
     const unlinked = ((await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? []).filter(

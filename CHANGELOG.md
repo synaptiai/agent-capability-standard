@@ -468,6 +468,28 @@ here and marked so.
   A user option's name is read for at most 256 characters (a run such as
   `.-u.-u.-u...` was read again from each of its positions: 48 s for 200
   KB in Python), so a password after a longer name is not recognised.
+  Security round 4 (batch 5): an `Authorization` or `Proxy-Authorization`
+  header's credential is read after any scheme (`ApiKey`, `SSWS`, `Bot`,
+  `Splunk`, `GenieKey`, `Key`, `AWS4-HMAC-SHA256`), where only the scheme
+  word was replaced and the credential kept: redaction replaces the scheme
+  and the next word on its line when the first word is not `Bearer`,
+  `Basic`, `Token`, `Digest` or `Negotiate` (so a credential with no scheme
+  takes the next word of its line with it, `Authorization: [REDACTED] the
+  admin API`), and reads a quoted value or a header line quoted whole (`-H
+  "Authorization: ..."`) to its closing quote; the refusal rule and the
+  plugin's scan refuse a value of 8 or more characters mixing letters and
+  digits after any scheme and spaces, also as a pair or tuple in text.
+  OpenPGP private key blocks (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) are
+  redacted and refused as PEM keys are, and after a private key header
+  with no end line the rest of the text is redacted (nothing was), so a
+  log line or an excerpt that quotes a key loses the text after the
+  header. In JSON data a number whose JSON text holds a registered secret
+  (a PIN, a card number given as a number) is redacted whole and refused,
+  as its string form is. The Python `MemoryStore` refuses data the refusal
+  rule recognises whether or not redaction would change it (a private
+  key's opening line alone was stored). The plugin's scan runs its `grep`
+  and `sed` with `LC_ALL=C`, reading bytes as the pre-tool-use hook does,
+  in the persist and audit skills' hooks too.
 - Python SDK and Standard Agents binding, evidence anchors that held a
   secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
   metadata redaction changed is kept with no `digest` and no
@@ -1459,7 +1481,16 @@ here and marked so.
   records (`acs:checkpoints`, and a trace entry's `checkpoint_id`), the
   value the `checkpoint` call returned, is stored redacted too
   (`addCheckpoint`); two ids that are one once redacted name one
-  checkpoint, so a call that uses one uses both.
+  checkpoint, so a call that uses one uses both. Security round 4 (batch
+  5): a trace entry's `action`, the tool's name, is redacted too (the name
+  the model called, or the one a composite's code invoked, may be a secret
+  under a prompt injection), and so are the exported audit record's `tool`
+  and `intent` and the waiting list `acs:trace:unlinked`; the audit hook
+  matches a call to its entry by the redacted name. A refusal a
+  composite's state returns for a nested call (or throws, for
+  `queueTool`) is redacted, the tool it names included. The Python
+  adapter's call records, the audit records exported from them and its
+  diagnostics redact the tool's name likewise.
 
 **Interoperability data.**
 

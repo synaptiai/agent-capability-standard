@@ -11,19 +11,28 @@
  * The values a host registers (`secrets`, four characters or more) are
  * replaced first, longest first, each also in the forms text carries it in
  * ({@link encodedForms}: JSON-escaped, once or twice, and percent-encoded);
- * then what the default patterns recognise.
+ * then what the default patterns recognise. In a JSON value, a number whose
+ * JSON text holds a registered value (a PIN, an account or card number given
+ * as a number) is replaced whole, as the JSON text's redaction would replace
+ * it.
  * The patterns are those of the Python redactor,
  * `grounded_agency/state/redaction.py`, and
  * `tests/conformance/secrets/redact.json` pins both: `Authorization` and
- * `Proxy-Authorization` header values, `Bearer` tokens, a URL's userinfo
+ * `Proxy-Authorization` header values (after a `Bearer`, `Basic`, `Token`,
+ * `Digest` or `Negotiate` scheme, the credential; after any other first word,
+ * such as `ApiKey`, `SSWS` or `Bot`, or a credential with no scheme, that
+ * word and the one after it on its line; a quoted value, or a header line
+ * quoted whole, `-H "Authorization: ..."`, read to its closing quote),
+ * `Bearer` tokens, a URL's userinfo
  * password (the user's name empty or not: `redis://:<secret>@`), an
  * assignment to a credential name (`password`, `passphrase`, `token`,
  * `secret_key`, `api_key`, ..., alone or ending a longer name) of four
  * characters or more, a command's user option (`curl -u user:<secret>`,
  * `--user`, `-U`, `--proxy-user`) and an option named for a credential
  * with its value after blanks (`--password <secret>`, not another option),
- * also as a list's items (`['-u', 'user:<secret>']`), PEM private key
- * bodies, AWS access key ids, GitHub and Slack tokens, `sk-` keys and JWTs,
+ * also as a list's items (`['-u', 'user:<secret>']`), PEM and OpenPGP
+ * private key bodies (after a header with no end, an excerpt, the rest of the
+ * text), AWS access key ids, GitHub and Slack tokens, `sk-` keys and JWTs,
  * and a header or credential given as a name/value pair or a `[name, value]`
  * tuple in JSON or code text (`"name": "Authorization", "value": "Basic
  * ..."`, `('Cookie', 'sid=...')`); quotes around a name and a value may be
@@ -64,18 +73,20 @@
  * holds a secret is refused, not redacted (§6.7), so {@link holdsCredential}
  * recognises only credential-shaped values, as the Python redactor's
  * `holds_credential` and the plugin's `hooks/secret_scan.sh` do: a
- * registered value, key and token formats (PEM private keys, AWS, GitHub,
+ * registered value (in a string, a member name or a number's JSON text), key
+ * and token formats (PEM and OpenPGP private keys, AWS, GitHub,
  * Slack, `sk-` keys, JWTs, a bearer token of 20 or more characters), the
  * password of a URL's userinfo unless it is a placeholder, an
  * `Authorization` or `Proxy-Authorization` header's value of 8 or more token
- * characters mixing letters and digits, a command's user option's password
+ * characters mixing letters and digits, with no scheme or after any scheme
+ * (`ApiKey`, `SSWS`, ...), a command's user option's password
  * of 8 or more characters mixing letters and digits (`curl -u
  * admin:<value>`; `docker run -u 1000:1000` passes), and an assignment to a
  * credential name, or a credential option's value, that is quoted with no
  * whitespace and 8 or more characters, or unquoted, 12 or more characters,
  * mixing letters and digits (quotes escaped or not), and such a
- * header's value of 8 or more token characters mixing letters and digits
- * given as a pair or tuple in text; prose such as `token: rotate monthly`
+ * header's value of 8 or more token characters mixing letters and digits,
+ * after any scheme or none, given as a pair or tuple in text; prose such as `token: rotate monthly`
  * passes. `tests/conformance/secrets/credentials.json`
  * pins the rule for the three. In JSON data, which is not prose, it also
  * recognises what redaction replaces in a secret member, unless the string
@@ -130,8 +141,27 @@ const quotedValue = (quote: string): string =>
 /** A secret member's name (see {@link SECRET_MEMBER}), quoted as JSON or code text quotes it. */
 const QUOTED_SECRET_NAME = `["'][^${NOT_WS}"']*(?:${NAMES}|authorization|cookies?)${QUOTE}`;
 
+/**
+ * The header schemes a redacted value keeps in view: what follows one is the
+ * credential. Any other first word may be the credential itself.
+ */
+const SCHEMES = '(?:bearer|basic|token|digest|negotiate)';
+
 /** A header's scheme, which the value after it may start with. */
-const VALUE_SCHEME = `(?:(?:bearer|basic|token|digest|negotiate)${WS}+)?`;
+const VALUE_SCHEME = `(?:${SCHEMES}${WS}+)?`;
+
+/**
+ * Any header scheme (`ApiKey`, `SSWS`, `Bot`, `AWS4-HMAC-SHA256`): a word and
+ * the spaces after it (RFC 9110 puts one or more there), before the
+ * credential; hooks/secret_scan.sh reads the same.
+ */
+const ANY_SCHEME = '[A-Za-z][A-Za-z0-9._-]* +';
+
+/**
+ * An Authorization or Proxy-Authorization header, up to its value (a JSON
+ * member's or a code's quote before the separator, and blanks).
+ */
+const AUTHORIZATION = `(?<![A-Za-z0-9])(?:proxy-)?authorization(?:${QUOTE})?${WS}*[:=]${WS}*`;
 
 /**
  * A header or credential given as a `[name, value]` tuple in JSON or code
@@ -202,17 +232,31 @@ const quotedForms = (prefix: string, afterQuote = '', flags = 'dgi'): RegExp[] =
  * each of its positions (test/redact.test.ts times them on 1 MB).
  */
 export const DEFAULT_PATTERNS: readonly RegExp[] = [
-  // PEM private key blocks: the body. A header with no end after it matches
-  // the rest of the text with no secret (nothing is replaced), so the next
-  // header is not read again to the end of the text.
-  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?:(?<secret>[\s\S]+?)-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----|[\s\S]*)/dg,
-  // Authorization and Proxy-Authorization header values (after a scheme).
+  // PEM private key blocks and OpenPGP private key blocks (`PRIVATE KEY
+  // BLOCK`): the body, to the first end line. A header with no end after it
+  // (an excerpt, a truncated line) keeps its body: the rest of the text is
+  // replaced, so the next header is not read again to the end of the text
+  // either.
+  /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?<secret>[\s\S]+?)(?:-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|$)/dg,
+  // Authorization and Proxy-Authorization header values: a quoted value
+  // (`"Authorization": "..."`) read to its closing quote, whitespace and all,
+  // after one of the five schemes ...
+  ...quotedForms(AUTHORIZATION, VALUE_SCHEME),
+  // ... and a header line quoted whole (`-H "Authorization: ..."`, its quotes
+  // escaped or not) read to its closing quote, the same way; an attempt
+  // starts at the start of a run of backslashes, so a run is read once ...
+  ...quotedForms('(?<!\\\\)', `(?:proxy-)?authorization${WS}*:${WS}*${VALUE_SCHEME}`),
+  // ... or, unquoted: after any other first word (a scheme such as `ApiKey`,
+  // `SSWS` or `Bot`, or a credential with no scheme), that word and the one
+  // after it on its line, so the credential is replaced whether or not the
+  // word was a scheme ...
   new RegExp(
-    `(?<![A-Za-z0-9])(?:proxy-)?authorization(?:${QUOTE})?${WS}*[:=]${WS}*(?:${QUOTE})?` +
-      `(?:(?:bearer|basic|token|digest|negotiate)${WS}+)?` +
-      `(?<secret>${valueChar(',;')}+)`,
+    `${AUTHORIZATION}(?:${QUOTE})?(?!${SCHEMES}${WS})` +
+      `(?<secret>${valueChar(',;')}+(?:[ \\t]+${valueChar(',;')}+)?)`,
     'dgi',
   ),
+  // ... and after one of the five schemes, the credential.
+  new RegExp(`${AUTHORIZATION}(?:${QUOTE})?(?:${SCHEMES}${WS}+)?(?<secret>${valueChar(',;')}+)`, 'dgi'),
   // A header or credential given as a name/value pair or a [name, value]
   // tuple in text: its value, of four characters or more, read to its
   // closing quote (`"Cookie", "theme=dark; sid=..."`) ...
@@ -408,6 +452,11 @@ function replaceSecrets(text: string, pattern: RegExp): string {
   return out + text.slice(last);
 }
 
+/** Whether `text` holds one of the registered `values` (their forms included). */
+function holdsRegistered(text: string, values: readonly string[]): boolean {
+  return values.some((v) => text.includes(v));
+}
+
 function redactWith(text: string, values: readonly string[], patterns: readonly RegExp[]): string {
   let out = text;
   for (const v of values) out = out.split(v).join(MARKER);
@@ -484,6 +533,12 @@ export function redactJson(value: Json, secrets: readonly string[] = []): { valu
       }
       return out;
     }
+    // A number whose JSON text holds a registered value: replaced whole, as
+    // the redaction of the JSON text would replace it.
+    if (typeof v === 'number' && holdsRegistered(JSON.stringify(v), values)) {
+      pointers.push(pointer);
+      return MARKER;
+    }
     return v;
   };
   return { value: walk(value, '', false), pointers };
@@ -526,7 +581,7 @@ export function holdsSecret(value: Json, secrets: readonly string[] = []): boole
 // prose (grounded_agency/state/redaction.py and hooks/secret_scan.sh hold
 // the same).
 const CREDENTIAL_SHAPES: readonly RegExp[] = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/,
   /(?:AKIA|ASIA)[0-9A-Z]{16}/,
   /gh[pousr]_[A-Za-z0-9]{36}/,
   /github_pat_[A-Za-z0-9_]{22,}/,
@@ -559,11 +614,19 @@ const USER_OPTION_VALUE = new RegExp(`${USER_OPTION}(?<value>[^${NOT_WS}"'\\\\]{
 // `${DB_PASSWORD}`, `****`).
 const URL_PASSWORD = new RegExp(`${SCHEME}://[^${NOT_WS}/:@]*:(?<value>[^${NOT_WS}/@]+)@`, 'g');
 const PLACEHOLDER = /^(?:[$<{*[].*|password|passwd|pwd|pass|secret|token)$/i;
-// An Authorization or Proxy-Authorization header's value, after its scheme:
-// 8 or more token characters with letters and digits.
+// An Authorization or Proxy-Authorization header's value, with no scheme or
+// after one of the five: 8 or more token characters with letters and digits
+// ...
 const AUTHORIZATION_VALUE = new RegExp(
   `(?:proxy-)?authorization(?:${QUOTE})?${WS}*[:=]${WS}*(?:${QUOTE})?` +
-    `(?:(?:basic|bearer|token|digest|negotiate)${WS}+)?(?<value>[A-Za-z0-9._~+/=-]{8,})`,
+    `(?:${SCHEMES}${WS}+)?(?<value>[A-Za-z0-9._~+/=-]{8,})`,
+  'gi',
+);
+// ... or after any other scheme (`ApiKey`, `SSWS`, `Bot`, `Splunk`). Both
+// readings are tried: the first word of a value may be its scheme or its
+// credential.
+const AUTHORIZATION_SCHEME_VALUE = new RegExp(
+  `(?:proxy-)?authorization(?:${QUOTE})?${WS}*[:=]${WS}*(?:${QUOTE})?${ANY_SCHEME}(?<value>[A-Za-z0-9._~+/=-]{8,})`,
   'gi',
 );
 // A header's or credential's value given as a name/value pair, or as a
@@ -571,6 +634,12 @@ const AUTHORIZATION_VALUE = new RegExp(
 // scheme: 8 or more token characters with letters and digits.
 const PAIR_VALUE_TEXT = new RegExp(`${PAIR_TEXT}(?<value>[A-Za-z0-9._~+/=-]{8,})`, 'gi');
 const TUPLE_VALUE_TEXT = new RegExp(`${TUPLE_TEXT}(?<value>[A-Za-z0-9._~+/=-]{8,})${QUOTE}${WS}*[\\])]`, 'gi');
+// ... and the same after any other scheme.
+const PAIR_SCHEME_VALUE_TEXT = new RegExp(`${PAIR_HEAD}${QUOTE}${ANY_SCHEME}(?<value>[A-Za-z0-9._~+/=-]{8,})`, 'gi');
+const TUPLE_SCHEME_VALUE_TEXT = new RegExp(
+  `${TUPLE_HEAD}${QUOTE}${ANY_SCHEME}(?<value>[A-Za-z0-9._~+/=-]{8,})${QUOTE}${WS}*[\\])]`,
+  'gi',
+);
 
 const lettersAndDigits = (v: string): boolean => /[0-9]/.test(v) && /[A-Za-z]/.test(v);
 
@@ -585,8 +654,11 @@ function credentialText(text: string): boolean {
     OPTION_VALUE,
     USER_OPTION_VALUE,
     AUTHORIZATION_VALUE,
+    AUTHORIZATION_SCHEME_VALUE,
     PAIR_VALUE_TEXT,
     TUPLE_VALUE_TEXT,
+    PAIR_SCHEME_VALUE_TEXT,
+    TUPLE_SCHEME_VALUE_TEXT,
   ]) {
     for (const m of text.matchAll(pattern)) {
       if (lettersAndDigits(m.groups?.['value'] ?? '')) return true;
@@ -614,14 +686,18 @@ function secretMemberValue(value: Json, secret: boolean): boolean {
   return false;
 }
 
-/** Every string in a JSON value, member names included. */
-function stringsIn(value: Json, out: string[]): void {
+/**
+ * Every string in a JSON value, member names included; and, given
+ * `numbers`, the JSON text of every number in it.
+ */
+function stringsIn(value: Json, out: string[], numbers?: string[]): void {
   if (typeof value === 'string') out.push(value);
-  else if (Array.isArray(value)) value.forEach((v) => stringsIn(v, out));
+  else if (typeof value === 'number') numbers?.push(JSON.stringify(value));
+  else if (Array.isArray(value)) value.forEach((v) => stringsIn(v, out, numbers));
   else if (value !== null && typeof value === 'object') {
     for (const [k, v] of Object.entries(value)) {
       out.push(k);
-      stringsIn(v, out);
+      stringsIn(v, out, numbers);
     }
   }
 }
@@ -630,13 +706,16 @@ function stringsIn(value: Json, out: string[]): void {
  * Whether `value` holds a registered secret or a credential-shaped value:
  * the rule for refusing `persist` data and `audit` records (§6.7,
  * §5.18.10). A JSON value is read string by string and as its JSON text,
- * so `{"api_key": "..."}` is an assignment.
+ * so `{"api_key": "..."}` is an assignment, and a registered value is
+ * looked for in its strings, its member names and the JSON text of its
+ * numbers (`{"card": 4111111111111111}`).
  */
 export function holdsCredential(value: Json, secrets: readonly string[] = []): boolean {
   const strings: string[] = [];
-  stringsIn(value, strings);
+  const numbers: string[] = [];
+  stringsIn(value, strings, numbers);
   const values = registered(secrets);
-  if (strings.some((s) => values.some((v) => s.includes(v)))) return true;
+  if ([...strings, ...numbers].some((s) => holdsRegistered(s, values))) return true;
   if (strings.some(credentialText)) return true;
   if (typeof value === 'string') return false;
   // Data, not prose: what redaction replaces in a secret member.

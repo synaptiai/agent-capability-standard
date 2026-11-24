@@ -1386,3 +1386,87 @@ describe('nested calls of plain tools: secrets, outputs, queued calls, the tool 
     });
   });
 });
+
+// The name a composite's code invokes can come from its arguments, which the
+// model chose: a refusal of it names it, in the trace, in the audit record
+// and in the diagnostic the composite's code receives (and may return to
+// the model). Each holds the redacted name (STANDARD 1.2.0 §6.7: no secret
+// in a record of a call or a diagnostic; security round 4, batch 5).
+describe('a nested tool name that holds a secret (security round 4, batch 5)', () => {
+  afterEach(() => resetLayer());
+  const REGISTERED = 'hk_live_9f8e7d6c5b4a39281706';
+  const TOKEN = 'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789';
+  const args = z.object({ tool: z.string() }).passthrough();
+
+  function dispatchSetup(queue = false) {
+    const t = memoryThread();
+    const lookup = groundedTool({
+      name: 'lookup',
+      capability: 'retrieve',
+      description: 'lookup',
+      args: z.object({}).passthrough(),
+      execute: async () => ({ data: 1, confidence: 1, evidence_anchors: [] }) as never,
+    });
+    const nested: ToolResult[] = [];
+    const thrown: string[] = [];
+    const dispatch = groundedTool({
+      name: 'dispatch',
+      capability: 'invoke',
+      invokes: { lookup } as never,
+      description: 'dispatch',
+      args,
+      execute: async (state, a) => {
+        if (queue) {
+          try {
+            state.queueTool(a.tool, {});
+          } catch (cause) {
+            thrown.push(cause instanceof Error ? cause.message : String(cause));
+          }
+        } else nested.push(await state.invokeTool(a.tool, {}));
+        return { result: true, evidence_anchors: [] };
+      },
+    });
+    t.tools.set('lookup', lookup);
+    t.tools.set('dispatch', dispatch);
+    return { t, nested, thrown };
+  }
+  const leaks = (text: string) => text.includes(REGISTERED) || text.includes(TOKEN);
+
+  for (const name of [REGISTERED, TOKEN, `x_${REGISTERED}`]) {
+    it(`redacts an invoked name the composite does not list (${name.slice(0, 7)}...) in its refusal, its entry and its record`, async () => {
+      configureLayer({ secrets: [REGISTERED] });
+      const { t, nested } = dispatchSetup();
+      expect((await run(t, 'dispatch', { tool: name })).status).toBe('success');
+      expect(nested[0]?.error_code).toBe('F504');
+      expect(nested[0]?.error).toContain('does not list');
+      expect(leaks(JSON.stringify(nested[0]))).toBe(false);
+      expect((nested[0]?.error_data as { location: { tool: string } }).location.tool).toContain('[REDACTED]');
+      const refused = (await readTrace(t.state)).find((e) => e.code === 'F504')!;
+      expect(refused).toMatchObject({ status: 'refused' });
+      expect(refused.action).toContain('[REDACTED]');
+      const record = actionRecord(refused, 'thread-1');
+      expect(record.tool).toBe(refused.action);
+      expect(leaks(JSON.stringify(record))).toBe(false);
+      expect(leaks([...t.values.values()].join('\n'))).toBe(false);
+      expect(t.invoked).toEqual([]);
+    });
+  }
+
+  it('redacts the name in the refusal a queued call throws', async () => {
+    configureLayer({ secrets: [REGISTERED] });
+    const { t, thrown } = dispatchSetup(true);
+    expect((await run(t, 'dispatch', { tool: REGISTERED })).status).toBe('success');
+    expect(thrown[0]).toContain('F504');
+    expect(leaks(thrown.join('\n'))).toBe(false);
+    await expect.poll(async () => (await readTrace(t.state)).some((e) => e.code === 'F504')).toBe(true);
+    expect(leaks([...t.values.values()].join('\n'))).toBe(false);
+    expect(t.queuedTools).toEqual([]);
+  });
+
+  it('still invokes a listed name, and names it as it is (control)', async () => {
+    const { t, nested } = dispatchSetup();
+    expect((await run(t, 'dispatch', { tool: 'lookup' })).status).toBe('success');
+    expect(nested[0]?.status).toBe('success');
+    expect((await readTrace(t.state)).map((e) => e.action)).toEqual(['dispatch', 'lookup']);
+  });
+});

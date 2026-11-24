@@ -1378,8 +1378,10 @@ class GroundedAgentAdapter:
         call: str | None,
         **details: Any,
     ) -> None:
-        """Append one call record."""
-        entry: dict[str, Any] = {"at": _now_iso(self._now), "tool": tool}
+        """Append one call record. The tool's name is redacted as every
+        other member is (§6.7): it is the name the model called."""
+        name, _ = self.redactor.redact_text(tool)
+        entry: dict[str, Any] = {"at": _now_iso(self._now), "tool": name}
         if mapping is not None and mapping is not UNCLASSIFIED_TOOL:
             entry["capability"] = mapping.capability_id or None
             if mapping.control:
@@ -1425,12 +1427,14 @@ class GroundedAgentAdapter:
     ) -> str:
         """A refusal (section 5.18.8): the §9.8 diagnostic, kept in
         ``diagnostics`` and a call record; returns its text form. Its message
-        is redacted (§6.7): a diagnostic carries no secret. ``outcome`` is
-        the record's decision: ``refused`` for a call that does not run,
-        ``failed`` for one that ran and whose result is refused (R402, F505,
-        F504)."""
+        and the tool it names are redacted (§6.7): a diagnostic carries no
+        secret. ``outcome`` is the record's decision: ``refused`` for a call
+        that does not run, ``failed`` for one that ran and whose result is
+        refused (R402, F505, F504)."""
         message, _ = self.redactor.redact_text(message)
-        location: dict[str, Any] = {"tool": tool}
+        # The name the model called, redacted as the message is.
+        name, _ = self.redactor.redact_text(tool)
+        location: dict[str, Any] = {"tool": name}
         if mapping is not UNCLASSIFIED_TOOL and mapping.capability_id:
             location["capability"] = mapping.capability_id
         if call is not None:

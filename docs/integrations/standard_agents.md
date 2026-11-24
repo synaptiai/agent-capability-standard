@@ -243,10 +243,14 @@ model family for a child. Two of them touch evidence:
   `persist` or `audit` call would store (a grounded tool's `secrets` option,
   and `recordToolCall`'s, add more: a grounded tool's join the layer's, an
   array when the tool is defined and a function's values at each call, so
-  the audit hook's entry for a plain tool is redacted with them too). An evidence anchor that held a secret
-  keeps no `digest` of what it cites (its metadata says `digest_omitted:
-  secret`): the redacted excerpt would show the text to check a guess
-  against.
+  the audit hook's entry for a plain tool is redacted with them too). An
+  entry's tool name is redacted as well: the model chooses the name it
+  calls, and a composite's code may invoke one its arguments chose, so the
+  audit records exported from the trace name the redacted tool, and so do
+  the refusals a composite's state returns. An evidence anchor that held a
+  secret keeps no `digest` of what it cites (its metadata says
+  `digest_omitted: secret`): the redacted excerpt would show the text to
+  check a guess against.
 
 ## A grounded Standard Agent today
 

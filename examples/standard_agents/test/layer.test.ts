@@ -15,7 +15,7 @@ import { configureLayer, destinationPolicies, layerSecrets, registerTools, reset
 import { MemoryRefusal, persistEntry } from '../src/acs/memory.js';
 import { effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
 import { bindingProfiles, type ProfileCore } from '../src/acs/profiles.js';
-import { readTrace } from '../src/acs/records.js';
+import { actionRecord, readTrace } from '../src/acs/records.js';
 import { memoryThread, user, type MemoryThread } from './memory_thread.js';
 
 const HOOKS = [['https://hooks.example.com/*']];
@@ -311,5 +311,55 @@ describe("a grounded tool's secrets reach every entry (security round 1, batch 8
     // resetLayer forgets them, as it forgets the layer's own.
     resetLayer();
     expect(layerSecrets()).toEqual([]);
+  });
+});
+
+// The name of a tool call is the model's: under a prompt injection it can
+// name a tool with a secret to put it into the records. The trace entry's
+// `action`, the waiting list's copy of it and the audit record's `tool` and
+// `intent` hold the redacted name, as its `error` does (STANDARD 1.2.0 §6.7;
+// security round 4, batch 5).
+describe('a tool name that holds a secret (security round 4, batch 5)', () => {
+  const REGISTERED = 'hk_live_9f8e7d6c5b4a39281706';
+  const PATTERNED = ['ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789', 'AKIAIOSFODNN7EXAMPLE'];
+  const call = (id: string, name: string) => ({ id, type: 'function' as const, function: { name, arguments: '{}' } });
+  const stored = (t: MemoryThread) => [...t.values.values()].join('\n');
+
+  it("redacts the name the model called in the audit hook's entry and in the audit record exported from it", async () => {
+    configureLayer({ secrets: [REGISTERED] });
+    const t = memoryThread();
+    for (const [i, name] of [...PATTERNED, REGISTERED, `x_${REGISTERED}`].entries()) {
+      const entry = await recordToolCall(t.state, call(`call_${i}`, name), { status: 'error', error: `Tool '${name}' not found` }, i);
+      expect(entry.action).toContain('[REDACTED]');
+      expect(entry.error).toBe(`Tool '${entry.action}' not found`);
+      const record = actionRecord(entry, 'thread-1');
+      expect(record.tool).toBe(entry.action);
+      expect(record.intent).toBe(`${entry.action} call`);
+      expect(JSON.stringify(record)).not.toMatch(/ghp_|AKIA|hk_live/);
+    }
+    expect(stored(t)).not.toMatch(/ghp_|AKIA|hk_live/);
+  });
+
+  it("redacts a grounded tool's name, keeps the redacted name waiting, and links the hook by it", async () => {
+    configureLayer({ secrets: [REGISTERED] });
+    const t = memoryThread();
+    const name = `sync_${REGISTERED}`;
+    const tool = groundedTool({
+      name,
+      capability: 'retrieve',
+      description: 'sync',
+      args: z.object({}),
+      execute: async () => ({ data: 1, confidence: 1, evidence_anchors: [] }) as never,
+    });
+    expect((await tool.execute(t.state, {})).status).toBe('success');
+    const [own] = await readTrace(t.state);
+    expect(own).toMatchObject({ action: 'sync_[REDACTED]', status: 'executed', capability: 'retrieve' });
+    expect(t.values.get('acs:trace:unlinked')).toContain('sync_[REDACTED]');
+    expect(stored(t)).not.toContain(REGISTERED);
+    // The hook for that call links the entry by the redacted name: no second entry.
+    const linked = await recordToolCall(t.state, call('call_1', name), { status: 'success' }, 2);
+    expect(linked).toMatchObject({ seq: own!.seq, tool_call_id: 'call_1', action: 'sync_[REDACTED]' });
+    expect(await readTrace(t.state)).toHaveLength(1);
+    expect(JSON.parse(t.values.get('acs:trace:unlinked') ?? '[]')).toEqual([]);
   });
 });
