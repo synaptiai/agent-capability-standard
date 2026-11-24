@@ -262,6 +262,86 @@ keeps such shapes out of the raw files; the lesson is in `lessons.md`.
 *Not done.* The medium-severity stream above. Proposals for a smaller
 shell grammar are not written.
 
+## Pull request #132: code scanning, the newer runner, PVC review
+
+*Done.*
+- **Code scanning:** each alert was fixed where it stood.
+  - Site: tag and comment stripping on built HTML now uses indexOf
+    scanners (`site/test/html-text.ts`, `withoutComments` in
+    `runs.test.ts`). Incomplete escaping was fixed in
+    `site/src/data/versions.ts` and `site/test/data.test.ts`. Eight of
+    these alerts were on lines already on main.
+  - Python tests: a URL substring check became a comparison with the
+    whole command as the layer keeps it; six asserts with side effects
+    were split; implicit string joins were made explicit.
+  - Rust tests: a per-run random snapshot key replaces the hard-coded
+    ones.
+- **The newer CI runner** (bash 5.3, jq 1.8, and a larger C stack, on which
+  Python's json decoder returns 100 000-deep lists instead of raising
+  RecursionError) failed 9 Python tests. The fixes:
+  - A line or file that parses to anything but what its reader writes is
+    read as one that does not parse: the checkpoint archive, the
+    idempotency log, snapshot manifests and memory rows.
+  - The jq depth test follows the installed jq.
+  - The hooks' brace readers give the union of the words of bash 5.2 and
+    of two candidate bash 5.3 readings (5.3a and 5.3c). The 5.3 rule was
+    inferred from one word seen on the runner, without bash 5.3's source.
+    `test_the_installed_bash_reads_as_one_reading` checks that the bash on
+    `PATH` gives one of them.
+  - Separately, as a precaution, the log hook digests only input that
+    parses again as JSON.
+  - The fix then failed mypy, which had not been run (lesson added), and
+    code scanning flagged two adjacent bytes literals. Both are fixed.
+- **PVC review:** `docs/reviews/pvc/2026-11-24_standard-1-2-0.pvc.yaml`
+  holds 15 perspective checks, all PARTIAL, and 58 actions (33 P1,
+  25 P2).
+
+*Open after this pull request.* This list gathers the "Not done"
+paragraphs above, the progress records, the open questions in the
+findings file and the PVC review, checked against the tree.
+1. **Upstream issues.**
+   - Check that the passages they quote from SA 0.2.0 are unchanged since
+     `78fa54c`: upstream edits 0.2.0 in place.
+   - Run `tasks/standard-agents-upstream/file-issues.sh --file` (it files
+     06 first, then 01).
+   - Add the links to the folder's README and to the integration guide.
+   - Eleven candidate findings are not drafted, and SA-Q01 to SA-Q30 have
+     no answer.
+2. **Release 3.0.0.**
+   - Versions: `plugin.json`, `pyproject.toml` and `__version__` (0.1.0;
+     the foundation design planned 0.2.0), and both `CITATION.cff` files
+     (still 1.1.0).
+   - Standard 1.2.0 out of Candidate; the ROADMAP; CHANGELOG [Unreleased]
+     becomes `[v3.0.0]`, which `release.yml` requires; then the tag.
+   - The release notes must warn about the hooks' behaviour changes and
+     the 1.1 runs that end differently (two F503 fixtures, an approved
+     step that fails, a version-1 restore), which are already in Upgrading.
+   - Close issue #77, which the Candidate delivers; #83 stays open for Go
+     and Java.
+3. **ACS-Q15** (is `acs` the final annotation key?) needs an answer before
+   anything annotated is published; ACS-Q10 (attendance of a thread no
+   trigger started) is also open.
+4. **npm:** a tag `acs-core-v0.1.0` on main, with `NPM_PUBLISH_ENABLED` and
+   `NPM_TOKEN` set; otherwise the job is a dry run. The site's deploy has
+   the same kind of gate (`SITE_DEPLOY_ENABLED` and the Cloudflare
+   secrets).
+5. **The binding** has not run in a Standard Agents runtime.
+6. **Safety layers.**
+   - The medium stream and the smaller shell grammar (design not written).
+   - The plugin hooks do not claim class SL; their host gaps are in
+     SECURITY.md §5.5.
+   - Audit-log integrity needs a witness kept out of the agent's reach
+     (`verify_audit_log.py --witness`), which a deployment must set up.
+7. **The PVC review's actions:** 33 P1 and 25 P2.
+8. **Standard 1.2.0 §7.2 and §7.3:** no reference layer implements them.
+9. **Smaller items.**
+   - The Astro advisory in `site/package-lock.json`.
+   - The margins of the figure-gap runs.
+   - The three workflows the digital-twin example copies.
+   - The RFCs' open questions; RFC-0002 is still a Draft.
+   - The 319-row mapping is dated against 1.1.0.
+   - Default redaction leaves an S3 presigned URL's `X-Amz-Signature`.
+
 ## Round 2: fix our side, pull request, merge
 
 Request: fix the issues identified on our end, file the upstream issues, open
