@@ -98,6 +98,13 @@ def _tree_is_head(cwd: Any) -> bool:
     return True
 
 
+def _cwd_of(input_data: dict[str, Any]) -> str | None:
+    """A hook input's `cwd` (the directory the call ran in), when it is a
+    non-empty string."""
+    cwd = input_data.get("cwd")
+    return cwd if isinstance(cwd, str) and cwd else None
+
+
 def _is_error(tool_response: Any) -> bool:
     if isinstance(tool_response, dict):
         return bool(tool_response.get("is_error")) or bool(
@@ -123,15 +130,19 @@ def create_checkpoint_recorder(
     expiry_minutes: int | float | None = None,
     *,
     refuses_output: Callable[[str, Any, Any], bool] | None = None,
+    call_dir: Callable[[str | None], str | None] | None = None,
 ) -> HookCallback:
     """
     Create a PostToolUse hook that records the checkpoint a successful
     state-saving call took.
 
-    Register it for every tool (no matcher). For a call whose mapping's
-    capabilities include ``checkpoint``, whose response is not an error and
-    whose output ``refuses_output`` does not refuse, a checkpoint is created in the tracker with ``metadata["source"]`` the
-    tool. For ``git stash create``, ``metadata["commit"]`` is the commit it
+    Register it for every tool (no matcher). For a call whose mapping in
+    the directory it ran in (its input's ``cwd``, as the PreToolUse hook
+    classifies it) includes ``checkpoint``, whose response is not an error
+    and whose output ``refuses_output`` does not refuse, a checkpoint is
+    created in the tracker with ``metadata["source"]`` the tool: a `git
+    stash create` whose git directory or git program may be repository
+    content is the worst case there, and takes none. For ``git stash create``, ``metadata["commit"]`` is the commit it
     printed, or ``"HEAD"`` when it printed nothing and the tracked files and
     index of the repository it ran in (the call's ``cwd``) are ``HEAD``'s
     (a clean tree, whose restore point is ``HEAD``), and
@@ -156,6 +167,12 @@ def create_checkpoint_recorder(
             output is refused has failed and takes no checkpoint (section
             5.18.6). The adapter passes its PostToolUse output check, which
             runs beside this hook on the same result.
+        call_dir: The directory the PreToolUse hook classified a call in,
+            by call id (None when it kept none). A call is classified in
+            its input's ``cwd``, else that directory, else this process's
+            working directory; one whose input names another directory
+            than that hook's takes none. The adapter passes what its
+            PreToolUse hook kept.
 
     Returns:
         Async hook callback function
@@ -173,7 +190,21 @@ def create_checkpoint_recorder(
             tool_input = input_data.get("tool_input", {})
             if not isinstance(tool_input, dict):
                 tool_input = {}
-            mapping = classify.map_tool(tool_name, tool_input)
+            # Classified where it ran, as the PreToolUse hook classified it
+            # (its input's cwd, else the one that hook kept): a `git stash
+            # create` whose git directory, or git program, may be
+            # repository content is the worst case there, and took no
+            # checkpoint (section 5.18.6).
+            cwd = _cwd_of(input_data)
+            if call_dir is not None:
+                kept = call_dir(tool_use_id or input_data.get("tool_use_id"))
+                if cwd is None:
+                    cwd = kept
+                elif kept is not None and kept != cwd:
+                    # It reports another directory than the one it was
+                    # checked in: where it ran cannot be told.
+                    return {}
+            mapping = classify.map_tool(tool_name, tool_input, cwd)
             if "checkpoint" not in mapping.capabilities:
                 return {}
             tool_response = input_data.get("tool_response")
@@ -191,9 +222,7 @@ def create_checkpoint_recorder(
                 printed = _stdout(tool_response)
                 if _COMMIT.fullmatch(printed):
                     commit = printed
-                elif not printed and await asyncio.to_thread(
-                    _tree_is_head, input_data.get("cwd")
-                ):
+                elif not printed and await asyncio.to_thread(_tree_is_head, cwd):
                     commit = "HEAD"
                 else:
                     return {}

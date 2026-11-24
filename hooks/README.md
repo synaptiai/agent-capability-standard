@@ -457,9 +457,14 @@ The marker is written by `posttooluse_take_checkpoint.sh` after a `git stash
 create` that succeeded (the call that saves the state takes the checkpoint,
 §5.18.6), and by `CheckpointTracker(marker_dir=".claude")` in the Python SDK.
 The hook writes none for a command over 4096 bytes, for a call run in the
-background (its output is not yet the command's), for one whose `cwd` is in
-another repository than the project's, for a commit it has no git directory
-to enter in, or for output that is neither a commit id nor empty; empty
+background (its output is not yet the command's), for one the pre-tool-use
+hook classified the worst case where it ran (its `cwd`: a `git` the shell
+finds in the repository, or a git directory git did not make for a work
+tree, such as a shipped `vendor/evil.git` whose `core.worktree` names the
+project; the two hooks hold the same functions), for one whose `cwd` is in
+another repository than the project's (another git directory or work tree),
+for a commit it has no git directory to enter in, or for output that is
+neither a commit id nor empty; empty
 output (nothing to save) gives `HEAD` as the restore point only when the
 project's tracked files and index are `HEAD`'s.
 Its expiry is `ACS_CHECKPOINT_MAX_AGE` seconds when that is an integer from 1
@@ -730,6 +735,18 @@ session, so each reads only a command that may concern it (one that names
 its input names, or `git stash`, in any quoting, line continuations joined,
 or holds `$'...'`, `$"..."`, or a glob, a brace or an extglob opener that
 may expand to one of those names) and leaves the others alone.
+
+The same file holds the reader of a glob the three hooks match names with
+(`glob_marks`, security round 5): each bracket expression is read as bash
+reads one, a `[` with `!` or `^` and the characters up to the `]` that
+closes it being one character, `[:alpha:]`, `[=c=]`, `[.c.]` and a `]`
+first in the set included (`cur[[:alpha:]]`, `cur[]l]`, `.cl[a-z]ude` and
+`git st[[:alpha:]]sh` once read the set's text as letters the name must
+hold, or ended the set at its first `]`). Where a `[` that a `]` follows
+opens a set it cannot read exactly, the run from it to the last `]` may
+match any run, so it matches every name bash does, never fewer, and it
+reads a word in time linear in its length. The send hook, which removes a
+run's quotes before, also reads a `]` after a set as part of it.
 
 ## Relationship to Spec
 

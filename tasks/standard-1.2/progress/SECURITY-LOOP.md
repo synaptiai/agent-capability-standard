@@ -6572,3 +6572,237 @@ diagnostic.
   nothing was asked of the server); `ls in.txt; <in.txt` and its forms
   (the worst case). No CLI or nested agent was started; the listener was
   stopped; the scratch repositories were removed.
+
+### Batch 3: four reported defects
+
+Four defects, each reproduced by an independent verifier on 4d17c00, and
+reproduced again here on a6c4136 before any change (probes under `timeout
+120` and a 4 GB address-space limit, in scratch directories since
+removed): with the host process in a directory that is no repository, the
+SDK's checkpoint recorder took a checkpoint from a `git stash create` run in
+a shipped `vendor/evil.git` (`core.bare=false`, `core.worktree` another
+tree) that the PreToolUse classification made `mutate` and `send`, and with
+`core.worktree` the project the plugin's take hook wrote a marker naming a
+commit of that directory's object store; the permission callback allowed,
+on one decision with no role, an `execute` or `mutate` binding registered
+again with `min_approvers` 3, a `role` or both after the hook asked or while
+the host decided, and a 10-minute-late decision on an expiry added while
+the host decided; the send hook let `/usr/bin/cur[[:alpha:]]`, `cur[]l]`,
+`w[[:alpha:]]et` and `~/.cur[[:lower:]]rc` pass, the audit hook appended
+through `.cl[[:lower:]]ude/...` and `.cl[a-z]ude/...`, and the rollback hook
+let `git st[[:alpha:]]sh apply <unrecorded>` through; and the audit hook let
+`printf -v 'BASH_CMDS[cat]' %s /usr/bin/tee; ... | cat -a
+.claude/audit/records.jsonl` and `printf -v PATH ...` pass. None was fixed
+by an earlier batch: round 2 #3 applied the shipped-git-directory rule in
+the PreToolUse checks and `record_after_call`, not in the recorder or the
+take hook; round 1 batch 3 #2's approval rules lived in PreToolUse alone,
+and round 1 #36 was the binding's request rounds ("Python sibling: none",
+corrected below); round 4 batch 3 #4 read extglob openers, and the
+converters' bracket handling dates from round 2; round 3 #5's `printf -v`
+rule is the SDK mapper's and the send hook's. Each fix has tests that fail
+on the code before it (below).
+
+#### 1. The checkpoint recorder classified `git stash create` without the call's cwd (medium); siblings: the take hook's git directory and git program
+
+`record_checkpoint` called `classify.map_tool(tool_name, tool_input)`, so
+`git_dir_may_be_content` and `command_may_be_content` ran in the adapter
+process's directory: a stash the PreToolUse hook classified the worst case
+(no checkpoint, §5.18.6) took one whose commit is the shipped repository's
+work tree, which a later gated call held and `is_checkpoint_commit`
+accepted for a restore. The plugin's take hook compared work trees alone.
+
+- Fix (SDK): the recorder classifies in the call's directory, its input's
+  `cwd`, else the one the PreToolUse hook kept (`create_checkpoint_recorder`
+  takes `call_dir`, a function of the call id; `wrap_options()` passes
+  `GroundedAgentAdapter._kept_call_dir`, which reads `_HookCheck.cwd`
+  without dropping it), and takes none where the input names another
+  directory than the hook's (where it ran cannot be told). `_tree_is_head`
+  reads the same directory.
+- Fix (take hook): it writes a marker only where the pre-tool-use hook
+  classified the call `checkpoint` where it ran: `command_may_be_content
+  git` and `git_dir_is_content` (the same functions, now one block,
+  `# BEGIN call-place`, in both hooks, kept equal by a test, with
+  `agent_path` saved before `hook_path` narrows the hook's own `PATH`), and
+  only for a call run with the project's git directory as well as its work
+  tree (sibling found here: an agent-made `sub/.git` with `core.worktree`
+  the project stashed into `sub/.git`'s store; its git directory is one git
+  makes, so only the comparison refuses it).
+- Sibling (found here): a repository's `git` on `PATH`
+  (`node_modules/.bin`) printed a commit id of its choosing; the
+  pre-tool-use hook and the mapper gate it as `mutate`, and now neither the
+  take hook nor the recorder takes a checkpoint from it.
+- Checked, not changed: the evidence collector classifies without the cwd
+  (it labels evidence; no safety decision reads it); the adapter's other
+  cwd-less `map_tool` calls classify MCP tools, whose mapping does not
+  depend on a directory.
+- Tests: `test_checkpoint_where_it_ran.py` (the premise: the stash is a
+  commit outside the project's store, classified `mutate`/`send`; the
+  recorder takes none for a commit or an empty output there; the take hook
+  writes no marker or entry where `core.worktree` is the project; through
+  `wrap_options()`, no checkpoint with the hook's cwd only, with the input's
+  cwd, or with another cwd than the hook's; a repository `git` on `PATH`;
+  a nested `sub/.git` with the project's work tree; controls: the project,
+  a subdirectory, the system's git) and `test_hook_lists_match_mapper.py`
+  `test_both_checkpoint_hooks_read_where_a_call_ran_alike`. On a6c4136's
+  recorder, adapter and hooks 8 of 11 fail; the premise and the 2 controls
+  pass.
+
+#### 2. The permission callback decided on the approval policy it read before the host's prompt (medium); siblings: a checkpoint or approval a changed binding now needs, a composite reloaded
+
+PreToolUse refused `min_approvers > 1` and a `role` and started the
+expiry's clock; the callback never applied the first two and read
+`expires` from the mapping it took before awaiting the host, so a binding
+registered again after the ask, or during the prompt, ran on one decision.
+§5.18.7 counts a decision against the binding's approval policy.
+
+- Fix: the hook keeps the mapping it checked a call under
+  (`_HookCheck.mapping`); the callback, before it asks the host, checks a
+  call whose mapping differs from it again (`_changed_binding_refusal`: the
+  §5.18.10 checks under the current mapping, F504; a prerequisite or a
+  checkpoint the call does not hold, F501; F502 where it requires approval:
+  the decision would be asked under another binding) and refuses a policy
+  it cannot meet (`_approval_policy_refusal`, shared with PreToolUse: more
+  than one approver, a role) before anyone is asked; after the host allows,
+  it classifies the call again, applies the same to a mapping that changed
+  while the host decided, and takes `expires` from the policy then in force,
+  measured from the ask. `_changed_input_refusal` and the new check share
+  `_recheck_refusal`. A hold the final mapping does not need is released.
+- Siblings (found here): a tool registered again as `mutate` while the host
+  decided ran holding no checkpoint (refused: F501 or F502); a composite
+  whose invoked binding was registered again with two approvers during the
+  prompt (refused: F502).
+- The round-1 #36 note "Python sibling: none" is corrected by this entry:
+  the stale policy lived within one call.
+- The binding (TypeScript) keeps its round-1 rule: a request asked under a
+  policy weaker than the call's opens a new round; no call fixture changes
+  a binding during a call, so the fixtures agree.
+- The Standard's text was not changed: §5.18.7 already counts validity
+  against the binding's `approval`, and says a host's prompt cannot meet a
+  `min_approvers` above 1 nor a `role`.
+- Tests: `test_approval_policy_at_decision.py`: after the ask (3 policies ×
+  `execute`/`mutate`: F502, no one asked, the checkpoint kept, a new call
+  refused at the hook), during the prompt (the same 6, an expiry added and
+  answered 10 minutes later, a binding that now needs a checkpoint, a
+  composite reloaded), and 4 controls (an unchanged binding with an expiry
+  runs, as does the same binding registered again and one that changes to
+  a binding needing no approval). On a6c4136's adapter 15 fail and the 4
+  controls pass.
+
+#### 3. POSIX bracket expressions defeated the send, audit and rollback hooks' glob reading (medium)
+
+send's `glob_regex` ended a class at its first `]` (`cur[[:alpha:]]` became
+`^cur.\]$`, `cur[]l]` `^cur.l\]$`); audit's `glob_part` and rollback's
+`may_be` kept a set's text (`:lower:`, `a-z`, `!x`) as letters the name
+must hold, so every bracket expression but a one-letter set was missed.
+
+- Fix: one reader in `hooks/shell_words.jq` (copied into the three skills
+  as before): `glob_text` marks a word's unquoted `*`, `?`, `[`, `]` as
+  `\u0001` to `\u0004` (the word reader's new field `g`; control characters
+  typed in a word read as U+FFFD), and `glob_marks` reads each bracket
+  expression as bash does, in time linear in the word (a precomputed "next
+  stop" array and one pass): `[`, then `!` or `^` and a character, or a
+  character other than `!` and `^`, then characters, up to the `]` that
+  closes it, is one character where no character before that `]` is a `[`
+  followed by `:`, `=` or `.` and the first is no `]`. Where a `[` that a
+  `]` follows opens any other set, the run from it to the last `]` matches
+  any run: more than bash, never less. The send hook, whose runs lose their
+  quotes before, also reads a `]` after a set as part of it (`cur[l"]"]`).
+  `glob_min` and `marks_regex` give the length bound and the regex; no
+  regex is built from a glob that matches more characters than the name.
+- Checked: a fuzz of 3000 unquoted and 2000 quoted patterns per seed over
+  `curlwgets[]!^:=.a-*?`, 4 seeds, against bash's own `case` matching
+  (names `curl`, `wget`, `stash`, `x]`, `c]l`, `c!l`, `c:l`, ...): no name
+  bash matched that the reading did not, for both readings. 16 KB words of
+  `[`, `[[:`, `]` and `[!]` are read in about a second each (the old
+  `\[[^\]]*\]` took 0.9 s, a backtracking regex for the new rule 4.3 s).
+  The SDK mapper reads no glob as a name (a glob word is its worst case);
+  the plugin's records guard does not read patterns (documented).
+- Tests: `test_skill_hooks.py` `TestGlobMarks` (soundness against bash for
+  19 patterns and 8 names, both readings; a simple set stays one character;
+  16 KB in under 20 s) and `TestBracketExpressions` (send: 15 refusals and 5
+  controls such as `grep -E '[a-z]+'`, `ls file[12].txt`; audit: 8 and 3;
+  rollback: 6 and 2; each under sh and bash) and the premise that bash
+  expands each form. On a6c4136's hooks 52 of 83 fail; the 30 that pass are
+  the 20 controls, the premise, and 10 refusals the old code made by luck
+  (`.cl[]a]ude` read as `.cl.*.*a.*ude`, `git st[]a]sh` likewise).
+
+#### 4. printf -v set PATH or BASH_CMDS for the rest of an audit-hook-checked line (medium); sibling: commands beside a recorded restore in the rollback hook
+
+`printf` is on the audit hook's reader list with any option, and its
+PATH/IFS rule read `NAME=value` words only: `printf -v
+'BASH_CMDS[cat]' %s /usr/bin/tee` made `cat` run `tee`, which appended a
+base64-decoded AKIA record to `records.jsonl`; `printf -v PATH D` ran
+`D/cat`.
+
+- Fix (audit): `printf` with an option, or a first word that may expand to
+  one, is refused, as the SDK mapper refuses it; and a word that names
+  `PATH`, `IFS`, `ENV`, `BASH_ENV`, `CDPATH`, `BASH_CMDS`, `BASH_ALIASES`,
+  `LD_*`, `DYLD_*` or `OPENSSL_*`, alone, glued to an option (`-vPATH`),
+  with a subscript or a value, is refused (F504, kind `assign`).
+- Sibling (reproduced here): the rollback hook allowed `printf -v PATH %s
+  D; git stash apply <recorded sha>`, so `D/git` ran as the restore. A line
+  that restores a checkpoint may now hold beside the restore only commands
+  that read (`git status|log|diff|show|rev-parse`, `echo`, `printf` with no
+  option, `cat`, `ls`, `grep`, ...), with no variable set or named, no write
+  but to `/dev/null`, and no word the shell expands; anything else (`cd`,
+  `alias`, `hash`, a function such as `git() ( ... )`, `source`, `git
+  config`, `export`) is F503 "runs beside a restore". The restore lines are
+  checked first, so a restore of an unrecorded commit keeps its own
+  message. `git status && git stash apply <sha>` still passes.
+- Checked, not changed: the send hook refuses these names already (round 3
+  #5, round 4 batch 3 #3); the plugin's pre-tool-use hook gates every such
+  line (`;` or `|`) as `mutate`; the SDK mapper sends `printf` with any
+  option to the worst case.
+- Tests: `test_skill_hooks.py` `TestVariablesSetWithoutAssignment` (audit:
+  10 refusals, the records file unchanged, and 3 controls; rollback: 12
+  commands beside a recorded restore refused and 4 readers passed; each
+  under sh and bash) and `test_printf_v_rebinds_a_reader` (the premise: bash
+  appends the record through `tee`). On a6c4136's skills 44 fail; the 14
+  controls and the premise pass.
+
+#### Documentation
+
+SECURITY.md §5.2 (the take hook's rule), §5.4 (the audit, rollback and
+send rows: bracket expressions, `printf -v` and the names, commands beside
+a restore) and §5.5 (the SDK adapter: the decision against the binding as
+it is when it arrives); the hooks' README (the take hook, the glob reader); the
+SDK guide (the recorder, the binding at the decision); the take hook's,
+the audit and rollback skills' hook headers; CHANGELOG [Unreleased]
+Upgrading (an SDK entry and the plugin's round-5 batch-3 entry). The
+Standard's text was not changed: §5.18.6 already takes a checkpoint only by
+a call classified `checkpoint`, §5.18.7 already counts a decision against
+the binding's policy, and §5.18.10 and §6.7 already require the skills'
+checks.
+
+#### Checks after batch 3
+
+- Python: `pytest tests/` file by file, each run under `timeout 120` and a
+  4 GB address-space limit (`tests/test_skill_hooks.py` and
+  `tests/test_redaction.py` in chunks of 100 node ids, `tests/test_discovery`
+  as one run): 7855 passed, 19 skipped, of 7874 collected (7701 before, plus
+  the 173 new). ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; `sync_skill_schemas.py
+  --check` and the five generators' `--check`; `scripts/run_conformance.py`.
+- Rust: no Rust source changed; not rebuilt.
+- TypeScript: the package's build and test (2056 passed); the binding's
+  check and test (263 passed, 2 skipped). No TypeScript source changed: the
+  binding keeps its own approval rounds (round 1 #36) and no call fixture
+  changed, so the adapter and the binding agree on the fixtures as before.
+- Old code: the new tests against a6c4136's `grounded_agency/` (the
+  recorder, the adapter), `hooks/` and the three skills (copied in place,
+  then restored): #1 8 of 11 fail (the premise and 2 controls pass), #2 15
+  of 19 (4 controls pass), #3 52 of 83 (20 controls, the premise and 10
+  refusals the old reading made by luck pass), #4 44 of 59 (14 controls and
+  the premise pass).
+- Probes, each under `timeout 120` and a 4 GB address-space limit: the
+  verifier's `vendor/evil.git` (the recorder takes none, the take hook with
+  `core.worktree` the project writes no marker; the project's own stash
+  still takes one); the bracket forms of the three hooks (each refused;
+  `grep -E '[a-z]+'`, `ls file[12].txt`, `git add [abc].py` pass); the
+  audit hook's `printf -v` lines (each refused, `printf '%s\n' ... >>
+  records.jsonl` passes); the rollback hook's commands beside a recorded
+  restore (each refused, `git status && git stash apply <sha>` passes); a
+  fuzz of the glob reader against bash (no name missed) and its time on 16
+  KB words (about a second). No CLI or nested agent was started; the
+  scratch repositories and fuzz files were removed.

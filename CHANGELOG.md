@@ -77,6 +77,22 @@ here and marked so.
   for each object its store lacks. With git-lfs installed, take a
   checkpoint and approve a restore, or install it with `git lfs install
   --skip-smudge`, whose two commands count as none.
+- Python SDK, tool calls (security round 5, batch 3): the checkpoint
+  recorder classifies a call in the directory it ran in (its hook input's
+  `cwd`, else the one the PreToolUse hook kept; `create_checkpoint_recorder`
+  takes `call_dir`, which `wrap_options()` sets), so a `git stash create`
+  the PreToolUse hook classified the worst case there (a git directory the
+  repository ships, such as `vendor/evil.git` with a `core.worktree`, or a
+  repository's `git` on `PATH`) takes no checkpoint, and one whose input
+  names another directory than the hook's takes none. The permission
+  callback counts a decision against the binding as it is when the decision
+  arrives: a call whose binding changed since PreToolUse checked it, or
+  while your `can_use_tool` decided (the tool registered again, or a
+  composite loaded again because a tool it invokes was), is checked again
+  under the new binding and, where it requires approval, refused with F502;
+  the new policy's `min_approvers` above 1 or `role` is F502 too, and its
+  `approval.expires` counts from PreToolUse's ask. Register a tool before
+  its calls, not while one waits for a decision.
 - Python SDK, `wrap_options()` (Changed): tools pre-approved in
   `allowed_tools` now count against the rate limit (raise
   `GroundedAgentConfig(rate_limit=...)` if an agent needs more); an error in
@@ -1293,6 +1309,23 @@ here and marked so.
     `[REDACTED]`: the model chooses a skill's name, and the line is signed,
     so a secret in it could not be taken out. The pre-tool-use hook's
     refusals and approval requests name the tool the same way.
+  - Security round 5, batch 3. The take hook writes no checkpoint marker
+    for a `git stash create` the pre-tool-use hook classified the worst
+    case where it ran (a `git` on `PATH` that may be the repository's, or a
+    git directory git did not make for a work tree: a shipped
+    `vendor/evil.git` whose `core.worktree` is the project stashed into its
+    own object store), nor for one run with another git directory than the
+    project's. The send, audit and rollback skills' hooks read a glob's
+    bracket expressions as bash does (`cur[[:alpha:]]`, `cur[]l]`,
+    `.cl[a-z]ude`, `git st[[:alpha:]]sh` are now refused; a set bash cannot
+    be read exactly makes the run any run). The audit skill's hook refuses
+    `printf` with an option (`printf -v NAME` sets a variable for the rest
+    of the line) and a word that names `PATH`, `IFS`, `ENV`, `BASH_ENV`,
+    `CDPATH`, `BASH_CMDS`, `BASH_ALIASES`, `LD_*`, `DYLD_*` or `OPENSSL_*`
+    in a command it reads; the rollback skill's hook refuses a recorded
+    restore beside a command that does more than read (`printf -v PATH ...;
+    git stash apply <sha>`, `cd`, `alias`, a function, a file written):
+    restore on a line of its own, or after `git status` and other reads.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,

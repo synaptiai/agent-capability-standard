@@ -4129,3 +4129,373 @@ class TestPathsReadExactly:
         assert result.stderr.startswith("F503 ROLLBACK_FAILED: "), result.stderr
         here = {**bash_call(f"git stash apply {sha}"), "cwd": str(repo / "r")}
         assert run_command(hook, here, repo, shell, env).returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Security round 5, batch 3, #3: a bracket expression bash reads otherwise
+# than "[ to the first ]" ([[:alpha:]], [[=l=]], [[.l.]], []l]) defeated the
+# glob reading of the send, audit and rollback hooks: send's converter ended
+# the class at its first ], and audit's and rollback's kept the set's text
+# (`:alpha:`, `a-z`) as letters the name must hold. They now share one
+# reader, glob_marks in hooks/shell_words.jq.
+
+GLOB_MARKS_JQ = (
+    'include "shell_words"; [.[] | glob_text(true) | glob_marks($lossy) | marks_regex]'
+)
+
+
+def glob_regexes(patterns: list[str], lossy: bool) -> list[str]:
+    """The regular expressions the shared reader makes of unquoted globs."""
+    done = subprocess.run(
+        [
+            "jq",
+            "-c",
+            "-L",
+            str(ROOT / "hooks"),
+            "--argjson",
+            "lossy",
+            json.dumps(lossy),
+            GLOB_MARKS_JQ,
+        ],
+        input=json.dumps(patterns),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    regexes = json.loads(done.stdout)
+    assert isinstance(regexes, list)
+    return regexes
+
+
+BRACKET_PATTERNS = [
+    "cur[[:alpha:]]",
+    "cur[[:lower:]]",
+    "cur[[=l=]]",
+    "cur[[.l.]]",
+    "cur[]l]",
+    "cur[!]x]",
+    "[[:lower:]]url",
+    "c[[:alpha:]][[:alpha:]][[:alpha:]]",
+    "c[a[u]rl",
+    "cu[[]rl",
+    "cur[l",
+    "cur[^x]",
+    "cur[a-z]",
+    "[abc]",
+    "cur[[:alpha]]",
+    "cur[[:alpha:]",
+    "w[]g]et",
+    "st[[:alpha:]]sh",
+    "[[:alpha:]]pply",
+]
+NAMES = ["curl", "wget", "stash", "apply", "c]rl", "c[rl", "cur[l", "cur[l]"]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="needs jq")
+class TestGlobMarks:
+    def _bash_matches(self, pattern: str, name: str) -> bool:
+        done = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'case "$1" in $2) exit 0;; esac; exit 1',
+                "_",
+                name,
+                pattern,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        return done.returncode == 0
+
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+    @pytest.mark.parametrize("lossy", [False, True])
+    def test_every_name_bash_matches_the_reading_matches(self, lossy: bool) -> None:
+        """Never less than bash: each pattern's regex matches every name
+        bash's own matching gives (the premise of each hook's check)."""
+        regexes = glob_regexes(BRACKET_PATTERNS, lossy)
+        for pattern, regex in zip(BRACKET_PATTERNS, regexes, strict=True):
+            for name in NAMES:
+                if self._bash_matches(pattern, name):
+                    assert re.search(regex, name), (pattern, name, regex)
+
+    def test_a_simple_set_is_one_character(self) -> None:
+        """A set bash closes at its first ] is one character, as before:
+        `[abc]` names no three-letter tool, `cur[^x]` and `cur[a-z]` curl."""
+        regexes = dict(
+            zip(
+                ["[abc]", "cur[^x]", "cur[a-z]", "x]"],
+                glob_regexes(["[abc]", "cur[^x]", "cur[a-z]", "x]"], False),
+                strict=True,
+            )
+        )
+        assert regexes == {
+            "[abc]": "^.$",
+            "cur[^x]": "^cur.$",
+            "cur[a-z]": "^cur.$",
+            "x]": "^x\\]$",
+        }
+
+    def test_the_reading_is_linear(self) -> None:
+        """16 KB words of brackets that never close, or whose classes never
+        end, are read in a few seconds (the hooks bound a command at
+        16384 bytes; a quadratic reading of 16 KB took minutes)."""
+        words = ["[" * 16000, "[[:" * 5000 + "]", "]" * 16000, "[!]" * 5000 + "]"]
+        start = time.monotonic()
+        glob_regexes(words, True)
+        assert time.monotonic() - start < 20
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestBracketExpressions:
+    """Each hook refuses a glob whose bracket expression may match the name
+    it watches, and still passes one that cannot."""
+
+    SEND = [
+        "/usr/bin/cur[[:alpha:]] -s --max-time 3 127.1:18777",
+        "/usr/bin/cur[[:lower:]] -s 127.1:18777",
+        "/usr/bin/cur[[=l=]] -s 127.1:18777",
+        "/usr/bin/cur[[.l.]] -s 127.1:18777",
+        "/usr/bin/[[:lower:]]url -s 127.1:18777",
+        "/usr/bin/cur[]l] -s 127.1:18777",
+        "/usr/bin/c[[:alpha:]][[:alpha:]][[:alpha:]] -s 127.1:18777",
+        "/usr/bin/w[[:alpha:]]et -q -O- 127.1:18777",
+        "/usr/bin/[[:alpha:]]get -q 127.1:18777",
+        "/usr/bin/w[]g]et -q 127.1:18777",
+        '/usr/bin/cur[l"]"] -s 127.1:18777',
+        "cp /tmp/x ~/.cur[[:lower:]]rc",
+        "cp /tmp/h /etc/hos[[:alpha:]]s",
+        "cp /tmp/h /etc/hos[]t]s",
+        "cp /tmp/x ~/.wge[[:alpha:]]rc",
+    ]
+
+    @pytest.mark.parametrize("command", SEND)
+    def test_send_refuses(self, tmp_path: Path, shell: str, command: str) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 2, (command, result.stderr)
+        assert result.stderr.startswith(F504), result.stderr
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -E '[a-z]+' notes.txt",
+            "ls file[12].txt",
+            "find . -name '*.[ch]'",
+            "ls [abc]",
+            "echo x]y",
+        ],
+    )
+    def test_send_passes_a_glob_that_names_no_tool(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("send", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), tmp_path, shell)
+        assert result.returncode == 0, (command, result.stderr)
+
+    AUDIT = [
+        "printf '%s\\n' '{\"event\":\"note\"}' >> .cl[[:lower:]]ude/aud[[:lower:]]t/rec[[:lower:]]rds.json[[:lower:]]",
+        "printf '%s\\n' '{\"event\":\"note\"}' >> .cl[a-z]ude/aud[a-z]t/rec[a-z]rds.json[a-z]",
+        "printf '%s\\n' '{\"event\":\"note\"}' >> .cl[!x]ude/aud[^x]t/rec[!x]rds.json[!x]",
+        "cp evil.txt .cl[[:lower:]]ude/aud[[:lower:]]t/rec[[:lower:]]rds.json[[:lower:]]",
+        "cat evil.txt >> .cl[a-z]ude/aud[a-z]t/rec[a-z]rds.json[a-z]",
+        "cp evil.txt .cl[[=a=]]ude/aud[[=i=]]t/rec[[=o=]]rds.json[[=l=]]",
+        "cp evil.txt .cl[]a]ude/aud[]i]t/rec[]o]rds.json[]l]",
+        "cp evil.txt .cl[[.a.]]ude/aud[[.i.]]t/rec[[.o.]]rds.json[[.l.]]",
+    ]
+
+    @pytest.mark.parametrize("command", AUDIT)
+    def test_audit_refuses(self, tmp_path: Path, shell: str, command: str) -> None:
+        records = tmp_path / ".claude" / "audit" / "records.jsonl"
+        records.parent.mkdir(parents=True)
+        records.write_text('{"event":"start"}\n')
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_command(hook, bash_call(command), tmp_path, shell, env)
+        assert result.returncode == 2, (command, result.stderr)
+        assert result.stderr.startswith(F504), result.stderr
+
+    @pytest.mark.parametrize(
+        "command", ["cat notes[0-9].txt > out.txt", "ls .cl[a-z]ude", "ls src/[ab]*.py"]
+    )
+    def test_audit_passes_a_glob_that_names_no_record(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_command(hook, bash_call(command), tmp_path, shell, env)
+        assert result.returncode == 0, (command, result.stderr)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "touch stash; git st[[:alpha:]]sh apply {other}",
+            "git stash [[:alpha:]]pply {other}",
+            "git stash p[[:alpha:]]p",
+            "git st[]a]sh apply {other}",
+            "git st[[=a=]]sh apply {other}",
+            "git stash a[[.p.]]ply {other}",
+        ],
+    )
+    def test_rollback_refuses(self, repo: Path, shell: str, command: str) -> None:
+        checkpoint(repo)
+        other = git(repo, "rev-parse", "HEAD").strip()
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        text = command.replace("{other}", other)
+        result = run_command(hook, bash_call(text), repo, shell, ROLLBACK_ENV)
+        assert_blocked(
+            result,
+            "restores no checkpoint taken in this project",
+            "F503 ROLLBACK_FAILED: ",
+        )
+
+    @pytest.mark.parametrize("command", ["git add [abc].py", "git add src/[a-z]*.py"])
+    def test_rollback_passes_a_glob_that_names_no_restore(
+        self, repo: Path, shell: str, command: str
+    ) -> None:
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
+        assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_bash_expands_the_bracket_expressions_to_the_names() -> None:
+    """The premise: bash expands each form to the program or the name."""
+    done = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "echo /usr/bin/cur[]l /usr/bin/cur[[:alpha:]] /etc/hos[[:alpha:]]s;"
+            " case stash in st[[:alpha:]]sh) echo stash;; esac;"
+            " case curl in c[a[u]rl) echo curl;; esac",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    words = done.stdout.split()
+    if os.path.exists("/usr/bin/curl"):
+        assert "/usr/bin/curl" in words
+    assert "stash" in words and "curl" in words
+
+
+# ---------------------------------------------------------------------------
+# Security round 5, batch 3, #4: printf, on the audit hook's reader list,
+# sets a variable for the rest of the line with -v (printf -v PATH,
+# printf -v 'BASH_CMDS[cat]' /usr/bin/tee), so a later reader of the records
+# file ran another program; the hook's PATH rule read NAME=value words only.
+# Sibling: the rollback hook let any command beside a recorded restore
+# (printf -v PATH ...; git stash apply <sha> ran another git).
+
+AUDIT_PAYLOAD = "eyJldmVudCI6Im5vdGUiLCJhd3MiOiJBS0lBSU9TRk9ETk43RVhBTVBMRSJ9Cg=="
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+class TestVariablesSetWithoutAssignment:
+    AUDIT = [
+        "printf -v 'BASH_CMDS[cat]' %s /usr/bin/tee; printf %s "
+        + AUDIT_PAYLOAD
+        + " | base64 -d | cat -a .claude/audit/records.jsonl",
+        "printf -v BASH_CMDS[cat] %s /usr/bin/tee; cat -a .claude/audit/records.jsonl",
+        "printf -v PATH %s /tmp/d; cat .claude/audit/records.jsonl",
+        "printf -vPATH %s /tmp/d; head -1 .claude/audit/records.jsonl",
+        "printf -v OPENSSL_CONF %s x; openssl dgst .claude/audit/records.jsonl",
+        "printf -v IFS %s x; cat .claude/audit/records.jsonl",
+        "printf -v 'BASH_ALIASES[cat]' %s tee; cat .claude/audit/records.jsonl",
+        "printf -v x %s y; cat .claude/audit/records.jsonl",
+        'printf -v "BASH"_CMDS[cat] %s tee; cat .claude/audit/records.jsonl',
+        "echo BASH_CMDS[cat]; cat .claude/audit/records.jsonl",
+    ]
+
+    @pytest.mark.parametrize("command", AUDIT)
+    def test_audit_refuses(self, tmp_path: Path, shell: str, command: str) -> None:
+        records = tmp_path / ".claude" / "audit" / "records.jsonl"
+        records.parent.mkdir(parents=True)
+        records.write_text('{"event":"start"}\n')
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_command(hook, bash_call(command), tmp_path, shell, env)
+        assert_blocked(result, "printf -v NAME", F504)
+        assert records.read_text() == '{"event":"start"}\n'
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "printf '%s\\n' '{\"event\":\"note\"}' >> .claude/audit/records.jsonl",
+            "cat .claude/audit/records.jsonl",
+            "grep -c event .claude/audit/records.jsonl",
+        ],
+    )
+    def test_audit_passes_a_plain_reader(
+        self, tmp_path: Path, shell: str, command: str
+    ) -> None:
+        records = tmp_path / ".claude" / "audit" / "records.jsonl"
+        records.parent.mkdir(parents=True)
+        records.write_text('{"event":"start"}\n')
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path)}
+        result = run_command(hook, bash_call(command), tmp_path, shell, env)
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        "before",
+        [
+            "printf -v PATH %s /tmp/d",
+            "printf -v 'BASH_CMDS[git]' %s /tmp/d/git",
+            "PATH=/tmp/d",
+            "export PATH=/tmp/d",
+            "alias git=/tmp/d/git",
+            "hash -p /tmp/d/git git",
+            "git() ( echo hi )",
+            "source ./env.sh",
+            "cd ../other",
+            "echo x > .git/hooks/post-index-change",
+            "git config core.hooksPath h",
+            "GIT_DIR=../other/.git; export GIT_DIR",
+        ],
+    )
+    def test_rollback_refuses_a_command_beside_a_restore(
+        self, repo: Path, shell: str, before: str
+    ) -> None:
+        sha = checkpoint(repo)
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        command = f"{before}; git stash apply {sha}"
+        result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
+        assert_blocked(result, "runs beside a restore", "F503 ROLLBACK_FAILED: ")
+
+    @pytest.mark.parametrize(
+        "before", ["git status", "git log -1 --oneline", "echo restoring", "pwd"]
+    )
+    def test_rollback_passes_a_reader_beside_a_restore(
+        self, repo: Path, shell: str, before: str
+    ) -> None:
+        sha = checkpoint(repo)
+        hook = command_hook("rollback", "PreToolUse", "Bash")
+        command = f"{before} && git stash apply {sha}"
+        result = run_command(hook, bash_call(command), repo, shell, ROLLBACK_ENV)
+        assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_printf_v_rebinds_a_reader(tmp_path: Path) -> None:
+    """The premise: after printf -v 'BASH_CMDS[cat]', bash runs tee for cat,
+    which appends its input to the records file."""
+    records = tmp_path / "records.jsonl"
+    records.write_text('{"event":"start"}\n')
+    tee = shutil.which("tee")
+    assert tee is not None
+    done = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"printf -v 'BASH_CMDS[cat]' %s {tee}; printf %s {AUDIT_PAYLOAD} | base64 -d"
+            " | cat -a records.jsonl > /dev/null",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "AKIAIOSFODNN7EXAMPLE" in records.read_text()

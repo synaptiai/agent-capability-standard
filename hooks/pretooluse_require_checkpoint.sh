@@ -479,6 +479,7 @@ hgit() {
   GIT_NO_LAZY_FETCH=1 bounded git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
 }
 
+# BEGIN call-place (the same in the pre-tool-use hook and the take hook; tests/test_hook_lists_match_mapper.py keeps them so)
 # The git directory git finds from the directory $1, into GIT_DIR_FOUND:
 # absolute, and exactly as git prints it (a command substitution strips the
 # line breaks that end its output, and a directory's name may end in one, so
@@ -627,6 +628,7 @@ git_dir_is_content() {
     *) return 0 ;;
   esac
 }
+# END call-place
 
 # The configuration keys that name a program git runs: core.fsmonitor (to
 # refresh the index: git status, git diff, git stash; true and false name

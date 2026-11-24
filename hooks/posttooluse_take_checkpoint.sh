@@ -33,7 +33,10 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # The hook writes no marker for a line over 4096 bytes (not read, nor
 # trimmed: the trims' cost grows with the line times its run of blanks), for
 # a call run in the background (its output is not yet the command's), for one
-# run in another repository than the project's (the payload's cwd), for
+# the pre-tool-use hook classified the worst case where it ran (the
+# payload's cwd: a git program or a git directory that may be repository
+# content, the same functions), for one run in another repository than the
+# project's (another git directory or work tree), for
 # output that is neither a commit id nor empty, or for empty output while the
 # project's tree or index differs from HEAD: HEAD would not restore that
 # state (checked with each filter the repository's own configuration names
@@ -68,6 +71,11 @@ elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
 else
   project_dir="$(pwd)"
 fi
+
+# The PATH the agent's commands run with, before the block below narrows it
+# for this hook's own programs: Claude Code gives each hook and each command
+# it runs the same environment (command_may_be_content reads it).
+agent_path="${PATH-}"
 
 # BEGIN hook-environment (the same in the three hooks that read a setting; tests/test_project_settings.py keeps them so)
 # The env of the project's settings files, repository content, reaches this
@@ -127,7 +135,7 @@ bounded() {
 }
 # END hook-environment
 
-input=$(cat)
+payload=$(cat)
 type -P jq > /dev/null 2>&1 || exit 0
 
 # The variables that the project's own settings files, .claude/settings.json
@@ -168,7 +176,7 @@ project_layer_settings() {
 named=$(project_layer_settings "$project_dir") || exit 0
 [ -z "$named" ] || exit 0
 
-command=$(printf '%s' "$input" | jq -r 'if type == "object" then (.tool_input.command | strings) else empty end' 2>/dev/null) || exit 0
+command=$(printf '%s' "$payload" | jq -r 'if type == "object" then (.tool_input.command | strings) else empty end' 2>/dev/null) || exit 0
 # Not read past 4096 bytes, before the trims (as the pre-tool-use hook).
 [ "${#command}" -le 4096 ] || exit 0
 command="${command#"${command%%[![:space:]]*}"}"
@@ -212,6 +220,157 @@ hgit() {
   GIT_NO_LAZY_FETCH=1 bounded git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
 }
 
+# BEGIN call-place (the same in the pre-tool-use hook and the take hook; tests/test_hook_lists_match_mapper.py keeps them so)
+# The git directory git finds from the directory $1, into GIT_DIR_FOUND:
+# absolute, and exactly as git prints it (a command substitution strips the
+# line breaks that end its output, and a directory's name may end in one, so
+# an x is printed after git's line and taken off with git's line break).
+# Status 0: found; 1: no repository there (git exits 128: there is none, or
+# git refuses it, as it refuses the agent's commands there); 2: git cannot
+# say (no git, stopped at its time bound, or any other answer).
+git_dir_at() {
+  local status=0
+  GIT_DIR_FOUND=""
+  command -v git > /dev/null 2>&1 || return 2
+  GIT_DIR_FOUND=$(hgit -C "$1" rev-parse --absolute-git-dir 2> /dev/null && printf x) || status=$?
+  case "$status" in
+    0) ;;
+    128) GIT_DIR_FOUND="" && return 1 ;;
+    *) GIT_DIR_FOUND="" && return 2 ;;
+  esac
+  GIT_DIR_FOUND="${GIT_DIR_FOUND%x}"
+  GIT_DIR_FOUND="${GIT_DIR_FOUND%$'\n'}"
+  [ -n "$GIT_DIR_FOUND" ] || return 2
+}
+
+# git's one-line answer ($@: hgit's arguments), into GIT_LINE, exactly as
+# git_dir_at reads it. Fails with git's status, or 1 for no line.
+git_line() {
+  GIT_LINE=$(hgit "$@" 2> /dev/null && printf x) || return $?
+  GIT_LINE="${GIT_LINE%x}"
+  [[ "$GIT_LINE" == *$'\n' ]] || return 1
+  GIT_LINE="${GIT_LINE%$'\n'}"
+}
+
+# The physical path of the directory $1, into PHYSICAL, exactly (the x keeps
+# the line breaks that may end a name from the command substitution).
+physical_dir() {
+  PHYSICAL=$(cd -P -- "$1" 2> /dev/null && pwd -P && printf x) || return 1
+  PHYSICAL="${PHYSICAL%x}"
+  [[ "$PHYSICAL" == *$'\n' ]] || return 1
+  PHYSICAL="${PHYSICAL%$'\n'}"
+}
+
+# Whether the program the agent's shell runs for the command name $1 may be
+# repository content (§5.18.3: a call is classified by its effect, and a
+# layer that cannot tell which program runs takes the worst case). bash runs
+# a name with no slash as the first executable file of that name in a
+# directory of its PATH (agent_path): the repository's own git, cat or ls
+# runs in place of the system's when PATH holds an empty or relative entry
+# (bash reads it from the working directory: PATH=node_modules/.bin:$PATH,
+# or a leading colon) under which the name is found, or an entry in the
+# project directory (an activated virtual environment, direnv's PATH_add)
+# whose file of that name lies, links followed, in the project (as
+# hook_path reads the project: not where it is the user's home directory, or
+# holds it). Yes then, when no such file is found, and when anything here
+# cannot be read. Not seen: the entries Claude Code's Bash tool adds to PATH
+# from the user's shell startup files (its shell snapshot), which reach no
+# hook. The SDK mapper asks the same (command_may_be_content).
+command_may_be_content() {
+  local name="$1" rest found="" entry dir target links=0 project="" home=""
+  case "$name" in "" | */*) return 0 ;; esac
+  [ -n "$agent_path" ] || return 0
+  call_dir || return 0
+  rest="${agent_path}:"
+  while [ -n "$rest" ]; do
+    entry="${rest%%:*}"
+    rest="${rest#*:}"
+    case "$entry" in
+      /*) found="${entry%/}/$name" ;;
+      *) found="${CALL_DIR%/}/${entry:+${entry%/}/}$name" ;;
+    esac
+    if [ -f "$found" ] && [ -x "$found" ]; then
+      case "$entry" in /*) break ;; *) return 0 ;; esac
+    fi
+    found=""
+  done
+  [ -n "$found" ] || return 0
+  # The file it names, each link followed.
+  while :; do
+    dir="${found%/*}"
+    physical_dir "${dir:-/}" || return 0
+    found="${PHYSICAL%/}/${found##*/}"
+    [ -L "$found" ] || break
+    links=$((links + 1))
+    [ "$links" -le 40 ] || return 0
+    target=$(readlink -- "$found" 2> /dev/null && printf x) || return 0
+    target="${target%x}"
+    [[ "$target" == *$'\n' ]] || return 0
+    target="${target%$'\n'}"
+    case "$target" in /*) found="$target" ;; *) found="${PHYSICAL%/}/$target" ;; esac
+  done
+  physical_dir "$project_dir" || return 0
+  project="$PHYSICAL"
+  # The home directory as the password database gives it, not HOME.
+  if home=$(unset HOME && cd -P ~ 2> /dev/null && pwd -P && printf x); then
+    home="${home%x}"
+    home="${home%$'\n'}"
+  else
+    home=""
+  fi
+  # A project that is the home directory, or holds it, is no repository's.
+  case "$home/" in "$project"/*) [ -z "$home" ] || return 1 ;; esac
+  case "$found" in "$project"/*) return 0 ;; esac
+  return 1
+}
+
+# Whether $1, an absolute git directory, is one git makes for a work tree: a
+# .git directory, or a linked worktree's or a submodule's under one. git
+# refuses a path with a .git component in a repository, so no clone or
+# checkout writes one; but a repository can ship a directory holding HEAD,
+# objects/ and refs/, which git takes for a git directory (an embedded bare
+# repository) and whose config and hooks are then repository content.
+git_dir_is_made() {
+  case "$1" in
+    */.git | */.git/worktrees/* | */.git/modules/*) return 0 ;;
+  esac
+  return 1
+}
+
+# The payload's cwd, into PAYLOAD_CWD, exactly as given (empty when there is
+# none): a command substitution strips the line breaks that end its output,
+# and a directory's name may end in one (`cd $'d\n'` is not d), so an x is
+# printed after the cwd and taken off. Fails when the payload cannot be read.
+payload_cwd() {
+  PAYLOAD_CWD=$(printf '%s' "$payload" | jq -j '(.cwd // "" | strings), "x"' 2>/dev/null) || return 1
+  PAYLOAD_CWD="${PAYLOAD_CWD%x}"
+}
+
+# The directory the call runs in, into CALL_DIR: its cwd, else the project
+# directory. Fails when the payload cannot be read.
+call_dir() {
+  payload_cwd || return 1
+  CALL_DIR="${PAYLOAD_CWD:-${CLAUDE_PROJECT_DIR:-$PWD}}"
+}
+
+# Whether the git directory git finds where this call runs is repository
+# content (not one git made for a work tree, git_dir_is_made): there git
+# reads that directory's config and hooks, and runs what they name
+# (core.fsmonitor for git status, git ls-files and git stash,
+# diff.<driver>.textconv for git log -p, git show and git diff). No
+# repository there: no. The SDK mapper asks the same (git_dir_may_be_content).
+git_dir_is_content() {
+  local found=0
+  call_dir || return 0
+  git_dir_at "$CALL_DIR" || found=$?
+  case "$found" in
+    0) ! git_dir_is_made "$GIT_DIR_FOUND" ;;
+    1) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+# END call-place
+
 split_words "$command" || exit 0
 words=("${WORDS[@]}")
 if [ "$GLOBBED" = 1 ] || [ "${words[0]}" != "git" ] || [ "${words[1]:-}" != "stash" ] || [ "${words[2]:-}" != "create" ]; then
@@ -225,27 +384,36 @@ done
 
 # A failed or interrupted call saved nothing; a background one has not
 # finished.
-skip=$(printf '%s' "$input" | jq -r '(.tool_response.is_error == true) or (.tool_response.interrupted == true) or (.tool_input.run_in_background == true)' 2>/dev/null) || exit 0
+skip=$(printf '%s' "$payload" | jq -r '(.tool_response.is_error == true) or (.tool_response.interrupted == true) or (.tool_input.run_in_background == true)' 2>/dev/null) || exit 0
 [ "$skip" = "false" ] || exit 0
 
 project="$project_dir"
 
-# The call ran in the project's repository: Claude Code sends the cwd it
-# ran in; a stash of another repository restores nothing here. The cwd and
-# git's answers are read exactly: a command substitution strips the line
-# breaks that end its output, and a directory's name may end in one (d and
-# $'d\n' are two directories), so an x is printed after each and compared
-# with it.
-cwd=$(printf '%s' "$input" | jq -j '(.cwd // "" | strings), "x"' 2>/dev/null) || exit 0
-cwd="${cwd%x}"
-if [ -n "$cwd" ]; then
-  command -v git > /dev/null 2>&1 || exit 0
-  ran_in=$(hgit -C "$cwd" rev-parse --show-toplevel 2>/dev/null && printf x) || exit 0
-  ours=$(hgit -C "$project" rev-parse --show-toplevel 2>/dev/null && printf x) || exit 0
-  [ "$ran_in" != x ] && [ "$ran_in" = "$ours" ] || exit 0
-fi
+# The call took a checkpoint only where the pre-tool-use hook classified it
+# `checkpoint` (§5.18.6), in the directory it ran in (Claude Code sends that
+# cwd; else the project directory): the git the agent's shell ran is the
+# system's (command_may_be_content), and the git directory git finds there
+# is one git made for a work tree (git_dir_is_content). Otherwise it was the
+# worst case, and what it printed restores nothing: a shipped git directory
+# whose core.worktree is the project stashes into its own object store.
+command_may_be_content git && exit 0
+git_dir_is_content && exit 0
+# And it ran in the project's repository: the same git directory (which
+# stores the commit) and the same work tree; a stash of another repository
+# restores nothing here. The cwd and git's answers are read exactly: a
+# command substitution strips the line breaks that end its output, and a
+# directory's name may end in one (d and $'d\n' are two directories), so an
+# x is printed after each and compared with it.
+call_dir || exit 0
+git_dir_at "$CALL_DIR" || exit 0
+ran_in_git="$GIT_DIR_FOUND"
+git_dir_at "$project" || exit 0
+[ "$ran_in_git" = "$GIT_DIR_FOUND" ] || exit 0
+ran_in=$(hgit -C "$CALL_DIR" rev-parse --show-toplevel 2>/dev/null && printf x) || exit 0
+ours=$(hgit -C "$project" rev-parse --show-toplevel 2>/dev/null && printf x) || exit 0
+[ "$ran_in" != x ] && [ "$ran_in" = "$ours" ] || exit 0
 
-printed=$(printf '%s' "$input" | jq -r '.tool_response.stdout // "" | strings' 2>/dev/null) || printed=""
+printed=$(printf '%s' "$payload" | jq -r '.tool_response.stdout // "" | strings' 2>/dev/null) || printed=""
 printed="${printed//[[:space:]]/}"
 now=$(date +%s)
 if [[ "$printed" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then

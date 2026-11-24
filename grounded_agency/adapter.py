@@ -128,6 +128,11 @@ class _HookCheck(NamedTuple):
     asked_at: datetime | None
     """When the hook asked for a decision (its ``"ask"``): a binding's
     ``approval.expires`` counts from then (section 5.18.7)."""
+    mapping: ToolMapping | None = None
+    """The mapping the hook checked the call under (its binding as it was
+    then): a decision counts only against the binding it was asked under,
+    and the callback refuses a call whose binding changed since
+    (section 5.18.7)."""
 
 
 class _Fault(NamedTuple):
@@ -1544,6 +1549,49 @@ class GroundedAgentAdapter:
         log instead with ``strict_mode=False``; and, for a call that
         requires approval, F502: the decision asked for was on other
         arguments."""
+        return self._recheck_refusal(
+            mapping,
+            tool,
+            call,
+            args,
+            f"the input of {tool} is not the one this layer's PreToolUse hook checked",
+            "on other arguments",
+        )
+
+    def _changed_binding_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None, args: Any
+    ) -> str | None:
+        """The refusal of a call whose mapping, ``mapping`` now, is not the
+        one the PreToolUse hook checked it under, or not the one in force
+        when the host was asked (section 5.18.7: a decision counts against
+        the binding's approval policy): its binding was registered again, a
+        composite was reloaded because a binding it invokes changed, or a
+        profile was applied. As :meth:`_changed_input_refusal`: the checks
+        of section 5.18.10 under the current mapping (F504), a prerequisite
+        or a checkpoint the call does not hold (F501), and, for a call that
+        requires approval now, F502: the decision asked for, if any, was
+        under another binding (its capability, flags or approval policy)."""
+        return self._recheck_refusal(
+            mapping,
+            tool,
+            call,
+            args,
+            f"the binding of {tool} changed after this layer checked the call",
+            "under another binding (its capability, flags or approval policy)",
+        )
+
+    def _recheck_refusal(
+        self,
+        mapping: ToolMapping,
+        tool: str,
+        call: str | None,
+        args: Any,
+        why: str,
+        decided: str,
+    ) -> str | None:
+        """:meth:`_changed_input_refusal` and
+        :meth:`_changed_binding_refusal`: ``why`` the call is checked again,
+        ``decided`` what the decision asked for was on."""
         refusal = self._secret_refusal(
             mapping, tool, call, args
         ) or self._destination_refusal(mapping, tool, call, args)
@@ -1558,9 +1606,8 @@ class GroundedAgentAdapter:
                     mapping,
                     tool,
                     call,
-                    f"the input of {tool} is not the one this layer's "
-                    f"PreToolUse hook checked, and the call it makes requires "
-                    f"a checkpoint the call does not hold",
+                    f"{why}, and the call it makes requires a checkpoint the "
+                    f"call does not hold",
                 )
         if refusal is not None:
             if self.config.strict_mode:
@@ -1572,20 +1619,55 @@ class GroundedAgentAdapter:
                 mapping,
                 tool,
                 call,
-                f"the input of {tool} is not the one this layer's PreToolUse "
-                f"hook checked: the decision asked for was on other arguments. "
-                f"{tool} did not run.",
+                f"{why}: the decision asked for was {decided}. {tool} did not "
+                f"run, and needs a new decision.",
+            )
+        return None
+
+    def _approval_policy_refusal(
+        self, mapping: ToolMapping, tool: str, call: str | None
+    ) -> str | None:
+        """F502 for a call whose binding's approval policy this layer cannot
+        meet (section 5.18.7): more than one approver, or an approver's role
+        (a permission prompt obtains one decision per call, and cannot show
+        the layer the person's role); None otherwise. The PreToolUse hook
+        refuses the call before it asks; the permission callback applies it
+        to the policy in force when the decision arrives."""
+        policy = mapping.approval
+        if policy is not None and policy.min_approvers > 1:
+            return self._refuse(
+                ErrorCode.APPROVAL_REQUIRED,
+                mapping,
+                tool,
+                call,
+                f"{_subject(mapping, tool)} needs {policy.min_approvers} "
+                f"approvers; this layer obtains one per call",
+            )
+        if policy is not None and policy.role is not None:
+            return self._refuse(
+                ErrorCode.APPROVAL_REQUIRED,
+                mapping,
+                tool,
+                call,
+                f"{_subject(mapping, tool)} needs an approver with role "
+                f"'{policy.role}'; a permission prompt cannot show this layer "
+                f"the person's role",
             )
         return None
 
     def _note_hook_check(
-        self, call: str, input_data: dict[str, Any], asked: bool
+        self,
+        call: str,
+        input_data: dict[str, Any],
+        asked: bool,
+        mapping: ToolMapping | None = None,
     ) -> None:
         """Keep what the PreToolUse hook checked of ``call`` (_HookCheck)."""
         check = _HookCheck(
             _args_key(input_data.get("tool_input", {})),
             _cwd_of(input_data),
             self._now() if asked else None,
+            mapping,
         )
         with self._state_lock:
             self._hook_checks.pop(call, None)
@@ -1606,6 +1688,12 @@ class GroundedAgentAdapter:
             return None
         with self._state_lock:
             return self._hook_checks.pop(call, None)
+
+    def _kept_call_dir(self, call: str | None) -> str | None:
+        """The directory the PreToolUse hook classified ``call`` in (what it
+        kept of it), keeping it."""
+        kept = self._hook_check(call)
+        return kept.cwd if kept is not None else None
 
     def _call_dir(self, call: str | None, input_data: dict[str, Any]) -> str | None:
         """The directory a call that reported back ran in (its hook input's
@@ -1895,6 +1983,7 @@ class GroundedAgentAdapter:
             self.mapper,
             expiry_minutes=self.config.expiry_minutes,
             refuses_output=self._refuses_host_result,
+            call_dir=self._kept_call_dir,
         )
         post_hooks.append(self._wrap_hook(recorder))
 
@@ -2305,6 +2394,11 @@ class GroundedAgentAdapter:
         def deny(message: str) -> dict[str, Any]:
             return decide("deny", message)
 
+        # The mapping each call was checked under, by call id, from
+        # check_call to check_before_tool, which keeps it for the
+        # permission callback (_HookCheck.mapping).
+        checked_under: dict[str, ToolMapping] = {}
+
         async def check_call(
             input_data: dict[str, Any],
             tool_use_id: str | None,
@@ -2366,6 +2460,8 @@ class GroundedAgentAdapter:
                         "Could not classify %s; treating it as unbound", tool_name
                     )
                     mapping = UNCLASSIFIED_TOOL
+                if isinstance(call, str):
+                    checked_under[call] = mapping
 
                 if mapping.control:
                     try:
@@ -2460,33 +2556,10 @@ class GroundedAgentAdapter:
 
                 if asks and mapping.requires_approval:
                     policy = mapping.approval
-                    if policy is not None and policy.min_approvers > 1:
+                    refusal = self._approval_policy_refusal(mapping, tool_name, call)
+                    if refusal is not None:
                         release()
-                        return deny(
-                            self._refuse(
-                                ErrorCode.APPROVAL_REQUIRED,
-                                mapping,
-                                tool_name,
-                                call,
-                                f"{_subject(mapping, tool_name)} needs "
-                                f"{policy.min_approvers} approvers; this layer "
-                                f"obtains one per call",
-                            )
-                        )
-                    if policy is not None and policy.role is not None:
-                        release()
-                        return deny(
-                            self._refuse(
-                                ErrorCode.APPROVAL_REQUIRED,
-                                mapping,
-                                tool_name,
-                                call,
-                                f"{_subject(mapping, tool_name)} needs an "
-                                f"approver with role '{policy.role}'; a "
-                                f"permission prompt cannot show this layer the "
-                                f"person's role",
-                            )
-                        )
+                        return deny(refusal)
                     expires = policy.expires_seconds if policy is not None else None
                     if expires is not None and prompt_tool:
                         release()
@@ -2630,14 +2703,21 @@ class GroundedAgentAdapter:
             """PreToolUse hook: every check of section 5.18, in order; for a
             call it passes or asks about, what it checked is kept for the
             permission callback (:meth:`_note_hook_check`)."""
-            result = await check_call(input_data, tool_use_id, context)
+            call = tool_use_id or input_data.get("tool_use_id")
+            try:
+                result = await check_call(input_data, tool_use_id, context)
+            finally:
+                mapping = (
+                    checked_under.pop(call, None) if isinstance(call, str) else None
+                )
             out = result.get("hookSpecificOutput") or {}
             decision = out.get("permissionDecision")
-            call = tool_use_id or input_data.get("tool_use_id")
             if decision == "deny" or not isinstance(call, str):
                 return result
             try:
-                self._note_hook_check(call, input_data, asked=decision == "ask")
+                self._note_hook_check(
+                    call, input_data, asked=decision == "ask", mapping=mapping
+                )
             except Exception:
                 # The permission callback, if the host asks it, finds no
                 # record and refuses the call (R407).
@@ -2837,19 +2917,30 @@ class GroundedAgentAdapter:
            has no record of is refused (R407), and an input other than the
            one it checked, as another hook's ``updatedInput`` makes it, is
            changed arguments (:meth:`_changed_input_refusal`: F504, F501,
-           F502). The call is classified in the directory the hook saw.
+           F502). The call is classified in the directory the hook saw. A
+           call whose binding changed since the hook checked it (registered
+           again, a composite reloaded because a binding it invokes changed)
+           is checked again under the new one
+           (:meth:`_changed_binding_refusal`), and refused with F502 where it
+           requires approval: the decision would be asked under the other.
         3. For a gated call, holds its checkpoint (the same hold as the
            PreToolUse hook's; F501 when none is left; R407 when the call has
            no ``tool_use_id``). The checkpoint is checked before a person is
            asked.
-        4. Hands the decision to ``host_can_use_tool`` when there is one.
+        4. Hands the decision to ``host_can_use_tool`` when there is one,
+           unless the binding's approval policy is one this layer cannot
+           meet (more than one approver, a role: F502, no one asked).
            A result that is not an allow releases the hold; for a call that
            requires approval it becomes ``F502 APPROVAL_REQUIRED: <tool> was
-           not approved: <the host's message>``. So does an allow that
-           arrives later than the binding's ``approval.expires`` after the
-           request (the PreToolUse hook's ask, or this callback's call of
-           the host's, whichever came first; STANDARD 1.2.0 section
-           5.18.7). An allow whose
+           not approved: <the host's message>``. An allow counts against the
+           binding as it is when it arrives (STANDARD 1.2.0 section
+           5.18.7): the call is classified again, and one whose binding
+           changed while the host decided is checked again and refused as
+           in step 2, and the approval policy then in force applies (F502
+           for more than one approver or a role, and for an allow that
+           arrives later than its ``approval.expires`` after the request:
+           the PreToolUse hook's ask, or this callback's call of the
+           host's, whichever came first). An allow whose
            ``updated_input`` differs from the input is classified again
            (STANDARD 1.2.0 section 5.18.7): refused if the new arguments need
            a prerequisite (F501, F503, V102) or a checkpoint (F501) the call
@@ -3003,6 +3094,29 @@ class GroundedAgentAdapter:
                                 return deny(message, holder), None
                             logger.warning("%s executing without checkpoint", tool_name)
 
+                if (
+                    checked is not None
+                    and checked.mapping is not None
+                    and checked.args_key == _args_key(input_data)
+                    and mapping0 != checked.mapping
+                ):
+                    # Section 5.18.7: the binding changed after the hook
+                    # checked the call (registered again, a composite
+                    # reloaded, a profile applied). Checked again under the
+                    # binding as it is now (a checkpoint it now needs is
+                    # held above), and a decision asked under the other one
+                    # decides nothing.
+                    refusal = self._changed_binding_refusal(
+                        mapping0, tool_name, holder, input_data
+                    )
+                    if refusal is not None:
+                        return deny(refusal, holder), None
+                if asks and mapping0.requires_approval:
+                    # A policy this layer cannot meet: no one is asked.
+                    refusal = self._approval_policy_refusal(mapping0, tool_name, holder)
+                    if refusal is not None:
+                        return deny(refusal, holder), None
+
                 if host_can_use_tool is None:
                     # No one to ask. An approval no one can give is a
                     # refusal (STANDARD 1.2.0 section 5.18.7, F502).
@@ -3059,15 +3173,36 @@ class GroundedAgentAdapter:
                     release(holder)
                     return result, None
 
-                policy = mapping0.approval
+                # Section 5.18.7: the decision counts against the binding's
+                # approval policy as it is when the decision arrives. The
+                # binding may have changed while the host decided (a
+                # binding registered again, a composite reloaded because a
+                # binding it invokes changed): the call is classified
+                # again, and one whose binding changed is checked again
+                # under the new one, and refused where it requires approval
+                # (the decision was asked under the other).
+                mapping_now = mapper.map_tool(tool_name, input_data, cwd)
+                if mapping_now != mapping0:
+                    refusal = self._changed_binding_refusal(
+                        mapping_now, tool_name, holder, input_data
+                    )
+                    if refusal is not None:
+                        return deny(refusal, holder), None
+                    if asks and mapping_now.requires_approval:
+                        refusal = self._approval_policy_refusal(
+                            mapping_now, tool_name, holder
+                        )
+                        if refusal is not None:
+                            return deny(refusal, holder), None
+                policy = mapping_now.approval
                 expires = policy.expires_seconds if policy is not None else None
-                if asks and mapping0.requires_approval and expires is not None:
+                if asks and mapping_now.requires_approval and expires is not None:
                     waited = (self._now() - requested).total_seconds()
                     if waited > expires:
                         return deny(
                             self._refuse(
                                 ErrorCode.APPROVAL_REQUIRED,
-                                mapping0,
+                                mapping_now,
                                 tool_name,
                                 holder,
                                 f"the decision on {tool_name} arrived "
@@ -3081,7 +3216,7 @@ class GroundedAgentAdapter:
 
                 updated = getattr(result, "updated_input", None)
                 args1 = updated if isinstance(updated, dict) else input_data
-                mapping1 = mapping0
+                mapping1 = mapping_now
                 if _args_key(args1) != _args_key(input_data):
                     # Section 5.18.7, changed arguments: classify again.
                     mapping1 = mapper.map_tool(tool_name, args1, cwd)
@@ -3092,7 +3227,7 @@ class GroundedAgentAdapter:
                     )
                     if refusal is None and (
                         mapping1.requires_checkpoint
-                        and not mapping0.requires_checkpoint
+                        and not mapping_now.requires_checkpoint
                     ):
                         refusal = self._refuse(
                             ErrorCode.CHECKPOINT_REQUIRED,
@@ -3114,11 +3249,10 @@ class GroundedAgentAdapter:
                         )
                     if refusal is not None:
                         return deny(refusal, holder), None
-                    if (
-                        mapping0.requires_checkpoint
-                        and not mapping1.requires_checkpoint
-                    ):
-                        release(holder)
+                if not mapping1.requires_checkpoint:
+                    # A hold the call no longer needs (its arguments, or
+                    # its binding, changed) leaves its checkpoint valid.
+                    release(holder)
 
                 checkpoint_id, refusal = use_checkpoint(mapping1, tool_name, holder)
                 if refusal is not None:

@@ -25,7 +25,9 @@ hooks:
             # builds) is read word by word, as the shell passes the words (escapes
             # and line continuations read as bash reads them), and may not write a
             # file, run a program that could (an interpreter, an in-place editor, cp,
-            # tee, dd, ...), or build its text when it runs; mv only moves the
+            # tee, dd, ...), set or name a variable that changes what a program runs
+            # (PATH, BASH_CMDS, printf -v), or build its text when it runs; a glob's
+            # bracket expressions are read as bash reads them; mv only moves the
             # project's records file aside in its own directory. So a file named with
             # quotes, a glob or a brace, or a record rewritten in two steps, is
             # refused, as is an extglob pattern (@(...), once shopt -s extglob has
@@ -139,7 +141,8 @@ hooks:
             # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
             # A Bash command's simple commands and their words as the shell passes them,
             # quotes and escapes removed. Each word: raw (as written), d (dequoted), m
-            # (dequoted, an unquoted glob character *, ?, [ or ] as \u0001), braces (an
+            # (dequoted, an unquoted glob character *, ?, [ or ] as \u0001), g (dequoted,
+            # the unquoted *, ?, [ and ] as \u0001 to \u0004: glob_text), braces (an
             # unquoted brace outside ${...}), ansi (it holds $'...' or $"...", kept as
             # written: bash decodes or translates them), subst (it holds a backtick, or
             # $( or ${ in double quotes, whose own quotes bash pairs apart from the text
@@ -158,6 +161,52 @@ hooks:
             # costs the text times its matches, so the caller bounds the command's
             # length.
             def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
+            # A word's text as a glob: with $unquoted, *, ?, [ and ] as \u0001 to
+            # \u0004; a character from \u0001 to \u0005 typed in it as U+FFFD, which
+            # matches no name, as bash matches the character.
+            def glob_text($unquoted): [explode[] | if . >= 1 and . <= 5 then 65533
+              elif ($unquoted | not) then .
+              elif . == 42 then 1 elif . == 63 then 2 elif . == 91 then 3 elif . == 93 then 4 else . end] | implode;
+            # A glob (glob_text) with each bracket expression read as bash reads one, in
+            # time linear in the glob. A [, then ! or ^ and a character, or a character
+            # other than ! and ^, then characters, up to the ] that closes it, is one
+            # character (\u0002) where no character before that ] is a [ followed by :,
+            # = or . (a class such as [:alpha:], [=c=] or [.c.]) and the first is no ]
+            # (bash reads a ] first in the set as one of it). Where a [ that a ] follows
+            # opens any other bracket expression, the run from it to the last ] is any
+            # run (\u0001): more than bash matches there, never less. With $lossy (the
+            # quotes were removed before, so a ] in a set cannot be told from one after
+            # it), a ] after a bracket expression makes that run any run too. A [ or ]
+            # left is a character (bash reads a [ that no ] closes as one). A run of
+            # \u0001 and \u0006 (a brace expansion's digits) is one, \u0001 where either
+            # is.
+            def glob_marks($lossy): explode as $c | ($c | length) as $n
+              # $stop[k]: the first j >= k where a set ends or cannot go on (a ], or a
+              # [ followed by :, = or .), null if none
+              | (reduce range($n - 1; -1; -1) as $j ([null];
+                   .[$j] = (if $c[$j] == 4 or ($c[$j] == 3 and ($c[$j + 1] == 58 or $c[$j + 1] == 61 or $c[$j + 1] == 46))
+                            then $j else .[$j + 1] end))) as $stop
+              | (reduce range(0; $n) as $i ({skip: 0, out: []};
+                   if $i < .skip then .
+                   elif $c[$i] == 3 then
+                     ($i + 1 + (if $c[$i + 1] == 33 or $c[$i + 1] == 94 then 1 else 0 end)) as $f
+                     | if $f < $n and $stop[$f] != $f and $stop[$f] != null and $c[$stop[$f]] == 4
+                       then .out += [5] | .skip = $stop[$f] + 1
+                       else .out += [3] end
+                   else .out += [$c[$i]] end) | .out) as $o
+              | ($o | length) as $m
+              | (first(range(0; $m) as $i | select($o[$i] == 3 or ($lossy and $o[$i] == 5)) | $i) // null) as $open
+              | (if $open == null then null else first(range($m - 1; $open; -1) as $i | select($o[$i] == 4) | $i) // null end) as $close
+              | (if $close != null then $o[:$open] + [1] + $o[$close + 1:] else $o end)
+              | reduce .[] as $x ([];
+                  if ($x == 1 or $x == 6) and (.[-1] == 1 or .[-1] == 6) then .[-1] = (if $x == 1 then 1 else .[-1] end)
+                  else . + [if $x == 5 then 2 else $x end] end)
+              | implode;
+            # The fewest characters a glob_marks glob matches.
+            def glob_min: explode | map(select(. != 1 and . != 6)) | length;
+            # A glob_marks glob as an anchored regular expression.
+            def marks_regex: "^" + (gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*") | gsub("\u0002"; ".")
+              | gsub("\u0003"; "\\[") | gsub("\u0004"; "\\]") | gsub("\u0006"; "[0-9-]*")) + "$";
             # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
             # newline is removed (a line continuation with its newline), any other stays.
             def dq_text: [scan("\\\\[\\s\\S]|[^\\\\]+")]
@@ -173,6 +222,7 @@ hooks:
               | {raw: $raw,
                  d: ($s | map(.t) | add // ""),
                  m: ($s | map(if .q then .t else (.t | unquoted_globs) end) | add // ""),
+                 g: ($s | map(.q as $q | .t | glob_text($q | not)) | add // ""),
                  braces: ($s | any((.q | not) and (.t | gsub("\\$\\{[^}]*\\}"; "") | test("[{}]")))),
                  ansi: ($s | any(.ansi)),
                  subst: ($s | any(if .sq or .esc then false elif .q then .t | test("`|\\$[({]") else .t | test("`") end)),
@@ -209,24 +259,35 @@ hooks:
             def sinks: ["/dev/null", "/dev/stdout", "/dev/stderr"];
             def basename_ci: ascii_downcase | sub("/+$"; "") | sub("^.*/"; "");
             def literal_path: gsub("\\$\\{CLAUDE_PROJECT_DIR:-\\.\\}"; ".");
-            def sensitive: test("^(PATH|ENV|BASH_ENV|IFS|CDPATH|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|OPENSSL_[A-Z0-9_]*)$");
+            # The variables that change what a program runs or writes: PATH, IFS,
+            # ENV, BASH_ENV, CDPATH, bash's tables of the programs names run and of
+            # aliases (BASH_CMDS[cat]=/usr/bin/tee makes cat tee), the loader's and
+            # openssl's. A variable is set without NAME=value too (printf -v NAME,
+            # printf -vNAME, printf -v 'NAME[key]'), for the rest of the line, so a
+            # word that names one, alone, glued to an option, with a subscript or a
+            # value, is refused.
+            def sensitive_names: "PATH|ENV|BASH_ENV|IFS|CDPATH|BASH_CMDS|BASH_ALIASES|LD_[A-Z0-9_]*|DYLD_[A-Z0-9_]*|OPENSSL_[A-Z0-9_]*";
+            def sensitive: test("^(\(sensitive_names))$");
+            def names_sensitive: test("^(-[A-Za-z]*)?(\(sensitive_names))(\\[.*\\])?(\\+?=.*)?$");
             def openssl_writes: test("^-(out|engine|provider|config|writerand|rand)");
-            # Whether a word with a glob character (marked \u0001), or a word a brace
-            # expansion gives, may name the records file or another file of
+            # Whether a word with a glob character (its g: glob_text), or a word a
+            # brace expansion gives, may name the records file or another file of
             # .claude/audit (the records moved aside, records.<time>.jsonl), or a
             # directory on its way (.claude, .claude/audit: cd .cl*/au*t, then the
             # file by its last name), from the directory the command runs in: each of
             # its last components may match the path's, and the directories it leaves
-            # out are the last ones of that directory. A glob character matches any run
-            # here (more than the shell's), but not a name's leading dot unless the
-            # command may turn on dotglob ($dots); a sequence of numbers gives a run of
-            # digits (\u0006).
-            # (A pattern with more characters than the name, glob characters
-            # aside, cannot match it: so no regex is built from a long word.)
-            def glob_part($pattern): . as $name | ($pattern | ascii_downcase) as $p
-              | ($p | explode | map(select(. != 1 and . != 6)) | length) <= ($name | length)
-              and ($dots or ((($name | startswith(".")) and ($p | startswith("\u0001"))) | not))
-                and ($name | test("^" + ($p | gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*") | gsub("\u0006"; "[0-9-]*")) + "$"));
+            # out are the last ones of that directory. A component matches as the
+            # shell matches it (in any letter case), each bracket expression read as
+            # bash reads one (glob_marks: .cl[[:lower:]]ude, .cl[a-z]ude and
+            # .cl[!x]ude are .claude), but a glob does not match a name's leading dot
+            # unless the command may turn on dotglob ($dots); a sequence of numbers
+            # gives a run of digits (\u0006).
+            # (A pattern that matches more characters than the name has cannot
+            # match it: so no regex is built from a long word.)
+            def glob_part($pattern): . as $name | ($pattern | ascii_downcase | glob_marks(false)) as $p
+              | ($p | glob_min) <= ($name | length)
+              and ($dots or ((($name | startswith(".")) and ($p | test("^[\u0001\u0002]"))) | not))
+                and ($name | test($p | marks_regex));
             def may_name_path($cwd; $file): . as $parts
               | ($file | length) as $n
               | ([$parts | length, $n] | min) as $k
@@ -291,18 +352,26 @@ hooks:
             def brace_words: brace_expand(0);
             def names_records($cwd): may_name_records($cwd) or (sub("^[^=]*="; "") | may_name_records($cwd));
             def may_name($cwd):
-              if .braces then (.m | brace_words) as $ws | $ws == null or any($ws[]; names_records($cwd))
-              else .m | test("\u0001") and names_records($cwd) end;
+              if .braces then (.g | brace_words) as $ws | $ws == null or any($ws[]; names_records($cwd))
+              else (.m | test("\u0001")) and (.g | names_records($cwd)) end;
             # The first refusal of a simple command, or null.
             def check_command($words):
               ($words | map(select(.target | not))) as $args
               | (first(range(0; $args | length) | select($args[.].assign | not)) // ($args | length)) as $p
-              | if $p == ($args | length) then
+              | (first($args[] | select(.d | names_sensitive)) // null) as $var
+              | if $var != null then {kind: "assign", word: $var.d}
+                elif $p == ($args | length) then
                   (first($args[] | select(.raw | sub("\\+?=.*$"; "") | sensitive)) // null) as $bad
                   | if $bad != null then {kind: "assign", word: $bad.raw} else null end
                 elif $p > 0 then {kind: "assign", word: $args[0].raw}
                 else $args[0].d as $prog
                 | if ($prog | test("[/$]")) or (any(readers[]; . == $prog) | not) then {kind: "program", word: $prog}
+                  # printf with an option (printf -v NAME sets a variable the rest of
+                  # the line runs with), or a first word that may expand to one
+                  elif $prog == "printf" and $args[1] != null
+                       and (($args[1].d | startswith("-")) or ($args[1].raw | test("[$`]"))
+                            or ($args[1].m | test("\u0001")) or $args[1].braces) then
+                    {kind: "assign", word: "printf \($args[1].d)"}
                   elif $prog == "openssl" then
                     (first($args[1:][] | select(.d | startswith("-") | not)) // {d: ""}) as $sub
                     | if $sub.d != "dgst" then {kind: "program", word: "openssl \($sub.d)"}
@@ -633,7 +702,7 @@ hooks:
                 writer) echo "F504 CONSTRAINT_VIOLATED: in the audit skill no command runs a program that writes files its input names, which could write the records file unread: '$WORD' (an archive or patch tool, a recursive copy (cp -r, -R or -a, scp, rsync, rclone), git apply, am, update-index, read-tree, checkout-index, mktree or fast-import, a git alias or another command than git's own, a git command that writes the work tree from a commit (checkout and restore but of literal paths after -- that do not hold the records, switch, reset but --soft or --mixed, merge, pull, rebase, cherry-pick, revert, stash but list, show, create, store, drop or clear, worktree, submodule, clone, ...), find -exec or xargs running a program other than a reader, gunzip -N, curl but as curl -q without -J, -K or --variable, wget but with --no-config first and without -r, -m, -p, -x, -i or --content-disposition, HTTPie, aria2c, dpkg -x or -i, rpm -i; tar only creates or lists, with short options, and unzip only lists), wherever it stands: after !, if or while, and after any program but one read here (prlimit, setpriv, a loader): $ONE_FORM" >&2; exit 2 ;;
                 program) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command runs only programs that write no file but by a redirection and run no other code (cat, echo, printf, jq, ls, head, tail, wc, grep, cut, tr, base64, sha256sum, shasum, md5sum, date, hostname, sleep, test, true, false, pwd, cd, stat, basename, dirname, mkdir, mv to move the records file aside, openssl dgst), each by its name; it does not run '$WORD', which could write the records file unread: $ONE_FORM" >&2; exit 2 ;;
                 mv) echo "F504 CONSTRAINT_VIOLATED: in the audit skill mv only moves the records file aside, in the project's audit directory, as mv <project>/.claude/audit/records.jsonl <project>/.claude/audit/records.<UTC time>.jsonl with literal paths (no .., ~ or expansion); it does not run '$WORD', which could put another file in its place or take the records out: $ONE_FORM" >&2; exit 2 ;;
-                assign) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command does not set a variable for one command (NAME=value cmd), nor PATH, IFS, ENV, BASH_ENV, CDPATH, LD_*, DYLD_* or OPENSSL_*, which change what a program runs or writes: '$WORD'" >&2; exit 2 ;;
+                assign) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command does not set a variable for one command (NAME=value cmd), nor run printf with an option (printf -v NAME sets a variable for the rest of the line), nor name PATH, IFS, ENV, BASH_ENV, CDPATH, BASH_CMDS, BASH_ALIASES, LD_*, DYLD_* or OPENSSL_* (alone, as -vNAME, NAME[key] or NAME=value), which change what a program runs or writes: '$WORD'" >&2; exit 2 ;;
                 subst) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command may not substitute a command or a process, or escape text (\$(, a backtick, <(, >(, \\ outside single quotes, \$'...' or \$\"...\"), since what runs is not what this check reads; run each command on its own, with literal values: $ONE_FORM" >&2; exit 2 ;;
                 expands) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command may not hold text whose words this check cannot read ($WORD); $ONE_FORM" >&2; exit 2 ;;
                 long) echo "F504 CONSTRAINT_VIOLATED: in the audit skill a command other than the append form is read up to 16384 bytes, and this one is longer; $ONE_FORM" >&2; exit 2 ;;

@@ -243,6 +243,26 @@ def test_both_checkpoint_hooks_run_git_alike() -> None:
     assert "git -c core.fsmonitor=false -c core.hooksPath=/dev/null" in rollback
 
 
+def test_both_checkpoint_hooks_read_where_a_call_ran_alike() -> None:
+    """The take hook writes a marker only where the pre-tool-use hook
+    classified `git stash create` a checkpoint: it holds the same functions
+    for the directory a call ran in, its git directory and the program its
+    shell runs (security round 5, batch 3, #1), and saves the agent's PATH
+    before narrowing its own, as the pre-tool-use hook does."""
+    take = (HOOK.parent / "posttooluse_take_checkpoint.sh").read_text(encoding="utf-8")
+    pattern = re.compile(r"^# BEGIN call-place.*?^# END call-place$", re.M | re.S)
+    pre_block, take_block = pattern.search(TEXT), pattern.search(take)
+    assert pre_block and take_block
+    assert pre_block.group(0) == take_block.group(0)
+    for name in ("command_may_be_content", "git_dir_is_content", "call_dir"):
+        assert f"\n{name}() {{\n" in pre_block.group(0), name
+    saved = 'agent_path="${PATH-}"\n'
+    for text in (TEXT, take):
+        assert text.index(saved) < text.index("# BEGIN hook-environment")
+    checks = take.index("command_may_be_content git && exit 0")
+    assert checks < take.index("git_dir_is_content && exit 0") < take.index("printed=")
+
+
 def test_the_tools_that_load_unseen_commands_are_gated_in_both() -> None:
     """Skill, Agent and Task: the hook gates them (they are not on
     UNGATED_TOOLS and its case names them), the mapper gives them the worst

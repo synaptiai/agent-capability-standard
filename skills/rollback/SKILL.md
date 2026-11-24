@@ -63,7 +63,11 @@ hooks:
             # no entry, in a git directory git made for a work tree (a
             # repository can ship one of its own), and run in the project's
             # repository (the call's cwd), as the plugin's pre-tool-use hook
-            # reads it; valid or not, used or not. Any other spelling is refused:
+            # reads it; valid or not, used or not; beside other commands on its line
+            # only where each of them only reads (a variable set or named, printf -v,
+            # alias, hash, a function, source, cd or a file written may make the
+            # restore's git another program, or run it elsewhere). Any other
+            # spelling is refused:
             # git's options before stash (-C, -c, an alias), a program that runs git
             # (env, xargs), a restore in a word (sh -c '...', code piped to a shell),
             # a word the shell expands or escapes ($, a backtick, \, a glob, a
@@ -75,7 +79,8 @@ hooks:
             # brace or an extglob opener (touch stash; git st?sh apply <id>, or
             # git st@(a)sh once shopt -s extglob has run) is read; a glob counts as
             # stash, pop, apply or branch where its pattern matches the name, in any
-            # letter case. A name built only when a command runs, or one
+            # letter case, each bracket expression read as bash reads one
+            # (glob_marks: git st[[:alpha:]]sh). A name built only when a command runs, or one
             # git's configuration gives, is not, and the plugin's pre-tool-use hook
             # gates such a command as a mutate. git runs with core.fsmonitor and
             # hooks turned off.
@@ -101,7 +106,8 @@ hooks:
             # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
             # A Bash command's simple commands and their words as the shell passes them,
             # quotes and escapes removed. Each word: raw (as written), d (dequoted), m
-            # (dequoted, an unquoted glob character *, ?, [ or ] as \u0001), braces (an
+            # (dequoted, an unquoted glob character *, ?, [ or ] as \u0001), g (dequoted,
+            # the unquoted *, ?, [ and ] as \u0001 to \u0004: glob_text), braces (an
             # unquoted brace outside ${...}), ansi (it holds $'...' or $"...", kept as
             # written: bash decodes or translates them), subst (it holds a backtick, or
             # $( or ${ in double quotes, whose own quotes bash pairs apart from the text
@@ -120,6 +126,52 @@ hooks:
             # costs the text times its matches, so the caller bounds the command's
             # length.
             def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
+            # A word's text as a glob: with $unquoted, *, ?, [ and ] as \u0001 to
+            # \u0004; a character from \u0001 to \u0005 typed in it as U+FFFD, which
+            # matches no name, as bash matches the character.
+            def glob_text($unquoted): [explode[] | if . >= 1 and . <= 5 then 65533
+              elif ($unquoted | not) then .
+              elif . == 42 then 1 elif . == 63 then 2 elif . == 91 then 3 elif . == 93 then 4 else . end] | implode;
+            # A glob (glob_text) with each bracket expression read as bash reads one, in
+            # time linear in the glob. A [, then ! or ^ and a character, or a character
+            # other than ! and ^, then characters, up to the ] that closes it, is one
+            # character (\u0002) where no character before that ] is a [ followed by :,
+            # = or . (a class such as [:alpha:], [=c=] or [.c.]) and the first is no ]
+            # (bash reads a ] first in the set as one of it). Where a [ that a ] follows
+            # opens any other bracket expression, the run from it to the last ] is any
+            # run (\u0001): more than bash matches there, never less. With $lossy (the
+            # quotes were removed before, so a ] in a set cannot be told from one after
+            # it), a ] after a bracket expression makes that run any run too. A [ or ]
+            # left is a character (bash reads a [ that no ] closes as one). A run of
+            # \u0001 and \u0006 (a brace expansion's digits) is one, \u0001 where either
+            # is.
+            def glob_marks($lossy): explode as $c | ($c | length) as $n
+              # $stop[k]: the first j >= k where a set ends or cannot go on (a ], or a
+              # [ followed by :, = or .), null if none
+              | (reduce range($n - 1; -1; -1) as $j ([null];
+                   .[$j] = (if $c[$j] == 4 or ($c[$j] == 3 and ($c[$j + 1] == 58 or $c[$j + 1] == 61 or $c[$j + 1] == 46))
+                            then $j else .[$j + 1] end))) as $stop
+              | (reduce range(0; $n) as $i ({skip: 0, out: []};
+                   if $i < .skip then .
+                   elif $c[$i] == 3 then
+                     ($i + 1 + (if $c[$i + 1] == 33 or $c[$i + 1] == 94 then 1 else 0 end)) as $f
+                     | if $f < $n and $stop[$f] != $f and $stop[$f] != null and $c[$stop[$f]] == 4
+                       then .out += [5] | .skip = $stop[$f] + 1
+                       else .out += [3] end
+                   else .out += [$c[$i]] end) | .out) as $o
+              | ($o | length) as $m
+              | (first(range(0; $m) as $i | select($o[$i] == 3 or ($lossy and $o[$i] == 5)) | $i) // null) as $open
+              | (if $open == null then null else first(range($m - 1; $open; -1) as $i | select($o[$i] == 4) | $i) // null end) as $close
+              | (if $close != null then $o[:$open] + [1] + $o[$close + 1:] else $o end)
+              | reduce .[] as $x ([];
+                  if ($x == 1 or $x == 6) and (.[-1] == 1 or .[-1] == 6) then .[-1] = (if $x == 1 then 1 else .[-1] end)
+                  else . + [if $x == 5 then 2 else $x end] end)
+              | implode;
+            # The fewest characters a glob_marks glob matches.
+            def glob_min: explode | map(select(. != 1 and . != 6)) | length;
+            # A glob_marks glob as an anchored regular expression.
+            def marks_regex: "^" + (gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*") | gsub("\u0002"; ".")
+              | gsub("\u0003"; "\\[") | gsub("\u0004"; "\\]") | gsub("\u0006"; "[0-9-]*")) + "$";
             # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
             # newline is removed (a line continuation with its newline), any other stays.
             def dq_text: [scan("\\\\[\\s\\S]|[^\\\\]+")]
@@ -135,6 +187,7 @@ hooks:
               | {raw: $raw,
                  d: ($s | map(.t) | add // ""),
                  m: ($s | map(if .q then .t else (.t | unquoted_globs) end) | add // ""),
+                 g: ($s | map(.q as $q | .t | glob_text($q | not)) | add // ""),
                  braces: ($s | any((.q | not) and (.t | gsub("\\$\\{[^}]*\\}"; "") | test("[{}]")))),
                  ansi: ($s | any(.ansi)),
                  subst: ($s | any(if .sq or .esc then false elif .q then .t | test("`|\\$[({]") else .t | test("`") end)),
@@ -169,12 +222,16 @@ hooks:
             # A word the shell expands or escapes: any word at all after expansion.
             def expands: (.raw | test("[$`\\\\]")) or (.m | test("\u0001")) or .braces;
             # Whether a word the shell expands may give one of $names: a glob whose
-            # pattern matches one (in any letter case, as with nocaseglob; a bracket
-            # class as any run), and any other expansion.
+            # pattern matches one (in any letter case, as with nocaseglob; each
+            # bracket expression read as bash reads one, glob_marks: git st[[:alpha:]]sh,
+            # git stash [[:alpha:]]pply), and any other expansion. (No regex is built
+            # from a glob that matches more characters than the longest name has.)
             def may_be($names): if (.raw | test("[$`\\\\]")) or .braces then true
               elif .m | test("\u0001") then
-                (.m | ascii_downcase | gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*")) as $re
-                | any($names | split("|")[]; test("^" + $re + "$"))
+                (.g | ascii_downcase | glob_marks(false)) as $g
+                | ($names | split("|")) as $ns
+                | if ($g | glob_min) > ($ns | map(length) | max) then false
+                  else ($g | marks_regex) as $re | any($ns[]; test($re)) end
               else false end;
             # The word with its backslashes removed, as bash removes them.
             def plain: .d | gsub("\\\\"; "");
@@ -200,12 +257,36 @@ hooks:
                   else {refuse: ($a | map(.d) | join(" "))} end
                 else null end;
 
+            # The commands a line that restores a checkpoint may hold beside the
+            # restore: ones that only read. Any other may make the restore's git
+            # another program, or run it elsewhere, unread here: a variable set or
+            # named (PATH=..., printf -v PATH, BASH_CMDS[git]=..., GIT_DIR, an
+            # export), another name for git (alias, hash, enable, git() { ...; }),
+            # code run (source, eval), a directory change (cd), a file written (a
+            # hook, git's configuration).
+            def beside: ["git", "echo", "printf", "cat", "ls", "head", "tail", "wc", "grep", "pwd", "true", "false", "test", "date", "sleep", "stat"];
+            def names_variable: test("^(-[A-Za-z]*)?(PATH|ENV|BASH_ENV|IFS|CDPATH|BASH_CMDS|BASH_ALIASES|GIT_[A-Za-z0-9_]*|LD_[A-Za-z0-9_]*|DYLD_[A-Za-z0-9_]*)(\\[.*\\])?(\\+?=.*)?$");
+            def reads_only: . as $words
+              | ($words | map(select(.target | not))) as $a
+              | ($a | length) > 0
+                and (any($words[]; .writes and (.d | IN("/dev/null", "/dev/stdout", "/dev/stderr") | not)) | not)
+                and (any($a[]; .assign or expands or (.d | names_variable)) | not)
+                and ($a[0].d | IN(beside[]))
+                and ($a[0].d != "printf" or (($a[1].d // "") | startswith("-") | not))
+                and ($a[0].d != "git" or (($a[1].d // "") | IN("status", "log", "diff", "show", "rev-parse")));
+
             .tool_input.command // ""
             | if utf8bytelength > 16384 then "unread over 16384 bytes"
               else commands as $c
               | if $c.why != null then "unread \(if $c.why == "quote" then "an unclosed quote" elif $c.why == "heredoc" then "a here-document" elif $c.why == "extglob" then "an extglob pattern" else "a process substitution" end)"
-                else $c.cmds[] | restore(.) | select(. != null)
-                | if .restore then "restore \(.restore)" else "refuse \(.refuse | gsub("[\n\r]"; " ") | .[:200])" end
+                else ($c.cmds | map(restore(.))) as $r
+                | (if any($r[]; . != null and has("restore"))
+                   then first(range(0; $r | length) as $i | select($r[$i] == null and ($c.cmds[$i] | reads_only | not)) | $c.cmds[$i]) // null
+                   else null end) as $other
+                # (each restore first: one of no recorded checkpoint is refused as that)
+                | ($r[] | select(. != null)
+                   | if .restore then "restore \(.restore)" else "refuse \(.refuse | gsub("[\n\r]"; " ") | .[:200])" end),
+                  (if $other != null then "beside \($other | map(.d) | join(" ") | gsub("[\n\r]"; " ") | .[:200])" else empty end)
                 end
               end
             JQ
@@ -229,6 +310,10 @@ hooks:
                 "restore "*) SUB="${LINE#restore }"; ARG="${SUB#* }"; SUB="${SUB%% *}" ;;
                 "refuse "*)
                   printf "F503 ROLLBACK_FAILED: '%s' restores no checkpoint taken in this project: this skill reads a restore only as git stash apply <sha> (or pop), those four words alone, with the full commit id a checkpoint recorded, in the project's repository; git's options before stash, a program that runs git, a restore inside a word and a word the shell expands or escapes are refused.\n" "${LINE#refuse }" >&2
+                  exit 2
+                  ;;
+                "beside "*)
+                  printf "F503 ROLLBACK_FAILED: '%s' runs beside a restore: on a line that restores a checkpoint, each other command only reads (git status, log, diff, show or rev-parse, echo, printf with no option, cat, ls, grep, ...), with no variable set or named (PATH, BASH_CMDS, GIT_*, printf -v), no alias or function, no directory change, no file written and no word the shell expands: any of them may make the restore's git another program, or run it elsewhere. Restore with git stash apply <sha> on its own line.\n" "${LINE#beside }" >&2
                   exit 2
                   ;;
                 "unread "*)

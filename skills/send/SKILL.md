@@ -155,7 +155,8 @@ hooks:
             # BEGIN shell-words (source: hooks/shell_words.jq; tests/test_skill_hooks.py keeps every copy equal)
             # A Bash command's simple commands and their words as the shell passes them,
             # quotes and escapes removed. Each word: raw (as written), d (dequoted), m
-            # (dequoted, an unquoted glob character *, ?, [ or ] as \u0001), braces (an
+            # (dequoted, an unquoted glob character *, ?, [ or ] as \u0001), g (dequoted,
+            # the unquoted *, ?, [ and ] as \u0001 to \u0004: glob_text), braces (an
             # unquoted brace outside ${...}), ansi (it holds $'...' or $"...", kept as
             # written: bash decodes or translates them), subst (it holds a backtick, or
             # $( or ${ in double quotes, whose own quotes bash pairs apart from the text
@@ -174,6 +175,52 @@ hooks:
             # costs the text times its matches, so the caller bounds the command's
             # length.
             def unquoted_globs: [explode[] | if . == 42 or . == 63 or . == 91 or . == 93 then 1 else . end] | implode;
+            # A word's text as a glob: with $unquoted, *, ?, [ and ] as \u0001 to
+            # \u0004; a character from \u0001 to \u0005 typed in it as U+FFFD, which
+            # matches no name, as bash matches the character.
+            def glob_text($unquoted): [explode[] | if . >= 1 and . <= 5 then 65533
+              elif ($unquoted | not) then .
+              elif . == 42 then 1 elif . == 63 then 2 elif . == 91 then 3 elif . == 93 then 4 else . end] | implode;
+            # A glob (glob_text) with each bracket expression read as bash reads one, in
+            # time linear in the glob. A [, then ! or ^ and a character, or a character
+            # other than ! and ^, then characters, up to the ] that closes it, is one
+            # character (\u0002) where no character before that ] is a [ followed by :,
+            # = or . (a class such as [:alpha:], [=c=] or [.c.]) and the first is no ]
+            # (bash reads a ] first in the set as one of it). Where a [ that a ] follows
+            # opens any other bracket expression, the run from it to the last ] is any
+            # run (\u0001): more than bash matches there, never less. With $lossy (the
+            # quotes were removed before, so a ] in a set cannot be told from one after
+            # it), a ] after a bracket expression makes that run any run too. A [ or ]
+            # left is a character (bash reads a [ that no ] closes as one). A run of
+            # \u0001 and \u0006 (a brace expansion's digits) is one, \u0001 where either
+            # is.
+            def glob_marks($lossy): explode as $c | ($c | length) as $n
+              # $stop[k]: the first j >= k where a set ends or cannot go on (a ], or a
+              # [ followed by :, = or .), null if none
+              | (reduce range($n - 1; -1; -1) as $j ([null];
+                   .[$j] = (if $c[$j] == 4 or ($c[$j] == 3 and ($c[$j + 1] == 58 or $c[$j + 1] == 61 or $c[$j + 1] == 46))
+                            then $j else .[$j + 1] end))) as $stop
+              | (reduce range(0; $n) as $i ({skip: 0, out: []};
+                   if $i < .skip then .
+                   elif $c[$i] == 3 then
+                     ($i + 1 + (if $c[$i + 1] == 33 or $c[$i + 1] == 94 then 1 else 0 end)) as $f
+                     | if $f < $n and $stop[$f] != $f and $stop[$f] != null and $c[$stop[$f]] == 4
+                       then .out += [5] | .skip = $stop[$f] + 1
+                       else .out += [3] end
+                   else .out += [$c[$i]] end) | .out) as $o
+              | ($o | length) as $m
+              | (first(range(0; $m) as $i | select($o[$i] == 3 or ($lossy and $o[$i] == 5)) | $i) // null) as $open
+              | (if $open == null then null else first(range($m - 1; $open; -1) as $i | select($o[$i] == 4) | $i) // null end) as $close
+              | (if $close != null then $o[:$open] + [1] + $o[$close + 1:] else $o end)
+              | reduce .[] as $x ([];
+                  if ($x == 1 or $x == 6) and (.[-1] == 1 or .[-1] == 6) then .[-1] = (if $x == 1 then 1 else .[-1] end)
+                  else . + [if $x == 5 then 2 else $x end] end)
+              | implode;
+            # The fewest characters a glob_marks glob matches.
+            def glob_min: explode | map(select(. != 1 and . != 6)) | length;
+            # A glob_marks glob as an anchored regular expression.
+            def marks_regex: "^" + (gsub("(?<c>[.+*?()^$|{}\\[\\]\\\\])"; "\\\(.c)") | gsub("\u0001"; ".*") | gsub("\u0002"; ".")
+              | gsub("\u0003"; "\\[") | gsub("\u0004"; "\\]") | gsub("\u0006"; "[0-9-]*")) + "$";
             # Text inside double quotes as bash passes it: \ before $, `, ", \ or a
             # newline is removed (a line continuation with its newline), any other stays.
             def dq_text: [scan("\\\\[\\s\\S]|[^\\\\]+")]
@@ -189,6 +236,7 @@ hooks:
               | {raw: $raw,
                  d: ($s | map(.t) | add // ""),
                  m: ($s | map(if .q then .t else (.t | unquoted_globs) end) | add // ""),
+                 g: ($s | map(.q as $q | .t | glob_text($q | not)) | add // ""),
                  braces: ($s | any((.q | not) and (.t | gsub("\\$\\{[^}]*\\}"; "") | test("[{}]")))),
                  ansi: ($s | any(.ansi)),
                  subst: ($s | any(if .sq or .esc then false elif .q then .t | test("`|\\$[({]") else .t | test("`") end)),
@@ -384,44 +432,41 @@ hooks:
                   end
                 end;
             def brace_words: brace_expand(0);
-            # A glob as a regular expression: *, ? and a bracket class match as the shell
-            # makes them match (a class as any one character).
-            def glob_regex: "^" + (gsub("(?<c>[.+()^$|{}\\\\])"; "\\\(.c)") | gsub("\\[[^\\]]*\\]"; "\u0003")
-              | gsub("(?<c>[\\[\\]])"; "\\\(.c)") | gsub("\\*"; ".*") | gsub("\\?"; ".") | gsub("\u0003"; ".") | gsub("\u0006"; "[0-9-]*")) + "$";
-            # The characters a glob must match one each (a bracket class is one; a *
-            # none): a pattern of more than 5 matches no tool's name.
-            def literal_count: reduce explode[] as $c ({n: 0, cls: false};
-              if .cls then (if $c == 93 then .cls = false else . end)
-              elif $c == 91 then .cls = true | .n += 1
-              elif $c == 42 or $c == 6 then .
-              else .n += 1 end) | .n;
+            # A glob as the shell matches it (in any letter case: shopt -s nocaseglob),
+            # its quotes removed before: each bracket expression read as bash reads
+            # one (glob_marks; [[:alpha:]], [[=l=]], []l] and [l"]"] included).
+            def glob_of: ascii_downcase | glob_text(true) | glob_marks(true);
             # A run of the command's text (split at blanks and operators, quotes and
             # backslashes removed) that the shell may expand to the name of curl, wget or
             # http: c?rl, /usr/bin/c[u]rl, cu{r,r}l, wg?t, in any letter case (shopt -s
             # nocaseglob: /usr/bin/CU?L). A pattern with no letter or digit of its own
-            # (*) names none.
+            # (*) names none, and one that matches more than 5 characters (a bracket
+            # expression is one, a * none) names none.
             # (the words a run gives, quotes and backslashes removed, braces
             # expanded: null for more than brace_words gives)
             def run_words: explode | map(select(. != 34 and . != 39 and . != 92)) | implode | brace_words;
             def may_expand_to_tool($ws):
               $ws == null
-                or any($ws[]; sub("^.*/"; "") | ascii_downcase | select(test("[a-z0-9]") and literal_count <= 5)
-                       | gsub("\\*+"; "*") | glob_regex as $re | any(tools[]; test($re)));
+                or any($ws[]; sub("^.*/"; "") | select(ascii_downcase | test("[a-z0-9]")) | glob_of
+                       | select(glob_min <= 5) | marks_regex as $re | any(tools[]; test($re)));
             # A run of the command's text the shell may expand to a file that sets where
             # a request goes: tee ~/.cu{r,r}lrc, /etc/ho?ts. Its last component must
             # hold a letter or a digit (ls /etc/* names none). A glob matches a leading
             # dot only by a dot, unless the command may turn on dotglob ($dots: shopt,
             # GLOBIGNORE, BASHOPTS, or a file sourced or text evaluated, which may
             # run either).
-            def name_matches($g): ((($dots | not) and startswith(".") and ($g | test("^[*?\\[]"))) | not)
-              and test($g | ascii_downcase | gsub("\\*+"; "*") | glob_regex);
+            # (A name is matched by a component's glob_of: no regex is built from a
+            # glob that matches more characters than the name has.)
+            def name_matches($g): ((($dots | not) and startswith(".") and ($g | test("^[\u0001\u0002]"))) | not)
+              and ($g | glob_min) <= length and test($g | marks_regex);
             def may_expand_to_setting_file($ws):
               $ws == null
                 or any($ws[]; (split("/") | map(select(. != "" and . != "."))) as $parts
                        | ($parts | length) > 0 and ($parts[-1] | test("[A-Za-z0-9]"))
-                         and any(setting_paths[]; . as $f | ($f | length) as $n
-                                 | ($parts | length) >= $n
-                                   and all(range(0; $n); . as $i | $f[$n - 1 - $i] | name_matches($parts[($parts | length) - 1 - $i]))));
+                         and (($parts | map(glob_of)) as $globs
+                              | any(setting_paths[]; . as $f | ($f | length) as $n
+                                    | ($globs | length) >= $n
+                                      and all(range(0; $n); . as $i | $f[$n - 1 - $i] | name_matches($globs[($globs | length) - 1 - $i])))));
             # The simple commands with whether each reads its input from a pipe or a
             # redirection (echo '...' | sh, sh < file, sh <<< '...').
             # (Its words leave out a redirection's target.)
