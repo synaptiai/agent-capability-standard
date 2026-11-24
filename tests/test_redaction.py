@@ -478,6 +478,69 @@ def test_coordination_records_redact_intent_and_evidence_refs() -> None:
     assert key not in json.dumps(records)
 
 
+_INQUIRE_TOKEN = "ghp_Ab3dE5gH7jK9mN1pQ3sT5vW7yZ9aB1cD3eF5"
+_INQUIRE_BODY = "MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gunVTLw"
+_INQUIRE_SEED = "MC4CAQAwBQYDK2VwBCIEIGp3Xq9Lw2Zr7Tn4Ks8Vd1Fh6Yj0Mb5Nc3Pe9Rg2Uk7Wa"
+_ASK = "which repo should I push to? "
+
+
+@pytest.mark.parametrize(
+    ("ambiguous_input", "fragment"),
+    [
+        # A token whose start the old 200-character cut kept, with 29 and
+        # 34 of its 40 characters (the second: all of its random part).
+        (_ASK + "x" * 141 + " " + _INQUIRE_TOKEN, _INQUIRE_TOKEN[4:20]),
+        (_ASK + "x" * 136 + " " + _INQUIRE_TOKEN, _INQUIRE_TOKEN[4:20]),
+        # A key whose end line the cut removed.
+        (
+            "use this deploy key? -----BEGIN RSA PRIVATE KEY-----\n"
+            + (_INQUIRE_BODY + "\n") * 20
+            + "-----END RSA PRIVATE KEY-----\n",
+            _INQUIRE_BODY[:24],
+        ),
+        # A short key whose whole body the cut kept, but not its end line.
+        (
+            "x" * 95
+            + " -----BEGIN PRIVATE KEY-----\n"
+            + _INQUIRE_SEED
+            + "\n-----END PRIVATE KEY-----\n",
+            _INQUIRE_SEED[20:],
+        ),
+    ],
+    ids=["token_29", "token_34", "rsa_key", "short_key"],
+)
+def test_an_inquire_steps_input_is_redacted_whole(
+    ambiguous_input: str, fragment: str
+) -> None:
+    """The orchestrator records an inquire step's ambiguous input whole, in
+    the anchor's metadata and the audit event, which redact it: a cut
+    before their redaction kept the part of a token or a key their
+    patterns no longer matched (STANDARD v1.2 §6.7; security round 4,
+    batch 6), as task_goal is kept whole."""
+    from grounded_agency.capabilities.registry import CapabilityRegistry
+    from grounded_agency.coordination.orchestrator import OrchestrationRuntime
+    from grounded_agency.state.evidence_store import EvidenceStore
+    from grounded_agency.workflows.engine import WorkflowStep
+
+    assert fragment not in DEFAULT_REDACTOR.redact_text(ambiguous_input)[0]
+    ontology = str(
+        Path(__file__).resolve().parents[1] / "schemas" / "capability_ontology.yaml"
+    )
+    store = EvidenceStore()
+    runtime = OrchestrationRuntime(CapabilityRegistry(ontology), evidence_store=store)
+    step = WorkflowStep(capability="inquire", purpose="Clarify the request.")
+    result = runtime.execute_workflow_step(step, {"ambiguous_input": ambiguous_input})
+    kept = json.dumps(list(store.export())) + json.dumps(
+        [
+            runtime.audit_log.to_list(),
+            runtime.audit_log.export_action_records(),
+            result.output["evidence_anchors"],
+        ]
+    )
+    assert fragment not in kept
+    assert MARKER in kept
+
+
 def test_runner_redacts_a_host_exception(tmp_path: Path) -> None:
     """A host's exception becomes the step's Error message, redacted: the
     failed step's message and the trace hold the marker, not the token."""

@@ -444,9 +444,21 @@ the `message` and `reason` of every `Error` it submits, the one it builds
 when the run refuses a host's response included, the evidence anchors of
 every `Output` it submits and of every `Event` (which the core copies into
 a `receive` or `wait` step's output), given as a list or a tuple, the
-`not_covered` items of a `RolledBack`, and a `cancel`'s reason, so the
-run's state, outputs, trace, records and snapshots keep an anchor that held
-a secret with it replaced and without its digest (§6.5, §6.7).
+`not_covered` items of a `RolledBack`, a `Decision`'s `decision_id`,
+`decision`, `approvers` and `approver_identities` (which reach the trace,
+the record's `approval` and an F502's reason), an `Event`'s `principal` and
+`identity` (the received item's `sender` and `sender_identity`), and a
+`cancel`'s reason, so the run's state, outputs, trace, records and
+snapshots keep an anchor that held a secret with it replaced and without
+its digest (§6.5, §6.7). Redaction can make two values one: approvers that
+differ only in a secret count once, and a `decision_id` that differs from
+one used before only in a secret is refused as used (F502); give ids and
+principals that hold no secret. A checkpoint named by an id that holds a
+secret is refused instead (F501 for a `CreateCheckpoint`'s, R402 for a
+`checkpoint` step's output): the run's records name it, and the run gives
+it back to roll back to, so a redacted id would name none you could
+restore. A `Current` value is kept as read: the core compares it with the
+approved source and writes it into no record.
 `evidence_seen` is rewritten to match: it lists an anchor's redacted `ref`
 when it listed the anchor's own, and when two anchors are one after
 redaction it lists neither unless it listed both. The runner gives what its
@@ -459,7 +471,8 @@ signature (`sig=`, `X-Amz-Signature=`) is not among the default patterns:
 a host that cites signed URLs adds a pattern for them
 (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) or cites them without
 their query. The core's grounding refusal (F505)
-names an anchor by its index and kind, never by its `ref`.
+names an anchor by its index and kind, never by its `ref`, and its approval
+refusals name neither a decision's value nor its id.
 
 ## Hosting runs
 

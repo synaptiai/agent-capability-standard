@@ -12,7 +12,9 @@ Reads .claude/audit.log and verifies that:
    number of entries and the last one's hmac, signed with the same key).
    So does the head's anchor, the same head the hook keeps in the project's
    git directory (<git dir>/acs/audit.head), where a command that removes
-   .claude whole (git clean -fdx, rm -rf .claude) leaves it.
+   .claude whole (git clean -fdx, rm -rf .claude) leaves it. So does each
+   witness given (--witness): a copy of a head kept where the agent cannot
+   write it.
 
 A line is checked as the bytes it holds, not as what a parser reads from
 it: JSON that names a member twice parses, in most readers, to the last
@@ -27,6 +29,18 @@ the head shows it; removing the log with its head, and starting a new one,
 the anchor shows. A log begun before the hook kept a head, and a chain no
 head anchors (the audit skill's .claude/audit/records.jsonl), are verified
 with --no-head, which checks the chain alone.
+
+The head and the anchor show a cut made by a writer that holds neither the
+key nor an earlier head: an accident, a person's edit, a command that
+removes .claude. They do not show one made by the agent the log records:
+its commands can read the head and the anchor (no read needs a checkpoint
+or approval) and, wherever the key is in their environment or in a file
+they can read, the key; so a command that names neither (one a person
+approved, SECURITY.md §5.5) can cut the log and write back an earlier
+head, or a head the key signs anew, and both verify. A witness shows it: a
+copy of the head taken where the agent cannot write it (copied off the
+machine at a session's end, a CI artifact, a write-once store), against
+which a log cut before the witness's entry fails.
 
 The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call.
 Three generations of entry verify, in any mix, because the HMAC is taken over
@@ -46,6 +60,7 @@ every field but ``hmac`` in the order recorded:
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
         [--head-file PATH] [--anchor-file PATH] [--no-head]
+        [--witness PATH ...]
 
 SEC-005: Audit log integrity verification.
 """
@@ -60,6 +75,7 @@ import os
 import re
 import socket
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -274,20 +290,27 @@ def default_anchor(log_path: Path) -> Path | None:
     return git_dir / "acs" / "audit.head"
 
 
-def _head_errors(name: str, head: tuple[int, str], lines: list[str]) -> list[str]:
+def _head_errors(
+    name: str, head: tuple[int, str], lines: list[str], noun: str | None = None
+) -> list[str]:
     """Whether ``lines`` still hold the entry ``head`` records, at its
-    place; ``name`` is "Head" or "Anchor"."""
+    place; ``name`` is "Head", "Anchor" or "Witness <path>", and ``noun``
+    what the messages call it (by default ``name`` in lower case)."""
+    noun = noun or name.lower()
     entries, last = head
     total = len(lines)
     if total < entries:
-        why = (
-            "its last entries were removed"
-            if name == "Head"
-            else "its last entries were removed, or the log was removed with "
-            "its head and begun again"
+        why = {
+            "head": "its last entries were removed",
+            "anchor": "its last entries were removed, or the log was removed "
+            "with its head and begun again",
+        }.get(
+            noun,
+            "its last entries were removed, or the log was removed and begun "
+            "again, since the witness was taken",
         )
         return [
-            f"{name}: the log ends before its {name.lower()}: {entries} entries "
+            f"{name}: the log ends before its {noun}: {entries} entries "
             f"recorded, {total} found ({why})"
         ]
     held: object = None
@@ -297,7 +320,7 @@ def _head_errors(name: str, head: tuple[int, str], lines: list[str]) -> list[str
         held = None
     if held != last:
         return [
-            f"{name}: entry {entries} is not the one the {name.lower()} records "
+            f"{name}: entry {entries} is not the one the {noun} records "
             "(entries were removed or replaced)"
         ]
     return []
@@ -308,12 +331,16 @@ def verify_log(
     hmac_key: str,
     head_path: Path | None = None,
     anchor_path: Path | None = None,
+    witness_paths: Sequence[Path] = (),
 ) -> tuple[int, int, list[str]]:
     """Verify the entire audit log, and, given ``head_path``, that the log
     still holds the entry its head records, at its place (so that its last
-    entries were not removed); and, given ``anchor_path`` where a file is,
-    the same of the head's anchor (so that the log was not removed with its
-    head and begun again).
+    entries were not removed); given ``anchor_path`` where a file is, the
+    same of the head's anchor (so that the log was not removed with its
+    head and begun again); and the same of each of ``witness_paths``: a
+    copy of a head kept where the agent cannot write, which shows a cut
+    that an earlier head written back, or a head signed anew with a key
+    the agent read, hides from the head and the anchor.
 
     Returns:
         (total_entries, valid_entries, all_errors)
@@ -325,6 +352,14 @@ def verify_log(
         anchor = read_head(anchor_path, hmac_key)
         if isinstance(anchor, str):
             head_errors.append(f"Anchor: {anchor}")
+    # A witness must be there: it was named to be checked.
+    witnesses: list[tuple[Path, tuple[int, str]]] = []
+    for path in witness_paths:
+        witness = read_head(path, hmac_key)
+        if isinstance(witness, str):
+            head_errors.append(f"Witness {path}: {witness}")
+        else:
+            witnesses.append((path, witness))
     if not log_path.exists():
         for name, recorded in (("head", head), ("anchor", anchor)):
             if isinstance(recorded, tuple):
@@ -332,6 +367,11 @@ def verify_log(
                     f"Audit log not found, though its {name} records "
                     f"{recorded[0]} entries"
                 )
+        for path, (entries, _) in witnesses:
+            head_errors.append(
+                f"Audit log not found, though the witness {path} records "
+                f"{entries} entries"
+            )
         return 0, 0, ["Audit log not found", *head_errors]
 
     # One entry per "\n": the hook writes no other line break between
@@ -353,6 +393,8 @@ def verify_log(
         all_errors += _head_errors("Head", head, lines)
     if isinstance(anchor, tuple):
         all_errors += _head_errors("Anchor", anchor, lines)
+    for path, witness in witnesses:
+        all_errors += _head_errors(f"Witness {path}", witness, lines, "witness")
 
     for i, line in enumerate(lines, 1):
         if not line.strip():
@@ -401,6 +443,17 @@ def main() -> None:
         help="Check the chain alone: a log begun before the hook kept a head, "
         "or a chain no head anchors (removing its last entries is not seen)",
     )
+    parser.add_argument(
+        "--witness",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="A copy of a head kept where the agent cannot write it (another "
+        "machine, a CI artifact), checked as the head is; repeatable. It "
+        "shows a cut that an earlier head written back hides, or a head "
+        "signed anew with a key the agent's commands could read",
+    )
     args = parser.parse_args()
     if args.no_head and (args.head_file or args.anchor_file):
         parser.error(
@@ -414,7 +467,9 @@ def main() -> None:
     anchor_path = (
         None if args.no_head else (args.anchor_file or default_anchor(args.log_file))
     )
-    total, valid, errors = verify_log(args.log_file, hmac_key, head_path, anchor_path)
+    total, valid, errors = verify_log(
+        args.log_file, hmac_key, head_path, anchor_path, args.witness
+    )
 
     if errors:
         print(f"INTEGRITY CHECK FAILED: {len(errors)} error(s) in {total} entries\n")

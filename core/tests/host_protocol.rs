@@ -1018,3 +1018,50 @@ fn finished_snapshot_has_no_duplicate_records() {
     assert!(state["finished"].get("outputs").is_none());
     assert_eq!(state["version"], 2);
 }
+
+// ---- diagnostics repeat no host text (§6.7) ----
+
+#[test]
+fn a_refused_decision_names_neither_its_value_nor_its_id() {
+    // A refusal's reason is a diagnostic, which holds no secret (§6.7):
+    // a decision's value and its id are the host's text (security round
+    // 4, batch 6). The trace's `approval_decided` names them; a runner
+    // redacts a Decision before the core sees it.
+    let secret = "ghp_Ab3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF3hJ5";
+    let steps = json!([
+        checkpoint(),
+        policy(),
+        mutate(json!({})),
+        mutate(json!({"store_as": "m2"}))
+    ]);
+
+    let mut run = start(&wf(steps.clone()), RecordMode::Actions);
+    answer(&mut run, output(json!({"checkpoint_id": "cp1"})), 0);
+    answer(&mut run, output(json!({"compliant": true})), 0);
+    decide(&mut run, "d1", &format!("approved; {secret}"), 0);
+    let failed = end(&run);
+    assert_eq!(failed["code"], "F502");
+    assert_eq!(
+        failed["message"],
+        "the decision is none of approved, rejected or unavailable"
+    );
+    assert!(!failed.to_string().contains(secret), "{failed}");
+
+    let id = format!("d-{secret}");
+    let mut run = start(&wf(steps), RecordMode::Actions);
+    answer(&mut run, output(json!({"checkpoint_id": "cp1"})), 0);
+    answer(&mut run, output(json!({"compliant": true})), 0);
+    decide(&mut run, &id, "approved", 0);
+    answer(&mut run, output(json!({"success": true})), 0);
+    decide(&mut run, &id, "approved", 0);
+    let failed = end(&run);
+    assert_eq!(failed["code"], "F502");
+    assert_eq!(failed["message"], "the decision was already used");
+    let refused = failed["action_records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["status"] == "rejected")
+        .unwrap();
+    assert_eq!(refused["reason"], "the decision was already used");
+}

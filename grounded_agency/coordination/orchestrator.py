@@ -734,11 +734,15 @@ class OrchestrationRuntime:
                 source_agent_id=ORCHESTRATOR_AGENT_ID,
                 target_agent_ids=[],
                 capability_id="inquire",
+                # Whole, as task_goal is: the store and the audit log redact
+                # it, and a cut could keep part of a secret their patterns
+                # no longer match (a token's tail, a key's body without its
+                # end line; STANDARD v1.2 §6.7).
                 metadata={
-                    "ambiguous_input": str(ambiguous_input)[:200],
+                    "ambiguous_input": str(ambiguous_input),
                     "max_questions": max_questions,
                 },
-                audit_details={"ambiguous_input": str(ambiguous_input)[:200]},
+                audit_details={"ambiguous_input": str(ambiguous_input)},
             )
             return WorkflowStepResult(
                 step=step,

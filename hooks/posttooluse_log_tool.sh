@@ -55,7 +55,12 @@ case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # leaves both as they are: they are the evidence of the cut. The pre-tool-use
 # hook refuses a call that names the head, .claude or the git directory's
 # acs/ (F504). To start a new log, move audit.log, audit.head and the anchor
-# aside together.
+# aside together. A head stays valid for as long as its key, and the agent's
+# commands can read it, the anchor and (from their environment) the key: a
+# cut written back with an earlier head, or with one the key signs anew, by
+# a command a person approved that names neither, verifies. A witness, a
+# copy of the head kept where the agent cannot write (verify_audit_log.py
+# --witness), shows it.
 #
 # The hook records; it does not block (the tool has already run). The log is
 # a best-effort capture (STANDARD v1.2 §6.4): it can miss a call, but never

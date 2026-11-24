@@ -526,7 +526,22 @@ here and marked so.
   shared default redactor gets one of its own), so the host's memory
   refuses a `persist` of a registered value. `IdempotencyLog`,
   `CheckpointTracker` and `MemoryStore` gain a `redactor` property, and
-  `Redactor` gains `include(other)`.
+  `Redactor` gains `include(other)`. Security round 4: it also redacts a
+  `Decision`'s `decision_id`, `decision`, `approvers` and
+  `approver_identities` (the trace's `approval_decided`, the record's
+  `approval` and an F502's reason held them as the host sent them) and an
+  `Event`'s `principal` and `identity` (the received item's `sender` and
+  `sender_identity`). Redaction can make two values one: approvers that
+  differ only in a secret count once, and a `decision_id` that differs from
+  one used before only in a secret is refused as used (F502). A checkpoint
+  the host names by an id that holds a secret is refused, not redacted
+  (the run gives the id back to roll back to): a `CreateCheckpoint`
+  answered with one fails F501, a `checkpoint` step whose output names one
+  fails R402. The executor's approval refusals no longer repeat the
+  decision: `'<decision>' is not a decision` is now `the decision is none
+  of approved, rejected or unavailable`, and `decision '<id>' was already
+  used` is `the decision was already used` (the trace's `approval_decided`
+  names both).
 - Python SDK, `CheckpointTracker` (§5.18.8, §6.7): the tracker redacts
   every string it records, with its new `redactor` (the default patterns
   unless given; the adapter's tracker has the layer's redactor, so the
@@ -554,7 +569,10 @@ here and marked so.
   cycle) becomes `"[unserializable]"`. A delegation anchor's `description`
   and the orchestration anchor's `task_goal` are kept whole, not cut at 100
   characters: a cut could keep part of a secret no redactor then
-  recognises.
+  recognises. Security round 4: so is an `inquire` step's
+  `ambiguous_input`, in its anchor's metadata and its audit event (it was
+  cut at 200 characters before the store and the log redacted it, keeping
+  the start of a token cut there).
 - Python SDK, evidence and logs (security round 4): `EvidenceStore.get`
   finds a record only by its id as written (`ev-1`), as
   `JsonlEvidenceStore.get` does; `ev-01` and `ev-١` (which `int()` read as
@@ -1238,7 +1256,13 @@ here and marked so.
   clean -fdx` or `rm -rf .claude` leaves, so a log removed with its head
   is reported and fails verification; the verifier reads the anchor where
   it exists (`--anchor-file` names another). To start a new log, move
-  `audit.log`, `audit.head` and the anchor aside together.
+  `audit.log`, `audit.head` and the anchor aside together. Security round
+  4: the head and the anchor do not show a cut made through the agent the
+  log records (its commands read both without a checkpoint or approval, and
+  the key from their environment, so an approved command that names
+  neither can write back an earlier head, or sign a new one); the verifier
+  gains `--witness PATH` (repeatable), a copy of the head kept where the
+  agent cannot write it, which shows such a cut.
 - Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
   an action record of its own (Standard 1.2.0 §6.4), with the event under
   `details.event`, the collected `audit_record`, `changes` and `provenance`

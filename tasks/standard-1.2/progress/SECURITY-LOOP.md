@@ -5884,3 +5884,197 @@ and a diagnostic.
   most 4.6 s, linear from 250 KB) and the TypeScript one (at most 0.4 s).
   No CLI or nested agent was started; nothing was left running; the
   scratch copies were removed.
+
+### Batch 6: three reported defects
+
+Three defects, each reproduced by an independent verifier on 7d04aea, and
+reproduced again here on ae9a101 before any change (probes under
+`timeout 120` and a 4 GB address-space limit): the runner submitted a
+`Decision` as the host sent it, so a `decision_id`, a decision value or an
+approver holding a token or a registered secret reached the trace, the
+action records and the snapshot, and a value that is no decision the F502
+message and the run record too; the orchestrator cut an `inquire` step's
+input at 200 characters before the evidence store and the coordination
+audit log redacted it; and an earlier audit head, read with an ungated
+`cat` and written back with a cut, verified. None was fixed by an earlier
+batch: the runner redacted an `Error`, the anchors, `not_covered` and a
+cancel's reason only (round 1 batch 7, round 3 batch 4); the inquire cut
+dates from S3, a sibling of the `task_goal` and delegation fixes; and the
+head (round 1 batch 8, round 3 batch 1) signs only (entries, hmac). Each fix
+has tests that fail on the code before it (below).
+
+#### 1. The runner never redacted a `Decision` (medium); siblings: a checkpoint's id, an `Event`'s sender, the core's approval refusal reasons
+
+`_turn` redacted an `Error`'s message and reason, the anchors of an
+`Output` and an `Event` and a `RolledBack`'s `not_covered`; a `Decision`
+went to the core untouched, and the core copies its `decision_id`,
+`decision` and `approvers` into the trace (`approval_decided`), the
+record's `approval`, the snapshot and, for a value it does not know or an
+id used before, the F502 reason (§6.7: no secret in an audit record, an
+executor's trace or a diagnostic).
+
+- Fix (runner): `_redacted(action, response)` applies every rule before
+  `_submit`; the new `_redact_members` redacts, with the runner's
+  `redactor`, a `Decision`'s `decision_id`, `decision`, `approvers` and
+  `approver_identities` and an `Event`'s `principal` and `identity`
+  (`_KEPT_MEMBERS`). A principal is redacted by the same text rule wherever
+  it is given, so `approvers` still lists the principals of
+  `approver_identities` and an event's `principal` still matches its
+  identity's. Redaction can make two values one; both outcomes fail
+  closed: approvers that differ only in a secret count once, and a
+  `decision_id` that differs from one used before only in a secret is
+  refused as used (F502). `digest` is not redacted: the core compares it
+  with its own and never records it.
+- Sibling (verifier q1; and found here, `CreateCheckpoint`): a checkpoint's
+  id reaches the trace (`checkpoint_created`, `checkpoint_consumed`), the
+  records' `checkpoint_id` and the snapshot, and the run gives it back in
+  `Rollback`. A redacted id would name a checkpoint the host cannot
+  restore, so a gated step would run under a checkpoint the run cannot
+  roll back to: `_refuse_secret_checkpoint` submits an `Error` instead, for
+  a `CreateCheckpoint` answered with such an id (F501) and for a
+  `checkpoint` step whose output names one (R402). No gated step runs.
+- Sibling (core): `decide` formatted `'{decision}' is not a decision` and
+  `decision '{decision_id}' was already used`, host text in a diagnostic,
+  against SECURITY.md's "The core's diagnostics repeat no text of a host's
+  output". They are now `the decision is none of approved, rejected or
+  unavailable` and `the decision was already used`; no fixture pinned
+  them. The trace's `approval_decided` still names both (§6.4 records the
+  decision's id), so a host that drives the core itself redacts a
+  `Decision` first, as the runner does (SECURITY.md says so).
+- Checked, not changed: a `Current` value reaches neither the trace nor a
+  record (only the `recheck` event's `changed` and the run's state, and the
+  re-ask's `shown`, which §6.7 keeps whole for the digest); redacting it
+  would make the digest comparison see a change where there is none, so it
+  is kept as read (pinned by a test). An `Event`'s body is a canonical
+  event the host makes (§6.2), kept as a step's output is; its anchors were
+  redacted already. In the binding, a decision's id is built by the binding
+  from the digest, the round and the approver's id, which comes from the
+  runtime's authenticated caller (`approvals.post`, `decideApproval`'s
+  `ThreadUser`), not from host free text: not a sibling.
+- Tests: `test_runner_secrets.py` `test_a_decision_keeps_no_secret` (an id
+  with an `access_token`, a registered id, a value with a GitHub token or a
+  registered secret: F502, an approver with an assignment or a registered
+  secret), `test_two_decision_ids_one_after_redaction_are_one_decision`,
+  `test_approver_identities_keep_no_secret` (identities alone and with
+  `approvers`, and a refused identity whose role holds a token),
+  `test_an_events_sender_keeps_no_secret` (identity, principal and
+  identity), `test_a_checkpoint_named_by_a_secret_is_refused` (a step's
+  output and a `CreateCheckpoint`, a token and a registered secret), and
+  the controls `test_a_decision_without_a_secret_is_kept_as_given`,
+  `test_an_events_sender_without_a_secret_is_kept`,
+  `test_a_recheck_compares_the_value_as_read`; `core/tests/host_protocol.rs`
+  `a_refused_decision_names_neither_its_value_nor_its_id`. On ae9a101's
+  `grounded_agency/` the 13 security tests fail and the 3 controls pass;
+  the Rust test fails on the old `decide` (its message held the token).
+
+#### 2. The orchestrator cut an `inquire` step's input before redaction (medium)
+
+`str(ambiguous_input)[:200]` went into the anchor's metadata and the audit
+event's details; the evidence store and `CoordinationAuditLog` redact
+afterwards, when the cut has removed what the patterns need (a `ghp_`
+token's 36 characters).
+
+- Fix: the input is recorded whole, as `task_goal` and a delegation's
+  description already are; the store and the log redact it.
+- Sweep: every `[:N]` slice in `grounded_agency/` and every
+  `.slice(0, N)` in the TypeScript sources: ids (`event_id[:8]`,
+  `task_id[:8]`), a list of unrestored items, the adapter's sanitised
+  variable names, and two log lines of the discovery injector and pipeline
+  (logs, which no rule of §6.7 names); no other cut before a redaction.
+- Tests: `test_redaction.py` `test_an_inquire_steps_input_is_redacted_whole`
+  (a token at offset 171 and 166, a PEM key whose end line the cut
+  removed, a short key whose whole body the cut kept): no fragment in the
+  store's export, the log's events and action records, or the returned
+  anchor. On ae9a101 the two token shapes fail; the two key shapes pass
+  there already, since batch 5's PEM rule redacts the rest of a text after
+  a header with no end line (the verifier's key leaks were on 7d04aea).
+
+#### 3. A replayed earlier head hid a cut of the audit log (low)
+
+The head and its anchor sign only (entries, hmac), so a head stays valid
+for as long as its key. The agent's commands read both ungated (`cat
+.claude/audit.head`, `cat .git/acs/audit.head`: exit 0), and a command a
+person approved that names neither (§5.5) could cut the log and write the
+saved head back: the verifier passed and the hook went on from the cut.
+
+- Analysis: the Standard asks only that an append-only store chain its
+  records (§6.4, SHOULD); the head is the plugin's own claim, and it
+  overclaimed. Refusing reads of the head would not close the gap: the
+  agent's commands can also read the key (probed here: `cat
+  /proc/self/environ` and `grep -a AUDIT /proc/self/environ` pass the
+  pre-tool-use hook, exit 0, and Claude Code gives every command the `env`
+  of its settings, where the hooks' README says to set
+  `AUDIT_HMAC_KEY`), and with the key a head is signed anew, no replay
+  needed; and a read through a pattern or a directory (`cat
+  .claude/audit.he*`, `grep -r . .claude`, both exit 0) names no head. No
+  local state the hook keeps is out of reach of an approved command, so
+  the fix is a witness kept outside the agent's reach, and the claims made
+  true.
+- Fix: `tools/verify_audit_log.py --witness PATH` (repeatable; `verify_log(...,
+  witness_paths=...)`): a copy of a head kept where the agent cannot write
+  it (copied off the machine at a session's end, a CI artifact, a
+  write-once store), checked as the head is (signed with the key, the log
+  holds its entry at its place); a log cut before the witness's entry
+  fails, and goes on failing as the log grows again. The replay probe
+  rerun here with a witness taken after the fifth entry: the verifier
+  fails (`the log ends before its witness: 5 entries recorded, 3 found`),
+  while the head and the anchor pass, as documented.
+- Documentation corrected: SECURITY.md §5.2 (the head and the anchor show
+  a cut by a writer that holds neither the key nor an earlier head, not
+  one made through the agent; the witness) and §5.5 (the bullet on the
+  records); `hooks/README.md`, the log hook's header comment and the
+  verifier's docstring; CHANGELOG.
+- Tests: `test_verify_audit_log.py`
+  `test_an_earlier_head_written_back_hides_a_cut_but_not_from_a_witness`
+  (the limitation pinned: head and hook see nothing; the witness fails the
+  log, by length and then by entry, through the API and the CLI),
+  `test_a_witness_the_log_has_grown_past_verifies`,
+  `test_a_witness_that_is_missing_or_another_key_signed_fails`. On ae9a101
+  they fail (`verify_log` takes no witness, the CLI no `--witness`).
+
+#### Documentation
+
+SECURITY.md §1.5 (the runner's `Decision`, `Event` sender and checkpoint
+ids; the orchestrator's inquire input; the core's approval refusals), §5.2
+and §5.5 (the head, the key, the witness); the runner's `redactor`,
+`Host.create_checkpoint` and `Host.request_approval` documentation;
+`docs/guides/RUNNING_WORKFLOWS.md` (secrets); `hooks/README.md`, the log
+hook's header and the verifier's docstring; CHANGELOG [Unreleased]
+Upgrading (the runner entry, the evidence entry, the audit log's end). The
+Standard's text was not changed: §6.7 already names an audit record, an
+executor's trace and a diagnostic, and §6.4 asks only for the chain.
+
+#### Checks after batch 6
+
+- Python: `pytest tests/` in bounded groups (each under `timeout 120` and a
+  4 GB address-space limit: each file, `tests/test_skill_hooks.py` and
+  `tests/test_pretooluse_hooks.py` by class and their module-level tests,
+  `tests/test_discovery/`, and `tests/test_redaction.py` in six chunks of
+  node ids, since its 1 MB timing units take about 170 s together): 7528
+  passed, 18 skipped, of 7546 collected (7505 before, plus the 23 new).
+  ruff check and format with CI's lists; mypy; every `tools/validate_*.py`
+  of CLAUDE.md, `validate_workflows.py --strict` and every domain catalog
+  and example `--strict`; `sync_skill_schemas.py --check` and the five
+  generators' `--check`; `scripts/run_conformance.py`.
+- Rust: `cargo fmt --check`; clippy with no feature, `python` and `wasm`
+  (`-D warnings`); `cargo test` (every test binary and the library, each
+  under the limits; `host_protocol` 33, with the new test) and
+  `cargo test --features wasm --test wasm`. The extension was rebuilt
+  (`uv pip install -e`) and the WebAssembly core (`npm run build:wasm`).
+- TypeScript: the package's build, check and test (2056 passed); the
+  binding's check and test (263 passed, 2 skipped). No TypeScript source
+  changed.
+- Old code: the new tests against ae9a101's `grounded_agency/`, `tools/`,
+  `hooks/` and extension: 18 fail (13 runner, 2 inquire token shapes, 3
+  witness), 5 pass (the 3 runner controls and the 2 key shapes batch 5
+  already covers); the Rust test fails on ae9a101's `decide`.
+- Probes, each under `timeout 120` and a 4 GB address-space limit: every
+  response kind through the runner with a registered secret and default
+  patterns (decision id, value, approvers, identities, a refused identity's
+  role, a checkpoint step's id, a `CreateCheckpoint` id, an event's
+  identity and principal, a `Current` value) before and after the fix; the
+  pre-tool-use hook on reads of the head, the anchor, the checkpoint key
+  and `/proc/self/environ` (all exit 0) and on `echo $AUDIT_HMAC_KEY` and
+  `printenv` (F501); the verifier's replay script with a witness. No CLI
+  or nested agent was started; nothing was left running; the scratch
+  copies were removed.

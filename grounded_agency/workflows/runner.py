@@ -61,6 +61,15 @@ Response = dict[str, Any]
 
 TERMINAL = frozenset({"Completed", "Failed"})
 
+# The members of a response the core keeps as given, in its trace, its
+# records, a diagnostic or a received item, beside an Error's message and
+# reason, the anchors and not_covered: the runner redacts them before it
+# submits the response (§6.7).
+_KEPT_MEMBERS: dict[str, tuple[str, ...]] = {
+    "Decision": ("decision_id", "decision", "approvers", "approver_identities"),
+    "Event": ("principal", "identity"),
+}
+
 
 class HostCannotServe(Exception):
     """Raised by :meth:`Host.invoke_capability` or :meth:`Host.await_event`
@@ -334,7 +343,9 @@ class Host:
 
     def create_checkpoint(self, action: Action) -> Response:
         """Take a checkpoint before ``action["step"]``; return ``{"kind":
-        "Checkpoint", "checkpoint_id": ...}``."""
+        "Checkpoint", "checkpoint_id": ...}``. The run's trace and records
+        name the id, so it holds no secret: the runner refuses one that
+        holds a secret its redactor recognises (F501)."""
         if self.checkpoint_tracker is None:
             raise NotImplementedError("no checkpoint store")
         checkpoint_id = self.checkpoint_tracker.create_checkpoint(
@@ -395,6 +406,10 @@ class Host:
         ``agent_identity`` per principal, with ``approvers`` empty or
         exactly their principals (§5.17); approvers are then counted by
         principal, and only those whose identity meets the request count.
+        The run's trace and records keep the decision's strings: none
+        holds a secret, and the runner redacts them (two that redaction
+        makes one count as one; a ``decision_id`` that redaction makes one
+        used before is refused as used, F502).
 
         By default a standing mandate is unavailable (this host holds no
         mandates), and any other approver raises ``NotImplementedError``."""
@@ -634,12 +649,20 @@ class WorkflowRunner:
                 (:meth:`Host.protect`): no rollback reaches evidence
                 (§4.4.1).
             redactor: Applied to the ``Error`` messages the runner builds
-                from a host's exceptions, to the message of every ``Error``
-                it submits, and to the evidence anchors of every ``Output``
-                it submits (§6.5, §6.7): an anchor that held a secret is
-                submitted with it replaced and without its digest, so the
-                run's state, outputs, trace and snapshots never hold it.
-                The default patterns when None.
+                from a host's exceptions, to the message and reason of every
+                ``Error`` it submits, to the evidence anchors of every
+                ``Output`` and ``Event`` it submits (§6.5, §6.7): an anchor
+                that held a secret is submitted with it replaced and without
+                its digest, so the run's state, outputs, trace and snapshots
+                never hold it; to a ``Decision``'s ``decision_id``,
+                ``decision``, ``approvers`` and ``approver_identities``, an
+                ``Event``'s ``principal`` and ``identity``, a
+                ``RolledBack``'s ``not_covered`` and a cancel's reason. A
+                checkpoint the host names by an id that holds a secret is
+                refused (F501, or R402 for a ``checkpoint`` step's output):
+                the run's records name it, and a redacted id would name
+                none the host could restore. The default patterns when
+                None.
             memory: The memory store whose ``run`` scope instance the
                 runner ends when a run ends (§4.5), whether or not a host
                 is at hand, as when :meth:`cancel` is called without one.
@@ -1060,9 +1083,7 @@ class WorkflowRunner:
             if response is None:
                 return Turn(None, run.wake_at(), action), answered
             seq = run.trace_seq
-            response = self._redact_not_covered(
-                self._redact_anchors(self._redact_error(response))
-            )
+            response = self._redacted(action, response)
             self._submit(run, action, response, host.now_ms())
             self._record_evidence(run, action, response, seq)
             answered += 1
@@ -1241,6 +1262,86 @@ class WorkflowRunner:
                     result,
                 ) from e
         return result
+
+    def _redacted(self, action: Action, response: Any) -> Any:
+        """``response`` as the run may keep it (§6.7): every string of it
+        that the core writes into the trace, the records, a diagnostic or a
+        received item redacted, and a checkpoint named by an id that holds
+        a secret refused. The core has no redactor: what it is given, it
+        keeps."""
+        response = self._refuse_secret_checkpoint(action, response)
+        response = self._redact_members(response)
+        response = self._redact_error(response)
+        response = self._redact_anchors(response)
+        return self._redact_not_covered(response)
+
+    def _redact_members(self, response: Any) -> Any:
+        """A ``Decision`` or an ``Event`` with every string of the members
+        the core keeps redacted (§6.4, §6.7): a decision's ``decision_id``,
+        ``decision``, ``approvers`` and ``approver_identities``, which reach
+        the trace's ``approval_decided``, the record's ``approval`` and an
+        F502's reason (a refused approver's principal and role), and an
+        event's ``principal`` and ``identity``, which the core writes into
+        the received item as ``sender`` and ``sender_identity`` (a canonical
+        event, §6.2). A principal is redacted alike wherever it is given, so
+        ``approvers`` still lists the principals of ``approver_identities``.
+
+        Redaction can make two values one: two approvers that differ only
+        in a secret count once, and a ``decision_id`` that differs from one
+        used before only in a secret is refused as used (F502). Both fail
+        closed; give ids and principals that hold no secret. Any other
+        response as it is."""
+        if not isinstance(response, dict):
+            return response
+        kind = response.get("kind")
+        members = _KEPT_MEMBERS.get(kind) if isinstance(kind, str) else None
+        if members is None:
+            return response
+        out = response
+        for name in members:
+            if name not in response:
+                continue
+            kept, pointers = self._redactor.redact(response[name])
+            if pointers:
+                out = {**out, name: kept}
+        return out
+
+    def _refuse_secret_checkpoint(self, action: Action, response: Any) -> Any:
+        """An ``Error`` in place of a response that names a checkpoint by an
+        id holding a secret the redactor recognises (§6.7): a
+        ``CreateCheckpoint``'s ``Checkpoint``, and a ``checkpoint`` step's
+        ``Output`` (its ``checkpoint_id``). The core writes the id into the
+        trace and the records of the steps that use the checkpoint, and
+        gives it back to the host to roll back to, so a redacted id would
+        name a checkpoint the host cannot restore: the checkpoint is
+        refused instead, and no step runs under it (F501 for an action's,
+        R402 for a step's). Any other response as it is."""
+        if not isinstance(response, dict):
+            return response
+        given: Any = None
+        if (
+            action["kind"] == "CreateCheckpoint"
+            and response.get("kind") == "Checkpoint"
+        ):
+            given = response.get("checkpoint_id")
+        elif (
+            action["kind"] == "InvokeCapability"
+            and action.get("capability") == "checkpoint"
+            and response.get("kind") == "Output"
+            and isinstance(response.get("value"), dict)
+        ):
+            given = response["value"].get("checkpoint_id")
+        if not isinstance(given, str) or not self._redactor.redact_text(given)[1]:
+            return response
+        return {
+            "kind": "Error",
+            "code": "R402",
+            "message": (
+                "the host named the checkpoint by an id that holds a secret, "
+                "which the run's trace and records would keep (STANDARD v1.2 "
+                "§6.7): the checkpoint is refused"
+            ),
+        }
 
     def _redact_error(self, response: Any) -> Any:
         """An ``Error`` response with its ``message`` and ``reason`` redacted

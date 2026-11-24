@@ -677,6 +677,89 @@ class TestHead:
         assert self._call(tmp_path, "toolu_4").returncode == 0
         assert json.loads(head.read_text())["entries"] == 4
 
+    def test_an_earlier_head_written_back_hides_a_cut_but_not_from_a_witness(
+        self, tmp_path: Path
+    ) -> None:
+        """Security round 4, batch 6: a head is valid for as long as its
+        key, so a cut written back with an earlier head (one the agent read
+        with an ungated cat) verifies, and the hook goes on from it. A
+        witness, a copy of a later head kept where the agent cannot write,
+        shows the cut, and goes on showing it as the log grows again."""
+        log, head = self._three(tmp_path)
+        earlier = head.read_text()
+        for call_id in ("toolu_4", "toolu_5"):
+            assert self._call(tmp_path, call_id).returncode == 0
+        witness = tmp_path / "elsewhere" / "audit.head"
+        witness.parent.mkdir()
+        witness.write_text(head.read_text())
+        log.write_text("\n".join(log.read_text().splitlines()[:3]) + "\n")
+        head.write_text(earlier)
+        # The limitation, as documented: the head and the hook see nothing.
+        assert verify_log(log, HMAC_KEY, head) == (3, 3, [])
+        assert self._call(tmp_path, "toolu_6").returncode == 0
+        total, valid, errors = verify_log(log, HMAC_KEY, head, None, [witness])
+        assert (total, valid) == (4, 4)
+        assert errors == [
+            f"Witness {witness}: the log ends before its witness: 5 entries "
+            "recorded, 4 found (its last entries were removed, or the log was "
+            "removed and begun again, since the witness was taken)"
+        ]
+        assert self._call(tmp_path, "toolu_7").returncode == 0
+        assert verify_log(log, HMAC_KEY, head, None, [witness])[2] == [
+            f"Witness {witness}: entry 5 is not the one the witness records "
+            "(entries were removed or replaced)"
+        ]
+        result = self._cli("--log-file", str(log), "--witness", str(witness))
+        assert result.returncode == 1, result.stdout
+        assert "is not the one the witness records" in result.stdout
+        # Without the witness the cut verifies.
+        assert self._cli("--log-file", str(log)).returncode == 0
+
+    def test_a_witness_the_log_has_grown_past_verifies(self, tmp_path: Path) -> None:
+        log, head = self._three(tmp_path)
+        witness = tmp_path / "witness.head"
+        witness.write_text(head.read_text())
+        for call_id in ("toolu_4", "toolu_5"):
+            assert self._call(tmp_path, call_id).returncode == 0
+        assert verify_log(log, HMAC_KEY, head, None, [witness]) == (5, 5, [])
+        result = self._cli(
+            "--log-file", str(log), "--witness", str(witness), "--witness", str(head)
+        )
+        assert result.returncode == 0, result.stdout
+
+    def test_a_witness_that_is_missing_or_another_key_signed_fails(
+        self, tmp_path: Path
+    ) -> None:
+        log, head = self._three(tmp_path)
+        missing = tmp_path / "missing.head"
+        assert verify_log(log, HMAC_KEY, head, None, [missing])[2] == [
+            f"Witness {missing}: Head not found: {missing} (the hook keeps one "
+            "beside the log; a log begun before it did, or a chain no head "
+            "anchors, is verified with --no-head)"
+        ]
+        kept = json.loads(head.read_text())
+        forged = tmp_path / "forged.head"
+        forged.write_text(
+            json.dumps(
+                {
+                    **kept,
+                    "head_hmac": compute_hmac(
+                        f"acs-audit-head:3:{kept['hmac']}", "another-key"
+                    ),
+                }
+            )
+            + "\n"
+        )
+        assert verify_log(log, HMAC_KEY, head, None, [forged])[2] == [
+            f"Witness {forged}: Head HMAC mismatch: the head was not signed "
+            "with this key"
+        ]
+        log.unlink()
+        assert verify_log(log, HMAC_KEY, None, None, [head])[2] == [
+            "Audit log not found",
+            f"Audit log not found, though the witness {head} records 3 entries",
+        ]
+
 
 @pytest.mark.skipif(
     shutil.which("jq") is None

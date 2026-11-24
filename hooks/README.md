@@ -484,7 +484,7 @@ skill writes its own records, of the events a workflow reports.
 - Never writes the tool input: a command, a file's content or a skill's arguments can hold a credential. A SHA-256 digest of the input is written in its place
 - Uses HMAC-SHA256 chaining for tamper detection (SEC-005)
 - Each entry includes the HMAC of the previous entry, creating a hash chain: a changed or removed entry breaks the link of the entry after it
-- Keeps the chain's end in `.claude/audit.head`: the number of entries and the last one's `hmac`, signed with the same key (`head_hmac`, the HMAC of `acs-audit-head:<entries>:<hmac>`), and the same head, its anchor, in the project's git directory (`<git dir>/acs/audit.head`; none outside a repository). Removing the last entries, or the whole log, breaks no link; the head shows it, and a command that removes `.claude` whole with the log and its head (`git clean -fdx`) leaves the anchor, which shows it. Before it appends, the hook checks that the log still holds the entry the head and the anchor record, at its place: when it does not, or one is not a head this key signed, the hook says so, writes the line, and leaves both as they are, the evidence of the cut. The pre-tool-use hook refuses a call that names the head, `.claude` or the git directory's `acs/` (`F504`). To start a new log, move `audit.log`, `audit.head` and the anchor aside together
+- Keeps the chain's end in `.claude/audit.head`: the number of entries and the last one's `hmac`, signed with the same key (`head_hmac`, the HMAC of `acs-audit-head:<entries>:<hmac>`), and the same head, its anchor, in the project's git directory (`<git dir>/acs/audit.head`; none outside a repository). Removing the last entries, or the whole log, breaks no link; the head shows it, and a command that removes `.claude` whole with the log and its head (`git clean -fdx`) leaves the anchor, which shows it. An earlier head written back with the cut, or one signed anew with the key, shows nothing: only a witness kept off the agent's reach does (below). Before it appends, the hook checks that the log still holds the entry the head and the anchor record, at its place: when it does not, or one is not a head this key signed, the hook says so, writes the line, and leaves both as they are, the evidence of the cut. The pre-tool-use hook refuses a call that names the head, `.claude` or the git directory's `acs/` (`F504`). To start a new log, move `audit.log`, `audit.head` and the anchor aside together
 - Serializes concurrent runs (tool calls made in parallel) with flock(2) on the log file itself, opened for append, taken by `perl` or, without it, by `flock`, so the chain stays in order and sessions using either exclude each other. There is no separate lock file, and the kernel releases the lock when its holder exits, however it exits. A run tries for at most `AUDIT_LOCK_WAIT` seconds (default 40, at most 55) and then appends without the lock, with a warning, at once where the lock cannot be taken at all: the verifier reports an entry out of chain order, and a held lock cannot silence the log
 
 The log is a best-effort capture (STANDARD v1.2 §6.4): it can miss a call,
@@ -581,11 +581,31 @@ before the hook kept a head, or a chain no head anchors (the `audit`
 skill's `.claude/audit/records.jsonl`), is checked with `--no-head`, the
 chain alone: removing its last entries is not seen.
 
+The head and the anchor show a cut made by a writer that holds neither
+the key nor an earlier head (an accident, a person's edit, `git clean
+-fdx`). They do not show one made through the agent the log records: a
+head stays valid for as long as its key, the agent's commands can read
+the head and the anchor without a checkpoint or approval, and they can
+read the key wherever it is in their environment or in a file they can
+read. A command a person approved that names none of the records can then
+cut the log and write back an earlier head, or a head the key signs anew,
+and the log verifies. Keep a witness against that: copy `.claude/audit.head`
+where the agent cannot write it (off the machine at the end of a session,
+a CI artifact, a write-once store), and verify with
+`--witness <copy>` (repeatable): a log cut before the witness's entry
+fails, and goes on failing as the log grows again.
+
+```bash
+python tools/verify_audit_log.py --witness /mnt/audit-witness/project.head
+```
+
 Set a custom HMAC key via the `AUDIT_HMAC_KEY` environment variable, in
 `~/.claude/settings.json`, managed settings or the environment Claude Code
 starts in: while the project's settings files name it (or another of the
 hooks' settings), the hook writes no line (exit 1 with the reason), so no
-key the repository may know signs one.
+key the repository may know signs one. Claude Code passes the variable to
+every command too, so the key is evidence against a writer that is not
+the agent, not against the agent's own approved commands (above).
 
 ## Hooks in Skill Frontmatter
 
