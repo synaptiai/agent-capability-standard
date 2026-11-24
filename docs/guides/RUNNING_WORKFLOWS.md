@@ -86,7 +86,7 @@ flowchart TB
 
 | Action | Your host | Respond with |
 |--------|-----------|--------------|
-| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; select the implementation for it with `select_implementation`, [§5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter); a waiting `delegate` that delegates again names the delegation it replaces in `replaces`); `idempotency_key` (`<run_id>:<n>`) is the same for every attempt of one pass of the step: perform the effect at most once per key ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts the message) |
+| `InvokeCapability` | runs `capability` with `inputs`, for the step's `domain` when it declares one (null otherwise; select the implementation for it with `select_implementation`, [§5.2.4](../../spec/STANDARD-v1.2.0.md#524-domain-parameter); a waiting `delegate` that delegates again names the delegation it replaces in `replaces`); `idempotency_key` (`<run_id>:<n>`) is the same for every attempt of one pass of the step: perform the effect at most once per key ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)) | `{"kind": "Output", "value": {...}}`, optionally with `"evidence_seen": [ref, ...]` (the refs of the evidence the output's producer had for this answer; leave it out when you do not know the request, [Evidence and grounding](#evidence-and-grounding)), or `{"kind": "Error", "code": "R401"/"R402", "message": ..., "reason": ...}` (any other code is read as R402; `reason` is optional, below; neither holds a secret, and the runner redacts both) |
 | `CreateCheckpoint` | takes a checkpoint before `step` | `{"kind": "Checkpoint", "checkpoint_id": ...}` |
 | `Rollback` | restores `checkpoint_id` | `{"kind": "RolledBack"}` only when everything the checkpoint captured is restored, optionally with `"not_covered": [{"item", "reason"}, ...]` (changes it never covered: `transmitted`, `delegated`, `outside_scope`, [§4.4.1](../../spec/STANDARD-v1.2.0.md#441-checkpoints-and-rollback)); otherwise an `Error` (the run fails F503) |
 | `RequestApproval` | asks `approver` about `shown`, in `mode`: `in_session`, whoever attends the run, in its session; `out_of_band`, a separate channel whose approvers need not attend the run (keep the run's snapshot while you wait). `queued_action_id` names the queued action a resumed run is asking about, on every such request ([Resuming a deferred run](#resuming-a-deferred-run)) | `{"kind": "Decision", "decision_id", "decision", "approvers", "digest"}`; `decision` is `approved`, `rejected` or `unavailable`; with `identity@1`, optionally `approver_identities` (each an `agent_identity`, one per principal; `approvers` then empty or their principals) |
@@ -144,9 +144,10 @@ vendor reason `x-...`. The code still decides what happens (an
 `unsupported_domain` R402 is retried like any R402); the reason travels to
 the step's trace event, to the run's `Failed` action and `RunResult.reason`,
 and to the step's record as `reason_code`. A `reason` outside that grammar
-is ignored and noted in the trace as `reason_ignored`. Raise
-`HostCannotServe(reason, message)` from `invoke_capability` or `await_event`
-and the runner answers the action with that `Error`.
+is ignored and noted in the trace as `reason_ignored` (redacted, as the
+message is). Raise `HostCannotServe(reason, message)` from
+`invoke_capability` or `await_event` and the runner answers the action with
+that `Error`.
 
 The executor computes some members of the actions it issues: `deadline` is
 the time the attempt's action was issued plus the step's `timeout`;
@@ -439,7 +440,39 @@ them to a file (`durable`), so evidence outlives the process (§6.6).
 runs; each is checked against the ontology when it is made, so a misspelt
 capability is a `ValueError` naming V101. `WorkflowRunner(...,
 redactor=Redactor([...]))` registers the host's secrets: the runner redacts
-the message of every `Error` it submits (§6.7).
+the `message` and `reason` of every `Error` it submits, the one it builds
+when the run refuses a host's response included, the evidence anchors of
+every `Output` it submits and of every `Event` (which the core copies into
+a `receive` or `wait` step's output), given as a list or a tuple, the
+`not_covered` items of a `RolledBack`, a `Decision`'s `decision_id`,
+`decision`, `approvers` and `approver_identities` (which reach the trace,
+the record's `approval` and an F502's reason), an `Event`'s `principal` and
+`identity` (the received item's `sender` and `sender_identity`), and a
+`cancel`'s reason, so the run's state, outputs, trace, records and
+snapshots keep an anchor that held a secret with it replaced and without
+its digest (§6.5, §6.7). Redaction can make two values one: approvers that
+differ only in a secret count once, and a `decision_id` that differs from
+one used before only in a secret is refused as used (F502); give ids and
+principals that hold no secret. A checkpoint named by an id that holds a
+secret is refused instead (F501 for a `CreateCheckpoint`'s, R402 for a
+`checkpoint` step's output): the run's records name it, and the run gives
+it back to roll back to, so a redacted id would name none you could
+restore. A `Current` value is kept as read: the core compares it with the
+approved source and writes it into no record.
+`evidence_seen` is rewritten to match: it lists an anchor's redacted `ref`
+when it listed the anchor's own, and when two anchors are one after
+redaction it lists neither unless it listed both. The runner gives what its
+redactor recognises to the host's `IdempotencyLog`, `CheckpointTracker` and
+`MemoryStore` and to its own `memory` (a store on the shared default
+redactor gets one of its own), so the log's file, the tracker's records (a
+checkpoint's reason and scope, which a `checkpoint` step's input gives)
+and a refused `persist` know the registered secrets too. A signed URL's
+signature (`sig=`, `X-Amz-Signature=`) is not among the default patterns:
+a host that cites signed URLs adds a pattern for them
+(`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) or cites them without
+their query. The core's grounding refusal (F505)
+names an anchor by its index and kind, never by its `ref`, and its approval
+refusals name neither a decision's value nor its id.
 
 ## Hosting runs
 
@@ -507,7 +540,9 @@ result.checkpoint_id    # the latest checkpoint the run knew of, if any
 ```
 
 Cancelling ends the run at once with `Failed` R408
-([§5.19.5](../../spec/STANDARD-v1.2.0.md#5195-cancelling-a-run)). No retry,
+([§5.19.5](../../spec/STANDARD-v1.2.0.md#5195-cancelling-a-run)), the reason
+as its message, redacted with the runner's `redactor` (the core writes it
+into the trace and the records). No retry,
 failure mode, recovery loop, handler or rollback runs: the executor does not
 roll back, and a host that wants the effects undone restores
 `checkpoint_id` itself. Approved and queued records become `cancelled` (a
@@ -676,7 +711,11 @@ host = Host(
 - **Sends** ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)).
   Call `self.send_once(action, effect)` from your `send` implementation:
   with an `IdempotencyLog`, an attempt whose key already transmitted gets
-  that output again (its `evidence_seen` included), one whose earlier
+  that output again (its `evidence_seen` included) as the log keeps it:
+  the log is the host's record of what it did, so it keeps the output as
+  the runner submits it (anchors redacted, `evidence_seen` rewritten to
+  match) with every other secret its redactor recognises replaced, and the
+  destination redacted (§6.7); one whose earlier
   attempt may have transmitted gets `outcome_unknown`, and a key reused
   with other inputs gets `key_conflict`. A host that saves runs keeps its
   keys as long:

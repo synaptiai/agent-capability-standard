@@ -51,6 +51,28 @@ export interface BindingApproval {
   expires_ms?: number;
 }
 
+/**
+ * The approval a composite's call needs (§5.18.4): its approval covers its
+ * nested calls, so it is the strictest of its own and each invoked
+ * binding's, the most approvers, the shortest expiry and a role one of them
+ * sets (the first given). Undefined when neither sets one.
+ */
+export function joinApproval(
+  a: BindingApproval | undefined,
+  b: BindingApproval | undefined,
+): BindingApproval | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  const role = a.role ?? b.role;
+  const expires =
+    a.expires_ms === undefined ? b.expires_ms : b.expires_ms === undefined ? a.expires_ms : Math.min(a.expires_ms, b.expires_ms);
+  return {
+    min_approvers: Math.max(a.min_approvers, b.min_approvers),
+    ...(role !== undefined ? { role } : {}),
+    ...(expires !== undefined ? { expires_ms: expires } : {}),
+  };
+}
+
 /** A tool binding record, as `schemas/interop/tool_binding.schema.json` describes it. */
 export interface ToolBindingRecord {
   tool: string;
@@ -87,6 +109,10 @@ export interface BoundTool extends SafetyFlags {
   control: boolean;
   domain?: string;
   classifier?: string;
+  /**
+   * The approval a call needs (§5.18.7): the record's, joined for a
+   * composite with each invoked binding's, transitively (§5.18.4).
+   */
   approval?: BindingApproval;
   destination?: string;
 }
@@ -519,6 +545,15 @@ export interface CheckBindingsOptions {
   hostTakesCheckpoints?: boolean;
   /** Bindings loaded earlier, which an `invokes` name may resolve to. */
   known?: Record<string, BoundTool>;
+  /**
+   * Flags a layer applies to a loaded tool beyond its record, by the record's
+   * `tool`: those the domain profiles it applies raise (§5.21.3), its nested
+   * calls' included, as the layer computed them. They are effective flags,
+   * so they join the tool's: in the bindings returned and in the checks of
+   * the offered tools (V102 for a raised `requires_checkpoint`, F506 for a
+   * host action tied to a tool they make refusable).
+   */
+  raised?: Readonly<Record<string, SafetyFlags>>;
 }
 
 /**
@@ -567,10 +602,18 @@ export function checkBindings(
     candidates.set(binding.tool, binding);
   }
 
-  // 5. invokes: cycles (V105), then names that resolve to nothing (V107).
-  const graph = new Map([...candidates].map(([tool, b]) => [tool, [...b.invokes]]));
+  // 5. invokes: cycles (V105), through the bindings loaded earlier too (a
+  // set loaded in two steps closes no cycle one set could not), then names
+  // that resolve to nothing (V107).
+  const graph = new Map<string, string[]>([
+    ...Object.entries(known)
+      .filter(([name]) => !candidates.has(name))
+      .map(([name, k]): [string, string[]] => [name, [...k.invokes]]),
+    ...[...candidates].map(([tool, b]): [string, string[]] => [tool, [...b.invokes]]),
+  ]);
   for (const component of cycles(graph)) {
     for (const tool of component) {
+      if (!candidates.has(tool)) continue;
       diagnostics.push(
         diagnostic(
           'V105',
@@ -625,19 +668,36 @@ export function checkBindings(
     return flags;
   };
 
+  // The approval a call needs: a composite's joins, transitively, that of
+  // each binding it invokes (§5.18.4), as its flags do.
+  const approvals = new Map<string, BindingApproval | undefined>();
+  const resolveApproval = (tool: string): BindingApproval | undefined => {
+    if (approvals.has(tool)) return approvals.get(tool);
+    const binding = candidates.get(tool);
+    if (!binding) return known[tool]?.approval;
+    let approval = binding.approval;
+    for (const name of binding.invokes) approval = joinApproval(approval, resolveApproval(name));
+    approvals.set(tool, approval);
+    return approval;
+  };
+
   // 7. Prerequisites of the capabilities each record names.
   const effective: Record<string, BoundTool> = {};
+  const raised = options.raised ?? {};
   for (const [tool, binding] of candidates) {
     const capabilities = capabilitiesOf(binding) as CapabilityId[];
+    const approval = resolveApproval(tool);
+    // A control-only tool performs no capability: no profile raises it.
+    const extra = !binding.control && Object.hasOwn(raised, tool) ? raised[tool] : undefined;
     effective[tool] = {
-      ...resolve(tool),
+      ...(extra !== undefined ? joinFlags(resolve(tool), extra) : resolve(tool)),
       capabilities,
       prerequisites: prerequisitesOf(capabilities),
       invokes: [...binding.invokes],
       control: binding.control,
       ...(binding.domain !== undefined ? { domain: binding.domain } : {}),
       ...(binding.classifier !== undefined ? { classifier: binding.classifier } : {}),
-      ...(binding.approval !== undefined ? { approval: binding.approval } : {}),
+      ...(approval !== undefined ? { approval } : {}),
       ...(binding.destination !== undefined ? { destination: binding.destination } : {}),
     };
   }
@@ -722,35 +782,35 @@ function checkOffered(
   return out;
 }
 
-/** The record members an `acs` annotation carries; the rest are copies or the annotation's own. */
-const RECORD_MEMBERS = [
-  'standard',
-  'ontology',
-  'capability',
-  'domain',
-  'flags',
-  'additional_capabilities',
-  'classifier',
-  'invokes',
-  'approval',
-  'control',
-  'destination',
-] as const;
+/**
+ * The members of an `acs` annotation that are copies (§5.18.1): the name the
+ * tool is offered under, the capability's layer and the effective flags. A
+ * layer computes these itself and ignores them.
+ */
+const ANNOTATION_COPIES: ReadonlySet<string> = new Set([
+  'tool',
+  'layer',
+  'risk',
+  'mutation',
+  'requires_checkpoint',
+  'requires_approval',
+]);
 
 /**
  * Read a Standard Agents `acs` annotation as a tool binding record (§5.18.1:
- * an annotation is a carrier). `tool` is the name the tool is offered under;
- * the copies an annotation holds (`layer`, the effective flags) are ignored.
+ * an annotation is a carrier, read as the record). `tool` is the name the
+ * tool is offered under; the copies an annotation holds (`layer`, the
+ * effective flags) are ignored. Every other member is the record's, an
+ * unknown one included, so `checkBindings` reports it (S303) and does not
+ * load the record: a record a layer cannot read in full is not read in part.
  * Null for a value that is not an object.
  */
 export function annotationRecord(name: string, annotation: unknown): Record<string, unknown> | null {
   if (!isObject(annotation)) return null;
-  const record: Record<string, unknown> = { tool: name };
-  for (const member of RECORD_MEMBERS) {
-    if (Object.hasOwn(annotation, member)) record[member] = annotation[member];
-  }
-  for (const [key, value] of Object.entries(annotation)) {
-    if (key.startsWith('x-')) record[key] = value;
-  }
-  return record;
+  // Object.fromEntries defines each member as an own property, so a member
+  // named __proto__ stays a member (and is reported) rather than a prototype.
+  return Object.fromEntries([
+    ['tool', name],
+    ...Object.entries(annotation).filter(([key]) => !ANNOTATION_COPIES.has(key)),
+  ]);
 }

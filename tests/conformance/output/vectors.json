@@ -2,7 +2,7 @@
   "standard": "1.2.0",
   "section": "5.18.9",
   "status": "informative",
-  "description": "Capability outputs on a text-only channel (Agent Capability Standard 1.2.0, section 5.18.9): what the reference codecs, grounded_agency/capabilities/output.py and packages/acs-core/src/output.ts, accept and refuse, so they agree. Every vector uses the capability `observe`. A `decode` vector reads `text` as the string a consumer received: `expect` is \"ok\" or a refusal with R402. An `encode` vector parses `value_text` with the language's own JSON parser and encodes the value: `expect` is \"ok\", and the encoded text then decodes, or a refusal with R402. The I-JSON limits of section 5.14 apply to the text a producer sends: a number written as an integer literal beyond ±2^53 is refused, one written in exponent form is a double and is not. How a value is written is the producer's serializer's: a JavaScript producer writes the double 1.8e16 as 18000000000000000, which it therefore refuses, where Python writes 1.8e+16; such cases, where the languages' serializers differ, are left out of `encode`.",
+  "description": "Capability outputs on a text-only channel (Agent Capability Standard 1.2.0, section 5.18.9): what the reference codecs, grounded_agency/capabilities/output.py and packages/acs-core/src/output.ts, accept and refuse, so they agree. Every vector uses the capability `observe`. A `decode` vector reads `text` as the string a consumer received: `expect` is \"ok\" or a refusal with R402; where it has `quotes_nothing_of`, the refusal's message (the diagnostic's text) holds no piece of four or more characters of that string, which the text holds, since a message that quotes part of a secret escapes redaction (section 6.7). An `encode` vector parses `value_text` with the language's own JSON parser and encodes the value: `expect` is \"ok\", and the encoded text then decodes, or a refusal with R402. The I-JSON limits of section 5.14 apply to the text a producer sends: a number written as an integer literal beyond ±2^53 is refused, one written in exponent form is a double and is not. How a value is written is the producer's serializer's: a JavaScript producer writes the double 1.8e16 as 18000000000000000, which it therefore refuses, where Python writes 1.8e+16; such cases, where the languages' serializers differ, are left out of `encode`.",
   "decode": [
     {
       "name": "object",
@@ -139,6 +139,33 @@
       "expect": {
         "refuse": "R402"
       }
+    },
+    {
+      "name": "text_starting_with_a_secret",
+      "about": "Text that is not JSON and starts with a secret: the refusal quotes none of the text, so no piece of the secret too short for redaction to match reaches a record.",
+      "text": "Zq8xRw4vT9mKp2LdN7cB rejected for account 42",
+      "expect": {
+        "refuse": "R402"
+      },
+      "quotes_nothing_of": "Zq8xRw4vT9mKp2LdN7cB"
+    },
+    {
+      "name": "unquoted_secret_value",
+      "about": "A secret written as a member's value without quotes.",
+      "text": "{\"observation\": Hq3vB8nW5zXk1MpY, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      },
+      "quotes_nothing_of": "Hq3vB8nW5zXk1MpY"
+    },
+    {
+      "name": "unquoted_password_member",
+      "about": "A password without quotes under the member that names it: a quoted window that cut the member's name would no longer be recognised as one.",
+      "text": "{\"password\": Tr0ub4dorK3yZ, \"observation\": 1, \"evidence_anchors\": [], \"confidence\": 0.5}",
+      "expect": {
+        "refuse": "R402"
+      },
+      "quotes_nothing_of": "Tr0ub4dorK3yZ"
     },
     {
       "name": "array",

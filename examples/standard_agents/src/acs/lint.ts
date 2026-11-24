@@ -13,9 +13,9 @@
  * `checkBindings`, which the Python loader mirrors.
  */
 import type { AgentDefinition } from '@standardagents/spec';
-import { agentsApply, annotationRecord, checkBindings, type BindingDiagnostic } from '@synaptiai/acs-core';
-import { ANNOTATION_KEY, statedName } from './grounded.js';
-import type { CapabilityId } from './ontology.js';
+import { agentsApply, annotationRecord, checkBindings, joinFlags, type BindingDiagnostic } from '@synaptiai/acs-core';
+import { ANNOTATION_KEY, computedFlags, statedName } from './grounded.js';
+import type { CapabilityId, SafetyFlags } from './ontology.js';
 
 /** The prompt-side options that act when a named tool is called. */
 export type ToolBinding = 'stopTool' | 'sessionStop' | 'sessionFail' | 'sessionStatus';
@@ -43,13 +43,21 @@ export interface LintDiagnostic {
 type Tools = Record<string, { annotations?: Record<string, unknown> }>;
 
 /**
- * The binding records the offered tools carry, and what each offered name
- * carries: the record of the name the tool states (its `tool`), or null for
- * a tool with no `acs` annotation.
+ * The binding records the offered tools carry, what each offered name
+ * carries (the record of the name the tool states, its `tool`, or null for
+ * a tool with no `acs` annotation), and, by that name, the effective flags
+ * each tool defined here computed (`computedFlags`): the record states none
+ * of those the applied domain profiles raise (§5.21.3), its own and the
+ * layer's, and they are what its calls are checked with.
  */
-function recordsOf(tools: Tools): { records: Record<string, unknown>[]; offered: Record<string, string | null> } {
+function recordsOf(tools: Tools): {
+  records: Record<string, unknown>[];
+  offered: Record<string, string | null>;
+  raised: Record<string, SafetyFlags>;
+} {
   const records: Record<string, unknown>[] = [];
   const offered: Record<string, string | null> = {};
+  const raised: Record<string, SafetyFlags> = {};
   const seen = new Set<string>();
   for (const [name, tool] of Object.entries(tools)) {
     const annotation = tool.annotations?.[ANNOTATION_KEY];
@@ -65,12 +73,14 @@ function recordsOf(tools: Tools): { records: Record<string, unknown>[]; offered:
       continue;
     }
     offered[name] = stated;
+    const computed = computedFlags(tool);
+    if (computed !== undefined) raised[stated] = Object.hasOwn(raised, stated) ? joinFlags(raised[stated]!, computed) : computed;
     if (!seen.has(stated)) {
       seen.add(stated);
       records.push(record);
     }
   }
-  return { records, offered };
+  return { records, offered, raised };
 }
 
 function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
@@ -91,15 +101,20 @@ function capabilityOf(tools: Tools, name: string): CapabilityId | undefined {
  *   could never get the call accepted. A host that takes checkpoints itself
  *   (`hostTakesCheckpoints`), or an offered tool whose binding names a
  *   `classifier`, counts as performing it.
+ *
+ * A tool defined here is checked with the flags it computed, those its
+ * domain profiles and the layer's raise included (§5.21.3), which its
+ * record does not state: they are what its calls are checked with.
  */
 export function lintPromptTools(
   prompt: string,
   tools: Tools,
   options: { hostTakesCheckpoints?: boolean } = {},
 ): LintDiagnostic[] {
-  const { records, offered } = recordsOf(tools);
+  const { records, offered, raised } = recordsOf(tools);
   const { diagnostics } = checkBindings(records, {
     offered,
+    raised,
     hostActions: [],
     hostTakesCheckpoints: options.hostTakesCheckpoints ?? false,
   });
@@ -132,15 +147,17 @@ export function lintPromptTools(
  * could still end the turn or the session, and with `messageProperty` hand a
  * parent the model's text for an action that never ran. Tying one to a tool
  * that is unbound, has a prerequisite, or needs a checkpoint or approval is
- * F506. Bind a `controlTool`, which is never refused, that the model calls
- * once the gated one has succeeded.
+ * F506: for a tool defined here, by the flags it computed, those the applied
+ * domain profiles raise included (§5.21.3), as its calls are refused. Bind a
+ * `controlTool`, which is never refused, that the model calls once the gated
+ * one has succeeded.
  */
 export function lintAgentBindings(
   agent: Pick<AgentDefinition, 'name' | 'sideA' | 'sideB'>,
   tools: Tools,
 ): LintDiagnostic[] {
   const out: LintDiagnostic[] = [];
-  const { records, offered } = recordsOf(tools);
+  const { records, offered, raised } = recordsOf(tools);
   for (const side of ['sideA', 'sideB'] as const) {
     const config = agent[side];
     if (config.prompt === undefined) continue;
@@ -156,7 +173,7 @@ export function lintAgentBindings(
     if (hostActions.length === 0) continue;
     const named: Record<string, string | null> = { ...offered };
     for (const { tool } of hostActions) if (!Object.hasOwn(named, tool)) named[tool] = null;
-    const { diagnostics } = checkBindings(records, { offered: named, hostActions });
+    const { diagnostics } = checkBindings(records, { offered: named, hostActions, raised });
     for (const d of diagnostics) {
       if (d.code !== 'F506') continue;
       const binding = d.location.action as ToolBinding;

@@ -1,0 +1,98 @@
+{
+  "description": "Under a destination policy, a layer refuses with F504, before approval and the checkpoint, a call of a send binding that names no destination argument: it cannot tell where the call sends, whatever argument names a destination the policy allows.",
+  "ontology": "2.2.0",
+  "destination_policy": [
+    "https://hooks.example.com/*"
+  ],
+  "bindings": [
+    {
+      "tool": "save",
+      "ontology": "2.2.0",
+      "capability": "checkpoint"
+    },
+    {
+      "tool": "write",
+      "ontology": "2.2.0",
+      "capability": "mutate"
+    },
+    {
+      "tool": "undo",
+      "ontology": "2.2.0",
+      "capability": "rollback"
+    },
+    {
+      "tool": "done",
+      "ontology": "2.2.0",
+      "control": true
+    },
+    {
+      "tool": "batch",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "write"
+      ]
+    },
+    {
+      "tool": "fix",
+      "ontology": "2.2.0",
+      "capability": "invoke",
+      "invokes": [
+        "undo"
+      ]
+    },
+    {
+      "tool": "solo",
+      "ontology": "2.2.0",
+      "capability": "invoke"
+    },
+    {
+      "tool": "apply",
+      "ontology": "2.2.0",
+      "capability": "plan",
+      "additional_capabilities": [
+        "mutate"
+      ]
+    },
+    {
+      "tool": "post",
+      "ontology": "2.2.0",
+      "capability": "send"
+    },
+    {
+      "tool": "notify",
+      "ontology": "2.2.0",
+      "capability": "send",
+      "destination": "/to"
+    }
+  ],
+  "sequence": [
+    {
+      "call": "save",
+      "expect": "run"
+    },
+    {
+      "call": "post",
+      "args": {
+        "url": "https://elsewhere.example.net/x",
+        "destination": "https://hooks.example.com/ok"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": {
+        "refuse": "F504"
+      }
+    },
+    {
+      "call": "notify",
+      "args": {
+        "to": "https://hooks.example.com/a"
+      },
+      "approve": [
+        "alice"
+      ],
+      "expect": "run"
+    }
+  ]
+}

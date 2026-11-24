@@ -1713,15 +1713,18 @@ impl<'a> Machine<'a> {
         let reused = !self.st.used_decisions.insert(decision_id.clone());
         let counted = counting.approvers.len() as u64;
         // (status, reason) for a decision that does not let the step run.
+        // A reason repeats neither the decision's id nor its value: both
+        // are the host's text, and a reason is a diagnostic, which holds no
+        // secret (§6.7); the trace's `approval_decided` names them.
         let problem: Option<(&str, String)> = if reused {
-            Some((
-                "rejected",
-                format!("decision '{decision_id}' was already used"),
-            ))
+            Some(("rejected", "the decision was already used".to_string()))
         } else if decision == "rejected" {
             Some(("rejected", "approval was rejected".to_string()))
         } else if decision != "approved" {
-            Some(("rejected", format!("'{decision}' is not a decision")))
+            Some((
+                "rejected",
+                "the decision is none of approved, rejected or unavailable".to_string(),
+            ))
         } else if expires_at.is_some_and(|e| now > e) {
             Some(("expired", "the approval expired".to_string()))
         } else if !canonical::same_digest(given, expected) {
@@ -3401,13 +3404,11 @@ fn contract_value_problem(output: &Value, required: &[String]) -> Option<String>
             .and_then(Value::as_f64)
             .is_some_and(|x| (0.0..=1.0).contains(&x))
         {
-            let shown: String = c
-                .map(Value::to_string)
-                .unwrap_or_default()
-                .chars()
-                .take(64)
-                .collect();
-            return Some(format!("'confidence' {shown} is not a number from 0 to 1"));
+            // The host's text is not repeated (§6.7).
+            let shown = c.map_or_else(|| "absent".to_string(), crate::grounding::shown_value);
+            return Some(format!(
+                "'confidence' ({shown}) is not a number from 0 to 1"
+            ));
         }
     }
     None

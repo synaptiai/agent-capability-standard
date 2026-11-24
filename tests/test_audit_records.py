@@ -23,6 +23,7 @@ import yaml
 from grounded_agency import _core
 from grounded_agency.capabilities.registry import CapabilityRegistry
 from grounded_agency.coordination.audit import CoordinationAuditLog
+from grounded_agency.state.redaction import Redactor
 from grounded_agency.trust import OverrideRefused, TrustModel, manual_override
 from tests.action_record_schema import problems
 from tests.runtime_replay import ONTOLOGY, ROOT, RUNTIME, load, play, start
@@ -235,6 +236,44 @@ def test_manual_override_records() -> None:
         "previous": 0.6,
         "value": 0.8,
     }
+
+
+def test_manual_override_records_no_secret() -> None:
+    """The override's record holds no secret (§6.7): its target, values and
+    anchors are redacted, and an anchor that held one keeps no digest."""
+    model = yaml.safe_load(TRUST.read_text(encoding="utf-8"))
+    kept: list[dict[str, Any]] = []
+    digest = "sha256:" + "a" * 64
+    record = manual_override(
+        model,
+        target="conflict:db_url",
+        previous="postgres://app:Hunter2SuperSecret99@db.internal/prod",
+        value="postgres://app:CHANGEME@db.internal/staging",
+        actor_identity={"principal": "alice", "kind": "human"},
+        anchors=[
+            {
+                "ref": "https://api.example.com/report?access_token=abcd1234efgh",
+                "kind": "url",
+                "digest": digest,
+            },
+            {"ref": "file:review.md", "kind": "file", "digest": digest},
+        ],
+        record=kept.append,
+        redactor=Redactor(["CHANGEME"]),
+    )
+    assert kept == [record]
+    assert problems(record) == []
+    text = json.dumps(record)
+    for secret in ("Hunter2SuperSecret99", "CHANGEME", "abcd1234efgh"):
+        assert secret not in text
+    assert record["anchors"] == [
+        {
+            "ref": "https://api.example.com/report?access_token=[REDACTED]",
+            "kind": "url",
+            "metadata": {"digest_omitted": "secret"},
+        },
+        {"ref": "file:review.md", "kind": "file", "digest": digest},
+    ]
 
 
 def test_manual_override_refusals() -> None:

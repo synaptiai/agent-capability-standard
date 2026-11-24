@@ -14,7 +14,8 @@
  * per entry.
  */
 import type { ThreadState } from '@standardagents/spec';
-import { redactJson, redactText, type EvidenceAnchor, type Json, type TRUST_CLASSES } from '@synaptiai/acs-core';
+import { redactAnchor, redactText, type EvidenceAnchor, type Json, type TRUST_CLASSES } from '@synaptiai/acs-core';
+import { layerSecrets } from './layer.js';
 import type { CapabilityId } from './ontology.js';
 
 /** The part of `ThreadState` the binding uses. */
@@ -92,6 +93,11 @@ export interface RecordedBy {
 
 /** One checkpoint. `valid` turns false when a step that requires one uses it. */
 export interface CheckpointRecord {
+  /**
+   * The id the `checkpoint` call's output gave (`checkpoint-<seq>` when it
+   * gave none), with every secret replaced (§6.7, `addCheckpoint`): a value
+   * the call returned, which may repeat what the model wrote.
+   */
   id: string;
   valid: boolean;
   /** The trace entry of the `checkpoint` call that took it. */
@@ -196,7 +202,7 @@ export interface TraceEntry {
   flow_id?: string;
   /** The model step of that execution (`state.execution.stepCount`). */
   step?: number;
-  /** The tool's name. */
+  /** The tool's name, with every secret replaced (§6.7, `redactedName`). */
   action: string;
   /**
    * `null` for a tool call the audit hook saw that no grounded tool
@@ -259,6 +265,7 @@ export interface TraceEntry {
 /** A trace entry waiting for the audit hook to supply its tool call id. */
 export interface Unlinked {
   seq: number;
+  /** The entry's `action`, redacted as the entry's is (§6.7). */
   action: string;
   /** The execution and model step the call was made in: only a hook of the same step may link it. */
   flow_id: string | null;
@@ -283,18 +290,41 @@ export function stale(waiting: Unlinked, flow: string | null, step: number | nul
 }
 
 /**
- * An entry's `error` and `evidence_anchors` with every secret replaced
- * (STANDARD v1.2.0 §6.7): always the default patterns, plus the registered
- * `secrets`. Nothing else in an entry holds a value a call received.
+ * A tool's name with every secret replaced (STANDARD v1.2.0 §6.7), as
+ * {@link appendTrace} writes it into an entry's `action`: the default
+ * patterns, the secrets registered layer-wide and `secrets`. The name is the
+ * one the model called (the audit hook's) or the one a composite's code
+ * invoked, either of which the call's arguments or a prompt can choose.
  */
-function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors'>>>(
+export function redactedName(name: string, secrets: readonly string[] = []): string {
+  return redactText(name, [...secrets, ...layerSecrets()]);
+}
+
+/**
+ * An entry's `action`, `error`, `evidence_anchors` and `checkpoint_id` with
+ * every secret replaced (STANDARD v1.2.0 §6.7): always the default patterns
+ * and the secrets registered layer-wide (`configureLayer({ secrets })`),
+ * plus `secrets`. An anchor that held a secret loses its `digest`
+ * (`redactAnchor`). Nothing else in an entry holds a value a call received
+ * or a model chose: the tool's name is the one the model called, or the one
+ * a composite's code invoked, and a checkpoint's id is what a `checkpoint`
+ * call returned. The audit record exported from an entry (`actionRecord`)
+ * takes its `tool` and `intent` from the redacted `action`.
+ */
+function redacted<T extends Partial<Pick<TraceEntry, 'action' | 'error' | 'evidence_anchors' | 'checkpoint_id'>>>(
   entry: T,
   secrets: readonly string[],
 ): T {
+  const values = [...secrets, ...layerSecrets()];
   const out = { ...entry };
-  if (typeof out.error === 'string') out.error = redactText(out.error, secrets);
+  if (typeof out.action === 'string') out.action = redactText(out.action, values);
+  if (typeof out.error === 'string') out.error = redactText(out.error, values);
+  if (typeof out.checkpoint_id === 'string') out.checkpoint_id = redactText(out.checkpoint_id, values);
+  // An anchor that held a secret keeps no digest of what it cites
+  // (`redactAnchor`): a digest of content that may be no more than the
+  // secret could be inverted by guessing.
   if (Array.isArray(out.evidence_anchors)) {
-    out.evidence_anchors = redactJson(out.evidence_anchors as Json, secrets).value as Json[];
+    out.evidence_anchors = (out.evidence_anchors as Json[]).map((a) => redactAnchor(a, values).value);
   }
   return out;
 }
@@ -304,7 +334,7 @@ function redacted<T extends Partial<Pick<TraceEntry, 'error' | 'evidence_anchors
  * number. The count is advanced before the entry is written, so a write that
  * fails part-way leaves a gap in the numbering, never an entry that the next
  * one overwrites. The entry is redacted first (§6.7), always: `secrets` adds
- * the host's own values to the default patterns.
+ * the host's own values to the default patterns and the layer's.
  */
 export async function appendTrace(
   store: Store,
@@ -316,6 +346,7 @@ export async function appendTrace(
   await store.setValue(KEYS.traceCount, seq);
   await store.setValue(KEYS.trace(seq), stored);
   if ((stored.capability !== null || stored.control) && stored.tool_call_id === undefined) {
+    // The redacted name: the list is a record of the layer's too (§6.7).
     const waiting: Unlinked = { seq, action: stored.action, flow_id: stored.flow_id ?? null, step: stored.step ?? null };
     // An entry of an earlier step can no longer be linked (see audit.ts).
     const unlinked = ((await store.getValue<Unlinked[]>(KEYS.unlinked)) ?? []).filter(
@@ -366,6 +397,21 @@ export async function readTrace(store: Store): Promise<TraceEntry[]> {
 
 export async function readCheckpoints(store: Store): Promise<CheckpointRecord[]> {
   return (await store.getValue<CheckpointRecord[]>(KEYS.checkpoints)) ?? [];
+}
+
+/**
+ * Record a checkpoint taken, its id redacted as {@link appendTrace} redacts
+ * (§6.7): the id is what the `checkpoint` call returned, and the record is
+ * the layer's. Two ids that are one after redaction name one checkpoint, so
+ * a call that uses one uses both (the safe side).
+ */
+export async function addCheckpoint(
+  store: Store,
+  record: CheckpointRecord,
+  secrets: readonly string[] = [],
+): Promise<void> {
+  const id = redactText(record.id, [...secrets, ...layerSecrets()]);
+  await store.setValue(KEYS.checkpoints, [...(await readCheckpoints(store)), { ...record, id }]);
 }
 
 /**

@@ -13,7 +13,8 @@ or reorders a kept record, never reuses a ``record_id``, answers queries in
 append order, exports JSON Lines, states its durability and whether it is
 bounded, counts what it removes, and notifies subscribers
 (``acs.evidence_recorded``). It redacts every anchor before keeping it
-(§6.7) and keeps a frozen copy, never the caller's object.
+(§6.7; an anchor that held a secret keeps no ``digest``) and keeps a frozen
+copy, never the caller's object.
 """
 
 from __future__ import annotations
@@ -96,13 +97,32 @@ def _validate_metadata_depth(value: Any, current_depth: int = 0) -> bool:
     return True
 
 
+def _flatten(value: Any) -> str:
+    """A metadata value nested too deep, as JSON text: redacted with the
+    default patterns first, while its structure can still be read (a
+    header's name/value pair, a secret member), since its text reads only as
+    a string (STANDARD v1.2 §6.7). Whole: a cut could keep part of a secret
+    that a redactor then no longer recognises, a registered one included;
+    the size limit replaces a value too large whole. A value with no JSON
+    text (a reference cycle) becomes a marker, not its repr."""
+    from .redaction import DEFAULT_REDACTOR
+
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+        redacted, _ = DEFAULT_REDACTOR.redact(json.loads(text))
+        return json.dumps(redacted, ensure_ascii=False)
+    except TypeError, ValueError, RecursionError:
+        return "[unserializable]"
+
+
 def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """
     Sanitize metadata to prevent injection attacks.
 
     - Validates key names (alphanumeric + underscore)
-    - Limits nesting depth
-    - Enforces size limit by truncating values
+    - Limits nesting depth: a deeper value becomes its JSON text,
+      redacted first (``_flatten``)
+    - Enforces the size limit by replacing the largest values whole
     """
     if not metadata:
         return {}
@@ -114,10 +134,9 @@ def _sanitize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         if not _validate_metadata_key(str(key)):
             continue
 
-        # Skip values that are too deeply nested
+        # Values that are too deeply nested become their (redacted) text
         if not _validate_metadata_depth(value):
-            # Flatten to string representation
-            value = str(value)[:100]
+            value = _flatten(value)
 
         sanitized[str(key)] = value
 
@@ -168,6 +187,8 @@ letters, digits, ``_``, ``.`` or ``-``."""
 
 _VENDOR = re.compile(r"x-[a-z0-9][a-z0-9_.-]*", re.ASCII)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}", re.ASCII)
+# A record id as this store writes one (``ev-<n>``).
+_RECORD_ID = re.compile(r"ev-(?:0|[1-9][0-9]*)")
 
 LEGACY_KINDS: dict[str, str] = {
     "tool_output": "tool",
@@ -844,9 +865,10 @@ class EvidenceStore:
     eviction, and each record :meth:`clear` drops, counts in
     ``info().removed``; record ids (``ev-<n>``) are never reused.
 
-    Every anchor is redacted (``redactor``, §6.7) and kept as a frozen copy:
-    what a getter returns cannot be changed, and changing the caller's
-    anchor after it was added changes nothing the store holds.
+    Every anchor is redacted (``redactor``, §6.7; one that held a secret
+    keeps no ``digest``, :meth:`Redactor.redact_anchor`) and kept as a
+    frozen copy: what a getter returns cannot be changed, and changing the
+    caller's anchor after it was added changes nothing the store holds.
 
     Example:
         store = EvidenceStore(max_anchors=1000)
@@ -974,7 +996,10 @@ class EvidenceStore:
 
     def get(self, record_id: str) -> EvidenceRecord | None:
         """The record with ``record_id``, or None (also once removed)."""
-        if not record_id.startswith("ev-") or not record_id[3:].isdigit():
+        # Only the id as written (`ev-<n>`, ASCII digits, no leading zero),
+        # as the JSON Lines store matches it: int() reads `ev-01` and `ev-١`
+        # as 1 too.
+        if not _RECORD_ID.fullmatch(record_id):
             return None
         with self._lock:
             return self._records.get(int(record_id[3:]))

@@ -1,6 +1,6 @@
 import { validateAgentDefinition, type HookToolCall, type PackedExports, type ToolResult } from '@standardagents/spec';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import approvalsGet from '../agents/api/acs/approvals.get.js';
 import approvalsPost from '../agents/api/acs/approvals.post.js';
@@ -19,10 +19,13 @@ import {
   readApproval,
   type ApprovalPolicy,
 } from '../src/acs/approval.js';
-import { digest } from '@synaptiai/acs-core';
+import { digest, type Json } from '@synaptiai/acs-core';
+import type { ProfileFlags, ProfilePolicy } from '@synaptiai/acs-core/wasm';
 import { ANNOTATION_KEY, CHECKPOINT_MAX_AGE_MS, acsAnnotation, groundedTool } from '../src/acs/grounded.js';
+import { configureLayer, resetLayer } from '../src/acs/layer.js';
 import { lintAgentBindings, lintPromptTools } from '../src/acs/lint.js';
-import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags } from '../src/acs/ontology.js';
+import { CAPABILITIES, ONTOLOGY_VERSION, STANDARD_VERSION, effectiveFlags, type CapabilityId } from '../src/acs/ontology.js';
+import { bindingProfiles } from '../src/acs/profiles.js';
 import { KEYS, readCheckpoints, readTrace } from '../src/acs/records.js';
 import { SETTINGS_PATH } from '../src/example/settings.js';
 import annotationSchema from '../../../schemas/interop/standard_agents_annotation.schema.json' with { type: 'json' };
@@ -240,6 +243,44 @@ describe('checkpoint before mutation', () => {
     expect((await quick.execute(t.state, {})).error).toMatch(/too long ago/);
   });
 
+  it('records a checkpoint id without the secrets it holds (§6.7)', async () => {
+    // The id is what the checkpoint call returned: here, the model's label.
+    const password = 'Hunter2Hunter2xyz';
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+    const registered = 'RegisteredHostSecretValue9876';
+    const save = groundedTool({
+      name: 'save',
+      capability: 'checkpoint',
+      description: 'x',
+      args: z.object({ label: z.string() }),
+      secrets: async () => [registered],
+      execute: async (_state, args) => ({ checkpoint_id: args.label, evidence_anchors: [] }),
+    });
+    const store = groundedTool({
+      name: 'store',
+      capability: 'persist',
+      flags: { requires_checkpoint: true },
+      description: 'x',
+      args: z.object({}),
+      execute: async () => ({ stored: true, evidence_anchors: [] }),
+    });
+    const t = thread();
+    try {
+      data(await save.execute(t.state, { label: `before DB_PASSWORD=${password} and ${token} ${registered}` }));
+      // The checkpoint still authorises the next call, which uses it.
+      data(await store.execute(t.state, {}));
+      const id = 'before DB_PASSWORD=[REDACTED] and [REDACTED] [REDACTED]';
+      const checkpoints = await readCheckpoints(t.state);
+      const trace = await readTrace(t.state);
+      expect(checkpoints).toMatchObject([{ id, valid: false }]);
+      expect(trace.at(-1)).toMatchObject({ status: 'executed', checkpoint_id: id });
+      const kept = JSON.stringify([checkpoints, trace]);
+      for (const secret of [password, token, registered]) expect(kept).not.toContain(secret);
+    } finally {
+      resetLayer();
+    }
+  });
+
   it('refuses a rollback when no checkpoint has run', async () => {
     const t = thread();
     const result = await rollbackConfig.execute(t.state, { checkpoint_id: 'cp-1' });
@@ -344,6 +385,54 @@ describe('approval bound to what was shown', () => {
     await decideApproval(t.state, user('bob', ['release-manager']), d, 'approved', clock);
     clock += 60_001;
     expect(await tool.execute(t.state, { version: '1.2.0' })).toMatchObject({ error_code: 'F502' });
+  });
+
+  it('decides nothing with a request asked under a weaker policy than the tool has at the call', async () => {
+    // A deployment tightens a tool's policy; thread values outlive the old
+    // definition. A request the old one made, decided before or after the
+    // change, authorises no call under the new one (§5.18.7): the call opens
+    // a new round under its own policy.
+    let clock = 1_000_000;
+    const release = (approval: ApprovalPolicy) =>
+      groundedTool({
+        name: 'release',
+        capability: 'execute',
+        description: 'Run the release.',
+        approval,
+        args: z.object({ version: z.string() }),
+        now: () => clock,
+        execute: async () => ({ result: 'released', success: true, evidence_anchors: [] }),
+      });
+    const strict = { min_approvers: 2, role: 'admin', expires_ms: 60_000 };
+
+    // A pending request, decided by bob (no role) after the change.
+    const t = thread();
+    const d = digestOf(await release({}).execute(t.state, { version: '1.2.0' }));
+    await decideApproval(t.state, user('bob'), d, 'approved', clock, 1);
+    const tightened = await release(strict).execute(t.state, { version: '1.2.0' });
+    expect(tightened).toMatchObject({ error_code: 'F502', error_data: { state: 'pending', round: 2 } });
+    expect(await readApproval(t.state, d)).toMatchObject({ min_approvers: 2, role: 'admin', expires_ms: 60_000 });
+    await expect(decideApproval(t.state, user('bob'), d, 'approved', clock, 2)).rejects.toThrow(/admin/);
+
+    // A request approved with no expiry, used a month after a role and an
+    // expiry were added.
+    const u = thread();
+    const e = digestOf(await release({}).execute(u.state, { version: '1.2.0' }));
+    await decideApproval(u.state, user('bob'), e, 'approved', clock, 1);
+    clock += 30 * 24 * 3600 * 1000;
+    expect(await release({ role: 'admin', expires_ms: 60_000 }).execute(u.state, { version: '1.2.0' })).toMatchObject({
+      error_code: 'F502',
+      error_data: { state: 'pending', round: 2 },
+    });
+    expect((await readTrace(u.state)).filter((x) => x.status === 'executed')).toEqual([]);
+
+    // Control: a request asked under a policy at least as strict stays, and
+    // its decisions count.
+    const v = thread();
+    const f = digestOf(await release(strict).execute(v.state, { version: '1.2.0' }));
+    await decideApproval(v.state, user('alice', ['admin']), f, 'approved', clock, 1);
+    await decideApproval(v.state, user('carol', ['admin']), f, 'approved', clock, 1);
+    expect(data(await release({ role: 'admin' }).execute(v.state, { version: '1.2.0' }))).toMatchObject({ success: true });
   });
 
   it('records who approved a call as attested identities', async () => {
@@ -1056,6 +1145,13 @@ describe('the agent definition', () => {
     ]);
   });
 
+  it('reports an annotation with an unknown member, which does not load (security round 3)', () => {
+    // A misspelt member was dropped, so the lint passed a send read as a
+    // retrieve; the record is S303, so the tool is unbound (W617).
+    const lookup = { annotations: { acs: { standard: '1.2.0', ontology: '2.2.0', capability: 'retrieve', aditional_capabilities: ['send'] } } };
+    expect(lintPromptTools('p', { lookup }).map((d) => [d.code, d.location.tool])).toEqual([['W617', 'lookup']]);
+  });
+
   it('reports a tool whose stated name is not the name it is offered under', () => {
     // Copied from another tool, with `name` left unchanged: an approver
     // would be shown `archive_record` for a call that purges.
@@ -1107,6 +1203,67 @@ describe('the agent definition', () => {
     expect(lintAgentBindings(unbound, { ...tools, web_search: {} }).map((d) => [d.code, d.location.tool])).toEqual([
       ['F506', 'web_search'],
     ]);
+  });
+
+  // Security round 5, batch 5: the lint read each tool's flags from its
+  // record alone, so a tool whose domain profiles (its own or the layer's)
+  // raise `requires_approval` or `requires_checkpoint` (§5.21.3: effective
+  // flags) passed F506 and V102, and its call was refused while the stop
+  // action still fired.
+  describe('flags the applied profiles raise (security round 5, batch 5)', () => {
+    afterEach(() => resetLayer());
+    const profiles = (flags: (c: CapabilityId) => Partial<ProfileFlags>) =>
+      bindingProfiles(
+        {
+          checkProfiles: () => ({ diagnostics: [], suggestions: [] }),
+          profileFlags: (_p: Json[], c: CapabilityId): ProfileFlags => ({ ...effectiveFlags(c).flags, person: false, ...flags(c) }),
+          profilePolicy: (): ProfilePolicy => ({ minimum_confidence: null, grounding: [], destinations: [], trust_weights: {} }),
+        },
+        [{ domain: 'core' }],
+      );
+    const human = profiles(() => ({ requires_approval: true, person: true }));
+    const always = profiles((c) => (c === 'checkpoint' ? {} : { requires_checkpoint: true }));
+    const finishing = { name: 'finisher', sideA: { prompt: 'p', stopTool: 'finish' }, sideB: { human: true } } as const;
+    const finishOf = (capability: 'classify' | 'retrieve', given?: ReturnType<typeof profiles>) =>
+      groundedTool({
+        name: 'finish',
+        capability,
+        description: 'finish',
+        args: z.object({}).passthrough(),
+        ...(given !== undefined ? { profiles: given } : {}),
+        execute: async () => ({ labels: ['done'], data: 1, confidence: 1, evidence_anchors: [] }) as never,
+      });
+
+    it("reports F506 for a stop tool a tool's own profiles make need approval, which its call is refused for", async () => {
+      const finish = finishOf('classify', human);
+      expect(acsAnnotation(finish)?.requires_approval).toBe(true);
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F502');
+    });
+
+    it("reports F506 for a stop tool the layer's profiles make need approval", async () => {
+      configureLayer({ profiles: human });
+      const finish = finishOf('retrieve');
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F502');
+    });
+
+    it('reports F506 for a stop tool the profiles make need a checkpoint, and V102 when no checkpoint tool is offered', async () => {
+      const finish = finishOf('retrieve', always);
+      expect(lintAgentBindings(finishing, { finish }).map((d) => [d.code, d.location.tool])).toEqual([['F506', 'finish']]);
+      expect(lintPromptTools('p', { finish }).map((d) => [d.code, d.location])).toEqual([
+        ['V102', { prompt: 'p', tool: 'finish', capability: 'retrieve', prerequisite: 'checkpoint' }],
+      ]);
+      expect(lintPromptTools('p', { finish, checkpoint_config: checkpointConfig })).toEqual([]);
+      expect((await finish.execute(thread().state, {})).error_code).toBe('F501');
+    });
+
+    it('reports nothing for a stop tool no profile raises (control)', async () => {
+      const finish = finishOf('retrieve', profiles(() => ({})));
+      expect(lintAgentBindings(finishing, { finish })).toEqual([]);
+      expect(lintPromptTools('p', { finish })).toEqual([]);
+      expect((await finish.execute(thread().state, {})).status).toBe('success');
+    });
   });
 
   it('offers only grounded tools, each with an annotation the schema accepts', () => {

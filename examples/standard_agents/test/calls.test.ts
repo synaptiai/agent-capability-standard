@@ -7,7 +7,9 @@
  * past the ten-minute maximum age; an expired decision moves it past the
  * binding's `approval.expires`. Approvals are recorded before the call
  * (`requestApproval`, then `decideApproval` for each approver). A nested
- * call is made by the tool's own code with `state.invokeTool`. A tool
+ * call is made by the tool's own code with `state.invokeTool`, and each
+ * tool is registered (`registerTools`) under the name the memory thread
+ * runs it under. A tool
  * returns what its output contract requires, or what the call `returns`,
  * which the binding checks (§5.18.10). Fixtures whose `needs` the binding's
  * conformance statement lacks are skipped.
@@ -26,7 +28,7 @@ import {
   type ApprovalPolicy,
 } from '../src/acs/approval.js';
 import { CHECKPOINT_MAX_AGE_MS, LAYER_NAME, controlTool, groundedTool } from '../src/acs/grounded.js';
-import { configureLayer, resetLayer } from '../src/acs/layer.js';
+import { configureLayer, registerTools, resetLayer } from '../src/acs/layer.js';
 import { ONTOLOGY_VERSION, STANDARD_VERSION } from '../src/acs/ontology.js';
 import statement from '../../../tests/conformance/calls/statements/standard_agents_binding.json' with { type: 'json' };
 import statementSchema from '../../../tests/conformance/calls/schema/statement.schema.json' with { type: 'json' };
@@ -86,15 +88,6 @@ function outputOf(capability: CapabilityId, seq: number): Record<string, unknown
   return output;
 }
 
-/** The value an RFC 6901 pointer locates in a call's arguments. */
-function atPointer(args: Record<string, unknown>, pointer: string): unknown {
-  let value: unknown = args;
-  for (const token of pointer.split('/').slice(1)) {
-    const key = token.replaceAll('~1', '/').replaceAll('~0', '~');
-    value = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
-  }
-  return value;
-}
 
 function policyOf(binding: Binding): ApprovalPolicy {
   const expires = binding.approval?.expires === undefined ? null : parseDuration(binding.approval.expires);
@@ -130,9 +123,8 @@ class Runner {
           capability: b.capability!,
           ...(b.additional_capabilities ? { additional_capabilities: b.additional_capabilities } : {}),
           ...(b.invokes ? { invokes: invokes as never } : {}),
-          ...(b.destination !== undefined
-            ? { destination: (args: Record<string, unknown>) => atPointer(args, b.destination!) }
-            : {}),
+          // The record's pointer, as the binding states it in the annotation.
+          ...(b.destination !== undefined ? { destination: b.destination } : {}),
           approval: policyOf(b),
           description: name,
           args: z.object({}).passthrough(),
@@ -153,6 +145,9 @@ class Runner {
       }
       built.set(name, tool);
       this.t.tools.set(name, tool);
+      // The runner is the host: it registers each tool it runs under the
+      // name, as a deployment registers the agent's tools (§5.18.4).
+      registerTools({ [name]: tool });
       return tool;
     };
     for (const b of bindings) build(b.tool);
@@ -242,7 +237,7 @@ describe("the binding's conformance statement", () => {
 
 describe('call-sequence fixtures', () => {
   it('reads all of them', () => {
-    expect(CASES).toHaveLength(30);
+    expect(CASES).toHaveLength(33);
   });
 
   afterEach(() => resetLayer());

@@ -15,6 +15,12 @@ of STANDARD 1.2.0 section 5.18.6 (and section 5.2.2 for steps):
   never reports a refusal) counts as used.
 - Validity ends at an execution boundary (:meth:`end_validity`) and at the
   maximum age, at most 30 minutes.
+- A tracker is one scope (section 5.18.5). The checkpoints it reads back
+  from its state file were taken in another scope (an earlier process, or
+  another tracker on the same ``checkpoint_dir``): it finds and restores
+  them, but they authorise none of its calls and count as no checkpoint
+  taken in its scope. Trackers that share a directory merge their records
+  into the state file under a lock, so none loses another's.
 
 Validity is what a checkpoint authorises; retention is what it can restore
 (STANDARD 1.2.0 section 4.4.1). With a :class:`FileSnapshotStore`
@@ -27,26 +33,39 @@ rollback brings a used checkpoint back.
 
 from __future__ import annotations
 
-import errno as _errno_mod
 import fnmatch
 import json
 import logging
 import os
+import shutil
+import subprocess
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from ..utils.git import SAFE_GIT_OPTIONS, git_dir_is_made, safe_git_environment
+from ..utils.layer_dir import LayerDir, LinkedPathError, open_layer_dir
+from .redaction import DEFAULT_REDACTOR, Redactor
+
+try:  # POSIX: trackers that share a directory serialise their writes
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from .snapshots import FileSnapshotStore, Restore
 
-# Platform-portable ELOOP errno values (Linux=40, macOS/BSD=62).
-_ELOOP_ERRNOS: set[int] = {getattr(_errno_mod, "ELOOP", 40), 62}
+_STATE_FILE = "tracker_state.json"
+_STATE_LOCK = "tracker_state.lock"
+_ARCHIVE_DIR = "archive"
+_ARCHIVE_FILE = "pruned_checkpoints.jsonl"
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +195,65 @@ class Checkpoint:
         return False
 
 
+def _file_identity(st: os.stat_result) -> tuple[int, ...]:
+    """A file as fstat gives it: device, inode, size, modification and
+    change times. A file replaced since has another."""
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def _tracked_by_git(path: Path) -> bool:
+    """Whether git tracks ``path``, an existing file: one a repository ships,
+    not one this layer wrote. git is asked from the file's own directory, so
+    a linked directory or a submodule is read where it leads, but only where
+    the git directory it finds there is one git made for a work tree
+    (:func:`~..utils.git.git_dir_is_made`): a repository can ship the
+    directory, or one above it, as a git directory of its own, whose index
+    would answer for the file and whose configuration names programs git
+    runs (the layer's git runs none). No git, or no repository, reads as
+    untracked (nothing a clone can ship); any other git directory, any
+    answer but yes or no, and a git that does not answer in time read as
+    tracked, so the file is not trusted."""
+    if not path.is_file():
+        return False
+    git = shutil.which("git")
+    if git is None:
+        return False
+    where = str(path.parent)
+    try:
+        found = subprocess.run(
+            [git, *SAFE_GIT_OPTIONS, "-C", where, "rev-parse", "--absolute-git-dir"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env=safe_git_environment(),
+        )
+        if found.returncode != 0:
+            return False
+        if not git_dir_is_made(found.stdout.decode("utf-8", "surrogateescape").strip()):
+            return True
+        result = subprocess.run(
+            [
+                git,
+                *SAFE_GIT_OPTIONS,
+                "-C",
+                where,
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                path.name,
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env=safe_git_environment(),
+        )
+    except subprocess.TimeoutExpired:
+        return True
+    except OSError, subprocess.SubprocessError:
+        return False
+    return result.returncode != 1
+
+
 class CheckpointTracker:
     """
     Tracks checkpoint lifecycle for the Grounded Agency safety pattern.
@@ -218,9 +296,29 @@ class CheckpointTracker:
         }
 
     Each Checkpoint dict contains: id, scope, reason, created_at,
-    expires_at, consumed, consumed_at, metadata, invalidated_at. A hold
-    found in the state file belongs to a process that is gone, so it is
-    unresolved: its checkpoint counts as used.
+    expires_at, consumed, consumed_at, metadata, invalidated_at.
+
+    The checkpoints are the layer's records of the calls that took them
+    (STANDARD 1.2.0 sections 5.18.8, 6.7), and a call's ``reason`` and
+    ``scope`` may be text a model wrote: every string the tracker records
+    (a checkpoint's ``reason``, its ``scope`` items, its ``metadata`` and
+    the words that end or use it) is redacted with its ``redactor`` when
+    recorded, so no secret it recognises reaches the records in memory,
+    the state file or the archive. A snapshot store captures the files the
+    scope names as given.
+
+    One tracker is one scope (STANDARD 1.2.0 section 5.18.5). What it reads
+    back from the state file was recorded in another scope: by an earlier
+    process, or by another tracker on the same directory (another adapter,
+    which may still be running). Those checkpoints are found and restored
+    (:meth:`find_checkpoint`, :meth:`restore_checkpoint`), but they
+    authorise no call of this tracker, count as no checkpoint taken in its
+    scope (:meth:`has_taken_since`, :meth:`has_commit`), and are never held,
+    used or ended by it (it prunes them from its history as its own); a
+    hold the file names is its holder's. Each write merges
+    this tracker's records with those other trackers wrote since it loaded
+    (under an exclusive lock on ``tracker_state.lock`` where the platform
+    has ``fcntl``), so a tracker never drops or rewinds another's.
     """
 
     MAX_AGE_MINUTES: int = MAX_AGE_MINUTES
@@ -240,12 +338,18 @@ class CheckpointTracker:
         clock: Callable[[], datetime] | None = None,
         max_age_minutes: float | None = None,
         snapshots: FileSnapshotStore | None = None,
+        redactor: Redactor = DEFAULT_REDACTOR,
     ) -> None:
         """
         Initialize the tracker.
 
         Args:
-            checkpoint_dir: Directory to store checkpoint metadata
+            checkpoint_dir: Directory to store checkpoint metadata. It,
+                        its ``archive/`` and their files are opened without
+                        following a symbolic link (nor one at a directory on
+                        the way to a relative path): with one there, the
+                        tracker writes nothing and keeps its records in
+                        memory.
             max_history: Maximum checkpoints to keep in history (default: 100).
                         Oldest checkpoints are pruned when limit is exceeded.
             marker_dir: Directory for the shell hook marker file (.claude/).
@@ -271,6 +375,10 @@ class CheckpointTracker:
                        :meth:`restore_checkpoint` puts them back; the
                        tracker's ``checkpoint_dir`` and ``marker_dir`` are
                        protected in it, never captured or restored.
+            redactor: What the records are redacted with (STANDARD 1.2.0
+                       section 6.7; default: the default patterns). The
+                       adapter passes its own, which knows the host's
+                       registered secrets.
 
         Raises:
             ValueError: If ``reservation_seconds`` is not more than 0, or
@@ -304,9 +412,23 @@ class CheckpointTracker:
         # Holds by checkpoint id.
         self._reservations: dict[str, _Reservation] = {}
         self._checkpoint_history: list[Checkpoint] = []
-        # When the newest checkpoint was taken: survives history pruning.
+        # When the newest checkpoint of this scope was taken: survives
+        # history pruning.
         self._last_taken_at: datetime | None = None
+        # Ids of the checkpoints read back from the state file: another
+        # scope's, never valid here, so never held, used or ended here
+        # (section 5.18.5).
+        self._earlier: set[str] = set()
+        # Ids of every checkpoint this tracker knows (read back or taken):
+        # a record in the state file with another id was written by another
+        # tracker since the load, and each write keeps it.
+        self._known: set[str] = set()
+        # The state file this tracker wrote last, as fstat gives it (device,
+        # inode, size, modification and change times): a file that is still
+        # that one is merged without asking git whether it tracks it.
+        self._written_state: tuple[int, ...] | None = None
         self._snapshots = snapshots
+        self._redactor = redactor
         if snapshots is not None:
             # The tracker's own records are never within a rollback's reach
             # (section 4.4.1): a used checkpoint stays used.
@@ -320,6 +442,19 @@ class CheckpointTracker:
         """The store that keeps checkpoints' content, if any."""
         return self._snapshots
 
+    @property
+    def redactor(self) -> Redactor:
+        """What the tracker redacts its records with (section 6.7)."""
+        return self._redactor
+
+    @redactor.setter
+    def redactor(self, redactor: Redactor) -> None:
+        self._redactor = redactor
+
+    def _redacted_text(self, text: str) -> str:
+        """``text`` as a record keeps it: each secret replaced."""
+        return self._redactor.redact_text(text)[0]
+
     def _now(self) -> datetime:
         return self._clock()
 
@@ -329,13 +464,15 @@ class CheckpointTracker:
         return self._max_age_minutes
 
     def _valid(self, checkpoint: Checkpoint, now: datetime) -> bool:
-        """Whether ``checkpoint`` can authorise a call at ``now``: valid by
-        its own record, taken no later than ``now`` and no longer ago than
-        the maximum age. A checkpoint dated after ``now`` (a crafted state
-        file, or a clock that stepped back) authorises nothing: the maximum
-        age could not bound it."""
+        """Whether ``checkpoint`` can authorise a call at ``now``: taken by
+        this tracker (one read back from the state file is another scope's,
+        section 5.18.5), valid by its own record, taken no later than
+        ``now`` and no longer ago than the maximum age. A checkpoint dated
+        after ``now`` (a clock that stepped back) authorises nothing: the
+        maximum age could not bound it."""
         return (
-            checkpoint.is_valid(now)
+            checkpoint.id not in self._earlier
+            and checkpoint.is_valid(now)
             and checkpoint.created_at <= now
             and now <= checkpoint.created_at + timedelta(minutes=self._max_age_minutes)
         )
@@ -346,161 +483,314 @@ class CheckpointTracker:
 
     def _state_file_path(self) -> Path:
         """Path to the persisted tracker state file."""
-        return self._checkpoint_dir / "tracker_state.json"
+        return self._checkpoint_dir / _STATE_FILE
+
+    def _state_lock_path(self) -> Path:
+        """Path to the lock trackers that share the directory write under."""
+        return self._checkpoint_dir / _STATE_LOCK
+
+    def _open_dir(self, create: bool) -> LayerDir | None:
+        """``checkpoint_dir``, opened without following a symbolic link at
+        it or, for a relative ``checkpoint_dir``, at any directory on the
+        way to it (:func:`~..utils.layer_dir.open_layer_dir`): a repository
+        can ship a link there, which would take the tracker's records out
+        of the project. None when it does not exist and ``create`` is
+        false.
+
+        Raises:
+            LinkedPathError: It is, or goes through, a link.
+        """
+        return open_layer_dir(self._checkpoint_dir, create=create)
+
+    @contextmanager
+    def _state_file_lock(self, where: LayerDir) -> Iterator[None]:
+        """An exclusive lock on :meth:`_state_lock_path`, where the platform
+        has ``fcntl``: trackers that share the directory, in this process or
+        another, read and write the state file one at a time. Without
+        ``fcntl`` the merge still runs, unlocked."""
+        if _fcntl is None:  # pragma: no cover - Windows
+            yield
+            return
+        fd = where.open(_STATE_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
+    def _open_state_file(self, where: LayerDir) -> Any:
+        """The state file in ``where``, opened for reading without
+        following a symbolic link (``O_NOFOLLOW`` and ``fstat`` on the
+        descriptor, so no check races the read). None when there is none,
+        or it is a link or not a regular file."""
+        try:
+            fd = where.open_regular(_STATE_FILE, os.O_RDONLY)
+        except FileNotFoundError:
+            return None
+        except LinkedPathError:
+            logger.warning(
+                "Refusing to follow symlink for state file: %s", self._state_file_path()
+            )
+            return None
+        try:
+            return os.fdopen(fd, encoding="utf-8")
+        except Exception:
+            os.close(fd)
+            raise
+
+    def _read_state_file(
+        self, where: LayerDir, *, untracked: bool = False
+    ) -> dict[str, Any] | None:
+        """The state file's object, or None when there is none, it is a
+        link, or it is larger than the limit. With ``untracked``, also None
+        when git tracks it (:func:`_tracked_by_git`), unless it is still the
+        file this tracker wrote last: a repository can ship one, and the
+        load refuses it, so the merge of each write must not read it either.
+
+        Raises:
+            OSError, ValueError: The file cannot be read, or holds no JSON
+                object. JSON nested deeper than the parser's stack allows
+                (`[[[...`, which raises RecursionError, no ValueError) is a
+                ValueError here, so every caller handles it as a file that
+                does not parse.
+        """
+        f = self._open_state_file(where)
+        if f is None:
+            return None
+        with f:
+            st = os.fstat(f.fileno())
+            if st.st_size > self._MAX_STATE_FILE_BYTES:
+                logger.warning(
+                    "State file too large (%d bytes, limit %d) — starting fresh",
+                    st.st_size,
+                    self._MAX_STATE_FILE_BYTES,
+                )
+                return None
+            if (
+                untracked
+                and _file_identity(st) != self._written_state
+                and _tracked_by_git(self._state_file_path())
+            ):
+                logger.warning(
+                    "Not merging %s: git tracks it, so a repository shipped it; "
+                    "it is replaced",
+                    self._state_file_path(),
+                )
+                return None
+            raw = f.read()
+        try:
+            state = json.loads(raw)
+        except RecursionError:
+            raise ValueError("the state file nests too deeply to parse") from None
+        if not isinstance(state, dict):
+            raise ValueError("the state file holds no JSON object")
+        return state
+
+    @staticmethod
+    def _checkpoints_in(state: dict[str, Any]) -> list[Checkpoint]:
+        """The checkpoints a state file's object records (its active one,
+        then its history), skipping any entry that does not read as one."""
+        history = state.get("history")
+        entries = [state.get("active"), *(history if isinstance(history, list) else [])]
+        found: list[Checkpoint] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                found.append(Checkpoint.from_dict(entry))
+            except KeyError, ValueError, TypeError, AttributeError:
+                continue
+        return found
+
+    def _merged_state(self, where: LayerDir) -> dict[str, Any]:
+        """What :meth:`_persist_state` writes: this tracker's checkpoints
+        and holds as it holds them; each checkpoint it read back as the
+        file has it now (its own tracker may have used it since); and every
+        checkpoint and hold another tracker on the directory wrote since
+        this one loaded, unchanged. A checkpoint this tracker removed
+        (pruned or cleared) stays removed. Caller holds the file lock."""
+        try:
+            current = self._read_state_file(where, untracked=True) or {}
+        except (OSError, ValueError) as e:
+            logger.warning("Replacing a state file that cannot be read: %s", e)
+            current = {}
+        on_file = {c.id: c for c in self._checkpoints_in(current)}
+        history = [
+            on_file.get(c.id, c) if c.id in self._earlier else c
+            for c in self._checkpoint_history
+        ]
+        history += [c for c in on_file.values() if c.id not in self._known]
+        history.sort(key=lambda c: c.created_at.timestamp())
+        history = history[-self._max_history :]
+        written = {c.id for c in history}
+        if self._active_checkpoint is not None:
+            written.add(self._active_checkpoint.id)
+        own = self._known - self._earlier
+        holds = [
+            {"checkpoint_id": r.checkpoint_id, "holder": r.holder}
+            for r in self._reservations.values()
+        ]
+        file_holds = current.get("reservations")
+        for hold in file_holds if isinstance(file_holds, list) else []:
+            if not isinstance(hold, dict):
+                continue
+            checkpoint_id = hold.get("checkpoint_id")
+            if (
+                isinstance(checkpoint_id, str)
+                and checkpoint_id in written
+                and checkpoint_id not in own
+                and checkpoint_id not in self._reservations
+            ):
+                holds.append(
+                    {"checkpoint_id": checkpoint_id, "holder": str(hold.get("holder"))}
+                )
+        last = self._last_taken_at
+        try:
+            file_last = datetime.fromisoformat(str(current.get("last_taken_at")))
+            if last is None or file_last.timestamp() > last.timestamp():
+                last = file_last
+        except ValueError:
+            pass
+        return {
+            "active": (
+                self._active_checkpoint.to_dict() if self._active_checkpoint else None
+            ),
+            "history": [c.to_dict() for c in history],
+            "reservations": holds,
+            "last_taken_at": last.isoformat() if last else None,
+        }
 
     def _persist_state(self) -> None:
-        """Atomically write tracker state to disk.
+        """Atomically write tracker state to disk, merged with what other
+        trackers on the directory wrote (:meth:`_merged_state`), under the
+        directory's lock.
 
-        Uses write-to-tmp + rename for crash safety.
+        Uses write-to-tmp + rename for crash safety. Every file is opened in
+        ``checkpoint_dir`` without following a link (:meth:`_open_dir`): a
+        directory that is, or goes through, one is not written to, and the
+        tracker keeps its records in memory. Never raises: a write that
+        fails is logged, and the change stands in memory.
         """
         try:
-            self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            state = {
-                "active": (
-                    self._active_checkpoint.to_dict()
-                    if self._active_checkpoint
-                    else None
-                ),
-                # Cap history before serializing to prevent unbounded file growth.
-                "history": [
-                    c.to_dict() for c in self._checkpoint_history[-self._max_history :]
-                ],
-                "reservations": [
-                    {"checkpoint_id": r.checkpoint_id, "holder": r.holder}
-                    for r in self._reservations.values()
-                ],
-                "last_taken_at": (
-                    self._last_taken_at.isoformat() if self._last_taken_at else None
-                ),
-            }
-            state_path = self._state_file_path()
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(self._checkpoint_dir), suffix=".tmp"
-            )
-            try:
+            where = self._open_dir(create=True)
+            if where is None:  # pragma: no cover - create=True makes it
+                raise FileNotFoundError(str(self._checkpoint_dir))
+            with where, self._state_file_lock(where):
+                state = self._merged_state(where)
+                tmp_name, fd = where.create_temp("tmp", ".tmp")
                 try:
-                    f = os.fdopen(fd, "w", encoding="utf-8")
+                    try:
+                        f = os.fdopen(fd, "w", encoding="utf-8")
+                    except Exception:
+                        os.close(fd)
+                        raise
+                    with f:
+                        json.dump(state, f)
+                    where.replace(tmp_name, _STATE_FILE)
                 except Exception:
-                    os.close(fd)
+                    # Clean up temp file on failure; re-raise original error.
+                    try:
+                        where.unlink(tmp_name)
+                    except OSError:
+                        pass
                     raise
-                with f:
-                    json.dump(state, f)
-                os.replace(tmp_path, str(state_path))
-            except Exception:
-                # Clean up temp file on failure; re-raise original error.
+                # What was written, as the next merge will find it (the
+                # rename may change its change time): still under the lock.
+                fd = where.open_regular(_STATE_FILE, os.O_RDONLY)
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
-        except (OSError, TypeError, ValueError, OverflowError) as e:
+                    self._written_state = _file_identity(os.fstat(fd))
+                finally:
+                    os.close(fd)
+            # A removed checkpoint is gone from the file now: only the ids
+            # this tracker still holds need to stay known.
+            self._known = {c.id for c in self._all()}
+        except Exception as e:
+            # Whatever the reason (RecursionError included), the change
+            # stands in memory, which is what this tracker's calls are
+            # decided on: a caller in the middle of a transition (a hold
+            # resolved at a boundary, then every checkpoint ended) must not
+            # be cut short by a write that failed.
             logger.warning("Failed to persist checkpoint state: %s", e)
 
     def _load_persisted_state(self) -> None:
         """Load tracker state from disk if available.
 
-        Uses O_NOFOLLOW + fstat() on the opened fd to avoid TOCTOU between
-        symlink check/existence check and read.  Falls back to is_symlink()
-        on platforms without O_NOFOLLOW.
-        Handles missing and corrupt files gracefully.
+        What is loaded was recorded in another scope (STANDARD 1.2.0 section
+        5.18.5): by an earlier process, or by another tracker on the same
+        directory. It goes to the history, to be found and restored; none of
+        it authorises a call of this tracker or counts as a checkpoint taken
+        in its scope, and this tracker never holds, uses or ends it. A hold
+        the file names is its holder's, and stays in the file.
 
-        A hold in the file belongs to a call this process never saw finish:
-        it is unresolved, so its checkpoint counts as used (STANDARD 1.2.0
-        section 5.18.6).
+        A state file git tracks is not loaded: a repository can ship one (a
+        clone or a checkout writes it), and its checkpoints were taken by no
+        call of this layer (STANDARD 1.2.0 sections 5.18.5, 5.18.6). The
+        tracker starts fresh, and logs why. So does a file that is a
+        symbolic link, larger than the limit, or does not parse, and one in
+        a ``checkpoint_dir`` that is, or goes through, a link
+        (:meth:`_open_dir`).
         """
         state_path = self._state_file_path()
-        o_nofollow = getattr(os, "O_NOFOLLOW", 0)
-        if o_nofollow:
-            try:
-                fd = os.open(str(state_path), os.O_RDONLY | o_nofollow)
-            except FileNotFoundError:
-                return
-            except OSError as e:
-                if e.errno in _ELOOP_ERRNOS:  # ELOOP — symlink rejected
-                    logger.warning(
-                        "Refusing to follow symlink for state file: %s", state_path
-                    )
-                    return
-                raise
-            try:
-                f = os.fdopen(fd, encoding="utf-8")
-            except Exception:
-                os.close(fd)
-                raise
-        else:
-            if state_path.is_symlink():
-                logger.warning(
-                    "Refusing to follow symlink for state file: %s", state_path
-                )
-                return
-            try:
-                f = open(state_path, encoding="utf-8")
-            except FileNotFoundError:
-                return
         try:
-            with f:
-                file_size = os.fstat(f.fileno()).st_size
-                if file_size > self._MAX_STATE_FILE_BYTES:
-                    logger.warning(
-                        "State file too large (%d bytes, limit %d) — starting fresh",
-                        file_size,
-                        self._MAX_STATE_FILE_BYTES,
-                    )
-                    return
-                raw = f.read()
-            state = json.loads(raw)
+            where = self._open_dir(create=False)
+        except LinkedPathError as e:
+            logger.warning(
+                "Not loading checkpoint state: %s. A repository may have shipped "
+                "the link; checkpoints are kept in memory only",
+                e,
+            )
+            return
+        except OSError as e:
+            logger.warning("Failed to load persisted checkpoint state: %s", e)
+            return
+        if where is None:
+            return
+        if _tracked_by_git(state_path):
+            where.close()
+            logger.warning(
+                "Not loading %s: git tracks it, so a repository shipped it and "
+                "no checkpoint in it was taken here; remove it from the "
+                "repository",
+                state_path,
+            )
+            return
+        try:
+            with where:
+                state = self._read_state_file(where)
+            if state is None:
+                return
             loaded_at = self._now()
+            loaded: list[Checkpoint] = []
             if state.get("active"):
-                self._active_checkpoint = Checkpoint.from_dict(state["active"])
+                loaded.append(Checkpoint.from_dict(state["active"]))
             # Cap loaded history to _max_history to prevent unbounded growth
             # from a crafted or accumulated state file.
-            self._checkpoint_history = [
+            loaded += [
                 Checkpoint.from_dict(entry)
                 for entry in state.get("history", [])[: self._max_history]
             ]
-            # A checkpoint dated after the load was not taken by this layer
-            # as the clock now reads (a crafted file, or a clock that stepped
-            # back): it authorises nothing, counts as no checkpoint taken and
-            # names no restore point, so it is dropped (section 5.18.6).
-            future = [c.id for c in self._all() if c.created_at > loaded_at]
+            # A checkpoint dated after the load (a crafted file, or a clock
+            # that stepped back) names no restore point the maximum age
+            # could bound: it is dropped (section 5.18.6).
+            future = [c.id for c in loaded if c.created_at > loaded_at]
             if future:
                 logger.warning(
                     "Dropping %d checkpoint(s) dated after the load time: %s",
                     len(future),
                     ", ".join(future),
                 )
-                if (
-                    self._active_checkpoint is not None
-                    and self._active_checkpoint.created_at > loaded_at
-                ):
-                    self._active_checkpoint = None
-                self._checkpoint_history = [
-                    c for c in self._checkpoint_history if c.created_at <= loaded_at
-                ]
-            last = state.get("last_taken_at")
-            if isinstance(last, str) and datetime.fromisoformat(last) <= loaded_at:
-                self._last_taken_at = datetime.fromisoformat(last)
-            else:
-                created = [c.created_at for c in self._all()]
-                self._last_taken_at = max(created) if created else None
-            holds = state.get("reservations") or []
-            resolved = False
-            if isinstance(holds, list):
-                for hold in holds:
-                    if not isinstance(hold, dict):
-                        continue
-                    checkpoint = self._find(str(hold.get("checkpoint_id")))
-                    if checkpoint is not None and not checkpoint.consumed:
-                        logger.warning(
-                            "Checkpoint %s was held by %s when the tracker last "
-                            "stopped; the hold is unresolved, so it counts as used",
-                            checkpoint.id,
-                            hold.get("holder"),
-                        )
-                        self._mark_used(checkpoint, "unresolved hold")
-                        resolved = True
-            if resolved:
-                self._persist_state()
+                loaded = [c for c in loaded if c.created_at <= loaded_at]
+            loaded.sort(key=lambda c: c.created_at.timestamp())
+            self._checkpoint_history = loaded
+            self._earlier = {c.id for c in loaded}
+            self._known = set(self._earlier)
+            if any(c.is_valid(loaded_at) for c in loaded):
+                logger.info(
+                    "Read back %d checkpoint(s) from %s: taken in another "
+                    "scope, they authorise no call of this tracker",
+                    len(loaded),
+                    state_path,
+                )
         except (
             json.JSONDecodeError,
             KeyError,
@@ -508,12 +798,14 @@ class CheckpointTracker:
             TypeError,
             AttributeError,
             OSError,
+            RecursionError,
         ) as e:
             logger.warning("Failed to load persisted checkpoint state: %s", e)
             # Start fresh — don't propagate corrupt state
             self._active_checkpoint = None
             self._checkpoint_history = []
-            self._last_taken_at = None
+            self._earlier = set()
+            self._known = set()
 
     # ------------------------------------------------------------------
     # Internal helpers (caller holds the lock unless stated)
@@ -541,7 +833,7 @@ class CheckpointTracker:
             checkpoint.consumed = True
             checkpoint.consumed_at = self._now()
             if by is not None:
-                checkpoint.metadata["consumed_by"] = by
+                checkpoint.metadata["consumed_by"] = self._redacted_text(by)
         if self._active_checkpoint is checkpoint:
             self._active_checkpoint = None
             self._checkpoint_history.append(checkpoint)
@@ -603,6 +895,11 @@ class CheckpointTracker:
         """
         Create a new checkpoint.
 
+        The checkpoint records ``reason``, ``scope`` and ``metadata``
+        with every secret the tracker's ``redactor`` recognises replaced
+        (section 6.7); a snapshot store captures what ``scope`` names as
+        given.
+
         Args:
             scope: List of file patterns or "*" for all
             reason: Human-readable reason for checkpoint
@@ -641,14 +938,17 @@ class CheckpointTracker:
             summary.pop("checkpoint_id", None)
             summary.pop("timestamp", None)
             metadata["capture"] = summary
+        # The record holds no secret the redactor recognises (section 6.7):
+        # a bound tool's reason and scope are the model's words.
+        redacted_metadata, _ = self._redactor.redact(metadata)
         now = self._now()
         checkpoint = Checkpoint(
             id=checkpoint_id,
-            scope=scope,
-            reason=reason,
+            scope=[self._redacted_text(str(s)) for s in scope],
+            reason=self._redacted_text(str(reason)),
             created_at=now,
             expires_at=now + timedelta(minutes=min(minutes, self._max_age_minutes)),
-            metadata=metadata,
+            metadata=redacted_metadata,
         )
 
         with self._lock:
@@ -659,6 +959,7 @@ class CheckpointTracker:
 
             # A hold of the previous checkpoint stays with its holder.
             self._active_checkpoint = checkpoint
+            self._known.add(checkpoint.id)
             self._last_taken_at = now
             self._write_marker(checkpoint)
             self._persist_state()
@@ -740,25 +1041,28 @@ class CheckpointTracker:
         return out
 
     def has_commit(self, commit: str, since: datetime | None = None) -> bool:
-        """Whether a checkpoint taken at or after ``since`` (any time when
-        omitted) and not after now, valid or not, recorded ``commit`` as its
-        restore point
-        (``metadata["commit"]``, as ``git stash create`` printed it): what
-        lets ``git stash pop|apply <commit>`` count as a rollback (section
-        5.18.3). A checkpoint pruned from the history is not found."""
+        """Whether a checkpoint this tracker took at or after ``since`` (any
+        time when omitted) and not after now, valid or not, recorded
+        ``commit`` as its restore point (``metadata["commit"]``, as ``git
+        stash create`` printed it): what lets ``git stash pop|apply
+        <commit>`` count as a rollback (section 5.18.3). A checkpoint read
+        back from the state file was taken in another scope and is not
+        counted; one pruned from the history is not found."""
         with self._lock:
             now = self._now()
             return any(
-                c.metadata.get("commit") == commit
+                c.id not in self._earlier
+                and c.metadata.get("commit") == commit
                 and (since is None or c.created_at >= since)
                 and c.created_at <= now
                 for c in self._all()
             )
 
     def has_taken_since(self, when: datetime) -> bool:
-        """Whether a checkpoint was taken at or after ``when``, and not
-        after now: what a ``checkpoint`` prerequisite reads (section
-        5.18.5). History pruning does not hide one."""
+        """Whether this tracker took a checkpoint at or after ``when``, and
+        not after now: what a ``checkpoint`` prerequisite reads (section
+        5.18.5). History pruning does not hide one; one read back from the
+        state file was taken in another scope and does not count."""
         with self._lock:
             return (
                 self._last_taken_at is not None
@@ -776,72 +1080,138 @@ class CheckpointTracker:
             self._archive_checkpoints(to_prune)
             self._checkpoint_history = self._checkpoint_history[-self._max_history :]
 
+    def _archive_path(self) -> Path:
+        """Path to the archive of pruned checkpoints."""
+        return self._checkpoint_dir / _ARCHIVE_DIR / _ARCHIVE_FILE
+
+    def _archive_refusal(self) -> str | None:
+        """Why the archive is not read or written, or None: git tracks it,
+        so a repository shipped it, and its records were written by no
+        tracker (as for the state file, :meth:`_load_persisted_state`)."""
+        if _tracked_by_git(self._archive_path()):
+            return (
+                f"git tracks {self._archive_path()}, so a repository shipped it; "
+                f"remove it from the repository"
+            )
+        return None
+
     def _archive_checkpoints(self, checkpoints: list[Checkpoint]) -> None:
         """SEC-011: Write pruned checkpoints to archive JSONL file.
 
         Archives are append-only JSONL files in .checkpoints/archive/.
         Each line is a JSON-serialized checkpoint dict.
+
+        The archive is opened in ``checkpoint_dir/archive`` without
+        following a symbolic link at either directory or at the file, and
+        only a regular file is appended to (``O_NOFOLLOW`` and ``fstat`` on
+        the descriptor): a repository can ship a link there, which would
+        take the records (a ``reason`` and ``scope`` a model may have
+        written among them) out of the project. An archive git tracks is
+        not written to either. When the archive cannot be written, the
+        prune is logged with the ids it drops. Either way, the pruned
+        checkpoints' content is discarded (section 4.4.1).
         """
         if not checkpoints:
             return
+        archive_file = self._archive_path()
         try:
-            archive_dir = self._checkpoint_dir / "archive"
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            archive_file = archive_dir / "pruned_checkpoints.jsonl"
-            with open(archive_file, "a", encoding="utf-8") as f:
+            where = self._open_dir(create=True)
+            if where is None:  # pragma: no cover - create=True makes it
+                raise FileNotFoundError(str(self._checkpoint_dir))
+            with where:
+                archive = where.subdir(_ARCHIVE_DIR, create=True)
+            if archive is None:  # pragma: no cover - create=True makes it
+                raise FileNotFoundError(str(archive_file.parent))
+            with archive:
+                refusal = self._archive_refusal()
+                if refusal is not None:
+                    raise OSError(refusal)
+                fd = archive.open_regular(
+                    _ARCHIVE_FILE, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600
+                )
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
                 for cp in checkpoints:
                     f.write(json.dumps(cp.to_dict()) + "\n")
-            # Content retention ends with the history entry (section 4.4.1):
-            # a later rollback to it reports `discarded`.
-            if self._snapshots is not None:
-                for cp in checkpoints:
-                    try:
-                        self._snapshots.discard(cp.id)
-                    except (OSError, ValueError) as e:
-                        logger.warning("Failed to discard checkpoint content: %s", e)
             logger.info(
                 "Archived %d pruned checkpoints to %s",
                 len(checkpoints),
                 archive_file,
             )
         except OSError as e:
-            logger.warning("Failed to archive pruned checkpoints: %s", e)
+            logger.warning(
+                "Pruned %d checkpoint(s) from the history without archiving "
+                "them (%s): %s",
+                len(checkpoints),
+                e,
+                ", ".join(cp.id for cp in checkpoints),
+            )
+        # Content retention ends with the history entry (section 4.4.1):
+        # a later rollback to it reports `discarded`.
+        if self._snapshots is not None:
+            for cp in checkpoints:
+                try:
+                    self._snapshots.discard(cp.id)
+                except (OSError, ValueError) as e:
+                    logger.warning("Failed to discard checkpoint content: %s", e)
 
     def get_archived_checkpoints(self) -> list[Checkpoint]:
         """SEC-011: Retrieve archived (pruned) checkpoints from JSONL.
 
         Per-line error handling: corrupt lines are skipped with a warning
         rather than aborting the entire archive read. File-level errors
-        (permissions, missing file) are caught at the outer level.
+        (permissions, missing file) are caught at the outer level. The
+        archive is read as it is written (:meth:`_archive_checkpoints`):
+        never through a symbolic link, a regular file only, and not when
+        git tracks it.
 
         Returns:
             List of archived Checkpoint objects, oldest first.
         """
-        archive_file = self._checkpoint_dir / "archive" / "pruned_checkpoints.jsonl"
-        if not archive_file.exists():
-            return []
         try:
-            # P2-4: Reject oversized archive files before reading
-            if archive_file.stat().st_size > self._MAX_STATE_FILE_BYTES:
-                logger.warning(
-                    "Archive file too large (%d bytes, limit %d) — skipping",
-                    archive_file.stat().st_size,
-                    self._MAX_STATE_FILE_BYTES,
-                )
+            where = self._open_dir(create=False)
+            if where is None:
                 return []
-            results: list[Checkpoint] = []
-            with open(archive_file, encoding="utf-8") as f:
+            with where:
+                archive = where.subdir(_ARCHIVE_DIR)
+            if archive is None:
+                return []
+            with archive:
+                try:
+                    fd = archive.open_regular(_ARCHIVE_FILE, os.O_RDONLY)
+                except FileNotFoundError:
+                    return []
+            with os.fdopen(fd, encoding="utf-8") as f:
+                # P2-4: Reject oversized archive files before reading
+                size = os.fstat(f.fileno()).st_size
+                if size > self._MAX_STATE_FILE_BYTES:
+                    logger.warning(
+                        "Archive file too large (%d bytes, limit %d) — skipping",
+                        size,
+                        self._MAX_STATE_FILE_BYTES,
+                    )
+                    return []
+                refusal = self._archive_refusal()
+                if refusal is not None:
+                    logger.warning("Not reading the checkpoint archive: %s", refusal)
+                    return []
+                results: list[Checkpoint] = []
                 for line_num, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
                         continue
                     try:
                         results.append(Checkpoint.from_dict(json.loads(line)))
-                    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                    except (
+                        json.JSONDecodeError,
+                        KeyError,
+                        ValueError,
+                        TypeError,
+                        RecursionError,
+                    ) as e:
                         logger.warning(
                             "Skipping corrupt archive line %d: %s", line_num, e
                         )
-            return results
+                return results
         except OSError as e:
             logger.warning("Failed to read checkpoint archive: %s", e)
             return []
@@ -1117,7 +1487,7 @@ class CheckpointTracker:
             for checkpoint in self._all():
                 if self._valid(checkpoint, now):
                     checkpoint.invalidated_at = now
-                    checkpoint.metadata["invalidated_by"] = reason
+                    checkpoint.metadata["invalidated_by"] = self._redacted_text(reason)
                     ended.append(checkpoint.id)
             if self._active_checkpoint is not None:
                 self._checkpoint_history.append(self._active_checkpoint)

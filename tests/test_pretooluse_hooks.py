@@ -17,9 +17,11 @@ import time
 from pathlib import Path
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from grounded_agency import GroundedAgentAdapter
+from grounded_agency.adapter import SAFETY_HOOK_TIMEOUT_S
+from tests.conftest import enter_checkpoint_commit
 
 
 def _decision(result: dict) -> str | None:
@@ -196,6 +198,83 @@ class TestPreToolUseInWrapOptions:
         assert "PreToolUse" in wrapped.hooks
         assert "PostToolUse" in wrapped.hooks
 
+    def test_the_safety_hook_blocks_when_it_fails_in_the_cli(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """STANDARD 1.2.0 §5.18.8: the hook refuses with R407 when a check
+        fails inside it, but a callback that fails or gives no verdict in
+        time, as the CLI sees it, was no decision there and the call ran.
+        Its matcher asks the CLI to block instead (as hooks.json does for
+        the plugin's hook); a caller's own matcher is left as it was."""
+        existing = HookMatcher(hooks=[lambda *_: {}])
+        wrapped = strict_adapter.wrap_options(
+            ClaudeAgentOptions(hooks={"PreToolUse": [existing]})
+        )
+        first, safety = wrapped.hooks["PreToolUse"]
+        assert first is existing and first.on_failure is None
+        (fn,) = safety.hooks
+        assert getattr(fn, "_grounded_adapter", None) is strict_adapter
+        assert safety.on_failure == "block"
+        # Its time limit is stated, not left to the SDK's default.
+        assert safety.timeout == SAFETY_HOOK_TIMEOUT_S == 60
+        # The other hooks keep the SDK's default.
+        for event, matchers in wrapped.hooks.items():
+            for entry in matchers:
+                if entry is not safety:
+                    assert getattr(entry, "on_failure", None) is None, event
+                    assert getattr(entry, "timeout", None) is None, event
+
+    @pytest.mark.asyncio
+    async def test_a_long_input_is_decided_well_within_the_time_limit(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """The secret check of a persist call reads its input in time linear
+        in its length: a TodoWrite (persist) with 1 MB of padding before an
+        AWS key is refused F504 in about half a second, where the patterns
+        before security round 1's fifth batch took 64 s at 290 KB, past the
+        CLI's time limit (which then blocks, on_failure="block")."""
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        todos = [
+            {"content": "a" * 1_000_000, "status": "pending"},
+            {"content": "deploy key AKIAABCDEFGHIJKLMNOP", "status": "pending"},
+        ]
+        started = time.perf_counter()
+        out = await hook(
+            {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": todos},
+                "permission_mode": "bypassPermissions",
+            },
+            "t-long",
+            None,
+        )
+        elapsed = time.perf_counter() - started
+        decision = out["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny"
+        assert decision["permissionDecisionReason"].startswith("F504")
+        assert elapsed < SAFETY_HOOK_TIMEOUT_S / 6
+
+    def test_without_the_sdk_the_dict_form_carries_it(
+        self, strict_adapter: GroundedAgentAdapter, monkeypatch
+    ):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_sdk(name, *args, **kwargs):
+            if name == "claude_agent_sdk":
+                raise ImportError(name)
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_sdk)
+        entry = strict_adapter._wrap_hook(
+            lambda *_: {}, on_failure="block", timeout=SAFETY_HOOK_TIMEOUT_S
+        )
+        assert entry["on_failure"] == "block"
+        assert entry["timeout"] == SAFETY_HOOK_TIMEOUT_S
+        plain = strict_adapter._wrap_hook(lambda *_: {})
+        assert "on_failure" not in plain and "timeout" not in plain
+
 
 def _hooks(entry) -> list:
     return entry["hooks"] if isinstance(entry, dict) else entry.hooks
@@ -258,6 +337,44 @@ class TestTurnEndReleasesLeftoverReservation:
         used = tracker.get_checkpoint_by_id(held)
         assert used is not None and used.consumed
         assert used.metadata["consumed_by"] == "unresolved hold at turn end"
+
+    @pytest.mark.asyncio
+    async def test_the_next_prompt_ends_what_a_turn_without_stop_left(
+        self, strict_adapter: GroundedAgentAdapter
+    ):
+        """Claude Code runs StopFailure in place of Stop when an API error
+        ended the turn, and an interrupted turn may run neither: the next
+        prompt is an execution boundary too (STANDARD 1.2.0 §5.18.6), so a
+        checkpoint and a hold the earlier turn left authorise nothing."""
+        prompts: list[str] = []
+
+        async def caller_prompt(input_data, tool_use_id, context):
+            prompts.append(input_data["prompt"])
+            return {}
+
+        wrapped = strict_adapter.wrap_options(
+            ClaudeAgentOptions(hooks={"UserPromptSubmit": [{"hooks": [caller_prompt]}]})
+        )
+        strict_adapter.create_checkpoint(["*"], "Test")
+        await self._reserve(strict_adapter, wrapped, self._write("s1"), "left")
+        tracker = strict_adapter.checkpoint_tracker
+        held = tracker.held_by("left")
+        assert held is not None
+        strict_adapter.create_checkpoint(["*"], "A second, unheld")
+        assert tracker.validate_and_reserve("probe2")[0]
+        assert tracker.release_reservation("probe2")
+
+        await _fire(
+            wrapped,
+            "UserPromptSubmit",
+            {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "prompt": "go"},
+        )
+
+        assert prompts == ["go"]
+        assert tracker.validate_and_reserve("next") == (False, None)
+        used = tracker.get_checkpoint_by_id(held)
+        assert used is not None and used.consumed
+        assert strict_adapter.call_records[-1]["decision"] == "boundary"
 
     @pytest.mark.asyncio
     async def test_stop_of_another_session_keeps_the_reservation(
@@ -530,11 +647,9 @@ def _write_marker(
     }
     if commit is not None:
         marker["commit"] = commit
-        # As posttooluse_take_checkpoint.sh does: the commit is entered
-        # before the marker names it.
-        commits = marker_dir / "checkpoints" / "commits"
-        commits.mkdir(parents=True, exist_ok=True)
-        (commits / commit).touch()
+        # As posttooluse_take_checkpoint.sh does: the commit is entered, in
+        # the project's git directory, before the marker names it.
+        enter_checkpoint_commit(project_dir / ".git", commit)
     (marker_dir / "checkpoint.ok").write_text(json.dumps(marker))
 
 
@@ -608,11 +723,44 @@ class TestShellPreToolUseHookStdin:
         assert result.returncode == 2
 
 
+_GIT_ENV = {
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+}
+
+
+def _git(path: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=path,
+        env={**os.environ, **_GIT_ENV},
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout.strip()
+
+
+def _repo(path: Path) -> Path:
+    """A git repository with one commit."""
+    if shutil.which("git") is None:
+        pytest.skip("git not installed")
+    path.mkdir(parents=True, exist_ok=True)
+    _git(path, "init", "-q")
+    (path / "app.txt").write_text("app\n")
+    _git(path, "add", "app.txt")
+    _git(path, "commit", "-q", "-m", "init")
+    return path
+
+
 def _gated_hook(
     tool_call: dict,
     project_dir: Path,
     approval: str | None = None,
     path: str | None = None,
+    timeout: float = 30,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(project_dir)
@@ -627,7 +775,7 @@ def _gated_hook(
         capture_output=True,
         text=True,
         env=env,
-        timeout=30,
+        timeout=timeout,
     )
 
 
@@ -646,6 +794,14 @@ def _write_call(mode: str = "default", call: str = "w1") -> dict:
         "tool_input": {"file_path": "a.py"},
         "permission_mode": mode,
         "tool_use_id": call,
+    }
+
+
+def _write_to(file_path: str) -> dict:
+    return {
+        "tool_name": "Write",
+        "tool_input": {"file_path": file_path, "content": ""},
+        "tool_use_id": "w1",
     }
 
 
@@ -728,8 +884,9 @@ class TestShellHookSection518:
 
     def test_rollback_restores_only_a_recorded_checkpoint(self, tmp_path: Path):
         """`git stash pop|apply <commit>` is a rollback only for the full id
-        of a commit a marker recorded: git applies any merge commit as if it
-        were a stash, so anything else is a gated mutation."""
+        of a commit a checkpoint recorded: git applies any merge commit as
+        if it were a stash, so anything else is a gated mutation."""
+        _repo(tmp_path)
         sha = "0123456789abcdef0123456789abcdef01234567"
         other = "89abcdef0123456789abcdef0123456789abcdef"
         for command in (f"git stash apply {sha}", "git stash pop"):
@@ -738,7 +895,7 @@ class TestShellHookSection518:
             assert refused.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), command
 
         _write_marker(tmp_path, commit=sha)
-        # The marker's own commit: a rollback that uses nothing.
+        # The commit the checkpoint entered: a rollback that uses nothing.
         kept = _gated_hook(_bash(f"git stash apply {sha}"), tmp_path)
         assert (kept.returncode, kept.stdout) == (0, "")
         assert (tmp_path / ".claude" / "checkpoint.ok").exists()
@@ -786,7 +943,9 @@ class TestShellHookSection518:
         assert result.stdout == ""
 
     def test_no_jq_is_r407(self, tmp_path: Path):
-        bin_dir = tmp_path / "bin"
+        # Beside the project: the hook drops the project's directories from
+        # PATH.
+        bin_dir = tmp_path.parent / f"{tmp_path.name}-bin"
         bin_dir.mkdir()
         for tool in ("bash", "cat", "date", "printf"):
             found = shutil.which(tool)
@@ -814,3 +973,725 @@ class TestShellHookSection518:
                     )
                 )
             assert sorted(r.returncode for r in results) == [0, 2, 2, 2]
+
+
+def _bypass(tool_call: dict) -> dict:
+    return {**tool_call, "permission_mode": "bypassPermissions"}
+
+
+@needs_bash_and_jq
+class TestShellHookTimeBound:
+    """A run that outlives the hook's time limit gives no verdict, and a
+    Claude Code without onFailure "block" then runs the call unchecked: the
+    hook must decide a padded command in bounded time."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm -rf a.txt" + " " * 50_000,
+            "rm -rf a.txt" + "\t" * 50_000,
+            " " * 200_000 + "rm -rf a.txt",
+            "ls" + " " * 50_000,
+        ],
+    )
+    def test_a_command_padded_with_blanks_is_decided_at_once(
+        self, tmp_path: Path, command: str
+    ):
+        """The trims ran before the 4096-byte bound: 50,000 trailing blanks
+        took 44 s and 200,000 leading ones over 40 s. The length is now
+        checked first: a padded command is mutate, decided in bounded time."""
+        started = time.monotonic()
+        result = _gated_hook(_bypass(_bash(command)), tmp_path)
+        assert time.monotonic() - started < 10
+        assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+
+    def test_the_hook_blocks_a_call_when_it_fails_or_times_out(self):
+        """hooks.json asks Claude Code to block the call when the hook
+        fails, or gives no verdict within its time limit."""
+        hooks = json.loads(
+            (SHELL_HOOK.parent / "hooks.json").read_text(encoding="utf-8")
+        )["hooks"]["PreToolUse"]
+        (group,) = hooks
+        (hook,) = group["hooks"]
+        assert hook["command"].endswith("/hooks/pretooluse_require_checkpoint.sh")
+        assert hook["onFailure"] == "block"
+        assert isinstance(hook["timeout"], int) and 0 < hook["timeout"] <= 60
+
+
+@needs_bash_and_jq
+class TestShellHookRoutesEveryTool:
+    """STANDARD 1.2.0 §5.18.2: a call of a tool with no binding is a
+    mutation that needs a checkpoint and approval. Claude Code routes every
+    tool to the hook; only the mapper's tools that need neither pass."""
+
+    def test_every_tool_is_routed_to_the_hook(self):
+        hooks = json.loads(
+            (SHELL_HOOK.parent / "hooks.json").read_text(encoding="utf-8")
+        )["hooks"]["PreToolUse"]
+        assert [group["matcher"] for group in hooks] == ["*"]
+
+    @pytest.mark.parametrize(
+        "tool_call",
+        [
+            {"tool_name": "Monitor", "tool_input": {"command": "rm -rf a.txt"}},
+            {"tool_name": "PowerShell", "tool_input": {"command": "Remove-Item a"}},
+            {
+                "tool_name": "mcp__github__push_files",
+                "tool_input": {"files": [{"path": "a", "content": "b"}]},
+            },
+            {
+                "tool_name": "ExitWorktree",
+                "tool_input": {"action": "remove", "discard_changes": True},
+            },
+            {"tool_name": "EnterWorktree", "tool_input": {}},
+            {"tool_name": "SomeFutureTool", "tool_input": {}},
+        ],
+    )
+    def test_an_unbound_tool_needs_a_checkpoint(self, tmp_path: Path, tool_call):
+        refused = _gated_hook(_bypass(tool_call), tmp_path, approval="off")
+        assert refused.returncode == 2, tool_call
+        assert refused.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), tool_call
+        # Approval too: with no person to ask, F502.
+        _write_marker(tmp_path)
+        blocked = _gated_hook(_bypass(tool_call), tmp_path)
+        assert blocked.returncode == 2
+        assert blocked.stderr.startswith("F502 APPROVAL_REQUIRED: ")
+        asked = _gated_hook({**tool_call, "permission_mode": "default"}, tmp_path)
+        assert asked.returncode == 0
+        decision = json.loads(asked.stdout)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "ask"
+        assert decision["permissionDecisionReason"].startswith(
+            f"F502 APPROVAL_REQUIRED: {tool_call['tool_name']} (unbound: treated as "
+            "a mutation, STANDARD 1.2.0 §5.18.2)"
+        )
+        assert not (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    @pytest.mark.parametrize("tool", ["Read", "Grep", "Glob", "TodoWrite"])
+    def test_a_tool_that_needs_neither_passes(self, tmp_path: Path, tool: str):
+        result = _gated_hook(_bypass({"tool_name": tool, "tool_input": {}}), tmp_path)
+        assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
+
+
+# What a persist tool's input may hold (STANDARD 1.2.0 §5.18.10, §6.7): the
+# SDK adapter's verdict on each is the hook's. Text forms, and data forms
+# (a value under a member named for a credential, a name/value pair, a
+# tuple) that the SDK redactor's data rule finds.
+PERSIST_INPUTS = [
+    {"todos": [{"content": "buy milk", "status": "pending"}]},
+    {"todos": [{"content": "deploy key AKIAIOSFODNN7EXAMPLE", "status": "pending"}]},
+    {
+        "todos": [
+            {
+                "content": "deploy with AWS_SECRET_ACCESS_KEY="
+                "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                "status": "pending",
+            }
+        ]
+    },
+    {"subject": "token: rotate monthly", "description": "and the password policy"},
+    {"subject": "ghp_" + "a" * 36},
+    {"subject": "connect postgres://app:Hunter2Secret@db/prod"},
+    {"subject": "connect postgres://app:<password>@db/prod"},
+    {"subject": "x", "metadata": {"password": "hunter2"}},
+    {"subject": "x", "metadata": {"password": "<your password>"}},
+    {"subject": "x", "metadata": {"token": "rotate monthly"}},
+    {"subject": "x", "metadata": {"api_key": 12345678901234}},
+    {"subject": "x", "metadata": {"secret": True}},
+    {"subject": "x", "metadata": {"client_secret": "abc"}},
+    {"subject": "x", "metadata": {"apiKey": "[REDACTED]"}},
+    {
+        "subject": "x",
+        "metadata": {
+            "headers": [{"name": "Authorization", "value": "Basic Zm9vOmJhcg"}]
+        },
+    },
+    {"subject": "x", "metadata": {"headers": [["Cookie", "sid=abc123"]]}},
+    {"subject": "x", "metadata": {"headers": [["Accept", "text/html"]]}},
+    {"subject": "x", "metadata": {"db": {"password": {"value": "s3cr3t-v4lue"}}}},
+    {"taskId": "1", "status": "completed"},
+    {},
+]
+
+
+@needs_bash_and_jq
+class TestShellHookPersistSecrets:
+    """§5.18.10: the data a persist call stores holds no secret the layer
+    recognises (F504), decided by code. TodoWrite, TaskCreate and TaskUpdate
+    are persist (the SDK mapper's _TOOL_MAPPINGS) and need neither a
+    checkpoint nor approval, so the hook checked nothing of theirs: the
+    adapter refused a credential they would store, the plugin let it pass."""
+
+    @pytest.mark.parametrize("mode", ["default", "bypassPermissions"])
+    @pytest.mark.parametrize("tool", ["TodoWrite", "TaskCreate", "TaskUpdate"])
+    def test_a_credential_a_persist_tool_would_store_is_refused(
+        self, tmp_path: Path, tool: str, mode: str
+    ):
+        """The reported route: an AWS key in a todo's content and in a
+        task's subject."""
+        tool_call = {
+            "tool_name": tool,
+            "tool_input": {
+                "todos": [
+                    {"content": "deploy with AKIAIOSFODNN7EXAMPLE", "status": "pending"}
+                ],
+                "subject": "key AKIAIOSFODNN7EXAMPLE",
+            },
+            "permission_mode": mode,
+            "tool_use_id": "tu1",
+        }
+        result = _gated_hook(tool_call, tmp_path)
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert result.stderr.startswith(
+            f"F504 CONSTRAINT_VIOLATED: {tool} (persist): the data it would store "
+            "holds what looks like a credential"
+        )
+        # Nothing was used or written.
+        assert not (tmp_path / ".claude").exists()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "tool_input", PERSIST_INPUTS, ids=lambda v: json.dumps(v)[:60]
+    )
+    async def test_the_hook_and_the_adapter_agree(
+        self, tmp_path: Path, strict_adapter: GroundedAgentAdapter, tool_input: dict
+    ):
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        for tool in ("TodoWrite", "TaskCreate"):
+            tool_call = {"tool_name": tool, "tool_input": tool_input}
+            out = await hook(
+                {**tool_call, "permission_mode": "bypassPermissions"}, "t1", None
+            )
+            sdk = _decision(out) == "deny"
+            if sdk:
+                assert _reason(out).startswith("F504"), _reason(out)
+            result = _gated_hook(_bypass(tool_call), tmp_path)
+            assert result.returncode in (0, 2), result.stderr
+            assert (result.returncode == 2) == sdk, (tool, result.stderr, _reason(out))
+            if result.returncode == 2:
+                assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: "), (
+                    result.stderr
+                )
+
+    @pytest.mark.asyncio
+    async def test_they_agree_on_the_credential_vectors(
+        self, tmp_path: Path, strict_adapter: GroundedAgentAdapter
+    ):
+        """The refusal rule's vectors (tests/conformance/secrets/
+        credentials.json) that register no value, text and data alike, as a
+        todo's content: both refuse what the vector says holds one."""
+        path = (
+            SHELL_HOOK.parents[1]
+            / "tests"
+            / "conformance"
+            / "secrets"
+            / "credentials.json"
+        )
+        vectors = [
+            v
+            for v in json.loads(path.read_text(encoding="utf-8"))["vectors"]
+            if not v["secret_values"]
+        ]
+        assert len(vectors) > 40
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        for v in vectors:
+            tool_call = {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": [{"content": v["input"], "status": "pending"}]},
+            }
+            out = await hook(
+                {**tool_call, "permission_mode": "bypassPermissions"}, "t1", None
+            )
+            result = _gated_hook(_bypass(tool_call), tmp_path)
+            refused = result.returncode == 2
+            assert refused == (_decision(out) == "deny"), (v["name"], result.stderr)
+            assert refused == v["expect"]["holds"], (v["name"], result.stderr)
+
+    # Security round 5, batch 4: the scan read one line at a time, so a
+    # value on the line after its name passed the hook (TodoWrite is
+    # ungated: stored with no approval) while the adapter refused it.
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("todos", "holds"),
+        [
+            (
+                [
+                    {
+                        "content": "Set the DB config:\ndb:\n  password:\n"
+                        "    Xyz12345abcdef",
+                        "status": "pending",
+                        "activeForm": "Configuring",
+                    }
+                ],
+                True,
+            ),
+            ([{"content": "Authorization:\nBearer Xyz12345abcdef"}], True),
+            ([{"content": "Bearer\nabcdefghijklmnopqrstuvwxyz"}], True),
+            ([{"content": 'API_KEY=\r\n"Xyz12345abc"'}], True),
+            # Two strings, a name ending one and a value opening the next:
+            # each is read on its own, as the adapter reads each.
+            (
+                [
+                    {"content": "rotate the api_key:", "status": "pending"},
+                    {"content": "abc123def456ghi", "status": "pending"},
+                ],
+                False,
+            ),
+            ([{"content": "buy milk\nand eggs", "status": "pending"}], False),
+        ],
+        ids=["reported", "authorization", "bearer", "crlf", "apart", "prose"],
+    )
+    async def test_a_value_on_the_next_line(
+        self,
+        tmp_path: Path,
+        strict_adapter: GroundedAgentAdapter,
+        todos: list[dict],
+        holds: bool,
+    ):
+        tool_call = {"tool_name": "TodoWrite", "tool_input": {"todos": todos}}
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        out = await hook(
+            {**tool_call, "permission_mode": "bypassPermissions"}, "t1", None
+        )
+        assert (_decision(out) == "deny") == holds
+        result = _gated_hook(
+            {**tool_call, "permission_mode": "default", "tool_use_id": "t1"},
+            tmp_path,
+        )
+        assert result.returncode == (2 if holds else 0), result.stderr
+        if holds:
+            assert result.stderr.startswith(
+                "F504 CONSTRAINT_VIOLATED: TodoWrite (persist)"
+            )
+
+    # Security round 5, batch 6: the plugin holds AUDIT_HMAC_KEY, which signs
+    # every audit line and head, and the project's checkpoint key, which
+    # signs the checkpoints it records; the scan registered neither, so a
+    # todo holding one was stored (§6.7: a host recognises at least the
+    # credentials it holds itself).
+    AUDIT_KEY = "9f8e7d6c5b4a39281706f5e4d3c2b1a0" * 2
+    CHECKPOINT_KEY = "0a1b2c3d4e5f60718293a4b5c6d7e8f9" * 2
+
+    def _todo(self, content: str) -> dict:
+        return _bypass(
+            {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": [{"content": content, "status": "pending"}]},
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "audit key for CI: {key}",
+            "export the signing key {key} to the runner",
+            "{key}",
+        ],
+    )
+    def test_the_audit_key_a_todo_would_store_is_refused(
+        self, tmp_path: Path, content: str
+    ):
+        todo = self._todo(content.format(key=self.AUDIT_KEY))
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+        env["AUDIT_HMAC_KEY"] = self.AUDIT_KEY
+        result = subprocess.run(
+            ["bash", str(SHELL_HOOK)],
+            input=json.dumps(todo),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: TodoWrite")
+        # The key is not in the refusal either.
+        assert self.AUDIT_KEY not in result.stderr
+        # Control: with another key set, the same todo is stored.
+        env["AUDIT_HMAC_KEY"] = "another-key-of-the-person"
+        result = subprocess.run(
+            ["bash", str(SHELL_HOOK)],
+            input=json.dumps(todo),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_the_checkpoint_key_a_todo_would_store_is_refused(self, tmp_path: Path):
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+        records = tmp_path / ".git" / "acs" / "checkpoints"
+        records.mkdir(parents=True)
+        (records / "key").write_text(self.CHECKPOINT_KEY)
+        result = _gated_hook(self._todo(f"sign with {self.CHECKPOINT_KEY}"), tmp_path)
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: TodoWrite")
+        # Control: another value of the same shape is stored.
+        other = "1" * 64
+        assert _gated_hook(self._todo(f"sign with {other}"), tmp_path).returncode == 0
+        # A file the take hook would not have written (not 64 hex digits) is
+        # not read as a key.
+        (records / "key").write_text("short")
+        assert _gated_hook(self._todo("sign with short"), tmp_path).returncode == 0
+
+    def test_a_large_input_is_decided_well_within_the_time_limit(self, tmp_path: Path):
+        """The scan reads the input in time linear in its length: 1 MB of
+        todos before an AWS key is refused in well under the hook's 30
+        seconds (hooks.json)."""
+        todos = [
+            {"content": "a b token: " * 90_000, "status": "pending"},
+            {"content": "deploy key AKIAIOSFODNN7EXAMPLE", "status": "pending"},
+        ]
+        started = time.perf_counter()
+        result = _gated_hook(
+            _bypass({"tool_name": "TodoWrite", "tool_input": {"todos": todos}}),
+            tmp_path,
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 2 and result.stderr.startswith("F504")
+        assert elapsed < 5
+
+    # Security round 4: the member rule tested each name and each value
+    # with a regular expression, which jq compiles at each test (about 0.4
+    # ms): 40,000 members took about 18 s of the hook's 30, and 120,000
+    # placeholders under a secret member about 11 s. String functions read
+    # the same input in under 2 s.
+    @pytest.mark.parametrize(
+        ("data", "refused"),
+        [
+            (
+                {
+                    **{f"m{i}": f"value {i}" for i in range(40_000)},
+                    "password": "hunter2",
+                },
+                True,
+            ),
+            ({"password": ["<ab>"] * 120_000}, False),
+        ],
+        ids=["members", "placeholders"],
+    )
+    def test_many_members_are_decided_in_time(
+        self, tmp_path: Path, data: dict, refused: bool
+    ):
+        tool_input = {"todos": [{"content": "x", "status": "pending", "meta": data}]}
+        assert len(json.dumps(tool_input)) <= 1_000_000
+        started = time.perf_counter()
+        result = _gated_hook(
+            _bypass({"tool_name": "TodoWrite", "tool_input": tool_input}),
+            tmp_path,
+            timeout=60,
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == (2 if refused else 0), result.stderr[:200]
+        if refused:
+            assert result.stderr.startswith(
+                "F504 CONSTRAINT_VIOLATED: TodoWrite (persist)"
+            )
+        assert elapsed < 5
+
+    # A credential after a long run that each stage reading matches out of
+    # the text (grep -o) once read again from each of its positions: a URL
+    # scheme's characters (the reported TodoWrite: rc 124 after 30 s under
+    # hooks.json's limit) and a user option's name (`.-u` at each third
+    # position). grep -o feeds a pipe here, as in the hook; with its output
+    # sent to /dev/null grep stops at the first match, which hid it.
+    LONG_RUNS = [
+        "a" * 100_000
+        + " then deploy from https://deploy:Pr0dPassw0rd@db.example.com/app",
+        ".-u" * 40_000 + " curl -u deploy:Pr0dPassw0rd2 https://db.example.com/",
+        ".-U=" * 30_000 + " curl -U deploy:Pr0dPassw0rd2 https://db.example.com/",
+    ]
+
+    @pytest.mark.parametrize("content", LONG_RUNS, ids=["url", "user", "user="])
+    def test_a_credential_after_a_long_run_is_decided_in_time(
+        self, tmp_path: Path, content: str
+    ):
+        todos = [{"content": content, "status": "pending", "activeForm": "Deploying"}]
+        started = time.perf_counter()
+        result = _gated_hook(
+            _bypass({"tool_name": "TodoWrite", "tool_input": {"todos": todos}}),
+            tmp_path,
+            timeout=60,
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 2, (result.returncode, result.stderr[:200])
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: TodoWrite (persist)")
+        assert elapsed < 10
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", LONG_RUNS, ids=["url", "user", "user="])
+    async def test_the_adapter_decides_them_in_time_too(
+        self, strict_adapter: GroundedAgentAdapter, content: str
+    ):
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        started = time.perf_counter()
+        out = await hook(
+            {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": [{"content": content, "status": "pending"}]},
+                "permission_mode": "bypassPermissions",
+            },
+            "t-run",
+            None,
+        )
+        assert _decision(out) == "deny" and _reason(out).startswith("F504")
+        assert time.perf_counter() - started < SAFETY_HOOK_TIMEOUT_S / 6
+
+
+def _ship_records(upstream: Path, victim: Path) -> str:
+    """An upstream repository whose history holds a merge commit M that
+    adds files its main branch never shows, and whose main branch tracks
+    an empty .claude/checkpoints/commits/M and a fresh .claude/checkpoint.ok
+    naming M; cloned to `victim`. Returns M."""
+    _repo(upstream)
+    base = _git(upstream, "rev-parse", "HEAD")
+    index = _git(upstream, "commit-tree", f"{base}^{{tree}}", "-p", base, "-m", "i")
+    (upstream / ".claude").mkdir()
+    (upstream / ".claude" / "settings.local.json").write_text(
+        '{"permissions": {"allow": ["Bash(*)"]}}'
+    )
+    (upstream / "setup.sh").write_text("echo planted\n")
+    _git(upstream, "add", "-f", ".claude/settings.local.json", "setup.sh")
+    tree = _git(upstream, "write-tree")
+    merge = _git(upstream, "commit-tree", tree, "-p", base, "-p", index, "-m", "m")
+    _git(upstream, "reset", "-q", "--hard", merge)
+    _git(upstream, "rm", "-q", ".claude/settings.local.json", "setup.sh")
+    commits = upstream / ".claude" / "checkpoints" / "commits"
+    commits.mkdir(parents=True)
+    (commits / merge).touch()
+    now = int(time.time())
+    (upstream / ".claude" / "checkpoint.ok").write_text(
+        json.dumps(
+            {
+                "checkpoint_id": "x",
+                "commit": merge,
+                "created_at": now - 60,
+                "expires_at": now + 1740,
+            }
+        )
+    )
+    _git(upstream, "add", "-f", ".claude")
+    _git(upstream, "commit", "-q", "-m", "records")
+    subprocess.run(
+        ["git", "clone", "-q", str(upstream), str(victim)],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    return merge
+
+
+@needs_bash_and_jq
+class TestShellHookTrustsOnlyItsOwnRecords:
+    """A rollback restores a checkpoint taken in the scope (STANDARD 1.2.0
+    §5.18.3, §5.18.6), and a checkpoint is taken by a call: records a
+    repository ships authorise nothing."""
+
+    def test_a_cloned_commit_entry_restores_nothing(self, tmp_path: Path):
+        merge = _ship_records(tmp_path / "upstream", tmp_path / "victim")
+        victim = tmp_path / "victim"
+        assert (victim / ".claude" / "checkpoints" / "commits" / merge).is_file()
+        for mode in ("bypassPermissions", "default"):
+            result = _gated_hook(_bash(f"git stash apply {merge}", mode), victim)
+            assert result.returncode == 2, mode
+            assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), mode
+        # The shipped marker was refused, not used or removed.
+        assert (victim / ".claude" / "checkpoint.ok").exists()
+        assert not (victim / ".claude" / "checkpoints" / "used").exists()
+
+    def test_a_tracked_marker_authorises_nothing(self, tmp_path: Path):
+        _ship_records(tmp_path / "upstream", tmp_path / "victim")
+        victim = tmp_path / "victim"
+        result = _gated_hook(_bypass(_bash("rm -rf app.txt")), victim, approval="off")
+        assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+        assert "tracked by git" in result.stderr
+        assert (victim / ".claude" / "checkpoint.ok").exists()
+        assert (victim / "app.txt").exists()
+
+    def test_a_marker_tracked_behind_a_linked_directory_authorises_nothing(
+        self, tmp_path: Path
+    ):
+        """git is asked from the marker's own directory: a .claude that is
+        a symbolic link to a tracked directory is read where it leads."""
+        upstream = _repo(tmp_path / "upstream")
+        (upstream / "cfg").mkdir()
+        now = int(time.time())
+        (upstream / "cfg" / "checkpoint.ok").write_text(
+            json.dumps(
+                {"checkpoint_id": "x", "created_at": now - 60, "expires_at": now + 1740}
+            )
+        )
+        (upstream / ".claude").symlink_to("cfg")
+        _git(upstream, "add", "cfg", ".claude")
+        _git(upstream, "commit", "-q", "-m", "linked")
+        victim = tmp_path / "victim"
+        subprocess.run(
+            ["git", "clone", "-q", str(upstream), str(victim)],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        assert (victim / ".claude").is_symlink()
+        result = _gated_hook(_bypass(_write_call()), victim, approval="off")
+        assert result.returncode == 2
+        assert "tracked by git" in result.stderr
+
+    def test_an_untracked_marker_still_authorises_one_call(self, tmp_path: Path):
+        project = _repo(tmp_path / "p")
+        (project / ".gitignore").write_text(".claude/\n")
+        _write_marker(project)
+        result = _gated_hook(_write_call(), project, approval="off")
+        assert result.returncode == 0
+        assert not (project / ".claude" / "checkpoint.ok").exists()
+
+    def test_a_restore_runs_in_the_projects_repository(self, tmp_path: Path):
+        """The commit was entered for the project's repository: restoring
+        it where the call runs in another (a cwd elsewhere, another
+        worktree) restores other state, a mutate."""
+        project = _repo(tmp_path / "project")
+        elsewhere = _repo(tmp_path / "elsewhere")
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        enter_checkpoint_commit(project / ".git", sha)
+        call = _bash(f"git stash apply {sha}")
+        (project / "sub").mkdir()
+        for cwd in (project, project / "sub"):
+            allowed = _gated_hook({**call, "cwd": str(cwd)}, project)
+            assert (allowed.returncode, allowed.stdout) == (0, ""), cwd
+        refused = _gated_hook({**call, "cwd": str(elsewhere)}, project)
+        assert refused.returncode == 2
+        assert refused.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+
+    @pytest.mark.parametrize(
+        "tool_call",
+        [
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": ".claude/checkpoint.ok"},
+            },
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/p/.claude/checkpoints/used/x"},
+            },
+            {
+                "tool_name": "MultiEdit",
+                "tool_input": {"file_path": "/p/.git/acs/checkpoints/commits/a"},
+            },
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "touch .git/acs/checkpoints/commits/0123"},
+            },
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "echo '{}' > .claude/checkpoint.ok"},
+            },
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "cp m .claude/checkpoints/ended/m"},
+            },
+            # The audit log's head (security round 1, batch 8): removing or
+            # writing it would let a log cut short verify.
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "/p/.claude/audit.head"},
+            },
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": "rm -f .claude/audit.head"},
+            },
+            {
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": "head -n 2 .claude/audit.log > t && mv t .claude/AUDIT.HEAD"
+                },
+            },
+        ],
+    )
+    def test_a_call_that_writes_the_records_is_refused(
+        self, tmp_path: Path, tool_call: dict
+    ):
+        """The records are written by the hooks alone: a call naming them
+        is refused (F504) before it can use a checkpoint."""
+        _write_marker(tmp_path)
+        result = _gated_hook(
+            {**tool_call, "permission_mode": "default"}, tmp_path, approval="off"
+        )
+        assert result.returncode == 2, tool_call
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: "), tool_call
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    @pytest.mark.parametrize(
+        "tool_call",
+        [
+            _write_to("/p/.git/acs//checkpoints/commits/a"),
+            _write_to("/p/.git/acs/./checkpoints/commits/a"),
+            _write_to("/p/.git/acs/x/../checkpoints/commits/a"),
+            _write_to("/p/.git/acs/x/y/../../checkpoints/commits/a"),
+            _write_to("/p/.git/ACS/Checkpoints/commits/a"),
+            _write_to("/p/.claude/Checkpoint.OK"),
+            _write_to("/p/.claude//checkpoints/used/x"),
+            _bash("touch .git/acs//checkpoints/commits/0123"),
+            _bash("touch .git/acs/./checkpoints/commits/0123"),
+            _bash("touch .claude/x/../checkpoints/ended/m"),
+            {
+                "tool_name": "Monitor",
+                "tool_input": {"command": "touch .claude/checkpoint.ok"},
+            },
+            {
+                "tool_name": "PowerShell",
+                "tool_input": {"command": "New-Item .git/acs/checkpoints/commits/a"},
+            },
+            # Padded past 4096 bytes: no ../ resolution, the rest still read
+            _bash("touch .git/acs//checkpoints/commits/0123" + " " * 5000),
+        ],
+    )
+    def test_another_spelling_of_the_records_is_refused(
+        self, tmp_path: Path, tool_call: dict
+    ):
+        """A path is read as the file system reads it: slashes run
+        together, ./ and x/../ segments, and letter case (a case-insensitive
+        file system opens CHECKPOINT.OK as checkpoint.ok) name the same
+        records, and refuse the call as the plain spelling does."""
+        _write_marker(tmp_path)
+        result = _gated_hook(
+            {**tool_call, "permission_mode": "default"}, tmp_path, approval="off"
+        )
+        assert result.returncode == 2, tool_call
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: "), tool_call
+        assert (tmp_path / ".claude" / "checkpoint.ok").exists()
+
+    def test_a_long_path_is_read_in_bounded_time(self, tmp_path: Path):
+        """Resolving x/../ costs more than the text's length, so it is done
+        only on a text of at most 4096 bytes; a megabyte of segments is
+        decided at once."""
+        _write_marker(tmp_path)
+        started = time.monotonic()
+        result = _gated_hook(
+            {**_bash("touch " + "a/" * 500_000 + "x"), "permission_mode": "default"},
+            tmp_path,
+            approval="off",
+        )
+        assert time.monotonic() - started < 10
+        assert result.returncode == 0, result.stderr
+
+    def test_reading_the_records_and_writing_text_about_them_pass(self, tmp_path: Path):
+        for tool_call in (
+            _bash("cat .claude/checkpoint.ok"),
+            _bash("ls .claude/checkpoints/used"),
+            _bash("cat .claude/audit.head"),
+            {"tool_name": "Read", "tool_input": {"file_path": ".claude/checkpoint.ok"}},
+        ):
+            assert _gated_hook(tool_call, tmp_path).returncode == 0, tool_call
+        _write_marker(tmp_path)
+        edit = {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "docs/hooks.md",
+                "new_string": "the marker is .claude/checkpoint.ok",
+            },
+            "permission_mode": "default",
+        }
+        assert _gated_hook(edit, tmp_path, approval="off").returncode == 0

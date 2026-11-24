@@ -13,7 +13,7 @@ import pytest
 from claude_agent_sdk import PermissionResultAllow
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig, _core
-from tests.conftest import FakeClock
+from tests.conftest import FakeClock, pre_tool_use
 
 
 @pytest.fixture
@@ -93,6 +93,7 @@ async def test_changed_arguments_that_need_a_checkpoint_are_f501(
     adapter: GroundedAgentAdapter,
 ) -> None:
     adapter.create_checkpoint(["*"], "t")
+    await pre_tool_use(adapter, "Bash", {"command": "ls"}, "b1")
     callback = adapter._make_permission_callback(_host({"command": "rm -rf x"}))
     result = await callback("Bash", {"command": "ls"}, _ctx("b1"))
     assert result.message.startswith("F501 CHECKPOINT_REQUIRED:")
@@ -107,8 +108,10 @@ async def test_changed_arguments_that_hold_a_credential_are_f504(
     §5.18.10, the persist and audit secret rows included (§6.7): the call
     would run with them."""
     secret = {"todos": [{"content": "deploy with AKIAABCDEFGHIJKLMNOP"}]}
+    plain = {"todos": [{"content": "deploy"}]}
+    await pre_tool_use(adapter, "TodoWrite", plain, "t1")
     callback = adapter._make_permission_callback(_host(secret))
-    result = await callback("TodoWrite", {"todos": [{"content": "deploy"}]}, _ctx("t1"))
+    result = await callback("TodoWrite", plain, _ctx("t1"))
     assert not _allowed(result)
     assert result.message.startswith("F504 CONSTRAINT_VIOLATED:")
     assert "AKIAABCDEFGHIJKLMNOP" not in result.message
@@ -121,6 +124,7 @@ async def test_changed_arguments_of_an_approved_call_are_f502(
     adapter: GroundedAgentAdapter,
 ) -> None:
     adapter.create_checkpoint(["*"], "t")
+    await pre_tool_use(adapter, "Write", {"file_path": "a"}, "w1")
     callback = adapter._make_permission_callback(_host({"file_path": "other"}))
     result = await callback("Write", {"file_path": "a"}, _ctx("w1"))
     assert result.message.startswith("F502 APPROVAL_REQUIRED:")
@@ -134,6 +138,7 @@ async def test_unchanged_updated_input_is_allowed_and_recorded(
     adapter: GroundedAgentAdapter,
 ) -> None:
     adapter.create_checkpoint(["*"], "t")
+    await pre_tool_use(adapter, "Write", {"file_path": "a"}, "w1")
     callback = adapter._make_permission_callback(_host())
     result = await callback("Write", {"file_path": "a"}, _ctx("w1"))
     assert _allowed(result)

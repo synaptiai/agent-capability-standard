@@ -236,8 +236,29 @@ model family for a child. Two of them touch evidence:
   1.2.0 keeps secrets out of evidence, records, notifications, diagnostics
   and stored memory
   ([§6.7](../../spec/STANDARD-v1.2.0.md#67-secrets-in-records)): the binding
-  redacts every trace entry it writes with default patterns, and a grounded
-  tool's `secrets` option registers the deployment's own values.
+  redacts every trace entry it writes, and the id of each checkpoint it
+  records (what the `checkpoint` call returned), with default patterns, and
+  `configureLayer({ secrets })` registers the deployment's own values for
+  every entry, the audit hook's for plain tools included, and for the data a
+  `persist` or `audit` call would store (a grounded tool's `secrets` option,
+  and `recordToolCall`'s, add more: a grounded tool's join the layer's, an
+  array when the tool is defined and a function's values at each call, so
+  the audit hook's entry for a plain tool is redacted with them too). An
+  entry's tool name is redacted as well: the model chooses the name it
+  calls, and a composite's code may invoke one its arguments chose, so the
+  audit records exported from the trace name the redacted tool, and so do
+  the refusals a composite's state returns. Every result a grounded call or
+  a composite's state returns that is not a success (a refusal, an R407
+  quoting a store's or a secrets function's error, an R402 naming an
+  output member, the tool's own error, a nested plain tool's error, a
+  control tool's own error result) is
+  redacted the same way before it reaches the runtime, the thread's
+  messages and the model; an F502's `shown` arguments have their secrets
+  replaced, and its `digest` stays that of the values the approver decides
+  on. An evidence anchor that held a
+  secret keeps no `digest` of what it cites (its metadata says
+  `digest_omitted: secret`): the redacted excerpt would show the text to
+  check a guess against.
 
 ## A grounded Standard Agent today
 
@@ -300,7 +321,13 @@ The schema is
 [`standard_agents_annotation.schema.json`](../../schemas/interop/standard_agents_annotation.schema.json),
 generated from the ontology. It refuses a copy that names another layer than
 the capability's or a flag weaker than the ontology's, so a reader that does
-use the copies is not misled. A tool with no `acs` annotation is **unbound**:
+use the copies is not misled. Every other member of an `acs` annotation is
+read as the record's, so one the record does not have (a misspelt `aproval`
+or `flag`) is S303 and the annotation does not load: the tool is unbound
+rather than read in part ([§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)),
+`groundedTool` refuses a composite that lists it (V107), the lint reports it
+(W617) and `deriveAgentManifest` names it malformed. Vendor data goes under a
+key that starts with `x-`. A tool with no `acs` annotation is **unbound**:
 [§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools) treats each of its calls as the strictest
 case, high risk with a checkpoint and an approval. A tool that only signals
 the host carries `{ standard, ontology, tool, control: true }` instead
@@ -443,7 +470,7 @@ The rules, and where each comes from:
 | A capability output carried as a string is the I-JSON text of the output object, with every required field ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)) | The return type of `execute` is the capability's output contract. At run time the wrapper checks that every required field is present, that `evidence_anchors` is an array, that a required `confidence` is a number from 0 to 1, and that the output is I-JSON; it returns the text, or R402 |
 | A binding cannot weaken a capability's flags (W602) | The `requires_*` flags can only be declared `true`; a weaker `risk` or `mutation` fails the definition |
 | The arguments of a call that requires approval are I-JSON ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)) | A call that needs approval whose arguments are not I-JSON (a lone surrogate, a number written as an integer beyond ±2^53) is refused with F502 before anything is asked or used: no decision can bind to them. The runtime parses a call's arguments before the tool sees them, so an integer literal beyond 2^53 arrives rounded and is checked, digested and run as rounded (a host gap the statement names) |
-| A layer that cannot complete its checks refuses the call, and every call is recorded with the layer that decided it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)) | A store write that fails, or the arguments of a call that needs no approval with no canonical JSON, refuse the call with R407. A call that ran but whose record cannot be completed returns R407 in place of its result. Each entry a grounded or control tool writes, refusals and the layer's own failures included, names the layer (`recorded_by`: the binding's name, the Standard version and a digest of the tool's annotation and checkpoint maximum age); only the audit hook's entry for a call no grounded tool recorded has none |
+| A layer that cannot complete its checks refuses the call, and every call is recorded with the layer that decided it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)) | A store write that fails, the arguments of a call that needs no approval with no canonical JSON, or a tool's `secrets` function that throws, refuse the call with R407 (recorded too: a `refused` entry, redacted with the secrets the layer holds). So does a nested call a composite makes whose checks the layer cannot complete (a read of its records that fails; arguments with no canonical JSON, a cycle among them), recorded with the call that covered it. A call that ran but whose record cannot be completed returns R407 in place of its result. Each entry a grounded or control tool writes, refusals and the layer's own failures included, names the layer (`recorded_by`: the binding's name, the Standard version and a digest of the tool's annotation and checkpoint maximum age); only the audit hook's entry for a call no grounded tool recorded has none |
 
 As [§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency) states, `precedes` and
 `conflicts_with` edges are not enforced over calls. `precedes` orders the
@@ -456,16 +483,27 @@ cannot arise.
 
 Every grounded `send` tool obeys the destination policies the layer puts in
 force ([§4.4.2](../../spec/STANDARD-v1.2.0.md#442-transmissions)):
-`configureLayer({destinations, profilePolicy})` in the module that defines
-the agent's tools (`profilePolicy` is the core's
-`CoreContext.profilePolicy(profiles)`, whose `allowed_destinations` join the
-host's). A call whose destination no policy allows, or is not a string, is
-refused with F504 before any approval is asked for. The destination is
-`args.destination` unless the tool's `destination` option says where
-(`destination: (args) => args.to`); a tool's own `profiles` add their
+`configureLayer({destinations, profiles})` in the module that defines
+the agent's tools, before them (`profiles` are domain profiles every grounded
+tool applies, as `bindingProfiles` checked them, their
+`allowed_destinations` joining the host's; `profilePolicy`, the core's
+`CoreContext.profilePolicy(profiles)`, adds the destinations alone, and is
+refused when it also sets a minimum confidence or grounding policies, which
+it would not put in force). A call whose destination no policy allows, or is not a string, is
+refused with F504 before any approval is asked for. The tool's `destination`
+option says where the destination is: an RFC 6901 pointer into the
+arguments (`destination: '/to'`, which the annotation states as the
+binding record's `destination`) or a function of them (`(args) =>
+args.to`). A `send` tool defined without it has a destination the layer
+cannot tell, so while any policy is in force every call of it is refused
+with F504 ([§5.18.10](../../spec/STANDARD-v1.2.0.md#51810-capability-checks)):
+the layer does not guess an argument (`destination`, say) that the model can
+set to an allowed value while the tool's code sends elsewhere. A tool's own
+`profiles` add their
 policies, and a composite's reach the sends its code invokes, at any depth.
 `memoryTools()` gives a `persist` and a `recall` tool on the
-thread's store (scope `session`), which pass the session cases of
+thread's store (scope `session`), which apply its `profiles` and
+`grounding` options and the layer's profiles as any grounded tool does, and pass the session cases of
 `tests/conformance/memory/store.json`. Its entries survive a restart of the
 host (the runtime MUST keep thread values across process restarts and
 redeploys), are retained while the thread lasts unless their `ttl` ends
@@ -611,25 +649,88 @@ export default groundedTool({
 });
 ```
 
-- **Flags.** The composite takes the effective flags of every tool it lists,
-  transitively, joined with its own. A listed tool with no annotation counts
-  as the strictest case.
+- **Flags and approval.** The composite takes the effective flags of every
+  tool it lists, transitively, joined with its own, and the approval they
+  need: the most approvers, the shortest expiry, and a role one of them
+  sets (its own first), since its approval covers their nested calls. A
+  listed tool is one defined with `groundedTool` or `controlTool`, or with
+  plain `defineTool` and an `acs` annotation that loads as a binding record;
+  one with no binding the binding loads throws when the composite is
+  defined (V107).
 - **The list is enforced twice.** The binding passes the names as the tool's
-  `uses`, so a runtime that enforces `uses` refuses an invocation outside the
-  list. The wrapper refuses one itself (F504) and records it.
-- **Nesting tokens.** Each invocation the composite's own code makes issues
-  a one-shot token for that tool, those arguments and that execution. A
-  grounded tool that takes a token is covered by the composite's approval and
-  checkpoint: it needs neither again, and its trace entry names the
-  composite's (`covered_by`). Every other check still applies, its
-  prerequisites included. A call that finds no token is checked as a call of
-  its own, such as one an endpoint or a parallel call makes while the
-  composite runs: being in the same thread or execution is not evidence that
-  the composite made it.
+  `uses` (an empty list for a tool with no `invokes`), so a runtime that
+  enforces `uses` refuses `invokeTool` and `queueTool` outside the list. The
+  wrapper refuses one itself (F504) and records it.
+- **Nesting tokens.** Each invocation the composite's own code makes while
+  it runs issues a one-shot token for that tool, those arguments and that
+  execution, carrying what the composite's call held. A grounded tool that
+  takes a token is covered by the composite's approval and checkpoint: it
+  needs neither again, and its trace entry names the composite's
+  (`covered_by`), when the decisions that approved the composite are valid
+  for its own approval too (its role, approvers and expiry), and, if it
+  needs a checkpoint, when the composite's call used one. The runtime runs
+  whatever tool it knows under the invoked name, which need not be the one
+  listed (a copy, a wrapper, another definition), so the composite's flags
+  prove nothing about the call. Every other check still applies, its
+  prerequisites included. A call that finds no token, or that what the
+  composite held does not cover, is checked as a call of its own, such as
+  one an endpoint or a parallel call makes while the composite runs: being
+  in the same thread or execution is not evidence that the composite made
+  it.
+- **Only while it runs.** Once the composite's own code has settled, an
+  invocation through the state it was given is not a nested call: code that
+  kept the state and invokes later is refused with F504, and the token of an
+  invocation the composite did not wait for is no longer honoured.
+- **Tools defined with plain `defineTool`.** Their code runs without the
+  wrapper, so the composite's nesting state checks an invocation of one
+  itself, as a grounded tool checks its own call: that a `persist` or
+  `audit` call's data holds no secret; a `send`'s destination, at its
+  record's `destination` pointer, against every policy in force; that the
+  composite's decisions are valid for its approval (no decision of its own
+  can be asked); its prerequisites; and, once it has run, what it returned:
+  the output contract (R402), the composite's grounding policies that
+  require its capability (F505) and its profiles' minimum confidence
+  (F504), since the plain tool has no options of its own. A call whose
+  output is refused has run and failed: it is no prerequisite that ran, so
+  a plain `checkpoint` tool that saved nothing does not let a rollback run.
+  It records the call before it runs and again with its outcome, with the
+  composite's `covered_by`.
+- **The tool the runtime runs.** The runtime runs the tool it registers
+  under an invoked name, and the binding cannot read its registry.
+  `registerTools({ name: tool, ... })`, called once the agent's tools are
+  defined, with the tools the runtime registers (the default exports of
+  `agents/tools/`, by file name), tells it. A plain tool's checks are its
+  listed binding's, so a nested call of one runs only under a name
+  registered as that very tool; and an invocation of a name registered as
+  another tool than the one listed, or as two, is refused (F504). A name a
+  composite lists for a grounded tool needs registration only while a
+  destination policy is in force (the layer's, the profiles' given to the
+  composite or to a composite enclosing it, or the profiles' given to the
+  listed tool or to a tool it invokes, transitively): the tool that runs
+  checks itself if it is grounded, but under a policy the binding invokes
+  no name whose tool may be one that sends anywhere (F504).
+- **Queued calls.** A call queued with `state.queueTool` runs after the
+  composite's call has ended, as a call of its own. The composite's state
+  queues a listed grounded or control tool, which checks itself when it
+  runs; it refuses to queue a listed plain tool, which nothing would check
+  then, a tool it does not list, and any tool once the composite's call has
+  ended: `queueTool` throws the F504 refusal, which is recorded.
 - **What `invokes` cannot bound.** The composite's own code can still write
   the store or reach the network directly, so the flags it takes from
   `invokes` are a lower bound. Declare `flags` or `additional_capabilities`
   for what it does itself.
+- **Rules that reach a nested call without a token.** The destination
+  policies and output rules of the profiles given to a composite (and to
+  the composites enclosing it) apply to every call of a tool the composite
+  has a pending invocation of, whether or not the call takes the token:
+  the runtime gives a tool its validated arguments (a zod `.default()` or
+  `.transform()`, a key stripped), which change the digest; a listed tool
+  may state another name than the one it is invoked under; and a composite
+  running outside an execution (an endpoint, an effect) issues tokens that
+  cover nothing. Such a call asks its own approval and checkpoint, and its
+  send and output are still checked against those rules. The binding
+  cannot tell it from another call of the tool made at that moment (a
+  parallel call, an endpoint's), so that call is checked against them too.
 
 ### Control tools
 
@@ -726,15 +827,22 @@ A grounded tool takes four more options:
   this call received (`refsIn(args)`) and what the tool's own code read
   during `execute`. Never the stored trace: a ref there was seen by an
   earlier request, not by this one.
-- **`secrets`**: values the redactor replaces besides its default patterns.
-  Redaction is always on: every trace entry's `evidence_anchors` and
-  `error`, and every notification, pass through it. A `persist` or `audit`
-  tool refuses data that holds a credential-shaped value or a registered
-  secret (F504, §5.18.10).
+- **`secrets`**: values the redactor replaces besides its default patterns
+  and those `configureLayer({ secrets })` registers for every tool and the
+  audit hook. They join the layer's (an array when the tool is defined, a
+  function's values at each call), so every entry the binding writes, other
+  tools' and the audit hook's included, is redacted with them too. Each is
+  replaced as it is, JSON-escaped (also as HTML-safe encoders such as Go's write it) and percent-encoded (`encodedForms`). Redaction is always on: every trace entry's `evidence_anchors`
+  and `error`, and every notification, pass through it. A `persist` or
+  `audit` tool refuses data that holds a credential-shaped value or a
+  registered secret (F504, §5.18.10).
 - **`profiles`**: the domain profiles the layer applies
   ([§5.21](../../spec/STANDARD-v1.2.0.md#521-domain-profiles)), as the core
   computes them: `bindingProfiles(context, documents)` with a `CoreContext`
-  of `@synaptiai/acs-core/wasm`, once, passed to every tool. They raise
+  of `@synaptiai/acs-core/wasm`, once, passed to every tool, or to
+  `configureLayer({ profiles })` before the tools are defined, which applies
+  them to every grounded tool beside its own (a tool defined before the
+  layer's profiles changed refuses its calls, R407). They raise
   each capability's flags at the call's effective risk, with the tools it
   `invokes`, and a composite's flags for what the tools it invokes perform,
   transitively, so profiles given to a composite alone reach its nested
@@ -745,7 +853,11 @@ A grounded tool takes four more options:
   nested call that needs a person is not covered by an approval no person
   gave. Their grounding policies join `grounding`; and an output below
   their `minimum_confidence` fails with F504 (`reason_code`), after the
-  grounding check. Their `allowed_destinations` join the layer's
+  grounding check. Given to a composite, these output rules, with the
+  composite's own `grounding`, reach the output of every nested call it
+  covers, at any depth: a plain tool's (which has no options of its own)
+  and a grounded tool's, after the tool's own rules (§5.21.3). Their
+  `allowed_destinations` join the layer's
   destination policies for the tool's `send` calls (§4.4.2) and, given to a
   composite, for every send its code invokes, at any depth: a nested call
   the binding attributes to the composite (§5.18.4) is checked against the
@@ -766,8 +878,12 @@ offers:
 |---|---|
 | W617 UNBOUND_TOOL (warning) | A tool has no `acs` annotation. Its calls are the strictest case |
 | V111 TOOL_NAME_MISMATCH (error) | A tool states another name than the one the prompt offers it under. An approver would be shown, and the trace would record, another tool's name |
-| V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included, so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`, and an offered tool whose binding names a `classifier` as performing any capability |
-| F506 GATED_CONTROL_ACTION (error) | Reported by `lintAgentBindings`: a stop or session action is tied to a tool that is unbound, has a prerequisite, or needs a checkpoint or an approval |
+| V102 MISSING_PREREQUISITE (error) | A tool's capability requires one that no offered tool performs, a checkpoint included (one the applied profiles require too), so the model could never get the call accepted. A host that takes checkpoints itself (`hostTakesCheckpoints`) counts as performing `checkpoint`, and an offered tool whose binding names a `classifier` as performing any capability |
+| F506 GATED_CONTROL_ACTION (error) | Reported by `lintAgentBindings`: a stop or session action is tied to a tool that is unbound, has a prerequisite, or needs a checkpoint or an approval, those the applied profiles require included |
+
+A tool defined with `groundedTool` is checked with the flags it computed,
+those its domain profiles and the layer's raise included (§5.21.3), which
+its record does not state; `checkBindings` takes them as `raised`.
 
 `lintAgentBindings` checks an agent definition. `stopTool`, `sessionStop`,
 `sessionFail` and `sessionStatus` act when the named tool is called
@@ -791,7 +907,7 @@ parent the model's text for an action that never ran. Bind a
 | | A provider-executed tool does not pass through a grounded wrapper, so it cannot be grounded this way |
 | | A write made by an effect, a hook, a handler or a thread endpoint does not pass through any tool's `execute`. Code that runs in an execution can route its writes through a grounded tool with `state.invokeTool()`. In an endpoint `state.execution` is null, and the text does not say what it is in an effect; a tool that needs a checkpoint or an approval refuses there, so a deferred write is checked when it is scheduled |
 | A rejection is never lost to an approval made at the same moment, and a rejection the endpoint answers as recorded stops a call that is starting on that approval | The store has no conditional write, and SA does not serialise endpoint requests with one another or with a running tool call. Two approvals that arrive together can lose one, which leaves the request pending until that approver decides again. A rejection that arrives after the call used the approval is answered 409, and the change runs |
-| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it, with those arguments, in that execution. A call to a tool the composite does not list is refused | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm, or in a new execution, finds none and is checked as a call of its own, which can refuse a call the composite needed. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call |
+| A nested call is covered by its composite's approval and checkpoint only when the composite's own code made it while it ran, with those arguments, in that execution, and only as far as the composite's call held them. A call to a tool the composite does not list, or through its state after it returned, is refused, as is a call it queues to a tool that would not check itself. A nested call of a plain tool runs only under a name `registerTools` registered as that tool, and is checked, its output included, as a grounded tool's call is | Tokens live in the memory of the JavaScript realm that runs the composite. A tool invoked in another realm finds none and is checked as a call of its own, without the rules of the composite's profiles. One invoked in a new execution, or with arguments the runtime changed (a default, a key stripped), takes no token either and asks its own approval and checkpoint, which can refuse a call the composite needed; the destination policies and output rules of the composites with a pending invocation of the tool still apply to it. Other code that calls a listed tool with exactly the pending arguments, at the same moment, can take that invocation's one covered call. `registerTools` is the deployment's statement of the runtime's registry, which the binding cannot read: with no destination policy in force (the layer's, nor one of the profiles given to the composite, to a composite enclosing it, or to the listed tool or a tool it invokes), a tool defined with plain `defineTool` that the runtime runs under a name a composite lists for a grounded tool, and that `registerTools` does not name, runs as a plain tool's call |
 | Two calls never both pass on one checkpoint or one approval: one thread's checks run one at a time in a realm (`serial.ts`), and the runtime runs a thread's tool calls in order | Across realms nothing serialises the checks; the binding relies on the runtime running one execution of a thread at a time, and refuses a call outside an execution that needs a checkpoint or an approval |
 
 The example has been type-checked against `@standardagents/spec` 0.45.10 and
@@ -815,12 +931,12 @@ rows of the table above that rest on SA behaviour the text does not state,
 and no check of §5.18.10 it does not apply: it applies the destination
 policies in force to every `send` tool (`configureLayer`, §4.4.2) and the
 secret checks of `persist` and `audit`, redacts every trace entry it
-writes (§6.7), and checks every grounded tool's output against its
-capability's output contract (R402, §5.18.10).
+writes (§6.7), and checks every grounded tool's output, and a nested plain
+call's, against its capability's output contract (R402, §5.18.10).
 
 It passes the normative fixtures of the class
 ([CONFORMANCE.md](../../spec/CONFORMANCE.md#safety-layer-conformance-class-sl)):
-the 33 binding fixtures in the package's `test/bindings.test.ts`, and the 30
+the 36 binding fixtures in the package's `test/bindings.test.ts`, and the 32
 call-sequence fixtures, played against the in-memory thread, in the binding's
 `test/calls.test.ts`, which also compares the statement with the binding's
 constants (its maximum age, `MAX_APPROVERS`). It skips two: one needs a call

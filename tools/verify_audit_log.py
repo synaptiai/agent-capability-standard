@@ -2,9 +2,45 @@
 """Verify audit log integrity via HMAC chain validation.
 
 Reads .claude/audit.log and verifies that:
-1. Each entry is valid JSON with required fields
-2. Each entry's HMAC matches its content
+1. Each entry is valid JSON with required fields, naming each member once
+2. Each entry's HMAC matches the bytes the hook signed: the line is the
+   compact JSON the hook writes (jq -c), ending in its hmac member, and the
+   HMAC is taken over the line with that member left out
 3. Each entry's prev_hmac matches the previous entry's HMAC (chain integrity)
+4. The log still holds the entry its head records, at its place: the head,
+   .claude/audit.head, is the chain's end as the hook last wrote it (the
+   number of entries and the last one's hmac, signed with the same key).
+   So does the head's anchor, the same head the hook keeps in the project's
+   git directory (<git dir>/acs/audit.head), where a command that removes
+   .claude whole (git clean -fdx, rm -rf .claude) leaves it. So does each
+   witness given (--witness): a copy of a head kept where the agent cannot
+   write it.
+
+A line is checked as the bytes it holds, not as what a parser reads from
+it: JSON that names a member twice parses, in most readers, to the last
+value at the first name's place, so a line edited to name `status` twice
+would read one way to a reader that keeps the first and verify by the
+other; and blanks or Unicode escapes inserted into a line change no parsed
+value. Each of those is refused.
+
+The chain alone shows a changed or removed entry by the link of the entry
+after it; removing the last entries, or the whole log, breaks no link, and
+the head shows it; removing the log with its head, and starting a new one,
+the anchor shows. A log begun before the hook kept a head, and a chain no
+head anchors (the audit skill's .claude/audit/records.jsonl), are verified
+with --no-head, which checks the chain alone.
+
+The head and the anchor show a cut made by a writer that holds neither the
+key nor an earlier head: an accident, a person's edit, a command that
+removes .claude. They do not show one made by the agent the log records:
+its commands can read the head and the anchor (no read needs a checkpoint
+or approval) and, wherever the key is in their environment or in a file
+they can read, the key; so a command that names neither (one a person
+approved, SECURITY.md §5.5) can cut the log and write back an earlier
+head, or a head the key signs anew, and both verify. A witness shows it: a
+copy of the head taken where the agent cannot write it (copied off the
+machine at a session's end, a CI artifact, a write-once store), against
+which a log cut before the witness's entry fails.
 
 The log is written by hooks/posttooluse_log_tool.sh, one entry per tool call.
 Three generations of entry verify, in any mix, because the HMAC is taken over
@@ -23,6 +59,8 @@ every field but ``hmac`` in the order recorded:
 
 Usage:
     python tools/verify_audit_log.py [--log-file PATH] [--hmac-key KEY]
+        [--head-file PATH] [--anchor-file PATH] [--no-head]
+        [--witness PATH ...]
 
 SEC-005: Audit log integrity verification.
 """
@@ -34,9 +72,12 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import socket
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 # Every entry carries the chain fields, and the fields of one generation: an
 # action record (what the hook writes), a tool call of the hook before
@@ -71,85 +112,300 @@ def compute_hmac(content: str, key: str) -> str:
     ).hexdigest()
 
 
-def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[str]:
-    """Verify a single audit log entry. Returns list of error messages."""
-    errors: list[str] = []
+# The end of every line the hook writes: jq -c appends the hmac member last.
+_HMAC_SUFFIX = re.compile(r',"hmac":"([0-9a-f]{64})"\}\Z')
 
-    # Check required fields: the chain's, and those of the generation the
-    # entry is closest to (the first, when it fits none)
+
+class DuplicateMember(ValueError):
+    """A JSON object names a member twice."""
+
+
+def _members_once(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise DuplicateMember(key)
+        out[key] = value
+    return out
+
+
+def parse_line(line: str) -> Any:
+    """A log line's JSON value. An object that names a member twice, at
+    any depth, is refused (:class:`DuplicateMember`, a ValueError), as is
+    text that is not JSON (json.JSONDecodeError)."""
+    return json.loads(line, object_pairs_hook=_members_once)
+
+
+def compact(value: Any) -> str:
+    """``value`` as jq -c prints it: compact, members in their order,
+    non-ASCII text as is, and DEL (U+007F) escaped, which json.dumps leaves
+    as is."""
+    return json.dumps(
+        value, separators=(",", ":"), sort_keys=False, ensure_ascii=False
+    ).replace("\x7f", "\\u007f")
+
+
+def verify_fields(entry: dict, expected_prev_hmac: str) -> list[str]:
+    """The required fields of a parsed entry, and its chain link."""
+    # The chain's fields, and those of the generation the entry is closest
+    # to (the first, when it fits none)
     keys = set(entry.keys())
     missing = CHAIN_FIELDS - keys
     if all(fields - keys for fields in GENERATIONS):
         missing |= min((fields - keys for fields in GENERATIONS), key=len)
     if missing:
-        errors.append(f"Missing fields: {sorted(missing)}")
-        return errors
-
-    # Check chain linkage
+        return [f"Missing fields: {sorted(missing)}"]
     if entry["prev_hmac"] != expected_prev_hmac:
-        errors.append(
+        return [
             f"Chain break: prev_hmac={entry['prev_hmac']!r} "
             f"but expected={expected_prev_hmac!r}"
+        ]
+    return []
+
+
+def verify_line(
+    line: str, expected_prev_hmac: str, hmac_key: str
+) -> tuple[list[str], str]:
+    """Verify one line of a log as the bytes the hook wrote: the errors,
+    and the hmac the next line's prev_hmac must equal (empty when the line
+    has none that can be read).
+
+    The line must name each member once and be the compact JSON the hook
+    writes (jq -c), ending in its hmac member; the HMAC is taken over the
+    line with that member left out, which is the text the hook signed."""
+    match = _HMAC_SUFFIX.search(line)
+    try:
+        entry = parse_line(line)
+    except DuplicateMember as e:
+        # The chain goes on from the hmac the line ends with, so only this
+        # line is reported.
+        return [
+            f"Member {e.args[0]!r} named twice: a reader that keeps the first "
+            "would read another entry than the one that verifies"
+        ], match.group(1) if match else ""
+    except json.JSONDecodeError as e:
+        return [f"Invalid JSON: {e}"], ""
+    if not isinstance(entry, dict):
+        return ["Not a JSON object"], ""
+    recorded = entry.get("hmac")
+    following = recorded if isinstance(recorded, str) else ""
+    errors = verify_fields(entry, expected_prev_hmac)
+    if errors and errors[0].startswith("Missing fields"):
+        return errors, following
+    if match is None:
+        errors.append(
+            "The line does not end with its hmac member as the hook writes it "
+            '(,"hmac":"<64 hex digits>"})'
         )
+    elif compact(entry) != line:
+        errors.append(
+            "The line is not the compact JSON the hook writes (its blanks, "
+            "escapes or number forms differ): its bytes are not the ones signed"
+        )
+    elif not hmac.compare_digest(
+        match.group(1), compute_hmac(line[: match.start()] + "}", hmac_key)
+    ):
+        errors.append(f"HMAC mismatch: recorded={recorded!r}")
+    return errors, following
+
+
+def verify_entry(entry: dict, expected_prev_hmac: str, hmac_key: str) -> list[str]:
+    """Verify a single parsed audit log entry. Returns list of error
+    messages. A parsed entry no longer holds the bytes the hook signed (a
+    member named twice, a blank or an escape leave no trace in it): a log's
+    lines are verified with :func:`verify_line`, as :func:`verify_log`
+    does."""
+    errors = verify_fields(entry, expected_prev_hmac)
+    if errors and errors[0].startswith("Missing fields"):
+        return errors
 
     # Reconstruct the content the hook signed: every field but `hmac`, in the
-    # order recorded, as jq -c prints it: compact, non-ASCII text as is, and
-    # DEL (U+007F) escaped, which json.dumps leaves as is
-    content_dict = {key: value for key, value in entry.items() if key != "hmac"}
-    content = json.dumps(
-        content_dict, separators=(",", ":"), sort_keys=False, ensure_ascii=False
-    ).replace("\x7f", "\\u007f")
-
-    # Verify HMAC
-    expected_hmac = compute_hmac(content, hmac_key)
-    if entry["hmac"] != expected_hmac:
+    # order recorded, as jq -c prints it
+    content = compact({key: value for key, value in entry.items() if key != "hmac"})
+    if entry["hmac"] != compute_hmac(content, hmac_key):
         errors.append(f"HMAC mismatch: recorded={entry['hmac']!r}")
-
     return errors
 
 
-def verify_log(log_path: Path, hmac_key: str) -> tuple[int, int, list[str]]:
-    """Verify the entire audit log.
+def head_hmac(entries: int, last_hmac: str, key: str) -> str:
+    """The signature of a head: the hook's HMAC of
+    ``acs-audit-head:<entries>:<hmac>``."""
+    return compute_hmac(f"acs-audit-head:{entries}:{last_hmac}", key)
+
+
+def read_head(head_path: Path, hmac_key: str) -> tuple[int, str] | str:
+    """The head at ``head_path`` as (entries, hmac), or why it cannot be
+    used."""
+    try:
+        with head_path.open(encoding="utf-8") as f:
+            line = f.readline(4096)
+    except FileNotFoundError:
+        return (
+            f"Head not found: {head_path} (the hook keeps one beside the log; "
+            "a log begun before it did, or a chain no head anchors, is "
+            "verified with --no-head)"
+        )
+    except (OSError, UnicodeDecodeError) as e:
+        return f"Head unreadable: {e}"
+    try:
+        head = json.loads(line)
+    except json.JSONDecodeError:
+        return "Head is not JSON"
+    entries = head.get("entries") if isinstance(head, dict) else None
+    last = head.get("hmac") if isinstance(head, dict) else None
+    sig = head.get("head_hmac") if isinstance(head, dict) else None
+    if not (
+        isinstance(entries, int)
+        and not isinstance(entries, bool)
+        and entries >= 1
+        and isinstance(last, str)
+        and isinstance(sig, str)
+    ):
+        return "Head lacks entries, hmac or head_hmac"
+    if not hmac.compare_digest(sig, head_hmac(entries, last, hmac_key)):
+        return "Head HMAC mismatch: the head was not signed with this key"
+    return entries, last
+
+
+def default_anchor(log_path: Path) -> Path | None:
+    """Where the hook keeps the head's anchor for a log at
+    ``<project>/.claude/audit.log``: ``<git dir>/acs/audit.head``, the git
+    directory being ``<project>/.git`` or the one a ``.git`` file names
+    (``gitdir: <path>``, a linked worktree's or a submodule's). None for a
+    log elsewhere, or a project with no ``.git``."""
+    if log_path.parent.name != ".claude":
+        return None
+    dotgit = log_path.parent.parent / ".git"
+    if dotgit.is_dir():
+        return dotgit / "acs" / "audit.head"
+    try:
+        line = dotgit.read_text(encoding="utf-8").partition("\n")[0]
+    except OSError, UnicodeDecodeError:
+        return None
+    if not line.startswith("gitdir: "):
+        return None
+    git_dir = Path(line.removeprefix("gitdir: ").strip())
+    if not git_dir.is_absolute():
+        git_dir = dotgit.parent / git_dir
+    return git_dir / "acs" / "audit.head"
+
+
+def _head_errors(
+    name: str, head: tuple[int, str], lines: list[str], noun: str | None = None
+) -> list[str]:
+    """Whether ``lines`` still hold the entry ``head`` records, at its
+    place; ``name`` is "Head", "Anchor" or "Witness <path>", and ``noun``
+    what the messages call it (by default ``name`` in lower case)."""
+    noun = noun or name.lower()
+    entries, last = head
+    total = len(lines)
+    if total < entries:
+        why = {
+            "head": "its last entries were removed",
+            "anchor": "its last entries were removed, or the log was removed "
+            "with its head and begun again",
+        }.get(
+            noun,
+            "its last entries were removed, or the log was removed and begun "
+            "again, since the witness was taken",
+        )
+        return [
+            f"{name}: the log ends before its {noun}: {entries} entries "
+            f"recorded, {total} found ({why})"
+        ]
+    held: object = None
+    try:
+        held = parse_line(lines[entries - 1]).get("hmac")
+    except ValueError, AttributeError:
+        held = None
+    if held != last:
+        return [
+            f"{name}: entry {entries} is not the one the {noun} records "
+            "(entries were removed or replaced)"
+        ]
+    return []
+
+
+def verify_log(
+    log_path: Path,
+    hmac_key: str,
+    head_path: Path | None = None,
+    anchor_path: Path | None = None,
+    witness_paths: Sequence[Path] = (),
+) -> tuple[int, int, list[str]]:
+    """Verify the entire audit log, and, given ``head_path``, that the log
+    still holds the entry its head records, at its place (so that its last
+    entries were not removed); given ``anchor_path`` where a file is, the
+    same of the head's anchor (so that the log was not removed with its
+    head and begun again); and the same of each of ``witness_paths``: a
+    copy of a head kept where the agent cannot write, which shows a cut
+    that an earlier head written back, or a head signed anew with a key
+    the agent read, hides from the head and the anchor.
 
     Returns:
         (total_entries, valid_entries, all_errors)
     """
+    head = read_head(head_path, hmac_key) if head_path is not None else None
+    head_errors = [head] if isinstance(head, str) else []
+    anchor: tuple[int, str] | str | None = None
+    if anchor_path is not None and (anchor_path.exists() or anchor_path.is_symlink()):
+        anchor = read_head(anchor_path, hmac_key)
+        if isinstance(anchor, str):
+            head_errors.append(f"Anchor: {anchor}")
+    # A witness must be there: it was named to be checked.
+    witnesses: list[tuple[Path, tuple[int, str]]] = []
+    for path in witness_paths:
+        witness = read_head(path, hmac_key)
+        if isinstance(witness, str):
+            head_errors.append(f"Witness {path}: {witness}")
+        else:
+            witnesses.append((path, witness))
     if not log_path.exists():
-        return 0, 0, ["Audit log not found"]
+        for name, recorded in (("head", head), ("anchor", anchor)):
+            if isinstance(recorded, tuple):
+                head_errors.append(
+                    f"Audit log not found, though its {name} records "
+                    f"{recorded[0]} entries"
+                )
+        for path, (entries, _) in witnesses:
+            head_errors.append(
+                f"Audit log not found, though the witness {path} records "
+                f"{entries} entries"
+            )
+        return 0, 0, ["Audit log not found", *head_errors]
 
     # One entry per "\n": the hook writes no other line break between
     # entries, and str.splitlines() would also split at U+0085, U+2028 and
-    # U+2029, which jq -c writes raw inside a JSON string.
-    text = log_path.read_text(encoding="utf-8").strip()
+    # U+2029, which jq -c writes raw inside a JSON string. Each line is
+    # verified as it is, blanks and all; the hook ends every line with "\n"
+    # and writes no blank one.
+    text = log_path.read_text(encoding="utf-8")
+    text = text.removesuffix("\n")
     lines = text.split("\n") if text else []
     if not lines:
-        return 0, 0, ["Audit log is empty"]
+        return 0, 0, ["Audit log is empty", *head_errors]
 
     total = len(lines)
     valid = 0
-    all_errors: list[str] = []
+    all_errors: list[str] = list(head_errors)
     prev_hmac = ""
+    if isinstance(head, tuple):
+        all_errors += _head_errors("Head", head, lines)
+    if isinstance(anchor, tuple):
+        all_errors += _head_errors("Anchor", anchor, lines)
+    for path, witness in witnesses:
+        all_errors += _head_errors(f"Witness {path}", witness, lines, "witness")
 
     for i, line in enumerate(lines, 1):
-        line = line.strip()
-        if not line:
+        if not line.strip():
+            all_errors.append(f"Line {i}: a blank line, which the hook never writes")
             continue
-
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError as e:
-            all_errors.append(f"Line {i}: Invalid JSON: {e}")
-            prev_hmac = ""  # Chain is broken
-            continue
-
-        errors = verify_entry(entry, prev_hmac, hmac_key)
+        errors, prev_hmac = verify_line(line, prev_hmac, hmac_key)
         if errors:
             for err in errors:
                 all_errors.append(f"Line {i}: {err}")
         else:
             valid += 1
-
-        prev_hmac = entry.get("hmac", "")
 
     return total, valid, all_errors
 
@@ -167,10 +423,53 @@ def main() -> None:
         default=None,
         help="HMAC key (default: derived from hostname, matching shell hook)",
     )
+    parser.add_argument(
+        "--head-file",
+        type=Path,
+        default=None,
+        help="The log's head (default: the log's path with the suffix .head, "
+        "as the hook writes .claude/audit.head)",
+    )
+    parser.add_argument(
+        "--anchor-file",
+        type=Path,
+        default=None,
+        help="The head's anchor, checked where it exists (default, for "
+        "<project>/.claude/audit.log: <git dir>/acs/audit.head)",
+    )
+    parser.add_argument(
+        "--no-head",
+        action="store_true",
+        help="Check the chain alone: a log begun before the hook kept a head, "
+        "or a chain no head anchors (removing its last entries is not seen)",
+    )
+    parser.add_argument(
+        "--witness",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="A copy of a head kept where the agent cannot write it (another "
+        "machine, a CI artifact), checked as the head is; repeatable. It "
+        "shows a cut that an earlier head written back hides, or a head "
+        "signed anew with a key the agent's commands could read",
+    )
     args = parser.parse_args()
+    if args.no_head and (args.head_file or args.anchor_file):
+        parser.error(
+            "--no-head checks no head: it takes no --head-file or --anchor-file"
+        )
 
     hmac_key = args.hmac_key or get_default_hmac_key()
-    total, valid, errors = verify_log(args.log_file, hmac_key)
+    head_path = (
+        None if args.no_head else (args.head_file or args.log_file.with_suffix(".head"))
+    )
+    anchor_path = (
+        None if args.no_head else (args.anchor_file or default_anchor(args.log_file))
+    )
+    total, valid, errors = verify_log(
+        args.log_file, hmac_key, head_path, anchor_path, args.witness
+    )
 
     if errors:
         print(f"INTEGRITY CHECK FAILED: {len(errors)} error(s) in {total} entries\n")

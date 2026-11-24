@@ -46,6 +46,8 @@ from datetime import UTC, datetime
 from functools import cmp_to_key
 from typing import Any, Literal
 
+from .state.redaction import DEFAULT_REDACTOR, Redactor
+
 __all__ = [
     "STRATEGIES",
     "TIE",
@@ -393,6 +395,7 @@ class TrustModel:
         anchors: Sequence[Mapping[str, Any]],
         record: Callable[[dict[str, Any]], None],
         now: str | None = None,
+        redactor: Redactor | None = None,
     ) -> dict[str, Any]:
         """:func:`manual_override` under the model's ``overrides``."""
         return manual_override(
@@ -404,6 +407,7 @@ class TrustModel:
             anchors=anchors,
             record=record,
             now=now,
+            redactor=redactor,
         )
 
 
@@ -626,6 +630,7 @@ def manual_override(
     anchors: Sequence[Mapping[str, Any]],
     record: Callable[[dict[str, Any]], None],
     now: str | None = None,
+    redactor: Redactor | None = None,
 ) -> dict[str, Any]:
     """A manual override of ``target`` (a trust score, or which value won a
     conflict), from ``previous`` to ``value``, by ``actor_identity``
@@ -637,6 +642,11 @@ def manual_override(
     ``record`` before this returns, and an exception ``record`` raises
     propagates: the override then does not take effect. Apply the value only
     after this returns. Returns the action record.
+
+    The record holds no secret (§6.7): every value in it is redacted with
+    ``redactor`` (the default patterns when None), and each anchor as an
+    evidence store keeps one (:meth:`Redactor.redact_anchor_data`: no digest
+    once it held a secret).
     """
     rules: Mapping[str, Any] = model.get("overrides") or {}
     if rules.get("allow_manual_override") is False:
@@ -660,6 +670,9 @@ def manual_override(
     }
     if actor_identity is not None:
         rec["actor_identity"] = dict(actor_identity)
+    redactor = redactor or DEFAULT_REDACTOR
+    kept_anchors = [redactor.redact_anchor_data(a)[0] for a in rec.pop("anchors")]
+    rec = {**redactor.redact(rec)[0], "anchors": kept_anchors}
     if rules.get("audit_required", True):
         record(rec)
     return rec

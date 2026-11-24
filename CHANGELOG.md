@@ -47,18 +47,91 @@ here and marked so.
   MCP tool registered without a `risk` takes its capability's risk (was
   `"medium"`), so a `retrieve` or `search` tool counts against the low-risk
   rate limit.
+- Python SDK, the Bash classifier (security round 5): a command the
+  read-only list would let pass, `git stash create` and a recorded restore
+  take the worst case where the program the shell finds for the first word
+  may be the repository's own: on `ToolCapabilityMapper.command_path` (the
+  PATH the commands run with; `None`, this process's) it is found under an
+  empty or relative entry, in a file in `ToolCapabilityMapper.project_dir`
+  (`None`, this process's working directory; links followed, not where the
+  project is the home directory, or holds it), or nowhere
+  (`command_may_be_content`). `wrap_options()` sets both from the options
+  (`env["PATH"]`, `cwd`). A project settings file that is not a regular
+  file (a FIFO, a link to `/dev/ptmx`) is unreadable, so every call is
+  refused with R407, as the plugin's hooks refuse it.
+- Python SDK, the Bash classifier (security round 5, batch 2): `pip list`
+  and `pip show` are off the read-only list and get Bash's worst case
+  (`mutate` and `send`: a checkpoint, approval, and F504 under a
+  destination policy), since pip runs the program its site configuration's
+  `python =` names (`.venv/pip.conf`, which `python -m venv` keeps from the
+  repository, read even with `--isolated`) and its interpreter runs the
+  `.pth` files of its site-packages. So does a line with a simple command
+  that holds a redirection and no words (`ls; <f`: zsh runs
+  `$READNULLCMD <f`, a pager, for it). A local git change that writes the
+  work tree (`git reset`, `git checkout --`, `git stash ...`; it was
+  `mutate`) and the restore of a recorded checkpoint (it was `rollback`,
+  needing nothing) get the worst case wherever any scope, the user's
+  included, configures a filter's `smudge` or `process` command
+  (`ToolCapabilityMapper.git_filter_may_run`): git-lfs's, which `git lfs
+  install` writes, asks the LFS server the repository's `.lfsconfig` names
+  for each object its store lacks. With git-lfs installed, take a
+  checkpoint and approve a restore, or install it with `git lfs install
+  --skip-smudge`, whose two commands count as none.
+- Python SDK, tool calls (security round 5, batch 3): the checkpoint
+  recorder classifies a call in the directory it ran in (its hook input's
+  `cwd`, else the one the PreToolUse hook kept; `create_checkpoint_recorder`
+  takes `call_dir`, which `wrap_options()` sets), so a `git stash create`
+  the PreToolUse hook classified the worst case there (a git directory the
+  repository ships, such as `vendor/evil.git` with a `core.worktree`, or a
+  repository's `git` on `PATH`) takes no checkpoint, and one whose input
+  names another directory than the hook's takes none. The permission
+  callback counts a decision against the binding as it is when the decision
+  arrives: a call whose binding changed since PreToolUse checked it, or
+  while your `can_use_tool` decided (the tool registered again, or a
+  composite loaded again because a tool it invokes was), is checked again
+  under the new binding and, where it requires approval, refused with F502;
+  the new policy's `min_approvers` above 1 or `role` is F502 too, and its
+  `approval.expires` counts from PreToolUse's ask. Register a tool before
+  its calls, not while one waits for a decision.
+- Python SDK, tool calls (security round 5, batch 5): the reason of every
+  PreToolUse decision, an ask's F502 included, is redacted as the call
+  record is (§6.7): an ask named the tool the model called verbatim, a name
+  that may hold a secret, in the text a host's `can_use_tool` callback and
+  permission prompt show. `check_offered` is unchanged; give it the
+  mappings `adapter.mapper.map_tool` gives under domain profiles (below).
 - Python SDK, `wrap_options()` (Changed): tools pre-approved in
   `allowed_tools` now count against the rate limit (raise
   `GroundedAgentConfig(rate_limit=...)` if an agent needs more); an error in
   the PreToolUse safety check denies the call in strict mode (in non-strict
   mode it is logged, and a call that requires approval is still asked),
   and an error in the rate check denies it in either mode (R407); `Skill`
-  is no longer added to `allowed_tools`; Stop and SubagentStop hooks are
-  added.
+  is no longer added to `allowed_tools`; Stop, UserPromptSubmit and
+  SubagentStop hooks are added.
 - Python SDK, `wrap_options()` (Fixed): a `can_use_tool` callback in the
   options it is given is now chained to, not replaced: once the layer's
   checks pass, the adapter's callback hands the call to the host's, whose
   answer decides it, so a callback that v2.0.0 dropped now takes effect.
+- Python SDK, `wrap_options()` (Fixed): `setting_sources` is passed through
+  unchanged. It added `"project"`: `[]`, the SDK's isolation mode for a
+  `cwd` that may be untrusted, loaded that directory's project settings
+  (whose hooks run commands and whose `env` applies), `None` (every source)
+  became the project's settings alone, so the user's and local deny rules
+  and hooks were dropped, and `["user"]` became `["user", "project"]`. A
+  host that wants a project's skills or CLAUDE.md loaded includes
+  `"project"` itself (or leaves `None`, every source, on an SDK where that
+  is the default).
+- Python SDK, `wrap_options()`: where the CLI loads the project's settings
+  (`setting_sources` `None`, or naming `"project"` or `"local"`), the
+  PreToolUse hook refuses every call with R407 while the
+  `.claude/settings.json` or `.claude/settings.local.json` it loads from
+  the options' `cwd` sets a variable in `env` that is not one of Claude
+  Code's own settings (`grounded_agency.utils.project_settings`,
+  `ALLOWED_PROJECT_ENV`), or cannot be read: the CLI applies that env to
+  every command it runs, so `BASH_ENV` made `ls` run a repository script
+  and `GIT_CONFIG_*` made `git status` run a repository program, each
+  classified `observe`. Move such an entry into `options.env` or the
+  host's environment, or pass `setting_sources` without `"project"` and
+  `"local"`. The plugin's hooks refuse the same calls.
 - Python SDK, `register_mcp_tool` (Fixed): a capability the ontology does
   not define raises `ValueError` (V101) at registration, where v2.0.0
   registered the tool; a declared `risk` below the capability's is ignored
@@ -74,10 +147,59 @@ here and marked so.
     callback's allow, or at PostToolUse for a call that did not pass the
     callback), and a call that fails uses it too. The newest valid checkpoint
     no other call holds is used, the earlier ones included. A hold that
-    lapses, is found on reload or is unresolved when the turn ends counts as
-    used. The Stop of any session the adapter serves ends every checkpoint's
-    validity: take a checkpoint in the turn that needs it, and serve sessions
-    that must not share this with separate adapters.
+    lapses or is unresolved when the turn ends counts as used. The Stop of
+    any session the adapter serves ends every checkpoint's validity, and so
+    does its next prompt (UserPromptSubmit), since a turn can end without
+    Stop (StopFailure after an API error, an interrupt): take a checkpoint
+    in the turn that needs it, and serve sessions that must not share this
+    with separate adapters. A tracker does not load a state file
+    (`tracker_state.json`) that git tracks: a repository can ship one, and
+    its checkpoints were taken by no call here; the tracker starts fresh and
+    logs a warning. Security round 4: nor does it merge one into the file
+    it writes (unless it is the file it wrote last), and a state file nested
+    too deeply to parse (`[[[...`, RecursionError) is one that does not
+    parse, so the tracker starts fresh and replaces it; a write of the state
+    file no longer raises (it is logged, and the change stands in memory),
+    so a boundary always ends every checkpoint's validity and a PreToolUse
+    check that fails releases the hold it made.
+  - One adapter, and one `CheckpointTracker`, is one scope: a checkpoint it
+    reads back from its `checkpoint_dir`, taken by an earlier process or by
+    another adapter on the same directory (the default `.checkpoints` is
+    shared by every adapter in a working directory), no longer authorises
+    its calls. It is still found and restored (`find_checkpoint`,
+    `restore_checkpoint`), but `has_valid_checkpoint`, `validate_and_reserve`,
+    `has_taken_since` and `has_commit` count only the tracker's own, and a
+    hold the state file names is left to its holder (it is no longer marked
+    used on load). After a restart, take a new checkpoint before a gated
+    call. Trackers that share a directory merge their records into its
+    state file under a lock (`tracker_state.lock`, where the platform has
+    `fcntl`), so one no longer drops or rewinds another's.
+  - `CheckpointTracker` (Fixed) opens `checkpoint_dir`, its `archive/` and
+    their files without following a symbolic link (at those directories, at
+    each directory on the way to a relative `checkpoint_dir`, and at the
+    files), appends only to a regular archive file (created with mode
+    0600), and neither reads nor appends to an archive git tracks. A
+    repository could ship a link there (the default `.checkpoints` is in the
+    working directory), and the 101st checkpoint's prune appended the
+    pruned checkpoints, with a `reason` and `scope` a bound checkpoint
+    tool's caller writes, wherever it led. With such a link the tracker
+    writes nothing, keeps its records in memory and logs a warning; a prune
+    is logged with the ids it drops, and the pruned checkpoints' content is
+    discarded whether or not the archive was written.
+    `FileSnapshotStore(root, store_dir)` raises `ValueError` when
+    `store_dir`, its `objects/` or its `manifests/` is a symbolic link (or,
+    for a relative `store_dir`, a directory on the way to it): name the
+    directory it leads to.
+  - `wrap_options()` registers the safety PreToolUse hook with
+    `on_failure="block"`: a callback that fails or gives no verdict in time,
+    as the CLI sees it, blocks the call, where it was no decision and the
+    call ran. With it, the SDK refuses to connect to a Claude Code that does
+    not honour `on_failure` (`CLIConnectionError`): update Claude Code. A
+    `claude-agent-sdk` whose `HookMatcher` has no `on_failure` cannot ask
+    for it; the adapter logs a warning and registers the hook as before.
+    Its matcher also states the CLI's time limit, `timeout=60` seconds
+    (`SAFETY_HOOK_TIMEOUT_S`, the SDK's default), where the SDK's
+    `HookMatcher` has the field.
   - `expiry_minutes` (the adapter's and `CheckpointTracker.create_checkpoint`'s)
     must be more than 0 and at most 30; `checkpoint_reservation_seconds`, if
     set, more than 0 and at most the expiry, and
@@ -88,8 +210,8 @@ here and marked so.
     its `expiry_minutes`) bounds every checkpoint: one taken through
     `adapter.checkpoint_tracker.create_checkpoint()` with a longer
     `expiry_minutes` is stored with the maximum age as its expiry, and one
-    read back from a state file stops authorising a call at its
-    `created_at` plus the maximum age. A checkpoint dated after the clock
+    taken through the tracker stops authorising a call at its `created_at`
+    plus the maximum age. A checkpoint dated after the clock
     (a crafted state file, a clock that stepped back) authorises nothing,
     counts as no checkpoint taken and names no restore point; one found
     dated after the load is dropped from the state.
@@ -118,7 +240,57 @@ here and marked so.
     a call that requires approval is refused (F502), since nothing puts it to
     a person. A binding whose `approval` asks for more than one approver or a
     `role` is refused F502. Arguments the permission callback changes are
-    classified again.
+    classified again. A binding's `approval.expires` is applied: the
+    permission callback refuses (F502) an allow that arrives later than
+    that after the PreToolUse hook asked.
+  - With a `permission_prompt_tool_name` (no `can_use_tool`), the adapter
+    never sees a call allowed, so it cannot check the call's checkpoint
+    again then, nor when the decision came: a call that requires a
+    checkpoint (Write, Edit, a mutating Bash command, a `mutate` or `send`
+    tool) is refused with R407, and one whose binding sets
+    `approval.expires` with F502. Before, such a call was asked about and
+    ran on its checkpoint even when the prompt was answered after the
+    maximum age or a boundary. Pass a `can_use_tool` callback to run them.
+    On that route a call that requires approval of a tool
+    `create_grounded_mcp_server` serves (with `require_layer`) is refused
+    with R407 too: such a tool runs only a call the adapter saw allowed.
+  - `wrap_options()` on options it already wrapped (Fixed): the safety hook
+    is replaced by one built for the options now wrapped, so a
+    `permission_prompt_tool_name` or a `permission_mode` set between the
+    two wraps applies as if the options were wrapped once (R407 for a call
+    that requires a checkpoint and F502 for `approval.expires` on the
+    prompt-tool route). Before, the first wrap's hook stayed: with a prompt
+    tool added, a Write was asked about, held a checkpoint no callback
+    checked again, and ran after a boundary.
+  - The permission callback decides only on what the PreToolUse hook
+    checked of the call (Fixed). The hook keeps, by `tool_use_id`, the
+    digest of the input it checked, the call's directory and the time of
+    its ask, until the call reports back or the callback refuses it; an
+    execution boundary no longer clears them. The callback refuses with
+    R407 a call the hook has no record of: code that calls
+    `_make_permission_callback()` itself runs the hook on the call first,
+    as Claude Code does. An input other than the one the hook checked
+    (another PreToolUse hook's `updatedInput`) is changed arguments
+    (Standard 1.2.0 §5.18.7): F504 when a secret or destination check fails
+    with it, F501 when it needs a checkpoint the call does not hold, F502
+    when it needs approval. Before, another session's Stop or prompt
+    between the hook and the callback made the callback classify the call
+    in the host process's directory (a git read in a partial clone then
+    ran as `observe`, with no approval and on an ended checkpoint) and count
+    `approval.expires` from its own start, and an input another hook
+    rewrote was allowed without the secret and destination checks. A call
+    the hook passed that Claude Code's own rules allow without the callback
+    (`allowed_tools`, an allow rule, `bypassPermissions`) still runs with
+    another hook's `updatedInput` unchecked: keep the tools such a hook
+    rewrites out of those rules (the statement names this host gap).
+  - A tool `create_grounded_mcp_server` serves (with `require_layer`) runs
+    a call only once it is allowed: the PreToolUse hook's pass, or the
+    permission callback's allow of a call the hook asked about. Before, the
+    hook's ask granted it, so a caller outside the wrapped session that
+    shared the server object ran the call while no one had decided, and the
+    decision stayed after a refusal the adapter never heard of. Every
+    refusal the callback makes (an error of the host's callback included)
+    and a call that reports back withdraw it.
   - Every refusal reason is the text form `CODE NAME: message` (F501, F502,
     F503, F504, R407, V102), and the diagnostics are kept in
     `adapter.call_records`. A rate limit is F504; a failure of the safety
@@ -126,8 +298,16 @@ here and marked so.
   - A `rollback` call is refused (F503) unless a checkpoint was taken since
     the adapter started; it uses no checkpoint, and no longer invalidates
     the others.
-  - `Skill` is always `invoke`, so `Skill(checkpoint)` takes no checkpoint:
-    the call that saves the state does. `create_checkpoint_recorder`
+  - `Skill`, `Agent` and `Task` are their own capability (`invoke`,
+    `delegate`) and Bash's worst case, `mutate` and `send`, whatever the
+    skill or agent (was `invoke` and `delegate` alone, needing nothing):
+    Claude Code runs the shell commands a skill's file embeds (``!`cmd` ``
+    and ```` ```! ```` blocks) as the skill loads, and the hooks and MCP
+    servers a subagent's definition names, with no hook event the adapter
+    sees. Each such call needs a checkpoint and approval, and a destination
+    policy refuses it. `Skill(checkpoint)` still takes no checkpoint: the
+    call that saves the state does, so take one (`git stash create`)
+    before the Skill call. `create_checkpoint_recorder`
     (`create_skill_tracker` stays as an alias) records one when a call
     classified `checkpoint`, such as `git stash create`, succeeds. It takes
     none for a `git stash create` run in the background, one whose output
@@ -150,27 +330,124 @@ here and marked so.
     refuses it (F504). These lines are no longer read-only: one with a `$`
     outside single quotes (`echo $HOME` included) or a brace expansion; an
     unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`,
-    `hostname`, `file`, `git`, `less` or `more` command (quote a pattern you
-    pass on); and `sort`, `uniq`, `date`, `hostname` or `file` with an
-    option outside the listed read-only set or an abbreviation of one that
-    writes (`sort --o=x`, `git diff --outp=x`), or `date` with an operand
-    other than `+FORMAT`.
+    `hostname`, `file` or `git` command (quote a pattern you pass on); and
+    `sort`, `uniq`, `date`, `hostname` or `file` with an option outside the
+    listed read-only set or an abbreviation of one that writes (`sort
+    --o=x`, `git diff --outp=x`), or `date` with an operand other than
+    `+FORMAT`.
   - Bash: commands that ask another host are no longer read-only: `npm
     view`, `kubectl get`, `describe` and `logs` (a registry or a cluster
     that the configuration or an option names; a kubeconfig's `exec` runs a
-    command), `git remote show`, and `pip list`, `pip show` or `npm list`
-    with an option outside a listed set (an index, a registry, a proxy,
-    `--outdated`); nor is a line with an input redirection from `/dev/tcp/`
-    or `/dev/udp/`. Each gets Bash's worst case, `mutate` and `send`: it
+    command), `git remote show`, and `pip list` or `pip show` with an option
+    outside a listed set (an index, a proxy, `--outdated`); nor is a line
+    with an input redirection from `/dev/tcp/` or `/dev/udp/`. Each gets
+    Bash's worst case, `mutate` and `send`: it
     needs a checkpoint and approval, and a destination policy refuses it
     (F504). `git remote`, `git remote -v` and `git remote get-url` stay
     read-only.
+  - Bash, fail-closed fixes: these are no longer read-only and get the
+    worst case, `mutate` and `send`. `less` and `more`, with any options (a
+    lesskey file, which `less -k`, `--lesskey-src` or an abbreviation names,
+    `/dev/stdin` fed by a pipe included, sets `LESSOPEN`, which less runs;
+    use `cat` or `head`). `npm list` (npm's update check sends the token a
+    project's `.npmrc` gives for the registry it names) and `docker ps`,
+    `docker images` and `docker logs` (the daemon `DOCKER_HOST` or the
+    docker context names). A git command that would only read (`git
+    status`, `git log`, `git show`, `git diff`, `git stash list|show`, ...)
+    where the repository it runs in is a partial clone, or where git cannot
+    say: there git fetches each object it lacks from the promisor remote.
+    The adapter reads the call's directory from the hook input's `cwd`, and
+    `ToolCapabilityMapper.map_tool` takes it as an optional `cwd` (None:
+    the process's working directory); `git stash create` and the restore of
+    a recorded checkpoint keep their classes there. A command over 4096
+    UTF-8 bytes is not read (the plugin hook's bound): the worst case, where
+    a quoted run of 40,000 blanks took 8 seconds to classify; a quoted `>`
+    (`grep " > " f`) is now an argument, not a redirection. Any quoted or
+    escaped operator (`'<'`, `";"`, `\;`, `'&&'`) is now the word the shell
+    passes: it no longer hides the word after it (`find f '<' -execdir sh
+    -c ... {} +` and `find . ! -name '<' -delete` were `observe`) nor splits
+    the line (`grep ';' f` is one read-only command); a redirection that
+    names no file (`cat <`, `ls > ;`) is the worst case. A command whose
+    first word holds a blank or a slash (a quoted `"git status"`, which
+    bash runs as the program of that name) is on no list: the worst case. A git read
+    also gets the worst case in a repository with submodules (`modules/` in
+    its git directory, or a gitlink in its index: a read that looks into a
+    submodule fetches into its object store), and every git command the
+    classifier would let pass (a read, `git stash create`, a restore) where
+    the git directory git finds is not one git made for a work tree (a
+    directory a repository ships holding `HEAD`, `objects/` and `refs/`,
+    whose `config` names programs git runs):
+    `ToolCapabilityMapper.git_dir_may_be_content` is the new lookup beside
+    `git_may_fetch`. The adapter's own git commands run with
+    `core.fsmonitor` and hooks turned off and fetch nothing, and the
+    tracker reads no state file in such a git directory. Security round 3:
+    a git read, and a restore, also get the worst case where the
+    repository's own configuration (local and worktree scopes, with what
+    they include) names a program git runs (a `core.fsmonitor` other than
+    a boolean, a diff driver, a filter, a merge driver, a signature
+    program, a pager) or its hooks hold `post-index-change`, as a project
+    delivered with its `.git` can; `git stash create` there is `checkpoint`
+    with the worst case beside it (take the first checkpoint with
+    `create_checkpoint`). `ToolCapabilityMapper.git_config_may_run` is the
+    new lookup. The recorder's clean-tree check turns those filters off.
+    `printf` with an option (`printf -v NAME`, which sets a shell variable
+    the later commands of the line run with), or with a word bash expands,
+    is the worst case, where a line of read-only commands could run code
+    as `observe`. Security round 3, batch 2: a class narrower than the
+    worst case now comes only from the command's program (its first word as
+    the shell passes it), never from text in an argument: `curl URL -A 'git
+    reset'`, `bash -c '...' x 'git clean'` and `node x.js 'docker rm'` were
+    `mutate` alone, so a destination policy let them through; a read-only
+    command whose argument holds such text (`grep 'git reset' f`) now
+    observes. `sed -i` (GNU sed's `e` command runs one) and `docker
+    rm|rmi|prune` (the daemon `DOCKER_HOST` names receives the request) get
+    the worst case. A local git change (`git reset`, `git checkout --`,
+    `git clean`, `git branch -d`, `git stash ...`) gets it in a partial clone
+    or a repository with submodules (`git reset` fetched the objects it
+    lacked), and where the repository's configuration names a program or
+    its hooks hold `post-index-change`, `reference-transaction` or
+    `post-checkout` (`ToolCapabilityMapper.git_change_may_run` is the new
+    lookup); a recorded restore where the configuration names a program
+    gets it too (it was `mutate`). Every worst case now holds `mutate`: an
+    interpreter is `execute`, `mutate` and `send` (it was `execute` and
+    `send`, found anywhere in the command), and `curl -X POST`, `ssh`,
+    `scp` and `rsync` are `send` and `mutate` (they were `send`), so a
+    profile's rule for `mutate` applies to them. A line with a character
+    outside ASCII right before a backslash or another character bash treats
+    specially (`|`, `{`, `}`, `[`, `]`, `;`, `<`, `>`, `?`, `@`, `^`, `~`),
+    quoted or not, gets the worst case (in a GBK, GB18030, BIG5, Shift JIS
+    or JOHAB locale bash reads that character as the other's second byte,
+    so `ls ぁ\;touch f` is two commands and `find t1 -name ぁ|ls -o -delete`
+    one find, which deletes; security round 4 added every character but
+    the backslash, so `grep -E '日本|中国' f` now asks too), and so does
+    `pip` with a word the shell expands (`pip show *` became `pip show
+    --log=FILE`). Security round 4: so does a word with an unquoted `{`,
+    then a `,` or `..`, then a `}`, in any order of braces between (bash
+    closes a group only at a `}` after its first comma, so `sort {a},-o}x`
+    is `sort a}x -ox`; a space Unicode has and bash does not split at, such
+    as U+3000, no longer ends the word), a `{name}` word right before a
+    redirection (`echo x {PATH}>/dev/null; ls` set `PATH` and ran the
+    repository's `./10/ls`; `{name} >file`, with a blank, asks too), and
+    `>&` before anything but ASCII digits (`>&١` writes a file named `١`).
   - MCP: a tool registered or served with no capability is no longer
     `execute`: it is unbound, the strictest case, and reported as W617 in
     `mapper.warnings`. Tool `metadata` may be a tool binding record
     (`capability`, `flags`, `additional_capabilities`, `invokes`,
     `approval`, `control`); the flat keys still work, and `capability` and
-    `capability_id` that disagree are S303.
+    `capability_id` that disagree are S303. An `invokes` name resolves only
+    to a bound tool: one registered with no capability, or whose record did
+    not load, is V107 (it resolved before), and so is a cycle through tools
+    registered earlier (V105). Registering or loading a tool again loads
+    again every composite that invokes it, transitively: the composite
+    takes the tool's flags as they are now (it kept those it was loaded
+    with), and one whose tool is now unbound is itself unbound (V107 in
+    `mapper.diagnostics`). `register_binding` raises only for its own
+    record's errors. Security round 3: the metadata is read as the record
+    in full, so a member no record has (a misspelt `aproval`, `flag` or
+    `capabilty`) is S303 and `create_grounded_mcp_server()` raises, where
+    it was dropped and the tool loaded with what remained; a metadata
+    `ontology` is now the record's (V109 if the adapter does not support
+    it). Put vendor data under a key that starts with `x-`.
     `create_grounded_mcp_server()` now defaults to `require_layer=True`:
     each tool it serves refuses (R407) a call the adapter's layer did not
     allow, so a session whose options were not wrapped with
@@ -191,6 +468,200 @@ here and marked so.
   list or an object (a header's list of values), and an assignment to a
   longer name ending in a credential name with no separator
   (`PGPASSWORD=...`).
+- Python SDK, tool calls: a composite's call asks for the strictest approval
+  of its own and each binding it invokes, transitively (the most
+  `min_approvers`, the shortest `expires`, a `role` one of them sets), since
+  its approval covers their nested calls (Standard 1.2.0 §5.18.4): its
+  `ToolMapping.approval` is that join. A composite that reaches a binding
+  needing two approvers or a role is now refused with F502, as that binding
+  is; one that reaches an `approval.expires` takes it.
+- Python SDK and TypeScript package, redaction: the password of a URL's
+  userinfo is now redacted whatever precedes the scheme's run of
+  characters (`x_https://user:pw@host`), and every pattern reads a text in
+  time in proportion to its length; the rest is redacted as before.
+- Python SDK, TypeScript package and plugin, secrets given as pairs: a
+  header or credential given as a name/value pair (an object whose `name`,
+  `key` or `header` member, in any case, names a credential or a header that
+  carries one: a HAR's `{"name": "Authorization", "value": ...}`, Postman,
+  Kubernetes `env`) or as a two-element `[name, value]` array is redacted
+  as a secret member is (its `value` member, its second element), and a
+  `persist` or `audit` call whose data holds one is refused (F504,
+  `secret_in_data`), as `{"Authorization": ...}` already was; a member
+  named `cookies` (a HAR's) is a secret member. In text, the value after
+  such a pair or tuple (`"Authorization", "value": "Basic ...`,
+  `('Cookie', 'sid=...')`) is redacted, and refused when it is 8 or more
+  characters mixing letters and digits (the plugin's `persist` and `audit`
+  hooks too; a list of names is not a tuple).
+- Python SDK, TypeScript package and plugin, credential forms (Standard
+  1.2.0 §6.7): the redactors, the refusal rule (`holds_credential`,
+  `holdsCredential`, the `persist` and `audit` hooks' scan) and so the
+  runner, the stores and the binding also read a URL's userinfo with an
+  empty user's name (`redis://:<password>@`), quotes escaped as JSON text
+  inside a JSON string or a shell's double quotes escapes them
+  (`{\"password\": \"...\"}`, also around a header pair or tuple), a
+  command's user option (`curl -u user:<password>`, `-uuser:...`,
+  `--user`, `-U`, `--proxy-user`, also as a list's items, as an
+  exception's text quotes a command), an option named for a credential with
+  its value after blanks (`--password <value>`, `--api-key <value>`, not
+  another option), and `secret_key` (`SECRET_KEY`, `DJANGO_SECRET_KEY`) and
+  `passphrase` as credential names. Redaction replaces them, and reads a
+  quoted value in text (an assignment's, an option's, a quoted user
+  option's password, a header pair's or tuple's) to its closing quote on
+  its line, whitespace and all, so `"passphrase": "correct horse battery
+  staple"` and a `Cookie` pair's later cookies are replaced whole, not to
+  the first blank, `,` or `;`; a `persist` or
+  `audit` call is refused (F504) for a user option's password of 8 or more
+  characters mixing letters and digits (`docker run -u 1000:1000` passes)
+  and for a credential option's value as for an assignment's. A registered
+  secret is also replaced and refused JSON-escaped (once or twice, `/` as
+  `\/` or not, non-ASCII as `\uXXXX` or not) and percent-encoded (each
+  common encoding, upper- or lower-case hex): `encoded_forms` and
+  `encodedForms` list the forms. `Redactor.add_secret` registers them all.
+  A user option's name is read for at most 256 characters (a run such as
+  `.-u.-u.-u...` was read again from each of its positions: 48 s for 200
+  KB in Python), so a password after a longer name is not recognised.
+  Security round 4 (batch 5): an `Authorization` or `Proxy-Authorization`
+  header's credential is read after any scheme (`ApiKey`, `SSWS`, `Bot`,
+  `Splunk`, `GenieKey`, `Key`, `AWS4-HMAC-SHA256`), where only the scheme
+  word was replaced and the credential kept: redaction replaces the scheme
+  and the next word on its line when the first word is not `Bearer`,
+  `Basic`, `Token`, `Digest` or `Negotiate` (so a credential with no scheme
+  takes the next word of its line with it, `Authorization: [REDACTED] the
+  admin API`), and reads a quoted value or a header line quoted whole (`-H
+  "Authorization: ..."`) to its closing quote; the refusal rule and the
+  plugin's scan refuse a value of 8 or more characters mixing letters and
+  digits after any scheme and spaces, also as a pair or tuple in text.
+  OpenPGP private key blocks (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) are
+  redacted and refused as PEM keys are, and after a private key header
+  with no end line the rest of the text is redacted (nothing was), so a
+  log line or an excerpt that quotes a key loses the text after the
+  header. In JSON data a number whose JSON text holds a registered secret
+  (a PIN, a card number given as a number) is redacted whole and refused,
+  as its string form is. The Python `MemoryStore` refuses data the refusal
+  rule recognises whether or not redaction would change it (a private
+  key's opening line alone was stored). The plugin's scan runs its `grep`
+  and `sed` with `LC_ALL=C`, reading bytes as the pre-tool-use hook does,
+  in the persist and audit skills' hooks too.
+- Python SDK, TypeScript package and plugin, session cookies, other
+  encoders' escapes, service tokens and the plugin's own keys (§6.7;
+  security round 5, batch 6). A `Cookie` or `Set-Cookie` header in text is
+  redacted whole (a header line to the end of its line, with a Set-Cookie
+  line's attributes; a header line quoted whole or a quoted member to its
+  closing quote), and so is curl's `-b`/`--cookie` value when it holds a
+  cookie (a name and `=` in its first 64 characters); the refusal rule and
+  the plugin's scan refuse such a cookie whose value is 8 or more token
+  characters mixing letters and digits, where all three let it through as
+  text. Redaction reads a quote written as its JSON escape (`\u0022`,
+  `\u0027`, .NET), `=` as `\u003d` (Gson) and a URL's slashes as `\/`
+  (PHP) in place, and starts a token right after an escaped quote; the
+  refusal rule and the scan read a text with those escapes, and `&`'s,
+  `<`'s, `>`'s and `+`'s, decoded. `encoded_forms` and `encodedForms` add
+  the HTML-safe JSON forms of a registered value (Go's `encoding/json`,
+  Gson, .NET; both hex cases, also escaped again), so their lists of a
+  value holding `&<>'+="` or a backtick are longer. Stripe, Google, GitLab,
+  npm, Vault and SendGrid tokens, a Slack webhook's path and a `.netrc`
+  entry's password are redacted and refused, and an account, signing,
+  encryption, HMAC or master key and `credential` join the credential names
+  (in text and as JSON member names: `{"accountKey": ...}`,
+  `{"credential": ...}` are now secret members, redacted and refused). The
+  plugin's scan refuses `AUDIT_HMAC_KEY`'s value wherever it runs (a
+  persist tool's data, the persist and audit skills, a logged tool's name),
+  and the pre-tool-use hook the project's checkpoint key in a persist
+  tool's data; a `TodoWrite` holding either was stored. The blanks after a
+  quoted `Authorization:` header line's colon are read whole (40 KB of them
+  with no closing quote took 67 s in Python). Redaction is broader: a word
+  after `Cookie:` in prose is replaced to the end of its line.
+- Python SDK and Standard Agents binding, evidence anchors that held a
+  secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
+  metadata redaction changed is kept with no `digest` and no
+  `metadata.hash`, and its metadata says `digest_omitted: "secret"` (the
+  Python evidence stores, `Redactor.redact_anchor`; the binding's trace,
+  its notifications and `exportEvidence`), since the content it cites
+  holds the secret and the redacted excerpt would show the text to check a
+  guess against. An anchor with no secret keeps its digest. The TypeScript
+  package exports `redactAnchor` and the Python `Redactor` gains
+  `redact_anchor_data`, the same rule on an anchor's JSON form.
+- Python SDK, coordination records (§6.7): `CoordinationAuditLog.record`
+  redacts every value an event keeps, not only `details`: `intent` (an
+  `audit` step's event intent or type), `evidence_refs` (a shared or
+  delegated anchor's ref), the event type, the agent ids and the
+  capability, so `CoordinationEvent`, `to_dict()` and the action record hold
+  the redacted text; a query by an agent id or event type that held a
+  secret matches the redacted one. `manual_override` (and
+  `TrustModel.manual_override`) redacts its action record, its anchors kept
+  as an evidence store keeps them, and takes an optional `redactor`.
+- Python SDK, `WorkflowRunner` (§6.7): the runner redacts the `reason` of
+  every `Error` it submits as well as its `message` (a string as text, any
+  other value as JSON; a token is unchanged), so a `HostCannotServe` given
+  free text, or a `reason` object, no longer reaches the trace and the
+  snapshot as `reason_ignored` with a secret in it; and the `Error` it
+  builds when the run refuses a host's response (whose account repeats the
+  value refused) is redacted too. Security round 3: it also redacts the
+  evidence anchors of an `Event` (the core copies them into a `receive` or
+  `wait` step's output), anchors given as a tuple (they reach the core and
+  the evidence store as a list), the `not_covered` items of a `RolledBack`
+  and the reason given to `cancel` (the R408 message, the trace and the
+  records hold the redacted reason). When the runner has a `redactor` of
+  its own, it gives what it recognises to the host's `IdempotencyLog`,
+  `CheckpointTracker` and `MemoryStore` and to its `memory` (a store on the
+  shared default redactor gets one of its own), so the host's memory
+  refuses a `persist` of a registered value. `IdempotencyLog`,
+  `CheckpointTracker` and `MemoryStore` gain a `redactor` property, and
+  `Redactor` gains `include(other)`. Security round 4: it also redacts a
+  `Decision`'s `decision_id`, `decision`, `approvers` and
+  `approver_identities` (the trace's `approval_decided`, the record's
+  `approval` and an F502's reason held them as the host sent them) and an
+  `Event`'s `principal` and `identity` (the received item's `sender` and
+  `sender_identity`). Redaction can make two values one: approvers that
+  differ only in a secret count once, and a `decision_id` that differs from
+  one used before only in a secret is refused as used (F502). A checkpoint
+  the host names by an id that holds a secret is refused, not redacted
+  (the run gives the id back to roll back to): a `CreateCheckpoint`
+  answered with one fails F501, a `checkpoint` step whose output names one
+  fails R402. The executor's approval refusals no longer repeat the
+  decision: `'<decision>' is not a decision` is now `the decision is none
+  of approved, rejected or unavailable`, and `decision '<id>' was already
+  used` is `the decision was already used` (the trace's `approval_decided`
+  names both).
+- Python SDK, `CheckpointTracker` (§5.18.8, §6.7): the tracker redacts
+  every string it records, with its new `redactor` (the default patterns
+  unless given; the adapter's tracker has the layer's redactor, so the
+  host's `secret_values` too): a checkpoint's `reason`, its `scope` items
+  and its `metadata`, the reason an execution boundary gives
+  (`invalidated_by`) and the words that use one (`consumed_by`), in memory,
+  in `tracker_state.json` and in the archive. A bound checkpoint tool's
+  `reason` and `scope` are the model's words, which reached the state file
+  as written. A snapshot store still captures the files the scope names as
+  given; the checkpoint's recorded `scope` (and so `matches_scope` and
+  `has_checkpoint_for_scope`) is the redacted one. Checkpoints a tracker
+  wrote before keep what they hold: delete `tracker_state.json` and the
+  archive once they are no longer needed.
+- Python SDK, `IdempotencyLog` (§6.4, §6.7): the log keeps a `send`'s
+  output as the runner submits it (its anchors redacted without their
+  digest, `evidence_seen` rewritten to match) with every other secret its
+  redactor recognises replaced (a receipt's `Authorization`, a URL's
+  password), in its file and in memory; a replay answers with that output,
+  not the one the effect returned. Entries a log wrote before keep what
+  they hold: delete the file once its runs' keys are no longer needed.
+- Python SDK, evidence: anchor metadata nested deeper than two levels is
+  kept as its JSON text, redacted while its structure can still be read and
+  whole (the 1 KB metadata limit replaces a value too large), not as the
+  first 100 characters of its repr; a value with no JSON text (a reference
+  cycle) becomes `"[unserializable]"`. A delegation anchor's `description`
+  and the orchestration anchor's `task_goal` are kept whole, not cut at 100
+  characters: a cut could keep part of a secret no redactor then
+  recognises. Security round 4: so is an `inquire` step's
+  `ambiguous_input`, in its anchor's metadata and its audit event (it was
+  cut at 200 characters before the store and the log redacted it, keeping
+  the start of a token cut there).
+- Python SDK, evidence and logs (security round 4): `EvidenceStore.get`
+  finds a record only by its id as written (`ev-1`), as
+  `JsonlEvidenceStore.get` does; `ev-01` and `ev-١` (which `int()` read as
+  1) find none. A line nested too deeply to parse (`[[[...`, which raised
+  RecursionError) is an unreadable line: `JsonlEvidenceStore` skips and
+  counts it, `IdempotencyLog` cuts it off as a torn last line and raises
+  `ValueError` for one anywhere else, and the snapshot store keeps every
+  object while a manifest is one.
 - Python SDK, the output contract of a tool's result (Standard 1.2.0
   §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
   `create_grounded_mcp_server` serves or one of another server bound with
@@ -303,6 +774,17 @@ here and marked so.
 - Python SDK (Fixed): an evidence metadata key with a final newline is
   refused like any other key outside `[a-zA-Z_][a-zA-Z0-9_]*`, and a trust
   model's `half_life` written with digits other than ASCII ones is refused.
+- Python SDK, workflow runner (Fixed; Standard 1.2.0 §6.5, §6.7): the runner
+  redacts the evidence anchors of every `Output` it submits with its
+  `redactor` (registered secrets included), as the evidence stores do, so
+  an anchor whose `ref`, `excerpt` or metadata held a secret is kept in the
+  run's state, outputs and snapshots with it replaced and without its
+  `digest` (`metadata.digest_omitted: secret`). `evidence_seen` is
+  rewritten to match: it lists an anchor's redacted `ref` when it listed the
+  anchor's own, and when two anchors are one after redaction it lists
+  neither unless it listed both (fail closed). A signed URL's signature
+  (`sig=`, `X-Amz-Signature=`) is not a default pattern: add a pattern
+  (`Redactor(patterns=[*DEFAULT_PATTERNS, ...])`) where a host cites them.
 
 **Across components (validator, executor, Python SDK, binding).**
 
@@ -356,10 +838,15 @@ here and marked so.
     rather than a list of patterns raises `TypeError`. While a policy is in
     force, `GroundedAgentAdapter` also refuses (F504) a call of an unbound
     tool, which it cannot tell sends or not, and of a composite whose
-    `invokes` reach a binding that performs `send`: it does not see nested
-    calls, so it cannot tell where they go. In the Standard Agents binding,
+    `invokes` reach a binding that performs `send`, or an unbound tool: it
+    does not see nested calls, so it cannot tell where they go. In the
+    Standard Agents binding,
     the `allowed_destinations` of profiles given to a composite reach the
-    sends its code invokes, at any depth.
+    sends its code invokes, at any depth. Security round 4: the adapter
+    reads a binding's `destination` pointer as RFC 6901 and the binding
+    reads it: an array index is ASCII digits with no leading zero, so
+    `/to/01` and `/to/١` locate nothing and, under a policy, the call is
+    refused (F504; the adapter took the element `int()` read).
   - A `persist` or `recall` step of a workflow that targets 1.2 and binds
     `scope` fails R402 (`unsupported_scope`) unless the output echoes the
     scope. Steps that do not bind it, and those of a 1.0 or 1.1 workflow
@@ -475,6 +962,19 @@ here and marked so.
   `capability` with `field` relative to the step (`gates[0].phase`, not
   `steps[0].gates[0].phase`), and is sorted with that step's findings; its
   code and `location.path` are unchanged.
+- Executor, Python SDK, TypeScript package and binding (Fixed; Standard
+  1.2.0 §6.7): a diagnostic repeats no text of a host's output. A grounding
+  refusal (F505) names an anchor by its index and kind (`evidence_anchors[0]
+  (kind 'url') cites a ref the host's evidence_seen does not list`), never
+  by the `ref` it cites, which a presigned or signed URL makes a
+  credential, and reached the trace, the run record and the snapshot; an
+  `acs:` anchor's reference is not repeated either, nor a vendor kind. A
+  confidence that is not a number from 0 to 1 (R402, F504
+  `invalid_confidence`, F505) is named by its type (`the output's
+  confidence (a string) ...`) unless it is a number, a boolean or null, and
+  an `inference_method` outside the vocabulary is not repeated. Match on codes and
+  reason tokens, not on these messages. `@synaptiai/acs-core` exports
+  `shownValue`, how a diagnostic names such a value.
 
 **Plugin: hooks and skills (released with plugin 3.0.0).**
 
@@ -495,9 +995,10 @@ here and marked so.
   `.claude/checkpoints/ended/`, as a used one is under `used/`. A read-only
   Bash command and `git stash list|show` need no marker, and `git stash
   pop|apply <commit>` needs none when a checkpoint recorded `<commit>` (the
-  marker's commit, or the entry `.claude/checkpoints/commits/<commit>` a
-  successful `git stash create` writes, one lookup however many checkpoints
-  were taken); any other restore needs a marker like any write. The rollback
+  entry `<git dir>/acs/checkpoints/commits/<commit>` a successful `git stash
+  create` writes in the project's git directory, one lookup however many
+  checkpoints were taken) and the call runs in the project's repository;
+  any other restore needs a marker like any write. The rollback
   skill's command hook refuses (F503) a `git stash pop|apply` that does not
   name such a commit, whatever `git stash list` holds; before, it refused a
   restore only when `git stash list` was empty. The rollback and send skills'
@@ -529,6 +1030,362 @@ here and marked so.
   rest of 127/8, 0/8, 169.254/16, IPv6 loopback, mapped, link-local and
   unique-local literals, and an IPv4 host in another form (`127.1`,
   `2130706433`, `0x7f000001`).
+- Plugin hooks, fail-closed fixes (released with plugin 3.0.0):
+  - The PreToolUse hook is registered for every tool (matcher `*`), with
+    `onFailure: "block"` and a 30-second `timeout`, so a run that fails,
+    cannot start or times out blocks the call where Claude Code supports
+    that setting. A tool the SDK mapper maps to a capability that needs
+    neither a checkpoint nor approval (Read, Grep, Glob, WebFetch,
+    TodoWrite, ...) still needs nothing; `Skill`, `Agent` and `Task` are
+    `mutate` (a skill's embedded shell commands and a subagent's hooks and
+    MCP servers run with no hook event; take a checkpoint before each, and
+    each is asked for approval); every other tool, MCP tools,
+    `Monitor`, `PowerShell` and `ExitWorktree` included, is now an unbound
+    `mutate` (Standard 1.2.0 §5.18.2): take a checkpoint (`git stash
+    create`) before each such call, which is asked for approval. Before,
+    only Write, Edit, MultiEdit, NotebookEdit and Bash were checked.
+  - A Bash command over 4096 bytes is gated before it is trimmed or read: a
+    command padded with blanks (50,000 trailing ones took 44 seconds to
+    trim) can no longer hold the hook past its time limit.
+  - The commits a rollback may restore are entered in the project's git
+    directory (`<git dir>/acs/checkpoints/commits/`), outside the work tree,
+    and a restore must run in the project's repository: an entry or a
+    marker a cloned repository ships no longer lets `git stash apply` run
+    without a checkpoint or approval. Entries under
+    `.claude/checkpoints/commits/` and the marker's `commit` no longer
+    authorise a restore (checkpoints taken before the upgrade are restored
+    as a gated `mutate`), and `git stash create` outside a git repository
+    writes no marker for a commit. The rollback skill's hook reads the same
+    entries. An entry holds the HMAC-SHA-256 of its commit under the
+    project's checkpoint key (`<git dir>/acs/checkpoints/key`, drawn at
+    random by the take hook, which needs `openssl` to enter a commit), so a
+    file a command creates there is no entry; an empty entry written before
+    the upgrade restores nothing (it is a gated `mutate`), and nothing is
+    entered in a git directory git did not make for a work tree.
+  - A marker git tracks authorises nothing (F501; it is left in place:
+    remove it from the repository), nor does one in a directory whose git
+    directory git did not make for a work tree (a repository can ship
+    `.claude` as a git directory), nor one git cannot answer for. A gated
+    call whose path, Bash, Monitor or PowerShell command, or Skill
+    arguments, names the layer's records (`checkpoint.ok`,
+    `.claude/checkpoints`, `acs/checkpoints`) is refused with F504, in any
+    spelling a path accepts: any letter case, a run of slashes, `./`
+    segments and (in a text of at most 4096 bytes) `x/../`, and through a
+    symbolic link on a path one of its words names. Security round 3: the
+    hook also reads every string and member name of any other tool's input
+    but Agent's and Task's (an MCP filesystem server's path, an MCP shell
+    server's command), a `~` the shell expands (`~+`, `~user`; `~-` and
+    `~N` are refused outright), a path attached to a short option
+    (`-tdir`), and the command a quoted word holds (`sh -c '...'`); a call
+    that names the directory holding the records (the project's `.claude`,
+    the git directory's `acs/`: `rm -rf .claude`, `mv .claude x`) is
+    refused too, as is a call with more than 65536 bytes of strings of at
+    most 4096 bytes. A commit message or an MCP text that names
+    `.claude` as a word, or a record's name, is refused: write it otherwise.
+    Security round 4: the hook expands brace groups and decodes `$'...'` as
+    bash does (`{fixtures/,.git/acs/check}points`,
+    `$'.claude/checkpoint\x2eok'` are refused), and refuses (F504) a call
+    with more than 4096 strings and member names (empty ones included),
+    brace expansions that make more than 8192 words, or more than 262144
+    bytes of paths to resolve; of a long cluster of short options it reads
+    only the texts whose first component exists, or that are absolute.
+    Security round 4, batch 2: it finds a brace group as bash does (the
+    first `{` a `}` closes, at the first `}` after a comma at its own level:
+    `{a},.claude/check}point.ok` names the marker and is refused; it paired
+    each `}` with the nearest `{`), and refuses (F504) a call whose brace
+    expansions read more than 65536 braces, commas and characters. The
+    audit and send skills' hooks read brace groups the same way
+    (`env {-u},cu{r,r}l} ...` runs curl; `tee -a .cl{x},a}ude/...` appends
+    to the audit records).
+  - The audit, persist, rollback and send skills' command hooks set
+    `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
+    does: a check that fails or gives no verdict in time blocks the call
+    where it let the call run. The audit hook reads its append form in time
+    that grows with the line alone (a 100 KB record with no closing quote
+    took 15 seconds, and about 700 KB outlived Claude Code's default
+    timeout).
+  - A marker older than `ACS_CHECKPOINT_MAX_AGE` (the setting in force when
+    it is used, which every audit line records) authorises nothing, whoever
+    wrote it with whatever expiry.
+  - The send skill's command hook reads a command that names `curl`, `wget`
+    or `http` (or `.curlrc`, `.wgetrc`, `/etc/hosts`, `/dev/tcp`) in any
+    quoting, as the shell passes its words, and each request as the tool
+    reads it. It now also refuses an internal host with no scheme
+    (`curl 127.1:18777`), after one slash (`http:/127.0.0.1`), under
+    `.localhost`, in `100.64/10` or `localhost.localdomain`; a host it
+    cannot read (percent-encoded, non-ASCII, curl's `[1-2]` or `{a,b}`
+    globbing); a quoted, abbreviated or variant option that redirects the
+    connection (`-''x`, `--resol`, `--proxy1.0`, wget's `--exe=`), curl's
+    `--variable`/`--expand-*`, git's `-c http.*`/`-c url.*`; a variable set
+    on the line or `CURL_HOME`, `HOME`, `XDG_CONFIG_HOME`, `WGETRC` or a
+    proxy exported; a request inside `sh -c` or an interpreter's code; an
+    unquoted brace, a glob before a URL's path, an unclosed quote or a
+    here-document; and such a command over 16384 bytes (send a payload
+    from a file, `-d @file`). An IPv6 host's brackets must be quoted
+    (`curl 'http://[2001:db8::1]/'`).
+  - The audit skill's hooks: a record whose JSON gives a member name twice
+    is refused (I-JSON); a command that may name the records file (it names
+    `records`, `jsonl`, `audit` or `.claude` in any quoting, runs under
+    `.claude`, or holds a glob that may match the file) and is not the one
+    append form may not redirect output to a file, run a program but a few
+    that only read (`cat`, `jq`, `tail`, `wc`, ...; `mkdir`; `openssl dgst`;
+    `mv` only to move the file aside), substitute a command or a process,
+    or set `PATH`, `LD_*` or `OPENSSL_*`; and a new hook on Edit, Write,
+    MultiEdit and NotebookEdit refuses an edit of the records file or of
+    another file under `.claude/audit/`, links followed. Compute the HMAC
+    and run `hostname -s` in commands of their own.
+  - Skill hooks, security round 2 (they stay registered for the rest of
+    the session once the skill ran): the send skill's hook now refuses, in
+    every command, a word a glob or a brace may expand to `curl`, `wget`
+    or `http` (`/usr/bin/c?rl`, `cu{r,r}l`; `ls /usr/bin/c*` too), and
+    reads a command holding `$'...'`, `$"..."` or a `/dev/` path the shell
+    expands; in a command that names a request tool it refuses code piped
+    or redirected to a shell or an interpreter (`curl .../install.sh | sh`,
+    `| python3`; `| python3 -m json.tool` and `| python3 -c '...'` still
+    run), a request inside a word of any program that runs one (`trap`,
+    `awk`, `sed`, `find -exec`, `git rebase -x`, `env -S`, ...), `xargs` or
+    `parallel` feeding the tool, a copy or a link of it, a git setting
+    outside `user.*`, `color.*`, `advice.*`, `init.defaultbranch`,
+    `core.quotepath`, `i18n.*`, `column.*` and `log.*` (`-c` or `git
+    config`), and a word naming a proxy, CA-bundle, resolver, git
+    (`GIT_*`) or loader (`LD_*`) variable, or `HOME`, `PATH`, `ENV`, `IFS`,
+    with or without a value (`for http_proxy in`, `read`, `printf -v`).
+    The audit skill's hook now refuses, in every command, a program that
+    writes files its input names (`patch`, `git apply`/`am`, `tar` but to
+    create or list with short options, `unzip` but to list, `cpio`,
+    `rsync`, `7z`, git's index and tree plumbing, a git alias, `find
+    -exec` or `xargs` running a program other than its readers), and reads
+    a brace expansion, a glob that may name `.claude` or `.claude/audit`,
+    and a redirection to a name the shell builds (`>> $A$B`) as it reads a
+    command naming the records file. The rollback skill's hook reads the
+    command's words as the shell passes them and allows a restore only as
+    `git stash apply|pop <recorded id>`, those four words alone: `git -C .
+    stash apply`, `env git stash ...`, `git stash branch` and a restore in
+    `sh -c` are refused with F503 (the plugin's hook gated them as
+    `mutate` already).
+  - Skill hooks, security round 3. The shared word reader pairs quotes as
+    bash does (a backslash escapes the next character, in double quotes
+    and `$'...'` too; a line continuation is removed, also inside an
+    operator and before a comment), so an escaped quote no longer hides
+    the commands after it, and each hook's first reading removes line
+    breaks (`cu\<newline>rl`, `sta\<newline>sh`). The audit skill's hook
+    reads in full a command holding `$'...'` or `$"..."` and refuses it
+    there; `mv` moves only the project's records file aside in
+    `<project>/.claude/audit` (any other directory, `..`, `~` or an
+    expansion is refused); and it now refuses, in every command, `gunzip`
+    and its kin with `-N`, `curl` unless run as `curl -q` without `-J`,
+    `-K` or `--variable`, `wget` unless run with `--no-config` and without
+    `-r`, `-m`, `-p`, `-x`, `-i` or `--content-disposition`, HTTPie,
+    `aria2c`, `dpkg -x|-i`, `rpm -i`, `python -m zipfile|tarfile`, and any
+    git command that is not one of git's own (an alias from a
+    configuration file): run `curl -q ...` and `wget --no-config ...` once
+    the audit skill ran. The send skill's hook now runs `curl` only with
+    `-q` first and `wget` only with `--no-config` (their configuration
+    files may set a proxy), HTTPie only where its configuration file sets
+    no default options, and no `ipfs://` URL; refuses, in every command, a
+    glob or a brace that may name `.curlrc`, `.wgetrc`, `/etc/hosts`,
+    `resolv.conf`, `~/.ipfs/gateway` or HTTPie's `config.json`, and a word
+    naming `IPFS_GATEWAY`, `IPFS_PATH`, `SYSTEM_WGETRC` or
+    `HTTPIE_CONFIG_DIR`; and a new hook on Edit, Write, MultiEdit and
+    NotebookEdit refuses an edit of those files.
+  - Skill hooks, security round 4. The shared word reader reads an
+    unquoted extglob opener (`@(`, `!(`, `+(`, `*(`, `?(`), which bash
+    expands as a pattern once a command has run `shopt -s extglob`, as text
+    it cannot read: the audit, rollback and send skills' hooks refuse such
+    a command (in the send skill's case, any command that holds one). The
+    send skill's hook applies the `curl -q`/`wget --no-config` rule and the
+    copy rule wherever the tool runs: after `!`, `if`, `while`, `until` or
+    `coproc`, and after any program; it runs a tool only as the command's
+    program or after a program that runs the one a later word names (`env`,
+    `sudo`, `timeout 5`, `nice -n 10`, ...) with only options and numbers
+    between, and refuses one given to another program (`prlimit curl`,
+    `setpriv`, a loader, `head -c ... /usr/bin/curl`, `git grep curl`;
+    `which curl`, `echo curl` and `apt-get install curl` still run); it
+    counts wget's `--no-config` only where wget reads it as an option (not
+    as `-O --no-config`, not after `--`) and reads every word after `--` as
+    a URL; it refuses `alias`, `hash`, `enable` and a word naming
+    `BASH_ALIASES` or `BASH_CMDS` in a command that names a tool, a command
+    line in a word that runs the tool by its path or names it as a value
+    (`sh -c '/usr/bin/curl ...'`, `eval 'alias g=curl'`), and a glob that
+    may expand to a tool's name in any letter case (`shopt -s nocaseglob`)
+    or, where the command may turn on dotglob (`shopt`, `GLOBIGNORE`, a
+    sourced file), to a setting file by a leading dot. The audit skill's
+    hook now refuses, in every command, a recursive copy (`cp -r`, `-R` or
+    `-a`, `scp`, `rclone`, `sftp`, `lftp`), every git command but git's
+    reads and those that write no file from a commit (`checkout` and
+    `restore` only of literal paths after `--` that do not hold the
+    records, `reset` only `--soft` or `--mixed`, `stash` only `list`,
+    `show`, `create`, `store`, `drop` or `clear`; `switch`, `merge`,
+    `pull`, `rebase`, `cherry-pick`, `revert`, `clone`, `worktree`,
+    `submodule` and the like are refused once the audit skill ran), `wget`
+    unless `--no-config` is its first word, and a writer after `!`, `if`
+    or `while` or after any program it does not read with a rule of its
+    own (`setpriv patch`, `runcon tar`); a here-document's body is read as
+    commands, with the old rule where a reader takes it as data (`cat
+    <<'EOF' > notes.md`, a commit message), and a command whose data body
+    holds a line continuation or ends at a delimiter other than a plain
+    word is refused. The rollback skill's hook reads a command holding a
+    glob or a brace too, and refuses one that may spell `git stash
+    apply|pop` (`git st?sh apply <id>` once a file named `stash` exists;
+    `git add *` is refused, `git add *.py` still runs).
+  - Skill hooks, security round 4 (batch 4). The audit skill's hook
+    refuses a record holding a value under a member named for a credential
+    (`{"password":"hunter2"}`, `{"token":4111111111111111}`, a value in an
+    array, one with blanks, the value of a `{"name": "Authorization",
+    "value": ...}` pair, the second of a `["Cookie", ...]` tuple), as the
+    plugin's pre-tool-use hook refuses the same data from a persist tool
+    and the SDK redactor reads it (`hooks/secret_member.jq`, copied into
+    both): write such a record by reference (`<ref>`) or digest. The send
+    skill's hook reads every word naming a tool after a wrapper as a
+    request's program (a wrapper's option may take a tool's name as its
+    value: in `env -u http curl ...` and `sudo -u http curl ...` curl runs,
+    and its words were read with HTTPie's grammar), so each reading must
+    pass; such a value may stand between the wrapper and the tool, and a
+    command with more than 8 such words after a wrapper is refused.
+  - The boundary hook (`stop_end_checkpoints.sh`) also runs on StopFailure,
+    UserPromptSubmit, SessionStart and SessionEnd: a marker a turn left
+    when an API error or an interrupt ended it, or a killed session, no
+    longer carries into the next turn. The hooks' scope, the project
+    directory with every session in it, is stated in SECURITY.md §5.5.
+  - The log hook reports (exit 1) input `jq` cannot parse, which may be a
+    tool call (nested past jq's depth limit, a lone surrogate escape), where
+    it exited 0 with nothing logged; input that is not JSON at all is
+    reported the same way.
+  - A git command on the read-only list (`git status`, `git log`, `git
+    show`, `git diff`, `git rev-parse`, `git ls-files`, `git stash
+    list|show`) is a gated `mutate` when the call's directory (the payload's
+    `cwd`) is in a partial clone, or git cannot say: there git fetches what
+    a read lacks from the promisor remote, sending the object id the command
+    names. `git stash create` still takes a checkpoint there. The same in a
+    repository with submodules (`modules/` in its git directory, or a
+    gitlink in its index). Every git command the hook would let pass (a
+    read, `git stash create`, a restore) is `mutate` where the git
+    directory git finds is not one git made for a work tree (a directory a
+    repository ships holding `HEAD`, `objects/` and `refs/`, whose `config`
+    names programs git runs). The hooks' own git commands run with
+    `core.fsmonitor` and hooks turned off and fetch nothing. Security round
+    3: the same where the repository's own configuration (the local and
+    worktree scopes, with what they include) names a program git runs (a
+    `core.fsmonitor` other than `true` or `false`, a diff driver's
+    `textconv` or `command`, `diff.external`, a filter, a merge driver, a
+    signature program, a pager) or its hooks directory holds
+    `post-index-change`: a git read and a recorded restore are a gated
+    `mutate`, and `git stash create` is put to a person with no marker
+    asked for (F502 in `bypassPermissions` or `dontAsk` unless
+    `ACS_HOOK_APPROVAL=off`). A project that sets such a program itself
+    (git-lfs or git-crypt installed with `--local`, a watchman fsmonitor)
+    gets these prompts; set it in the global configuration instead. The
+    take hook's clean-tree check turns the repository's own filters off. A
+    Bash `printf` with an option (`printf -v NAME`) is a gated `mutate`.
+  - The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
+    `AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`) belong in `~/.claude/settings.json`,
+    managed settings or the environment Claude Code starts in. While the
+    project's `.claude/settings.json` or `.claude/settings.local.json` names
+    one of them in `env` (any letter case), or cannot be read, the
+    PreToolUse hook blocks every call with R407, the log hook writes no line
+    and the checkpoint hook writes no marker: Claude Code applies a
+    project's `env`, which is repository content, to every hook over the
+    user's settings, so a cloned repository could set
+    `ACS_HOOK_APPROVAL=off` or an audit key it knows. Move such an entry out
+    of the project's files (Claude Code started in the home directory reads
+    `~/.claude/settings.json` as the project's too: there, set them in the
+    environment).
+  - The same holds for every variable those files set in `env` but Claude
+    Code's own settings (`ANTHROPIC_*`, `OTEL_*`, `MAX_THINKING_TOKENS`,
+    `MCP_TIMEOUT`, `BASH_DEFAULT_TIMEOUT_MS` and the few more
+    `hooks/README.md` lists, as written): Claude Code applies that env to
+    every hook and every command it runs, and `BASH_ENV`, `SHELLOPTS`,
+    `PATH`, `HOME`, `LD_PRELOAD`, `GIT_CONFIG_*`, a proxy or an exported
+    function changes what a hook, or a command it lets pass, runs. A
+    project whose settings set, say, `NODE_ENV` or `PATH` now has every
+    call blocked with R407 until the entry moves to
+    `~/.claude/settings.json`, managed settings or the environment. The
+    hook scripts open with `#!/bin/sh` and start themselves under
+    `bash -p` (so `bash` must be on `PATH`, as before); the three that
+    read a setting drop relative and project directories from their own
+    `PATH`, and run `jq` with no `HOME`.
+  - A Bash command whose first word holds a blank or a slash (a quoted
+    `"git status"`, which bash runs as the program of that name) is a gated
+    `mutate`, not a read-only list entry.
+  - Security round 5. A command on the read-only list, `git stash create`
+    and a recorded restore are a gated `mutate` where the program bash finds
+    for the first word on the `PATH` Claude Code gives the hook may be the
+    repository's own: found under an empty or relative entry
+    (`PATH=node_modules/.bin:$PATH`, a leading colon), in a file in the
+    project (links followed: an activated virtual environment, direnv's
+    `PATH_add`; not where the project is the home directory, or holds it),
+    or nowhere. A project whose `PATH` holds such an entry gets a checkpoint
+    and an approval for `ls` or `git status` only where that entry has a
+    file of that name. Each git command the hooks run, and each read of a
+    project settings file, stops after 5 seconds (a repository's
+    configuration can include a FIFO or `/dev/ptmx`, which held the hook
+    past its 30-second limit): a call whose project or marker git directory
+    git cannot name in time is blocked (R407, F501), a git read or
+    checkpoint there is a gated `mutate`, the take hook writes no marker
+    and the log hook writes its line without the anchor and says why; a
+    settings file that is not a regular file is unreadable (R407). The
+    records guard compares every path it resolves however many there are
+    (past about 64 KB of them, a match was read as none), follows a link
+    to a name that ends in a line break to that name, and reads the call's
+    `cwd` and git's answers exactly; the persist, audit, send and rollback
+    skills' hooks read a `file_path`, a `cwd` and a link target exactly
+    too.
+  - Security round 5, batch 2. A restore of a recorded checkpoint (`git
+    stash pop|apply <commit>`) is a gated `mutate` (a marker and approval),
+    not a rollback, wherever any scope, the user's included, configures a
+    filter's `smudge` or `process` command: git-lfs's, which `git lfs
+    install` writes to the user's configuration, asks the LFS server the
+    repository's `.lfsconfig` names for each object its store lacks,
+    sending the object's id. The two commands `git lfs install
+    --skip-smudge` writes count as none. The log hook writes a tool's name
+    (`tool`, `intent`) and a `Skill` call's skill name (`details.skill`)
+    only when it is plain (1 to 128 ASCII letters, digits, `.`, `_`, `:`
+    or `-`) and the plugin's secret scan finds no credential in it, else
+    `[REDACTED]`: the model chooses a skill's name, and the line is signed,
+    so a secret in it could not be taken out. The pre-tool-use hook's
+    refusals and approval requests name the tool the same way.
+  - Security round 5, batch 3. The take hook writes no checkpoint marker
+    for a `git stash create` the pre-tool-use hook classified the worst
+    case where it ran (a `git` on `PATH` that may be the repository's, or a
+    git directory git did not make for a work tree: a shipped
+    `vendor/evil.git` whose `core.worktree` is the project stashed into its
+    own object store), nor for one run with another git directory than the
+    project's. The send, audit and rollback skills' hooks read a glob's
+    bracket expressions as bash does (`cur[[:alpha:]]`, `cur[]l]`,
+    `.cl[a-z]ude`, `git st[[:alpha:]]sh` are now refused; a set bash cannot
+    be read exactly makes the run any run). The audit skill's hook refuses
+    `printf` with an option (`printf -v NAME` sets a variable for the rest
+    of the line) and a word that names `PATH`, `IFS`, `ENV`, `BASH_ENV`,
+    `CDPATH`, `BASH_CMDS`, `BASH_ALIASES`, `LD_*`, `DYLD_*` or `OPENSSL_*`
+    in a command it reads; the rollback skill's hook refuses a recorded
+    restore beside a command that does more than read (`printf -v PATH ...;
+    git stash apply <sha>`, `cd`, `alias`, a function, a file written):
+    restore on a line of its own, or after `git status` and other reads.
+  - Security round 5, batch 4. The shared secret scan reads a text line by
+    line and again with its line breaks read as blanks, as the SDK's and the
+    TypeScript rules do, so a value on the line after its name
+    (`password:` then the value, a YAML value indented under its key,
+    `Authorization:` or `Bearer` then the token) is now refused: in what
+    `TodoWrite`, `TaskCreate` and `TaskUpdate` store (each string read on
+    its own), in an audit record and in what the persist skill writes. The
+    persist skill's hook also refuses an edit that builds a credential with
+    the lines around it (a value put under a name the file holds, a name put
+    over a value, a line taken out from between them: the changed lines and
+    six lines that are not blank on each side are compared before and after
+    the call), and any change to a line of a private key block (from its
+    BEGIN line to its END line, or the end of the file), such as a key's
+    body put into a template. The send skill's hook reads curl's `--url`
+    value as a URL (`--url=VALUE` too) and refuses an operand or a `--url`
+    value that starts with `@` (curl 8.13 and later reads URLs from that
+    file; pass the URLs on the command line), and refuses `/etc/hosts` and
+    the other files that set where a request goes in any spelling
+    (`/etc//hosts`, `/etc/./hosts`, a `..` segment) and by their last
+    component where the command may change the directory (`cd /etc && ...
+    >> hosts`, `curl --output-dir /etc -o hosts`, `wget -P /etc
+    .../hosts`); its Edit/Write hook refuses a path with a `..` segment
+    whose last component is such a file's. The audit skill's hook refuses
+    curl's URLs read from a file (`--url @file`, an `@file` operand), whose
+    file names curl takes from them.
 - Plugin audit log: `.claude/audit.log` now holds one JSON line per tool
   call, an action record (Standard 1.2.0 §6.4): `action_id`, `timestamp`,
   `actor`, `intent`, `status`, `tool`, `call_id`, `details` (`event`,
@@ -539,12 +1396,40 @@ here and marked so.
   cannot sign: no `jq`, a symlinked log, no `openssl` (it no longer writes a
   line with `hmac: "no-hmac-available"`, which broke the chain), a line that
   could not be built, an unreadable last line, an unavailable digest.
+- Plugin audit log, its end: the chain shows a changed or removed entry by
+  the link of the entry after it, but not the removal of the last entries
+  or of the whole log, which the hook's comment claimed it did. The hook now
+  keeps the chain's end in `.claude/audit.head` (the number of entries and
+  the last one's `hmac`, signed with the same key), and
+  `tools/verify_audit_log.py` fails a log that no longer holds that entry at
+  its place. The verifier reads the head beside the log (`--head-file`
+  names another) and fails when there is none: verify a log begun before
+  the hook kept a head, or the audit skill's `records.jsonl`, with
+  `--no-head` (the chain alone). The hook reports, as a non-blocking error,
+  a log that no longer holds its head's entry (it writes the line and keeps
+  the head as the evidence: move `audit.log` and `audit.head` aside together
+  to start a new log), a head another key signed, a log that had no head
+  (anchored from then on, once) and a head that cannot be written. The
+  pre-tool-use hook refuses a call that names `audit.head` (F504). The hook
+  now also runs `mv`. Security round 3: in a git repository the hook keeps
+  the same head, its anchor, in `<git dir>/acs/audit.head`, which `git
+  clean -fdx` or `rm -rf .claude` leaves, so a log removed with its head
+  is reported and fails verification; the verifier reads the anchor where
+  it exists (`--anchor-file` names another). To start a new log, move
+  `audit.log`, `audit.head` and the anchor aside together. Security round
+  4: the head and the anchor do not show a cut made through the agent the
+  log records (its commands read both without a checkpoint or approval, and
+  the key from their environment, so an approved command that names
+  neither can write back an earlier head, or sign a new one); the verifier
+  gains `--witness PATH` (repeatable), a copy of the head kept where the
+  agent cannot write it, which shows such a cut.
 - Audit skill: each line it appends to `.claude/audit/records.jsonl` is now
   an action record of its own (Standard 1.2.0 §6.4), with the event under
   `details.event`, the collected `audit_record`, `changes` and `provenance`
   under `details`, and `prev_hmac` and `hmac` under `AUDIT_HMAC_KEY` (else
   the hook's default key), so `tools/verify_audit_log.py --log-file
-  .claude/audit/records.jsonl` checks the file. Lines an earlier version
+  .claude/audit/records.jsonl --no-head` checks the file (no head anchors
+  its end). Lines an earlier version
   wrote (`audit_id`, `timestamp`, `event`, `context`, `retention`,
   `audit_record`, `changes`, `provenance`) carry no chain and do not verify:
   move an existing file aside and let the skill start a new one (it does so
@@ -571,14 +1456,56 @@ here and marked so.
   proxy or `*_proxy=` variable, `--doh-url`, curl's `-K`, wget's `-e` and
   `-i`), and reads `localhost.` and `127.0.0.1.nip.io` as internal; put a
   credential header in a file (`curl -H @file`).
+- Plugin: the `persist` skill's hooks see `NotebookEdit` too (its
+  `notebook_path` and `new_source`), and the command hook reads what the
+  call stores, not only the text it carries: the lines the file holds after
+  the call that it does not hold now (the edits applied to the file the path
+  reaches), each with its `\uXXXX`, `\UXXXXXXXX`, `\xXX`, `\/` and `\"`
+  escapes decoded. So a value whose key or other half is already in the
+  file (`password: "CHANGEME"` edited to a password, a token built by two
+  edits or calls) or a JSON-escaped token is refused (F504). An existing
+  target that is not a regular file, or is over 8 MB, is refused. Security
+  round 3: the hook reads the file and applies the edits as Claude Code's
+  Edit does: a file opening with FF FE as UTF-16LE (with `iconv`; without
+  it, refused, R407), CRLF line ends as LF, and an empty `new_string`
+  removing `old_string` with the line break after it. An Edit or MultiEdit
+  whose `old_string` an existing file does not hold as written, nor with
+  curly quotes read as straight ones, is refused (R407): Claude Code may
+  still find it (as a `\uXXXX` escape in the file, or the character of
+  one in `old_string`), and the hook cannot tell what the file will hold;
+  give `old_string` as the file spells it.
 - Skills: the `send`, `rollback`, `checkpoint`, `persist` and `transform`
   skills' prompt hooks no longer judge approval, checkpoints, rate limits or
   expiry (Changed), and the persist, rollback and send skills' command hooks
   now block (exit 2) a call they refuse, which they let through before
   (Fixed).
+- Plugin, pre-tool-use hook (Fixed; Standard 1.2.0 §5.18.10, §6.7): a
+  `TodoWrite`, `TaskCreate` or `TaskUpdate` call (`persist`) whose input
+  holds a secret the layer recognises is blocked with `F504
+  CONSTRAINT_VIOLATED:` in every permission mode, as the SDK adapter
+  refuses it: the shared scan over every string of the input and its JSON
+  text, and a value under a member named for a credential (`{"password":
+  "..."}`, an `Authorization` name/value pair, a `["Cookie", ...]` tuple).
+  Keep credentials out of todos and tasks; cite them by reference.
+- Plugin, `tools/verify_audit_log.py` (Fixed): each line is verified as the
+  bytes the hook signed, the compact JSON `jq -c` writes ending in its
+  `hmac` member, with each member named once. A line edited without the key
+  so that it parses to the signed entry (a member named twice, a blank or a
+  `\u` escape inserted, the `hmac` moved) now fails, as does a blank line;
+  a line the hook wrote verifies as before. `verify_entry` checks a parsed
+  entry; `verify_line` checks a line.
 
 **Standard Agents binding and TypeScript package.**
 
+- TypeScript package and Standard Agents binding: `annotationRecord` reads
+  an `acs` annotation as the record in full (security round 3): every
+  member but the copies (`tool`, `layer`, `risk`, `mutation`,
+  `requires_checkpoint`, `requires_approval`) reaches the record, so a
+  misspelt one (`aproval`, `flag`, `aditional_capabilities`) is S303 and
+  the annotation does not load, where it was dropped and the tool loaded
+  as what remained: `groundedTool` refuses a composite listing such a tool
+  (V107), `lintPromptTools` reports it unbound (W617) and
+  `deriveAgentManifest` names it malformed. Put vendor data under `x-`.
 - TypeScript package: `npm test` replays the fixtures through the
   WebAssembly core, so run `npm run build:wasm` (which needs the
   `wasm32-unknown-unknown` target) and `npm run build` first; the binding
@@ -634,6 +1561,161 @@ here and marked so.
   userinfo password and an `Authorization` header's value included.
 - Standard Agents binding: `LintDiagnostic.code` gains `V107` and
   `location` a variant `{workflow, field, path}` (`lintDelegationTargets`).
+- TypeScript package and Standard Agents binding, the lint (security round
+  5, batch 5): `checkBindings` takes `raised`, the flags a layer applies to
+  a loaded tool beyond its record (those its domain profiles raise,
+  §5.21.3), joined into the tool's effective flags and the checks of the
+  offered tools. `lintAgentBindings` and `lintPromptTools` pass the flags
+  each tool defined with `groundedTool` computed (`computedFlags`), so a
+  stop or session action tied to a tool whose profiles, or the layer's,
+  make it need approval or a checkpoint is now F506, and a checkpoint they
+  require that no offered tool takes is V102, where both passed before.
+  The Python SDK's `check_offered` checks the mappings it is given: pass
+  those `adapter.mapper.map_tool` gives, which carry the profiles' flags.
+- TypeScript package: `checkBindings(records, {known})` reports V105 for a
+  cycle that runs through the `known` bindings too (a record that invokes a
+  known composite that invokes it), and does not load the record, as the
+  Python loader does; before, a set loaded in two steps closed the cycle.
+  A loaded composite's `approval` is the join of its own and its invoked
+  bindings' (`joinApproval`), as in the Python loader.
+- Standard Agents binding, composites (Standard 1.2.0 §5.18.4):
+  `groundedTool` throws (V107) for a composite that lists a tool with no
+  binding the layer loads (plain `defineTool` with no `acs` annotation, or
+  one that does not load on its own); before, it counted as the strictest
+  case and its calls went unchecked and unrecorded. A listed tool defined
+  with plain `defineTool` and a binding record is now checked by the
+  composite's nesting state (a `send`'s destination at its record's
+  `destination` against every policy in force, F504; the composite's
+  decisions against its approval, F502; its prerequisites) and recorded
+  with `covered_by`. A composite asks for the strictest approval of its own
+  and its invoked tools' (the most approvers, the shortest expiry, a role
+  one of them sets), and a nested call is covered only when the decisions
+  that approved the composite are valid for its own approval (else it is
+  checked on its own). `requestApproval` starts a new round when the live
+  request was asked under a weaker policy than the call's.
+- Standard Agents binding, domain profiles (Standard 1.2.0 §5.21.1):
+  `configureLayer({ profiles })` applies `bindingProfiles` to every grounded
+  tool defined after it, beside the tool's own, and a tool defined before
+  the layer's profiles changed refuses its calls (R407): call it before
+  defining the tools. `configureLayer({ profilePolicy })` throws for a
+  policy that sets a minimum confidence or grounding policies, which it
+  does not put in force. `memoryTools` takes `profiles` and `grounding`
+  (before, its tools applied no profile), and its `recall` tool registers
+  `secrets` too.
+- Standard Agents binding, sends (Standard 1.2.0 §4.4.2, §5.18.10): a `send`
+  tool's destination is no longer read from `args.destination` by default.
+  Its `destination` option says where: an RFC 6901 pointer into the
+  arguments (`destination: '/destination'`, new, which the annotation
+  states as the binding record's `destination`) or a function of them, as
+  before. While a destination policy is in force, every call of a `send`
+  tool defined without the option is refused with F504 (the layer cannot
+  tell where it sends); give each `send` tool the option. With no policy in
+  force nothing changes.
+- Standard Agents binding, composites (Standard 1.2.0 §5.18.4): a nested
+  call is covered by the composite's approval and checkpoint only as far as
+  the composite's call held them (a nested call that needs a checkpoint is
+  covered only when the composite's call used one), since the runtime runs
+  whatever tool it knows under a listed name; otherwise it is checked as a
+  call of its own. An invocation through a composite's state once its call
+  has ended (code that kept the state, or an invocation the composite did
+  not wait for) is refused with F504, or, for a grounded tool whose
+  invocation had started, checked as a call of its own. Security round 5,
+  batch 4: a nested call is covered only by the decisions the composite's
+  call counted (under a person requirement, a person's), so an approval the
+  deployment attests as an agent's, given to the composite's request, no
+  longer covers a nested call that needs a person once the person's
+  approval has expired: the nested call is checked as a call of its own
+  (F502 for a plain tool, or its own request for a grounded one). Security
+  round 5, batch 5: the destination policies and output rules (grounding,
+  minimum confidence) of the profiles given to a composite, and to those
+  enclosing it, now apply to every call of a tool the composite has a
+  pending invocation of, whether or not the call takes the invocation's
+  token: a runtime that gives the tool its validated arguments (a zod
+  `.default()` or `.transform()`, a stripped key) changed their digest, a
+  listed tool that states another name than the one it is invoked under
+  never matched, and a composite running outside an execution (an
+  endpoint, an effect) issued no token, so the nested call ran with none
+  of them. Such a call still asks its own approval and checkpoint; a send
+  those policies forbid is now refused (F504) and an output they refuse
+  fails (F505, F504). Another call of the tool made while the invocation is
+  pending (a parallel call, an endpoint's), which the binding cannot tell
+  from it, is held to them too.
+- Standard Agents binding, composites and plain tools (Standard 1.2.0
+  §5.18.4, §5.18.10): a nested call of a listed tool defined with plain
+  `defineTool` runs only under a name the new `registerTools` (in
+  `src/acs/layer.ts`) registers as that very tool, since the runtime runs
+  whatever tool it registers under the name; call `registerTools` with the
+  agent's tools, by the names the runtime runs them under, once they are
+  defined. Without it such a call is refused (F504), as is an invocation of
+  any listed name registered as another tool than the one listed, or as two,
+  and, while a destination policy is in force (the layer's, a composite's
+  profiles', or, security round 4, the profiles' given to the listed tool
+  or to a tool it invokes, transitively), an invocation of any listed name
+  not registered, a grounded tool's included.
+  Such a nested call is now checked as a grounded tool's call is: a
+  `persist` or `audit` call whose data holds a secret is refused (F504),
+  and what it returns is checked against its capability's output contract
+  (R402), the composite's grounding policies (F505) and its profiles'
+  minimum confidence (F504), so a plain tool must return its output's JSON
+  text (a plain `checkpoint` that returns other text takes none, and no
+  rollback runs on it). Security round 4: the output rules of the profiles
+  given to a composite (their grounding policies and minimum confidence),
+  with its own `grounding`, now reach the output of every nested call it
+  covers, at any depth, a grounded tool's (after the tool's own rules) as
+  well as a plain tool's, where before they reached only a plain tool's
+  call the composite itself made: a nested grounded call whose output they
+  refuse fails (F505, F504) and is not counted as executed. A composite's
+  state refuses `queueTool` (it throws the F504 refusal, which is
+  recorded) for a tool the composite does not list, a listed plain tool,
+  and any tool once its call has ended; a listed grounded or control tool
+  is queued as before. A grounded tool with no
+  `invokes` now declares `uses: []`, so a runtime that enforces `uses`
+  refuses its `invokeTool` and `queueTool` calls.
+- Standard Agents binding, secrets (Standard 1.2.0 §6.7):
+  `configureLayer({ secrets })` registers the host's own secrets layer-wide:
+  every trace entry the binding writes, the audit hook's for plain tools
+  included, is redacted with them, and `persist` data or an `audit` record
+  holding one is refused. `recordToolCall` takes an optional last argument,
+  `{ secrets }`. `configureLayer` replaces the whole configuration, so pass
+  `secrets` with the policies and profiles. A grounded tool's own `secrets`
+  join the layer's (`registerSecrets`; an array when the tool is defined, a
+  function's values at each call) and `configureLayer` keeps them, so the
+  audit hook's entry for a plain tool, and `persist` data, are redacted and
+  refused with every secret any tool registered; `resetLayer` forgets them. An evidence anchor that held a
+  secret loses its `digest` in the trace (above). A call refused because a
+  tool's `secrets` function threw (R407) is now recorded, as a `refused`
+  entry with the layer's `recorded_by`, redacted with the secrets the layer
+  holds, so the audit hook links it rather than writing an entry of its
+  own. Security round 3: a nested call whose checks the layer cannot
+  complete, a read of its records that fails or arguments with no
+  canonical JSON (a cycle, nesting too deep to walk, a value that is not
+  JSON), is refused with R407 and recorded with the call that covered it,
+  where the exception reached the composite's code and nothing was
+  recorded; a nested plain call with such arguments, which ran, is refused
+  too, as a grounded tool's own call is. The id of a checkpoint the layer
+  records (`acs:checkpoints`, and a trace entry's `checkpoint_id`), the
+  value the `checkpoint` call returned, is stored redacted too
+  (`addCheckpoint`); two ids that are one once redacted name one
+  checkpoint, so a call that uses one uses both. Security round 4 (batch
+  5): a trace entry's `action`, the tool's name, is redacted too (the name
+  the model called, or the one a composite's code invoked, may be a secret
+  under a prompt injection), and so are the exported audit record's `tool`
+  and `intent` and the waiting list `acs:trace:unlinked`; the audit hook
+  matches a call to its entry by the redacted name. A refusal a
+  composite's state returns for a nested call (or throws, for
+  `queueTool`) is redacted, the tool it names included. The Python
+  adapter's call records, the audit records exported from them and its
+  diagnostics redact the tool's name likewise. Security round 5 (batch 5):
+  every result a grounded call returns that is not a success is redacted
+  before the runtime stores it and the model reads it, as its trace entry
+  is: the R407 of a `secrets` function that throws or of a check the
+  layer cannot complete (which quoted the store's error), an R402 that
+  names an output member, the tool's own error (which a thrown `Error`'s
+  message becomes), and an F502's `error_data.shown`, whose arguments now
+  have their secrets replaced (its `digest` stays that of the values the
+  approver decides on, which the approvals endpoint still shows); and so is
+  every result a composite's state returns that is not a success, a nested
+  plain tool's own error included, and a control tool's own error result.
 
 **Interoperability data.**
 
@@ -662,8 +1744,8 @@ here and marked so.
   §9.8 diagnostics, records that name the layer, and capability outputs on a
   text-only channel; §5.2.2 states the executor's checkpoint use for steps.
   §10.4 adds the safety-layer conformance class SL.
-- Safety-layer conformance fixtures: 35 binding fixtures in
-  `tests/conformance/bindings/` and 30 call-sequence fixtures in
+- Safety-layer conformance fixtures: 36 binding fixtures in
+  `tests/conformance/bindings/` and 33 call-sequence fixtures in
   `tests/conformance/calls/`, with their schemas and the statements of the
   two reference layers, generated by `scripts/gen_call_fixtures.py`
   (`--check` in CI). The Python SDK adapter and the Standard Agents binding
@@ -716,6 +1798,13 @@ here and marked so.
   `encodeCapabilityOutput`, `decodeCapabilityOutput`, `effectiveFlagsOf`,
   `prerequisitesOf`. The Standard Agents binding adds `controlTool`,
   `additional_capabilities` and `invokes` with one-shot nesting tokens.
+- TypeScript package (`packages/acs-core`), security round 3:
+  `decodeCapabilityOutput`'s refusal of a text that is not JSON no longer
+  repeats the JSON parser's message, which quoted part of the text (a
+  window that cut a secret left a piece no redaction matched in the trace);
+  it says where the text stops being JSON, when the parser tells
+  (`(at character N)`). Code that matched the parser's wording (`Unexpected
+  token`) reads the R402 code instead.
 - TypeScript package (`packages/acs-core`): `decodeCapabilityOutput` accepts
   a number written in exponent form (1.8e16, 1e300) and checks integer
   literals in the text itself; `encodeCapabilityOutput` accepts a value it
@@ -1177,6 +2266,11 @@ here and marked so.
 - CI tests Python 3.14 and 3.15.
 
 ### Fixed
+- Python SDK: the I-JSON checks of a capability output and of a call's or a
+  binding's arguments built each child's whole path when its parent was
+  read, so a long member name above a wide array cost the name's length
+  times the width (an 80 KB MCP result took about 800 MB at PostToolUse).
+  A path is now written only for the value refused.
 - A reference index beyond the platform's `usize` (`${a[18446744073709551615]}`)
   was a parse error on a 32-bit target and a missing index on a 64-bit one;
   it is a missing index everywhere.

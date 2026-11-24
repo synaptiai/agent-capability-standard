@@ -106,6 +106,10 @@ describe('agent manifests of Standard Agents agents (STANDARD 1.2.0 §5.15.1)', 
       [{ bad: acs({ control: true, invokes: ['writer'] }) }, { writer }],
       [{ bad: acs({ capability: 'retrieve', flags: { mutation: 'yes' } }) }, {}],
       [{ bad: { annotations: { acs: { capability: 'retrieve' } } } }, {}],
+      // Security round 3: an unknown member was dropped, so a send read as
+      // a retrieve and a delegation was gated as read-only
+      [{ bad: acs({ capability: 'retrieve', aditional_capabilities: ['send'] }) }, {}],
+      [{ bad: acs({ capability: 'retrieve', flag: { risk: 'high' } }) }, {}],
     ] as const) {
       const error = thrown(() => deriveAgentManifest({ name: 'a', tools, invoked }));
       expect(error.malformed.map((m) => m.tool)).toEqual(['bad']);

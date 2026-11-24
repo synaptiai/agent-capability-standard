@@ -105,7 +105,8 @@ class JsonlEvidenceStore:
             here, offset = offset, offset + len(line)
             try:
                 record = EvidenceRecord.from_dict(json.loads(line))
-            except (ValueError, TypeError) as e:
+            except (ValueError, TypeError, RecursionError) as e:
+                # RecursionError: JSON nested deeper than the parser allows.
                 self._unreadable += 1
                 logger.warning(
                     "%s: skipped an unreadable line at byte %d: %s", self.path, here, e

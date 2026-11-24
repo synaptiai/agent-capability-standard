@@ -17,6 +17,7 @@ from grounded_agency import (
     GroundedAgentConfig,
     ProfileError,
     _core,
+    check_offered,
 )
 from grounded_agency.grounding import GroundingPolicy
 from grounded_agency.workflows import WorkflowEngine, WorkflowRunner
@@ -708,6 +709,42 @@ def test_the_adapter_without_profiles_is_unchanged(
     )
     mapping = adapter.mapper.map_tool("Read", {"file_path": "a"})
     assert (mapping.requires_approval, mapping.person_required) == (False, False)
+
+
+def test_check_offered_reads_the_flags_the_profiles_raise(
+    ontology_path: str, tmp_path: Path
+) -> None:
+    """``check_offered`` checks the mappings it is given (section 5.18.2):
+    those the adapter's mapper gives (``map_tool``) carry the flags the
+    applied profiles raise (section 5.21.3), so a host action tied to a tool
+    they make refusable is F506, as the TypeScript binding's lint reports it
+    (security round 5, batch 5); a record's mapping alone states none."""
+    adapter = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path,
+            checkpoint_dir=str(tmp_path / ".cp"),
+            profiles=[ROOT / "schemas" / "profiles" / "healthcare.yaml"],
+        )
+    )
+    name = "mcp__s__finish"
+    record = {"tool": name, "ontology": "2.2.0", "capability": "classify"}
+    assert adapter.mapper.load_bindings([record]) == []
+    effective = {name: adapter.mapper.map_tool(name, {})}
+    assert (effective[name].requires_approval, effective[name].person_required) == (
+        True,
+        True,
+    )
+    diagnostics = check_offered({name: name}, effective, [("stopTool", name)])
+    assert [(d.code_str, d.location["tool"]) for d in diagnostics] == [("F506", name)]
+    # The record's own mapping, which no profile raised, passes.
+    plain = GroundedAgentAdapter(
+        GroundedAgentConfig(
+            ontology_path=ontology_path, checkpoint_dir=str(tmp_path / ".cp2")
+        )
+    )
+    assert plain.mapper.load_bindings([record]) == []
+    own = {name: plain.mapper.map_tool(name, {})}
+    assert check_offered({name: name}, own, [("stopTool", name)]) == []
 
 
 def test_profiles_need_approvals_on(ontology_path: str) -> None:

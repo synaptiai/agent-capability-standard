@@ -432,3 +432,20 @@ def test_the_tracker_keeps_the_capture_and_prunes_content(tmp_path: Path) -> Non
     taken = plain.create_checkpoint(scope=["*"], reason="r")
     with pytest.raises(NotImplementedError):
         plain.restore_checkpoint(taken)
+
+
+def test_a_manifest_nested_too_deeply_keeps_every_object(root: Path) -> None:
+    """Security round 4, batch 2 (a sibling of defect 4): json.loads raises
+    RecursionError on it, which the collection of unused objects did not
+    catch, so discarding a checkpoint raised."""
+    s = store(root)
+    s.capture("cp1", ["*"])
+    s.capture("cp2", ["*"])
+    manifests = root.parent / "store" / "manifests"
+    deep = next(m for m in manifests.glob("*.json") if "cp1" in m.name)
+    deep.write_bytes(b"[" * 100_000 + b"]" * 100_000)
+    objects = sorted(p.name for p in (root.parent / "store" / "objects").iterdir())
+    s.discard("cp2")
+    assert sorted(p.name for p in (root.parent / "store" / "objects").iterdir()) == (
+        objects
+    )

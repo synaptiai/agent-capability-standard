@@ -14,6 +14,7 @@ import pytest
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.capabilities.bindings import (
+    ApprovalPolicy,
     ToolBinding,
     check_offered,
     load_bindings,
@@ -304,6 +305,66 @@ class TestLoadBindings:
         assert loaded["fix"].prerequisites == frozenset()
         assert loaded["undo"].prerequisites == frozenset({"checkpoint"})
 
+    def test_a_composite_takes_the_approval_of_its_invokes_transitively(
+        self, registry: CapabilityRegistry, mapper: ToolCapabilityMapper
+    ) -> None:
+        """A composite's approval covers its nested calls (section 5.18.4),
+        so its call asks for the strictest approval of the bindings it
+        reaches: the most approvers, the shortest expiry, a role one of them
+        sets, its own first (security round 1, batch 5)."""
+        loaded, diagnostics = _load(
+            registry,
+            [
+                _rec(
+                    tool="write_prod",
+                    capability="mutate",
+                    approval={"role": "admin", "min_approvers": 2, "expires": "1m"},
+                ),
+                _rec(
+                    tool="batch",
+                    capability="invoke",
+                    invokes=["write_prod"],
+                    approval={"expires": "10m"},
+                ),
+                _rec(tool="outer", capability="invoke", invokes=["batch"]),
+                _rec(
+                    tool="ops",
+                    capability="invoke",
+                    invokes=["write_prod"],
+                    approval={"role": "ops"},
+                ),
+                _rec(tool="plain", capability="invoke"),
+            ],
+        )
+        assert diagnostics == []
+        joined = ApprovalPolicy(min_approvers=2, role="admin", expires_seconds=60.0)
+        assert loaded["batch"].approval == joined
+        assert loaded["outer"].approval == joined
+        assert loaded["ops"].approval == ApprovalPolicy(
+            min_approvers=2, role="ops", expires_seconds=60.0
+        )
+        assert loaded["plain"].approval is None
+        # Across two loads, from the mappings known.
+        assert (
+            mapper.load_bindings(
+                [
+                    _rec(
+                        tool="write_prod",
+                        capability="mutate",
+                        approval={"min_approvers": 3},
+                    )
+                ]
+            )
+            == []
+        )
+        assert (
+            mapper.load_bindings(
+                [_rec(tool="batch", capability="invoke", invokes=["write_prod"])]
+            )
+            == []
+        )
+        assert mapper.map_tool("batch", {}).approval == ApprovalPolicy(min_approvers=3)
+
     def test_a_record_citing_an_unsupported_standard_is_v109(
         self, registry: CapabilityRegistry
     ) -> None:
@@ -338,6 +399,159 @@ class TestLoadBindings:
         )
         assert batch.requires_checkpoint and batch.requires_approval
         assert batch.invokes == ("mcp__s__write",)
+
+    @staticmethod
+    def _composite(mapper: ToolCapabilityMapper, tool: str, *invokes: str) -> list[Any]:
+        return mapper.load_bindings(
+            [
+                {
+                    "tool": tool,
+                    "ontology": mapper.ontology_version,
+                    "capability": "generate",
+                    "invokes": list(invokes),
+                }
+            ]
+        )
+
+    def test_an_unbound_tool_resolves_no_invokes_name(
+        self, mapper: ToolCapabilityMapper
+    ) -> None:
+        """An unbound tool has no binding (section 5.18.1), so a composite
+        that names it does not load (V107, section 5.18.4), whether the
+        tool was registered with no capability or its record failed to
+        load. Before, both resolved the name, with no diagnostic."""
+        mapper.register_mcp_tool("mcp__ext__post")
+        assert _codes(self._composite(mapper, "mcp__x__report", "mcp__ext__post")) == [
+            "V107"
+        ]
+        assert mapper.map_tool("mcp__x__report", {}) is UNCLASSIFIED_TOOL
+        with pytest.raises(ValueError, match="V107"):
+            mapper.register_mcp_tool(
+                "mcp__x__report", "generate", invokes=["mcp__ext__post"]
+            )
+        # A send binding with a typo in its flags does not load: unbound.
+        assert _codes(
+            mapper.load_bindings(
+                [
+                    {
+                        "tool": "mcp__x__notify",
+                        "ontology": mapper.ontology_version,
+                        "capability": "send",
+                        "flags": {"risk": "severe"},
+                    }
+                ]
+            )
+        ) == ["S303"]
+        assert _codes(self._composite(mapper, "mcp__x__wrap", "mcp__x__notify")) == [
+            "V107"
+        ]
+        assert mapper.map_tool("mcp__x__wrap", {}) is UNCLASSIFIED_TOOL
+        # A chain through another composite does not load either.
+        diagnostics = mapper.load_bindings(
+            [
+                {
+                    "tool": "mcp__x__inner",
+                    "ontology": mapper.ontology_version,
+                    "capability": "generate",
+                    "invokes": ["mcp__ext__post"],
+                },
+                {
+                    "tool": "mcp__x__outer",
+                    "ontology": mapper.ontology_version,
+                    "capability": "generate",
+                    "invokes": ["mcp__x__inner"],
+                },
+            ]
+        )
+        assert _codes(diagnostics) == ["V107", "V107"]
+        assert mapper.map_tool("mcp__x__outer", {}) is UNCLASSIFIED_TOOL
+
+    def test_a_tool_left_unbound_unloads_the_composites_that_invoke_it(
+        self, mapper: ToolCapabilityMapper
+    ) -> None:
+        mapper.register_mcp_tool("mcp__x__notify", "send")
+        assert self._composite(mapper, "mcp__x__inner", "mcp__x__notify") == []
+        assert self._composite(mapper, "mcp__x__outer", "mcp__x__inner") == []
+        assert mapper.invoked_senders(mapper.map_tool("mcp__x__outer", {})) == [
+            "mcp__x__notify"
+        ]
+        mapper.register_mcp_tool("mcp__x__notify")
+        for name in ("mcp__x__inner", "mcp__x__outer"):
+            assert mapper.map_tool(name, {}) is UNCLASSIFIED_TOOL, name
+            assert [
+                d.code_str for d in mapper.diagnostics if d.location["tool"] == name
+            ] == ["V107"]
+        assert sorted(r["tool"] for r in mapper.records) == []
+
+    def test_an_unbound_or_missing_invoked_name_may_send(
+        self, mapper: ToolCapabilityMapper
+    ) -> None:
+        """Fail closed: a composite mapping that reaches a name with no
+        binding counts it as a tool that may send (section 5.18.2)."""
+        mapping = ToolMapping(
+            capability_id="generate",
+            risk="low",
+            mutation=False,
+            requires_checkpoint=False,
+            requires_approval=False,
+            invokes=("mcp__gone__tool",),
+        )
+        assert mapper.invoked_senders(mapping) == ["mcp__gone__tool"]
+
+    def test_a_composite_takes_the_flags_its_bindings_have_now(
+        self, registry: CapabilityRegistry, mapper: ToolCapabilityMapper
+    ) -> None:
+        """A composite's effective flags include those of each binding it
+        invokes (section 5.18.4), as they are registered now: a mapper and
+        a fresh one loading the records it holds agree. Before, the
+        composite kept the flags it was loaded with."""
+
+        def flags(m: ToolCapabilityMapper, name: str) -> tuple[Any, ...]:
+            mapping = m.map_tool(name, {})
+            return (
+                mapping.risk,
+                mapping.mutation,
+                mapping.requires_checkpoint,
+                mapping.requires_approval,
+            )
+
+        def fresh() -> ToolCapabilityMapper:
+            other = ToolCapabilityMapper(registry)
+            assert other.load_bindings(mapper.records) == []
+            return other
+
+        mapper.register_mcp_tool("mcp__x__helper", "retrieve")
+        assert self._composite(mapper, "mcp__x__report", "mcp__x__helper") == []
+        assert self._composite(mapper, "mcp__x__weekly", "mcp__x__report") == []
+        assert flags(mapper, "mcp__x__weekly") == ("low", False, False, False)
+        for register in (
+            lambda: mapper.register_mcp_tool("mcp__x__helper", "mutate"),
+            lambda: mapper.register_binding(
+                {
+                    "tool": "mcp__x__helper",
+                    "ontology": mapper.ontology_version,
+                    "capability": "retrieve",
+                    "flags": {"risk": "high", "requires_approval": True},
+                }
+            ),
+            lambda: mapper.register_mcp_tool("mcp__x__helper", "retrieve"),
+        ):
+            register()
+            other = fresh()
+            for name in ("mcp__x__report", "mcp__x__weekly"):
+                assert flags(mapper, name) == flags(other, name), name
+        mapper.register_mcp_tool("mcp__x__helper", "mutate")
+        assert flags(mapper, "mcp__x__weekly") == ("high", True, True, True)
+
+    def test_a_cycle_across_two_loads_is_v105(
+        self, mapper: ToolCapabilityMapper
+    ) -> None:
+        mapper.register_mcp_tool("mcp__x__a", "retrieve")
+        assert self._composite(mapper, "mcp__x__b", "mcp__x__a") == []
+        diagnostics = self._composite(mapper, "mcp__x__a", "mcp__x__b")
+        assert _codes(diagnostics) == ["V105", "V107"]
+        assert mapper.map_tool("mcp__x__a", {}) is UNCLASSIFIED_TOOL
+        assert mapper.map_tool("mcp__x__b", {}) is UNCLASSIFIED_TOOL
 
     def test_a_record_that_does_not_load_leaves_its_tool_unbound(
         self, mapper: ToolCapabilityMapper
@@ -423,13 +637,15 @@ class TestMapperRegistration:
         assert mapping.capabilities == ("observe",)
 
     @pytest.mark.parametrize("skill", ["checkpoint", "rollback", "anything"])
-    def test_skill_is_invoke_whatever_the_skill(
+    def test_skill_is_invoke_and_the_worst_case_whatever_the_skill(
         self, mapper: ToolCapabilityMapper, skill: str
     ) -> None:
+        """The shell commands a skill's file embeds run as it loads, with no
+        hook seeing them (STANDARD 1.2.0 section 5.18.3)."""
         mapping = mapper.map_tool("Skill", {"skill": skill})
         assert mapping.capability_id == "invoke"
-        assert mapping.capabilities == ("invoke",)
-        assert not mapping.requires_checkpoint
+        assert mapping.capabilities == ("invoke", "mutate", "send")
+        assert mapping.requires_checkpoint and mapping.requires_approval
 
     def test_static_mutate_carries_its_prerequisite(
         self, mapper: ToolCapabilityMapper

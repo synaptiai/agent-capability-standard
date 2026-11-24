@@ -43,7 +43,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..errors import ErrorCode, ValidationError
-from .mapper import RISK_LEVELS, ToolMapping
+from .mapper import RISK_LEVELS, UNCLASSIFIED_TOOL, ToolMapping
+from .output import Place, place_text
 
 __all__ = [
     "ApprovalPolicy",
@@ -104,6 +105,25 @@ class ApprovalPolicy:
     expires_seconds: float | None = None
 
 
+def join_approval(
+    a: ApprovalPolicy | None, b: ApprovalPolicy | None
+) -> ApprovalPolicy | None:
+    """The approval a composite's call needs (section 5.18.4): its approval
+    covers its nested calls, so it is the strictest of its own and each
+    invoked binding's, the most approvers, the shortest expiry and a role
+    one of them sets (the first given). ``None`` when neither sets one."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    expires = [e for e in (a.expires_seconds, b.expires_seconds) if e is not None]
+    return ApprovalPolicy(
+        min_approvers=max(a.min_approvers, b.min_approvers),
+        role=a.role if a.role is not None else b.role,
+        expires_seconds=min(expires) if expires else None,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ToolBinding:
     """One tool binding record, read in full (section 5.18.1)."""
@@ -146,19 +166,21 @@ def i_json_problem(value: Any) -> str | None:
         _core.canonical_json(value)
     except (ValueError, TypeError) as e:
         return str(e)
-    stack: list[tuple[Any, str]] = [(value, "$")]
+    # Each value carries its place as a link to its parent's (memory that
+    # grows with the input); the text is built for the value refused.
+    stack: list[tuple[Any, Place]] = [(value, None)]
     while stack:
-        v, at = stack.pop()
+        v, place = stack.pop()
         if isinstance(v, float):
             if v.is_integer() and _INT_LIMIT < abs(v) < 1e21:
                 return (
-                    f"holds the number {v!r} at {at}, which canonical JSON "
-                    f"writes as the integer {int(v)}, outside ±2^53"
+                    f"holds the number {v!r} at {place_text('$', place)}, which "
+                    f"canonical JSON writes as the integer {int(v)}, outside ±2^53"
                 )
         elif isinstance(v, Mapping):
-            stack.extend((x, f"{at}.{k}") for k, x in v.items())
+            stack.extend((x, (place, k)) for k, x in v.items())
         elif isinstance(v, list):
-            stack.extend((x, f"{at}[{i}]") for i, x in enumerate(v))
+            stack.extend((x, (place, i)) for i, x in enumerate(v))
     return None
 
 
@@ -599,7 +621,8 @@ def load_bindings(
         requires: The ontology's ``requires`` edges as ``(from, to)``.
         ontology_version: The ontology's ``meta.version``.
         known: Mappings already loaded, which an ``invokes`` name may
-            resolve to.
+            resolve to. An entry that is :data:`~.mapper.UNCLASSIFIED_TOOL`
+            is an unbound tool, which resolves no name (V107).
 
     Returns:
         The loaded mappings by tool name, and every diagnostic: errors for
@@ -673,11 +696,24 @@ def load_bindings(
             continue
         candidates[binding.tool] = binding
 
-    # 5. invokes: cycles (V105), then names that resolve to no loaded
-    # binding (V107), until nothing changes.
-    graph = {tool: list(b.invokes) for tool, b in candidates.items()}
+    # 5. invokes: cycles (V105), through the bindings loaded earlier too (a
+    # set loaded in two steps closes no cycle a single set could not), then
+    # names that resolve to no loaded binding (V107), until nothing changes.
+    # A tool known as unbound (registered with no capability, or whose
+    # record did not load) has no binding (section 5.18.1).
+    bound = {
+        name: mapping
+        for name, mapping in known.items()
+        if mapping is not UNCLASSIFIED_TOOL and name not in candidates
+    }
+    graph = {
+        **{name: list(mapping.invokes) for name, mapping in bound.items()},
+        **{tool: list(b.invokes) for tool, b in candidates.items()},
+    }
     for component in _cycles(graph):
         for tool in component:
+            if tool not in candidates:
+                continue
             diagnostics.append(
                 ValidationError(
                     ErrorCode.CIRCULAR_DEPENDENCY,
@@ -694,15 +730,20 @@ def load_bindings(
             unresolved = [
                 name
                 for name in binding.invokes
-                if name not in candidates and name not in known
+                if name not in candidates and name not in bound
             ]
             if unresolved:
                 for name in unresolved:
+                    why = (
+                        "which is unbound (its record names no capability or "
+                        "did not load)"
+                        if name in known
+                        else "which no loaded binding of the set names"
+                    )
                     diagnostics.append(
                         ValidationError(
                             ErrorCode.UNRESOLVED_TARGET,
-                            f"tool '{tool}' invokes '{name}', which no loaded "
-                            f"binding of the set names; it is not loaded",
+                            f"tool '{tool}' invokes '{name}', {why}; it is not loaded",
                             {"tool": tool, "field": "invokes"},
                         )
                     )
@@ -731,6 +772,21 @@ def load_bindings(
         effective[tool] = flags
         return flags
 
+    # The approval a call needs: a composite's joins, transitively, that of
+    # each binding it invokes (section 5.18.4), as its flags do.
+    approvals: dict[str, ApprovalPolicy | None] = {}
+
+    def resolve_approval(tool: str) -> ApprovalPolicy | None:
+        if tool in approvals:
+            return approvals[tool]
+        if tool not in candidates:
+            return known[tool].approval
+        approval = candidates[tool].approval
+        for name in candidates[tool].invokes:
+            approval = join_approval(approval, resolve_approval(name))
+        approvals[tool] = approval
+        return approval
+
     # 7. Prerequisites of the capabilities each record names.
     loaded: dict[str, ToolMapping] = {}
     for tool, binding in candidates.items():
@@ -749,7 +805,7 @@ def load_bindings(
             capabilities=caps,
             invokes=binding.invokes,
             prerequisites=prerequisites,
-            approval=binding.approval,
+            approval=resolve_approval(tool),
             control=binding.control,
             classifier=binding.classifier,
             destination=binding.destination,
@@ -770,7 +826,10 @@ def check_offered(
         offered: Each name the host offers a tool under, mapped to the
             ``tool`` of the record it carries, or ``None`` for none.
         mappings: The loaded bindings by record ``tool``
-            (:func:`load_bindings`).
+            (:func:`load_bindings`), or as a layer maps them: the adapter's
+            mapper (``map_tool``) gives each with the flags the applied
+            domain profiles raise (section 5.21.3), which are effective
+            flags its record does not state; only those given are checked.
         host_actions: ``(action, tool)`` pairs: a host action that takes
             effect whenever ``tool`` is called, such as ending the turn.
         host_takes_checkpoints: The host takes checkpoints itself, so

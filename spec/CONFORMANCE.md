@@ -257,13 +257,13 @@ conformance class, SL ([§10.4](STANDARD-v1.2.0.md#104-safety-layer-conformance)
 a layer validates no catalog, and a validator checks no call. Its tests are
 normative for the class:
 
-- **Binding fixtures**, `tests/conformance/bindings/*.json` (33): a set of
+- **Binding fixtures**, `tests/conformance/bindings/*.json` (36): a set of
   tool binding records, optionally the tools a host offers and the host
   actions tied to them, and the exact diagnostics and effective flags a
   layer computes. Schema: `tests/conformance/bindings/schema/fixture.schema.json`.
   Nine of them check offered tools and host actions (§5.18.2, a SHOULD) and
   need the `offered_tools` feature.
-- **Call-sequence fixtures**, `tests/conformance/calls/*.json` (30): one
+- **Call-sequence fixtures**, `tests/conformance/calls/*.json` (32): one
   layer scope with bindings, optionally a destination policy in force, then
   calls and events (a boundary, an expired
   checkpoint or decision), each call with the outcome a conforming layer

@@ -131,8 +131,8 @@ for example `F501 CHECKPOINT_REQUIRED: ...`, with the §9.8 diagnostic in
 | F502 | The call needs an approval that has not been given for exactly these arguments |
 | F501, F503 | No unused checkpoint of this execution; F503 for a rollback when no checkpoint was ever taken |
 | V102 | A capability the call requires (other than `checkpoint`) has not run in the thread |
-| F504 | A composite invoked a tool it does not list in `invokes`; `persist` data or an `audit` record holds a credential; a `send` call's destination is not one the destination policies in force allow |
-| R402 | The output breaks its contract or is not I-JSON |
+| F504 | A composite invoked or queued a tool it does not list in `invokes`, or did so through its state after it returned; it queued a listed plain tool; it invoked a plain tool under a name `registerTools` does not register as that tool, a name registered as another tool than the one listed, or, while a destination policy is in force, a name no tool is registered under; `persist` data or an `audit` record holds a credential; a `send` call's destination is not one the destination policies in force allow, or the tool states none (no `destination` option) while a policy is in force; a nested call's output is below the minimum confidence of a profile applied to its tool or to a composite enclosing it |
+| R402 | The output breaks its contract or is not I-JSON (a nested plain call's too) |
 | R407 | The binding could not complete its checks, or the record of a call that ran |
 
 A tool that calls other tools with `state.invokeTool` lists them in
@@ -147,10 +147,24 @@ groundedTool({
 });
 ```
 
-It takes their flags, and a call its own code makes to one of them is
-covered by its approval and checkpoint (a one-shot nesting token per
-invocation); a call to a tool it does not list is refused. A stop or
-session action is bound to a `controlTool`, which is never refused:
+It takes their flags, and a call its own code makes to one of them while it
+runs is covered by its approval and checkpoint (a one-shot nesting token per
+invocation), as far as its own call held them; a call to a tool it does not
+list, or through its state after it returned, is refused. It may queue
+(`state.queueTool`) only a listed grounded or control tool, which checks
+itself when it runs. A listed tool defined with plain `defineTool` and a
+binding record is checked by the composite's state, its output included,
+and runs only under a name registered as that very tool, as does any listed
+tool while a destination policy is in force: register the agent's tools,
+by the names the runtime runs them under, once they are defined:
+
+```typescript
+import { registerTools } from '../../src/acs/layer.js';
+
+registerTools({ write_config: writeConfig, verify_config: verifyConfig, notify });
+```
+
+A stop or session action is bound to a `controlTool`, which is never refused:
 
 ```typescript
 controlTool({ name: 'finish', description: 'End the turn.', args: z.object({}) });
@@ -169,10 +183,19 @@ configureLayer({ destinations: [['https://hooks.example.com/*', '*@example.com']
 
 A `send` call whose destination no pattern of a policy matches, or whose
 destination is not a string, is refused with F504 before any approval is
-asked for. The destination is `args.destination` unless the tool says
-where with its `destination` option (`destination: (args) => args.to`); a
-`send` tool defined without the option obeys the policy all the same.
-Without `configureLayer`, no policy is in force. A tool's `profiles` add
+asked for. A `send` tool says where its destination is with its
+`destination` option, an RFC 6901 pointer into its arguments (`destination:
+'/to'`, stated in its annotation) or a function of them (`(args) =>
+args.to`). One defined without it has a destination the layer cannot tell,
+so every call of it is refused while a policy is in force (§5.18.10): the
+layer does not guess an argument the model can set while the tool's code
+sends elsewhere. Without `configureLayer`, no policy is in force.
+`configureLayer({ secrets })` registers the host's own credentials (§6.7):
+every trace entry the binding writes, the audit hook's included, is
+redacted with them, and `persist` data holding one is refused. A grounded
+tool's own `secrets` join them (an array when the tool is defined, a
+function's values at each call), so they reach every entry too, not only
+that tool's. A tool's `profiles` add
 their `allowed_destinations` for that tool and, given to a composite, for
 the sends its code invokes at any depth (each nested call the binding
 attributes to it, §5.18.4).

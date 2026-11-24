@@ -33,6 +33,24 @@ def _adapter(ontology_path: str, tmp_path: Path, **config: Any) -> GroundedAgent
     )
 
 
+async def _decide(
+    adapter: GroundedAgentAdapter, tool: str, args: dict[str, Any], call: str
+) -> Any:
+    """A call's decision as Claude Code reaches it: the PreToolUse hook,
+    then, unless the hook refused it, the permission callback. A hook's
+    refusal is returned in the callback's form (behavior, message)."""
+    from types import SimpleNamespace
+
+    hook = adapter._make_pretooluse_safety_hook()
+    out = (await hook({"tool_name": tool, "tool_input": args}, call, None)).get(
+        "hookSpecificOutput", {}
+    )
+    if out.get("permissionDecision") == "deny":
+        return SimpleNamespace(behavior="deny", message=out["permissionDecisionReason"])
+    callback = adapter._make_permission_callback()
+    return await callback(tool, args, SimpleNamespace(tool_use_id=call))
+
+
 def _decision(result: dict[str, Any]) -> str:
     return result.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
 
@@ -97,14 +115,15 @@ class TestTrackerHolds:
     def test_holds_persist_and_are_used_on_reload(
         self, tmp_path: Path, tracker: CheckpointTracker
     ) -> None:
+        """A reload is another scope: neither the held checkpoint nor the
+        free one authorises its calls (section 5.18.5)."""
         c1 = tracker.create_checkpoint(["*"], "one")
         c2 = tracker.create_checkpoint(["*"], "two")
         tracker.validate_and_reserve("A")
         reloaded = CheckpointTracker(checkpoint_dir=str(tmp_path))
-        # c2 was held: unresolved, used. c1 is free and valid.
-        assert reloaded.validate_and_reserve("B") == (True, c1)
-        held = reloaded.get_checkpoint_by_id(c2)
-        assert held is not None and held.consumed
+        assert reloaded.validate_and_reserve("B") == (False, None)
+        assert reloaded.get_checkpoint_by_id(c1) is not None
+        assert reloaded.get_checkpoint_by_id(c2) is not None
 
     def test_has_taken_since_survives_pruning(
         self, tmp_path: Path, fake_clock: FakeClock
@@ -142,31 +161,26 @@ class TestAdapterScope:
         adapter = _adapter(ontology_path, tmp_path)
         adapter.create_checkpoint(["*"], "one")
         adapter.create_checkpoint(["*"], "two")
-        callback = adapter._make_permission_callback()
-        from types import SimpleNamespace
 
         for call in ("w1", "w2"):
-            result = await callback(
-                "Write", {"file_path": call}, SimpleNamespace(tool_use_id=call)
-            )
+            result = await _decide(adapter, "Write", {"file_path": call}, call)
             assert result.behavior == "allow"
-        third = await callback(
-            "Write", {"file_path": "w3"}, SimpleNamespace(tool_use_id="w3")
-        )
+        third = await _decide(adapter, "Write", {"file_path": "w3"}, "w3")
         assert third.message.startswith("F501 CHECKPOINT_REQUIRED:")
 
     @pytest.mark.asyncio
-    async def test_overlapping_prompt_tool_calls_on_one_checkpoint(
+    async def test_overlapping_prompted_calls_on_one_checkpoint(
         self, ontology_path: str, tmp_path: Path
     ) -> None:
+        async def host(*_: Any) -> Any:  # never reached: no call is allowed
+            raise AssertionError
+
         adapter = GroundedAgentAdapter(
             GroundedAgentConfig(
                 ontology_path=ontology_path, checkpoint_dir=str(tmp_path / ".cp")
             )
         )
-        options = adapter.wrap_options(
-            ClaudeAgentOptions(permission_prompt_tool_name="mcp__approvals__prompt")
-        )
+        options = adapter.wrap_options(ClaudeAgentOptions(can_use_tool=host))
         adapter.create_checkpoint(["*"], "one")
         (pre,) = options.hooks["PreToolUse"][-1].hooks
         call = {
@@ -185,6 +199,48 @@ class TestAdapterScope:
                 await hook({"hook_event_name": "Stop", "session_id": "s1"}, None, None)
         assert not adapter.has_valid_checkpoint()
         assert adapter.checkpoint_tracker.held_by("w1") is None
+
+    @pytest.mark.asyncio
+    async def test_another_adapters_checkpoint_authorises_nothing(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        """Two adapters on one checkpoint_dir are two scopes: B reads A's
+        checkpoint back from the shared state file but cannot use it, and A
+        still can (STANDARD 1.2.0 section 5.18.5). Before, B ran an unbound
+        tool and a Write on A's checkpoint, and A then ran its own Write on
+        it too: one checkpoint, two gated calls in two scopes."""
+        a = _adapter(ontology_path, tmp_path)
+        taken = a.create_checkpoint(["*"], "A's")
+        b = _adapter(ontology_path, tmp_path)
+        assert not b.has_valid_checkpoint()
+        for tool, call in (("mcp__ext__do_it", "b1"), ("Write", "b2")):
+            refused = await _decide(b, tool, {"file_path": "x"}, call)
+            assert refused.message.startswith("F501 CHECKPOINT_REQUIRED:")
+        b_pre = b._make_pretooluse_safety_hook()
+        result = await b_pre(
+            {"tool_name": "mcp__ext__do_it", "tool_input": {}}, "b3", None
+        )
+        assert _reason(result).startswith("F501 CHECKPOINT_REQUIRED:")
+        ran = await _decide(a, "Write", {"file_path": "a"}, "a1")
+        assert ran.behavior == "allow"
+        assert a.call_records[-1]["checkpoint_id"] == taken
+
+    @pytest.mark.asyncio
+    async def test_a_checkpoint_left_by_an_earlier_process_authorises_nothing(
+        self, ontology_path: str, tmp_path: Path
+    ) -> None:
+        """A restart is a new scope: the checkpoint an earlier process took
+        and never used authorises none of the new adapter's calls. Before,
+        the new adapter ran a second Write on it after using its own."""
+        _adapter(ontology_path, tmp_path).create_checkpoint(["*"], "earlier")
+        later = _adapter(ontology_path, tmp_path)
+        unbound = await _decide(later, "mcp__ext__do_it", {}, "m1")
+        assert unbound.message.startswith("F501 CHECKPOINT_REQUIRED:")
+        later.create_checkpoint(["*"], "its own")
+        first = await _decide(later, "Write", {"file_path": "w1"}, "w1")
+        assert first.behavior == "allow"
+        second = await _decide(later, "Write", {"file_path": "w2"}, "w2")
+        assert second.message.startswith("F501 CHECKPOINT_REQUIRED:")
 
     @pytest.mark.asyncio
     async def test_two_sessions_on_one_adapter_share_boundaries(

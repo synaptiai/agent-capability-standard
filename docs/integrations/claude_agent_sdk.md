@@ -159,8 +159,8 @@ The adapter is a safety layer on a tool-calling host ([Standard 1.2.0 §5.18](..
 | **Edit** | **mutate** | **high** | **Yes** | **Yes** |
 | **MultiEdit** | **mutate** | **high** | **Yes** | **Yes** |
 | **NotebookEdit** | **mutate** | **high** | **Yes** | **Yes** |
-| Task, Agent | delegate | medium | No | No |
-| Skill | invoke | medium | No | No |
+| **Task, Agent** | **delegate, mutate, send** | **high** | **Yes** | **Yes** |
+| **Skill** | **invoke, mutate, send** | **high** | **Yes** | **Yes** |
 | AskUser, AskUserQuestion | inquire | low | No | No |
 | TodoRead, TaskList, TaskGet | recall | low | No | No |
 | TodoWrite, TaskCreate, TaskUpdate | persist | low | No | No |
@@ -168,9 +168,9 @@ The adapter is a safety layer on a tool-calling host ([Standard 1.2.0 §5.18](..
 | BashOutput, TaskOutput, ListMcpResourcesTool | observe | low | No | No |
 | ReadMcpResourceTool | retrieve | low | No | No |
 | ExitPlanMode | inquire | low | No | No |
-| **any other tool** | **unbound** | **high** | **Yes** | **Yes** |
+| **any other tool**, `Monitor`, `KillShell` and `TaskStop` (they run a command or stop a process) included | **unbound** | **high** | **Yes** | **Yes** |
 
-`Skill` is `invoke` whatever the skill: loading a skill's instructions saves and restores nothing. The state-saving or restoring call the skill leads to is classified on its own, so `Skill(checkpoint)` takes no checkpoint; the skill's `git stash create` does ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). Claude Code tools that run a command or stop a process (`Monitor`, `KillShell`, `TaskStop`) are not in the table on purpose: they are unbound.
+`Skill`, `Agent` and `Task` are their own capability (`invoke`, `delegate`) and Bash's worst case, `mutate` and `send`, whatever the skill or agent: Claude Code runs the shell commands a skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's arguments substituted into them) as the skill loads, under its `allowed-tools`, and the hooks and MCP servers a subagent's definition names as the subagent runs, and none of these reaches the adapter's hooks; a project's skill or agent can take any name, a built-in agent's included ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). So each such call needs a checkpoint and approval, and a destination policy refuses it. Loading a skill's instructions saves and restores nothing: `Skill(checkpoint)` takes no checkpoint, the skill's `git stash create` does ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)), so run `git stash create` before the Skill call too.
 
 Each mapping carries the capabilities the call performs (`capabilities`, primary first) and its **prerequisites**, the `from` capabilities of the `requires` edges into them: `checkpoint` for `mutate`, `send` and `rollback`.
 
@@ -184,31 +184,43 @@ In strict mode such a tool is refused until a checkpoint exists, then put to the
 adapter.mapper.register_mcp_tool("mcp__wiki__get_page", capability_id="retrieve")
 ```
 
-A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused.
+A tool registered with no capability is unbound too, and is reported as W617 (`UNBOUND_TOOL`) in `adapter.mapper.warnings`. `grounded_agency.check_offered()` checks the tools a host offers against the loaded bindings: W617 for an unbound one, V111 for a binding whose `tool` is not the offered name, V102 for a tool that needs a capability no offered tool performs, and F506 for a host action tied to a tool that can be refused. It checks the flags of the mappings it is given: under domain profiles, give it the mappings the adapter's mapper gives (`adapter.mapper.map_tool(name, {})`), which carry the flags the profiles raise; `load_bindings` gives each record's alone.
 
 ### Bash Command Classification
 
-Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability. A command whose effect the mapper does not know gets Bash's worst case, `mutate` and `send` (`execute` and `send` for an interpreter): it may transmit anywhere, so a destination policy refuses it (below).
+Bash commands are classified by what they do ([§5.18.3](../../spec/STANDARD-v1.2.0.md#5183-classification)). A command counts as read-only only when it is on the mapper's allow-list; every other command is a high-risk mutation that needs a checkpoint and approval, whatever its capability. A command whose effect the mapper does not know gets Bash's worst case, `mutate` and `send` (with `execute` first for an interpreter, wherever it appears in the command, and `send` first for a program that sends): it may transmit anywhere, so a destination policy refuses it (below). Only the command's program, its first word as the shell passes it, gives a class narrower than that (`observe` for the allow-list, `mutate` for `rm` and the local git changes); text in an argument never does, so `curl URL -A 'git reset'` is curl's worst case, not `git reset`'s `mutate`.
 
-The command line is read with the shell's quoting rules and split into simple commands at `&&`, `||`, `;`, `|` and `&`. A line gets the worst case when it redirects output to anything but `/dev/null` (or input from `/dev/tcp/`), opens a subshell or a here-document, has an unbalanced quote, or expands what the mapper cannot see: a `$` outside single quotes, a brace expansion, backticks, `eval` or `source`. An allow-listed command is read-only only with the arguments it reads with: `sort`, `uniq`, `date`, `hostname` and `file` take a listed set of options and operands (`sort -o` or `--compress-program`, `uniq IN OUT`, `date -s`, `hostname NAME`, `file -C` and any abbreviation of a writing option, `sort --o=x`, write); `find -delete` or `-exec`, `git ... --output` (or an abbreviation), `git branch NAME`, `git remote` other than `-v` or `get-url`, and `less -o` write or ask another host, as do `pip list`, `pip show` and `npm list` with an option off their lists; and an unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`, `hostname`, `file`, `git`, `less` or `more` command may become an option (quote a pattern: `git log -- '*.py'`). `sed`, `awk` and `env` are not on the allow-list, since they can write a file or run another command whatever else they do. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`.
-
-**`git stash`**, only when the line is exactly one simple command with no option that writes: `git stash create` takes a checkpoint, `git stash list` and `git stash show` only read, and `git stash pop <commit>` and `git stash apply <commit>` are `rollback` when `<commit>` is the full id of a commit a checkpoint of this adapter's scope recorded (the commit `git stash create` printed, kept as the checkpoint's `metadata["commit"]`). git applies any merge commit as if it were a stash, so any other revision, an abbreviated id, an option, a bare `pop` or `apply` (which read `refs/stash`, where `git stash create` writes nothing), any other form (`store`, `push`, `drop`, none) and `git -C dir stash ...` are a gated mutation.
+The command line is read with the shell's quoting rules and split into simple commands at an unquoted `&&`, `||`, `;`, `|` and `&`; a quoted or escaped operator (`'<'`, `";"`, `\;`) is the word the shell passes, so `grep ';' f` is one command and `find f '<' -execdir ...` keeps its `-execdir`. The allow-list matches a command's exact name, so `LS` or `/bin/ls` is not `ls`, and a two-word entry's program and subcommand as two words: bash runs a first word that holds a blank (a quoted `"git status"`) as the program of that name, which is on no list. An allow-listed command is read-only only with the arguments it reads with, some commands that look like reads are not on the list, and a line the mapper cannot read as the shell will gets the worst case whatever its commands: the table's rows from "A line that redirects" on list them.
 
 **A line of several commands** takes the strictest flags and every prerequisite of all the commands that are not read-only, with their capabilities in order: `curl -X POST u -d x; rm f` is `send` and `mutate`. So `git stash pop && rm -rf x` is a gated `mutate`, never a `rollback`.
 
 | Pattern | Capability | Risk | Checkpoint | Approval |
 |---------|-----------|------|------------|----------|
 | `ls`, `cat`, `head`, `pwd` | observe | low | No | No |
-| `git status`, `git log`, `git rev-parse`, `git ls-files` | observe | low | No | No |
-| `git stash create` | checkpoint | low | No | No |
-| `git stash pop <commit>`, `git stash apply <commit>`, a commit a checkpoint recorded | rollback | medium | No (one taken earlier) | No |
-| `git stash pop`, `git stash apply` of anything else | mutate | high | Yes | Yes |
-| `rm`, `mv`, `chmod`, `git stash push` | mutate | high | Yes | Yes |
-| `curl -X POST`, `ssh` | send | high | Yes | Yes |
+| `git status`, `git log`, `git rev-parse`, `git ls-files`, and `git stash list` or `git stash show` as the line's only command with no option that writes (not in a partial clone, a repository with submodules, a shipped git directory, or one whose own configuration or hooks name a program git runs) | observe | low | No | No |
+| `git stash create`, the line's only command | checkpoint | low | No | No |
+| `git stash create` where the repository's own configuration (local, worktree, the files they include) names a program git runs (`core.fsmonitor` other than `true`/`false`, a filter, a diff or merge driver, a signature program, a pager) or its hooks hold `post-index-change`, as a project delivered with its `.git` can (take the first checkpoint with `create_checkpoint`) | checkpoint, execute, mutate, send | high | Yes | Yes |
+| `git stash pop <commit>` or `git stash apply <commit>`, the line's only command with no option, where `<commit>` is the full id of a commit a checkpoint of this adapter's scope recorded (the commit `git stash create` printed, kept as the checkpoint's `metadata["commit"]`) | rollback | medium | No (one taken earlier) | No |
+| Any other `git stash` (git applies any merge commit as if it were a stash): `pop` or `apply` of another revision, an abbreviated id or with an option, a bare `pop` or `apply` (they read `refs/stash`, where `git stash create` writes nothing), any other form (`store`, `push`, `drop`, none), and one in a line of several commands | mutate | high | Yes | Yes |
+| `rm`, `mv`, `chmod`, and the local git changes: `git reset`, `git checkout --`, `git clean`, `git branch -d`, `git stash push` | mutate | high | Yes | Yes |
+| A local git change, or a restore of anything but a recorded checkpoint, in a partial clone or a repository with submodules (`git reset` fetches the objects it lacks), or where the repository's configuration names a program git runs or its hooks hold `post-index-change`, `reference-transaction` or `post-checkout` (`mapper.git_change_may_run`); a recorded restore where the configuration names a program | mutate, send | high | Yes | Yes |
+| A local git change that writes the tree (`git reset`, `git checkout --`, `git stash ...`), and a recorded restore, where any scope, the user's included, configures a filter's `smudge` or `process` command (`mapper.git_filter_may_run`: git-lfs's, which `git lfs install` writes, asks the LFS server the repository's `.lfsconfig` names for each object its store lacks, sending its id; the two commands `git lfs install --skip-smudge` writes count as none) | mutate, send | high | Yes | Yes |
+| `curl -X POST`, `ssh`, `scp`, `rsync` as the command's program (they write local files too: `curl -o`) | send, mutate | high | Yes | Yes |
 | `git push`, `npm publish`, `docker push`, `kubectl apply` | mutate, send | high | Yes | Yes |
-| Asking another host: `npm view`, `kubectl get`, `git remote show`, `pip list --outdated`, `npm list --registry=…`, `cat < /dev/tcp/…` | mutate, send | high | Yes | Yes |
-| `python -c`, `node -e`, `python script.py` | execute, send | high | Yes | Yes |
-| any other command (`sed`, `awk`, `env`, `curl URL`, `gh`, `make`) | mutate, send | high | Yes | Yes |
+| Asking another host: `npm view`, `npm list`, `kubectl get`, `docker ps`, `docker rm`, `docker rmi`, `docker prune`, `git remote show`, `cat < /dev/tcp/…`, a git read in a partial clone or a repository with submodules | mutate, send | high | Yes | Yes |
+| Running what the repository names: a git read where its own configuration or hooks name a program git runs (`mapper.git_config_may_run`) | mutate, send | high | Yes | Yes |
+| Setting the shell's state: `printf` with an option (`printf -v PATH .; ls`: `-v NAME` sets a variable the line's later commands run with, an array subscript evaluated as arithmetic runs code) or a word bash expands | mutate, send | high | Yes | Yes |
+| `python -c`, `node -e`, `python script.py`, anywhere in the command (`env python3 -c ...`) | execute, mutate, send | high | Yes | Yes |
+| A line that redirects output to anything but `/dev/null` or `>&N` (ASCII digits: `>&١` writes a file) or input from `/dev/tcp/`, names no file after a redirection, holds a simple command with a redirection and no words (`ls; <f`: zsh, the Bash tool's shell where it is the user's, as on macOS, runs `$READNULLCMD <f` for it, a pager whose `LESSOPEN` or lesskey preprocessor can run code), or puts a `{name}` word before one (bash assigns the variable: `echo x {PATH}>/dev/null` sets `PATH`) | mutate, send | high | Yes | Yes |
+| A line that opens a subshell or a here-document, has an unbalanced quote, or expands what the mapper cannot see: a `$` outside single quotes, a brace expansion (bash closes a group only at a `}` after its first comma: `{a},-o}x` is `a}x -ox`), backticks, `eval` or `source` | mutate, send | high | Yes | Yes |
+| A line with a character outside ASCII right before a backslash, `\|`, `{`, `}` or another character bash treats specially, quoted or not: the mapper reads the line as Unicode text, and bash reads its bytes in the user's locale, where in a double-byte one (GBK, GB18030, BIG5, Shift JIS) the two can be one character, so `ls ぁ\;touch f` is two commands there and `find t1 -name ぁ\|ls -o -delete` one find, which deletes | mutate, send | high | Yes | Yes |
+| An allow-listed command with an argument it does not read with: `sort`, `uniq`, `date`, `hostname` and `file` take a listed set of options and operands (`sort -o` or `--compress-program`, `uniq IN OUT`, `date -s`, `hostname NAME`, `file -C` and any abbreviation of a writing option, `sort --o=x`, write); `find -delete` or `-exec`, `git ... --output` (or an abbreviation), `git branch NAME` and `git remote` other than `-v` or `get-url` write or ask another host; and an unquoted `*`, `?` or `[` in a `find`, `sort`, `uniq`, `date`, `hostname`, `file`, `printf` or `git` command may become an option (quote a pattern: `git log -- '*.py'`) | mutate, send | high | Yes | Yes |
+| Commands that look like reads and are not on the allow-list: every `pip` command, `pip list` and `pip show` included (pip runs the program its site configuration's `python =` names, `sys.prefix/pip.conf`, read even with `--isolated`, where `python -m venv .venv` keeps the one a repository ships, and the interpreter it starts runs the `.pth` files of its site-packages, which an editable install of the project puts there); `sed` with `-i` or not (its `e` command and `s///e` flag run a command), `awk`, `env`, `less` and `more`, which can write a file or run another command whatever else they do | mutate, send | high | Yes | Yes |
+| any other command (`curl URL`, `gh`, `make`, `git -C dir stash ...`), one whose first word is quoted or spelt otherwise (`'rm -rf' x`, `RM`), and a line over 4096 bytes | mutate, send | high | Yes | Yes |
+
+**In a partial clone** git fetches what a read lacks from the promisor remote, sending it the object id the command names, and **in a repository with submodules** (`modules/` in its git directory, or a gitlink in its index) a read that looks into one (`--submodule=diff`, `diff.submodule`, `git status`) fetches into that submodule's object store, a partial clone's included: there, or where git cannot say, a git command that would only read (`git log`, `git stash show`, ...) gets the worst case (`mapper.git_may_fetch`), and so does one that changes the repository or work tree (`git reset` fetched the objects of the commit it moved to). The adapter asks about the call's directory, the hook input's `cwd`, which `mapper.map_tool(tool, args, cwd)` also takes. `git stash create` and the restore of a recorded checkpoint keep their classes there (a restore takes the worst case where a smudge filter is configured, above).
+
+**In a git directory a repository may have shipped** (one git did not make for a work tree: not a `.git` directory, nor a linked worktree's or a submodule's under one; a repository can ship a directory holding `HEAD`, `objects/` and `refs/`, which git takes for a git directory), git reads that directory's `config` and runs what it names (`core.fsmonitor` for `git status` and `git stash create`, a textconv driver for `git log -p`): there every git command the mapper would let pass, a read, `git stash create` or a restore, gets the worst case (`mapper.git_dir_may_be_content`). The adapter's own git commands run with `core.fsmonitor` and hooks turned off and fetch nothing.
 
 ### MCP Tool Mapping
 
@@ -259,7 +271,8 @@ flowchart TB
 
 `metadata` may hold `capability`, `domain`, `flags` (`risk`, `mutation`, `requires_checkpoint`, `requires_approval`), `additional_capabilities`, `classifier`, `invokes`, `approval` (`min_approvers`, `role`, `expires`), `control` and `destination`; the flat legacy keys `capability_id`, `risk`, `mutation`, `requires_checkpoint` and `requires_approval` are still accepted (a `capability` and a `capability_id` that disagree raise `ValueError` with S303). A registration follows the Standard's rules ([§5.18.1](../../spec/STANDARD-v1.2.0.md#5181-tool-bindings)):
 
-- **A binding that does not load is refused.** A capability the ontology does not define (V101), a member of the wrong type (S303), an `invokes` name that does not resolve (V107) or a cycle (V105) raises `ValueError` whose message opens with each code and name, and no server is created.
+- **A binding that does not load is refused.** A capability the ontology does not define (V101), a member of the wrong type (S303), an `invokes` name that does not resolve (V107) or a cycle (V105) raises `ValueError` whose message opens with each code and name, and no server is created. An `invokes` name resolves to a bound tool only: one registered with no capability, or whose record did not load, is unbound and resolves nothing (V107), and a cycle through bindings loaded earlier is V105 too.
+- **A composite follows what it invokes** ([§5.18.4](../../spec/STANDARD-v1.2.0.md#5184-composite-tools)). When a tool is registered or loaded again, every composite that invokes it, directly or through another composite, is loaded again from its record: it takes the flags the tool now has, and one whose tool is now unbound does not load (V107, in `adapter.mapper.diagnostics`) and is unbound itself. Its approval covers their nested calls, so its call asks for the strictest approval of its own and theirs (the most `min_approvers`, the shortest `expires`, a `role` one of them sets): one that reaches a binding needing two approvers or a role is refused with F502, as that binding is.
 - **Flags are effective flags** ([§5.2.1](../../spec/STANDARD-v1.2.0.md#521-safety-flags)): the stricter of the declaration and the ontology flags of every capability named and of every binding invoked. A declared `risk` of `high` also makes `mutation` and `requires_checkpoint` true unless they are declared.
 - **A weaker declaration has no effect.** `capability="mutate"` with `flags={"risk": "low"}` is still high-risk and still needs a checkpoint. Each such flag is kept in `adapter.mapper.warnings` as a W602 (`SAFETY_FLAG_DOWNGRADE`) diagnostic whose `location` holds `tool`, `capability` and `field`. The one exception is `mutation: false` on a capability the ontology marks `mutation_overridable` (`audit`), when no other capability is named.
 - **A tool with no capability is unbound** ([§5.18.2](../../spec/STANDARD-v1.2.0.md#5182-unbound-tools)): the strictest case, reported as W617. It used to be registered as `execute`.
@@ -278,7 +291,7 @@ for w in adapter.mapper.warnings:
 
 A tool of another MCP server bound this way performs its capability, so its result must carry that capability's output, as a served tool's must (the output contract, below): the adapter checks it at PostToolUse.
 
-**`require_layer`** (default `True`): each tool of the server refuses to run, with `R407 SAFETY_CHECK_FAILED`, unless the adapter's layer allowed this exact call (its tool name and arguments), so a session whose options were not wrapped with `wrap_options()` cannot run it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)). Every tool with a callable `handler` is guarded, whatever its class; one without is refused with a `ValueError` that opens with R407, and nothing is registered. `require_layer=False` restores the earlier behaviour and is outside class SL.
+**`require_layer`** (default `True`): each tool of the server refuses to run, with `R407 SAFETY_CHECK_FAILED`, unless the adapter's layer allowed this exact call (its tool name and arguments), so a session whose options were not wrapped with `wrap_options()` cannot run it ([§5.18.8](../../spec/STANDARD-v1.2.0.md#5188-refusals-records-and-failure)). The decision is granted at the allow, never at the ask, and every refusal withdraws it. Every tool with a callable `handler` is guarded, whatever its class; one without is refused with a `ValueError` that opens with R407, and nothing is registered. `require_layer=False` restores the earlier behaviour and is outside class SL.
 
 **The output contract** ([§5.18.10](../../spec/STANDARD-v1.2.0.md#51810-capability-checks)): a tool with a capability returns that capability's output as the I-JSON text of the output object, its one text content item ([§5.18.9](../../spec/STANDARD-v1.2.0.md#5189-text-only-results)). The SDK's server passes a result's `content` and `is_error` to the session and drops every other member, `structuredContent` included, so the text is what the model reads and what the adapter checks; a tool may still return `structuredContent` beside the text, and it is not read.
 
@@ -304,7 +317,7 @@ flowchart TB
 
 ## Checkpoint Lifecycle
 
-Checkpoints are the core safety mechanism ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). One checkpoint authorises one call whose effective `requires_checkpoint` is true:
+Checkpoints are the core safety mechanism ([§5.18.6](../../spec/STANDARD-v1.2.0.md#5186-checkpoints-for-calls)). One checkpoint authorises one call whose effective `requires_checkpoint` is true, a call of the adapter that took it ([§5.18.5](../../spec/STANDARD-v1.2.0.md#5185-scope-order-and-concurrency)). A checkpoint the adapter reads back from `checkpoint_dir`, taken by an earlier process or by another adapter on that directory, can be found and restored, but authorises nothing, counts as no checkpoint taken in its scope and names no commit a `git stash apply` restores. Adapters that share the directory merge its state file under a file lock, so none drops or rewinds another's. A tracker merges no state file git tracks, reads one it cannot parse (nested too deeply included) as none, and a failed write never stops a transition. The tracker writes in `checkpoint_dir` and its `archive/` without following a symbolic link (at those directories, at each directory on the way to a relative `checkpoint_dir`, and at the files), and neither reads nor appends to an archive git tracks: a repository can ship a link there, and with one the tracker keeps its records in memory and logs a warning. A checkpoint's life:
 
 ```mermaid
 ---
@@ -320,9 +333,9 @@ flowchart TB
 ```
 
 - **Which one.** The most recently taken of the valid checkpoints no other call holds, the active one or one in history (the reference executor's rule): once the latest is used, an earlier valid one authorises the next call.
-- **When it is used up.** When the call is allowed to start: at the permission callback's allow, re-checked in one atomic step (`CheckpointTracker.consume_if_valid`), or, for a call that ran without passing the callback (a tool in `allowed_tools`, a call that needs no approval, a permission prompt tool's decision), at PostToolUse. A call that started uses it whatever its outcome: PostToolUseFailure uses it too, since a failed call may have changed something.
-- **Holds.** A call holds its checkpoint from PreToolUse until it is allowed or refused. A hold the adapter cannot resolve (it lapses with its checkpoint, or after `checkpoint_reservation_seconds`; it is found on reload; the turn ends with the call unreported) counts as used.
-- **Validity.** A checkpoint authorises nothing after an execution boundary, the Stop of any session the adapter serves (one adapter is one layer scope; serve sessions that must not share boundaries with separate adapters), or after its maximum age, `expiry_minutes`, at most 30.
+- **When it is used up.** When the call is allowed to start: at the permission callback's allow, re-checked in one atomic step (`CheckpointTracker.consume_if_valid`), or, for a call that ran without passing the callback (a tool in `allowed_tools`, a call that needs no approval), at PostToolUse. A call that started uses it whatever its outcome: PostToolUseFailure uses it too, since a failed call may have changed something.
+- **Holds.** A call holds its checkpoint from PreToolUse until it is allowed or refused. A hold the adapter cannot resolve (it lapses with its checkpoint, or after `checkpoint_reservation_seconds`; the turn ends with the call unreported) counts as used.
+- **Validity.** A checkpoint authorises nothing after an execution boundary, the Stop or the next prompt (UserPromptSubmit) of any session the adapter serves (one adapter is one layer scope; serve sessions that must not share boundaries with separate adapters), or after its maximum age, `expiry_minutes`, at most 30.
 - **Prerequisites.** A `mutate`, `send` or `rollback` call needs a checkpoint taken in the scope, since the adapter started (F501; F503 for a `rollback` call, which uses none and can restore an expired or used checkpoint). Any other missing prerequisite is V102.
 - **None valid.** The adapter refuses with F501 and does not take a checkpoint on the call's behalf: it cannot know what the call will change. The model takes one with a state-saving call.
 
@@ -346,7 +359,8 @@ checkpoint_id = adapter.checkpoint_tracker.create_checkpoint(
 
 # Method 3: Autonomous. Claude invokes the checkpoint skill, whose
 # instructions have it run one Bash call, git stash create "checkpoint:<id>".
-# The Skill call takes no checkpoint; the checkpoint recorder (a PostToolUse
+# The Skill call takes no checkpoint (it needs one, and approval, as the
+# commands a skill's file embeds run unseen); the checkpoint recorder (a PostToolUse
 # hook for every tool) records one when git stash create succeeds, with the
 # commit it printed, or HEAD for a clean tree, as the restore point.
 ```
@@ -364,7 +378,7 @@ assert not adapter.has_valid_checkpoint()
 
 ## PreToolUse Hook Enforcement
 
-The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop and SubagentStop hooks. PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`, and applies the rules of §5.18 in this order:
+The adapter injects PreToolUse, PostToolUse, PostToolUseFailure, Stop, UserPromptSubmit and SubagentStop hooks. PreToolUse runs for every tool call, including pre-approved ones that never reach `can_use_tool`, and applies the rules of §5.18 in this order:
 
 ```mermaid
 ---
@@ -392,7 +406,7 @@ flowchart TB
   5. *Approval (F502).* With `approval="ask"` (the default), a call whose mapping requires approval is answered `"ask"`, in the permission modes that put it to a person; see [Approval](#approval). Each refusal here releases the hold step 4 took.
 
   For a pre-approved tool this hook is the only check that runs, so it does not let errors through: a tool the mapper does not know or cannot classify is unbound, and any other error refuses the call with R407 in strict mode and is logged in non-strict mode.
-- **PostToolUse**: Collects evidence anchors; the checkpoint recorder takes a checkpoint for a successful state-saving call; a call that still holds a checkpoint uses it, whatever its outcome; a call that succeeded counts its capabilities as run, for later prerequisites. The result of a bound tool of another MCP server is checked here, and replaced with the refusal when it fails the check; when the hook itself fails, such a result is replaced with R407, never passed on unchecked.
+- **PostToolUse**: Collects evidence anchors; the checkpoint recorder takes a checkpoint for a successful state-saving call, classified in the directory it ran in (its input's `cwd`, else the one the PreToolUse hook kept; none when the two differ), so a `git stash create` that hook classified the worst case there (a shipped git directory, a repository's `git` on `PATH`) takes none; a call that still holds a checkpoint uses it, whatever its outcome; a call that succeeded counts its capabilities as run, for later prerequisites. The result of a bound tool of another MCP server is checked here, and replaced with the refusal when it fails the check; when the hook itself fails, such a result is replaced with R407, never passed on unchecked.
 - **PostToolUseFailure**: A failed or interrupted call uses the checkpoint it held.
 - **Stop**: The end of a turn is an execution boundary. Holds of the stopping session's calls count as used, and every checkpoint the adapter holds stops authorising anything.
 - **SubagentStop**: Holds of the finished subagent's calls count as used; not a boundary.
@@ -422,7 +436,11 @@ The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, a
 - **The digest is recorded.** The adapter records with each decision the §5.14 digest of the shown value, `[{"action": <tool>, "capability": <capability, or null when unbound>, "args": <the arguments>}]` (`_core.approval_digest`). Arguments that are not I-JSON are refused with F502: an integer beyond ±2^53, or a float that canonical JSON writes as one (1.8e16), a lone surrogate, a value that is not JSON.
 - **One decision per call.** Each gated call goes to the prompt; an identical later call asks again.
 - **What a prompt cannot give** is refused with F502: a binding whose `approval.min_approvers` is above 1, or that names an `approval.role`.
+- **Expiry.** A binding's `approval.expires` is how long after the request a decision may arrive ([§5.18.7](../../spec/STANDARD-v1.2.0.md#5187-approval-for-calls)): the permission callback refuses with F502 an allow that comes later than that after PreToolUse asked, and the call does not run.
+- **The binding when the decision arrives.** A decision counts against the binding as it is when it arrives: PreToolUse keeps the mapping it checked the call under, and the permission callback classifies the call again before it asks your callback and after your callback allows. A call whose binding changed in between (you registered the tool again, or a composite was loaded again because a tool it invokes was) is checked again under the new binding and, where it requires approval, refused with F502: the decision was asked under the other. The new binding's `min_approvers` above 1 or `role` is F502 too, and its `approval.expires` counts from PreToolUse's ask. Register a tool's binding before its calls, not while one waits for a decision.
 - **Changed arguments.** When your callback allows with an `updated_input` other than the input, the adapter classifies the new arguments again and refuses the call if they need approval (F502: the decision was on other arguments), or a checkpoint or prerequisite the call does not hold (F501, F503, V102).
+- **What the hook checked.** The permission callback decides only on what the PreToolUse hook checked of the call: the hook keeps, by `tool_use_id`, the digest of the input it checked, the call's directory and the time of its ask, until the call reports back or the callback refuses it (no boundary clears them). An input other than that one, as when another PreToolUse hook answers with `updatedInput`, is changed arguments: checked again against the secret and destination rules (F504), and refused when it needs a checkpoint the call does not hold (F501) or approval (F502). A call the hook has no record of is refused with R407. A call the hook passed that Claude Code's own rules allow without the callback (`allowed_tools`, an allow rule, `bypassPermissions`) runs with another hook's `updatedInput` unchecked: keep the tools such a hook rewrites out of those rules.
+- **Wrapping again.** Options `wrap_options()` returned can be wrapped again (after setting a `permission_prompt_tool_name` or a `permission_mode`, say): the hooks are kept, and the safety hook is replaced by one built for the options now wrapped.
 
 ### Who Decides
 
@@ -431,19 +449,19 @@ The ontology sets `requires_approval: true` on `execute`, `mutate` and `send`, a
 title: Who decides a call that requires approval
 ---
 flowchart TB
-  accDescr: In permission modes default, acceptEdits and plan, PreToolUse answers ask with F502; in any other mode it refuses with F502. If the wrapped options have a can_use_tool callback, the adapter's callback checks the checkpoint, calls yours, re-checks changed arguments and uses the checkpoint at the allow; anything but an allow is F502 and releases the hold. A permission prompt tool decides when there is one. With neither, the call is refused with F502.
+  accDescr: In permission modes default, acceptEdits and plan, PreToolUse answers ask with F502; in any other mode it refuses with F502. If the wrapped options have a can_use_tool callback, the adapter's callback checks the checkpoint, calls yours, refuses a decision later than the binding's approval.expires, re-checks changed arguments and uses the checkpoint at the allow; anything but an allow is F502 and releases the hold. A permission prompt tool decides when there is one, a call that needs no checkpoint and whose binding sets no expiry. With neither, the call is refused with F502.
   mode{"Mode default, acceptEdits or plan?"} -->|no| f502["deny: F502"]
   mode -->|yes| ask["PreToolUse: ask, F502"]
   ask --> q1{"A can_use_tool callback?"}
   q1 -->|yes| cb["Yours decides; the adapter re-checks and uses the checkpoint"]
   q1 -->|no| q2{"A permission prompt tool?"}
-  q2 -->|yes| ppt["Claude Code asks that tool"]
+  q2 -->|yes| ppt["Claude Code asks that tool; a call that needs a checkpoint was refused first, R407"]
   q2 -->|no| none["deny: F502, no one can give it"]
 ```
 
 The adapter relies on a prompt only in the Claude Code permission modes that put it to a person: `default`, `acceptEdits` and `plan` (`grounded_agency.adapter.PROMPTING_PERMISSION_MODES`, not configurable). The mode is read from the hook input, else from the wrapped options' `permission_mode`. In `bypassPermissions` the documentation does not say that a hook's `"ask"` reaches the callback, in `auto` a classifier can answer the prompt, and `dontAsk` denies the call anyway, so in those modes, and in any mode the adapter does not know, a call that requires approval is refused with F502: it could otherwise run on a decision no person made. To run such a session, set `approval="off"`, which is outside class SL.
 
-The adapter installs no callback beside a permission prompt tool, because the SDK refuses the two together. PreToolUse still holds the call's checkpoint. A call the prompt tool refuses is never reported to the adapter, so its checkpoint is lost: it counts as used when its hold lapses or the turn ends, and the next gated call needs a new checkpoint. With neither a callback nor a prompt tool, the call is refused, because no one can decide it.
+The adapter installs no callback beside a permission prompt tool, because the SDK refuses the two together. It then never sees a call allowed, so it cannot check a checkpoint again at the allow, nor when the decision came: PreToolUse refuses a call that needs a checkpoint (R407), one whose binding sets `approval.expires` (F502) and one of a served tool (R407); the prompt tool decides the rest. With neither, the call is refused: no one can decide it.
 
 Your callback is also called for the calls Claude Code asks about on its own account, whether or not their capability requires approval. When it refuses a call that requires approval, the adapter's answer is `F502 APPROVAL_REQUIRED: <tool> was not approved: <your message>`.
 
@@ -508,7 +526,7 @@ except CapabilityOutputError as e:
 
 ## Conformance (class SL)
 
-The adapter claims the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundary is the Stop of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it applies every check of §5.18.10. The output-contract row applies to the results it receives as capability outputs, those of every MCP tool bound to a capability, in the form the session reads them (R402): a tool `create_grounded_mcp_server` serves checks its own, and the PostToolUse hook checks another server's. Claude Code's own tools return results in their own forms, which carry no capability output, and the statement names those calls (`calls_without_output`). It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`, which plays each fixture with the tools served and again as another server's tools); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False`, `approval="off"`, `check_outputs=False` and `create_grounded_mcp_server(require_layer=False)` are outside the class.
+The adapter claims the safety-layer class SL ([§10.4](../../spec/STANDARD-v1.2.0.md#104-safety-layer-conformance)). Its conformance statement is `tests/conformance/calls/statements/grounded_agency_adapter.json`: it covers every call Claude Code reports to the PreToolUse hook of wrapped options, including tools in `allowed_tools`; its scope is the adapter instance; its boundaries are the Stop and the next prompt of any session it serves; its checkpoint maximum age is `expiry_minutes`; it obtains approval by prompt in the modes named above, one approver per call and no role; it makes a check and its use atomic with the tracker's lock; it names its host gaps; and it applies every check of §5.18.10. The output-contract row applies to the results it receives as capability outputs, those of every MCP tool bound to a capability, in the form the session reads them (R402): a tool `create_grounded_mcp_server` serves checks its own, and the PostToolUse hook checks another server's. Claude Code's own tools return results in their own forms, which carry no capability output, and the statement names those calls (`calls_without_output`). It passes every binding fixture and the call-sequence fixtures whose needs it supports (`tests/test_binding_fixtures.py`, `tests/test_call_fixtures.py`, which plays each fixture with the tools served and again as another server's tools); the ones that need recorded decisions from several approvers, or nested calls, are skipped. `strict_mode=False`, `approval="off"`, `check_outputs=False` and `create_grounded_mcp_server(require_layer=False)` are outside the class.
 
 ## Structured Output
 
@@ -628,20 +646,6 @@ capture fails silently.
 
 ## Evidence Stores, Secrets and Grounding
 
-What happens to a call's evidence, from the hook to the store's readers:
-
-```mermaid
----
-title: Where a tool call's evidence goes
----
-flowchart TB
-  accDescr: For each covered tool call the evidence collector builds an anchor, with a digest of the response unless the response holds a secret. The store passes the anchor through its redactor, so that each secret becomes [REDACTED], and keeps a frozen record under a new id. Its listeners then get one acs.evidence_recorded payload, and export gives every record as JSON Lines.
-  call["A covered tool call"] --> col["The collector: an anchor, with a digest unless the response holds a secret"]
-  col --> red["The store's redactor: each secret becomes [REDACTED]"]
-  red --> rec["A frozen record under a new id"]
-  rec --> out["Listeners get one acs.evidence_recorded payload; export() gives JSON Lines"]
-```
-
 ### Evidence Stores
 
 Every store implements `EvidenceStoreProtocol` (§6.6): `append` and
@@ -664,6 +668,20 @@ removed), `subscribe(listener)` and `record_capture_failure()`.
   completed, and reports the bytes as `x-torn_tail_bytes`; the next ids
   continue the file's.
 
+What happens to a call's evidence, from the hook to the store's readers:
+
+```mermaid
+---
+title: Where a tool call's evidence goes
+---
+flowchart TB
+  accDescr: For each covered tool call the evidence collector builds an anchor, with a digest of the response unless the response holds a secret. The store passes the anchor through its redactor, so that each secret becomes [REDACTED], and keeps a frozen record under a new id. Its listeners then get one acs.evidence_recorded payload, and export gives every record as JSON Lines.
+  call["A covered tool call"] --> col["The collector: an anchor, with a digest unless the response holds a secret"]
+  col --> red["The store's redactor: each secret becomes [REDACTED]"]
+  red --> rec["A frozen record under a new id"]
+  rec --> out["Listeners get one acs.evidence_recorded payload; export() gives JSON Lines"]
+```
+
 Give the adapter a store with `GroundedAgentConfig(evidence_store=...)`. A
 listener `subscribe`d to a store receives one `acs.evidence_recorded`
 payload per append (§6.6: record ids, each anchor's `ref`, `kind` and
@@ -679,10 +697,18 @@ credential assignments, private keys and common key formats) before it
 keeps it: a secret becomes `[REDACTED]`. The collector keeps a response's
 `digest` only when the redactor finds no secret in the response, since the
 digest of a response that is a secret could be inverted by guessing; the
-anchor's metadata then says `digest_omitted: secret`. Register the host's
+anchor's metadata then says `digest_omitted: secret`. A store does the same
+with any anchor it redacts (one a runner's host or a grounded tool
+supplies): it keeps neither its `digest` nor its metadata's `hash`, since
+the content it cites holds the secret, and the redacted excerpt would show
+the text to check a guess against. Register the host's
 own secrets with `GroundedAgentConfig(secret_values=(...))`: they reach the
 store's and the coordination audit log's redactor, and never
-`recorded_by`. The adapter also redacts its call records and refusals, and
+`recorded_by`. The adapter also redacts its call records and refusals,
+and its checkpoint tracker every string it records (a checkpoint's
+`reason`, `scope` and `metadata`: a bound checkpoint tool's `reason` and
+`scope` are the model's words), in memory, in
+`checkpoint_dir/tracker_state.json` and in its archive; it
 refuses a `persist` or `audit` call whose data holds a credential-shaped
 value, or a value in a member named for a credential (`password`,
 `accessToken`, `Authorization`) that redaction would replace, unless it is a
@@ -885,14 +911,14 @@ Any other value of `approval` raises `ValueError`, as does an `expiry_minutes` a
 
 ## Using with Capability Skills
 
-The Grounded Agency skills (in `skills/`) can be invoked by Claude:
+The Grounded Agency skills (in `skills/`) can be invoked by Claude. `wrap_options()` passes `setting_sources` through unchanged, so the host chooses which settings files the CLI loads: include `"project"` to load a project's skills, and pass `[]` (the SDK's isolation mode) when `cwd` may be untrusted, since a project's settings can run hooks and set the environment. Where the CLI loads them (`None`, or a list naming `"project"` or `"local"`), the adapter refuses every call (R407) while `.claude/settings.json` or `.claude/settings.local.json` in `cwd` sets a variable in `env` that is not one of Claude Code's own settings (`ALLOWED_PROJECT_ENV` in `grounded_agency.utils.project_settings`: `ANTHROPIC_*`, `OTEL_*` and a few more), or cannot be read: the CLI applies that env to every command it runs (`BASH_ENV`, `PATH`, `LD_PRELOAD`, `GIT_CONFIG_*`, a proxy), so the layer cannot tell what a command does. Set such variables in `options.env` or the host's environment instead.
 
 ```python
 # Configure SDK to load skills from project
 options = adapter.wrap_options(
     ClaudeAgentOptions(
         cwd=Path("/path/to/agent-capability-standard"),
-        setting_sources=["project"],  # Loads skills
+        setting_sources=["project"],  # Loads skills; wrap_options keeps it
         allowed_tools=["Read"],
     )
 )
@@ -908,7 +934,8 @@ options = adapter.wrap_options(
 ```
 User: "Make a backup before editing the config"
           ↓
-Claude: Invokes Skill(skill="checkpoint"): an invoke call, no checkpoint
+Claude: Invokes Skill(skill="checkpoint"): invoke and the worst case, so it
+        needs a checkpoint taken before it and approval, and takes none
           ↓
 Claude: Runs Bash(git stash create "checkpoint:config"), as the skill says
           ↓
@@ -1015,6 +1042,14 @@ If `claude_agent_sdk` isn't installed, the adapter falls back to dict-based type
 pip install claude-agent-sdk
 ```
 
+### CLIConnectionError: Does Not Honor on_failure
+
+The adapter's PreToolUse safety hook asks the CLI to block a call when the hook fails or gives no verdict in time (`on_failure="block"`, with a 60-second `timeout`), and the SDK will not connect to a Claude Code too old to honour that. Update Claude Code.
+
+```bash
+claude update
+```
+
 ## API Reference
 
 ### grounded_query()
@@ -1049,7 +1084,8 @@ class GroundedClient:
 
 ### GroundedAgentAdapter
 
-**Checkpoint content.** With `GroundedAgentConfig(snapshots=FileSnapshotStore(".", ".snapshots"))`,
+**Checkpoint content.** With `GroundedAgentConfig(snapshots=FileSnapshotStore(".", ".snapshots"))`
+(the store refuses, with `ValueError`, a `store_dir` or an `objects/` or `manifests/` in it that is a symbolic link),
 a checkpoint also keeps a copy of the files its scope names, and
 `adapter.checkpoint_tracker.restore_checkpoint(checkpoint_id)` puts them
 back, used or not (STANDARD 1.2.0 §4.4.1); it never captures `.claude/`,
@@ -1061,10 +1097,12 @@ authorises one change by either (§5.15.4).
 and the profiles' `allowed_destinations` are destination policies (§4.4.2):
 a `send` call whose destination, read at its binding's `destination`
 pointer, one does not allow, or whose binding names none, is refused with
-F504 before approval. So is a call of an unbound tool, which the adapter
+F504 before approval (the pointer read as RFC 6901 writes it: `/to/01`
+and `/to/١` locate nothing). So is a call of an unbound tool, which the adapter
 cannot tell sends or not (§5.18.2), and a call of a composite whose
-`invokes` reach a binding that performs `send`: the adapter does not see a
-tool's nested calls, so it cannot tell where they go (§5.18.4). A Bash
+`invokes` reach a binding that performs `send`, or an unbound tool: the
+adapter does not see a tool's nested calls, so it cannot tell where they
+go (§5.18.4). A Bash
 command whose classification includes `send` (one that transmits, one the
 mapper does not recognise, an interpreter, a push or publish) is refused
 too, since a command line names no destination the adapter reads: under a
@@ -1225,9 +1263,12 @@ class CheckpointTracker:
     def has_valid_checkpoint(self) -> bool: ...
     # The checkpoint validate_and_reserve would hold now, without holding it
     def valid_checkpoint_id(self) -> str | None: ...
+    # Whether this tracker took a checkpoint at or after `when`; one read
+    # back from checkpoint_dir (another scope's) does not count
     def has_taken_since(self, when: datetime) -> bool: ...
-    # Whether a checkpoint (since `since`) recorded this commit as its
-    # restore point: what makes `git stash apply <commit>` a rollback
+    # Whether a checkpoint this tracker took (since `since`) recorded this
+    # commit as its restore point: what makes `git stash apply <commit>` a
+    # rollback
     def has_commit(self, commit: str, since: datetime | None = None) -> bool: ...
 
     # Hold the newest valid checkpoint no other call holds.

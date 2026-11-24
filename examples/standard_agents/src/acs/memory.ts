@@ -21,9 +21,19 @@
  * `recallEntry` are what they run.
  */
 import type { ThreadState } from '@standardagents/spec';
-import { canonicalize, holdsCredential, iJsonProblem, parseDurationMs, redactJson, type Json } from '@synaptiai/acs-core';
+import {
+  canonicalize,
+  holdsCredential,
+  iJsonProblem,
+  parseDurationMs,
+  redactJson,
+  type GroundingPolicy,
+  type Json,
+} from '@synaptiai/acs-core';
 import { z } from 'zod';
 import { groundedTool } from './grounded.js';
+import { layerSecrets } from './layer.js';
+import type { BindingProfiles } from './profiles.js';
 
 /** The scope this store provides, and its default. */
 export const MEMORY_SCOPE = 'session';
@@ -67,10 +77,21 @@ export interface MemoryOptions {
   now?: () => number;
   /** The largest value, as the UTF-8 length of its JSON text. */
   max_value_bytes?: number;
-  /** The host's own secrets (§6.7), refused in data and keys beside the default patterns. */
+  /**
+   * The host's own secrets (§6.7), refused in data and keys beside the
+   * default patterns and the secrets registered layer-wide
+   * (`configureLayer({ secrets })`).
+   */
   secrets?: readonly string[];
   /** The tools' names (default `persist_memory` and `recall_memory`). */
   names?: { persist?: string; recall?: string };
+  /**
+   * Domain profiles (§5.21) both tools apply, beside the layer's
+   * (`configureLayer({ profiles })`): `groundedTool`'s `profiles`.
+   */
+  profiles?: BindingProfiles;
+  /** Grounding policies (§5.20) both tools apply: `groundedTool`'s `grounding`. */
+  grounding?: GroundingPolicy | readonly GroundingPolicy[];
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -108,7 +129,7 @@ export async function persistEntry(
   now: number,
   options: Pick<MemoryOptions, 'prefix' | 'max_value_bytes' | 'secrets'> = {},
 ): Promise<Record<string, Json>> {
-  const secrets = options.secrets ?? [];
+  const secrets = [...(options.secrets ?? []), ...layerSecrets()];
   const data = (input['data'] ?? null) as Json;
   const given = input['key'];
   if (given !== undefined && typeof given !== 'string') throw new MemoryRefusal('x-invalid-key', 'key must be a string');
@@ -198,10 +219,15 @@ export async function recallEntry(
 /**
  * The `persist` and `recall` tools on the thread's key-value store (§4.5),
  * each a `groundedTool` (so a `persist` call whose data holds a credential
- * is refused by the layer too, F504, §5.18.10).
+ * is refused by the layer too, F504, §5.18.10), applying `profiles` and
+ * `grounding` and the layer's profiles as any grounded tool does.
  */
 export function memoryTools(options: MemoryOptions = {}) {
   const now = options.now ?? (() => Date.now());
+  const applied = {
+    ...(options.profiles !== undefined ? { profiles: options.profiles } : {}),
+    ...(options.grounding !== undefined ? { grounding: options.grounding } : {}),
+  };
   const scope = z.string().optional().describe("The memory scope: 'session' (the thread), the only one provided");
   const persist = groundedTool({
     name: options.names?.persist ?? 'persist_memory',
@@ -214,6 +240,7 @@ export function memoryTools(options: MemoryOptions = {}) {
       scope,
     }),
     ...(options.secrets !== undefined ? { secrets: options.secrets } : {}),
+    ...applied,
     execute: async (state: ThreadState, args) =>
       (await persistEntry(state, args as Record<string, unknown>, now(), options)) as never,
   });
@@ -226,6 +253,8 @@ export function memoryTools(options: MemoryOptions = {}) {
       default: z.unknown().optional().describe('What to return when no live entry has the key'),
       scope,
     }),
+    ...(options.secrets !== undefined ? { secrets: options.secrets } : {}),
+    ...applied,
     execute: async (state: ThreadState, args) =>
       (await recallEntry(state, args as Record<string, unknown>, now(), options)) as never,
   });

@@ -3,12 +3,16 @@ successful `git stash create` writes the marker (posttooluse_take_checkpoint.sh)
 a gated call uses it (pretooluse_require_checkpoint.sh), and the end of a turn
 ends its validity (stop_end_checkpoints.sh). A marker whose validity ended
 unused (expired, turn ended, replaced) is filed under
-.claude/checkpoints/ended/, so its commit can still be restored."""
+.claude/checkpoints/ended/, so its commit, entered in the project's git
+directory (<git dir>/acs/checkpoints/commits/), can still be restored."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -76,6 +80,12 @@ def _git(path: Path, *args: str) -> str:
     ).stdout
 
 
+def _commits(project: Path) -> Path:
+    """Where the take hook enters the commits it records: the project's git
+    directory, outside the work tree."""
+    return project / ".git" / "acs" / "checkpoints" / "commits"
+
+
 def _clean_repo(path: Path) -> Path:
     """A repository with one commit and a tree that is HEAD's."""
     if shutil.which("git") is None:
@@ -89,6 +99,7 @@ def _clean_repo(path: Path) -> Path:
 
 
 def test_a_successful_stash_create_writes_the_marker(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
     before = int(time.time())
     result = _run(
         TAKE,
@@ -201,6 +212,7 @@ def test_nothing_else_writes_a_marker(tmp_path: Path, payload: Any) -> None:
 
 
 def test_the_maximum_age_is_capped(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
     before = int(time.time())
     _run(
         TAKE,
@@ -263,6 +275,7 @@ def _restore(project: Path, commit: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_stop_ends_the_marker_and_keeps_the_history(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
     used = tmp_path / ".claude" / "checkpoints" / "used"
     used.mkdir(parents=True)
@@ -275,6 +288,7 @@ def test_stop_ends_the_marker_and_keeps_the_history(tmp_path: Path) -> None:
 
 
 def test_a_checkpoint_whose_turn_ended_can_still_be_restored(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
     _run(STOP, {"hook_event_name": "Stop"}, tmp_path)
     assert _restore(tmp_path, SHA).returncode == 0
@@ -285,6 +299,7 @@ def test_a_checkpoint_whose_turn_ended_can_still_be_restored(tmp_path: Path) -> 
 
 
 def test_an_expired_checkpoint_can_still_be_restored(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
     now = int(time.time())
     _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
     marker = _marker(tmp_path)
@@ -307,6 +322,7 @@ def test_an_expired_checkpoint_can_still_be_restored(tmp_path: Path) -> None:
 
 
 def test_a_replaced_checkpoint_can_still_be_restored(tmp_path: Path) -> None:
+    _clean_repo(tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": OTHER}), tmp_path)
     marker = _marker(tmp_path)
@@ -343,14 +359,24 @@ def test_stop_exits_0_without_a_claude_directory(tmp_path: Path) -> None:
 
 def test_a_restore_looks_up_one_entry_not_the_history(tmp_path: Path) -> None:
     """A successful `git stash create` enters its commit in
-    .claude/checkpoints/commits/, and a restore looks that entry up: it
-    reads no file of the history (used/, ended/), which grows with every
+    <git dir>/acs/checkpoints/commits/, and a restore looks that entry up:
+    it reads no file of the history (used/, ended/), which grows with every
     checkpoint taken, so the check takes the same time however long the
     history is (a check that ran past the hook's timeout would let the
     call run)."""
+    _clean_repo(tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
-    entry = tmp_path / ".claude" / "checkpoints" / "commits" / SHA
-    assert entry.is_file() and entry.read_text() == ""
+    entry = _commits(tmp_path) / SHA
+    # It holds the commit's HMAC under the project's checkpoint key, which
+    # the take hook drew (64 hex digits, readable by the user alone).
+    key_file = _commits(tmp_path).parent / "key"
+    key = key_file.read_text()
+    assert re.fullmatch(r"[0-9a-f]{64}", key)
+    assert key_file.stat().st_mode & 0o077 == 0
+    signature = hmac.new(
+        key.encode(), f"acs-checkpoint-commit:{SHA}".encode(), hashlib.sha256
+    ).hexdigest()
+    assert entry.is_file() and entry.read_text() == signature
     _run(STOP, {"hook_event_name": "Stop"}, tmp_path)
     assert _marker(tmp_path) is None
     assert _restore(tmp_path, SHA).returncode == 0
@@ -369,4 +395,115 @@ def test_a_clean_tree_enters_no_commit(tmp_path: Path) -> None:
     _clean_repo(tmp_path)
     _run(TAKE, _stash("git stash create", {"stdout": ""}), tmp_path)
     assert _marker(tmp_path) is not None
+    assert not _commits(tmp_path).exists()
     assert not (tmp_path / ".claude" / "checkpoints" / "commits").exists()
+
+
+def test_a_commit_outside_a_repository_writes_no_marker(tmp_path: Path) -> None:
+    """A commit is entered in the project's git directory; with none, the
+    take hook enters nothing and writes no marker that names it."""
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    assert _marker(tmp_path) is None
+    assert not (tmp_path / ".claude" / "checkpoints" / "commits").exists()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git stash create" + " " * 50_000,
+        " " * 200_000 + "git stash create",
+        "git stash create" + "\t" * 50_000,
+    ],
+)
+def test_long_blank_runs_are_not_trimmed_and_write_no_marker(
+    tmp_path: Path, command: str
+) -> None:
+    """The trims' cost grows with the line times its run of blanks: the
+    length is checked first, so a padded line is not read, in bounded time
+    (50,000 trailing blanks took 44 s to trim before)."""
+    _clean_repo(tmp_path)
+    started = time.monotonic()
+    result = _run(TAKE, _stash(command, {"stdout": SHA}), tmp_path)
+    assert time.monotonic() - started < 10
+    assert result.returncode == 0
+    assert _marker(tmp_path) is None
+
+
+BOUNDARIES = ["Stop", "StopFailure", "UserPromptSubmit", "SessionStart", "SessionEnd"]
+
+
+def test_every_boundary_event_ends_the_marker() -> None:
+    """The end and the start of a turn and of a session are execution
+    boundaries (STANDARD 1.2.0 §5.18.6): Claude Code runs StopFailure in
+    place of Stop when an API error ended the turn, and a turn that was
+    interrupted or a session that was killed reaches neither, so the next
+    prompt or session ends a marker they left."""
+    hooks = json.loads((HOOKS / "hooks.json").read_text())["hooks"]
+    for event in BOUNDARIES:
+        commands = [h["command"] for group in hooks[event] for h in group["hooks"]]
+        assert commands == ["${CLAUDE_PLUGIN_ROOT}/hooks/stop_end_checkpoints.sh"], (
+            event
+        )
+
+
+@pytest.mark.parametrize("event", BOUNDARIES)
+def test_a_marker_left_by_an_earlier_turn_authorises_nothing(
+    tmp_path: Path, event: str
+) -> None:
+    _clean_repo(tmp_path)
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    boundary = {"hook_event_name": event, "session_id": "s2", "prompt": "next"}
+    result = _run(STOP, boundary, tmp_path)
+    assert (result.returncode, result.stdout) == (0, "")
+    assert _marker(tmp_path) is None
+    assert [m["commit"] for m in _ended(tmp_path)] == [SHA]
+    write = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "a.txt"},
+        "permission_mode": "acceptEdits",
+        "tool_use_id": "w2",
+    }
+    refused = _run(PRE, write, tmp_path)
+    assert refused.returncode == 2
+    assert refused.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+    # Its commit can still be restored.
+    assert _restore(tmp_path, SHA).returncode == 0
+
+
+def test_the_layer_maximum_age_applies_to_a_marker_written_under_a_longer_one(
+    tmp_path: Path,
+) -> None:
+    """A marker written under ACS_CHECKPOINT_MAX_AGE=1800 (or by another
+    writer) is held to the maximum age in force when it is used, the one
+    the log hook records (STANDARD 1.2.0 §5.18.6, §5.18.8)."""
+    _clean_repo(tmp_path)
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    marker = _marker(tmp_path)
+    assert marker is not None
+    path = tmp_path / ".claude" / "checkpoint.ok"
+    path.write_text(
+        json.dumps(
+            {
+                **marker,
+                "created_at": marker["created_at"] - 600,
+                "expires_at": marker["expires_at"] - 600,
+            }
+        )
+    )
+    write = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": "a.txt"},
+        "permission_mode": "default",
+        "tool_use_id": "w1",
+    }
+    refused = _run(PRE, write, tmp_path, ACS_CHECKPOINT_MAX_AGE="60")
+    assert refused.returncode == 2
+    assert refused.stderr.startswith("F501 CHECKPOINT_REQUIRED: ")
+    assert "expired" in refused.stderr
+    assert not path.exists()
+    assert [m["commit"] for m in _ended(tmp_path)] == [SHA]
+    # Within the maximum age the same marker authorises the call.
+    _run(TAKE, _stash("git stash create", {"stdout": SHA}), tmp_path)
+    allowed = _run(PRE, write, tmp_path, ACS_CHECKPOINT_MAX_AGE="60")
+    assert allowed.returncode == 0
+    assert not path.exists()

@@ -15,6 +15,19 @@ function outcome(run: () => unknown): Expect {
   return 'ok';
 }
 
+/**
+ * The pieces of four or more characters of `text` that `message` holds: a
+ * message that quotes part of a secret escapes redaction, which matches a
+ * secret whole (§6.7).
+ */
+function piecesQuoted(message: string, text: string): string[] {
+  const pieces: string[] = [];
+  for (let i = 0; i + 4 <= text.length; i += 1) {
+    if (message.includes(text.slice(i, i + 4))) pieces.push(text.slice(i, i + 4));
+  }
+  return pieces;
+}
+
 const GOOD = {
   observation: { files: 3 },
   evidence_anchors: [{ ref: 'tool:Bash:t1', kind: 'tool_output' }],
@@ -76,6 +89,19 @@ describe('encode and decode', () => {
 describe('the shared vectors (tests/conformance/output/vectors.json)', () => {
   it.each(vectors.decode.map((v) => [v.name, v] as const))('decode %s', (_name, v) => {
     expect(outcome(() => decodeCapabilityOutput('observe', v.text))).toEqual(v.expect as Expect);
+    const quoted = 'quotes_nothing_of' in v ? v.quotes_nothing_of : undefined;
+    if (quoted !== undefined) {
+      let refused: unknown;
+      try {
+        decodeCapabilityOutput('observe', v.text);
+      } catch (e) {
+        refused = e;
+      }
+      expect(refused).toBeInstanceOf(CapabilityOutputError);
+      const error = refused as CapabilityOutputError;
+      expect(piecesQuoted(error.diagnostic.message, quoted)).toEqual([]);
+      expect(piecesQuoted(error.message, quoted)).toEqual([]);
+    }
   });
 
   it.each(vectors.encode.map((v) => [v.name, v] as const))('encode %s', (_name, v) => {

@@ -28,6 +28,7 @@ from typing import Any
 
 from .. import _core
 from ..state.redaction import DEFAULT_REDACTOR, Redactor
+from ._responses import redact_anchors
 
 _MAX_LOG_BYTES = 256 * 1024 * 1024
 
@@ -54,8 +55,17 @@ class IdempotencyLog:
     is in memory and its keys do not survive a restart: a host that saves
     runs (§5.19.4) must give it a path. Each entry keeps the key, the
     capability, the SHA-256 of the canonical inputs, whether the effect is
-    ``started`` or ``done``, when, the destination (redacted, §6.7) and,
-    once done, the output it answered with and its ``evidence_seen``.
+    ``started`` or ``done``, when, the destination and, once done, the
+    output it answered with and its ``evidence_seen``.
+
+    The log is the host's record of what it did (§6.4), so it holds no
+    secret its ``redactor`` recognises (§6.7): the destination is redacted,
+    and the output is kept as a runner submits it, its evidence anchors
+    redacted (their digest gone) and ``evidence_seen`` rewritten to match,
+    with every other secret in the output and in ``evidence_seen`` replaced
+    too. A replay answers with that output. A
+    :class:`~grounded_agency.workflows.runner.WorkflowRunner` gives the log
+    of each host it drives what its own ``redactor`` recognises.
     """
 
     def __init__(
@@ -71,6 +81,15 @@ class IdempotencyLog:
         self._entries: dict[str, dict[str, Any]] = {}
         if self._path is not None:
             self._load()
+
+    @property
+    def redactor(self) -> Redactor:
+        """What the log redacts with (§6.7)."""
+        return self._redactor
+
+    @redactor.setter
+    def redactor(self, redactor: Redactor) -> None:
+        self._redactor = redactor
 
     @property
     def path(self) -> Path | None:
@@ -93,7 +112,8 @@ class IdempotencyLog:
         and raises when it cannot tell (the entry then stays ``started``, so
         a later attempt is answered ``outcome_unknown``). An attempt whose
         key was done is answered with the ``Output`` it got, its
-        ``evidence_seen`` included (§5.20). An action with no key is passed
+        ``evidence_seen`` included (§5.20), as the log keeps it: redacted
+        (§6.7). An action with no key is passed
         straight to ``effect``. A delegation that names the one it
         ``replaces`` has a key of its own (§4.4.2), so it is kept like any
         other: a re-delivery of it is answered, not performed again."""
@@ -142,15 +162,30 @@ class IdempotencyLog:
         response = effect()
         with self._lock:
             if response.get("kind") == "Output":
-                done = {**started, "state": "done", "value": response.get("value")}
-                # The host's attestation (§5.20) is part of the answer: a
-                # replay without it would fail an attested policy (F505).
-                if "evidence_seen" in response:
-                    done["evidence_seen"] = response["evidence_seen"]
-                self._record(done)
+                self._record({**started, "state": "done", **self._kept(response)})
             else:
                 self._record({"key": key, "state": "cleared"})
         return response
+
+    def _kept(self, response: Mapping[str, Any]) -> dict[str, Any]:
+        """What a done entry keeps of an ``Output``: its ``value`` and its
+        ``evidence_seen`` as a runner would submit them (the anchors
+        redacted, ``evidence_seen`` rewritten to match, §5.20), and every
+        other secret in either replaced (§6.4, §6.7). The host's attestation
+        is part of the answer: a replay without it would fail an attested
+        policy (F505)."""
+        submitted = redact_anchors(self._redactor, dict(response))
+        value = submitted.get("value")
+        anchors = value.get("evidence_anchors") if isinstance(value, dict) else None
+        if isinstance(value, dict) and isinstance(anchors, list):
+            rest = {k: v for k, v in value.items() if k != "evidence_anchors"}
+            value = {**self._redactor.redact(rest)[0], "evidence_anchors": anchors}
+        else:
+            value = self._redactor.redact(value)[0]
+        kept: dict[str, Any] = {"value": value}
+        if "evidence_seen" in submitted:
+            kept["evidence_seen"] = self._redactor.redact(submitted["evidence_seen"])[0]
+        return kept
 
     def performed_since(
         self, since_ms: int, *, run_id: str, capability: str | None = "send"
@@ -219,8 +254,16 @@ class IdempotencyLog:
             if chunk.strip():
                 try:
                     entry = json.loads(chunk)
-                except ValueError:
+                except (ValueError, RecursionError) as e:
+                    # RecursionError: nested deeper than the parser allows,
+                    # which no entry this log writes is; a line that does
+                    # not parse, as any other.
                     if any(c.strip() for c in chunks[i + 1 :]):
+                        if isinstance(e, RecursionError):
+                            raise ValueError(
+                                f"idempotency log {self._path}: a line nests "
+                                f"too deeply to parse"
+                            ) from None
                         raise
                     torn_at = offset
                     break

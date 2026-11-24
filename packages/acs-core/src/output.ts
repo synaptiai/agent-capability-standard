@@ -160,8 +160,17 @@ export function decodeCapabilityOutput(capability: CapabilityId, text: string): 
   try {
     value = JSON.parse(text);
   } catch (cause) {
-    const why = cause instanceof Error ? cause.message : String(cause);
-    throw new CapabilityOutputError(capability, `is not the JSON text of one object and nothing else: ${why}`);
+    // The parser's message quotes the text (V8: the whole text up to 20
+    // characters, else a window of about 10 around the error), and a secret
+    // the window cuts no longer matches whole when the message is redacted
+    // (§6.7). So the message names at most where the text stops being JSON,
+    // as a number, as Python's decoder does.
+    const why = cause instanceof Error ? cause.message : '';
+    const at = /\bat position (\d+)\b/.exec(why)?.[1];
+    throw new CapabilityOutputError(
+      capability,
+      `is not the JSON text of one object and nothing else${at !== undefined ? ` (at character ${at})` : ''}`,
+    );
   }
   scan(capability, text);
   return checkContract(capability, value, false);

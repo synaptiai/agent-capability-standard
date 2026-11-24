@@ -40,6 +40,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ..utils.layer_dir import LinkedPathError, open_layer_dir
+
 # The plugin's audit log and checkpoint marker (``.claude/``) and the logs
 # the skills of its earlier releases wrote (``.audit/``): never within a
 # checkpoint's reach, whatever the caller excludes.
@@ -172,10 +174,35 @@ def _write_private(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def _private_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if stat.S_IMODE(path.stat().st_mode) & 0o077:
-        os.chmod(path, 0o700)
+def _private_store(store_dir: str | Path) -> None:
+    """Make, or check, the store's directory and its ``objects/`` and
+    ``manifests/``, mode 0700, none of them a symbolic link, nor any
+    directory on the way to a relative ``store_dir``
+    (:func:`~..utils.layer_dir.open_layer_dir`): a repository can ship a
+    link where a store in the project lies (``.snapshots``), which would
+    take the copies, and the change of mode, out of the project.
+
+    Raises:
+        ValueError: One of them is a symbolic link.
+    """
+    try:
+        top = open_layer_dir(store_dir, create=True, mode=0o700)
+        if top is None:  # pragma: no cover - create=True makes it
+            raise FileNotFoundError(str(store_dir))
+        with top:
+            top.restrict()
+            for name in ("objects", "manifests"):
+                sub = top.subdir(name, create=True, mode=0o700)
+                if sub is None:  # pragma: no cover - create=True makes it
+                    raise FileNotFoundError(str(top.path / name))
+                with sub:
+                    sub.restrict()
+    except LinkedPathError as e:
+        raise ValueError(
+            f"{e.filename} is a symbolic link; the snapshot store does not "
+            f"follow one (a repository can ship it): name the directory it "
+            f"leads to"
+        ) from e
 
 
 def _read_regular(path: Path, limit: int) -> bytes | None:
@@ -238,6 +265,7 @@ class FileSnapshotStore:
     ) -> None:
         if max_file_bytes <= 0:
             raise ValueError("max_file_bytes must be more than 0")
+        _private_store(store_dir)
         self._root = Path(root).resolve()
         self._store = Path(store_dir).resolve()
         self._exclude = tuple(exclude)
@@ -249,9 +277,6 @@ class FileSnapshotStore:
         self.protect(self._store)
         for p in protected:
             self.protect(p)
-        _private_dir(self._store)
-        _private_dir(self._store / "objects")
-        _private_dir(self._store / "manifests")
 
     # ------------------------------------------------------------------
     # What is never within reach
@@ -679,7 +704,14 @@ class FileSnapshotStore:
             try:
                 value = json.loads(m.read_bytes())
                 live.update(str(e["sha256"]) for e in value["files"].values())
-            except OSError, ValueError, KeyError, TypeError, AttributeError:
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                AttributeError,
+                RecursionError,
+            ):
                 # An unreadable manifest keeps every object.
                 return
         for obj in (self._store / "objects").iterdir():

@@ -202,6 +202,66 @@ stay open for later versions, among them RFC-0007's dependencies between
 catalogs (question 1) and a `name:tag` whose tag starts with a letter and
 holds a digit (question 8).
 
+## Security review loop on the safety layers (after round 3)
+
+*What.* An adversarial loop on the layers that must fail closed (the
+plugin's hooks, the skills' command hooks, the Python Bash classifier and
+adapter, the TypeScript binding, the redactors). Each round: six finders
+with distinct lenses, a deduplication against every finding seen before, an
+independent verifier per finding that tried to refute it by reproducing it
+on a clean copy, then fix batches (root cause, every implementation sharing
+the rule, a test that fails on the old code). It was to stop after two
+rounds in a row with nothing new of medium severity or worse, or after five
+rounds. Every defect, fix and test is recorded in
+`progress/SECURITY-LOOP.md`.
+
+| Round | Reported | New | Confirmed | High | Medium | Low |
+|---|---|---|---|---|---|---|
+| 1 | 47 | 47 | 37 | 1 | 30 | 6 |
+| 2 | 32 | 26 | 25 | 4 | 17 | 4 |
+| 3 | 28 | 22 | 20 | 2 | 15 | 3 |
+| 4 | 32 | 26 | 24 | 2 | 18 | 4 |
+| 5 | 28 | 26 | 24 | 0 | 21 | 3 |
+| **All** | 167 | 147 | 130 | 9 | 101 | 20 |
+
+All 130 are fixed. Every fix batch ended done, and no finding was lost or
+left unverified.
+
+*Not converged.* The loop stopped at its five-round cap, not because it ran
+dry. Each round still confirmed about 20 medium defects, mostly in reading
+shell text the way bash or zsh reads it: quoting, expansions, locales,
+program lookup and the programs' own configuration files. Round 5 was the
+first with no high defect after verification. The pattern says the
+text-reading layers (the hooks and the Bash classifier) will keep yielding
+edge cases. The structural answer is to classify fewer forms: refuse or
+take the worst case for anything outside a small grammar, rather than model
+more of bash. That is a design task, left open.
+
+*Checked.* After the last batch, every step of every job in `ci.yml` and
+`site.yml`, from a clean state with the extension rebuilt (Rust 1.99.1):
+- **Rust:** fmt; clippy plain, `python` and `wasm`; `cargo test --locked`;
+  the wasm tests; MSRV 1.88 `check`.
+- **CEL differential** (Go 1.26.0) and **lint** (ruff, mypy).
+- **Python:** `pytest tests/` on 3.14 and 3.15b4 (8296 passed, 19 skipped
+  each); benchmarks; conformance.
+- **TypeScript:** the package (2169 tests) and the binding (293 passed, 2
+  skipped).
+- **Site:** check, test (1173) and build; axe with no violations; the
+  figure-gap sweep with CI's headless shell, nothing over 1800px.
+
+Two steps failed at first and were fixed: a 1 s evidence-store timing test
+(the redactor now remembers short clean texts, 9912af4) and two figure
+gaps (the SDK guide and the audit skill's page, cbf19b9).
+
+*Push protection.* The first push of the merge was refused because three
+made-up tokens in the secrets vectors were in a provider's own format. The
+loop's unpushed commits were rewritten with those tokens' raw text escaped:
+every changed file decodes to the same JSON in each commit. A test now
+keeps such shapes out of the raw files; the lesson is in `lessons.md`.
+
+*Not done.* The medium-severity stream above. Proposals for a smaller
+shell grammar are not written.
+
 ## Round 2: fix our side, pull request, merge
 
 Request: fix the issues identified on our end, file the upstream issues, open

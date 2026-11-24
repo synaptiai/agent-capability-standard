@@ -18,6 +18,7 @@ import pytest
 
 from grounded_agency import GroundedAgentAdapter, GroundedAgentConfig
 from grounded_agency.capabilities.mapper import ToolCapabilityMapper
+from tests.conftest import pre_tool_use
 
 # =============================================================================
 # Dynamic Tool Registration Tests
@@ -250,8 +251,10 @@ class TestAdapterMCPIntegration:
         elif hasattr(result, "behavior"):
             assert result.behavior == "deny"
 
-        # With checkpoint, should be allowed
+        # With checkpoint, should be allowed (once the PreToolUse hook has
+        # checked the call, as Claude Code runs it first)
         adapter.create_checkpoint(["*"], "Test")
+        await pre_tool_use(adapter, "mcp__deploy__push", {}, "t2")
         result = await callback(
             "mcp__deploy__push", {}, SimpleNamespace(tool_use_id="t2")
         )
@@ -371,6 +374,185 @@ class TestGroundedServerGuard:
         # The decision was for one call: a second needs its own.
         again = await handler({"q": "x"})
         assert again["is_error"] is True
+
+    @staticmethod
+    def _served_wipe(
+        adapter: GroundedAgentAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+        capability: str = "mutate",
+    ) -> tuple[Callable[..., object], list[dict[str, object]]]:
+        """A served tool ``wipe`` bound to ``capability`` (``mutate``: a
+        checkpoint and approval), and the arguments of each call that ran
+        it."""
+        import claude_agent_sdk
+        from claude_agent_sdk import tool
+
+        from grounded_agency.mcp import create_grounded_mcp_server
+
+        ran: list[dict[str, object]] = []
+
+        @tool("wipe", "Deletes a table.", {"table": str})
+        async def wipe(args: dict[str, object]) -> dict[str, object]:
+            ran.append(dict(args))
+            text = json.dumps({"success": True, "evidence_anchors": [], "changes": []})
+            return {"content": [{"type": "text", "text": text}]}
+
+        wipe.metadata = {"capability": capability}  # type: ignore[attr-defined]
+        captured: dict[str, object] = {}
+
+        def capture(*, name: str, version: str, tools: list[object]) -> object:
+            captured.update({t.name: t for t in tools})  # type: ignore[attr-defined]
+            return {"name": name}
+
+        monkeypatch.setattr(claude_agent_sdk, "create_sdk_mcp_server", capture)
+        create_grounded_mcp_server(
+            name="db", version="1.0.0", tools=[wipe], adapter=adapter
+        )
+        return captured["wipe"].handler, ran  # type: ignore[attr-defined]
+
+    @staticmethod
+    async def _ask(adapter: GroundedAgentAdapter, call: str) -> dict:
+        hook = adapter._make_pretooluse_safety_hook()
+        payload = {
+            "tool_name": "mcp__db__wipe",
+            "tool_input": {"table": "users"},
+            "tool_use_id": call,
+            "permission_mode": "default",
+        }
+        result: dict = await hook(payload, call, None)
+        return result
+
+    @staticmethod
+    def _host(answer: str) -> Callable[..., object]:
+        from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+        async def host(name: str, args: dict, context: object) -> object:
+            if answer == "raise":
+                raise RuntimeError("the host's callback failed")
+            if answer == "deny":
+                return PermissionResultDeny(message="no")
+            return PermissionResultAllow(updated_input=args)
+
+        return host
+
+    @pytest.mark.asyncio
+    async def test_an_asked_call_runs_only_once_it_is_allowed(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The decision a served tool checks is granted at the allow, not
+        at the ask (STANDARD 1.2.0 §5.18.7, §5.18.8). Before, the hook's
+        ask granted it, so a caller outside the wrapped session ran the
+        call while a person had not decided, and the approved call was
+        then refused with R407."""
+        handler, ran = self._served_wipe(asking_adapter, monkeypatch)
+        asking_adapter.create_checkpoint(["*"], "t")
+        asked = await self._ask(asking_adapter, "call-1")
+        reason = asked["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("F502 APPROVAL_REQUIRED: ")
+        undecided = await handler({"table": "users"})
+        assert undecided["is_error"] is True
+        assert undecided["content"][0]["text"].startswith("R407 SAFETY_CHECK_FAILED: ")
+        assert ran == []
+
+        callback = asking_adapter._make_permission_callback(self._host("allow"))
+        decision = await callback(
+            "mcp__db__wipe", {"table": "users"}, SimpleNamespace(tool_use_id="call-1")
+        )
+        assert getattr(decision, "behavior", None) == "allow"
+        result = await handler({"table": "users"})
+        assert not result.get("is_error")
+        assert ran == [{"table": "users"}]
+        again = await handler({"table": "users"})
+        assert again["is_error"] is True
+        assert ran == [{"table": "users"}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("answer", ["deny", "raise"])
+    async def test_a_refused_call_leaves_no_decision(
+        self,
+        asking_adapter: GroundedAgentAdapter,
+        monkeypatch: pytest.MonkeyPatch,
+        answer: str,
+    ) -> None:
+        """A host's refusal, and the R407 of a host callback that fails,
+        leave nothing a served tool would take (the verifier's case D:
+        before, the failed callback's R407 left the ask's grant)."""
+        handler, ran = self._served_wipe(asking_adapter, monkeypatch)
+        asking_adapter.create_checkpoint(["*"], "t")
+        await self._ask(asking_adapter, "call-1")
+        callback = asking_adapter._make_permission_callback(self._host(answer))
+        decision = await callback(
+            "mcp__db__wipe", {"table": "users"}, SimpleNamespace(tool_use_id="call-1")
+        )
+        assert getattr(decision, "behavior", None) == "deny"
+        refused = await handler({"table": "users"})
+        assert refused["is_error"] is True
+        assert ran == []
+        assert asking_adapter._allowed == {}
+
+    @pytest.mark.asyncio
+    async def test_a_call_never_decided_leaves_no_decision(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A call refused where this layer never hears of it (another
+        PreToolUse hook's deny, an interrupt) left the ask's grant until
+        the turn ended: a caller outside the session ran it (the
+        verifier's case C). Nothing is granted now, and a later allow of
+        another call grants only that call."""
+        handler, ran = self._served_wipe(asking_adapter, monkeypatch)
+        asking_adapter.create_checkpoint(["*"], "t")
+        await self._ask(asking_adapter, "call-1")
+        refused = await handler({"table": "users"})
+        assert refused["is_error"] is True
+        assert ran == []
+
+    @pytest.mark.asyncio
+    async def test_a_call_that_reported_back_leaves_no_decision(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A call allowed that failed before the tool ran (the SDK refuses
+        arguments its schema rejects before the handler) reports back; the
+        decision it left authorises nothing more."""
+        served = self._served(asking_adapter, monkeypatch)
+        handler = served["find"].handler  # type: ignore[attr-defined]
+        assert await self._pre(asking_adapter, "mcp__srv__find", {"q": "x"}) == {}
+        failed = asking_adapter._make_failure_recorder()
+        await failed(
+            {"tool_name": "mcp__srv__find", "tool_input": {"q": "x"}, "error": "e"},
+            "c1",
+            None,
+        )
+        refused = await handler({"q": "x"})
+        assert refused["is_error"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_prompt_tool_route_refuses_a_served_call_that_needs_approval(
+        self, asking_adapter: GroundedAgentAdapter, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a permission prompt tool, this layer never sees a call
+        allowed, so a served tool cannot tell an allowed call from a
+        refused one: the call is refused with R407 before it is asked
+        about (§5.18.8). A served call that needs no approval still runs."""
+        served = self._served(asking_adapter, monkeypatch)
+        hook = asking_adapter._make_pretooluse_safety_hook(prompt_tool=True)
+        payload = {
+            "tool_name": "mcp__db__wipe",
+            "tool_input": {"table": "users"},
+            "permission_mode": "default",
+        }
+        # An execute-bound tool: approval and no checkpoint (a call that
+        # needs a checkpoint is refused on this route already).
+        handler, ran = self._served_wipe(asking_adapter, monkeypatch, "execute")
+        refused = await hook(payload, "p1", None)
+        reason = refused["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("R407 SAFETY_CHECK_FAILED: ")
+        assert "can_use_tool" in reason
+        assert (await handler({"table": "users"}))["is_error"] is True
+        assert ran == []
+        find = {"tool_name": "mcp__srv__find", "tool_input": {"q": "x"}}
+        assert await hook(find, "p2", None) == {}
+        result = await served["find"].handler({"q": "x"})  # type: ignore[attr-defined]
+        assert not result.get("is_error")
 
     @pytest.mark.asyncio
     async def test_an_f505_output_is_the_failure_of_the_call_that_ran(
@@ -954,6 +1136,76 @@ class TestGroundedServerGuard:
                 name="srv", version="1.0.0", tools=[broken], adapter=adapter
             )
         assert adapter.mapper.records == []
+
+    @pytest.mark.parametrize(
+        "metadata",
+        [
+            # Security round 3: an unknown member was dropped, so the tool
+            # loaded as a plain retrieve and ran with no approval, checkpoint
+            # or destination check (STANDARD 1.2.0 section 5.18.1)
+            {
+                "capability": "retrieve",
+                "aproval": {"min_approvers": 2, "role": "admin"},
+            },
+            {"capability": "retrieve", "flag": {"requires_approval": True}},
+            {"capability": "retrieve", "aditional_capabilities": ["send"]},
+            {"capabilty": "mutate"},
+        ],
+    )
+    def test_metadata_with_an_unknown_member_does_not_load(
+        self, ontology_path: str, tmp_path: Path, metadata: dict[str, object]
+    ) -> None:
+        """The metadata is a carrier read as the record: an unknown member
+        reaches the record, which the loader refuses (S303), and no server
+        is created; nothing is registered."""
+        from grounded_agency.mcp import _record, create_grounded_mcp_server
+
+        record = _record("mcp__srv__wipe", "srv", "2.2.0", metadata)
+        assert record is not None
+        assert set(metadata) <= set(record)
+        adapter = GroundedAgentAdapter(
+            GroundedAgentConfig(
+                ontology_path=ontology_path,
+                checkpoint_dir=str(tmp_path / ".checkpoints"),
+            )
+        )
+
+        async def handler(args: dict[str, object]) -> dict[str, object]:
+            return {"content": []}
+
+        wipe = SimpleNamespace(
+            name="wipe",
+            description="Wipes.",
+            input_schema={},
+            handler=handler,
+            metadata=metadata,
+        )
+        with pytest.raises(ValueError, match=r"S303 SCHEMA_VALIDATION_FAILED"):
+            create_grounded_mcp_server(
+                name="srv", version="1.0.0", tools=[wipe], adapter=adapter
+            )
+        assert adapter.mapper.records == []
+
+    def test_metadata_reads_the_copies_and_vendor_data_as_before(self) -> None:
+        """The factory names the tool; the legacy capability_id and flat
+        flags are read into capability and flags; vendor data is kept; a
+        tool with no record member is unbound."""
+        from grounded_agency.mcp import _record
+
+        assert _record(
+            "mcp__srv__x",
+            "srv",
+            "2.2.0",
+            {"tool": "x", "capability_id": "mutate", "risk": "high", "x-note": 1},
+        ) == {
+            "tool": "mcp__srv__x",
+            "ontology": "2.2.0",
+            "capability": "mutate",
+            "x-note": 1,
+            "flags": {"risk": "high", "mutation": True, "requires_checkpoint": True},
+        }
+        assert _record("mcp__srv__x", "srv", "2.2.0", {"x-note": 1}) is None
+        assert _record("mcp__srv__x", "srv", "2.2.0", {"risk": "high"}) is None
 
 
 # =============================================================================

@@ -67,6 +67,27 @@ async def approve(tool_name: str, tool_input: dict, context: object) -> object:
     return PermissionResultAllow(updated_input=tool_input)
 
 
+async def decide(
+    adapter: GroundedAgentAdapter,
+    permission_callback: object,
+    tool_name: str,
+    tool_input: dict,
+    tool_use_id: str,
+) -> object:
+    """A call's decision in the order Claude Code reaches it: the adapter's
+    PreToolUse hook, then, unless the hook refused it, the permission
+    callback. The callback decides only on a call the hook checked, with
+    the input it checked (otherwise R407). A hook's refusal is returned as
+    the callback's result would be (``behavior``, ``message``)."""
+    hook = adapter._make_pretooluse_safety_hook()
+    out = (
+        await hook({"tool_name": tool_name, "tool_input": tool_input}, tool_use_id, None)
+    ).get("hookSpecificOutput", {})
+    if out.get("permissionDecision") == "deny":
+        return SimpleNamespace(behavior="deny", message=out["permissionDecisionReason"])
+    return await permission_callback(tool_name, tool_input, call(tool_use_id))
+
+
 def is_allowed(result: object) -> bool:
     """An SDK permission result (``behavior``) or the fallback (``allowed``)."""
     return (
@@ -101,10 +122,12 @@ async def demo_checkpoint_enforcement():
 
     # Simulate permission check for Write tool
     permission_callback = adapter._make_permission_callback(approve)
-    result = await permission_callback(
+    result = await decide(
+        adapter,
+        permission_callback,
         "Write",
         {"file_path": "test.txt", "content": "hello"},
-        call("demo-1"),
+        "demo-1",
     )
 
     print(f"Permission result for Write: {result}")
@@ -134,10 +157,12 @@ async def demo_safe_mutation():
     # so the host's can_use_tool callback (here: approve) decides the call.
     print("\n--- With Checkpoint ---")
     permission_callback = adapter._make_permission_callback(approve)
-    result = await permission_callback(
+    result = await decide(
+        adapter,
+        permission_callback,
         "Write",
         {"file_path": "test.txt", "content": "hello"},
-        call("demo-2"),
+        "demo-2",
     )
 
     print(f"Permission result for Write: {result}")

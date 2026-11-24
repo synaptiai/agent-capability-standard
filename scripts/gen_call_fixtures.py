@@ -233,6 +233,12 @@ binding(
     errors=[diag("S303", "look")],
 )
 binding(
+    "unknown_member",
+    "An unknown member whose name does not start with x- is S303, and the record is not loaded (section 5.18.1): a misspelt approval or flags member could declare something stricter, so the tool is unbound rather than read in part. A carrier, such as an annotation, is read as the record: its unknown members reach the record and refuse it the same way.",
+    [rec("wipe", "retrieve", aproval={"min_approvers": 2, "role": "admin"})],
+    errors=[diag("S303", "wipe")],
+)
+binding(
     "domain_id_loads",
     "A domain id of several segments, such as image.object, is a valid domain: the record loads.",
     [rec("look", "detect", domain="image.object")],
@@ -593,6 +599,17 @@ calls(
     ],
 )
 calls(
+    "composite_takes_invoked_approval",
+    "A composite's approval covers its nested calls, so it takes the approval of the bindings it invokes: "
+    "one approver is not the two an invoked binding's approval.min_approvers asks for.",
+    [
+        call("save", RUN),
+        call("batch", refuse("F502"), A, approve=ALICE),
+        call("write", refuse("F502"), A, approve=ALICE),
+    ],
+    write={"approval": {"min_approvers": 2}},
+)
+calls(
     "control_tool_ungated",
     "A control-only tool is never refused.",
     [call("done", RUN)],
@@ -811,6 +828,52 @@ calls(
     extra=SENDS,
 )
 
+# A send binding that names no destination argument (section 5.18.1): under a
+# policy the layer cannot tell where it sends, so it refuses the call, even
+# with an argument named `destination` that the policy allows; the tool's
+# code may send elsewhere (sections 4.4.2, 5.18.10).
+calls(
+    "send_destination_unknown_under_policy",
+    "Under a destination policy, a layer refuses with F504, before approval and the checkpoint, a call of a send binding that names no destination argument: it cannot tell where the call sends, whatever argument names a destination the policy allows.",
+    [
+        call("save", RUN),
+        call(
+            "post",
+            refuse("F504"),
+            {
+                "url": "https://elsewhere.example.net/x",
+                "destination": "https://hooks.example.com/ok",
+            },
+            approve=ALICE,
+        ),
+        call("notify", RUN, HOOK, approve=ALICE),
+    ],
+    destination_policy=POLICY,
+    extra=[rec("post", "send"), rec("notify", "send", destination="/to")],
+)
+
+# A destination argument is located by its RFC 6901 pointer, whose array
+# index is ASCII digits with no leading zero: `/to/01` and `/to/\u0661`
+# (ARABIC-INDIC DIGIT ONE) locate nothing, so under a policy the layer
+# cannot tell where the call sends and refuses it (sections 4.4.2, 5.18.10),
+# whatever element a looser reading takes; `/to/1` locates the second.
+LISTED = {"to": ["https://elsewhere.example.net/a", "https://hooks.example.com/a"]}
+calls(
+    "send_destination_pointer_index",
+    "Under a destination policy, a layer locates a send's destination by its binding's RFC 6901 pointer, whose array index is ASCII digits with no leading zero: a pointer whose index is written otherwise (`01`, a digit outside ASCII) locates nothing, so the layer refuses the call with F504 before approval and the checkpoint.",
+    [
+        call("save", RUN),
+        call("lead_zero", refuse("F504"), LISTED, approve=ALICE),
+        call("arabic_one", refuse("F504"), LISTED, approve=ALICE),
+        call("second", RUN, LISTED, approve=ALICE),
+    ],
+    destination_policy=POLICY,
+    extra=[
+        rec("lead_zero", "send", destination="/to/01"),
+        rec("arabic_one", "send", destination="/to/\u0661"),
+        rec("second", "send", destination="/to/1"),
+    ],
+)
 
 # ---------------------------------------------------------------------------
 

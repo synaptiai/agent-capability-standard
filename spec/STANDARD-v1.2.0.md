@@ -2513,12 +2513,25 @@ those of each binding listed (§5.18.1).
 
 - A call the composite's own code makes while it runs, to a binding it
   lists, is a **nested call**. The composite's approval and checkpoint
-  cover it: a layer that attributes it to the running composite applies no
-  further checkpoint or approval to it, and records it with the call that
-  covered it. Every other check still applies to it, its prerequisites
-  (§5.18.5) included. A layer that cannot attribute it checks it as a call
-  of its own. A composite that lists a binding a profile requires a person
-  for is asked of a person (§5.21.3).
+  cover it as far as the composite's call held them: a layer that
+  attributes it to the running composite applies no further approval to it
+  when decisions approved the composite's call, no further checkpoint when
+  that call used one, and records it with the call that covered it. Every
+  other check still applies to it, its prerequisites (§5.18.5) included. A
+  layer that cannot attribute it, or whose composite's call did not hold
+  what it needs (the binding run under a listed name need not be the one
+  listed), checks it as a call of its own. A call made through the
+  composite once its call has ended is no nested call: a layer checks it
+  as a call of its own, or refuses it (F504). A composite that lists a
+  binding a profile requires a person for is asked of a person (§5.21.3).
+- The composite's approval covers a nested call only as a decision valid
+  for the nested binding's `approval` too (§5.18.7). So the approval a
+  composite's call needs is, transitively, the strictest of its own and
+  that of each binding it lists: the most `min_approvers`, the shortest
+  `expires`, and a `role` one of them sets (its own first). A layer that
+  attributes a nested call whose binding sets another `role`, more
+  approvers or a shorter `expires` than the decisions the composite's call
+  counted meet at the nested call checks it as a call of its own.
 - A layer attributes a call to a composite only on evidence that the
   composite's own code made it, such as an invocation the layer itself
   passed to the composite. That a call comes from the same thread, session

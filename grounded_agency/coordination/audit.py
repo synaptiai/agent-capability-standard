@@ -118,8 +118,10 @@ class CoordinationAuditLog:
     with a max length so memory stays bounded — oldest events are
     silently dropped when the limit is reached.
 
-    Every event's ``details`` pass through ``redactor`` before the event is
-    kept: a secret never enters an audit record (STANDARD v1.2 §6.7).
+    Every value an event keeps passes through ``redactor`` before the event
+    is kept (its ``details``, ``intent``, ``evidence_refs``, event type, agent
+    ids and capability), so no member of the event, its :meth:`to_dict` or
+    its action record holds a secret (STANDARD v1.2 §6.7).
     """
 
     STORE_INFO: types.MappingProxyType[str, str] = types.MappingProxyType(
@@ -155,8 +157,11 @@ class CoordinationAuditLog:
         intent: str = "",
     ) -> CoordinationEvent:
         """Create and append a new audit event. ``intent`` is its audit
-        record's ``intent``, when not the event type. ``details`` are
-        redacted (§6.7) before the event is kept.
+        record's ``intent``, when not the event type. Every value the event
+        keeps is redacted (§6.7) before the event is kept: ``details``,
+        ``intent`` and ``evidence_refs`` (an evidence ref can be a URL with a
+        token in it) as much as the event type, the agent ids and the
+        capability.
 
         Returns the recorded ``CoordinationEvent`` so callers can
         reference its ``event_id`` if needed.
@@ -165,28 +170,37 @@ class CoordinationAuditLog:
             json.loads(json.dumps(details, default=str)) if details else {}
         )
         kept_details, _ = self.redactor.redact(kept_details)
+        text = self._redacted_text
         event = CoordinationEvent(
             event_id=os.urandom(16).hex(),
-            event_type=event_type,
-            source_agent_id=source_agent_id,
-            target_agent_ids=tuple(target_agent_ids),
-            capability_id=capability_id,
+            event_type=text(event_type),
+            source_agent_id=text(source_agent_id),
+            target_agent_ids=tuple(text(t) for t in target_agent_ids),
+            capability_id=text(capability_id),
             timestamp=datetime.now(UTC).isoformat(),
             details=types.MappingProxyType(kept_details),
-            evidence_refs=tuple(evidence_refs) if evidence_refs else (),
-            intent=intent,
+            evidence_refs=(
+                tuple(text(r) for r in evidence_refs) if evidence_refs else ()
+            ),
+            intent=text(intent),
         )
         with self._lock:
             self._events.append(event)
             self._total_recorded += 1
         logger.debug(
             "Audit: %s from %s -> %s [%s]",
-            event_type,
-            source_agent_id,
-            target_agent_ids,
+            event.event_type,
+            event.source_agent_id,
+            list(event.target_agent_ids),
             event.event_id[:8],
         )
         return event
+
+    def _redacted_text(self, value: Any) -> Any:
+        """A string with every secret replaced; any other value as it is
+        (the event's members are strings; ``details`` are redacted as
+        JSON)."""
+        return self.redactor.redact_text(value)[0] if isinstance(value, str) else value
 
     # ------------------------------------------------------------------
     # Queries

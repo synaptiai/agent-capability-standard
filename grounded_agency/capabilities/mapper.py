@@ -15,24 +15,29 @@ Tools are bound by tool binding records (section 5.18.1, see
 :mod:`grounded_agency.capabilities.bindings`); the static mappings below bind
 Claude Code's own tools, and Bash is classified by its command
 (section 5.18.3): a line of several commands takes the strictest flags and
-every prerequisite of all of them. ``Skill`` is ``invoke`` whatever the
-skill: loading a skill's instructions saves and restores nothing; the
-state-saving call the skill leads to is classified on its own
-(section 5.18.6).
+every prerequisite of all of them. ``Skill``, ``Agent`` and ``Task`` are
+their own capability (``invoke``, ``delegate``) and Bash's worst case: the
+commands a skill's file embeds and a subagent's definition names run with
+no hook seeing them. Loading the checkpoint skill takes no checkpoint; the
+state-saving call it leads to is classified on its own (section 5.18.6).
 """
 
 from __future__ import annotations
 
 import copy
 import logging
+import os
 import re
 import shlex
+import shutil
+import subprocess
 import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..errors import ErrorCode, Severity, ValidationError, text_form
+from ..utils.git import SAFE_GIT_OPTIONS, git_dir_is_made, safe_git_environment
 from .registry import CapabilityNode, CapabilityRegistry
 
 if TYPE_CHECKING:
@@ -45,18 +50,54 @@ logger = logging.getLogger("grounded_agency.capabilities.mapper")
 RISK_LEVELS: tuple[str, ...] = ("low", "medium", "high")
 _RISK_ORDER: dict[str, int] = {level: n for n, level in enumerate(RISK_LEVELS)}
 
-# Patterns for Bash command classification
-_DESTRUCTIVE_PATTERNS = re.compile(
-    r"""
-    ^\s*(rm|rmdir|mv|cp\s+.*\s+/|chmod|chown|ln|unlink|shred)\s |  # File ops
-    \s+(>|>>)\s |                                                   # Redirects
-    \|\s*(rm|tee|dd)\s |                                           # Piped destructive
-    \bsed\s+-i |                                                   # In-place sed
-    \bgit\s+(reset|checkout\s+--|clean|stash\s+drop|branch\s+-[dD]) |  # Git mutations
-    \bdocker\s+(rm|rmi|prune)                                      # Docker mutations
-    """,
-    re.VERBOSE | re.IGNORECASE,
+# How the Bash classifier reads one simple command (_classify_single_command).
+# A class narrower than the worst case (`mutate` and `send`) is given only by
+# the command's own program, its first word as the shell passes it: the
+# words of _LOCAL_FILE_PROGRAMS and _local_git_change, and the patterns
+# below matched from the start of the words joined by spaces. Text that
+# matches one further on is an argument (`curl URL -A 'git reset'`), which
+# never narrows the class. Redirections are not read here: _simple_commands
+# reads them, and gives an output redirection to anything but /dev/null the
+# worst case first. (An alternative `\s+(>|>>)\s` of an earlier pattern was
+# retried from every blank of a run and backtracked over the whole run, so a
+# quoted run of 40,000 blanks took 8 s to classify.)
+
+# Programs that change local files only, whatever their arguments: `mutate`.
+# Not here, because they run a command or reach another host: `sed`, whose
+# `e` command and `s///e` flag run one (`-i` or not), `docker rm|rmi|prune`
+# (the daemon DOCKER_HOST or the docker context names receives the
+# request), `tee`, `dd` and `cp` (which take the worst case, as any program
+# on no list).
+_LOCAL_FILE_PROGRAMS: frozenset[str] = frozenset(
+    {"rm", "rmdir", "mv", "chmod", "chown", "ln", "unlink", "shred"}
 )
+
+
+def _local_git_change(words: list[str]) -> bool:
+    """Whether a simple command is one of the git commands that change the
+    local repository or work tree only (`git reset`, `git checkout --`,
+    `git clean`, `git branch -d|-D`, and every `git stash` form), each word
+    as the shell passes it: `mutate` in a repository where git neither
+    fetches nor runs a program the repository names
+    (``ToolCapabilityMapper._git_change``). A git option before the
+    subcommand (`git -c ...`) is not recognised."""
+    if len(words) < 2 or words[0] != "git":
+        return False
+    sub, rest = words[1], words[2:]
+    if sub in ("reset", "clean", "stash"):
+        return True
+    if sub == "checkout":
+        return rest[:1] == ["--"]
+    return sub == "branch" and bool(rest) and rest[0][:2] in ("-d", "-D")
+
+
+def _writes_tree(words: list[str]) -> bool:
+    """Whether a local git change (:func:`_local_git_change`) may write
+    files of the work tree from objects, through any smudge filter
+    configured (`git reset`, `git checkout --`, `git stash`); `git clean`
+    and `git branch -d` write none."""
+    return words[1] in ("reset", "checkout", "stash")
+
 
 # Mutations of a system the command reaches by an argument or its
 # configuration (a remote, a registry, a cluster): `mutate`, and `send` as
@@ -65,16 +106,19 @@ _DESTRUCTIVE_PATTERNS = re.compile(
 # binding does not know is `send`), so a destination policy applies to it.
 _REMOTE_MUTATION_PATTERNS = re.compile(
     r"""
-    \bgit\s+push\b |                                               # Pushes
-    \bnpm\s+(publish|unpublish)\b |                                # Registries
-    \bdocker\s+push\b |
-    \bkubectl\s+(delete|apply|patch|edit)\b                        # Clusters
+    git\s+push\b |                                                 # Pushes
+    npm\s+(publish|unpublish)\b |                                  # Registries
+    docker\s+push\b |
+    kubectl\s+(delete|apply|patch|edit)\b                          # Clusters
     """,
-    re.VERBOSE | re.IGNORECASE,
+    re.VERBOSE,
 )
 
 # SEC-002: Interpreter invocation patterns that can execute arbitrary code.
-# These bypass other checks because the outer command looks benign.
+# These bypass other checks because the outer command looks benign. Matched
+# anywhere in the words (a program that runs another, `env` or `xargs`, may
+# run the interpreter): a match puts `execute` first in the worst case, and
+# takes nothing from it.
 _INTERPRETER_PATTERNS = re.compile(
     r"""
     \bpython[23]?\s+(-c|--command)\s |          # Python one-liners
@@ -99,18 +143,22 @@ _PROCESS_SUBSTITUTION_PATTERNS = re.compile(
     re.VERBOSE,
 )
 
+# Programs that send, matched from the start of the words: `send` first,
+# with `mutate` beside it, since each also changes files or another system
+# (`curl -o`, `scp` and `rsync` write local files, `ssh` runs a command
+# there).
 _NETWORK_SEND_PATTERNS = re.compile(
     r"""
-    \bcurl\s+.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--form|-d\s) |  # curl with data
-    \bwget\s+--post |                                               # wget POST
-    \bssh\s |                                                       # SSH connections
-    \bscp\s |                                                       # SCP transfers
-    \brsync\s |                                                     # rsync
-    \bnc\s |                                                        # netcat
-    \btelnet\s |                                                    # telnet
-    \bftp\s                                                         # ftp
+    curl\s+.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--form|-d\s) |  # curl with data
+    wget\s+--post |                                               # wget POST
+    ssh\s |                                                       # SSH connections
+    scp\s |                                                       # SCP transfers
+    rsync\s |                                                     # rsync
+    nc\s |                                                        # netcat
+    telnet\s |                                                    # telnet
+    ftp\s                                                         # ftp
     """,
-    re.VERBOSE | re.IGNORECASE,
+    re.VERBOSE,
 )
 
 # Patterns that are ALWAYS dangerous regardless of context.
@@ -140,24 +188,38 @@ _SEPARATORS: frozenset[str] = frozenset({"&&", "||", ";", "|", "&", "|&"})
 # duplicates a descriptor; anything else writes a file.
 _OUTPUT_REDIRECTS: frozenset[str] = frozenset({">", ">>", ">|", "&>", "&>>", ">&"})
 _OPERATOR_CHARS = frozenset("();<>|&")
+# A descriptor number as bash reads one: ASCII digits only.
+_FD_NUMBER = re.compile(r"[0-9]+")
 
 # Commands that only read, unless given an option that writes (_writes).
 # Not here, because they run another command or can write a file whatever
-# their options: env, xargs, sed, awk, tee and the interpreters. Nor commands
-# that reach another host whatever their options, which a destination policy
-# must see (STANDARD 1.2.0 section 5.18.3): `npm view` (a registry, which a
-# project's .npmrc or --registry names) and `kubectl get|describe|logs` (a
-# server, which --server or --kubeconfig names, and a kubeconfig's `exec`
-# runs a command). `git remote`, `pip list`, `pip show` and `npm list` read
-# local state only with the arguments _writes allows.
+# their options: env, xargs, sed, awk, tee and the interpreters, and the
+# pagers less and more (a lesskey file, which `less -k`, `--lesskey-src` or
+# any abbreviation of them names, `/dev/stdin` fed by a pipe included, sets
+# LESSOPEN, which less runs; macOS's more is less). Nor commands that reach
+# another host whatever their options, which a destination policy must see
+# (STANDARD 1.2.0 section 5.18.3): `npm view` and `npm list` (a registry,
+# which a project's .npmrc or --registry names: npm's update check sends
+# the token the .npmrc gives for it, `${ENV}` expanded, to it),
+# `kubectl get|describe|logs` (a server, which --server or --kubeconfig
+# names, and a kubeconfig's `exec` runs a command) and `docker
+# ps|images|logs` (a daemon, which DOCKER_HOST or the docker context names,
+# over tcp or ssh; a container name or filter goes to it). Nor `pip list`
+# and `pip show`: pip runs the program the site configuration's `python =`
+# names (sys.prefix/pip.conf, read even with --isolated: an in-project
+# virtual environment keeps the one a repository ships there), and the
+# interpreter it starts runs the `.pth` files of its site-packages, which an
+# editable install of the project, or a shipped environment, puts there
+# (security round 5). `git` reads local state only where it cannot fetch
+# (git_may_fetch), and `git remote` only with the arguments _writes allows.
+# `printf` only without an option: `printf -v NAME` sets a shell variable
+# that the later commands of the line run with (_writes).
 _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
     {
         "ls",
         "cat",
         "head",
         "tail",
-        "less",
-        "more",
         "file",
         "stat",
         "du",
@@ -192,12 +254,6 @@ _READ_ONLY_COMMANDS: frozenset[str] = frozenset(
         "git ls-files",
         "git branch",
         "git remote",
-        "npm list",
-        "pip list",
-        "pip show",
-        "docker ps",
-        "docker images",
-        "docker logs",
     }
 )
 
@@ -349,45 +405,44 @@ _READ_ONLY_OPTIONS: dict[str, _Options] = {
 
 # Commands whose arguments can make them write: a word the shell expands
 # (an unquoted `*`, `?` or `[`) may become any file name, an option
-# included, so such a word makes the command write.
+# included, so such a word makes the command write. Every command whose
+# options are read (_writes) is here (security round 3: `pip show *`, when
+# pip was listed, became `pip show --log=FILE ...` and wrote the log).
 _ARGUMENT_WRITERS: frozenset[str] = frozenset(
-    {*_READ_ONLY_OPTIONS, "find", "git", "less", "more"}
+    {*_READ_ONLY_OPTIONS, "find", "git", "printf"}
 )
 
-# A brace expansion, `{a,b}` or `{1..3}`, in a line whose quoted characters
-# are masked: bash replaces it with words this reading never sees.
-_BRACE_EXPANSION = re.compile(r"\{[^{}\s]*(?:,|\.\.)[^{}\s]*\}")
+# bash's blanks, which end a word: a space and a tab, never another
+# character Unicode calls a space (`{a\u3000,-o}` is one word to bash).
+_BLANKS = re.compile(r"[ \t]+")
 
-# The options with which these subcommands read local state only. Any other
-# option (an index, a registry, a proxy, a configuration file) can make them
-# ask another host, and takes the worst case: `pip list --outdated` and pip's
-# own version check ask the configured index, and npm's update check asks
-# the registry. pip and npm take any unambiguous prefix of a long option.
-_SUBCOMMAND_OPTIONS: dict[tuple[str, str], _Options] = {
-    ("pip", "list"): _Options(
-        flags="levq",
-        long=frozenset(
-            "local user editable exclude-editable include-editable not-required "
-            "verbose quiet disable-pip-version-check no-color isolated".split()
-        ),
-        long_with_arg=frozenset({"format", "exclude", "path"}),
-    ),
-    ("pip", "show"): _Options(
-        flags="fvq",
-        long=frozenset(
-            "files verbose quiet disable-pip-version-check no-color isolated".split()
-        ),
-    ),
-    ("npm", "list"): _Options(
-        flags="alpg",
-        with_arg="w",
-        long=frozenset(
-            "all json long parseable global link package-lock-only unicode "
-            "workspaces include-workspace-root".split()
-        ),
-        long_with_arg=frozenset({"depth", "omit", "include", "workspace"}),
-    ),
-}
+
+def _brace_expansion(masked: str) -> bool:
+    """Whether bash may expand a brace in ``masked``, a line whose quoted
+    characters are masked (:func:`_mask_quoted`): whether a word holds an
+    unquoted `{`, after it an unquoted `,` or `..`, and after that an
+    unquoted `}`. bash replaces such a group with words this reading never
+    sees, and closes a group only at a `}` after its first comma
+    (`{a},-o}x` is `a}x -ox`), so any such order counts, whatever lies
+    between. Linear in the line: each word is searched three times."""
+    for word in _BLANKS.split(masked):
+        start = word.find("{")
+        if start < 0:
+            continue
+        seps = [p for p in (word.find(",", start), word.find("..", start)) if p >= 0]
+        if seps and word.find("}", min(seps)) >= 0:
+            return True
+    return False
+
+
+def _names_a_variable(word: str) -> bool:
+    """Whether ``word`` (masked) is bash's `{varname}` form: right before a
+    redirection, bash opens a descriptor of 10 or more and assigns its
+    number to the variable (`echo x {PATH}>/dev/null` sets PATH to 10 for
+    the rest of the line: echo, printf and pwd are builtins, run in the
+    shell itself). Any word that opens with `{` and closes with `}` counts,
+    a name bash would refuse included."""
+    return len(word) >= 2 and word[0] == "{" and word[-1] == "}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,6 +492,16 @@ def _mask_quoted(command: str) -> tuple[str, bool] | None:
     return "".join(out), expands
 
 
+# A character outside ASCII right before an ASCII character bash treats
+# specially that a double-byte encoding can take as a character's second
+# byte (0x30 to 0x7E): in such a locale bash may read the pair as one
+# character, so the special character is gone (_simple_commands). Looked for
+# in the line as written, quoted text included: a backslash quotes inside
+# double quotes too, and an escaped character outside ASCII (`\ぁ|`) is
+# masked whole, though its last byte may take the `|` there.
+_SPECIAL_AFTER_NON_ASCII = re.compile(r"[^\x00-\x7f][;<>?@\[\\\]^`{|}~]")
+
+
 def _tokens(command: str) -> list[str] | None:
     """The shell words and operators of a line (POSIX rules, operators as
     their own tokens); None when they cannot be read."""
@@ -455,49 +520,102 @@ def _simple_commands(command: str) -> list[_Command] | None:
 
     Returns None when the line holds something this reading cannot show to be
     harmless: an unbalanced quote, a parameter or brace expansion, a subshell
-    or group, a here-document, or an output redirection to anything but
-    /dev/null. Redirections are dropped from the words. Comments are not
-    recognised, so `ls # ; rm x` reads as two commands: a reading that errs
-    splits a command into more commands to check, never fewer.
+    or group, a here-document, an output redirection to anything but
+    /dev/null or `>&N` (N in ASCII digits), a redirection after a
+    `{varname}` word, a redirection in a simple command with no words, or a
+    character outside ASCII right before a backslash or another character
+    bash treats specially.
+    Redirections are dropped from the words. Comments are not recognised, so
+    `ls # ; rm x` reads as two commands: a reading that errs splits a command
+    into more commands to check, never fewer.
+
+    The line is read as Unicode text; bash reads its bytes in the user's
+    locale. In a double-byte locale (GBK, GB18030, BIG5, Shift JIS, JOHAB)
+    the last byte of such a character's UTF-8 form can open a character
+    whose second byte is the next ASCII byte, so bash sees no such ASCII
+    character. A backslash gone unquotes what it escaped (`ls ぁ\\;touch f`
+    and `ls "ぁ\\";touch f #"` are two commands there, one here); a `|`
+    gone joins two commands into one (`find t1 -name ぁ|ls -o -delete` is
+    one find there, which deletes); a `{` gone makes a brace group (`sort
+    {-o,ぁ{x}` is `sort -o ぁ{x` there, which writes that file). So such a
+    pair takes the worst case, quoted or not. A byte below 0x30 (a quote,
+    `$`, `&`, `(`, `)`, `*`, `!`, `#` or a blank) is no second byte in any
+    of them, and a letter, a digit, `_`, `:` or `=` taken changes nothing
+    bash does (it passes a word's bytes on as they are): with those pairs
+    refused, this reading sees at least the commands, expansions and
+    redirections bash makes.
     """
+    if _SPECIAL_AFTER_NON_ASCII.search(command):
+        return None
     masked = _mask_quoted(command)
-    if masked is None or masked[1] or _BRACE_EXPANSION.search(masked[0]):
+    if masked is None or masked[1] or _brace_expansion(masked[0]):
         return None
     tokens = _tokens(command)
     if tokens is None:
         return None
     # The same reading of the masked line gives the same words, each with
-    # its quoted characters masked: an unquoted glob character is one left.
-    # Should the two readings ever differ, every word counts as expanded.
+    # its quoted characters masked: an unquoted glob character is one left,
+    # and only a token that is an operator there too is one. shlex gives a
+    # quoted or escaped operator (`'<'`, `";"`, `\|`) as the bare operator,
+    # but the shell passes it as a word: `find f '<' -execdir sh {} +` runs
+    # its -execdir, and `grep ';' f` is one command. Should the two readings
+    # ever differ in length, no token can be placed: the worst case.
     shadow = _tokens(masked[0])
     if shadow is None or len(shadow) != len(tokens):
-        shadow = ["*"] * len(tokens)
+        return None
     commands: list[_Command] = [_Command([])]
+    # The simple commands (by index) that hold a redirection.
+    redirected: set[int] = set()
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        if token in _SEPARATORS:
-            commands.append(_Command([]))
-        elif token == "<":
-            target = tokens[i + 1] if i + 1 < len(tokens) else ""
-            if target.startswith(_NETWORK_PATHS):
-                return None  # a connection to another host, not a file
-            i += 1  # reads a file: skip its name
-        elif token in _OUTPUT_REDIRECTS:
-            target = tokens[i + 1] if i + 1 < len(tokens) else ""
-            if target != "/dev/null" and not (token == ">&" and target.isdigit()):
-                return None
-            i += 1
-        elif token and set(token) <= _OPERATOR_CHARS:
-            return None  # (, ), <<, <>, ;; and the like
-        else:
+        if not _is_operator(shadow[i]):
             last = commands[-1]
             commands[-1] = _Command(
                 [*last.words, token],
                 last.globbed or any(c in "*?[" for c in shadow[i]),
             )
+        elif token != shadow[i]:
+            return None  # an operator the two readings do not agree on
+        elif token in _SEPARATORS:
+            commands.append(_Command([]))
+        elif token == "<" or token in _OUTPUT_REDIRECTS:
+            if i + 1 == len(tokens) or _is_operator(shadow[i + 1]):
+                return None  # no file named: not a line the shell runs
+            if i > 0 and not _is_operator(shadow[i - 1]):
+                if _names_a_variable(shadow[i - 1]):
+                    return None  # {varname}>...: sets a shell variable
+            target = tokens[i + 1]
+            if token == "<":
+                if target.startswith(_NETWORK_PATHS):
+                    return None  # a connection to another host, not a file
+            elif target != "/dev/null" and not (
+                # bash reads only ASCII digits as a descriptor: `>&١` is
+                # `&>١`, a file (str.isdigit takes any Unicode digit).
+                token == ">&" and _FD_NUMBER.fullmatch(target)
+            ):
+                return None
+            redirected.add(len(commands) - 1)
+            i += 1  # skip the file's name
+        else:
+            return None  # (, ), <<, <>, ;; and the like
         i += 1
+    if any(not commands[n].words for n in redirected):
+        # A redirection with no command (`ls; <f`) runs nothing in bash, but
+        # zsh, the Bash tool's shell where it is the user's (macOS's
+        # default), runs `$READNULLCMD <f` for it, a pager (less on macOS,
+        # Debian's `pager`), which a LESSOPEN or lesskey `|-` preprocessor
+        # makes run code, and `$NULLCMD` for an output one: the worst case
+        # (security round 5). A command with neither words nor a
+        # redirection (`ls;`, `ls &`) runs nothing in either.
+        return None
     return [c for c in commands if c.words]
+
+
+def _is_operator(token: str) -> bool:
+    """Whether a token of :func:`_tokens` is an operator: shlex gives one
+    as a run of operator characters only."""
+    return bool(token) and set(token) <= _OPERATOR_CHARS
 
 
 def _option_writes(args: list[str], options: _Options) -> bool:
@@ -557,18 +675,15 @@ def _writes(words: list[str], globbed: bool = False) -> bool:
     options = _READ_ONLY_OPTIONS.get(name)
     if options is not None:
         return _option_writes(args, options)
-    short = [a for a in args if a.startswith("-") and not a.startswith("--")]
     if name == "find":
         return any(a in _FIND_WRITES for a in args)
-    if name == "less":
-        # -o and -O copy the input to a log file; +cmd runs a less command.
-        return (
-            any(a.startswith("+") for a in args)
-            or any(_long_prefix_of(a, ("log-file", "LOG-FILE")) for a in args)
-            or any("o" in a[1:] or "O" in a[1:] for a in short)
-        )
-    if name == "more":
-        return any(a.startswith("+") for a in args)  # runs a pager command
+    if name == "printf":
+        # bash's printf takes one option, -v NAME, which assigns its output
+        # to the shell variable NAME (PATH, HOME, IFS, an array element whose
+        # subscript bash evaluates as arithmetic, running a `$(...)` the
+        # format wrote): the later commands of the line run with it. A first
+        # argument that starts with `-` is an option (or `--`).
+        return bool(args) and args[0].startswith("-")
     if name == "git":
         if any(_long_prefix_of(a, ("output",)) for a in args):
             return True
@@ -579,18 +694,357 @@ def _writes(words: list[str], globbed: bool = False) -> bool:
             # `git remote show NAME|URL` asks that remote: a request to
             # another host. `get-url` only reads the configuration.
             return not (rest in ([], ["-v"], ["--verbose"]) or rest[0] == "get-url")
-    if name in ("pip", "npm") and args:
-        options = _SUBCOMMAND_OPTIONS.get((name, args[0]))
-        return options is None or _option_writes(args[1:], options)
     return False
+
+
+# The longest command the classifier reads, in UTF-8 bytes: a longer one is
+# the worst case before any pattern runs, so no reading of it can run long
+# (the plugin's PreToolUse hook has the same bound).
+_MAX_COMMAND_BYTES = 4096
+
+# The git configuration that makes a repository a partial clone: a promisor
+# remote, or extensions.partialClone naming one (what `git config
+# --get-regexp` matches, keys in lower case).
+_PROMISOR_CONFIG = r"^(remote\..+\.promisor|extensions\.partialclone)$"
+
+
+# The configuration keys that name a program git runs: core.fsmonitor (to
+# refresh the index: `git status`, `git diff`, `git stash`; true and false
+# name git's own), a diff driver's textconv or command and diff.external
+# (`git diff`, `git log -p`, `git show`), a filter's clean, smudge or process
+# (a read hashes a changed file through clean; a restore writes through
+# smudge), a merge driver (a restore merges), a signature program (`git log`
+# with log.showSignature) and a pager. The plugin's PreToolUse hook holds the
+# same pattern (GIT_PROGRAM_KEYS).
+_PROGRAM_CONFIG = (
+    r"^(core\.fsmonitor|core\.pager|pager\..+|diff\.external"
+    r"|diff\..+\.(textconv|command)|filter\..+\.(clean|smudge|process)"
+    r"|merge\..+\.driver|gpg\.program|gpg\..+\.program)$"
+)
+# The configuration keys of a filter git runs when it writes a file of the
+# work tree from an object: a filter driver's smudge or process command.
+# The plugin's PreToolUse hook holds the same pattern (GIT_SMUDGE_KEYS).
+_SMUDGE_CONFIG = r"^filter\..+\.(smudge|process)$"
+# The commands `git lfs install --skip-smudge` writes, as they are: they
+# write the pointer file and ask no server (a probe logged no request for a
+# `git reset --hard` that the plain commands made ask the LFS server). The
+# plugin's PreToolUse hook holds the same two (git_filter_runs).
+_SKIPPING_SMUDGE = frozenset(
+    {b"git-lfs smudge --skip -- %f", b"git-lfs filter-process --skip"}
+)
+# The configuration scopes a repository's own files give (`git config
+# --show-scope`; an included file takes the scope of the file that
+# includes it).
+_REPOSITORY_SCOPES = (b"local", b"worktree")
+# core.fsmonitor values that name git's own daemon or none, not a program.
+_GIT_BOOLEANS = frozenset(
+    {b"", b"true", b"false", b"yes", b"no", b"on", b"off", b"1", b"0"}
+)
+
+
+def _git(git: str, where: str, *args: str) -> subprocess.CompletedProcess[bytes]:
+    """git ``args`` run in ``where`` as the layer runs it on its own behalf:
+    no fsmonitor program, no hook, no lazy fetch (:mod:`..utils.git`)."""
+    return subprocess.run(
+        [git, *SAFE_GIT_OPTIONS, "-C", where, *args],
+        capture_output=True,
+        timeout=10,
+        check=False,
+        env=safe_git_environment(),
+    )
+
+
+def _where(cwd: str | None) -> str:
+    return cwd if isinstance(cwd, str) and cwd else os.getcwd()
+
+
+def git_dir_may_be_content(cwd: str | None = None) -> bool:
+    """Whether the git directory git finds from ``cwd`` (this process's
+    working directory when it is None) may be repository content: one git
+    did not make for a work tree (:func:`~..utils.git.git_dir_is_made`), such
+    as a directory a repository ships holding ``HEAD``, ``objects/`` and
+    ``refs/`` (an embedded bare repository). git run there reads that
+    directory's configuration and hooks and runs what they name
+    (``core.fsmonitor`` for `git status`, `git ls-files` and `git stash`, a
+    ``diff.<driver>.textconv`` for `git log -p`, `git show` and `git diff`).
+    No repository there is a no; no git, or git failing in another way, a
+    yes. The plugin's PreToolUse hook asks the same (git_dir_is_content)."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    try:
+        done = _git(git, _where(cwd), "rev-parse", "--absolute-git-dir")
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
+    if done.returncode != 0:
+        return False
+    found = done.stdout.decode("utf-8", "surrogateescape").strip()
+    return not git_dir_is_made(found)
+
+
+def git_may_fetch(cwd: str | None = None) -> bool:
+    """Whether git, run in ``cwd`` (this process's working directory when it
+    is None), may ask another host for an object it reads:
+
+    - in a partial clone, git fetches each object it lacks from the promisor
+      remote, so a read such as `git show <id>` or `git log -p` reaches that
+      host, and the object id the agent chose goes to it (STANDARD 1.2.0
+      section 5.18.3: a request to another system);
+    - in a repository with submodules (``modules/`` in its common git
+      directory, or a gitlink in its index), a read that looks into one
+      (`--submodule=diff`, the ``diff.submodule`` setting, `git status`)
+      reads that submodule's object store, where a partial clone fetches the
+      same way.
+
+    Read from the configuration and index git itself reads there; anything
+    git does not answer (no git, no such directory, a configuration it
+    cannot read) counts as yes. The plugin's PreToolUse hook asks the same
+    question."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    where = _where(cwd)
+    try:
+        done = _git(git, where, "config", "--get-regexp", _PROMISOR_CONFIG)
+        if not (done.returncode == 1 and not done.stdout):
+            return True
+        found = _git(git, where, "rev-parse", "--git-common-dir")
+        if found.returncode != 0:
+            return False  # no repository: nothing to fetch for
+        common = os.path.join(
+            where, found.stdout.decode("utf-8", "surrogateescape").strip()
+        )
+        if os.path.lexists(os.path.join(common, "modules")):
+            return True
+        index = _git(git, where, "ls-files", "--stage", "--", ":/")
+        if index.returncode != 0:
+            return True
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
+    return any(line.startswith(b"160000 ") for line in index.stdout.splitlines())
+
+
+def _names_program(listing: bytes) -> bool:
+    """Whether a `git config --show-scope --get-regexp` listing of
+    :data:`_PROGRAM_CONFIG` sets one of its keys in a scope the repository's
+    own files give (core.fsmonitor only to a value other than a boolean)."""
+    for line in listing.splitlines():
+        scope, tab, rest = line.partition(b"\t")
+        if not tab or scope not in _REPOSITORY_SCOPES:
+            continue
+        key, _, value = rest.partition(b" ")
+        if key == b"core.fsmonitor" and value.lower() in _GIT_BOOLEANS:
+            continue
+        return True
+    return False
+
+
+# The hooks git runs on a read that writes the index (`git status`), and
+# those it runs on a change of the work tree, the index or a ref: `git
+# reset` and `git stash` run post-index-change and reference-transaction,
+# `git branch -d` and `git stash drop` reference-transaction, `git checkout
+# --` post-checkout and post-index-change (probed with every hook git
+# documents present; `git clean` ran none).
+_READ_HOOKS: tuple[str, ...] = ("post-index-change",)
+_CHANGE_HOOKS: tuple[str, ...] = (
+    "post-index-change",
+    "reference-transaction",
+    "post-checkout",
+)
+
+
+def _repository_runs(cwd: str | None, hooks: tuple[str, ...]) -> bool:
+    """Whether git, run in ``cwd`` (this process's working directory when
+    it is None), may run a program the repository itself names: its own
+    configuration sets a key of :data:`_PROGRAM_CONFIG`, or its hooks
+    directory holds one of ``hooks``. No repository there is a no; no git,
+    or git failing in another way, a yes."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    where = _where(cwd)
+    try:
+        if _git(git, where, "rev-parse", "--absolute-git-dir").returncode != 0:
+            return False
+        done = _git(
+            git, where, "config", "--show-scope", "--get-regexp", _PROGRAM_CONFIG
+        )
+        if done.returncode not in (0, 1):
+            return True
+        if done.returncode == 0 and _names_program(done.stdout):
+            return True
+        # Where git looks for hooks (core.hooksPath, else <git dir>/hooks):
+        # asked without the layer's options, which point it at /dev/null.
+        found = subprocess.run(
+            [
+                git,
+                "-c",
+                "core.fsmonitor=false",
+                "-C",
+                where,
+                "rev-parse",
+                "--git-path",
+                "hooks",
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env=safe_git_environment(),
+        )
+        if found.returncode != 0 or not found.stdout.strip():
+            return True
+        path = os.path.join(where, os.fsdecode(found.stdout.strip()))
+        return any(os.path.lexists(os.path.join(path, hook)) for hook in hooks)
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
+
+
+def git_config_may_run(cwd: str | None = None) -> bool:
+    """Whether git, run in ``cwd`` (this process's working directory when
+    it is None), may run a program the repository itself names: its own
+    configuration (the local and worktree scopes, with the files they
+    include) sets a key of :data:`_PROGRAM_CONFIG`, or its hooks directory
+    holds ``post-index-change``, which git runs when a read such as `git
+    status` writes the index. A repository delivered with its ``.git`` (an
+    archive, a copied checkout) brings that configuration and those hooks,
+    and one approved `git config core.fsmonitor ./x` writes it; the user's
+    own settings (global, system, the command line) are not repository
+    content. No repository there is a no; no git, or git failing in another
+    way, a yes. The plugin's PreToolUse hook asks the same
+    (git_runs_configured)."""
+    return _repository_runs(cwd, _READ_HOOKS)
+
+
+def git_change_may_run(cwd: str | None = None) -> bool:
+    """:func:`git_config_may_run` for a git command that changes the local
+    repository or work tree (`git reset`, `git checkout --`, `git branch
+    -d`, `git stash`): its hooks directory may also hold
+    ``reference-transaction`` or ``post-checkout``, which git runs on such
+    a change (:data:`_CHANGE_HOOKS`; git-lfs's ``post-checkout`` fetches
+    from the LFS server). No repository there is a no; no git, or git
+    failing in another way, a yes."""
+    return _repository_runs(cwd, _CHANGE_HOOKS)
+
+
+def git_filter_may_run(cwd: str | None = None) -> bool:
+    """Whether git, writing files of the work tree from objects in ``cwd``
+    (this process's working directory when it is None), may run a filter
+    that reaches another host: a filter driver's smudge or process command
+    configured in any scope, the user's own included. git runs it for each
+    file whose attributes name the driver, which the repository chooses
+    (its `.gitattributes`, or those of the commit written), and git-lfs,
+    whose `git lfs install` writes its filter to the global configuration,
+    asks the LFS server the repository's `.lfsconfig` or remote names for
+    each object its store lacks, sending the object's id: `git reset --hard`
+    to a commit holding an LFS pointer, and a restore of a checkpoint that
+    holds one, did (security round 5). Reads run no smudge. Only the
+    commands `git lfs install --skip-smudge` writes (:data:`_SKIPPING_SMUDGE`)
+    count as none. No repository there is a no; no git, or git failing in
+    another way, a yes. The plugin's PreToolUse hook asks the same
+    (git_filter_runs)."""
+    git = shutil.which("git")
+    if git is None:
+        return True
+    where = _where(cwd)
+    try:
+        if _git(git, where, "rev-parse", "--absolute-git-dir").returncode != 0:
+            return False
+        done = _git(git, where, "config", "-z", "--get-regexp", _SMUDGE_CONFIG)
+    except OSError, ValueError, subprocess.SubprocessError:
+        return True
+    if done.returncode == 1 and not done.stdout:
+        return False
+    if done.returncode != 0:
+        return True
+    # -z: each entry is the key, a line break, the value, then a NUL.
+    for entry in done.stdout.split(b"\0"):
+        if entry and entry.partition(b"\n")[2] not in _SKIPPING_SMUDGE:
+            return True
+    return False
+
+
+def _home_directory() -> str:
+    """The user's home directory as the password database gives it (not
+    HOME, as the plugin's hooks read it), physical; ``""`` where there is
+    none."""
+    try:
+        import pwd
+
+        return os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    except ImportError, KeyError, OSError:
+        return ""
+
+
+def command_may_be_content(
+    name: str,
+    cwd: str | None = None,
+    search_path: str | None = None,
+    project_dir: str | None = None,
+) -> bool:
+    """Whether the program the shell runs for the command name ``name`` may
+    be repository content (STANDARD 1.2.0 section 5.18.3: a call is
+    classified by its effect, and a layer that cannot tell which program
+    runs takes the worst case). bash runs a name with no slash as the first
+    executable file of that name in a directory of its PATH
+    (``search_path``: the PATH the commands run with; None for this
+    process's): the repository's own `git`, `cat` or `ls` runs in place of
+    the system's when PATH holds an empty or relative entry (read from the
+    working directory, ``cwd``: ``PATH=node_modules/.bin:$PATH``, a leading
+    colon) under which the name is found, or an entry in the project
+    directory (``project_dir``, None for this process's working directory:
+    an activated virtual environment, direnv's ``PATH_add``) whose file of
+    that name lies, links followed, in the project (not where the project is
+    the user's home directory, or holds it). Yes then, when no such file is
+    found, and when the lookup fails. The plugin's PreToolUse hook asks the
+    same (command_may_be_content)."""
+    if not name or "/" in name:
+        return True
+    path = os.environ.get("PATH", "") if search_path is None else search_path
+    if not path:
+        return True
+    where = _where(cwd)
+    found = None
+    for entry in path.split(os.pathsep):
+        relative = not os.path.isabs(entry)
+        candidate = (
+            os.path.join(where, entry, name) if relative else os.path.join(entry, name)
+        )
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            # The first that bash would run: an empty or relative entry is
+            # read from the working directory, repository content.
+            if relative:
+                return True
+            found = candidate
+            break
+    if found is None:
+        return True
+    try:
+        project = os.path.realpath(project_dir if project_dir else os.getcwd())
+        real = os.path.realpath(found, strict=True)
+    except OSError, ValueError:
+        return True
+    within = project.rstrip(os.sep) + os.sep
+    home = _home_directory()
+    if home and (home + os.sep).startswith(within):
+        # A project that is the home directory, or holds it, is no
+        # repository's.
+        return False
+    return real.startswith(within)
 
 
 def _is_read_only(command: _Command) -> bool:
     """Whether a simple command is on the read-only allow-list (by its exact
-    name, or its name and subcommand) with no option that writes."""
+    name, or its name and subcommand, each one word) with no option that
+    writes. The shell runs the program the first word names as it stands:
+    one holding a blank (`"git status"`, quoted) or a slash names a program
+    on no list, whatever the list's entries spell."""
     words = command.words
-    listed = (
-        words[0] in _READ_ONLY_COMMANDS or " ".join(words[:2]) in _READ_ONLY_COMMANDS
+    if any(c.isspace() or c == "/" for c in words[0]):
+        return False
+    # With no blank in the first word, a two-word entry can only match the
+    # first word and the second.
+    listed = words[0] in _READ_ONLY_COMMANDS or (
+        len(words) > 1 and f"{words[0]} {words[1]}" in _READ_ONLY_COMMANDS
     )
     return listed and not _writes(words, command.globbed)
 
@@ -622,7 +1076,10 @@ class ToolMapping:
         prerequisites: The ``from`` capabilities of the ``requires`` edges
             into every capability in ``capabilities`` (section 5.18.5)
         approval: How approval of a call is counted (the binding's
-            ``approval`` member, section 5.18.7)
+            ``approval`` member, section 5.18.7), joined for a composite
+            with that of each binding it invokes, transitively: the most
+            approvers, the shortest expiry, a role one of them sets
+            (section 5.18.4)
         control: The tool only signals the host and is never refused
             (section 5.18.3)
         classifier: The classifier the binding names (section 5.18.3); this
@@ -707,13 +1164,9 @@ _TOOL_MAPPINGS: dict[str, str] = {
     "Edit": "mutate",
     "MultiEdit": "mutate",
     "NotebookEdit": "mutate",
-    # COORDINATE layer. "Agent" and "AskUserQuestion" are the current
-    # Claude Code names of the tools once called "Task" and "AskUser".
-    "Task": "delegate",
-    "Agent": "delegate",
-    # A skill's instructions save and restore nothing: the calls the skill
-    # leads to are classified on their own (STANDARD 1.2.0 section 5.18.6).
-    "Skill": "invoke",
+    # COORDINATE layer. "AskUserQuestion" is the current Claude Code name
+    # of the tool once called "AskUser". Task, Agent and Skill are in
+    # _UNSEEN_COMMANDS.
     "AskUser": "inquire",
     "AskUserQuestion": "inquire",
     # REMEMBER layer
@@ -732,6 +1185,25 @@ _TOOL_MAPPINGS: dict[str, str] = {
     "ListMcpResourcesTool": "observe",
     "ReadMcpResourceTool": "retrieve",
     "ExitPlanMode": "inquire",
+}
+
+# Tools whose call loads a definition that runs commands no hook sees, with
+# their own capability:
+# Claude Code runs the shell commands a skill's file embeds (!`cmd` and ```!
+# blocks, the call's arguments substituted into them) as the skill loads,
+# under its allowed-tools, and starts the hooks and MCP servers a subagent's
+# definition names as the subagent runs, with no PreToolUse or PostToolUse
+# event for any of them; and a project's skill or agent can take any name,
+# a built-in one's included. A call of one is its own capability and Bash's
+# worst case, a gated `mutate` and `send` (STANDARD 1.2.0 section
+# 5.18.3: what the classifier cannot see). Loading the checkpoint skill
+# takes no checkpoint: the `git stash create` it leads to does (section
+# 5.18.6). The plugin's PreToolUse hook gates them too. "Agent" is the
+# current Claude Code name of the tool once called "Task".
+_UNSEEN_COMMANDS: dict[str, str] = {
+    "Task": "delegate",
+    "Agent": "delegate",
+    "Skill": "invoke",
 }
 
 # The registry behind a mapper constructed without an ontology: the
@@ -849,6 +1321,51 @@ class ToolCapabilityMapper:
         # only then. The adapter sets it from its checkpoint tracker; with
         # None, every such command is a gated mutation.
         self.is_checkpoint_commit: Callable[[str], bool] | None = None
+        # Whether git, run in a directory (the call's, or None for this
+        # process's), may ask another host for an object it reads: a git
+        # command the allow-list reads as `observe` takes the worst case
+        # there (:func:`git_may_fetch`: a partial clone, or a repository
+        # with submodules). A lookup that fails is a yes.
+        self.git_may_fetch: Callable[[str | None], bool] = git_may_fetch
+        # Whether the git directory git finds from a directory may be
+        # repository content, whose configuration names programs git runs:
+        # every git command the classifier would let pass (a read, `git
+        # stash create`, a restore) takes the worst case there
+        # (:func:`git_dir_may_be_content`). A lookup that fails is a yes.
+        self.git_dir_may_be_content: Callable[[str | None], bool] = (
+            git_dir_may_be_content
+        )
+        # Whether git, run in a directory, may run a program the
+        # repository's own configuration or hooks name: a git read takes the
+        # worst case there, `git stash create` the worst case beside its
+        # checkpoint, and a restore the worst case
+        # (:func:`git_config_may_run`). A lookup that fails is a yes.
+        self.git_config_may_run: Callable[[str | None], bool] = git_config_may_run
+        # The same for a git command that changes the local repository or
+        # work tree (`git reset`, `git checkout --`, `git branch -d`, `git
+        # stash`), whose hooks are more (:func:`git_change_may_run`): it
+        # takes the worst case there. A lookup that fails is a yes.
+        self.git_change_may_run: Callable[[str | None], bool] = git_change_may_run
+        # Whether git, writing files of the work tree in a directory, may
+        # run a filter configured in any scope, the user's git-lfs included,
+        # which asks the LFS server the repository names for an object it
+        # lacks: a git change that writes the tree (`git reset`, `git
+        # checkout --`, `git stash`) and a restore of a recorded checkpoint
+        # take the worst case there (:func:`git_filter_may_run`). A lookup
+        # that fails is a yes.
+        self.git_filter_may_run: Callable[[str | None], bool] = git_filter_may_run
+        # The PATH the classified commands run with (None: this process's)
+        # and the project's directory (None: this process's working
+        # directory). The adapter sets them from the options it wraps (the
+        # CLI's ``env`` and ``cwd``). A command the allow-list would let pass
+        # takes the worst case where its program may be the repository's own
+        # (:func:`command_may_be_content`: a relative or empty PATH entry,
+        # or one in the project, that holds a file of its name).
+        self.command_path: str | None = None
+        self.project_dir: str | None = None
+        self.command_may_be_content: Callable[
+            [str, str | None, str | None, str | None], bool
+        ] = command_may_be_content
 
     @property
     def warnings(self) -> list[ValidationError]:
@@ -989,11 +1506,27 @@ class ToolCapabilityMapper:
         """Load a set of tool binding records (STANDARD 1.2.0 section 5.18.1).
 
         Each record that loads is stored under its ``tool``; ``invokes``
-        names resolve within the set and among the tools registered before.
-        A tool whose record does not load is unbound (:data:`UNCLASSIFIED_TOOL`).
-        Nothing is raised: every diagnostic is returned and kept in
-        :attr:`diagnostics` (warnings also in :attr:`warnings`).
+        names resolve within the set and among the bound tools registered
+        before. A tool whose record does not load is unbound
+        (:data:`UNCLASSIFIED_TOOL`).
+
+        A composite's effective flags include those of the bindings it
+        invokes (section 5.18.4), so every loaded composite that invokes,
+        transitively, a tool of the set is loaded again from its record,
+        with the set: it takes the flags they now have, and one that now
+        invokes an unbound tool does not load (V107) and is unbound itself.
+        Nothing is raised: every diagnostic, the composites' included, is
+        returned and kept in :attr:`diagnostics` (warnings also in
+        :attr:`warnings`).
         """
+        own, dependents = self._load(records)
+        return own + dependents
+
+    def _load(
+        self, records: Iterable[Mapping[str, Any]], *, again: bool = True
+    ) -> tuple[list[ValidationError], list[ValidationError]]:
+        """:meth:`load_bindings`: the set's diagnostics, and those of the
+        composites loaded again (none when ``again`` is false)."""
         from .bindings import load_bindings
 
         records = [dict(r) if isinstance(r, Mapping) else r for r in records]
@@ -1027,6 +1560,31 @@ class ToolCapabilityMapper:
             if isinstance(r, Mapping) and r.get("tool") in loaded:
                 # A copy the caller cannot change under the digest.
                 self._records[r["tool"]] = copy.deepcopy(dict(r))
+        return diagnostics, (self._load_composites_again(names) if again else [])
+
+    def _load_composites_again(self, changed: set[str]) -> list[ValidationError]:
+        """Load again, as one set, every loaded composite that invokes a
+        tool in ``changed``, transitively (section 5.18.4): what a layer
+        loading the records it now holds would compute. Its diagnostics.
+        ``invokes`` has no cycle among loaded bindings (V105 counts those
+        loaded before), so the set is finite and loads once."""
+        again: set[str] = set()
+        reached = set(changed)
+        while reached:
+            reached = {
+                name
+                for name, mapping in self._dynamic_mappings.items()
+                if name in self._records
+                and name not in changed
+                and name not in again
+                and reached.intersection(mapping.invokes)
+            }
+            again |= reached
+        if not again:
+            return []
+        diagnostics, _ = self._load(
+            [self._records[name] for name in sorted(again)], again=False
+        )
         return diagnostics
 
     def register_binding(self, record: Mapping[str, Any]) -> ToolMapping:
@@ -1035,9 +1593,11 @@ class ToolCapabilityMapper:
         Raises:
             ValueError: If the record does not load (S303, S304, V101, V105,
                 V107, V109, V110). The message opens with each error's code
-                and name; the tool stays unbound.
+                and name; the tool stays unbound. A composite loaded again
+                with it (:meth:`load_bindings`) raises nothing here: its
+                diagnostics are in :attr:`diagnostics`.
         """
-        diagnostics = self.load_bindings([record])
+        diagnostics, _ = self._load([record])
         errors = [d for d in diagnostics if d.severity is Severity.ERROR]
         if errors:
             raise ValueError("; ".join(text_form(e) for e in errors))
@@ -1126,6 +1686,8 @@ class ToolCapabilityMapper:
             )
             logger.warning("%s", text_form(report))
             self._diagnostics[tool_name] = [report]
+            # A composite that invokes it no longer loads (V107).
+            self._load_composites_again({tool_name})
             return UNCLASSIFIED_TOOL
 
         if mutation is None and risk == "high":
@@ -1162,7 +1724,9 @@ class ToolCapabilityMapper:
             record["approval"] = dict(approval)
         return self.register_binding(record)
 
-    def map_tool(self, tool_name: str, tool_input: dict[str, Any]) -> ToolMapping:
+    def map_tool(
+        self, tool_name: str, tool_input: dict[str, Any], cwd: str | None = None
+    ) -> ToolMapping:
         """
         Map a tool invocation to its capability metadata.
 
@@ -1176,14 +1740,20 @@ class ToolCapabilityMapper:
         Args:
             tool_name: SDK tool name (e.g., "Write", "Bash", "Read")
             tool_input: Tool input parameters
+            cwd: The directory the call runs in (a hook input's ``cwd``);
+                None: this process's working directory. Only a git
+                command's class depends on it (:attr:`git_may_fetch`,
+                :attr:`git_dir_may_be_content`).
 
         Returns:
             ToolMapping with capability metadata, raised by the applied
             domain profiles (section 5.21.3)
         """
-        return self._apply_profiles(self._map_tool(tool_name, tool_input))
+        return self._apply_profiles(self._map_tool(tool_name, tool_input, cwd))
 
-    def _map_tool(self, tool_name: str, tool_input: dict[str, Any]) -> ToolMapping:
+    def _map_tool(
+        self, tool_name: str, tool_input: dict[str, Any], cwd: str | None = None
+    ) -> ToolMapping:
         """:meth:`map_tool` before domain profiles."""
         # Handle Bash specially - analyze command content. Input that is
         # not a dict has no command to read: classify it as an empty one,
@@ -1191,11 +1761,16 @@ class ToolCapabilityMapper:
         if tool_name == "Bash":
             if not isinstance(tool_input, dict):
                 tool_input = {}
-            return self._classify_bash_command(tool_input)
+            return self._classify_bash_command(tool_input, cwd)
 
         # Check dynamic mappings (MCP tools, etc.)
         if tool_name in self._dynamic_mappings:
             return self._dynamic_mappings[tool_name]
+
+        # A call that loads a definition whose commands no hook sees: its
+        # own capability, and the worst case of what it may run.
+        if tool_name in _UNSEEN_COMMANDS:
+            return self._unseen(tool_name)
 
         # Static mapping for known tools
         if tool_name in _TOOL_MAPPINGS:
@@ -1222,10 +1797,13 @@ class ToolCapabilityMapper:
         return mapping.person_required
 
     def invoked_senders(self, mapping: ToolMapping) -> list[str]:
-        """The bindings ``mapping`` invokes, transitively, that perform
-        ``send`` (sections 4.4.2, 5.18.4), in the order found. This mapper's
-        layer does not see a composite's nested calls, so it cannot tell
-        where they send."""
+        """The tools ``mapping`` invokes, transitively, that may perform
+        ``send`` (sections 4.4.2, 5.18.4), in the order found: each binding
+        that performs it, and each tool that is unbound, which may send
+        anywhere (section 5.18.2; a composite does not load with one, V107,
+        so this is the fail-closed answer should one be reached). This
+        mapper's layer does not see a composite's nested calls, so it cannot
+        tell where they send."""
         found: list[str] = []
         seen: set[str] = set()
         queue = list(mapping.invokes)
@@ -1235,7 +1813,7 @@ class ToolCapabilityMapper:
                 continue
             seen.add(name)
             invoked = self._dynamic_mappings.get(name, UNCLASSIFIED_TOOL)
-            if "send" in invoked.capabilities:
+            if invoked is UNCLASSIFIED_TOOL or "send" in invoked.capabilities:
                 found.append(name)
             queue.extend(invoked.invokes)
         return found
@@ -1296,11 +1874,15 @@ class ToolCapabilityMapper:
         self._profiled[mapping] = raised
         return raised
 
-    def _classify_bash_command(self, tool_input: dict[str, Any]) -> ToolMapping:
+    def _classify_bash_command(
+        self, tool_input: dict[str, Any], cwd: str | None = None
+    ) -> ToolMapping:
         """
         Classify a Bash command based on its content (STANDARD 1.2.0
         section 5.18.3).
 
+        0. A command over 4096 UTF-8 bytes is not read: the worst case, before
+           any pattern runs (some take time that grows faster than the line).
         1. Always-dangerous patterns (command substitution, backticks,
            variable expansion, eval, exec, source, control characters) and
            process substitution give the line the worst case at once
@@ -1314,13 +1896,34 @@ class ToolCapabilityMapper:
            when <commit> is the full id of a commit the layer recorded as a
            checkpoint (:attr:`is_checkpoint_commit`); any other `pop` or
            `apply` is a gated mutation, since git applies any merge commit
-           as if it were a stash. A git option before `stash` (`git -C dir
-           stash ...`) is not recognised.
+           as if it were a stash. Where the repository's own configuration
+           or hooks name a program git runs (:attr:`git_config_may_run`),
+           `create` takes a checkpoint beside the worst case (a host takes
+           the first checkpoint with ``create_checkpoint``) and a restore
+           takes the worst case; so does a restore where a smudge filter is
+           configured in any scope (:attr:`git_filter_may_run`: git-lfs's
+           asks the LFS server for an object the store lacks). Any other
+           restore is the worst case where git may fetch or run what the
+           repository names (`_git_change_gated`), or run such a filter. A
+           git option before `stash` (`git -C dir stash ...`) is not
+           recognised.
         3. Otherwise each simple command is classified on its own. A line
            whose every command is allow-listed as read-only is an
            observation; any other line takes the strictest flags and every
            prerequisite of all the commands that are not read-only, with
-           their capabilities in order (`_combine`).
+           their capabilities in order (`_combine`). A git command that would
+           observe takes the worst case where git may fetch from another
+           host (:attr:`git_may_fetch` for ``cwd``: a partial clone) or run
+           a program the repository names (:attr:`git_dir_may_be_content`,
+           :attr:`git_config_may_run`). `printf` with an option (`-v NAME`
+           sets a shell variable the later commands of the line run with)
+           is not read-only (`_writes`). A class narrower than the worst
+           case comes only from the command's program, never from text in
+           its arguments (:meth:`_classify_single_command`), and only where
+           the program the shell finds for its name, on
+           :attr:`command_path`, cannot be the repository's own
+           (:func:`command_may_be_content`; the `git stash` forms of step 2
+           alike).
 
         Security principle: fail-safe defaults. A command is high-risk until
         it is shown to be on the read-only allow-list, and a command the
@@ -1330,6 +1933,7 @@ class ToolCapabilityMapper:
 
         Args:
             tool_input: Bash tool input with 'command' key
+            cwd: The directory the command runs in (None: this process's)
 
         Returns:
             ToolMapping based on command analysis
@@ -1337,8 +1941,15 @@ class ToolCapabilityMapper:
         command = tool_input.get("command", "")
         worst = self._worst_case()
 
-        # Empty or non-string command is suspicious - fail-safe
-        if not isinstance(command, str) or not command.strip():
+        # Empty, non-string or over-long command is suspicious - fail-safe.
+        # The length is checked first: a pattern below can take time that
+        # grows faster than the line.
+        if (
+            not isinstance(command, str)
+            or len(command) > _MAX_COMMAND_BYTES
+            or len(command.encode("utf-8", "surrogatepass")) > _MAX_COMMAND_BYTES
+            or not command.strip()
+        ):
             return worst
 
         # SEC-002: These bypass all other checks and are always high-risk.
@@ -1360,16 +1971,152 @@ class ToolCapabilityMapper:
                 and words[2] in _GIT_STASH_CLASSES
                 and not _writes(words, commands[0].globbed)
             ):
+                # `git stash create` refreshes the index (core.fsmonitor)
+                # and a restore writes the tree (filters): in a git
+                # directory the repository ships, each runs what its
+                # configuration names. And the git the shell finds may be
+                # the repository's own.
+                if self._git_dir_may_be_content(cwd) or self._program_may_be_content(
+                    "git", cwd
+                ):
+                    return worst
                 capability = _GIT_STASH_CLASSES[words[2]]
-                if capability != "rollback" or self._restores_checkpoint(words):
+                if capability == "observe":
+                    if self._git_read_gated(cwd):
+                        return worst
                     return self._builtin("Bash", capability)
-                return self._builtin("Bash", "mutate", checkpoint_gated=True)
+                if self._git_config_may_run(cwd):
+                    # It runs what the repository's own configuration names,
+                    # which may do anything, sending included: a checkpoint
+                    # taken with the worst case beside it (a host takes the
+                    # first with create_checkpoint), and a restore that is
+                    # the worst case.
+                    if capability == "checkpoint":
+                        return self._combine(
+                            [
+                                self._builtin("Bash", "checkpoint"),
+                                self._worst_case("execute"),
+                            ]
+                        )
+                    return worst
+                if capability == "checkpoint":
+                    # It reads no object the local state lacks (a probe in a
+                    # partial clone fetched nothing), and writes no file.
+                    return self._builtin("Bash", capability)
+                if self._restores_checkpoint(words):
+                    # It writes the tree, through any smudge filter
+                    # configured: git-lfs's asks the LFS server for each
+                    # object of a pointer the store lacks.
+                    if self._git_filter_may_run_in(cwd):
+                        return worst
+                    return self._builtin("Bash", capability)
+                return self._git_change(cwd, writes_tree=True)
 
-        results = [self._classify_single_command(c) for c in commands]
+        results = [self._classify_single_command(c, cwd) for c in commands]
         gated = [r for r in results if r.risk != "low"]
         if not gated:
             return self._builtin("Bash", "observe")
         return self._combine(gated)
+
+    def _program_may_be_content(self, name: str, cwd: str | None) -> bool:
+        """:attr:`command_may_be_content` for the command name ``name`` run
+        in ``cwd`` with :attr:`command_path` in :attr:`project_dir`; a
+        lookup that fails is a yes."""
+        try:
+            return bool(
+                self.command_may_be_content(
+                    name, cwd, self.command_path, self.project_dir
+                )
+            )
+        except Exception:
+            logger.exception("Could not tell which program %s names", name)
+            return True
+
+    def _git_dir_may_be_content(self, cwd: str | None) -> bool:
+        """:attr:`git_dir_may_be_content` for ``cwd``; a lookup that fails is
+        a yes."""
+        try:
+            return bool(self.git_dir_may_be_content(cwd))
+        except Exception:
+            logger.exception("Could not tell which git directory serves %s", cwd)
+            return True
+
+    def _git_config_may_run(self, cwd: str | None) -> bool:
+        """:attr:`git_config_may_run` for ``cwd``; a lookup that fails is a
+        yes."""
+        try:
+            return bool(self.git_config_may_run(cwd))
+        except Exception:
+            logger.exception(
+                "Could not tell whether git runs configured programs in %s", cwd
+            )
+            return True
+
+    def _git_change_gated(self, cwd: str | None) -> bool:
+        """Whether a git command that changes the local repository or work
+        tree may do more in ``cwd``: what :meth:`_git_read_gated` asks, or
+        run a hook git runs on such a change (:attr:`git_change_may_run`:
+        `reference-transaction` on `git reset`, `git branch -d` and `git
+        stash drop`, `post-checkout` on `git checkout --`). A lookup that
+        fails is a yes."""
+        if self._git_read_gated(cwd):
+            return True
+        try:
+            return bool(self.git_change_may_run(cwd))
+        except Exception:
+            logger.exception("Could not tell which hooks git runs in %s", cwd)
+            return True
+
+    def _git_filter_may_run_in(self, cwd: str | None) -> bool:
+        """:attr:`git_filter_may_run` for ``cwd``; a lookup that fails is a
+        yes."""
+        try:
+            return bool(self.git_filter_may_run(cwd))
+        except Exception:
+            logger.exception("Could not tell which filters git runs in %s", cwd)
+            return True
+
+    def _git_change(self, cwd: str | None, writes_tree: bool) -> ToolMapping:
+        """The class of a git command that changes the local repository or
+        work tree: a gated `mutate`, or the worst case where git may fetch
+        an object it lacks (`git reset` in a partial clone fetched the
+        objects of the commit it moved to), run a program the repository
+        names (:meth:`_git_change_gated`) or, for one that writes files of
+        the work tree (``writes_tree``), run a smudge filter configured in
+        any scope (:attr:`git_filter_may_run`: git-lfs's asked the LFS
+        server for the objects of `git reset --hard`'s commit)."""
+        if self._git_change_gated(cwd) or (
+            writes_tree and self._git_filter_may_run_in(cwd)
+        ):
+            return self._worst_case()
+        return self._builtin("Bash", "mutate", checkpoint_gated=True)
+
+    def _git_read_gated(self, cwd: str | None) -> bool:
+        """Whether a git command that only reads may do more in ``cwd``: run
+        what repository content names (:attr:`git_dir_may_be_content`,
+        :attr:`git_config_may_run`) or fetch from another host
+        (:attr:`git_may_fetch`). A lookup that fails is a yes."""
+        if self._git_dir_may_be_content(cwd) or self._git_config_may_run(cwd):
+            return True
+        try:
+            return bool(self.git_may_fetch(cwd))
+        except Exception:
+            logger.exception("Could not tell whether git may fetch in %s", cwd)
+            return True
+
+    def _unseen(self, tool_name: str) -> ToolMapping:
+        """A ``Skill``, ``Agent`` or ``Task`` call: its own capability
+        (``invoke``, ``delegate``) and Bash's worst case (a gated ``mutate``
+        and ``send``), since the commands the skill's file embeds or the
+        subagent's definition names run with no hook seeing them (section
+        5.18.3)."""
+        return self._combine(
+            [
+                self._builtin(tool_name, _UNSEEN_COMMANDS[tool_name]),
+                self._builtin(tool_name, "mutate", checkpoint_gated=True),
+                self._builtin(tool_name, "send", checkpoint_gated=True),
+            ]
+        )
 
     def _restores_checkpoint(self, words: list[str]) -> bool:
         """Whether `git stash pop|apply <commit>` (``words``) names, as its
@@ -1417,46 +2164,71 @@ class ToolCapabilityMapper:
         return combined
 
     def _worst_case(self, capability: str = "mutate") -> ToolMapping:
-        """Bash's worst case (section 5.18.3): ``capability`` (a gated
-        mutation) and ``send``, for a command whose effect the classifier
-        does not know. It may transmit anywhere, so a destination policy in
-        force refuses it: this layer cannot tell where (section 4.4.2)."""
+        """Bash's worst case (section 5.18.3): a gated ``mutate`` and
+        ``send``, for a command whose effect the classifier does not know,
+        with ``capability`` first (`execute` for an interpreter, `send` for
+        a program that sends). It may transmit anywhere, so a destination
+        policy in force refuses it: this layer cannot tell where (section
+        4.4.2)."""
         return self._combine(
             [
                 self._builtin("Bash", capability, checkpoint_gated=True),
+                self._builtin("Bash", "mutate", checkpoint_gated=True),
                 self._builtin("Bash", "send", checkpoint_gated=True),
             ]
         )
 
-    def _classify_single_command(self, command: _Command) -> ToolMapping:
+    def _classify_single_command(
+        self, command: _Command, cwd: str | None = None
+    ) -> ToolMapping:
         """
         Classify one simple command.
 
-        Checks in order: interpreter → network → remote mutation →
-        destructive → `git stash` → read-only allowlist → the worst case. It
-        never returns a `git stash` class: those need a line of one command
-        (`_classify_bash_command`), so here every `git stash` form is a
-        gated mutation of the local repository.
+        Checks in order: interpreter → network → remote mutation → local
+        change → `git stash` → read-only allowlist → the worst case. Every
+        class but the last two is the worst case with a capability first,
+        or a gated `mutate`; only the command's program gives one narrower
+        than the worst case (a gated `mutate` for `rm` and the local git
+        changes, `observe` for the allow-list), never text in its
+        arguments: `curl URL -A 'git reset'` is curl. An interpreter found
+        anywhere in the words puts `execute` first, and takes nothing away.
+        It never returns a `git stash` class: those need a line of one
+        command (`_classify_bash_command`), so here every `git stash` form
+        is a change of the local repository. A git command takes the worst
+        case where git may fetch from another host (``cwd`` in a partial
+        clone) or run a program the repository names.
         """
-        text = " ".join(command.words)
+        words = command.words
+        text = " ".join(words)
         # SEC-002: an interpreter runs code this classifier does not see,
         # which may transmit (python -c, node -e, a script).
         if _INTERPRETER_PATTERNS.search(text):
             return self._worst_case("execute")
 
-        # Check for network send operations
-        if _NETWORK_SEND_PATTERNS.search(text):
-            return self._builtin("Bash", "send", checkpoint_gated=True)
+        # A program that sends, from the start of the words.
+        if _NETWORK_SEND_PATTERNS.match(text):
+            return self._worst_case("send")
 
         # A change to a system the command names: it cannot tell which.
-        if _REMOTE_MUTATION_PATTERNS.search(text):
+        if _REMOTE_MUTATION_PATTERNS.match(text):
             return self._worst_case()
 
-        # Check for destructive operations
-        if _DESTRUCTIVE_PATTERNS.search(text) or command.words[:2] == ["git", "stash"]:
+        # A local change, by the program's own words.
+        if len(words) > 1 and words[0] in _LOCAL_FILE_PROGRAMS:
             return self._builtin("Bash", "mutate", checkpoint_gated=True)
+        if _local_git_change(words):
+            return self._git_change(cwd, writes_tree=_writes_tree(words))
 
         if _is_read_only(command):
+            if self._program_may_be_content(command.words[0], cwd):
+                # The shell may run the repository's own program of that
+                # name: what it does is unknown.
+                return self._worst_case()
+            if command.words[0] == "git" and self._git_read_gated(cwd):
+                # A read of an object a partial clone lacks fetches it from
+                # the promisor remote: a request to another host, carrying
+                # the object id the command names.
+                return self._worst_case()
             return self._builtin("Bash", "observe")
 
         # SECURE DEFAULT: a command not shown to be read-only is high-risk,

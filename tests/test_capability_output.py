@@ -123,6 +123,19 @@ def test_shared_decode_vectors(vector: dict[str, Any]) -> None:
         _outcome(lambda: decode_capability_output("observe", vector["text"]))
         == vector["expect"]
     )
+    quoted = vector.get("quotes_nothing_of")
+    if quoted is not None:
+        with pytest.raises(CapabilityOutputError) as refused:
+            decode_capability_output("observe", vector["text"])
+        assert _pieces_quoted(refused.value.error.message, quoted) == []
+        assert _pieces_quoted(str(refused.value), quoted) == []
+
+
+def _pieces_quoted(message: str, text: str) -> list[str]:
+    """The pieces of four or more characters of ``text`` that ``message``
+    holds: a message that quotes part of a secret escapes redaction, which
+    matches a secret whole (section 6.7)."""
+    return [text[i : i + 4] for i in range(len(text) - 3) if text[i : i + 4] in message]
 
 
 @pytest.mark.parametrize(
@@ -146,3 +159,43 @@ def test_python_writes_a_large_double_in_exponent_form() -> None:
     text = encode_capability_output("observe", {**GOOD, "observation": 1.8e16})
     assert '"observation":1.8e+16' in text
     assert decode_capability_output("observe", text)["observation"] == 1.8e16
+
+
+@pytest.mark.parametrize("layout", ["array", "object"])
+def test_the_check_takes_memory_in_proportion_to_the_output(layout: str) -> None:
+    """The I-JSON walks (the output check, and a binding's or a call's
+    arguments, ``i_json_problem``) keep each value's place as a link to its
+    parent's and write a place out only for the value they refuse. Before,
+    each child's whole path was built when its parent was read: a long
+    member name above a wide array cost the name's length times the width
+    (a result of 80 KB took about 800 MB at PostToolUse, so a hostile MCP
+    server could exhaust the host's memory)."""
+    import tracemalloc
+
+    from grounded_agency.capabilities.bindings import i_json_problem
+
+    name = "x" * 20_000
+    wide: Any = [0] * 5_000 if layout == "array" else {f"k{i}": 0 for i in range(5_000)}
+    output = {**GOOD, "observation": {name: wide}}
+    text = encode_capability_output("observe", output)
+    tracemalloc.start()
+    try:
+        assert decode_capability_output("observe", text)
+        assert i_json_problem(output) is None
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # The paths alone were 20,000 x 5,000 bytes: 100 MB.
+    assert peak < 20 * len(text) + 2_000_000, peak
+
+
+def test_a_refusal_still_names_the_place() -> None:
+    """The place a refusal names is written as before: member names after
+    dots, indexes in brackets."""
+    from grounded_agency.capabilities.bindings import i_json_problem
+
+    output = {**GOOD, "observation": {"a": [0, {"b": 2**60}]}}
+    with pytest.raises(CapabilityOutputError) as refused:
+        decode_capability_output("observe", json.dumps(output))
+    assert "at $.observation.a[1].b," in refused.value.error.message
+    assert "at $.a[0].b," in str(i_json_problem({"a": [{"b": 1.8e16}]}))
