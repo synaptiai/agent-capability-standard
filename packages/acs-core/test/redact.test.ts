@@ -135,6 +135,12 @@ describe('reading a long text (security round 1, batch 5)', () => {
     '--a-',
     '--password ',
     '--password --',
+    // A user option's name, read for at most 256 characters: `.-u` starts
+    // an attempt at each of its positions, each read to the run's end
+    // (security round 4, batch 1).
+    '.-u',
+    '.-U=',
+    '!-u ',
     // Quoted values read to their closing quote, whitespace and all: a run
     // ends at the next quote of its kind or a line break, and a run with no
     // closing quote is read once more as an unquoted value (security round

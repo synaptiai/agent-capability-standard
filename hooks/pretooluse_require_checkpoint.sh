@@ -1,4 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Claude Code starts this hook with the env of the project's settings files
+# applied (repository content, project_layer_settings below): it runs under
+# bash -p, which reads no BASH_ENV or ENV file, imports no shell function and
+# ignores SHELLOPTS, BASHOPTS, CDPATH and GLOBIGNORE, and starts itself so
+# when started another way (as /bin/sh, bash reads none of them either).
+case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # Apply the checkpoint and approval rules of STANDARD 1.2.0 §5.18 to every
 # tool call, as a PreToolUse command hook (hooks.json routes every tool here,
 # with onFailure "block": a run that fails, or gives no verdict in time,
@@ -13,8 +19,11 @@
 # Its settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE; the log hook's
 # AUDIT_HMAC_KEY and AUDIT_LOCK_WAIT) come from its environment, where Claude
 # Code also puts the env of the project's .claude/settings.json and
-# .claude/settings.local.json, repository content, over the user's settings:
-# while either file names one of them, or cannot be read, every call is
+# .claude/settings.local.json, repository content, over the user's settings,
+# as it does for every command it runs: while either file sets a variable
+# there that is not Claude Code's own (one of the layer's settings, or one
+# that changes what a hook or a command runs: BASH_ENV, SHELLOPTS, PATH,
+# HOME, LD_PRELOAD, GIT_CONFIG_*, ...), or cannot be read, every call is
 # blocked with R407 SAFETY_CHECK_FAILED (project_layer_settings).
 #
 # Exit codes follow Claude Code's hook contract:
@@ -110,9 +119,10 @@
 #   - mutate: a call whose arguments name the layer's own records
 #     (checkpoint.ok, .claude/checkpoints/, acs/checkpoints/, audit.head, in
 #     any letter case and with //, ./ and x/../ read as a path reads them, or
-#     through a symbolic link, a ~ the shell expands or a path attached to a
-#     short option: each path a text of at most 4096 bytes names is resolved
-#     as the system resolves a path), or the directory that holds them (the
+#     through a symbolic link, a ~ the shell expands, a brace group it
+#     expands, a $'...' it decodes or a path attached to a short option: each
+#     path a text of at most 4096 bytes names is resolved as the system
+#     resolves a path), or the directory that holds them (the
 #     project's .claude, its git directory's acs/), is refused (F504
 #     CONSTRAINT_VIOLATED): only these hooks write them. The texts read are
 #     a file tool's path, a Bash command and a Skill call's arguments, and
@@ -167,21 +177,6 @@ block() {
 }
 trap 'block "R407 SAFETY_CHECK_FAILED: the checkpoint hook failed at line $LINENO, so the call is blocked."' ERR
 
-if [ "$#" -gt 0 ]; then
-  payload="$1"
-else
-  payload="$(cat)"
-fi
-
-unreadable="R407 SAFETY_CHECK_FAILED: cannot read the tool call (a JSON payload and jq are required)"
-if ! command -v jq > /dev/null 2>&1; then
-  block "$unreadable"
-fi
-tool_name=$(printf '%s' "$payload" | jq -r 'if type == "object" then (.tool_name | strings) else error("not an object") end' 2>/dev/null) || tool_name=""
-if [ -z "$tool_name" ]; then
-  block "$unreadable"
-fi
-
 # SEC-006: Use absolute path via CLAUDE_PROJECT_DIR, fall back to CLAUDE_PLUGIN_ROOT, then pwd
 if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
   project_dir="${CLAUDE_PROJECT_DIR}"
@@ -191,38 +186,95 @@ else
   project_dir="$(pwd)"
 fi
 
-# The layer's settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE,
-# AUDIT_HMAC_KEY, AUDIT_LOCK_WAIT) that the project's own settings files,
-# .claude/settings.json and .claude/settings.local.json in the project
-# directory $1, name in their env, in any letter case, one to a line; for a
-# file jq cannot read, its name. Claude Code applies those files' env, which
-# is repository content, to every hook, over the user's settings and the
-# environment it started in, so a hook cannot tell the person's value of
-# such a setting from the repository's (ACS_HOOK_APPROVAL=off, an
-# AUDIT_HMAC_KEY the repository knows, a longer maximum age). The three
-# hooks that read a setting hold the same function; a test keeps them so,
-# and keeps every setting a hook reads named in it.
+# BEGIN hook-environment (the same in the three hooks that read a setting; tests/test_project_settings.py keeps them so)
+# The env of the project's settings files, repository content, reaches this
+# hook's programs too (project_layer_settings). Before any runs, PATH keeps
+# only the absolute directories outside the project directory, each as the
+# system resolves it: a relative entry, or one in the project, would put the
+# repository's jq, git or openssl in place of the system's (with none left,
+# PATH names /dev/null: an empty one would search the working directory).
+# A project directory that is the user's home directory, or holds it (as
+# the password database gives it, not HOME), is no repository's: there
+# every absolute directory is kept. jq runs with no HOME: it loads
+# $HOME/.jq as a library, whose definitions replace its own.
+hook_path() {
+  local entry rest="${PATH:-}:" out="" project="" home=""
+  if cd -P -- "$project_dir" 2>/dev/null; then project="$PWD"; fi
+  unset HOME
+  if cd -P ~ 2>/dev/null; then home="$PWD"; fi
+  case "$home/" in "$project"/*) [ -z "$home" ] || project="" ;; esac
+  while [ -n "$rest" ]; do
+    entry="${rest%%:*}"
+    rest="${rest#*:}"
+    case "$entry" in /*) ;; *) continue ;; esac
+    cd -P -- "$entry" 2>/dev/null || continue
+    case "$PWD/" in "${project:-//}"/*) continue ;; esac
+    out="${out:+$out:}$PWD"
+  done
+  printf '%s' "${out:-/dev/null}"
+}
+PATH=$(hook_path)
+export PATH
+jq() { HOME= command jq "$@"; }
+# END hook-environment
+
+if [ "$#" -gt 0 ]; then
+  payload="$1"
+else
+  payload="$(cat)"
+fi
+
+unreadable="R407 SAFETY_CHECK_FAILED: cannot read the tool call (a JSON payload and jq are required)"
+if ! type -P jq > /dev/null 2>&1; then
+  block "$unreadable"
+fi
+tool_name=$(printf '%s' "$payload" | jq -r 'if type == "object" then (.tool_name | strings) else error("not an object") end' 2>/dev/null) || tool_name=""
+if [ -z "$tool_name" ]; then
+  block "$unreadable"
+fi
+
+# The variables that the project's own settings files, .claude/settings.json
+# and .claude/settings.local.json in the project directory $1, set in their
+# env and that are not Claude Code's own settings (the list below), one to a
+# line; for a file jq cannot read, its name. Claude Code applies those
+# files' env, which is repository content, to every hook and every command
+# it runs, over the user's settings and the environment it started in. So a
+# hook cannot tell the person's value of one of the layer's settings from
+# the repository's (ACS_HOOK_APPROVAL=off, an AUDIT_HMAC_KEY the repository
+# knows, a longer maximum age), and any other variable can change what a
+# hook, or a command it lets pass, runs: BASH_ENV, ENV, SHELLOPTS and
+# BASHOPTS (bash runs a repository script first, or nothing), PATH and HOME
+# (a repository's jq, git or openssl, or jq's library), LD_* and DYLD_* (a
+# repository's library in every program), GIT_CONFIG_* and the rest of
+# git's command scope (GIT_CONFIG_PARAMETERS, GIT_CONFIG_GLOBAL,
+# XDG_CONFIG_HOME: a program `git status` runs), a proxy, an exported
+# function (BASH_FUNC_*). Only names on the list pass, as written (another
+# letter case is another variable on most systems, the same one on
+# Windows). The three hooks that read a setting hold the same function; a
+# test keeps them so, keeps every setting a hook reads off the list, and
+# keeps the list the SDK adapter's (grounded_agency/utils/project_settings.py).
 project_layer_settings() {
   local file
   for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
     if [ -e "$file" ] || [ -L "$file" ]; then
-      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("^(acs_hook_approval|acs_checkpoint_max_age|audit_hmac_key|audit_lock_wait)$"; "i")) else empty end' "$file" 2>/dev/null \
+      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("\\A(ANTHROPIC_[A-Z0-9_]+|OTEL_[A-Z0-9_]+|CLAUDE_CODE_(ENABLE_TELEMETRY|MAX_OUTPUT_TOKENS|USE_BEDROCK|USE_VERTEX|DISABLE_NONESSENTIAL_TRAFFIC)|DISABLE_(TELEMETRY|ERROR_REPORTING|AUTOUPDATER)|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH)\\z") | not) else empty end' "$file" 2>/dev/null \
         || printf '%s\n' ".claude/${file##*/} (unreadable)"
     fi
   done
 }
 
-# A setting the repository may have chosen configures nothing: every call is
-# refused until it is set where the repository cannot reach (§5.18.8: the
-# layer cannot complete its checks, nor sign the call's record, with a value
-# it cannot trust).
+# A setting, or any other variable, the repository may have chosen: every
+# call is refused until it is set where the repository cannot reach
+# (§5.18.8: the layer cannot complete its checks, nor sign the call's
+# record, with a value it cannot trust, nor tell what a command does in an
+# environment the repository chose).
 named=$(project_layer_settings "$project_dir") || named="(unreadable)"
 # Shown in the reason: the first 400 characters, one line, plain.
 named="${named:0:400}"
 named="${named//$'\n'/ }"
 named="${named//[^A-Za-z0-9_.\/() ]/?}"
 if [ -n "$named" ]; then
-  block "R407 SAFETY_CHECK_FAILED: the project's settings files name the layer's settings in env, or cannot be read: ${named% }. Claude Code applies a project's env, which is repository content, over yours, so the call is blocked. Remove them from .claude/settings.json and .claude/settings.local.json, and set them in ~/.claude/settings.json, in managed settings or in the environment Claude Code starts in."
+  block "R407 SAFETY_CHECK_FAILED: the project's settings files set variables in env that are not Claude Code's own (the layer's settings, or ones that change what a hook or a command runs: BASH_ENV, SHELLOPTS, PATH, HOME, LD_PRELOAD, GIT_CONFIG_*, ...), or cannot be read: ${named% }. Claude Code applies a project's env, which is repository content, over yours, to every hook and command it runs, so the call is blocked. Remove them from .claude/settings.json and .claude/settings.local.json, and set them in ~/.claude/settings.json, in managed settings or in the environment Claude Code starts in."
 fi
 
 # Tools whose calls need nothing from this hook: the SDK mapper's static
@@ -242,17 +294,17 @@ SECRET_ERE='-----BEGIN [A-Z ]*PRIVATE KEY-----|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]
 SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
 # A quote, or an escaped one (\" in JSON text inside a JSON string)
 SECRET_Q="\\\\*[\"']"
-# A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password)
+# A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions)
 SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
 SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
-SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]*:"
+SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
 secret_in() {
   printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
   # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
   printf '%s' "$1" | grep -Eiq -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']" && return 0
-  # The password of a URL's userinfo, unless it is a placeholder
-  printf '%s' "$1" | grep -Eo -- '[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
-    sed -E 's#^[^/]*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+  # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once)
+  printf '%s' "$1" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
+    sed -E 's#^.*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
   # An Authorization header's value, 8 or more characters with letters and digits
   printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}" |
     sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//" |
@@ -772,8 +824,9 @@ fi
 # a text of at most 4096 bytes, each x/../ resolved (a longer path cannot be
 # opened, and a longer command is a mutate already; the resolution's cost
 # grows faster than the text). The texts of at most 4096 bytes are then read
-# for paths below: more than 65536 bytes of them in one call is refused,
-# rather than hold the hook past its time limit.
+# for paths below: more than 65536 bytes of them in one call, or more than
+# 4096 texts of any length (an empty one counts no byte, yet costs time to
+# read), is refused, rather than hold the hook past its time limit.
 RECORD_TEXTS_JQ='
   def file_tool: .tool_name == "Write" or .tool_name == "Edit" or .tool_name == "MultiEdit" or .tool_name == "NotebookEdit";
   def texts:
@@ -791,21 +844,180 @@ RECORD_TEXTS_JQ='
 '
 records_named=$(printf '%s' "$payload" | jq -r "$RECORD_TEXTS_JQ"'
   texts as $t
-  | if any($t[]; records or (length <= 4096 and (lexical | records))) then "named"
-    elif ([$t[] | utf8bytelength | select(. <= 4096)] | add // 0) > 65536 then "over"
+  | if ($t | length) > 4096 or ([$t[] | utf8bytelength | select(. <= 4096)] | add // 0) > 65536 then "over"
+    elif any($t[]; records or (length <= 4096 and (lexical | records))) then "named"
     else "no" end' 2>/dev/null) || block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
 records_refusal="F504 CONSTRAINT_VIOLATED: ${tool_name} names the checkpoint records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/) or the audit log's head (.claude/audit.head), which only the plugin's hooks write"
 case "$records_named" in
   no) ;;
-  over) block "F504 CONSTRAINT_VIOLATED: ${tool_name}'s input holds more than 65536 bytes of strings of at most 4096 bytes, more than this hook reads for paths into the layer's records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/, .claude/audit.head) in its time limit, so the call is blocked." ;;
+  over) block "F504 CONSTRAINT_VIOLATED: ${tool_name}'s input holds more than 4096 strings and member names, or more than 65536 bytes of strings of at most 4096 bytes, more than this hook reads for paths into the layer's records (.claude/checkpoint.ok, .claude/checkpoints/, the git directory's acs/checkpoints/, .claude/audit.head) in its time limit, so the call is blocked." ;;
   *) block "${records_refusal}." ;;
 esac
 
+# The character $'...' gives for the escape just after the backslash at $2
+# in $1, into ANSI_CHAR (as bash decodes it: \a \b \e \E \f \n \r \t \v \\
+# \' \" \?, \nnn octal, \xHH, \uHHHH and \UHHHHHHHH, the last two in UTF-8,
+# \cx a control character, any other kept with its backslash), and the
+# characters it takes after the backslash, into ANSI_LEN. ANSI_NUL is 1 for
+# a NUL, which ends what bash keeps of that $'...'.
+ansi_escape() {
+  local c="${1:$2:1}" digits v=0 k
+  ANSI_LEN=1
+  ANSI_CHAR=""
+  ANSI_NUL=0
+  case "$c" in
+    a) ANSI_CHAR=$'\a' ;;
+    b) ANSI_CHAR=$'\b' ;;
+    e | E) ANSI_CHAR=$'\e' ;;
+    f) ANSI_CHAR=$'\f' ;;
+    n) ANSI_CHAR=$'\n' ;;
+    r) ANSI_CHAR=$'\r' ;;
+    t) ANSI_CHAR=$'\t' ;;
+    v) ANSI_CHAR=$'\v' ;;
+    \\ | \' | \" | \?) ANSI_CHAR="$c" ;;
+    [0-7] | x | u | U)
+      case "$c" in
+        [0-7]) digits="${1:$2:3}"; digits="${digits%%[!0-7]*}"; v=$((8#$digits)); ANSI_LEN=${#digits} ;;
+        *)
+          k=2
+          [ "$c" = u ] && k=4
+          [ "$c" = U ] && k=8
+          digits="${1:$(($2 + 1)):k}"
+          digits="${digits%%[!0-9A-Fa-f]*}"
+          if [ -z "$digits" ]; then
+            ANSI_CHAR="\\$c"
+            return 0
+          fi
+          v=$((16#$digits))
+          ANSI_LEN=$((${#digits} + 1))
+          ;;
+      esac
+      if [ "$v" -eq 0 ]; then
+        ANSI_NUL=1
+      elif [ "$c" != u ] && [ "$c" != U ] || [ "$v" -lt 128 ]; then
+        ansi_byte "$((v & 255))"
+      elif [ "$v" -lt 2048 ]; then
+        ansi_byte "$((192 | v >> 6))"
+        ansi_byte "$((128 | (v & 63)))"
+      elif [ "$v" -lt 65536 ]; then
+        ansi_byte "$((224 | v >> 12))"
+        ansi_byte "$((128 | (v >> 6 & 63)))"
+        ansi_byte "$((128 | (v & 63)))"
+      elif [ "$v" -lt 1114112 ]; then
+        ansi_byte "$((240 | v >> 18))"
+        ansi_byte "$((128 | (v >> 12 & 63)))"
+        ansi_byte "$((128 | (v >> 6 & 63)))"
+        ansi_byte "$((128 | (v & 63)))"
+      fi
+      ;;
+    c)
+      if [ -n "${1:$(($2 + 1)):1}" ]; then
+        printf -v v '%d' "'${1:$(($2 + 1)):1}"
+        v=$((v & 31))
+        if [ "$v" -eq 0 ]; then ANSI_NUL=1; else ansi_byte "$v"; fi
+        ANSI_LEN=2
+      else
+        ANSI_CHAR='\c'
+      fi
+      ;;
+    "") ANSI_CHAR='\'; ANSI_LEN=0 ;;
+    *) ANSI_CHAR="\\$c" ;;
+  esac
+}
+
+# The byte $1 (0 to 255) added to ANSI_CHAR (no subshell).
+ansi_byte() {
+  local oct byte
+  printf -v oct '%03o' "$1"
+  printf -v byte "\\$oct"
+  ANSI_CHAR+="$byte"
+}
+
+# A brace group that holds no other: unquoted braces and commas are marked
+# \001 ({), \003 (}) and \002 (,) in a word path_words reads.
+BRACE_GROUP=$'^(.*)\001([^\001\003]*)\003(.*)$'
+
+# The words bash makes of the word $1 by brace expansion, appended to
+# PATH_WORDS: the innermost group first, a group with a comma giving each of
+# its alternatives and a sequence ({a..e}, {1..10..3}, {01..10}) each of its
+# elements, any other group kept as written. Each word made is charged to the
+# call's budgets, BRACE_LEFT words and RESOLVE_LEFT bytes; fails (2) past
+# either, rather than hold the hook past its time limit.
+brace_words() {
+  local -a todo=("$1")
+  local at=0 w pre body post alt rest from to step width n e x
+  while [ "$at" -lt "${#todo[@]}" ]; do
+    w="${todo[at]}"
+    at=$((at + 1))
+    if [[ "$w" =~ $BRACE_GROUP ]]; then
+      pre="${BASH_REMATCH[1]}"
+      body="${BASH_REMATCH[2]}"
+      post="${BASH_REMATCH[3]}"
+      if [[ "$body" == *$'\002'* ]]; then
+        rest="$body"$'\002'
+        while [ -n "$rest" ]; do
+          alt="${rest%%$'\002'*}"
+          rest="${rest#*$'\002'}"
+          BRACE_LEFT=$((BRACE_LEFT - 1))
+          RESOLVE_LEFT=$((RESOLVE_LEFT - ${#pre} - ${#alt} - ${#post}))
+          [ "$BRACE_LEFT" -ge 0 ] && [ "$RESOLVE_LEFT" -ge 0 ] || return 2
+          todo+=("$pre$alt$post")
+        done
+      elif [[ "$body" =~ ^(-?[0-9]{1,9})\.\.(-?[0-9]{1,9})(\.\.-?([0-9]{1,9}))?$ ]] || [[ "$body" =~ ^([A-Za-z])\.\.([A-Za-z])(\.\.-?([0-9]{1,9}))?$ ]]; then
+        from="${BASH_REMATCH[1]}"
+        to="${BASH_REMATCH[2]}"
+        step="${BASH_REMATCH[4]:-1}"
+        step=$((10#$step))
+        [ "$step" -gt 0 ] || step=1
+        width=0
+        if [[ "$from" =~ ^-?0[0-9] || "$to" =~ ^-?0[0-9] ]]; then
+          width=${#from}
+          [ "${#to}" -le "$width" ] || width=${#to}
+        fi
+        if [[ "$from" == [A-Za-z] ]]; then
+          printf -v from '%d' "'$from"
+          printf -v to '%d' "'$to"
+          width=-1
+        else
+          case "$from" in -*) from=$((-10#${from#-})) ;; *) from=$((10#$from)) ;; esac
+          case "$to" in -*) to=$((-10#${to#-})) ;; *) to=$((10#$to)) ;; esac
+        fi
+        n=$(((from > to ? from - to : to - from) / step + 1))
+        BRACE_LEFT=$((BRACE_LEFT - n))
+        [ "$BRACE_LEFT" -ge 0 ] || return 2
+        for ((x = from; from <= to ? x <= to : x >= to; x += (from <= to ? step : -step))); do
+          if [ "$width" -lt 0 ]; then
+            ANSI_CHAR=""
+            ansi_byte "$x"
+            e="$ANSI_CHAR"
+          elif [ "$x" -lt 0 ]; then
+            printf -v e -- "-%0$((width > 0 ? width - 1 : 0))d" "$((-x))"
+          else
+            printf -v e "%0${width}d" "$x"
+          fi
+          RESOLVE_LEFT=$((RESOLVE_LEFT - ${#pre} - ${#e} - ${#post}))
+          [ "$RESOLVE_LEFT" -ge 0 ] || return 2
+          todo+=("$pre$e$post")
+        done
+      else
+        todo+=("$pre{${body//$'\002'/,}}$post")
+      fi
+    else
+      w="${w//$'\001'/\{}"
+      w="${w//$'\002'/,}"
+      PATH_WORDS+=("${w//$'\003'/\}}")
+    fi
+  done
+}
+
 # The words of a text the shell would pass as arguments, into PATH_WORDS:
-# split at blanks, line breaks and ; & | < > ( ) { } ` $ = outside quotes,
-# with '...' and "..." quoting, a backslash keeping the character after it,
-# and the quotes removed. A text over 4096 bytes is not read (as
-# split_words).
+# split at blanks, line breaks and ; & | < > ( ) ` $ = outside quotes, with
+# '...' and "..." quoting, $'...' decoded as bash decodes it (ansi_escape),
+# $"..." read as "...", a backslash keeping the character after it, the
+# quotes removed, and a word with an unquoted brace expanded as bash
+# expands it (brace_words). A text over 4096 bytes is not read (as
+# split_words): fails (1). Past the call's budgets for brace expansion,
+# fails (2).
 path_words() {
   local line="$1" ch quote="" word="" esc=0 i
   PATH_WORDS=()
@@ -815,6 +1027,21 @@ path_words() {
     if [ "$esc" = 1 ]; then
       word+="$ch"
       esc=0
+    elif [ "$quote" = A ]; then
+      # $'...'
+      if [ "$ch" = "'" ]; then
+        quote=""
+      elif [ "$ch" = '\' ]; then
+        ansi_escape "$line" "$((i + 1))"
+        word+="$ANSI_CHAR"
+        i=$((i + ANSI_LEN))
+        [ "$ANSI_NUL" = 0 ] || quote=Z
+      else
+        word+="$ch"
+      fi
+    elif [ "$quote" = Z ]; then
+      # What follows a NUL in $'...', up to its end, which bash drops.
+      if [ "$ch" = "'" ]; then quote=""; elif [ "$ch" = '\' ]; then i=$((i + 1)); fi
     elif [ -n "$quote" ]; then
       if [ "$ch" = "$quote" ]; then
         quote=""
@@ -827,16 +1054,38 @@ path_words() {
       case "$ch" in
         \' | \") quote="$ch" ;;
         \\) esc=1 ;;
-        ' ' | $'\t' | $'\n' | $'\r' | \; | \& | \| | \< | \> | \( | \) | \{ | \} | \` | \$ | =)
-          if [ -n "$word" ]; then PATH_WORDS+=("$word"); fi
-          word=""
+        \$)
+          case "${line:i+1:1}" in
+            \') quote=A; i=$((i + 1)) ;;
+            \") quote='"'; i=$((i + 1)) ;;
+            *) path_word || return 2 ;;
+          esac
+          ;;
+        \{) word+=$'\001' ;;
+        ,) word+=$'\002' ;;
+        \}) word+=$'\003' ;;
+        ' ' | $'\t' | $'\n' | $'\r' | \; | \& | \| | \< | \> | \( | \) | \` | =)
+          path_word || return 2
           ;;
         *) word+="$ch" ;;
       esac
     fi
   done
-  if [ -n "$word" ]; then PATH_WORDS+=("$word"); fi
+  path_word || return 2
   return 0
+}
+
+# The word path_words has read so far, added to PATH_WORDS (brace-expanded
+# when it holds an unquoted brace), and begun again. Fails past the call's
+# budgets for brace expansion.
+path_word() {
+  if [[ "$word" == *$'\001'* ]]; then
+    brace_words "$word" || return 2
+  elif [ -n "$word" ]; then
+    word="${word//$'\002'/,}"
+    PATH_WORDS+=("${word//$'\003'/\}}")
+  fi
+  word=""
 }
 
 # The path $2 names, read from the physical directory $1 ("/" or a path with
@@ -891,17 +1140,21 @@ NESTED='*[[:space:]\;\&\|\<\>\(\)\{\}\`\$=\"\\'\'']*'
 # its words (path_words), the words of each word a shell may read again
 # (one that holds a blank, a quote or an operator: `sh -c 'cp x notes/k'`
 # names notes/k), and, a level below that, the pieces of such a word split
-# at every blank, quote and operator.
+# at every blank, quote and operator. Fails (2) past the call's budgets for
+# brace expansion.
 add_words() {
-  local word inner piece flat
+  local word inner piece flat status=0
   local -a top nested pieces
-  path_words "$1" || return 0
+  path_words "$1" || status=$?
+  case "$status" in 0) ;; 1) return 0 ;; *) return 2 ;; esac
   top=(${PATH_WORDS[@]+"${PATH_WORDS[@]}"})
   for word in ${top[@]+"${top[@]}"}; do
     READ_WORDS+=("$word")
     # shellcheck disable=SC2053
     [[ "$word" == $NESTED ]] || continue
-    path_words "$word" || continue
+    status=0
+    path_words "$word" || status=$?
+    case "$status" in 0) ;; 1) continue ;; *) return 2 ;; esac
     nested=(${PATH_WORDS[@]+"${PATH_WORDS[@]}"})
     for inner in ${nested[@]+"${nested[@]}"}; do
       READ_WORDS+=("$inner")
@@ -921,12 +1174,20 @@ add_words() {
 # ~+: the call's directory; ~name: that user's home directory); and for one
 # that opens with a single - (a cluster of short options), each text that
 # may follow an option there as its value (-tdir, -ofile, -rtdir: from the
-# second character to the first that is not a letter or digit). Fails (2)
-# for ~- and ~N, ~+N, ~-N, which name a directory the hook cannot know (the
-# shell's previous directory, its directory stack), and for ~ followed by a
-# name no user can have.
+# second character to the first that is not a letter or digit) and can name
+# a file: one whose first component exists in the call's directory (as a
+# file, a directory or a link) or that is absolute. A first component that
+# does not exist cannot be opened through (and a .. after it cannot be
+# followed), and one of more than 255 characters exists on no file system,
+# so a long cluster gives at most 256 texts to look at, not one per
+# position, each read again in full. Each text added is charged to the
+# call's budget, RESOLVE_LEFT bytes (one with a slash when resolve_path
+# reads it). Fails (2) for ~- and ~N, ~+N, ~-N,
+# which name a directory the hook cannot know (the shell's previous
+# directory, its directory stack), and for ~ followed by a name no user can
+# have; fails (3) past the budget.
 word_candidates() {
-  local word="$1" prefix rest home run k
+  local word="$1" prefix rest home run k end slash first
   CANDIDATES=("$word")
   case "$word" in
     "~"*)
@@ -948,8 +1209,26 @@ word_candidates() {
     -[!-]*)
       run="${word:1}"
       run="${run%%[!A-Za-z0-9]*}"
-      for ((k = 2; k <= ${#run} + 1; k++)); do
-        [ -z "${word:k}" ] || CANDIDATES+=("${word:k}")
+      # Just past the run, and where a text from there has its first slash.
+      end=$((${#run} + 1))
+      rest="${word:end}"
+      rest="${rest%%/*}"
+      slash=$((end + ${#rest}))
+      k=$((slash - 255))
+      [ "$k" -ge 2 ] || k=2
+      for (( ; k <= end; k++)); do
+        first="${word:k:slash-k}"
+        if [ -n "$first" ] && [ ! -e "${base%/}/$first" ] && [ ! -L "${base%/}/$first" ]; then
+          continue
+        fi
+        [ -n "${word:k}" ] || continue
+        if [ "$slash" -ge "${#word}" ]; then
+          # No slash: resolved below without resolve_path, which charges
+          # the others.
+          RESOLVE_LEFT=$((RESOLVE_LEFT - ${#word} + k))
+          [ "$RESOLVE_LEFT" -ge 0 ] || return 3
+        fi
+        CANDIDATES+=("${word:k}")
       done
       ;;
   esac
@@ -968,13 +1247,15 @@ word_candidates() {
 # there: `touch notes/todo.md`, where notes/todo.md is a link to <git
 # dir>/acs/checkpoints/key, writes the key. A link a word cannot be resolved
 # through (a loop, a path past 40 links, a call past 200 links in all), a
-# call that names more than 262144 bytes of paths to resolve, and a ~ form
-# the hook cannot expand are refused too. Not seen: a path a command builds
+# call that names more than 262144 bytes of paths to resolve (the texts
+# after an option letter included) or whose brace expansions make more than
+# 8192 words, and a ~ form the hook cannot expand are refused too. Not seen: a path a command builds
 # when it runs, a pattern the shell expands, or a link a command reaches
 # without naming it (copying a directory that holds one); such a call is
 # still a mutate a person approves.
 LINKS_LEFT=200
 RESOLVE_LEFT=262144
+BRACE_LEFT=8192
 READ_WORDS=()
 if base=$(call_dir) && resolve_path / "$base"; then
   base="$RESOLVED"
@@ -982,15 +1263,16 @@ else
   block "R407 SAFETY_CHECK_FAILED: cannot read the directory the call runs in, so the call is blocked."
 fi
 texts_read=0
+over_budget="${records_refusal}, or names more paths than this hook resolves in its time limit (brace expansions that make more than 8192 words, more than 262144 bytes of paths, or a cluster of short options whose values cannot be read in time), so it cannot tell where they lead."
 while IFS= read -r -d '' text; do
   case "$text" in
     E) texts_read=1 ;;
     P*) READ_WORDS+=("${text:1}") ;;
-    W*) add_words "${text:1}" ;;
-    B*) READ_WORDS+=("${text:1}"); add_words "${text:1}" ;;
+    W*) add_words "${text:1}" || block "$over_budget" ;;
+    B*) READ_WORDS+=("${text:1}"); add_words "${text:1}" || block "$over_budget" ;;
   esac
 done < <(printf '%s' "$payload" | jq -j "$RECORD_TEXTS_JQ"'
-  mode as $m | (texts[] | select(utf8bytelength <= 4096) | $m + (split("\u0000") | join(" ")) + "\u0000"), "E\u0000"' 2>/dev/null)
+  mode as $m | (texts[] | select(utf8bytelength <= 4096 and length > 0) | $m + (split("\u0000") | join(" ")) + "\u0000"), "E\u0000"' 2>/dev/null)
 if [ "$texts_read" != 1 ]; then
   block "R407 SAFETY_CHECK_FAILED: cannot read the tool call's arguments, so the call is blocked."
 fi
@@ -998,9 +1280,13 @@ fi
 # copies it whole each time).
 resolved=()
 for word in ${READ_WORDS[@]+"${READ_WORDS[@]}"}; do
-  if ! word_candidates "$word"; then
-    block "${records_refusal}, or names a path that opens with ~-, ~N or another ~ form this hook cannot expand (the shell's previous directory, its directory stack), so it cannot tell where the path leads."
-  fi
+  status=0
+  word_candidates "$word" || status=$?
+  case "$status" in
+    0) ;;
+    2) block "${records_refusal}, or names a path that opens with ~-, ~N or another ~ form this hook cannot expand (the shell's previous directory, its directory stack), so it cannot tell where the path leads." ;;
+    *) block "$over_budget" ;;
+  esac
   for candidate in "${CANDIDATES[@]}"; do
     # A name with no slash that is no link resolves to itself (most words).
     case "$candidate" in

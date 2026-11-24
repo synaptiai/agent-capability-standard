@@ -68,6 +68,18 @@ here and marked so.
   host that wants a project's skills or CLAUDE.md loaded includes
   `"project"` itself (or leaves `None`, every source, on an SDK where that
   is the default).
+- Python SDK, `wrap_options()`: where the CLI loads the project's settings
+  (`setting_sources` `None`, or naming `"project"` or `"local"`), the
+  PreToolUse hook refuses every call with R407 while the
+  `.claude/settings.json` or `.claude/settings.local.json` it loads from
+  the options' `cwd` sets a variable in `env` that is not one of Claude
+  Code's own settings (`grounded_agency.utils.project_settings`,
+  `ALLOWED_PROJECT_ENV`), or cannot be read: the CLI applies that env to
+  every command it runs, so `BASH_ENV` made `ls` run a repository script
+  and `GIT_CONFIG_*` made `git status` run a repository program, each
+  classified `observe`. Move such an entry into `options.env` or the
+  host's environment, or pass `setting_sources` without `"project"` and
+  `"local"`. The plugin's hooks refuse the same calls.
 - Python SDK, `register_mcp_tool` (Fixed): a capability the ontology does
   not define raises `ValueError` (V101) at registration, where v2.0.0
   registered the tool; a declared `risk` below the capability's is ignored
@@ -436,6 +448,9 @@ here and marked so.
   `\/` or not, non-ASCII as `\uXXXX` or not) and percent-encoded (each
   common encoding, upper- or lower-case hex): `encoded_forms` and
   `encodedForms` list the forms. `Redactor.add_secret` registers them all.
+  A user option's name is read for at most 256 characters (a run such as
+  `.-u.-u.-u...` was read again from each of its positions: 48 s for 200
+  KB in Python), so a password after a longer name is not recognised.
 - Python SDK and Standard Agents binding, evidence anchors that held a
   secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
   metadata redaction changed is kept with no `digest` and no
@@ -917,6 +932,13 @@ here and marked so.
     refused too, as is a call with more than 65536 bytes of strings of at
     most 4096 bytes. A commit message or an MCP text that names
     `.claude` as a word, or a record's name, is refused: write it otherwise.
+    Security round 4: the hook expands brace groups and decodes `$'...'` as
+    bash does (`{fixtures/,.git/acs/check}points`,
+    `$'.claude/checkpoint\x2eok'` are refused), and refuses (F504) a call
+    with more than 4096 strings and member names (empty ones included),
+    brace expansions that make more than 8192 words, or more than 262144
+    bytes of paths to resolve; of a long cluster of short options it reads
+    only the texts whose first component exists, or that are absolute.
   - The audit, persist, rollback and send skills' command hooks set
     `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
     does: a check that fails or gives no verdict in time blocks the call
@@ -1056,6 +1078,20 @@ here and marked so.
     of the project's files (Claude Code started in the home directory reads
     `~/.claude/settings.json` as the project's too: there, set them in the
     environment).
+  - The same holds for every variable those files set in `env` but Claude
+    Code's own settings (`ANTHROPIC_*`, `OTEL_*`, `MAX_THINKING_TOKENS`,
+    `MCP_TIMEOUT`, `BASH_DEFAULT_TIMEOUT_MS` and the few more
+    `hooks/README.md` lists, as written): Claude Code applies that env to
+    every hook and every command it runs, and `BASH_ENV`, `SHELLOPTS`,
+    `PATH`, `HOME`, `LD_PRELOAD`, `GIT_CONFIG_*`, a proxy or an exported
+    function changes what a hook, or a command it lets pass, runs. A
+    project whose settings set, say, `NODE_ENV` or `PATH` now has every
+    call blocked with R407 until the entry moves to
+    `~/.claude/settings.json`, managed settings or the environment. The
+    hook scripts open with `#!/bin/sh` and start themselves under
+    `bash -p` (so `bash` must be on `PATH`, as before); the three that
+    read a setting drop relative and project directories from their own
+    `PATH`, and run `jq` with no `HOME`.
   - A Bash command whose first word holds a blank or a slash (a quoted
     `"git status"`, which bash runs as the program of that name) is a gated
     `mutate`, not a read-only list entry.

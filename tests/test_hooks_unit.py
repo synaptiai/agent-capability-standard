@@ -31,6 +31,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 from verify_audit_log import verify_log  # noqa: E402
 
 
+def outside_project(tmp_path: Path, name: str) -> Path:
+    """A directory beside the project directory `tmp_path`, not in it: the
+    hooks drop from PATH every directory in the project (a repository's
+    program never runs in place of the system's), so a test's own programs
+    live here."""
+    return tmp_path.parent / f"{tmp_path.name}-{name}"
+
+
 def input_digest(tool_input: Any) -> str:
     """SHA-256 of a tool input as compact JSON with sorted keys (jq -cS)."""
     canonical = json.dumps(
@@ -297,7 +305,7 @@ class TestPreToolUseExitCodes:
                 }
             )
         )
-        bin_dir = tmp_path / "bin"
+        bin_dir = outside_project(tmp_path, "bin")
         bin_dir.mkdir()
         fake_date = bin_dir / "date"
         fake_date.write_text("#!/bin/sh\nexit 1\n")
@@ -699,7 +707,7 @@ class TestAuditLogConcurrency:
 
     def _bin(self, tmp_path: Path, name: str, tools: list[str]) -> Path:
         """A directory of links to `tools`, to run the hook with only them."""
-        bin_dir = tmp_path / name
+        bin_dir = outside_project(tmp_path, name)
         bin_dir.mkdir()
         for tool in tools:
             tool_path = shutil.which(tool)
@@ -914,7 +922,7 @@ class TestAuditDigestUnavailable:
     SECRET = "sk-live-0123456789abcdef"
 
     def _bin_dir(self, tmp_path: Path, leave_out: set[str]) -> Path:
-        bin_dir = tmp_path / "bin"
+        bin_dir = outside_project(tmp_path, "bin")
         bin_dir.mkdir()
         for tool in _AUDIT_HOOK_TOOLS:
             if tool not in leave_out:

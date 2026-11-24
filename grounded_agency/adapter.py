@@ -75,6 +75,7 @@ from .state.evidence_store import (
 from .state.rate_limiter import RateLimitConfig, RateLimiter
 from .state.redaction import DEFAULT_REDACTOR, Redactor
 from .state.snapshots import FileSnapshotStore
+from .utils.project_settings import refused_project_env
 
 if TYPE_CHECKING:
     from .coordination.orchestrator import OrchestrationRuntime
@@ -1881,6 +1882,10 @@ class GroundedAgentAdapter:
         safety_pre_hook = self._make_pretooluse_safety_hook(
             options_mode=getattr(base, "permission_mode", None),
             prompt_tool=bool(getattr(base, "permission_prompt_tool_name", None)),
+            project_settings=(
+                os.fspath(getattr(base, "cwd", None) or os.getcwd()),
+                getattr(base, "setting_sources", None),
+            ),
         )
         safety_pre_hook._grounded_adapter = self  # see _already_wrapped
         # It refuses with R407 when a check fails inside it; a callback that
@@ -2175,7 +2180,10 @@ class GroundedAgentAdapter:
         return subagent_end
 
     def _make_pretooluse_safety_hook(
-        self, options_mode: str | None = None, prompt_tool: bool = False
+        self,
+        options_mode: str | None = None,
+        prompt_tool: bool = False,
+        project_settings: tuple[str, Sequence[str] | None] | None = None,
     ) -> Any:
         """
         Create the PreToolUse hook that applies STANDARD 1.2.0 section 5.18
@@ -2185,6 +2193,15 @@ class GroundedAgentAdapter:
         ``allowed_tools`` that never reach ``can_use_tool``, so the checks
         live here, in this order:
 
+        0. The project's settings (``project_settings``: the CLI's working
+           directory and its ``setting_sources``): while a settings file the
+           CLI loads from the project sets a variable in ``env`` that is not
+           Claude Code's own (:func:`~.utils.project_settings.refused_project_env`),
+           or cannot be read, every call is refused with R407. The CLI
+           applies that env, repository content, to every command it runs
+           (``BASH_ENV``, ``GIT_CONFIG_*``, ``PATH``, ``LD_PRELOAD``, a
+           proxy), so the layer cannot tell what a call does. The plugin's
+           hooks refuse the same calls.
         1. Classify (a tool the mapper cannot classify is unbound: the
            strictest case).
         2. A control-only tool is allowed and recorded: no check applies.
@@ -2273,6 +2290,31 @@ class GroundedAgentAdapter:
                 tool_input = input_data.get("tool_input", {})
                 call = tool_use_id or input_data.get("tool_use_id")
                 cwd = _cwd_of(input_data)
+
+                if project_settings is not None:
+                    named = refused_project_env(*project_settings)
+                    if named:
+                        shown = re.sub(r"[^A-Za-z0-9_.()/ ]", "?", ", ".join(named))
+                        return deny(
+                            self._refuse(
+                                ErrorCode.SAFETY_CHECK_FAILED,
+                                mapping,
+                                tool_name,
+                                call,
+                                f"the project's settings files set variables in "
+                                f"env that are not Claude Code's own, or cannot "
+                                f"be read: {shown[:400]}. The CLI applies a "
+                                f"project's env, which is repository content, "
+                                f"to every command it runs (BASH_ENV, "
+                                f"GIT_CONFIG_*, PATH, LD_PRELOAD, a proxy), so "
+                                f"this layer cannot tell what {tool_name} does. "
+                                f"Remove them from .claude/settings.json and "
+                                f".claude/settings.local.json and set them in "
+                                f"options.env or the host's environment, or "
+                                f"pass setting_sources without 'project' and "
+                                f"'local'.",
+                            )
+                        )
 
                 try:
                     mapping = mapper.map_tool(tool_name, tool_input, cwd)

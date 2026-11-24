@@ -192,9 +192,13 @@ _OPTION_SEPARATOR = (
 )
 # A command's user option, up to the user's password: curl's `-u
 # user:<secret>` (also `-uuser:...`), `--user`, `--proxy-user` and `-U`.
+# The user's name is read for at most 256 characters: an attempt starts at
+# each `-u` after a character that is not a name's, and a run such as
+# `.-u.-u.-u...` holds one at each of its positions, so an unbounded name
+# was read again from each to the run's end.
 _USER_OPTION = (
     rf"(?<![A-Za-z0-9_-])(?:-[uU]{_OPTION_SEPARATOR}?|--(?:proxy-)?user"
-    rf"{_OPTION_SEPARATOR})[^{_NOT_WS}:\"'\\]*:"
+    rf"{_OPTION_SEPARATOR})[^{_NOT_WS}:\"'\\]{{0,256}}:"
 )
 # ... and the same option up to the quote its value opens with.
 _USER_OPTION_QUOTE_SEPARATOR = rf"(?:{_WS}+|=|(?:{_QUOTE})?{_WS}*,{_WS}*)"

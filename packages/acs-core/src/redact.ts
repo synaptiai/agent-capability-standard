@@ -160,10 +160,14 @@ const OPTION_SEPARATOR = `(?:${WS}+(?:${QUOTE})?|=(?:${QUOTE})?|(?:${QUOTE})?${W
 /**
  * A command's user option, up to the user's password: curl's `-u
  * user:<secret>` (also `-uuser:...`), `--user`, `--proxy-user` and `-U`.
+ * The user's name is read for at most 256 characters: an attempt starts at
+ * each `-u` after a character that is not a name's, and a run such as
+ * `.-u.-u.-u...` holds one at each of its positions, so an unbounded name
+ * was read again from each to the run's end.
  */
 const USER_OPTION =
   `(?<![A-Za-z0-9_-])(?:-[uU]${OPTION_SEPARATOR}?|--(?:proxy-)?user${OPTION_SEPARATOR})` +
-  `[^${NOT_WS}:"'\\\\]*:`;
+  `[^${NOT_WS}:"'\\\\]{0,256}:`;
 /** ... and the same option up to the quote its value opens with. */
 const USER_OPTION_QUOTE_SEPARATOR = `(?:${WS}+|=|(?:${QUOTE})?${WS}*,${WS}*)`;
 const USER_OPTION_NAME =

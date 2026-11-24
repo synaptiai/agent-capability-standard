@@ -760,6 +760,7 @@ def _gated_hook(
     project_dir: Path,
     approval: str | None = None,
     path: str | None = None,
+    timeout: float = 30,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["CLAUDE_PROJECT_DIR"] = str(project_dir)
@@ -774,7 +775,7 @@ def _gated_hook(
         capture_output=True,
         text=True,
         env=env,
-        timeout=30,
+        timeout=timeout,
     )
 
 
@@ -942,7 +943,9 @@ class TestShellHookSection518:
         assert result.stdout == ""
 
     def test_no_jq_is_r407(self, tmp_path: Path):
-        bin_dir = tmp_path / "bin"
+        # Beside the project: the hook drops the project's directories from
+        # PATH.
+        bin_dir = tmp_path.parent / f"{tmp_path.name}-bin"
         bin_dir.mkdir()
         for tool in ("bash", "cat", "date", "printf"):
             found = shutil.which(tool)
@@ -1221,6 +1224,54 @@ class TestShellHookPersistSecrets:
         elapsed = time.perf_counter() - started
         assert result.returncode == 2 and result.stderr.startswith("F504")
         assert elapsed < 5
+
+    # A credential after a long run that each stage reading matches out of
+    # the text (grep -o) once read again from each of its positions: a URL
+    # scheme's characters (the reported TodoWrite: rc 124 after 30 s under
+    # hooks.json's limit) and a user option's name (`.-u` at each third
+    # position). grep -o feeds a pipe here, as in the hook; with its output
+    # sent to /dev/null grep stops at the first match, which hid it.
+    LONG_RUNS = [
+        "a" * 100_000
+        + " then deploy from https://deploy:Pr0dPassw0rd@db.example.com/app",
+        ".-u" * 40_000 + " curl -u deploy:Pr0dPassw0rd2 https://db.example.com/",
+        ".-U=" * 30_000 + " curl -U deploy:Pr0dPassw0rd2 https://db.example.com/",
+    ]
+
+    @pytest.mark.parametrize("content", LONG_RUNS, ids=["url", "user", "user="])
+    def test_a_credential_after_a_long_run_is_decided_in_time(
+        self, tmp_path: Path, content: str
+    ):
+        todos = [{"content": content, "status": "pending", "activeForm": "Deploying"}]
+        started = time.perf_counter()
+        result = _gated_hook(
+            _bypass({"tool_name": "TodoWrite", "tool_input": {"todos": todos}}),
+            tmp_path,
+            timeout=60,
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 2, (result.returncode, result.stderr[:200])
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: TodoWrite (persist)")
+        assert elapsed < 10
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", LONG_RUNS, ids=["url", "user", "user="])
+    async def test_the_adapter_decides_them_in_time_too(
+        self, strict_adapter: GroundedAgentAdapter, content: str
+    ):
+        hook = strict_adapter._make_pretooluse_safety_hook()
+        started = time.perf_counter()
+        out = await hook(
+            {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": [{"content": content, "status": "pending"}]},
+                "permission_mode": "bypassPermissions",
+            },
+            "t-run",
+            None,
+        )
+        assert _decision(out) == "deny" and _reason(out).startswith("F504")
+        assert time.perf_counter() - started < SAFETY_HOOK_TIMEOUT_S / 6
 
 
 def _ship_records(upstream: Path, victim: Path) -> str:

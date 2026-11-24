@@ -1,4 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Claude Code starts this hook with the env of the project's settings files
+# applied (repository content, project_layer_settings below): it runs under
+# bash -p, which reads no BASH_ENV or ENV file, imports no shell function and
+# ignores SHELLOPTS, BASHOPTS, CDPATH and GLOBIGNORE, and starts itself so
+# when started another way (as /bin/sh, bash reads none of them either).
+case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # Append one action record (STANDARD v1.2 §6.4) per tool call to
 # .claude/audit.log, with an HMAC integrity chain.
 #
@@ -57,9 +63,10 @@
 # chain link, it says why on standard error and exits 1, which Claude Code
 # shows as a non-blocking hook error: no jq, input jq cannot parse (nested
 # past jq's depth limit, a lone surrogate escape, or not JSON at all: such
-# input may be a tool call), project settings files that name one of the
-# hooks' settings in env or cannot be read (no key the repository may know
-# signs a line: project_layer_settings), a symlinked audit.log (refused,
+# input may be a tool call), project settings files that set a variable in
+# env that is not Claude Code's own (one of the hooks' settings, or one that
+# changes what this hook runs), or cannot be read (no key the repository may
+# know signs a line: project_layer_settings), a symlinked audit.log (refused,
 # SEC-006), no openssl, a line that could not be built, a last line whose
 # hmac cannot be read (the line starts a new chain), an input digest that
 # could not be computed (the line says "unavailable"), a head the log no
@@ -79,6 +86,47 @@
 # SEC-006: Consistent path resolution (matches pretooluse_require_checkpoint.sh)
 set -euo pipefail
 
+# Determine the project directory using CLAUDE_PROJECT_DIR or pwd
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+  project_dir="${CLAUDE_PROJECT_DIR}"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  project_dir="${CLAUDE_PLUGIN_ROOT}"
+else
+  project_dir="$(pwd)"
+fi
+
+# BEGIN hook-environment (the same in the three hooks that read a setting; tests/test_project_settings.py keeps them so)
+# The env of the project's settings files, repository content, reaches this
+# hook's programs too (project_layer_settings). Before any runs, PATH keeps
+# only the absolute directories outside the project directory, each as the
+# system resolves it: a relative entry, or one in the project, would put the
+# repository's jq, git or openssl in place of the system's (with none left,
+# PATH names /dev/null: an empty one would search the working directory).
+# A project directory that is the user's home directory, or holds it (as
+# the password database gives it, not HOME), is no repository's: there
+# every absolute directory is kept. jq runs with no HOME: it loads
+# $HOME/.jq as a library, whose definitions replace its own.
+hook_path() {
+  local entry rest="${PATH:-}:" out="" project="" home=""
+  if cd -P -- "$project_dir" 2>/dev/null; then project="$PWD"; fi
+  unset HOME
+  if cd -P ~ 2>/dev/null; then home="$PWD"; fi
+  case "$home/" in "$project"/*) [ -z "$home" ] || project="" ;; esac
+  while [ -n "$rest" ]; do
+    entry="${rest%%:*}"
+    rest="${rest#*:}"
+    case "$entry" in /*) ;; *) continue ;; esac
+    cd -P -- "$entry" 2>/dev/null || continue
+    case "$PWD/" in "${project:-//}"/*) continue ;; esac
+    out="${out:+$out:}$PWD"
+  done
+  printf '%s' "${out:-/dev/null}"
+}
+PATH=$(hook_path)
+export PATH
+jq() { HOME= command jq "$@"; }
+# END hook-environment
+
 # Read JSON from stdin (Claude Code hooks receive data via stdin). Not
 # $(</dev/stdin): on Linux a hook's stdin is a socket, which cannot be opened
 # by path.
@@ -92,7 +140,7 @@ fail() {
 }
 
 # Without jq the tool call cannot be read, so nothing is logged
-if ! command -v jq &> /dev/null; then
+if ! type -P jq &> /dev/null; then
   fail "jq is not installed"
 fi
 
@@ -109,6 +157,49 @@ if ! tool_name=$(printf '%s' "$input" | jq -r 'if type == "object" then (.tool_n
 fi
 if [[ -z "$tool_name" ]]; then
   exit 0
+fi
+
+# The variables that the project's own settings files, .claude/settings.json
+# and .claude/settings.local.json in the project directory $1, set in their
+# env and that are not Claude Code's own settings (the list below), one to a
+# line; for a file jq cannot read, its name. Claude Code applies those
+# files' env, which is repository content, to every hook and every command
+# it runs, over the user's settings and the environment it started in. So a
+# hook cannot tell the person's value of one of the layer's settings from
+# the repository's (ACS_HOOK_APPROVAL=off, an AUDIT_HMAC_KEY the repository
+# knows, a longer maximum age), and any other variable can change what a
+# hook, or a command it lets pass, runs: BASH_ENV, ENV, SHELLOPTS and
+# BASHOPTS (bash runs a repository script first, or nothing), PATH and HOME
+# (a repository's jq, git or openssl, or jq's library), LD_* and DYLD_* (a
+# repository's library in every program), GIT_CONFIG_* and the rest of
+# git's command scope (GIT_CONFIG_PARAMETERS, GIT_CONFIG_GLOBAL,
+# XDG_CONFIG_HOME: a program `git status` runs), a proxy, an exported
+# function (BASH_FUNC_*). Only names on the list pass, as written (another
+# letter case is another variable on most systems, the same one on
+# Windows). The three hooks that read a setting hold the same function; a
+# test keeps them so, keeps every setting a hook reads off the list, and
+# keeps the list the SDK adapter's (grounded_agency/utils/project_settings.py).
+project_layer_settings() {
+  local file
+  for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("\\A(ANTHROPIC_[A-Z0-9_]+|OTEL_[A-Z0-9_]+|CLAUDE_CODE_(ENABLE_TELEMETRY|MAX_OUTPUT_TOKENS|USE_BEDROCK|USE_VERTEX|DISABLE_NONESSENTIAL_TRAFFIC)|DISABLE_(TELEMETRY|ERROR_REPORTING|AUTOUPDATER)|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH)\\z") | not) else empty end' "$file" 2>/dev/null \
+        || printf '%s\n' ".claude/${file##*/} (unreadable)"
+    fi
+  done
+}
+
+# A key, setting or other variable the repository may have chosen signs,
+# describes and runs nothing: no line is written (the pre-tool-use hook
+# refuses every call meanwhile, R407), and the log's chain and head are left
+# as they are. Checked before any program but jq runs.
+named=$(project_layer_settings "$project_dir") || named="(unreadable)"
+# Shown in the reason: the first 400 characters, one line, plain.
+named="${named:0:400}"
+named="${named//$'\n'/ }"
+named="${named//[^A-Za-z0-9_.\/() ]/?}"
+if [[ -n "$named" ]]; then
+  fail "R407 SAFETY_CHECK_FAILED: the project's settings files set variables in env that are not Claude Code's own, or cannot be read: ${named% }; Claude Code applies a project's env, which is repository content, over yours, so no line is signed with it"
 fi
 
 event=$(printf '%s' "$input" | jq -r '.hook_event_name | strings' 2>/dev/null || echo "")
@@ -150,48 +241,6 @@ if input_canonical=$(printf '%s' "$input" | jq -cS '.tool_input' 2>/dev/null); t
   if [[ "$digest" =~ ^[0-9a-f]{64}$ ]]; then
     input_sha256="$digest"
   fi
-fi
-
-# The layer's settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE,
-# AUDIT_HMAC_KEY, AUDIT_LOCK_WAIT) that the project's own settings files,
-# .claude/settings.json and .claude/settings.local.json in the project
-# directory $1, name in their env, in any letter case, one to a line; for a
-# file jq cannot read, its name. Claude Code applies those files' env, which
-# is repository content, to every hook, over the user's settings and the
-# environment it started in, so a hook cannot tell the person's value of
-# such a setting from the repository's (ACS_HOOK_APPROVAL=off, an
-# AUDIT_HMAC_KEY the repository knows, a longer maximum age). The three
-# hooks that read a setting hold the same function; a test keeps them so,
-# and keeps every setting a hook reads named in it.
-project_layer_settings() {
-  local file
-  for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
-    if [ -e "$file" ] || [ -L "$file" ]; then
-      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("^(acs_hook_approval|acs_checkpoint_max_age|audit_hmac_key|audit_lock_wait)$"; "i")) else empty end' "$file" 2>/dev/null \
-        || printf '%s\n' ".claude/${file##*/} (unreadable)"
-    fi
-  done
-}
-
-# Determine the project directory using CLAUDE_PROJECT_DIR or pwd
-if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-  project_dir="${CLAUDE_PROJECT_DIR}"
-elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-  project_dir="${CLAUDE_PLUGIN_ROOT}"
-else
-  project_dir="$(pwd)"
-fi
-
-# A key or setting the repository may have chosen signs and describes
-# nothing: no line is written (the pre-tool-use hook refuses every call
-# meanwhile, R407), and the log's chain and head are left as they are.
-named=$(project_layer_settings "$project_dir") || named="(unreadable)"
-# Shown in the reason: the first 400 characters, one line, plain.
-named="${named:0:400}"
-named="${named//$'\n'/ }"
-named="${named//[^A-Za-z0-9_.\/() ]/?}"
-if [[ -n "$named" ]]; then
-  fail "R407 SAFETY_CHECK_FAILED: the project's settings files name the layer's settings in env, or cannot be read: ${named% }; Claude Code applies a project's env, which is repository content, over yours, so no line is signed with it"
 fi
 
 # The layer and its configuration, as every line names it (§5.18.8): what a

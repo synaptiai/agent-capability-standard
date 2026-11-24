@@ -1,4 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Claude Code starts this hook with the env of the project's settings files
+# applied (repository content): it runs under bash -p, which reads no
+# BASH_ENV or ENV file, imports no shell function and ignores SHELLOPTS,
+# BASHOPTS, CDPATH and GLOBIGNORE, and starts itself so when started another
+# way (as /bin/sh, bash reads none of them either). While those files set
+# any other variable, the pre-tool-use hook refuses every call.
+case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # End the checkpoint marker's validity at an execution boundary, after which
 # an earlier checkpoint authorises nothing (STANDARD 1.2.0 §5.18.6). The
 # boundaries are the end and the start of a turn and of a session: hooks.json

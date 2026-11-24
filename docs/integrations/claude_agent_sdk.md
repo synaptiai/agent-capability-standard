@@ -906,7 +906,7 @@ Any other value of `approval` raises `ValueError`, as does an `expiry_minutes` a
 
 ## Using with Capability Skills
 
-The Grounded Agency skills (in `skills/`) can be invoked by Claude. `wrap_options()` passes `setting_sources` through unchanged, so the host chooses which settings files the CLI loads: include `"project"` to load a project's skills, and pass `[]` (the SDK's isolation mode) when `cwd` may be untrusted, since a project's settings can run hooks and set the environment.
+The Grounded Agency skills (in `skills/`) can be invoked by Claude. `wrap_options()` passes `setting_sources` through unchanged, so the host chooses which settings files the CLI loads: include `"project"` to load a project's skills, and pass `[]` (the SDK's isolation mode) when `cwd` may be untrusted, since a project's settings can run hooks and set the environment. Where the CLI loads them (`None`, or a list naming `"project"` or `"local"`), the adapter refuses every call (R407) while `.claude/settings.json` or `.claude/settings.local.json` in `cwd` sets a variable in `env` that is not one of Claude Code's own settings (`ALLOWED_PROJECT_ENV` in `grounded_agency.utils.project_settings`: `ANTHROPIC_*`, `OTEL_*` and a few more), or cannot be read: the CLI applies that env to every command it runs (`BASH_ENV`, `PATH`, `LD_PRELOAD`, `GIT_CONFIG_*`, a proxy), so the layer cannot tell what a command does. Set such variables in `options.env` or the host's environment instead.
 
 ```python
 # Configure SDK to load skills from project

@@ -1,4 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Claude Code starts this hook with the env of the project's settings files
+# applied (repository content, project_layer_settings below): it runs under
+# bash -p, which reads no BASH_ENV or ENV file, imports no shell function and
+# ignores SHELLOPTS, BASHOPTS, CDPATH and GLOBIGNORE, and starts itself so
+# when started another way (as /bin/sh, bash reads none of them either).
+case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac
 # Write the checkpoint marker after a successful `git stash create`
 # (STANDARD 1.2.0 §5.18.6: the call that saves the state takes the
 # checkpoint), as a PostToolUse command hook for Bash (see hooks.json).
@@ -34,10 +40,11 @@
 # turned off, so the check runs no program the repository chose).
 # MAX_AGE is ACS_CHECKPOINT_MAX_AGE when it is an integer from 1 to 1800,
 # else 1800 seconds (30 minutes, the Standard's cap). While the project's
-# .claude/settings.json or .claude/settings.local.json names one of the
-# hooks' settings in env, or cannot be read, no marker is written: Claude
-# Code applies that env, repository content, over the user's settings
-# (project_layer_settings). A marker the new one
+# .claude/settings.json or .claude/settings.local.json sets a variable in env
+# that is not Claude Code's own (one of the hooks' settings, or one that
+# changes what git or this hook runs), or cannot be read, no marker is
+# written, and nothing else is run: Claude Code applies that env, repository
+# content, over the user's settings (project_layer_settings). A marker the new one
 # replaces is filed under .claude/checkpoints/ended/ first; its commit, entered
 # in commits/, can still be restored. A commit is entered only in a git
 # repository whose git directory git made for a work tree (a .git directory,
@@ -54,8 +61,84 @@ set -uo pipefail
 # Read the command as bytes, alike in every locale (as the pre-tool-use hook).
 export LC_ALL=C
 
+if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+  project_dir="${CLAUDE_PROJECT_DIR}"
+elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+  project_dir="${CLAUDE_PLUGIN_ROOT}"
+else
+  project_dir="$(pwd)"
+fi
+
+# BEGIN hook-environment (the same in the three hooks that read a setting; tests/test_project_settings.py keeps them so)
+# The env of the project's settings files, repository content, reaches this
+# hook's programs too (project_layer_settings). Before any runs, PATH keeps
+# only the absolute directories outside the project directory, each as the
+# system resolves it: a relative entry, or one in the project, would put the
+# repository's jq, git or openssl in place of the system's (with none left,
+# PATH names /dev/null: an empty one would search the working directory).
+# A project directory that is the user's home directory, or holds it (as
+# the password database gives it, not HOME), is no repository's: there
+# every absolute directory is kept. jq runs with no HOME: it loads
+# $HOME/.jq as a library, whose definitions replace its own.
+hook_path() {
+  local entry rest="${PATH:-}:" out="" project="" home=""
+  if cd -P -- "$project_dir" 2>/dev/null; then project="$PWD"; fi
+  unset HOME
+  if cd -P ~ 2>/dev/null; then home="$PWD"; fi
+  case "$home/" in "$project"/*) [ -z "$home" ] || project="" ;; esac
+  while [ -n "$rest" ]; do
+    entry="${rest%%:*}"
+    rest="${rest#*:}"
+    case "$entry" in /*) ;; *) continue ;; esac
+    cd -P -- "$entry" 2>/dev/null || continue
+    case "$PWD/" in "${project:-//}"/*) continue ;; esac
+    out="${out:+$out:}$PWD"
+  done
+  printf '%s' "${out:-/dev/null}"
+}
+PATH=$(hook_path)
+export PATH
+jq() { HOME= command jq "$@"; }
+# END hook-environment
+
 input=$(cat)
-command -v jq > /dev/null 2>&1 || exit 0
+type -P jq > /dev/null 2>&1 || exit 0
+
+# The variables that the project's own settings files, .claude/settings.json
+# and .claude/settings.local.json in the project directory $1, set in their
+# env and that are not Claude Code's own settings (the list below), one to a
+# line; for a file jq cannot read, its name. Claude Code applies those
+# files' env, which is repository content, to every hook and every command
+# it runs, over the user's settings and the environment it started in. So a
+# hook cannot tell the person's value of one of the layer's settings from
+# the repository's (ACS_HOOK_APPROVAL=off, an AUDIT_HMAC_KEY the repository
+# knows, a longer maximum age), and any other variable can change what a
+# hook, or a command it lets pass, runs: BASH_ENV, ENV, SHELLOPTS and
+# BASHOPTS (bash runs a repository script first, or nothing), PATH and HOME
+# (a repository's jq, git or openssl, or jq's library), LD_* and DYLD_* (a
+# repository's library in every program), GIT_CONFIG_* and the rest of
+# git's command scope (GIT_CONFIG_PARAMETERS, GIT_CONFIG_GLOBAL,
+# XDG_CONFIG_HOME: a program `git status` runs), a proxy, an exported
+# function (BASH_FUNC_*). Only names on the list pass, as written (another
+# letter case is another variable on most systems, the same one on
+# Windows). The three hooks that read a setting hold the same function; a
+# test keeps them so, keeps every setting a hook reads off the list, and
+# keeps the list the SDK adapter's (grounded_agency/utils/project_settings.py).
+project_layer_settings() {
+  local file
+  for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
+    if [ -e "$file" ] || [ -L "$file" ]; then
+      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("\\A(ANTHROPIC_[A-Z0-9_]+|OTEL_[A-Z0-9_]+|CLAUDE_CODE_(ENABLE_TELEMETRY|MAX_OUTPUT_TOKENS|USE_BEDROCK|USE_VERTEX|DISABLE_NONESSENTIAL_TRAFFIC)|DISABLE_(TELEMETRY|ERROR_REPORTING|AUTOUPDATER)|MAX_THINKING_TOKENS|MAX_MCP_OUTPUT_TOKENS|MCP_TIMEOUT|MCP_TOOL_TIMEOUT|BASH_DEFAULT_TIMEOUT_MS|BASH_MAX_TIMEOUT_MS|BASH_MAX_OUTPUT_LENGTH)\\z") | not) else empty end' "$file" 2>/dev/null \
+        || printf '%s\n' ".claude/${file##*/} (unreadable)"
+    fi
+  done
+}
+
+# A variable the repository may have chosen sets no expiry and may run a
+# program in the git commands below: no marker, and nothing run (the
+# pre-tool-use hook refuses every call meanwhile, R407).
+named=$(project_layer_settings "$project_dir") || exit 0
+[ -z "$named" ] || exit 0
 
 command=$(printf '%s' "$input" | jq -r 'if type == "object" then (.tool_input.command | strings) else empty end' 2>/dev/null) || exit 0
 # Not read past 4096 bytes, before the trims (as the pre-tool-use hook).
@@ -116,13 +199,7 @@ done
 skip=$(printf '%s' "$input" | jq -r '(.tool_response.is_error == true) or (.tool_response.interrupted == true) or (.tool_input.run_in_background == true)' 2>/dev/null) || exit 0
 [ "$skip" = "false" ] || exit 0
 
-if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
-  project="${CLAUDE_PROJECT_DIR}"
-elif [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
-  project="${CLAUDE_PLUGIN_ROOT}"
-else
-  project="$(pwd)"
-fi
+project="$project_dir"
 
 # The call ran in the project's repository: Claude Code sends the cwd it
 # ran in; a stash of another repository restores nothing here.
@@ -164,32 +241,6 @@ elif [ -z "$printed" ]; then
 else
   exit 0
 fi
-
-# The layer's settings (ACS_HOOK_APPROVAL, ACS_CHECKPOINT_MAX_AGE,
-# AUDIT_HMAC_KEY, AUDIT_LOCK_WAIT) that the project's own settings files,
-# .claude/settings.json and .claude/settings.local.json in the project
-# directory $1, name in their env, in any letter case, one to a line; for a
-# file jq cannot read, its name. Claude Code applies those files' env, which
-# is repository content, to every hook, over the user's settings and the
-# environment it started in, so a hook cannot tell the person's value of
-# such a setting from the repository's (ACS_HOOK_APPROVAL=off, an
-# AUDIT_HMAC_KEY the repository knows, a longer maximum age). The three
-# hooks that read a setting hold the same function; a test keeps them so,
-# and keeps every setting a hook reads named in it.
-project_layer_settings() {
-  local file
-  for file in "$1/.claude/settings.json" "$1/.claude/settings.local.json"; do
-    if [ -e "$file" ] || [ -L "$file" ]; then
-      jq -r 'if type == "object" and (.env | type) == "object" then .env | keys[] | select(test("^(acs_hook_approval|acs_checkpoint_max_age|audit_hmac_key|audit_lock_wait)$"; "i")) else empty end' "$file" 2>/dev/null \
-        || printf '%s\n' ".claude/${file##*/} (unreadable)"
-    fi
-  done
-}
-
-# A maximum age the repository may have chosen sets no expiry: no marker
-# (the pre-tool-use hook refuses every call meanwhile, R407).
-named=$(project_layer_settings "$project") || exit 0
-[ -z "$named" ] || exit 0
 
 max_age="${ACS_CHECKPOINT_MAX_AGE:-1800}"
 if ! [[ "$max_age" =~ ^[0-9]{1,4}$ ]] || (( 10#$max_age < 1 || 10#$max_age > 1800 )); then

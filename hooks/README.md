@@ -53,18 +53,46 @@ is not one, or a system without `jq`, is blocked with `R407
 SAFETY_CHECK_FAILED:`.
 
 The hooks' settings (`ACS_HOOK_APPROVAL`, `ACS_CHECKPOINT_MAX_AGE`,
-`AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`) belong in `~/.claude/settings.json`
-(`env`), managed settings or the environment Claude Code starts in, never in
-the project's `.claude/settings.json` or `.claude/settings.local.json`.
-Claude Code applies a project's `env`, which is repository content, to every
-hook over the user's settings, so a hook cannot tell the person's value from
-the repository's: a cloned repository could set `ACS_HOOK_APPROVAL=off`. While
-either project file names one of them in `env` (in any letter case), or
-cannot be read, the pre-tool-use hook blocks every call with `R407
-SAFETY_CHECK_FAILED:`, the log hook writes no line and the checkpoint hook
-writes no marker. Claude Code started in the home directory reads
-`~/.claude/settings.json` as the project's too: there, set them in the
-environment instead.
+`AUDIT_HMAC_KEY`, `AUDIT_LOCK_WAIT`), and any variable that is not one of
+Claude Code's own settings, belong in `~/.claude/settings.json` (`env`),
+managed settings or the environment Claude Code starts in, never in the
+project's `.claude/settings.json` or `.claude/settings.local.json`. Claude
+Code applies a project's `env`, which is repository content, to every hook
+and every command it runs, over the user's settings: a hook cannot tell the
+person's value of a setting from the repository's (a cloned repository could
+set `ACS_HOOK_APPROVAL=off`), and any other variable can change what a hook
+or a command it lets pass runs (`BASH_ENV` runs a repository script first,
+`SHELLOPTS=noexec` runs nothing, `PATH` or `HOME` a repository's `jq`, `git`
+or `openssl` or a `jq` library, `LD_PRELOAD` a library, `GIT_CONFIG_*` a
+program `git status` runs). While either project file sets in `env` a name
+other than Claude Code's own (`ANTHROPIC_*`, `OTEL_*`,
+`CLAUDE_CODE_ENABLE_TELEMETRY`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS`,
+`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`,
+`DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`, `MAX_THINKING_TOKENS`,
+`MAX_MCP_OUTPUT_TOKENS`, `MCP_TIMEOUT`, `MCP_TOOL_TIMEOUT`,
+`BASH_DEFAULT_TIMEOUT_MS`, `BASH_MAX_TIMEOUT_MS`, `BASH_MAX_OUTPUT_LENGTH`,
+as written), or cannot be read, the pre-tool-use hook blocks every call with
+`R407 SAFETY_CHECK_FAILED:`, the log hook writes no line and the checkpoint
+hook writes no marker and runs no git command. Claude Code started in the
+home directory reads `~/.claude/settings.json` as the project's too: there,
+set them in the environment instead.
+
+Each hook starts under `bash -p`, which reads no `BASH_ENV` or `ENV` file,
+imports no shell function and ignores `SHELLOPTS`, `BASHOPTS`, `CDPATH` and
+`GLOBIGNORE` (the scripts open with `#!/bin/sh` and start themselves so,
+whoever starts them); the three that read a setting keep on `PATH` only the
+absolute directories outside the project directory (all of them where the
+project is the user's home directory, as the password database gives it,
+or holds it), run `jq` with no `HOME`
+(jq loads `$HOME/.jq` as a library), and read the settings files before
+they run any other program. What they cannot reach: Claude Code starts each
+hook through `/bin/sh -c` with that env applied, so where `/bin/sh` is bash
+(macOS, Fedora, Arch, Git Bash) `SHELLOPTS=noexec` or an exported function
+stops that shell first, and anywhere a `PATH` naming a repository directory
+ahead of bash's, or `LD_PRELOAD`, runs the repository's code in the hook's
+place: repository settings the person accepts reach as far as project hooks,
+which run the repository's code. Review them before accepting them.
 
 ```bash
 echo '{"tool_name": "Write", "tool_input": {"file_path": "a.py"}}' \
@@ -336,15 +364,22 @@ Then:
   `.git/acs/checkpoints/key`, is blocked too. So are the paths the shell
   reads differently from their text: a `~` it expands (`~`, `~+`, `~user`;
   `~-` and `~N`, which name a directory the hook cannot know, are blocked
-  outright), a path attached to a short option (`-tnotes/k`,
-  `-onotes/todo.md`), and the command a quoted word holds for a shell that
-  reads it again (`sh -c 'cp x notes/k/'`). A path that leads to the
-  directory holding the records (the project's `.claude`, its git
-  directory's `acs/`) is blocked too: `rm -rf .claude` removes the marker,
-  and the audit log with its head. So is a link that cannot be followed (a
-  loop, more than 40 links), and a call with more than 65536 bytes of
-  strings of at most 4096 bytes, more than the hook reads in its time
-  limit. Reading the records is not refused; a path a command builds when
+  outright), a brace group it expands (`{fixtures/,.git/acs/check}points`,
+  `audit.he{ad,x}`, `.claud{e..e}`), a `$'...'` it decodes
+  (`$'.git/acs/check\x70oints'`, and octal, `\u`, `\U` and `\c`
+  escapes; `$"..."` as `"..."`), a path attached to a short option
+  (`-tnotes/k`, `-onotes/todo.md`; of a long cluster only the texts whose
+  first component exists in the call's directory, or that are absolute),
+  and the command a quoted word holds for a shell that reads it again (`sh
+  -c 'cp x notes/k/'`). A path that leads to the directory holding the
+  records (the project's `.claude`, its git directory's `acs/`) is blocked
+  too: `rm -rf .claude` removes the marker, and the audit log with its
+  head. So is a link that cannot be followed (a loop, more than 40 links),
+  and, rather than hold the hook past its time limit, a call with more than
+  4096 strings and member names or more than 65536 bytes of strings of at
+  most 4096 bytes, brace expansions that make more than 8192 words, or more
+  than 262144 bytes of paths to resolve (the slowest reading found within
+  these bounds takes about 4 seconds). Reading the records is not refused; a path a command builds when
   it runs, a pattern the shell expands and a link a command reaches without
   naming it (copying a directory that holds one) are not seen, nor is a
   text over 4096 bytes read for paths.
@@ -583,7 +618,13 @@ value, with `F504 CONSTRAINT_VIOLATED:` (STANDARD v1.2 §6.7). The `persist`
 hook scans the text a call carries and the lines the file will hold after it
 that it does not hold now, each also with its JSON-style escapes decoded, so
 a credential whose key is already in the file, or that two edits build, is
-read whole. GNU grep reads the scan's patterns in time linear in the text.
+read whole. Each of the scan's patterns reads the text in time linear in
+its length: `grep -o`, which prints each match, looks for one from each
+position of a line that matches, so its patterns start where no earlier
+attempt's run can hold another (a URL's scheme from the start of its run)
+or read a bounded run (a user option's name, at most 256 characters); time
+it with grep's output to a pipe, as the scan reads it, not to `/dev/null`,
+where grep stops at the first match.
 
 The `send`, `audit` and `rollback` skills' `Bash` hooks share one reader of
 a command's words, `shell_words.jq` in this directory, copied the same way

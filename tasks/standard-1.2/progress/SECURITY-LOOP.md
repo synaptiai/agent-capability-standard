@@ -4640,3 +4640,259 @@ records for the call that took it is. No version changes.
   fix are not rewritten at every write). No CLI or nested agent was
   started; nothing was left running; the probe copies and scratch files
   were removed.
+
+## Round 4
+
+### Batch 1: four reported defects
+
+Four defects, each reproduced by an independent verifier on 7d04aea and
+reproduced again here before any change (the reported payloads and env,
+under `timeout 120` and a 4 GB address-space limit): the Write in
+`bypassPermissions` with no marker exited 0 under `SHELLOPTS=noexec`,
+`BASH_ENV` and a `PATH` with a pass-through `jq`; the MCP edit of 8 option
+clusters took 34.0 s (F501); 100 KB of padding before a URL's password in a
+TodoWrite took past 30 s. None was fixed by an earlier batch: round 2 #6
+refused only the four settings' names, round 3 #2 bounded the guard's
+reading by bytes alone, round 2 #16 and round 3 batch 3 #1 fixed braces and
+`$'...'` in the audit skill's hook only, and round 1 batch 5 judged the
+shell scan linear from timings with grep's output sent to `/dev/null`.
+Each fix has tests that fail on the code before it (below).
+
+#### 1. A project's settings `env` other than the four layer settings turned the hooks off or skipped the git-program rule (medium; sibling of round 2 #6); siblings: `HOME` and jq's library, exported functions, the take hook's clean-tree check, the SDK adapter
+
+Claude Code applies the `env` of the project's `.claude/settings.json` and
+`.claude/settings.local.json` (repository content) to every hook and every
+command it runs. `project_layer_settings` refused only `ACS_HOOK_APPROVAL`,
+`ACS_CHECKPOINT_MAX_AGE`, `AUDIT_HMAC_KEY` and `AUDIT_LOCK_WAIT`, so
+`SHELLOPTS=noexec` (bash runs nothing: exit 0, and the log hook wrote no
+line), `BASH_ENV` (a repository script that exits 0 first), `GIT_CONFIG_*`
+(git's command scope: `git status` ran a repository program, classified
+`observe`; `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_GLOBAL`, `HOME`,
+`XDG_CONFIG_HOME` alike) and a `PATH` entry naming a repository `jq`
+each passed. Siblings found here: `HOME` alone defeated every jq check (jq
+loads `$HOME/.jq` as a library: `def test(a; b): false;` made the settings
+check itself find nothing); an exported function (`BASH_FUNC_jq%%`)
+replaced `jq` in the hook; the take hook ran its clean-tree `git diff`
+(where a command-scope filter ran three times) before it read the settings;
+and the SDK adapter, whose CLI applies the same env to every Bash command
+where it loads the project's settings, classified `ls` under `BASH_ENV`
+and `git status` under `GIT_CONFIG_*` as `observe`.
+
+- Fix (the three hooks that read a setting, one function a test keeps
+  equal): `project_layer_settings` now prints every name the project's
+  `env` sets that is not one of Claude Code's own settings, as written
+  (`ANTHROPIC_*`, `OTEL_*`, `CLAUDE_CODE_ENABLE_TELEMETRY`,
+  `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `CLAUDE_CODE_USE_BEDROCK`,
+  `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`,
+  `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`, `DISABLE_AUTOUPDATER`,
+  `MAX_THINKING_TOKENS`, `MAX_MCP_OUTPUT_TOKENS`, `MCP_TIMEOUT`,
+  `MCP_TOOL_TIMEOUT`, `BASH_DEFAULT_TIMEOUT_MS`, `BASH_MAX_TIMEOUT_MS`,
+  `BASH_MAX_OUTPUT_LENGTH`): an allowlist, not the reported denylist, since
+  no list of what bash, the loader, git, jq, openssl and perl read is
+  complete (`PERL5OPT` reaches the log hook's lock, `OPENSSL_CONF` its
+  signature). While it prints anything the pre-tool-use hook refuses every
+  call (R407), the log hook writes no line, and the take hook writes no
+  marker and now runs no git command (the check moved before them).
+- Fix (how the hooks start): the four hook scripts open with `#!/bin/sh`
+  and `case $- in *p*) ;; *) exec bash -p "$0" "$@" ;; esac`, so bash runs
+  them in privileged mode whoever starts them: no `BASH_ENV` or `ENV`
+  file, no imported function, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and
+  `GLOBIGNORE` ignored (POSIX `sh` reads none of these either, and bash
+  started as `sh` reads no `BASH_ENV`). `hooks.json` is unchanged: its
+  exec form (`args`) would avoid `/bin/sh -c` but breaks Git Bash on
+  Windows, and on a Claude Code without it would run its `command` alone.
+- Fix (what the check runs): a block the three hooks share (kept equal by
+  a test), before they read the call: `PATH` keeps only the absolute
+  directories outside the project directory, as the system resolves them
+  (`/dev/null` when none is left: an empty `PATH` searches the working
+  directory; every absolute directory where the project directory is the
+  user's home directory, as the password database gives it, or holds it,
+  since a home directory is no repository's and holds the user's own
+  tools: `~/.local/bin`, `~/.nix-profile/bin`), and `jq` runs with an
+  empty `HOME`; availability is asked with `type -P jq`. The settings are
+  read before any program but `jq`.
+- The skills' command hooks are commands Claude Code starts with `/bin/sh
+  -c` (POSIX sh, no bash of their own): while the project's settings set
+  such a variable the pre-tool-use hook refuses every call, theirs
+  included.
+- Sibling, the SDK adapter: `grounded_agency/utils/project_settings.py`
+  (`ALLOWED_PROJECT_ENV`, the hooks' list as the same expression, a test
+  keeps them equal; `refused_project_env`). `wrap_options` gives the
+  safety hook the options' `cwd` and `setting_sources`; where the CLI loads
+  the project's settings (`None`, or `project`, `local`), every call is
+  refused R407 while the file it loads sets a name off the list or cannot
+  be read (UTF-8 only, as jq reads it).
+- Not covered (SECURITY.md §5.5, hooks README): Claude Code starts each
+  hook through `/bin/sh -c` with that env applied, so where `/bin/sh` is
+  bash (macOS, Fedora, Arch, Git Bash) `SHELLOPTS=noexec` or an exported
+  function stops that shell before any plugin code runs, and anywhere a
+  `PATH` naming a repository directory ahead of bash's, or `LD_PRELOAD`,
+  runs the repository's code in the hook's place (as a project hook, which
+  the same accepted settings can define, does). The hooks refuse every
+  call while such a variable is set wherever their own code runs.
+- Tests (`tests/test_project_settings.py`): each of 19 variables
+  (`BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `ENV`, `PATH`, `HOME`,
+  `XDG_CONFIG_HOME`, `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`,
+  `GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_GLOBAL`,
+  `OPENSSL_CONF`, `PERL5OPT`, `HTTPS_PROXY`, `BASH_FUNC_jq%%`,
+  `CLAUDE_CODE_SHELL_PREFIX`, `path`, `NODE_ENV`) in either file refuses a
+  Write and a Read; Claude Code's own settings change nothing; no marker
+  and no log line while one is set; the reported routes with the hook
+  started as Claude Code starts it (`/bin/sh -c <script>` with the env
+  applied): `SHELLOPTS=noexec`, `BASH_ENV` (Write and the `curl` in
+  `dontAsk`), an exported `jq` function, `GIT_CONFIG_*` for `git status`,
+  `git diff`, `git stash create` and `git log -1` (and the program never
+  ran), the take hook's command-scope filter (never ran, no marker), a
+  repository `jq` on a relative `PATH` entry, a `HOME` with a jq library;
+  a repository `jq` named by its absolute path in the project; a project
+  that is the home directory keeping its tools (fails without the home
+  rule); the scripts' start; the adapter (19 variables, Claude Code's own, the
+  sources the CLI loads, an unreadable file); the hooks and the adapter
+  allow the same names (30); the function and the block equal in the
+  three hooks. On 7d04aea's hooks and adapter: 100 fail, 57 pass (the
+  earlier tests and the controls).
+- Tests changed to the new behaviour: the controls that used `OTHER`,
+  `ACS_HOOK_APPROVALS` and `PATH_EXTRA` as unrelated settings now use
+  Claude Code's own; the tests that run a hook with a directory of chosen
+  programs on `PATH` (`tests/test_hooks_unit.py`: a failing `date`, the
+  audit lock and digest tests; the no-`jq` test) keep it beside the
+  project directory, not in it.
+
+#### 2. The records guard's reading of an MCP or unknown tool's input ran past the hook's 30 s limit within its 65536-byte budget (medium)
+
+`word_candidates` gave a word that opens with `-` one candidate per
+position of its option cluster (up to 4090 texts of up to 4 KB each, none
+charged to `RESOLVE_LEFT`), and empty strings, which count no bytes, had no
+bound: the reported edit took 34.0 s here (44.3 s for the reporter, rc 124
+under `timeout 30`), the verifier's quoted sibling (each string read three
+times) 51.7 s, and 110,000 empty strings 21 to 32 s.
+
+- Fix: a call whose input holds more than 4096 strings and member names
+  (empty ones included, any length) is refused F504 with the over-budget
+  refusal, checked before the lexical check (which cost about 70 µs a
+  text: 7.8 s for 110,000); empty texts are not read. Of an option
+  cluster, only the texts whose first component exists in the call's
+  directory (a file, a directory or a link) or that are absolute are
+  candidates: a component that does not exist cannot be opened through,
+  and one of more than 255 characters exists on no file system, so a
+  cluster gives at most 256 positions to look at. Each slash-free text
+  added is charged to `RESOLVE_LEFT` (resolve_path charges the others);
+  past it the call is refused F504.
+- After: the reported edit 2.1 s (F501), the quoted sibling 3.9 s, 110,000
+  empty strings 0.2 s (F504), 4096 strings of quoted words 4.0 s (the
+  slowest shape found within the bounds), clusters with a 3800-byte tail
+  2.1 s, brace and `$'...'` worst cases (below) under 3 s.
+- Tests (`tests/test_records_guard.py`, `TestTheReadingsTime`): the
+  reported edit and the quoted sibling decided within 15 s; 4097 and
+  110,000 strings refused F504; 4096 strings of quoted words asked within
+  25 s; a cluster that still names a path it holds (`-rrr...tnotes/k`,
+  `-uuu...onotes/todo.md`, `-fff...r.claude`, each 300 letters) refused.
+  The first three fail on 7d04aea's hook; the last two pass on both.
+
+#### 3. The records guard did not read brace expansion or ANSI-C quoting (low; sibling of round 2 #4 and round 3 batch 3 #1)
+
+`path_words` split at `{`, `}` and `$` and kept `\xNN` as written, so
+`cp -rT {fixtures/,.git/acs/check}points` reached the ordinary approval
+(F502) instead of F504, and, approved, wrote a key and an entry of the
+repository's, after which `git stash apply <shipped commit>` restored with
+no marker in every mode.
+
+- Fix (`path_words`): `$'...'` is decoded as bash decodes it
+  (`ansi_escape`: `\a` to `\v`, `\\ \' \" \?`, octal, `\xHH`, `\uHHHH` and
+  `\UHHHHHHHH` in UTF-8, `\cx`, an unknown escape kept with its backslash,
+  and a NUL ending what bash keeps of that `$'...'`; bytes made with
+  `printf -v`, no subshell), `$"..."` is read as `"..."`, and unquoted
+  braces and commas are marked so `brace_words` expands each word as bash
+  does: the innermost group first, a comma group into its alternatives, a
+  sequence (`{a..e}`, `{1..10..3}`, `{01..10}`) into its elements, any
+  other group kept as written. Each word made is charged to `BRACE_LEFT`
+  (8192 words a call) and `RESOLVE_LEFT` bytes; past either the call is
+  refused F504. Checked against bash on the forms of the probe
+  (sequences of letters across `Z..a`, padded and negative numbers, steps,
+  nested and escaped braces, a quoted comma).
+- Tests (`TestBracesAndAnsiCQuoting`): 14 spellings of a records path
+  (brace, hex, octal, `\u`, `\U`, `$"..."`, nested, sequence, a link
+  reached through a brace, `sh -c` with a brace) refused; three of the
+  directory that holds them; bash's own expansion of the reported forms
+  (the premise); 8 controls asked (`file{1..3}`, `x{,.bak}`, `$'a\tb'`, a
+  NUL that ends the name, `mkdir -p src/{a,b}/{c,d}`, `jq '{a,b}'`,
+  `{A..z}`, 4096 words); two expansions past the budget refused within
+  10 s; an MCP shell server's command; the reported route end to end (the
+  copy is refused, and run anyway it writes the key). On 7d04aea's hook 20
+  of them fail; the premise, the controls and `$"..."` (read lexically
+  before) pass.
+
+#### 4. The shared secret scan was quadratic in `grep -o`, so a TodoWrite holding a credential after 100 KB kept the pre-tool-use hook past its 30 s limit (low); sibling: the Python and TypeScript user-option pattern
+
+GNU grep decides whether a line matches in linear time, but `grep -o` looks
+for a match from each position of a line that matches: the URL stage's
+`[A-Za-z][A-Za-z0-9+.-]*://` read a long scheme-like run again from each of
+its positions (20 KB 0.8 s, 40 KB 3.1 s with output to a pipe; 0.005 s to
+`/dev/null`, which is how round 1 batch 5 timed it), and the user-option
+stage read `[^...]*:` from each `-u` of a run such as `.-u.-u.-u...`
+(0.35 s at 20 KB). The Python and TypeScript user-option pattern had the
+same shape: 48.8 s for 200 KB in Python, 5.1 s for 100 KB in V8.
+
+- Fix (`hooks/secret_scan.sh` and its three copies): the URL stage starts at
+  the start of a scheme's run, `(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z]...`
+  (the Python and TypeScript `_SCHEME`, which round 1 batch 5 made so), and
+  its `sed` strips through the last `//`; a user option's name is read for
+  at most 256 characters (`{0,256}`) in the shell, Python
+  (`_USER_OPTION`) and TypeScript (`USER_OPTION`). A password after a
+  longer name is not recognised (stated in CHANGELOG).
+- After: every adversarial shape tried (URL, user option with `-u`, `-U=`
+  and `--user`, Authorization, name/value pairs and tuples, credential
+  options, assignments, each with the match first or last) reads 80 KB in
+  at most 0.13 s with output to a pipe; Python reads 400 KB of `.-u` in
+  0.9 s.
+- Tests: `TestShellHookPersistSecrets` (`tests/test_pretooluse_hooks.py`):
+  the reported TodoWrite (100 KB then a URL's password), 120 KB of `.-u`
+  and of `.-U=` then a user option's password, each F504 within 10 s from
+  the hook (on 7d04aea: 39.8 s, 25.5 s, 18.8 s), and the adapter within its
+  matcher's sixth (the URL passes on both, the user options fail on
+  7d04aea's Python); `.-u`, `.-U=` and `!-u ` at 1 MB in the Python and
+  TypeScript long-run tests (the old patterns take minutes there).
+
+#### Documentation
+
+SECURITY.md §1.5 (the linear-time claim, now what grep -o needs), §5.1
+(the project's env, the hooks' start, their own programs, braces and
+`$'...'`, the reading's bounds), §5.2 (the log and take hooks), §5.5 (the
+settings bullet; a new bullet on what accepted repository settings reach
+before a hook runs; the adapter's refusal); `hooks/README.md` (settings,
+start, records guard, scan); the SDK guide's settings paragraph; the hooks'
+and the adapter's comments; CHANGELOG [Unreleased] Upgrading (the plugin's
+env rule and start, the adapter's refusal, the records guard's bounds and
+readings, the user name's bound). The Standard's text was not changed: it
+already requires a layer that cannot complete its checks to refuse
+(§5.18.8).
+
+#### Checks after batch 1
+
+- Python: `pytest tests/` (6861 passed, 18 skipped: 6702 plus the new
+  ones), run before the last change to the hooks' `PATH` rule (the home
+  directory) and to their comments; after them, the hook suites again
+  (`test_project_settings` with `test_hooks_unit`, 257 passed; the
+  pre-tool-use, records guard, lifecycle, audit, skill-hook, redaction,
+  git-program and pipeline tests, 2700 passed; after the comments,
+  `test_records_guard` with `test_project_settings`, 252 passed). ruff check and format with CI's lists; mypy; every
+  `tools/validate_*.py` of CLAUDE.md, `validate_workflows.py --strict` and
+  every domain catalog and example `--strict`; `sync_skill_schemas.py
+  --check` and the generators' `--check` (no fixture or vector changed).
+- Rust: no Rust source changed, so `cargo test` was not rerun and no core
+  was rebuilt.
+- TypeScript: the package's check, build and test (2015: 2012 plus the
+  three long runs); the binding's check and test (247 passed, 2 skipped).
+- Site: `npm run check`, `npm test` (1173). Node, and the site's build
+  under it, needs more than a 4 GB or 16 GB address-space limit (V8 and
+  WebAssembly reserve address space they do not use: the build stopped
+  with a heap failure at about 550 MB under 16 GB); these ran under a
+  64 GB limit (15 GB of memory here) and `timeout`.
+- Old code: the new tests against 7d04aea's hooks, adapter and redactor
+  (project settings: 100 fail, 57 pass; records guard: 24 fail, 12 pass;
+  persist timing: 5 fail, 1 pass), each count above.
+- Probes, each under `timeout 120` and a 4 GB address-space limit: the
+  reported payloads and env (above), the brace and `$'...'` cases against
+  bash's own expansion, the shapes of the secret scan at 10 to 80 KB with
+  grep's output to a pipe. No CLI or nested agent was started; nothing
+  was left running; the scratch repositories and payloads were removed.

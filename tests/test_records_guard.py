@@ -409,3 +409,184 @@ class TestTheDirectoryThatHoldsThem:
     def test_other_paths_are_asked(self, project: Path, command: str) -> None:
         fresh_marker(project)
         assert asked(run_pre(project, "Bash", {"command": command}))
+
+
+class TestBracesAndAnsiCQuoting:
+    """Security round 4, batch 1, #3: path_words split at `{`, `}` and `$`
+    and kept `\\xNN` in `$'...'` as written, so the path bash builds from
+    `{a,b}` or `$'...'` was never read; one approved `cp -rT
+    {fixtures/,.git/acs/check}points` wrote a key and an entry of the
+    repository's, after which a shipped commit restored with nothing."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cp -rT {fixtures/,.git/acs/check}points",
+            "cp -rT fixtures $'.git/acs/check\\x70oints'",
+            "cp -rT fixtures $'.git/acs/check\\160oints'",
+            "cp -rT fixtures $'.git/acs/check\\u0070oints'",
+            "cp -rT fixtures $'.git/acs/check\\U00000070oints'",
+            "cp a.txt $'.claude/checkpoint\\x2eok'",
+            'cp a.txt $".claude/checkpoint.ok"',
+            "touch .claude/audit.he{ad,x}",
+            "cp -rT fixtures .git/acs/check{points,}",
+            "cp -rT fixtures .git/{acs,x}/checkpoints",
+            "cp -r fixtures/. .claud{e..e}/checkpoints/",
+            "cp -r fixtures/. .{claude,x}/{a,check{points,x}}/",
+            "sh -c 'touch .claude/audit.he{ad,x}'",
+            "cp -rT fixtures notes/{k,x}",
+        ],
+    )
+    def test_a_records_path_bash_builds_is_refused(
+        self, project: Path, command: str
+    ) -> None:
+        marker = fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), (command, result.stdout, result.stderr)
+        assert marker.exists()
+
+    @pytest.mark.parametrize(
+        "command", ["rm -rf .{claude,x}", "mv .git/{acs,old}", "rm -rf $'.cl\\x61ude'"]
+    )
+    def test_the_directory_that_holds_them(self, project: Path, command: str) -> None:
+        fresh_marker(project)
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), (command, result.stderr)
+
+    def test_bash_builds_those_paths(self, project: Path) -> None:
+        """The premise, from bash itself."""
+        out = subprocess.run(
+            [
+                "bash",
+                "-c",
+                "printf '%s\\n' {fixtures/,.git/acs/check}points "
+                "$'.git/acs/check\\x70oints' .claude/audit.he{ad,x} "
+                "$'.cl\\0aude'x",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.split()
+        assert ".git/acs/checkpoints" in out
+        assert out.count(".git/acs/checkpoints") == 2
+        assert ".claude/audit.head" in out
+        assert ".clx" in out
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "touch file{1..3}.txt",
+            "cp a.txt{,.bak}",
+            "printf $'a\\tb\\n' > out.txt",
+            "touch $'.cl\\0aude'x",
+            "mkdir -p src/{a,b}/{c,d}",
+            "jq '{a,b}' a.txt > b.txt",
+            "touch $'\\u00e9t\\u00e9' {A..z}",
+            "echo {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}",
+        ],
+    )
+    def test_other_braces_and_quotes_are_asked(
+        self, project: Path, command: str
+    ) -> None:
+        fresh_marker(project)
+        assert asked(run_pre(project, "Bash", {"command": command})), command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "touch x{1..100000}",
+            "touch {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}",
+        ],
+    )
+    def test_an_expansion_past_the_budget_is_refused(
+        self, project: Path, command: str
+    ) -> None:
+        fresh_marker(project)
+        start = time.monotonic()
+        result = run_pre(project, "Bash", {"command": command})
+        assert refused_f504(result), result.stderr
+        assert "8192 words" in result.stderr
+        assert time.monotonic() - start < 10
+
+    def test_an_mcp_tools_argument_is_read_alike(self, project: Path) -> None:
+        fresh_marker(project)
+        result = run_pre(
+            project,
+            "mcp__shell__run",
+            {"command": "cp -rT {fixtures/,.git/acs/check}points"},
+        )
+        assert refused_f504(result), result.stderr
+
+    def test_the_reported_route_end_to_end(self, project: Path) -> None:
+        """The copy is refused before it runs; run anyway, it writes the key
+        and the entry, after which a restore of M would be a rollback."""
+        (project / "fixtures" / "points").mkdir()
+        (project / "fixtures" / "points" / "key").write_text("0" * 64)
+        fresh_marker(project)
+        command = "cp -rT {fixtures/,.git/acs/check}points"
+        assert refused_f504(run_pre(project, "Bash", {"command": command}))
+        subprocess.run(["bash", "-c", command], cwd=project, check=True, timeout=30)
+        key = project / ".git" / "acs" / "checkpoints" / "key"
+        assert key.read_text() == "0" * 64
+
+
+class TestTheReadingsTime:
+    """Security round 4, batch 1, #2: within the 65536-byte budget, a word
+    that opens with `-` gave one candidate per position of its option
+    cluster (up to 4090 texts of up to 4 KB, none charged to the budget),
+    and empty strings, which count no bytes, had no bound: the reported
+    MCP edit took 44 s (rc 124 under hooks.json's 30 s), the verifier's
+    quoted sibling 51.7 s, 110,000 empty strings 32 s."""
+
+    def _mcp(self, project: Path, tool_input: Any) -> subprocess.CompletedProcess[str]:
+        start = time.monotonic()
+        result = run_pre(
+            project, "mcp__filesystem__edit_file", tool_input, "bypassPermissions"
+        )
+        assert time.monotonic() - start < 15, result.stderr
+        return result
+
+    def test_long_option_clusters(self, project: Path) -> None:
+        edits = [
+            {"oldText": "-" + "a" * 4070, "newText": "-" + "b" * 4070} for _ in range(8)
+        ]
+        result = self._mcp(project, {"path": "src/app.py", "edits": edits})
+        assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), result.stderr
+
+    def test_quoted_option_clusters(self, project: Path) -> None:
+        """Three readings of each: the text, its dequoted word, the word
+        nested in that."""
+        text = "-" + "a" * 4060 + "'\"'"
+        result = self._mcp(project, {"path": "src/app.py", "edits": [text] * 16})
+        assert result.returncode == 2
+        assert result.stderr.startswith("F501 CHECKPOINT_REQUIRED: "), result.stderr
+
+    @pytest.mark.parametrize("count", [4097, 110_000])
+    def test_more_than_4096_strings_are_refused(
+        self, project: Path, count: int
+    ) -> None:
+        result = self._mcp(project, {"path": "x.txt", "args": [""] * count})
+        assert refused_f504(result), result.stderr
+        assert "4096 strings" in result.stderr
+
+    def test_the_most_strings_it_reads(self, project: Path) -> None:
+        """4096 strings of quoted words, each read whole, as words and
+        nested: the slowest shape found at the count bound (about 4 s
+        here)."""
+        fresh_marker(project)
+        start = time.monotonic()
+        result = run_pre(project, "mcp__x__y", {"args": ["'a b' \"c d\""] * 4094})
+        assert asked(result), result.stderr
+        assert time.monotonic() - start < 25
+
+    def test_a_cluster_still_names_a_path_it_holds(self, project: Path) -> None:
+        """Only the texts after an option letter that can name a file are
+        read: one whose first component exists, or an absolute one."""
+        fresh_marker(project)
+        for command in (
+            "cp -r -" + "r" * 300 + "tnotes/k fixtures/key",
+            "sort -" + "u" * 300 + "onotes/todo.md a.txt",
+            "rm -" + "f" * 300 + "r.claude",
+        ):
+            assert refused_f504(run_pre(project, "Bash", {"command": command})), command
