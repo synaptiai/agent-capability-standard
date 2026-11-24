@@ -38,7 +38,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeIs
 
 from ..utils.layer_dir import LinkedPathError, open_layer_dir
 
@@ -122,7 +122,7 @@ def _is_captured_path(rel: str) -> bool:
     return all(part not in ("", ".", "..") for part in rel.split("/"))
 
 
-def _is_manifest(value: Any) -> bool:
+def _is_manifest(value: object) -> TypeIs[dict[str, Any]]:
     """Whether a manifest file's JSON is one :meth:`FileSnapshotStore.capture`
     writes, as far as a restore reads it: an object whose ``files`` maps
     each path capture records (:func:`_is_captured_path`) to an object with

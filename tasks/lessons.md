@@ -332,3 +332,16 @@ file. `test_the_vector_files_hold_no_raw_provider_token` checks the secrets
 vectors; scan a new fixture of another kind for these shapes before
 committing it. Never ask for the push protection to be bypassed for test
 data that can be written another way.
+
+## Before a push, run the whole lint job, not only the step you changed for
+
+**Pattern.** A fix to the newer CI runner's failures went out with ruff
+clean (on CI's paths) and the affected tests passing, but not mypy: a
+validator that returns the parsed JSON after a `bool` guard returned `Any`
+where the function promises a dict, and `Lint & type-check` failed.
+
+**Rule.** Before pushing Python changes, run every step of the lint job as
+`ci.yml` writes it: `ruff check`, `ruff format --check` (both on CI's
+paths), and `mypy grounded_agency/`. A guard that checks a parsed value's
+shape returns `TypeIs[...]`, so the checked value has the type the caller
+promises without a cast.
