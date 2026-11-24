@@ -1388,19 +1388,26 @@ brace_group() {
 # BRACED (marks kept), as bash makes them: the first group (brace_group)
 # gives, if it is a list, the words of each of its parts (split at its own
 # commas, each expanded again), else, if it is a sequence ({a..e},
-# {1..10..3}, {01..10}), each of its elements; the text before it is kept,
-# and the text after it is expanded again. Bash 5.2 and 5.3 differ on the
-# rest (BRACE_MODE, which brace_words sets, says which is read). Bash 5.2
-# reads a group as a list when a comma is anywhere in it, nested included
-# ({a..b{c,d}}: one part, a..b{c,d}, so a..bc and a..bd), and keeps a group
-# with no comma that is no sequence as written. Bash 5.3 reads a group as a
-# list only when a comma is at its own level, and of a group that is
-# neither, keeps the { as written and expands what follows it, the group's
-# own text included ({a..bc} and {a..bd}). Reading as 5.2, it sets
-# BRACE_SPLIT to 1 at a group 5.3 reads otherwise. Each word made is charged
-# to the call's budgets, BRACE_LEFT words and RESOLVE_LEFT bytes; fails (2)
-# past either or past BRACE_SCAN_LEFT, rather than hold the hook past its
-# time limit.
+# {1..10..3}, {01..10}, {a..e..+2}: a sign and leading zeros as bash takes
+# them), each of its elements; the text before it is kept, and the text
+# after it is expanded again. Bash versions differ on the rest, and
+# BRACE_MODE, which brace_words sets, says which reading is read. Bash 5.2
+# (BRACE_MODE 5.2) reads a group as a list when a comma is anywhere in it,
+# nested included ({a..b{c,d}}: one part, a..b{c,d}, so a..bc and a..bd),
+# and keeps a group with no comma that is no sequence as written. Bash 5.3
+# reads a group as a list only when a comma is at its own level, and of a
+# group that is neither expands the text inside its braces, keeping them
+# ({a..bc} and {a..bd}: the one word of bash 5.3's seen, on a runner,
+# without its source). Two readings give that word, and both are read:
+# keeping the { as written and expanding all that follows it, the rest of
+# the word included (5.3a), or keeping the group's two braces around the
+# words of its own text, then expanding the text after it (5.3c). Reading
+# as 5.2, it sets BRACE_SPLIT to 1 at a group 5.3 reads otherwise. Each word made is charged to the call's budgets,
+# BRACE_LEFT words and RESOLVE_LEFT bytes; fails (2) past either, past
+# BRACE_SCAN_LEFT, or at a sequence with a number of more than 9 digits (an
+# increment of more than 18), leading zeros aside, which bash versions may
+# print otherwise and bash arithmetic cannot always hold, rather than hold
+# the hook past its time limit or guess.
 brace_expand() {
   local w="$1" pre amble post part m t from to step width n e x start cut status=0
   local -a mid=() tail=() cuts=()
@@ -1423,11 +1430,15 @@ brace_expand() {
       brace_expand "$part" || return 2
       mid+=("${BRACED[@]}")
     done
-  elif [[ "$amble" =~ ^(-?[0-9]{1,9})\.\.(-?[0-9]{1,9})(\.\.-?([0-9]{1,9}))?$ ]] || [[ "$amble" =~ ^([A-Za-z])\.\.([A-Za-z])(\.\.-?([0-9]{1,9}))?$ ]]; then
+  elif [[ "$amble" =~ ^([+-]?[0-9]+)\.\.([+-]?[0-9]+)(\.\.[+-]?([0-9]+))?$ ]] || [[ "$amble" =~ ^([A-Za-z])\.\.([A-Za-z])(\.\.[+-]?([0-9]+))?$ ]]; then
     from="${BASH_REMATCH[1]}"
     to="${BASH_REMATCH[2]}"
-    step="${BASH_REMATCH[4]:-1}"
-    step=$((10#$step))
+    # The increment's digits, leading zeros aside: its sign does not count
+    # (bash steps from the first toward the second), 0 is 1.
+    step="${BASH_REMATCH[4]}"
+    step="${step#"${step%%[!0]*}"}"
+    [ "${#step}" -le 18 ] || return 2
+    step=$((10#${step:-0}))
     [ "$step" -gt 0 ] || step=1
     width=0
     if [[ "$from" =~ ^-?0[0-9] || "$to" =~ ^-?0[0-9] ]]; then
@@ -1439,8 +1450,13 @@ brace_expand() {
       printf -v to '%d' "'$to"
       width=-1
     else
-      case "$from" in -*) from=$((-10#${from#-})) ;; *) from=$((10#$from)) ;; esac
-      case "$to" in -*) to=$((-10#${to#-})) ;; *) to=$((10#$to)) ;; esac
+      for x in "$from" "$to"; do
+        x="${x#[+-]}"
+        x="${x#"${x%%[!0]*}"}"
+        [ "${#x}" -le 9 ] || return 2
+      done
+      case "$from" in -*) from=$((-10#${from#-})) ;; *) from=$((10#${from#+})) ;; esac
+      case "$to" in -*) to=$((-10#${to#-})) ;; *) to=$((10#${to#+})) ;; esac
     fi
     n=$(((from > to ? from - to : to - from) / step + 1))
     BRACE_LEFT=$((BRACE_LEFT - n))
@@ -1461,8 +1477,14 @@ brace_expand() {
     # A group bash 5.2 leaves as it is: its braces as written.
     BRACE_SPLIT=1
     mid=("{${amble}}")
+  elif [ "$BRACE_MODE" = 5.3c ]; then
+    # Bash 5.3, read the second way: the group's braces as written around
+    # the words of its own text.
+    brace_expand "$amble" || return 2
+    for t in "${BRACED[@]}"; do mid+=("{$t}"); done
   else
-    # Bash 5.3: the { as written, then the words of what follows it.
+    # Bash 5.3, read the first way: the { as written, then the words of
+    # what follows it.
     brace_expand "${w:BG_OPEN+1}" || return 2
     tail=("${BRACED[@]}")
     BRACED=()
@@ -1487,49 +1509,45 @@ brace_expand() {
   done
 }
 
+# The words $@ joined by \001 into JOINED. No word brace_words makes holds
+# a \001 (each, a mark or not, is read back as a {), so two lists of words
+# join alike only when they are the same words in the same order.
+join_words() {
+  local IFS=$'\001'
+  JOINED="$*"
+}
+
 # The words bash makes of the word $1 by brace expansion (brace_expand),
 # with their marks read back as the characters, appended to PATH_WORDS: the
-# words of bash 5.2's reading and of bash 5.3's (the hook runs under
-# whichever bash the user has, and a word either makes may name the
-# records). Two whole passes, both charged to the call's budgets; the
-# second only when the first met a group 5.3 reads otherwise (BRACE_SPLIT),
-# since with none it is the first again. When their words differ, sort
-# merges them, each once (both lists whole, should sort fail).
+# words of each reading, bash 5.2's and the two of bash 5.3's (the hook runs
+# under whichever bash the user has, and a word any of them makes may name
+# the records). Each reading is a whole pass charged to the call's budgets;
+# those after the first run only when the first met a group 5.3 reads
+# otherwise (BRACE_SPLIT), since with none each is the first again. A
+# reading adds its words unless a reading before it made the same words in
+# the same order; a word two readings make otherwise is added twice. In
+# bash, with no process started.
 brace_words() {
-  local w k=0 BRACE_MODE=5.2 BRACE_SPLIT=0
-  local -a first=() words=()
-  brace_expand "$1" || return 2
-  for w in "${BRACED[@]}"; do
-    w="${w//$'\001'/\{}"
-    w="${w//$'\002'/,}"
-    first+=("${w//$'\003'/\}}")
-  done
-  if [ "$BRACE_SPLIT" = 0 ]; then
-    PATH_WORDS+=("${first[@]}")
-    return 0
-  fi
-  BRACE_MODE=5.3
-  brace_expand "$1" || return 2
-  for w in "${BRACED[@]}"; do
-    w="${w//$'\001'/\{}"
-    w="${w//$'\002'/,}"
-    words+=("${w//$'\003'/\}}")
-  done
-  if [ "${#first[@]}" -eq "${#words[@]}" ]; then
-    for w in "${first[@]}"; do
-      [ "$w" = "${words[k]}" ] || break
-      k=$((k + 1))
-    done
-  fi
-  if [ "$k" -lt "${#first[@]}" ] || [ "$k" -lt "${#words[@]}" ]; then
-    BRACED=("${first[@]}" "${words[@]}")
+  local w mode joined BRACE_MODE BRACE_SPLIT=0
+  local -a words=() seen=()
+  for mode in 5.2 5.3a 5.3c; do
+    BRACE_MODE="$mode"
+    brace_expand "$1" || return 2
     words=()
-    while IFS= read -r -d '' w; do
-      words+=("$w")
-    done < <(printf '%s\0' "${BRACED[@]}" | LC_ALL=C sort -zu)
-    [ "${#words[@]}" -gt 0 ] || words=("${BRACED[@]}")
-  fi
-  PATH_WORDS+=("${words[@]}")
+    for w in "${BRACED[@]}"; do
+      w="${w//$'\001'/\{}"
+      w="${w//$'\002'/,}"
+      words+=("${w//$'\003'/\}}")
+    done
+    join_words "${words[@]}"
+    joined="${#words[@]}:$JOINED"
+    for w in ${seen[@]+"${seen[@]}"}; do
+      [ "$w" != "$joined" ] || continue 2
+    done
+    seen+=("$joined")
+    PATH_WORDS+=("${words[@]}")
+    [ "$BRACE_SPLIT" = 1 ] || return 0
+  done
 }
 
 # The words of a text the shell would pass as arguments, into PATH_WORDS:

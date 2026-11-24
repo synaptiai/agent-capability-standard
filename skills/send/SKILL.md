@@ -415,17 +415,22 @@ hooks:
             # level (bash closes no group at a } before its first comma: {a},b} gives
             # a} and b); a group that is a list gives its parts (split at its own
             # commas), each expanded again, a sequence x..y its elements, and the text
-            # after the group is expanded again. Bash 5.2 and 5.3 differ on the rest
+            # after the group is expanded again. Bash versions differ on the rest
             # ($v): 5.2 reads a group as a list when a comma is anywhere in it, nested
             # included ({a..b{c,d}} gives a..bc and a..bd), and keeps a group that is
             # neither as written; 5.3 reads it as a list only when a comma is at its
-            # own level, and of a group that is neither keeps the { as written and
-            # expands what follows it ({a..bc} and {a..bd}). brace_words gives the
-            # words of both readings (the hook runs under whichever bash the user has),
-            # each once where they differ. A sequence of numbers gives digits
-            # (\u0006). null for more than 256 words (both readings' together), groups
-            # 32 deep, more than 512 braces and commas in a word, or more than 8 {
-            # tried for one group, in either reading.
+            # own level, and of a group that is neither expands the text inside its
+            # braces, keeping them ({a..bc} and {a..bd}, seen on a runner), which two
+            # readings give: the { kept and all that follows it expanded (5.3a), or
+            # the group's braces kept around the words of its text, then the text
+            # after it expanded (5.3c). brace_words gives the words of the three
+            # readings (the hook runs under whichever bash the user has), each once
+            # where they differ. A sequence takes a sign and leading zeros as bash
+            # does ({a..e..+2}); one of numbers gives digits (\u0006). null for more
+            # than 256 words (all readings' together), groups 32 deep, more than 512
+            # braces and commas in a word, more than 8 { tried for one group, or a
+            # sequence with a number of more than 9 digits (an increment of more than
+            # 18), leading zeros aside, in any reading.
             def brace_marks: [match("[{},]|\\.\\.(?!\\})"; "g") | {o: .offset, t: .string}];
             def brace_close($m; $k): first(foreach range($k + 1; $m | length) as $j ({l: 0, c: 0, at: null};
                 $m[$j].t as $t
@@ -442,6 +447,15 @@ hooks:
                   elif .l == 0 then .cuts += [$x.o]
                   else . end) | [-1] + .cuts + [$a | length]) as $b
               | [range(0; ($b | length) - 1) as $i | $a[$b[$i] + 1:$b[$i + 1]]];
+            # Whether a sequence ("x..y" or "x..y..n") has a term of more than 9
+            # digits or an increment of more than 18, sign and leading zeros aside.
+            def brace_seq_long: split("..") | map(sub("^[+-]"; "") | sub("^0+"; "") | length)
+              | (.[0] > 9 or .[1] > 9 or (.[2] // 0) > 18);
+            # A letter sequence's letters: from x toward y, every |n|th (0 is 1).
+            def brace_letters: explode as $c
+              | ((.[6:] | sub("^[+-]"; "") | sub("^0+"; "")) | if . == "" then 1 else tonumber end) as $s
+              | (if $c[0] <= $c[3] then 1 else -1 end) as $d
+              | [range(0; (($c[3] - $c[0]) * $d / $s | floor) + 1) | [$c[0] + . * $d * $s] | implode];
             def brace_expand($depth; $v): . as $w | brace_marks as $m
               | [range(0; $m | length) | select($m[.].t == "{" and (($m[.].o == 0 and $w[1:2] == "}") | not))] as $opens
               | if ($m | length) > 512 or $depth > 32 then null
@@ -449,12 +463,14 @@ hooks:
                 | if $g == null then (if ($opens | length) > 8 then null else [$w] end)
                   else $w[:$g[0]] as $pre | $w[$g[0] + 1:$g[1]] as $body | $w[$g[1] + 1:] as $post
                   | ($body | brace_parts) as $parts
-                  | (if ($body | test(",")) and ($v == 52 or ($parts | length) > 1) then
+                  | (if ($body | test(",")) and ($v == "5.2" or ($parts | length) > 1) then
                        [$parts[] | brace_expand($depth + 1; $v)] | if any(.[]; . == null) then null else add end
-                     elif $body | test("^-?[0-9]+\\.\\.-?[0-9]+(\\.\\.-?[0-9]+)?$") then ["\u0006"]
-                     elif $body | test("^[A-Za-z]\\.\\.[A-Za-z](\\.\\.-?[0-9]+)?$") then
-                       [($body | explode) as $c | range([$c[0], $c[3]] | min; ([$c[0], $c[3]] | max) + 1) | [.] | implode]
-                     elif $v == 52 then ["{" + $body + "}"]
+                     elif $body | test("^[+-]?[0-9]+\\.\\.[+-]?[0-9]+(\\.\\.[+-]?[0-9]+)?$") then
+                       (if $body | brace_seq_long then null else ["\u0006"] end)
+                     elif $body | test("^[A-Za-z]\\.\\.[A-Za-z](\\.\\.[+-]?[0-9]+)?$") then
+                       (if $body | brace_seq_long then null else $body | brace_letters end)
+                     elif $v == "5.2" then ["{" + $body + "}"]
+                     elif $v == "5.3c" then $body | brace_expand($depth + 1; $v) | if . == null then null else map("{" + . + "}") end
                      else false end) as $mid
                   | if $mid == false then
                       ($w[$g[0] + 1:] | brace_expand($depth + 1; $v)) as $rest
@@ -465,9 +481,9 @@ hooks:
                     end
                   end
                 end;
-            def brace_words: brace_expand(0; 52) as $a | brace_expand(0; 53) as $b
-              | if $a == null or $b == null then null elif $a == $b then $a
-                else $a + $b | unique | if length > 256 then null else . end end;
+            def brace_words: [brace_expand(0; "5.2"), brace_expand(0; "5.3a"), brace_expand(0; "5.3c")]
+              | if any(.[]; . == null) then null elif .[0] == .[1] and .[0] == .[2] then .[0]
+                else add | unique | if length > 256 then null else . end end;
             # A glob as the shell matches it (in any letter case: shopt -s nocaseglob),
             # its quotes removed before: each bracket expression read as bash reads
             # one (glob_marks; [[:alpha:]], [[=l=]], []l] and [l"]"] included).

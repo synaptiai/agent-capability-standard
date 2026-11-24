@@ -95,13 +95,42 @@ _MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
+def _aware_time(value: Any) -> datetime | None:
+    """The instant an ISO 8601 text with a UTC offset names (``Z``, as
+    :func:`_iso` writes it, or ``+hh:mm``); None for any other value."""
+    if not isinstance(value, str):
+        return None
+    try:
+        t = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.utcoffset() is not None else None
+
+
+def _is_captured_path(rel: str) -> bool:
+    """Whether ``rel`` is a path :meth:`FileSnapshotStore.capture` records:
+    root-relative, file and directory names joined by ``/`` (no empty,
+    ``.`` or ``..`` part, so neither an absolute path nor a way around the
+    names a restore never writes), with no NUL and an exact UTF-8 form
+    (capture's digest encodes it)."""
+    if "\0" in rel:
+        return False
+    try:
+        rel.encode()
+    except UnicodeEncodeError:
+        return False
+    return all(part not in ("", ".", "..") for part in rel.split("/"))
+
+
 def _is_manifest(value: Any) -> bool:
     """Whether a manifest file's JSON is one :meth:`FileSnapshotStore.capture`
     writes, as far as a restore reads it: an object whose ``files`` maps
-    each path to an object with the SHA-256 that names its object (so no
-    file outside the store) and its permission bits, and whose ``scope``
-    and ``excluded``, when present, are lists of strings. A restore that met
-    anything else part way would stop with some files put back."""
+    each path capture records (:func:`_is_captured_path`) to an object with
+    the SHA-256 that names its object (so no file outside the store) and its
+    permission bits, whose ``scope`` and ``excluded``, when present, are
+    lists of strings, and whose ``expires_at``, when not null, is a time
+    with its UTC offset. A restore that met anything else part way would
+    stop with some files put back."""
     if not isinstance(value, dict) or not isinstance(value.get("files"), dict):
         return False
     for member in ("scope", "excluded"):
@@ -110,13 +139,17 @@ def _is_manifest(value: Any) -> bool:
             isinstance(items, list) and all(isinstance(i, str) for i in items)
         ):
             return False
+    expires = value.get("expires_at")
+    if expires is not None and _aware_time(expires) is None:
+        return False
     return all(
-        isinstance(entry, dict)
+        _is_captured_path(rel)
+        and isinstance(entry, dict)
         and isinstance(entry.get("sha256"), str)
         and _SHA256.fullmatch(entry["sha256"]) is not None
         and type(entry.get("mode")) is int
         and 0 <= entry["mode"] <= 0o7777
-        for entry in value["files"].values()
+        for rel, entry in value["files"].items()
     )
 
 
@@ -545,13 +578,11 @@ class FileSnapshotStore:
         self._check_id(checkpoint_id)
         with self._lock:
             manifest = self.manifest(checkpoint_id)
-            if manifest is not None and manifest.get("expires_at"):
-                expires = datetime.fromisoformat(
-                    str(manifest["expires_at"]).replace("Z", "+00:00")
-                )
-                if self._clock() >= expires:
-                    self._discard_locked(checkpoint_id)
-                    manifest = None
+            # Null, or a time with its offset (_is_manifest).
+            expires = _aware_time(manifest.get("expires_at")) if manifest else None
+            if expires is not None and self._clock() >= expires:
+                self._discard_locked(checkpoint_id)
+                manifest = None
             if manifest is None:
                 return Restore(False, [{"item": "*", "reason": "discarded"}])
             return self._restore(manifest, list(scope) if scope else None)

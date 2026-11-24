@@ -492,6 +492,26 @@ def test_a_manifest_nested_too_deeply_is_malformed(root: Path, deep_json: str) -
         '{"files": {"a.txt": {"sha256": "../../a.txt", "mode": 420}}}',
         '{"files": {"a.txt": {"sha256": "' + _SHA + '", "mode": true}}}',
         '{"files": {"a.txt": {"sha256": "' + _SHA + '", "mode": -1}}}',
+        # Paths capture never records.
+        *(
+            '{"files": {"' + rel + '": {"sha256": "' + _SHA + '", "mode": 420}}}'
+            for rel in (
+                "a\\u0000x",
+                "a\\udc80x",
+                "a\\ud800x",
+                "",
+                "/a.txt",
+                "src//b.py",
+                "./a.txt",
+                "src/../.git/config",
+                "src/",
+            )
+        ),
+        # Times that are no time with its offset.
+        '{"files": {}, "expires_at": "2099-01-01T00:00:00"}',
+        '{"files": {}, "expires_at": "never"}',
+        '{"files": {}, "expires_at": [1]}',
+        '{"files": {}, "expires_at": ""}',
     ],
 )
 def test_a_manifest_that_is_no_manifest_is_malformed(root: Path, text: str) -> None:
@@ -506,4 +526,30 @@ def test_a_restore_never_stops_part_way_on_a_manifest_entry(root: Path) -> None:
     path = root.parent / "store" / "manifests" / "cp1.json"
     manifest = json.loads(path.read_text())
     manifest["files"]["src/b.py"]["mode"] = "rw"
+    _no_manifest(root, json.dumps(manifest))
+
+
+@pytest.mark.parametrize("rel", ["aa\u0000x", "aa\udc80x"])
+def test_a_restore_never_stops_part_way_on_a_manifest_path(
+    root: Path, rel: str
+) -> None:
+    """A path with a NUL raised ValueError from the system call after the
+    files that sort before it were put back; one with a lone surrogate,
+    UnicodeEncodeError from the digest once all were."""
+    s = store(root)
+    s.capture("cp1", ["*"])
+    path = root.parent / "store" / "manifests" / "cp1.json"
+    manifest = json.loads(path.read_text())
+    manifest["files"][rel] = manifest["files"]["a.txt"]
+    _no_manifest(root, json.dumps(manifest))
+
+
+def test_a_restore_reads_a_naive_expiry_as_malformed(root: Path) -> None:
+    """A time with no UTC offset raised TypeError (no comparison with the
+    clock's aware time) out of the restore."""
+    s = store(root)
+    s.capture("cp1", ["*"])
+    path = root.parent / "store" / "manifests" / "cp1.json"
+    manifest = json.loads(path.read_text())
+    manifest["expires_at"] = "2099-01-01T00:00:00"
     _no_manifest(root, json.dumps(manifest))

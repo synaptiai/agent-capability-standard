@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import time
@@ -30,7 +31,12 @@ from typing import Any
 
 import pytest
 
-from tests.brace_readings import BY_VERSION, assert_reading
+from tests.brace_readings import (
+    BY_VERSION,
+    READINGS,
+    assert_reading,
+    installed_readings,
+)
 from tests.conftest import enter_checkpoint_commit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -574,6 +580,26 @@ BRACE_CASES = [
     "{1..3}",
     "{01..10..3}",
     "{z..a..5}",
+    # A sign and leading zeros as bash takes them (expand_seqterm: strtoimax
+    # reads a + and any number of digits).
+    "{a..a..+1}",
+    "{a..e..+2}",
+    "{e..a..2}",
+    "{a..e..-2}",
+    "{a..e..0}",
+    "{a..a..1000000000}",
+    "{a..c..000000000000000001}",
+    ".cl{a..a..+1}ude",
+    "{+1..3}",
+    "{1..+3}",
+    "{+05..07}",
+    "{-05..+07}",
+    "{5..+07}",
+    "{0000000001..2}",
+    "{1..3..+0000000000000000001}",
+    "{1..2..}",
+    "{a..c..+}",
+    "{1..3.}",
     "x{1..3},y}",
     "{a},.claude/check}point.ok",
     "{fixtures/,.git/acs/check}points",
@@ -636,6 +662,7 @@ class TestLateClosingBraceGroups:
             "brace_marks",
             "brace_group",
             "brace_expand",
+            "join_words",
             "brace_words",
         ):
             start = text.index(f"\n{name}() {{\n") + 1
@@ -672,10 +699,10 @@ class TestLateClosingBraceGroups:
             assert_reading(word, self._run(driver, word), _bash_words(word))
 
     def test_each_pass_is_one_versions_reading(self, tmp_path: Path) -> None:
-        """brace_expand read as bash 5.2 and as bash 5.3: each version's
-        words of a word the two read differently, and the same words of
-        every other case (so brace_words gives bash's own there, whichever
-        bash is installed)."""
+        """brace_expand read as bash 5.2 and as each reading of bash 5.3:
+        each reading's words of a word the readings make differently, and
+        the same words of every other case (so brace_words gives bash's
+        own there, whichever bash is installed)."""
         driver = self._driver(
             tmp_path,
             'BRACE_MODE="$2"\nbrace_expand "$m"\n'
@@ -683,12 +710,64 @@ class TestLateClosingBraceGroups:
             + "w=\"${w//$'\\002'/,}\"; printf '%s\\n' \"${w//$'\\003'/\\}}\"; done\n",
         )
         for word in BRACE_CASES:
-            assert self._run(driver, word, "5.2") == self._run(driver, word, "5.3"), (
-                word
+            first = self._run(driver, word, "5.2")
+            for mode in READINGS[1:]:
+                assert self._run(driver, word, mode) == first, (word, mode)
+        for word, readings in BY_VERSION.items():
+            for mode, words in zip(READINGS, readings, strict=True):
+                assert self._run(driver, word, mode) == words, (word, mode)
+
+    def test_the_brace_functions_start_no_process(self) -> None:
+        """brace_words ran sort for each word whose readings differ, a
+        process no budget counted (511 such words took 4.2 s, 1.1 s with
+        one reading); the readings are merged in bash now. No command or
+        process substitution, backquote or pipe in the functions."""
+        text = PRE.read_text(encoding="utf-8")
+        for name in (
+            "ansi_byte",
+            "brace_marks",
+            "brace_group",
+            "brace_expand",
+            "join_words",
+            "brace_words",
+        ):
+            start = text.index(f"\n{name}() {{\n") + 1
+            body = text[start : text.index("\n}\n", start)]
+            code = "\n".join(
+                line for line in body.split("\n") if not line.lstrip().startswith("#")
             )
-        for word, (v52, v53) in BY_VERSION.items():
-            assert self._run(driver, word, "5.2") == sorted(v52), word
-            assert self._run(driver, word, "5.3") == sorted(v53), word
+            found = re.findall(r"\$\((?!\()|<\(|>\(|`|(?<!\|)\|(?!\|)", code)
+            assert not found, (name, found)
+
+    def test_the_installed_bash_reads_as_one_reading(self) -> None:
+        """Of every word in the table, the installed bash gives the words of
+        one reading: bash 5.2's here, and on a runner with bash 5.3 one of
+        the two readings its one word allowed (a bash that reads as neither
+        fails here, and the readers need its rule)."""
+        installed = {word: _bash_words(word) for word in BY_VERSION}
+        assert installed_readings(installed), installed
+
+    @pytest.mark.parametrize(
+        "word",
+        [
+            "{1..10000000000}",
+            "{-1..+10000000000}",
+            "{05000000000..05000000001}",
+            "{a..b..1000000000000000000}",
+            "{1..2..9223372036854775808}",
+            "x{a,b}{1..10000000000}",
+        ],
+    )
+    def test_a_sequence_bash_may_print_otherwise_is_not_read(
+        self, tmp_path: Path, word: str
+    ) -> None:
+        """Past 9 digits (an increment past 18), leading zeros aside, bash
+        5.2 prints a zero-padded number as a 32-bit int (05000000000 as
+        00705032704), refuses one past 64 bits, and other versions may do
+        otherwise: brace_words fails (2), so the call is refused, rather
+        than guess."""
+        driver = self._driver(tmp_path, 'st=0\nbrace_words "$m" || st=$?\necho "$st"\n')
+        assert self._run(driver, word) == ["2"], word
 
     @pytest.mark.parametrize(
         "command",
@@ -699,6 +778,13 @@ class TestLateClosingBraceGroups:
             "rm -rf {x},.cl}aude",
             "cp -rT fixtures {a}..,.git/acs/check}points",
             "sh -c 'tee {a},.claude/check}point.ok'",
+            # Sequences with a sign or a long increment (they were kept as
+            # written).
+            "rm -rf .cl{a..a..+1}ude",
+            "rm -rf .cl{a..a..1000000000}ude",
+            "rm -rf .cl{a..a..000000000000000001}ude",
+            # A sequence bash versions may print otherwise: not read.
+            "touch x{1..10000000000}",
         ],
     )
     def test_a_records_path_a_late_group_builds_is_refused(
@@ -719,16 +805,20 @@ class TestLateClosingBraceGroups:
             # Bash 5.2: x..yc/key (and x..yd/key); 5.3 keeps the braces:
             # {x..yc}/key.
             ("x..yc", "touch {x..y{c,d}}/key"),
+            # Bash 5.3 read as 5.3a alone: {a..bd/key (and {a..bc}}/key).
+            ("{a..bd", "touch {a..b{c}},d}/key"),
+            # Bash 5.3 read as 5.3c alone: {{..c}..{}{b}},}/key.
+            ("{{..c}..{}{b}},}", "touch {{..c}..{}{{b..b}}},}/key"),
         ],
     )
     def test_a_records_path_one_bash_version_builds_is_refused(
         self, project: Path, link: str, command: str
     ) -> None:
         """The hook runs under whichever bash the user has, so a word is
-        read as bash 5.2 and as bash 5.3 expand it. Read as 5.2 alone, the
-        first was asked: on bash 5.3 it writes the checkpoint key through
-        the link to the git directory's acs/checkpoints/ the repository
-        ships."""
+        read as bash 5.2 and as each reading of bash 5.3 expands it. Read as
+        5.2 alone, the first was asked: on bash 5.3 it writes the checkpoint
+        key through the link to the git directory's acs/checkpoints/ the
+        repository ships. Read as 5.2 and 5.3a alone, the last was asked."""
         (project / link).symlink_to(".git/acs/checkpoints")
         marker = fresh_marker(project)
         result = run_pre(project, "Bash", {"command": command})

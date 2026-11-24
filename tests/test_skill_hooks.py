@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.brace_readings import BY_VERSION, assert_reading
+from tests.brace_readings import BY_VERSION, READINGS, assert_reading
 from tests.conftest import enter_checkpoint_commit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -842,6 +842,12 @@ class TestSendCommandHook:
             "cp /usr/bin/c?rl fetch",
             "timeout 5 /usr/bin/cu?l -s 127.1:18777",
             "/usr/bin/c{u..u}rl -s 127.1:18777",
+            # a sequence's increment with a sign or of any length, as bash
+            # takes it (it was kept as written)
+            "c{u..u..+1}rl -s 127.1:18777",
+            "c{u..u..1000000000}rl -s 127.1:18777",
+            # an increment bash versions may read otherwise is not read
+            "c{u..u..1000000000000000000}rl -s 127.1:18777",
             "/usr/bin/[c]url -s 127.1:18777",
             "/usr/bin/*url -s 127.1:18777",
         ],
@@ -3385,6 +3391,17 @@ BRACE_WORDS = [
     "{{{a,b}",
     "a{b,c,d{e,f}}g",
     '{"a":{"b":1},"c":2}',
+    # Letter sequences with a sign or a long increment, as bash takes them.
+    "{a..a..+1}",
+    "{a..e..+2}",
+    "{e..a..2}",
+    "{a..e..-2}",
+    "{a..e..0}",
+    "{a..a..1000000000}",
+    "{a..c..000000000000000001}",
+    "c{u..u..+1}rl",
+    "{a..c..+}",
+    "{a..c.}",
 ]
 
 _BRACE_END = "if length > 256 then null else . end end;"
@@ -3432,20 +3449,41 @@ def test_the_brace_reading_is_bashs() -> None:
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="needs jq")
 def test_each_brace_pass_is_one_versions_reading() -> None:
-    """brace_expand read as bash 5.2 ($v 52) and as bash 5.3 ($v 53): each
-    version's words of a word the two read differently, and the same words
-    of every other word (so brace_words gives bash's own there, whichever
-    bash is installed)."""
+    """brace_expand read as bash 5.2 ($v "5.2") and as each reading of bash
+    5.3 ("5.3a", "5.3c"): each reading's words of a word the readings make
+    differently, and the same words of every other word (so brace_words
+    gives bash's own there, whichever bash is installed)."""
     block = _brace_block("send")
     passes = {
-        v: block + f'\n$w | brace_expand(0; {v}) | map(select(. != "")) | sort'
-        for v in (52, 53)
+        v: block + f'\n$w | brace_expand(0; "{v}") | map(select(. != "")) | sort'
+        for v in READINGS
     }
     for word in BRACE_WORDS:
-        assert _jq_words(passes[52], word) == _jq_words(passes[53], word), word
-    for word, (v52, v53) in BY_VERSION.items():
-        assert _jq_words(passes[52], word) == sorted(v52), word
-        assert _jq_words(passes[53], word) == sorted(v53), word
+        first = _jq_words(passes["5.2"], word)
+        for v in READINGS[1:]:
+            assert _jq_words(passes[v], word) == first, (word, v)
+    for word, readings in BY_VERSION.items():
+        for v, words in zip(READINGS, readings, strict=True):
+            assert _jq_words(passes[v], word) == words, (word, v)
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="needs jq")
+@pytest.mark.parametrize(
+    "word",
+    [
+        "{1..10000000000}",
+        "{-1..+10000000000}",
+        "{05000000000..05000000001}",
+        "{a..b..1000000000000000000}",
+        "{1..2..9223372036854775808}",
+        "x{a,b}{1..10000000000}",
+    ],
+)
+def test_a_sequence_bash_may_print_otherwise_is_not_read(word: str) -> None:
+    """As the records guard: past 9 digits (an increment past 18), leading
+    zeros aside, brace_words gives null (the word may name anything)."""
+    program = _brace_block("send") + "\n$w | brace_words"
+    assert _jq_words(program, word) is None, word
 
 
 def test_the_audit_and_send_skills_read_braces_alike() -> None:

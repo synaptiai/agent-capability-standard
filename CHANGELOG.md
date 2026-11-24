@@ -671,6 +671,12 @@ here and marked so.
   `MemoryStore` file or a snapshot manifest that is not what the store
   writes is a `ValueError` (a manifest before a restore puts anything back;
   an entry's SHA-256 must be one, so it names no file outside the store).
+  That includes a memory row whose time no date-time states (a recall
+  raised OverflowError) or whose data persist would refuse (not I-JSON, or
+  nested deeper than 100 levels: a recall raised RecursionError), and a
+  manifest path capture never records (a NUL or a lone surrogate, which
+  stopped a restore part way; an empty, `.` or `..` part) or an
+  `expires_at` with no UTC offset (TypeError).
 - Python SDK, the output contract of a tool's result (Standard 1.2.0
   §5.18.9, §5.18.10): an MCP tool bound to a capability, one that
   `create_grounded_mcp_server` serves or one of another server bound with
@@ -1112,7 +1118,20 @@ here and marked so.
     audit and send skills' hooks read each word as both versions expand it
     (`touch {x..y{a..b}}/key`, through a shipped link `{x..ya}` to the git
     directory's `acs/checkpoints/`, writes the key on bash 5.3 and is
-    refused).
+    refused). That one word is all of bash 5.3's seen (on a runner, without
+    its source), and two readings give it: the `{` kept and all after it
+    expanded, or the group's braces kept around the words of its text; the
+    readers give the words of both (`touch {{..c}..{}{{b..b}}},}/key`
+    through a link `{{..c}..{}{b}},}` is refused), and
+    `tests/brace_readings.py` holds words that tell them apart, which a
+    runner with bash 5.3 checks. The readers merge the readings' words in
+    bash, with no process started (the guard ran `sort` for each word, a
+    process no budget counted). A sequence takes a sign and an increment
+    of any length, as bash does (`.cl{a..a..+1}ude` and
+    `.cl{a..a..1000000000}ude` are `.claude`; both were kept as written);
+    one with a number of more than 9 digits (an increment of more than 18),
+    leading zeros aside, is not read and the call is refused (bash 5.2
+    prints a zero-padded one as a 32-bit number).
   - The audit, persist, rollback and send skills' command hooks set
     `onFailure: block` and a 30-second `timeout`, as the PreToolUse hook
     does: a check that fails or gives no verdict in time blocks the call

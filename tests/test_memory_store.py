@@ -336,6 +336,14 @@ _ROW = {"scope": "session", "instance": "s", "key": "k", "data": 1, "stored_at":
         {"entries": [{**_ROW, "stored_at": "5"}]},
         {"entries": [{**_ROW, "stored_at": True}]},
         {"entries": [{**_ROW, "expires_at": "never"}]},
+        # Times no date-time states: a recall raised OverflowError.
+        {"entries": [{**_ROW, "stored_at": 1e300}]},
+        {"entries": [{**_ROW, "stored_at": -(10**18)}]},
+        {"entries": [{**_ROW, "stored_at": 2**70}]},
+        {"entries": [{**_ROW, "expires_at": 10**30}]},
+        {"entries": [{**_ROW, "stored_at": 253_402_300_800_000}]},
+        # Data persist refuses: not I-JSON.
+        {"entries": [{**_ROW, "data": 2**53 + 1}]},
     ],
 )
 def test_a_file_that_is_no_memory_file_is_malformed(
@@ -348,6 +356,49 @@ def test_a_file_that_is_no_memory_file_is_malformed(
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError, match="memory file"):
         MemoryStore(path)
+
+
+@pytest.mark.parametrize("data", ["NaN", "Infinity"])
+def test_a_row_with_no_json_number_is_malformed(tmp_path: Path, data: str) -> None:
+    """json.loads reads NaN and Infinity, which persist refuses."""
+    path = tmp_path / "memory.json"
+    row = json.dumps({**_ROW, "data": 0}).replace('"data": 0', f'"data": {data}')
+    path.write_text('{"version": 1, "entries": [' + row + "]}")
+    with pytest.raises(ValueError, match="memory file"):
+        MemoryStore(path)
+
+
+@pytest.mark.parametrize("depth", [102, 5000, 20_000])
+def test_a_row_nested_deeper_than_persist_stores_is_malformed(
+    tmp_path: Path, depth: int
+) -> None:
+    """persist stores data at most 100 levels deep (its canonical form), so
+    no row it writes is deeper; the load kept one (where json.loads parses
+    it), and a recall raised RecursionError from the copy it returns."""
+    path = tmp_path / "memory.json"
+    row = json.dumps({**_ROW, "data": 0})
+    row = row.replace('"data": 0', '"data": ' + "[" * depth + "]" * depth)
+    path.write_text('{"version": 1, "entries": [' + row + "]}")
+    with pytest.raises(ValueError, match="memory file"):
+        MemoryStore(path)
+
+
+def test_a_row_at_the_limits_persist_stores_reads_back(tmp_path: Path) -> None:
+    """The control: data 100 levels deep, and the first and last times a
+    date-time states."""
+    path = tmp_path / "memory.json"
+    ctx = MemoryContext(session="s")
+    deep: Any = []
+    for _ in range(100):
+        deep = [deep]
+    MemoryStore(path).persist({"key": "k", "data": deep}, ctx)
+    rows = json.loads(path.read_text())["entries"]
+    rows[0].update(stored_at=-62_135_596_800_000, expires_at=253_402_300_799_999)
+    path.write_text(json.dumps({"version": 1, "entries": rows}))
+    out = MemoryStore(path).recall({"key": "k"}, ctx)
+    assert out["data"] == deep
+    assert out["stored_at"] == "0001-01-01T00:00:00.000Z"
+    assert out["expires_at"] == "9999-12-31T23:59:59.999Z"
 
 
 def test_a_file_the_store_writes_reads_back(tmp_path: Path) -> None:

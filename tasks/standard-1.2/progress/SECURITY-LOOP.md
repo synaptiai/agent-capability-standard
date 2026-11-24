@@ -7561,3 +7561,83 @@ the loop ran. The runner differs in three ways.
   listed ones and the same words as the other on every other word;
   `test_a_records_path_one_bash_version_builds_is_refused` refuses the
   link route above (asked before) and its 5.2 twin.
+  The review below found that one word cannot tell two readings of bash
+  5.3 apart; the readers now give both, with no `sort`.
+
+## After the loop: review of the CI fixes
+
+An independent review of the commit above reported five findings; each was
+reproduced first.
+
+- **The bash 5.3 rule rested on one word that two readings give** (medium).
+  Reading A keeps a group's `{` and expands all that follows it (the rule
+  above); reading C keeps the group's two braces around the words of its
+  own text, then expands the text after it. A model of each gives the same
+  words for all 50 test words, so a runner with bash 5.3 passed whichever
+  is real; on generated words C makes words that are neither 5.2's nor
+  A's, and on bash 5.3 read as C, `touch {{..c}..{}{{b..b}}},}/key`
+  through a shipped link `{{..c}..{}{b}},}` to `acs/checkpoints/` writes
+  the key and was asked. **Fix:** both readers give the words of three
+  readings, 5.2, 5.3a and 5.3c (bash `BRACE_MODE`, jq `$v`), the last two
+  only for a word whose 5.2 pass met a group 5.3 reads otherwise; the docs
+  say the 5.3 rule is inferred and that both readings are read. **Test:**
+  `tests/brace_readings.py` holds each reading's words of each word, words
+  that tell 5.3a and 5.3c apart included (`{a..b{c}},d}`, `{..{}},}`,
+  `{{,}..{}},}`, `{{..c}..{}{{b..b}}},}/key`); each pass gives its
+  reading's words; the readers give the words of all three;
+  `test_the_installed_bash_reads_as_one_reading` requires the installed
+  bash to give one reading's words of every listed word (5.2 here; on a
+  runner with bash 5.3 it shows 5.3a or 5.3c, or fails if neither);
+  `test_a_records_path_one_bash_version_builds_is_refused` refuses the
+  link routes that only 5.3a (`{a..bd`) and only 5.3c build. The bash and
+  jq passes matched the models of the three readings, and the 5.2 model
+  the installed bash, on 9 788 random words.
+- **A sequence's sign and long increment were kept as written** (medium,
+  older than the commit). Bash takes a `+` and any number of digits in a
+  sequence's terms (`expand_seqterm`: `strtoimax`), so `.cl{a..a..+1}ude`
+  and `.cl{a..a..1000000000}ude` are `.claude`; the guard's patterns took
+  `-?[0-9]{1,9}` and the skills' jq `-?[0-9]+`, so `rm -rf
+  .cl{a..a..+1}ude` was asked and `c{u..u..+1}rl` ran past the send skill's
+  name gate. **Fix:** both readers take `[+-]?[0-9]+` for every term, an
+  increment's value as bash uses it (its sign ignored, 0 as 1), and a
+  letter sequence's step in jq (it gave every letter of the range); a
+  sequence with a number of more than 9 digits, or an increment of more
+  than 18, leading zeros aside, is not read (bash 5.2 prints a zero-padded
+  number as a 32-bit int, `{05000000000..05000000001}` as `00705032704`,
+  refuses one past 64 bits, and another version may do otherwise): the
+  guard's call is refused, the jq reader gives null. **Test:** signed,
+  padded and long-increment sequences in `BRACE_CASES` and `BRACE_WORDS`
+  (exactly the installed bash's words); the two `rm -rf .cl{a..a..}ude`
+  forms refused; the send hook blocks `c{u..u..+1}rl` and
+  `c{u..u..1000000000}rl`; the long numbers refused or null.
+- **`_is_manifest` did not check a manifest's paths or `expires_at`**
+  (low). A path with a NUL stopped a restore part way (ValueError from the
+  system call, after the files before it were put back), one with a lone
+  surrogate raised UnicodeEncodeError, and an `expires_at` with no offset
+  TypeError. **Fix:** a manifest path must be one capture records
+  (`_is_captured_path`: no NUL, an exact UTF-8 form, no empty, `.` or `..`
+  part, so neither an absolute path nor `src/../.git/config`, which passed
+  the restore's check of names it never writes), and `expires_at` null or
+  a time with its offset (`_aware_time`, which the restore uses too).
+  **Test:** those manifests are malformed before anything is restored;
+  the restore of a captured manifest with a NUL or surrogate path added, or
+  a naive expiry, puts nothing back.
+- **`MemoryStore` loaded rows persist never writes** (low). A time past
+  the range a date-time states (1e300, 2**70) loaded and a recall raised
+  OverflowError; data nested 5 000 or 20 000 levels (which the runner's
+  decoder parses) loaded and a recall raised RecursionError from its copy.
+  **Fix:** a row's times must lie from 0001-01-01T00:00:00.000Z to
+  9999-12-31T23:59:59.999Z, and its data be what persist stores: I-JSON
+  at most 100 levels deep, checked by the core's canonical form (no
+  recursion in Python), as persist checks it. **Test:** those rows,
+  NaN and Infinity, and an integer past 2^53 are malformed; data 100
+  levels deep and the two end times read back.
+- **The guard forked `sort` for each word the readings expand
+  differently** (low). No budget counted it: 511 words `{..{,}}` took
+  4.18 s (1.07 s before the commit). **Fix:** the readings' words are
+  merged in bash: a reading adds its words unless one before it made the
+  same words in the same order (compared joined by `\001`, which no word
+  holds once its marks are read back), so no process is started and every
+  pass is charged to the budgets. The same call takes 3.33 s (three
+  passes); 16 strings of 4 090 bytes to an MCP tool, refused over budget,
+  3.92 s (3.42 s before the commit, 8.94 s with `sort`).

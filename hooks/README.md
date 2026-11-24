@@ -404,10 +404,16 @@ Then:
   outright), a brace group it expands, found as bash finds it (the first
   `{` a `}` closes, at the first `}` after a comma at its own level, so
   `{a},.claude/check}point.ok` names the marker:
-  `{fixtures/,.git/acs/check}points`, `audit.he{ad,x}`, `.claud{e..e}`)
-  and expanded as bash 5.2 and bash 5.3 both expand it (they differ on a
-  group with no comma at its own level that is no sequence:
-  `{a..b{c,d}}` is `a..bc a..bd` to 5.2, `{a..bc} {a..bd}` to 5.3), a
+  `{fixtures/,.git/acs/check}points`, `audit.he{ad,x}`, `.claud{e..e}`,
+  `.cl{a..a..+1}ude`) and expanded as bash 5.2 and bash 5.3 expand it.
+  They differ on a group with no comma at its own level that is no
+  sequence: `{a..b{c,d}}` is `a..bc a..bd` to 5.2 and `{a..bc} {a..bd}`
+  to 5.3, the one word of 5.3's seen (on a runner, without its source),
+  which two readings give; the hook reads both (`tests/brace_readings.py`
+  holds words that tell them apart, which a runner with bash 5.3 checks).
+  A sequence with a number of more than 9 digits (an increment of more
+  than 18), leading zeros aside, is not read: bash 5.2 prints a padded one
+  as a 32-bit number, and the call is blocked. So are a
   `$'...'` it decodes
   (`$'.git/acs/check\x70oints'`, and octal, `\u`, `\U` and `\c`
   escapes; `$"..."` as `"..."`), a path attached to a short option

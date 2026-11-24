@@ -43,6 +43,8 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 # The last instant a date-time states, 9999-12-31T23:59:59.999Z, in
 # milliseconds since the Unix epoch: no entry ends later (§4.5).
 MAX_EXPIRES_MS = 253_402_300_799_999
+# The first, 0001-01-01T00:00:00.000Z.
+_MIN_MS = -62_135_596_800_000
 
 
 class MemoryError(Exception):  # noqa: A001 - exported as MemoryStoreError
@@ -104,21 +106,39 @@ def _ijson_problem(value: Any, at: str = "") -> str | None:
 
 
 def _is_ms(value: Any) -> bool:
-    if isinstance(value, float):
-        return math.isfinite(value)
-    return isinstance(value, int) and not isinstance(value, bool)
+    """Whether ``value`` is a time :func:`_iso` writes: milliseconds since
+    the Unix epoch from 0001-01-01T00:00:00.000Z to
+    9999-12-31T23:59:59.999Z."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return _MIN_MS <= value <= MAX_EXPIRES_MS
+
+
+def _is_data(value: Any) -> bool:
+    """Whether ``value`` is data :meth:`MemoryStore.persist` stores: I-JSON
+    nested at most 100 levels deep, as its canonical form (the measure of
+    its size) requires. That check runs in the core, without recursion in
+    Python, so a row nested far deeper is refused here rather than raising
+    RecursionError from the copy a recall returns."""
+    try:
+        _core.canonical_json(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _is_row(row: Any) -> bool:
     """Whether a row of a memory file is one :meth:`MemoryStore._save`
-    writes: its scope, instance and key strings, its data, and its times in
-    milliseconds (``expires_at`` absent or null when it never expires)."""
+    writes: its scope, instance and key strings, its data
+    (:func:`_is_data`), and its times in milliseconds (:func:`_is_ms`;
+    ``expires_at`` absent or null when it never expires)."""
     return (
         isinstance(row, dict)
         and all(isinstance(row.get(m), str) for m in ("scope", "instance", "key"))
         and "data" in row
         and _is_ms(row.get("stored_at"))
         and (row.get("expires_at") is None or _is_ms(row["expires_at"]))
+        and _is_data(row["data"])
     )
 
 
@@ -404,7 +424,9 @@ class MemoryStore:
         # A file that is not what _save writes is one that does not parse
         # (ValueError): not an object (a list, a number, a string, null),
         # nested deeper than the parser allows (RecursionError, raised or
-        # not according to the stack size), or a row short of a member.
+        # not according to the stack size), or a row persist never stores
+        # (_is_row: a member missing, a time no date-time states, data that
+        # is not I-JSON or nests deeper than 100 levels).
         try:
             value = json.loads(text)
         except RecursionError:
