@@ -189,7 +189,7 @@ describe('workflows', () => {
   it('accepts any workflow name the Standard allows (§5.1 names no pattern)', () => {
     // The workflow page escapes the id where it writes it into CSS.
     for (const id of ['Bad', 'a-b', 'a"]{}', 'a b']) {
-      expect(parseCatalog('t.yaml', `"${id.replace(/"/g, '\\"')}":\n  goal: g\n  risk: low\n  steps:\n  - capability: plan\n`, 'core', loadOntology()).map((w) => w.id), id).toEqual([id]);
+      expect(parseCatalog('t.yaml', `${JSON.stringify(id)}:\n  goal: g\n  risk: low\n  steps:\n  - capability: plan\n`, 'core', loadOntology()).map((w) => w.id), id).toEqual([id]);
     }
   });
 

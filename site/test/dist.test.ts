@@ -18,6 +18,7 @@ import { bareHeadings, checkGeneratedHeadings, checkRouteCoverage, duplicateIds,
 import { ROUTES, type Route } from '../src/lib/routes';
 import { EXEMPT_RUNS, pageMatches } from '../src/lib/runs';
 import { CODE_TABLE_FIGURES, codeTableCodes } from '../src/lib/spec-tail-figures';
+import { markerUrls, visibleText, withoutTags } from './html-text';
 import {
   allCatalogSteps,
   claudeLayerTable,
@@ -301,7 +302,7 @@ describe('built site', () => {
         expect(card, `${page} ${id}`).toBeGreaterThan(0);
         const before = html.slice(0, card);
         const lastH3 = [...before.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].at(-1)!;
-        const title = lastH3[1]!.replace(/<[^>]*>/g, '').replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const title = withoutTags(lastH3[1]!).replace(/^\d+\.\s*/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
         expect(title, `${page} ${id}`).toBe(id);
         expect(before.slice(lastH3.index! + lastH3[0].length).replace(/<figure[\s\S]*$/, ''), `${page} ${id}`).not.toMatch(/<(p|ul|ol|pre|table)[\s>]/);
       }
@@ -399,10 +400,7 @@ describe('design system on the built site', () => {
       expect(link, f).not.toBeNull();
       const [, attrs = '', inner = ''] = link!;
       expect(attrs.includes('aria-label'), f).toBe(false);
-      const text = inner
-        .replace(/<svg[\s\S]*?<\/svg>/g, '')
-        .replace(/<[^>]*aria-hidden="true"[^>]*>[\s\S]*?<\/span>/g, '')
-        .replace(/<[^>]+>/g, '');
+      const text = visibleText(inner);
       for (const word of ['Agent Capability Standard', 'ACS', ' home']) expect(text, f).toContain(word);
     }
   });
@@ -667,12 +665,12 @@ describe('agent files', () => {
     const title = /^# (.+)$/m.exec(repoText(`spec/STANDARD-v${version}.md`))![1]!;
     const full = readFileSync(path.join(dist, 'llms-full.txt'), 'utf8');
     expect(full).toContain(`\n# ${title}\n`);
-    const first = /<!-- (\S+) -->/.exec(full)![1];
+    const first = markerUrls(full)[0];
     expect(first).toBe(`${ORIGIN}/spec/${version}/index.md`);
     // Every built page under /spec/, /capabilities/, /layers/ and /workflows/
     // (the design's Specification, Capabilities and Workflows sections), each
     // once, minus the older Standards named by the spec/STANDARD-v*.md files.
-    const urls = [...full.matchAll(/^<!-- (\S+) -->$/gm)].map((m) => m[1]!.slice(ORIGIN.length));
+    const urls = markerUrls(full).map((url) => url.slice(ORIGIN.length));
     const older = new Set(standardFileVersions().slice(1).map((v) => `/spec/${v}/`));
     const want = dirsWith('index.md')
       .filter((d) => /^\/(spec|capabilities|layers|workflows)\//.test(d) && !older.has(d))
@@ -742,7 +740,7 @@ describe('agent files', () => {
   it('gives the home page and its Markdown copy the same H2 headings and section sentences', () => {
     const html = readFileSync(path.join(dist, 'index.html'), 'utf8');
     const md = readFileSync(path.join(dist, 'index.md'), 'utf8');
-    const text = (h: string) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').trim();
+    const text = (h: string) => withoutTags(h).replace(/&amp;/g, '&').trim();
     const h2Html = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => text(m[1]!));
     const h2Md = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]!.trim());
     expect(h2Html.length).toBeGreaterThan(0);

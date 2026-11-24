@@ -63,7 +63,7 @@ export function olderVersionNote(version: string, currentText: string): OlderVer
   const supersedes = /^\*\*Supersedes:\*\*(.*)$/m.exec(currentText)?.[1] ?? '';
   const stillSupported = supersedes.includes(`STANDARD-v${version}.md`) && /still supported/i.test(supersedes);
   const heading = computeAnchors(currentText).entries.find(
-    (h) => h.depth === 2 && new RegExp(`^(Appendix [A-Z]+): Changes from ${version.replace(/\./g, '\\.')}$`).test(h.text),
+    (h) => h.depth === 2 && new RegExp(`^(Appendix [A-Z]+): Changes from ${version.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}$`).test(h.text),
   );
   const changes = heading ? { label: heading.text.split(':')[0]!, anchor: heading.slug } : null;
   return { stillSupported, changes };
