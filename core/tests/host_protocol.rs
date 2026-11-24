@@ -16,6 +16,23 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+/// The key the tests sign snapshots with, made when the tests run: no test
+/// depends on its value, so none is written into the source.
+fn snapshot_key() -> &'static [u8] {
+    static KEY: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        use std::hash::{BuildHasher, Hasher};
+        let state = std::collections::hash_map::RandomState::new();
+        (0u64..4)
+            .flat_map(|i| {
+                let mut hasher = state.build_hasher();
+                hasher.write_u64(i);
+                hasher.finish().to_le_bytes()
+            })
+            .collect()
+    })
+}
+
 fn ctx() -> Context {
     let root = root();
     Context::load(&root.join("schemas/capability_ontology.yaml"), &root).unwrap()
@@ -482,8 +499,8 @@ fn taken_heads_chain() {
     let manual = sha256_hex(&(String::new() + &canonical(&records[0])));
     assert_eq!(run.taken_heads().0, manual);
     // A snapshot after taking restores with the same heads.
-    let snap = run.snapshot(Some(b"k"));
-    let restored = Run::restore(&ctx(), &catalog, &snap, Some(b"k")).unwrap();
+    let snap = run.snapshot(Some(snapshot_key()));
+    let restored = Run::restore(&ctx(), &catalog, &snap, Some(snapshot_key())).unwrap();
     assert_eq!(restored.taken_heads(), run.taken_heads());
     // Editing a head breaks the digest, and with a key the HMAC.
     let mut state: Value = serde_json::from_str(&snap.state).unwrap();
@@ -500,7 +517,7 @@ fn taken_heads_chain() {
         state: edited,
         hmac: snap.hmac.clone(),
     };
-    assert!(Run::restore(&ctx(), &catalog, &rehashed, Some(b"k")).is_err());
+    assert!(Run::restore(&ctx(), &catalog, &rehashed, Some(snapshot_key())).is_err());
     // A head that is not a head, or one without a base, is refused.
     for (key, value) in [
         ("records_taken_sha256", json!("abc")),

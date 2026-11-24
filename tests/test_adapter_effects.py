@@ -412,7 +412,8 @@ async def test_subagent_mutation_uses_shared_checkpoint(
     # The parent delegates (the mapper classifies Task as delegate) ...
     assert adapter.mapper.map_tool("Task", {}).capability_id == "delegate"
     # ... and the subagent's Write uses the shared checkpoint.
-    assert await hook(write("sub", "agent-1"), "w1", None) == {}
+    allowed = await hook(write("sub", "agent-1"), "w1", None)
+    assert allowed == {}
     await consumer(
         {
             "tool_name": "Write",
@@ -426,7 +427,8 @@ async def test_subagent_mutation_uses_shared_checkpoint(
     denied = reason(await hook(write("parent", None), "w2", None))
     assert denied is not None and denied.startswith("F501 CHECKPOINT_REQUIRED:")
     adapter.create_checkpoint(["*"], "again")
-    assert await hook(write("parent", None), "w3", None) == {}
+    allowed = await hook(write("parent", None), "w3", None)
+    assert allowed == {}
 
 
 def test_snapshots_protect_the_audit_log(ontology_path: str, tmp_path: Path) -> None:

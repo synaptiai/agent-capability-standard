@@ -214,7 +214,8 @@ def test_memory_store_counts_removals_and_never_reuses_ids() -> None:
     )
     store.clear()
     assert store.info().removed == 5
-    assert store.append(anchor()).record_id == "ev-5"
+    appended = store.append(anchor())
+    assert appended.record_id == "ev-5"
     assert store.get("ev-0") is None
 
 
@@ -234,7 +235,8 @@ def test_jsonl_reopen_keeps_ids_and_continues(tmp_path: Path) -> None:
     with JsonlEvidenceStore(path) as again:
         assert [r.record_id for r in again.records()] == ["ev-0", "ev-1"]
         assert again.records(capability="retrieve")[0].anchor.ref == "file:a.txt"
-        assert again.append(anchor("file:c")).record_id == "ev-2"
+        appended = again.append(anchor("file:c"))
+        assert appended.record_id == "ev-2"
     for line in path.read_text().splitlines():
         validate("EvidenceRecord", json.loads(line))
 
@@ -268,7 +270,8 @@ def test_jsonl_skips_and_counts_an_unreadable_line(tmp_path: Path) -> None:
     with JsonlEvidenceStore(path) as store:
         assert store.info().to_dict()["x-unreadable_lines"] == 1
         assert len(store.records()) == 1
-        assert store.append(anchor("file:b")).record_id == "ev-1"
+        appended = store.append(anchor("file:b"))
+        assert appended.record_id == "ev-1"
 
 
 def test_jsonl_skips_a_line_nested_too_deeply(tmp_path: Path) -> None:
@@ -370,7 +373,8 @@ def test_jsonl_writes_nothing_of_a_batch_that_does_not_serialize(
         with pytest.raises(TypeError):
             store.append_many([anchor(), bad])
         assert path.stat().st_size == 0 and seen == []
-        assert store.append(anchor()).record_id == "ev-0"
+        appended = store.append(anchor())
+        assert appended.record_id == "ev-0"
 
 
 def test_jsonl_refuses_a_symlink(tmp_path: Path) -> None:

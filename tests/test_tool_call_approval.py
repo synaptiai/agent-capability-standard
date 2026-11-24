@@ -1405,6 +1405,13 @@ class TestWrapOptionsApproval:
 # =============================================================================
 
 
+# The command of _bash_call() as the layer keeps it: the bearer token
+# redacted, the rest unchanged (STANDARD v1.2 §6.7).
+_BASH_COMMAND_KEPT = (
+    "curl -H 'Authorization: Bearer [REDACTED]' https://api.example.com"
+)
+
+
 def _bash_call() -> dict[str, Any]:
     return {
         "tool_name": "Bash",
@@ -1465,8 +1472,7 @@ class TestEvidenceToolInput:
             tool_output.metadata["tool_input"]["command"],
             command.metadata["command"],
         ):
-            assert "https://api.example.com" in text
-            assert SECRET not in text and "[REDACTED]" in text
+            assert text == _BASH_COMMAND_KEPT
 
     @pytest.mark.asyncio
     async def test_structured_credentials_in_the_input_are_redacted(self) -> None:
@@ -1558,7 +1564,7 @@ class TestEvidenceToolInput:
                 await hook(_bash_call(), "b1", None)
 
         kept = json.dumps(adapter.evidence_store.to_list())
-        assert ("https://api.example.com" in kept) is keep
+        assert (_BASH_COMMAND_KEPT in kept) is keep
         # Kept only redacted (STANDARD v1.2 §6.7).
         assert SECRET not in kept
 

@@ -40,7 +40,7 @@ def run(name: str, cwd: Path) -> str:
                 "Valid checkpoint exists: False",
                 "Write: ALLOWED (checkpoint:",
                 "F502 APPROVAL_REQUIRED: Write (capability 'mutate') requires "
-                "approval, and no one can give it",
+                + "approval, and no one can give it",
             ],
         ),
         (

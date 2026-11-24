@@ -164,12 +164,19 @@ describe('exempt runs and scope', () => {
       const start = lines.findIndex((l) => heading(l) !== null && slug(heading(l)![2]!) === e.anchor);
       expect(start, `${source}: no heading #${e.anchor}`).toBeGreaterThanOrEqual(0);
       const level = heading(lines[start]!)![1]!.length;
-      const body: string[] = [];
+      const section: string[] = [];
       for (const l of lines.slice(start + 1)) {
         const h = heading(l);
         if (h !== null && h[1]!.length <= level) break;
-        if (h === null && !/^\s*$|^<!--.*-->\s*$|^---\s*$/.test(l)) body.push(l);
+        if (h === null) section.push(l);
       }
+      // Comments (on one line or several, ended by --> or --!>), blank lines
+      // and thematic breaks are not text.
+      const body = section
+        .join('\n')
+        .replace(/<!--[\s\S]*?--!?>/g, '')
+        .split('\n')
+        .filter((l) => !/^\s*$|^---\s*$/.test(l));
       expect(body, `${source} #${e.anchor} has text: remove its unwritten entry from EXEMPT_RUNS`).toEqual([]);
     }
   });

@@ -462,8 +462,8 @@ class TestBracesAndAnsiCQuoting:
                 "bash",
                 "-c",
                 "printf '%s\\n' {fixtures/,.git/acs/check}points "
-                "$'.git/acs/check\\x70oints' .claude/audit.he{ad,x} "
-                "$'.cl\\0aude'x",
+                + "$'.git/acs/check\\x70oints' .claude/audit.he{ad,x} "
+                + "$'.cl\\0aude'x",
             ],
             capture_output=True,
             text=True,
@@ -610,7 +610,7 @@ class TestLateClosingBraceGroups:
                 "bash",
                 "-c",
                 "printf '%s\\n' {a},.claude/check}point.ok "
-                "{a},.git/acs/check}points {a}y,.claude/audit.he}ad {x},.cl}aude",
+                + "{a},.git/acs/check}points {a}y,.claude/audit.he}ad {x},.cl}aude",
             ],
             capture_output=True,
             text=True,

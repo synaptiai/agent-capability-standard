@@ -15,6 +15,23 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+/// The key the tests sign snapshots with, made when the tests run: no test
+/// depends on its value, so none is written into the source.
+fn snapshot_key() -> &'static [u8] {
+    static KEY: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| {
+        use std::hash::{BuildHasher, Hasher};
+        let state = std::collections::hash_map::RandomState::new();
+        (0u64..4)
+            .flat_map(|i| {
+                let mut hasher = state.build_hasher();
+                hasher.write_u64(i);
+                hasher.finish().to_le_bytes()
+            })
+            .collect()
+    })
+}
+
 /// `expected` matches `actual` when every key it names matches (objects
 /// recursively; arrays element by element, of the same length).
 fn matches(expected: &Value, actual: &Value) -> bool {
@@ -193,9 +210,16 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
         match mode {
             Replay::Plain => {}
             Replay::Restore => {
-                let snap = run.snapshot(Some(b"key"));
-                run = Run::restore_set(ctx, catalog, &set, &snap, Some(b"key"), Default::default())
-                    .unwrap_or_else(|e| panic!("{name}: restore before {i}: {e}"));
+                let snap = run.snapshot(Some(snapshot_key()));
+                run = Run::restore_set(
+                    ctx,
+                    catalog,
+                    &set,
+                    &snap,
+                    Some(snapshot_key()),
+                    Default::default(),
+                )
+                .unwrap_or_else(|e| panic!("{name}: restore before {i}: {e}"));
             }
             Replay::Drain => {
                 taken_trace.extend(run.take_trace());
@@ -250,9 +274,16 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
             if let Some(at) = resume.get("at").and_then(Value::as_u64) {
                 now = at;
             }
-            let snap = run.snapshot(Some(b"key"));
-            run = Run::restore_set(ctx, catalog, &set, &snap, Some(b"key"), Default::default())
-                .unwrap_or_else(|e| panic!("{name}: restore at {i}: {e}"));
+            let snap = run.snapshot(Some(snapshot_key()));
+            run = Run::restore_set(
+                ctx,
+                catalog,
+                &set,
+                &snap,
+                Some(snapshot_key()),
+                Default::default(),
+            )
+            .unwrap_or_else(|e| panic!("{name}: restore at {i}: {e}"));
             let attendance = match resume.get("attendance").and_then(Value::as_str) {
                 Some("unattended") => Attendance::Unattended,
                 _ => Attendance::Attended,
@@ -304,10 +335,16 @@ fn play(ctx: &Context, name: &str, f: &Value, mode: Replay) -> Played {
     if mode == Replay::Drain {
         // The final state vouches for everything taken: its heads are the
         // fold, and a keyed snapshot of it restores.
-        let snap = run.snapshot(Some(b"key"));
-        let restored =
-            Run::restore_set(ctx, catalog, &set, &snap, Some(b"key"), Default::default())
-                .unwrap_or_else(|e| panic!("{name}: restore after draining: {e}"));
+        let snap = run.snapshot(Some(snapshot_key()));
+        let restored = Run::restore_set(
+            ctx,
+            catalog,
+            &set,
+            &snap,
+            Some(snapshot_key()),
+            Default::default(),
+        )
+        .unwrap_or_else(|e| panic!("{name}: restore after draining: {e}"));
         assert_eq!(restored.taken_heads().0, fold(&taken_records), "{name}");
         assert_eq!(restored.taken_heads().1, fold(&taken_trace), "{name}");
     }
@@ -611,8 +648,8 @@ fn restore_checks_digest_hmac_and_catalog() {
     let ctx = ctx();
     let catalog = one_step();
     let run = Run::start(&ctx, &catalog, "w", topic(), opts()).unwrap();
-    let snap = run.snapshot(Some(b"k"));
-    assert!(Run::restore(&ctx, &catalog, &snap, Some(b"k")).is_ok());
+    let snap = run.snapshot(Some(snapshot_key()));
+    assert!(Run::restore(&ctx, &catalog, &snap, Some(snapshot_key())).is_ok());
     // A signed snapshot is only trusted with its key.
     assert!(matches!(
         Run::restore(&ctx, &catalog, &snap, None),
@@ -632,13 +669,13 @@ fn restore_checks_digest_hmac_and_catalog() {
     ));
     let unsigned = run.snapshot(None);
     assert!(matches!(
-        Run::restore(&ctx, &catalog, &unsigned, Some(b"k")),
+        Run::restore(&ctx, &catalog, &unsigned, Some(snapshot_key())),
         Err(acs_core::exec::RestoreError::Hmac)
     ));
     let mut changed = catalog.clone();
     changed["w"]["goal"] = serde_json::json!("another goal");
     assert!(matches!(
-        Run::restore(&ctx, &changed, &snap, Some(b"k")),
+        Run::restore(&ctx, &changed, &snap, Some(snapshot_key())),
         Err(acs_core::exec::RestoreError::Catalog)
     ));
 }
@@ -684,7 +721,7 @@ fn runs_are_deterministic() {
             42,
         )
         .unwrap();
-        run.snapshot(Some(b"k"))
+        run.snapshot(Some(snapshot_key()))
     };
     assert_eq!(play(), play());
 }
@@ -1185,7 +1222,7 @@ fn the_header_is_validated_and_kept() {
     assert!(Run::start(&ctx, &one_step(), "w", topic(), with(Some("2.0"))).is_ok());
     for header in [None, Some("1.0"), Some("1.1.0"), Some("1.2.0")] {
         let run = Run::start(&ctx, &undeclared(), "w", topic(), with(header)).unwrap();
-        let snap = run.snapshot(Some(b"k"));
+        let snap = run.snapshot(Some(snapshot_key()));
         // The snapshot keeps the header (and leaves it out when there is
         // none, as a 1.1 snapshot did), and a restore validates with it.
         assert_eq!(
@@ -1193,8 +1230,8 @@ fn the_header_is_validated_and_kept() {
             header.is_some(),
             "{header:?}"
         );
-        let restored = Run::restore(&ctx, &undeclared(), &snap, Some(b"k")).unwrap();
-        assert_eq!(restored.snapshot(Some(b"k")), snap);
+        let restored = Run::restore(&ctx, &undeclared(), &snap, Some(snapshot_key())).unwrap();
+        assert_eq!(restored.snapshot(Some(snapshot_key())), snap);
     }
     // A forged state whose header the executor does not support is refused
     // at restore, by validation.
@@ -1666,9 +1703,9 @@ fn resume_twice_is_two_runs() {
     // resumes a saved state once (§5.14.1).
     let ctx = ctx();
     let f = fixture("resume_deferred_attended");
-    let snap = played(&ctx, "resume_deferred_attended").snapshot(Some(b"k"));
+    let snap = played(&ctx, "resume_deferred_attended").snapshot(Some(snapshot_key()));
     let resumed = || {
-        let mut run = Run::restore(&ctx, &f["catalog"], &snap, Some(b"k")).unwrap();
+        let mut run = Run::restore(&ctx, &f["catalog"], &snap, Some(snapshot_key())).unwrap();
         run.resume(resume_options()).unwrap();
         serde_json::to_value(run.next()).unwrap()
     };
