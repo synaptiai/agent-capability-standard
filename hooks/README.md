@@ -260,6 +260,10 @@ keeps the hook's tool list and read-only list subsets of the mapper's and its
   for a credential, the value of a `{"name": "Authorization", "value": ...}`
   pair, or the second of a `["Cookie", ...]` tuple. A test keeps the
   hook's verdict the adapter's on the credential vectors and on data forms.
+  The credentials the plugin holds itself are refused too: `AUDIT_HMAC_KEY`'s
+  value, and the project's checkpoint key, read from
+  `<git dir>/acs/checkpoints/key` where git names the project's git
+  directory (a git that cannot say reads none).
 - `Write`, `Edit`, `MultiEdit`, `NotebookEdit`: `mutate`.
 - `Skill`, `Agent`, `Task`: `mutate`. Claude Code runs the shell commands a
   skill's file embeds (``!`cmd` `` and ```` ```! ```` blocks, the call's
@@ -683,7 +687,16 @@ its name); `secret_lines` reads each line on its own, for a hook that joins
 texts read apart (each string of a persist tool's input or of an audit
 record, given once as it is and once with its own line breaks read as
 blanks); `secret_values` lists what the rules whose match may hold whitespace
-find, for the `persist` hook's comparison. The `persist`
+find, for the `persist` hook's comparison. Each reads a text with the JSON
+escapes other encoders write for the characters its rules read decoded
+(`secret_decoded`: `\u0022` and `\u0027` as an escaped quote, `\u0026`,
+`\u002b`, `\u003c`, `\u003d` and `\u003e` as the character, PHP's `\/` as
+`/`), as the SDK's and the TypeScript refusal rules do; and `secret_lines`
+first looks for a value the plugin holds itself (`secret_held`):
+`AUDIT_HMAC_KEY`'s value and `SECRET_HELD`, which the pre-tool-use hook sets
+to the project's checkpoint key (`<git dir>/acs/checkpoints/key`) for a
+persist tool's data (STANDARD 1.2.0 §6.7: a host recognises at least the
+credentials it holds itself). The `persist`
 hook scans the text a call carries and the lines the file will hold after it
 that it does not hold now, each also with its JSON-style escapes decoded, so
 a credential whose key is already in the file, or that two edits build, is
@@ -694,7 +707,8 @@ holds), and a change to a line of a private key block. Each of the scan's patter
 its length: `grep -o`, which prints each match, looks for one from each
 position of a line that matches, so its patterns start where no earlier
 attempt's run can hold another (a URL's scheme from the start of its run)
-or read a bounded run (a user option's name, at most 256 characters); time
+or read a bounded run (a user option's name, at most 256 characters; a
+cookie option's cookie name, at most 64); time
 it with grep's output to a pipe, as the scan reads it, not to `/dev/null`,
 where grep stops at the first match, and in a multibyte locale too: the
 scan reads bytes (its functions set `LC_ALL=C` in the subshells they run in),

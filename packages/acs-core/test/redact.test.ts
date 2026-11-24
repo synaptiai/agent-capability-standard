@@ -74,15 +74,38 @@ describe('redactor', () => {
 describe('registered values in the forms text carries them (security round 1, batch 8)', () => {
   // The forms of a registered value, in order: tests/test_redaction.py pins
   // the same list for the Python redactor's encoded_forms.
-  const pinned: string[] = JSON.parse(String.raw`["p@ss/w~rd é!\"", "p@ss/w~rd é!\\\"", "p@ss/w~rd \\u00e9!\\\"", "p@ss\\/w~rd é!\\\"", "p@ss\\/w~rd \\u00e9!\\\"", "p@ss/w~rd é!\\\\\\\"", "p@ss/w~rd \\\\u00e9!\\\\\\\"", "p%40ss%2Fw~rd%20%C3%A9%21%22", "p%40ss/w~rd%20%C3%A9%21%22", "p%40ss%2Fw~rd%20%C3%A9!%22", "p%40ss%2Fw~rd+%C3%A9%21%22", "p%40ss%2Fw%7Erd+%C3%A9%21%22", "p%40ss%2fw~rd%20%c3%a9%21%22", "p%40ss/w~rd%20%c3%a9%21%22", "p%40ss%2fw~rd%20%c3%a9!%22", "p%40ss%2fw~rd+%c3%a9%21%22", "p%40ss%2fw%7erd+%c3%a9%21%22"]`);
+  const pinned: string[] = JSON.parse(String.raw`["p@ss/w~rd é!\"", "p@ss/w~rd é!\\\"", "p@ss/w~rd \\u00e9!\\\"", "p@ss\\/w~rd é!\\\"", "p@ss\\/w~rd \\u00e9!\\\"", "p@ss/w~rd é!\\\\\\\"", "p@ss/w~rd \\\\u00e9!\\\\\\\"", "p@ss/w~rd \\u00e9!\\u0022", "p@ss/w~rd \\u00E9!\\u0022", "p@ss/w~rd \\\\u00e9!\\\\u0022", "p@ss/w~rd \\\\u00E9!\\\\u0022", "p%40ss%2Fw~rd%20%C3%A9%21%22", "p%40ss/w~rd%20%C3%A9%21%22", "p%40ss%2Fw~rd%20%C3%A9!%22", "p%40ss%2Fw~rd+%C3%A9%21%22", "p%40ss%2Fw%7Erd+%C3%A9%21%22", "p%40ss%2fw~rd%20%c3%a9%21%22", "p%40ss/w~rd%20%c3%a9%21%22", "p%40ss%2fw~rd%20%c3%a9!%22", "p%40ss%2fw~rd+%c3%a9%21%22", "p%40ss%2fw%7erd+%c3%a9%21%22"]`);
   const value = 'p@ss/w~rd \u00e9!"';
 
   it('gives the forms in the Python redactor\'s order', () => {
     expect(encodedForms(value)).toEqual(pinned);
-    // A value with a lone surrogate has no UTF-8: its JSON forms only.
-    expect(encodedForms('ab\ud800cd')).toEqual(['ab\ud800cd', 'ab\\ud800cd', 'ab\\\\ud800cd']);
+    // A value with a lone surrogate has no UTF-8: its JSON forms only (.NET
+    // writes the escape in upper-case hex).
+    expect(encodedForms('ab\ud800cd')).toEqual([
+      'ab\ud800cd',
+      'ab\\ud800cd',
+      'ab\\\\ud800cd',
+      'ab\\uD800cd',
+      'ab\\\\uD800cd',
+    ]);
     // A value of letters and digits has one form.
     expect(encodedForms('s3cr3tValue')).toEqual(['s3cr3tValue']);
+  });
+
+  // As encoders that keep JSON safe inside HTML write a value (security round
+  // 5, batch 6: a registered value holding &, <, >, ', + or = was kept).
+  it.each([
+    ['Go', "Zq8\\u0026mK\\u003c41\\u003epX'+w=="],
+    ['Gson', 'Zq8\\u0026mK\\u003c41\\u003epX\\u0027+w\\u003d\\u003d'],
+    ['.NET', 'Zq8\\u0026mK\\u003C41\\u003EpX\\u0027\\u002Bw=='],
+    ['Go, twice', "Zq8\\\\u0026mK\\\\u003c41\\\\u003epX'+w=="],
+  ])('replaces a registered value as %s writes it', (_, encoded) => {
+    const html = "Zq8&mK<41>pX'+w==";
+    expect(encodedForms(html)).toContain(encoded);
+    const text = `terraform output failed: {"db_conn":{"value":"${encoded}"}}`;
+    expect(redactText(text, [html])).toBe('terraform output failed: {"db_conn":{"value":"[REDACTED]"}}');
+    expect(holdsCredential({ note: text }, [html])).toBe(true);
+    expect(holdsCredential({ note: text })).toBe(false);
   });
 
   it.each([
@@ -162,6 +185,27 @@ describe('reading a long text (security round 1, batch 5)', () => {
     '\\"authorization: ',
     'authorization: "a ',
     "['authorization', 'a ",
+    // Cookie headers, curl's cookie option, netrc entries, the JSON escapes
+    // of quotes and slashes, and words after a quote's escape (security
+    // round 5, batch 6).
+    'cookie: a ',
+    'set-cookie:',
+    '"cookie": "a ',
+    "'cookie: a ",
+    'cookie=a ',
+    '.-b',
+    "-b 'a ",
+    '--cookie a',
+    '-ba',
+    'login a ',
+    'machine password ',
+    '\\u0022',
+    '\\u0022a',
+    'password\\u0022:\\u0022a ',
+    '[\\u0022token\\u0022, \\u0022',
+    'a:\\/\\/b:',
+    'token\\u003d',
+    '\\/',
   ];
   it.each(units)('reads 1 MB of %j in time in proportion to its length', (unit) => {
     const text = unit.repeat(Math.ceil(1_000_000 / unit.length)).slice(0, 1_000_000);
@@ -185,6 +229,15 @@ describe('reading a long text (security round 1, batch 5)', () => {
     ['--password "', 'x\\y '],
     ['"Authorization: ', 'a '],
     ['Authorization: "', 'a b '],
+    // A run of blanks after a quoted header line's colon, read once (security
+    // round 5, batch 6), and a Cookie header's the same way.
+    ['"Authorization:', ' '],
+    ['"Authorization: Basic', ' '],
+    ["'Cookie:", ' '],
+    ['"Cookie": "', 'a; '],
+    ['Cookie: a', ' '],
+    ["-b '", 'a=b '],
+    ['password\\u0022: \\u0022', 'a '],
   ];
   it.each(unclosed)('reads 1 MB of %j then %j with no closing quote in linear time', (prefix, tail) => {
     const text = (prefix + tail.repeat(Math.ceil(1_000_000 / tail.length))).slice(0, 1_000_000);

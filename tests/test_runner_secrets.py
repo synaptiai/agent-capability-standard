@@ -7,6 +7,7 @@ the runner gives its registered secrets (security round 3, batch 4)."""
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -517,6 +518,128 @@ def test_a_host_error_quoting_a_header_or_a_key_keeps_none_of_it(
     assert result.code == "R402", result
     assert "[REDACTED]" in result.message
     assert holding(kept(run, result), secret) == []
+
+
+SID = "8f3k2l9d0s7a6q5w4e3r2t1yQ"
+DB_PASSWORD = "Tr0ub4dor3xyzQ9"
+B = "\\"
+
+
+def _escaped(code: str) -> str:
+    return B + "u00" + code
+
+
+@pytest.mark.parametrize(
+    ("error", "secret"),
+    [
+        (
+            subprocess.CalledProcessError(
+                22,
+                [
+                    "curl",
+                    "-fsS",
+                    "-H",
+                    f"Cookie: sessionid={SID}",
+                    "https://app.example/api",
+                ],
+            ),
+            SID,
+        ),
+        (RuntimeError(f"bad response: Set-Cookie: session={SID}; Path=/"), SID),
+        (
+            RuntimeError(
+                f"401 Unauthorized; sent headers {{'User-Agent': 'x', 'Cookie': 'sessionid={SID}'}}"
+            ),
+            SID,
+        ),
+        (RuntimeError(f'request failed: {{"Cookie": "sessionid={SID}"}}'), SID),
+        (
+            RuntimeError(
+                'upstream 500: {"error":"db unreachable","dsn":"mysql:'
+                + B
+                + "/"
+                + B
+                + f"/app:{DB_PASSWORD}@db.internal"
+                + B
+                + '/prod"}'
+            ),
+            DB_PASSWORD,
+        ),
+        (
+            RuntimeError(
+                'upstream 500: {"request":"{'
+                + _escaped("22")
+                + "password"
+                + _escaped("22")
+                + ":"
+                + _escaped("22")
+                + DB_PASSWORD
+                + _escaped("22")
+                + '}"}'
+            ),
+            DB_PASSWORD,
+        ),
+        (
+            ValueError(
+                f"cannot parse ~/.netrc line: 'machine api.example.com login bot password {SID}'"
+            ),
+            SID,
+        ),
+        (
+            RuntimeError(
+                "DefaultEndpointsProtocol=https;AccountName=x;"
+                f"AccountKey={SID}==;EndpointSuffix=core.windows.net"
+            ),
+            SID,
+        ),
+        (PermissionError(f"Invalid API Key provided: sk_live_{SID}"), SID),
+    ],
+    ids=[
+        "curl_cookie",
+        "set_cookie",
+        "requests_headers_repr",
+        "cookie_json_text",
+        "php_slashes",
+        "dotnet_quotes",
+        "netrc",
+        "azure_account_key",
+        "stripe_key",
+    ],
+)
+def test_a_host_error_quoting_a_cookie_an_escaped_value_or_a_service_key_keeps_none_of_it(
+    tmp_path: Path, error: Exception, secret: str
+) -> None:
+    """A session cookie in a header line, a headers dictionary or curl's
+    command; a URL's password or an assignment escaped as PHP or .NET write
+    JSON; a .netrc entry, an Azure account key and a Stripe key are redacted
+    in the message, the trace, the records and the snapshot (security round
+    5, batch 6: each was kept in all four)."""
+    runner = WorkflowRunner(engine_for(tmp_path, LOOK))
+    run = runner.start("look", {}, records="actions", now_ms=1_000)
+    result = runner.drive(run, RaisingHost(error))
+    assert result.code == "R402", result
+    assert "[REDACTED]" in result.message
+    assert holding(kept(run, result), secret) == []
+
+
+def test_a_registered_value_go_escaped_in_a_host_error_is_kept_nowhere(
+    tmp_path: Path,
+) -> None:
+    """The host's own credential, as Go's encoding/json (terraform's
+    output) escapes it: & < > as \\u00XX (security round 5, batch 6: kept in
+    the trace, the message and the run record)."""
+    value = "Zq8&mK<41>pX9w"
+    encoded = (
+        "Zq8" + _escaped("26") + "mK" + _escaped("3c") + "41" + _escaped("3e") + "pX9w"
+    )
+    error = RuntimeError(
+        f'terraform output failed: {{"db_conn":{{"value":"{encoded}"}}}}'
+    )
+    runner = WorkflowRunner(engine_for(tmp_path, LOOK), redactor=Redactor([value]))
+    run = runner.start("look", {}, records="actions", now_ms=1_000)
+    result = runner.drive(run, RaisingHost(error))
+    assert result.code == "R402", result
+    assert holding(kept(run, result), encoded, value) == []
 
 
 # ---------------------------------------------------------------------------

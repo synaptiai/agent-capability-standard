@@ -832,7 +832,7 @@ A grounded tool takes four more options:
   audit hook. They join the layer's (an array when the tool is defined, a
   function's values at each call), so every entry the binding writes, other
   tools' and the audit hook's included, is redacted with them too. Each is
-  replaced as it is, JSON-escaped and percent-encoded (`encodedForms`). Redaction is always on: every trace entry's `evidence_anchors`
+  replaced as it is, JSON-escaped (also as HTML-safe encoders such as Go's write it) and percent-encoded (`encodedForms`). Redaction is always on: every trace entry's `evidence_anchors`
   and `error`, and every notification, pass through it. A `persist` or
   `audit` tool refuses data that holds a credential-shaped value or a
   registered secret (F504, §5.18.10).

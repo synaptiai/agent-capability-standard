@@ -373,8 +373,27 @@ class TestFrontmatterHooks:
             "authorization: a" + " " * 400_000 + "x",
             '"token", "value": "' + "a" * 400_000,
             "['token', 'a " * 30_000,
+            # Cookie headers, curl's cookie option, netrc entries and the
+            # JSON escapes the scan decodes (security round 5, batch 6).
+            "Cookie: a=b; " * 30_000,
+            "-b a=" * 80_000,
+            ".-b" * 130_000,
+            "login a " * 50_000,
+            "\\u0022" * 66_000,
+            "a:\\/\\/b:" * 40_000,
         ],
-        ids=["scheme_run", "blank_run", "pair_run", "tuples"],
+        ids=[
+            "scheme_run",
+            "blank_run",
+            "pair_run",
+            "tuples",
+            "cookie_header",
+            "cookie_option",
+            "cookie_option_run",
+            "netrc",
+            "quote_escapes",
+            "slash_escapes",
+        ],
     )
     def test_secret_scan_reads_in_linear_time_in_a_multibyte_locale(
         self, shell: str, text: str
@@ -2015,6 +2034,38 @@ class TestAuditCommandHook:
         result = run_command(hook, bash_call(command), tmp_path, shell)
         assert time.perf_counter() - started < 5
         assert_blocked(result, "cite it by reference or digest", F504)
+
+    @pytest.mark.parametrize(
+        "note",
+        ["ci key {key}", "AUDIT_HMAC_KEY={key}", "{key}"],
+    )
+    def test_blocks_a_record_holding_the_audit_key(
+        self, tmp_path: Path, shell: str, note: str
+    ) -> None:
+        """The key the skill signs records under (AUDIT_HMAC_KEY) is a
+        credential the layer holds itself (STANDARD 1.2.0 §6.7; security
+        round 5, batch 6: a record whose note held it was appended)."""
+        key = "9f8e7d6c5b4a39281706f5e4d3c2b1a0" * 2
+        record = json.dumps(
+            {"event": {"note": note.format(key=key)}}, separators=(",", ":")
+        )
+        command = f"printf '%s\\n' '{record}' >> .claude/audit/records.jsonl"
+        hook = command_hook("audit", "PreToolUse", "Bash")
+        result = run_command(
+            hook, bash_call(command), tmp_path, shell, {"AUDIT_HMAC_KEY": key}
+        )
+        assert_blocked(result, "cite it by reference or digest", F504)
+        assert key not in result.stderr
+        # Control: under another key, the record is appended.
+        result = run_command(
+            hook, bash_call(command), tmp_path, shell, {"AUDIT_HMAC_KEY": "other"}
+        )
+        if note == "AUDIT_HMAC_KEY={key}":
+            # An assignment to a name ending in an HMAC key is refused by
+            # its name too.
+            assert_blocked(result, "cite it by reference or digest", F504)
+        else:
+            assert result.returncode == 0, result.stderr
 
     @pytest.mark.parametrize(
         "vector",

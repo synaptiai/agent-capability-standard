@@ -1336,6 +1336,30 @@ class TestNamesHoldNoSecret:
         assert name not in log_file.read_text(encoding="utf-8")
         assert verify_log(log_file, "unit-test-key") == (1, 1, [])
 
+    def test_a_tool_name_that_holds_the_audit_key_is_redacted(
+        self, tmp_path: Path
+    ) -> None:
+        """The key the log is signed under is a credential the plugin holds
+        itself (§6.7): a name holding it is written [REDACTED], so the log
+        does not carry the key that forges it (security round 5, batch 6)."""
+        key = "9f8e7d6c5b4a39281706f5e4d3c2b1a0" * 2
+        name = f"mcp__srv__{key}"
+        payload = {"tool_name": name, "tool_use_id": "toolu_03", "tool_input": {}}
+        env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "AUDIT_HMAC_KEY": key}
+        assert run_hook(POSTTOOLUSE_HOOK, payload, env).returncode == 0
+        (entry,) = read_entries(tmp_path)
+        assert entry["tool"] == "[REDACTED]"
+        log_file = tmp_path / ".claude" / "audit.log"
+        assert key not in log_file.read_text(encoding="utf-8")
+        assert verify_log(log_file, key) == (1, 1, [])
+        # Control: under another key, the same plain name is kept.
+        other = tmp_path / "other"
+        other.mkdir()
+        env = {"CLAUDE_PROJECT_DIR": str(other), "AUDIT_HMAC_KEY": "unit-test-key"}
+        assert run_hook(POSTTOOLUSE_HOOK, payload, env).returncode == 0
+        (entry,) = read_entries(other)
+        assert entry["tool"] == name
+
     @pytest.mark.parametrize("name", PLAIN_NAMES)
     def test_a_plain_name_is_kept(self, tmp_path: Path, name: str) -> None:
         env = {"CLAUDE_PROJECT_DIR": str(tmp_path), "AUDIT_HMAC_KEY": "unit-test-key"}

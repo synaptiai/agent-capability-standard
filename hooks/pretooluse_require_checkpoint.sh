@@ -338,22 +338,54 @@ PERSIST_TOOLS=(TodoWrite TaskCreate TaskUpdate)
 # breaks, each text given once as it is and once with its own line breaks read as blanks.
 # secret_values TEXT: what the rules whose match may hold whitespace find in TEXT, one per line, each line read on its own:
 # the match, or the value a rule reads out of it (a caller compares what two texts hold).
+# Each reads TEXT with the JSON escapes some encoders write decoded (secret_decoded), and secret_lines first looks for a
+# value the layer holds itself (secret_held).
 # The shapes of keys and tokens (the first two may hold whitespace)
 SECRET_SPACED='-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----|[Bb]earer[[:space:]]+[A-Za-z0-9._~+/=-]{20,}'
 SECRET_ERE="$SECRET_SPACED"'|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
-SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key)'
+# ... and service tokens by their prefix (Stripe, Google, GitLab, npm, Vault, SendGrid) and a Slack webhook's path
+SECRET_ERE="$SECRET_ERE"'|[rs]k_(live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}|glpat-[0-9A-Za-z_-]{20,}|npm_[A-Za-z0-9]{36}|hv[sbr]\.[A-Za-z0-9_-]{24,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|hooks\.slack\.com/services/T[A-Za-z0-9]+/B[A-Za-z0-9]+/[A-Za-z0-9]{16,}'
+SECRET_KEY='(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential)'
 # A quote, or an escaped one (\" in JSON text inside a JSON string)
 SECRET_Q="\\\\*[\"']"
 # A command's option named for a credential (--password, --api-key), and a user option (curl -u user:password; a user of at most 256 characters, so no run is read again from each of its positions)
 SECRET_OPT="(^|[^A-Za-z0-9_-])--([A-Za-z0-9]+[_-])*$SECRET_KEY"
 SECRET_SEP="([[:space:]]+($SECRET_Q)?|=($SECRET_Q)?|($SECRET_Q)?[[:space:]]*,[[:space:]]*$SECRET_Q)"
 SECRET_USER="(^|[^A-Za-z0-9_-])(-[uU]$SECRET_SEP?|--(proxy-)?user$SECRET_SEP)[^[:space:]:\"'\\\\]{0,256}:"
+# curl's cookie option (-b, --cookie), up to its value, and up to the quote its value opens with
+SECRET_COOKIE_OPT="(^|[^A-Za-z0-9_-])(-b$SECRET_SEP?|--cookie$SECRET_SEP)"
+SECRET_COOKIE_OPTQ="(^|[^A-Za-z0-9_-])(-b([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*)?|--cookie([[:space:]]+|=|($SECRET_Q)?[[:space:]]*,[[:space:]]*))$SECRET_Q"
 # A quoted value with no whitespace, 8 or more characters, assigned or given to a credential option
 SECRET_QUOTED="$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[^[:space:]\"']{8,}[\"']|$SECRET_OPT([[:space:]]+|($SECRET_Q)?[[:space:]]*,[[:space:]]*)$SECRET_Q[^-[:space:]\"'][^[:space:]\"']{7,}[\"']"
 # The rules are ASCII, read byte by byte (LC_ALL=C, in a subshell): a multibyte locale sends some of them to a matcher whose time grows with the square of the text
+# secret_held TEXT: status 0 when TEXT holds, as written, the value of AUDIT_HMAC_KEY (the key the plugin's audit log is
+# signed with) or of SECRET_HELD (a value the calling hook holds itself), 4 characters or more: a host recognises the
+# credentials it holds itself (STANDARD 1.2.0 §6.7)
+secret_held() (
+  for SECRET_VALUE in "${AUDIT_HMAC_KEY:-}" "${SECRET_HELD:-}"; do
+    [ "${#SECRET_VALUE}" -ge 4 ] || continue
+    case "$1" in *"$SECRET_VALUE"*) return 0 ;; esac
+  done
+  return 1
+)
+# secret_decoded TEXT: TEXT with the JSON escapes some encoders write for characters the rules read decoded, \u0022 and
+# \u0027 as an escaped quote (\" and \'), \u0026, \u002b, \u003c, \u003d and \u003e (Go's, Gson's and .NET's HTML-safe
+# escapes, in either case) as the character, and \/ (PHP's) as /; the SDK's and the TypeScript rules decode the same
+secret_decoded() (
+  LC_ALL=C
+  export LC_ALL
+  printf '%s' "$1" | sed -e 's/\\u0022/\\"/g' -e "s/\\\\u0027/\\\\'/g" -e 's/\\u0026/\&/g' -e 's/\\u002[bB]/+/g' \
+    -e 's/\\u003[cC]/</g' -e 's/\\u003[dD]/=/g' -e 's/\\u003[eE]/>/g' -e 's#\\/#/#g'
+)
 secret_values() (
   LC_ALL=C
   export LC_ALL
+  case "$1" in
+    *'\u00'* | *'\/'*)
+      SECRET_TEXT="$(secret_decoded "$1")" || { echo '(unread)'; return 0; }
+      set -- "$SECRET_TEXT"
+      ;;
+  esac
   printf '%s' "$1" | grep -Eo -- "$SECRET_SPACED"
   printf '%s' "$1" | grep -Eio -- "$SECRET_QUOTED"
   # An Authorization header's value, 8 or more characters with letters and digits
@@ -365,12 +397,12 @@ secret_values() (
   printf '%s' "$1" | grep -Eio -- "(proxy-)?authorization($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}" |
     sed -E 's/^.* //' | grep -E '[0-9]' | grep -E '[A-Za-z]'
   # A header's or credential's value given as a name/value pair, or a tuple of exactly two, in text: 8 or more characters with letters and digits
-  printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+  printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q((basic|bearer|token|digest|negotiate)[[:space:]]+)?[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
     sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.*[:=,][[:space:]]*\\\\*[\"']//" |
     sed -E 's/^([Bb][Aa][Ss][Ii][Cc]|[Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Dd][Ii][Gg][Ee][Ss][Tt]|[Nn][Ee][Gg][Oo][Tt][Ii][Aa][Tt][Ee])[[:space:]]+//' |
     grep -E '[0-9]' | grep -E '[A-Za-z]'
   # ... and the same after any other scheme
-  printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"']*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
+  printf '%s' "$1" | grep -Eio -- "[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*($SECRET_Q)?value($SECRET_Q)?[[:space:]]*[:=][[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}|[[(][[:space:]]*\\\\*[\"'][^[:space:]\"'\\\\]*($SECRET_KEY|authorization|cookies?)$SECRET_Q[[:space:]]*,[[:space:]]*$SECRET_Q[A-Za-z][A-Za-z0-9._-]* +[A-Za-z0-9._~+/=-]{8,}$SECRET_Q[[:space:]]*[])]" |
     sed -E "s/\\\\*[\"'][[:space:]]*[])]\$//; s/^.* //" |
     grep -E '[0-9]' | grep -E '[A-Za-z]'
   # A user option's password (curl -u user:password), 8 or more characters with letters and digits
@@ -381,15 +413,36 @@ secret_values() (
     sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
   printf '%s' "$1" | grep -Eio -- "$SECRET_KEY($SECRET_Q)?[[:space:]]*[:=][[:space:]]*[^[:space:]\"']{12,}" |
     sed -E 's/^[^:=]*[:=][[:space:]]*//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+  # A .netrc entry's password (machine <host> login <user> password <value>), 8 or more characters with letters and digits
+  printf '%s' "$1" | grep -Eo -- "(^|[^A-Za-z0-9_-])(machine|login|account|default)[[:space:]]+([^[:space:]]+[[:space:]]+)?password[[:space:]]+[^[:space:]\"']{8,}" |
+    sed -E 's/^.*[[:space:]]//' | grep -E '[0-9]' | grep -E '[A-Za-z]'
+  # A cookie (name=value) in a Cookie or Set-Cookie header's value (to the end of its line or its closing quote), or in
+  # curl's cookie option's value (holding a name and = in its first 64 characters; quoted, or to a blank): a value of 8 or
+  # more token characters with letters and digits, a Set-Cookie attribute aside
+  {
+    printf '%s' "$1" | grep -Eio -- "(set-)?cookie($SECRET_Q)?[[:space:]]*[:=][[:space:]]*($SECRET_Q)?[^[:space:]\"'\\\\][^[:cntrl:]\"'\\\\]*" |
+      sed -E "s/^[^:=]*[:=][[:space:]]*(\\\\*[\"'])?//"
+    printf '%s' "$1" | grep -Eo -- "$SECRET_COOKIE_OPTQ[^[:cntrl:]\"'\\\\=]{0,64}=[^[:cntrl:]\"'\\\\]*" |
+      sed -E "s/^.?(-b|--cookie)([[:space:]]+|=|(\\\\*[\"'])?[[:space:]]*,[[:space:]]*)?\\\\*[\"']//"
+    printf '%s' "$1" | grep -Eo -- "$SECRET_COOKIE_OPT[^[:space:]\"'\\\\=]{0,64}=[^[:space:]\"'\\\\]*" |
+      sed -E "s/^(.?-b|.?--cookie)([[:space:]]+(\\\\*[\"'])?|=(\\\\*[\"'])?|(\\\\*[\"'])?[[:space:]]*,[[:space:]]*\\\\*[\"'])?//"
+  } | tr ';, ' '\n\n\n' | grep -E '^[^=]*=' | grep -Eiv '^(path|domain|expires|max-age|samesite|secure|httponly|partitioned|priority)=' |
+    sed -E 's/^[^=]*=//' | grep -Ex '[A-Za-z0-9._~+/=%-]{8,}' | grep -E '[0-9]' | grep -E '[A-Za-z]'
   return 0
 )
 secret_lines() (
   LC_ALL=C
   export LC_ALL
-  printf '%s' "$1" | grep -Eq -- "$SECRET_ERE" && return 0
-  # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once)
-  printf '%s' "$1" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]/:@]*:[^[:space:]/@]+@' |
-    sed -E 's#^.*//[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
+  secret_held "$1" && return 0
+  SECRET_TEXT="$1"
+  case "$1" in
+    *'\u00'* | *'\/'*) SECRET_TEXT="$(secret_decoded "$1")" || return 0 ;;
+  esac
+  printf '%s' "$SECRET_TEXT" | grep -Eq -- "$SECRET_ERE" && return 0
+  # The password of a URL's userinfo, unless it is a placeholder (its scheme read from the start of its run, once; its
+  # slashes escaped or not)
+  printf '%s' "$SECRET_TEXT" | grep -Eo -- '(^|[^A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*:(\\*/){2}[^[:space:]/:@]*:[^[:space:]/@]+@' |
+    sed -E 's#^.*/[^:]*:##; s#@$##' | grep -Eivq -- '^([$<{*[].*|password|passwd|pwd|pass|secret|token)$' && return 0
   # The rules that read a quoted value, or a value out of a match
   secret_values "$1" | grep -q .
 )
@@ -930,9 +983,9 @@ SECRET_MEMBER_JQ='
 # spellings, never the reverse; a placeholder is matched in ASCII only, so
 # no rare spelling hides a value. A copy sits in a single-quoted shell
 # string, so this text holds no single quote.
-def acs_names: ["password", "passwd", "passphrase", "pwd", "secret", "secret_key", "secret-key", "secretkey", "token", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "client_secret", "client-secret", "clientsecret", "private_key", "private-key", "privatekey", "authorization", "cookie", "cookies"];
+def acs_names: ["password", "passwd", "passphrase", "pwd", "secret", "secret_key", "secret-key", "secretkey", "token", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "client_secret", "client-secret", "clientsecret", "private_key", "private-key", "privatekey", "account_key", "account-key", "accountkey", "signing_key", "signing-key", "signingkey", "encryption_key", "encryption-key", "encryptionkey", "hmac_key", "hmac-key", "hmackey", "master_key", "master-key", "masterkey", "credential", "authorization", "cookie", "cookies"];
 def acs_name: (ascii_downcase as $n | any(acs_names[]; . as $s | $n | endswith($s)))
-  or (utf8bytelength != length and test("\\A[\\s\\S]*(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|authorization|cookies?)\\z"; "i"));
+  or (utf8bytelength != length and test("\\A[\\s\\S]*(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential|authorization|cookies?)\\z"; "i"));
 def acs_is($words): (ascii_downcase | IN($words[])) or (utf8bytelength != length and test("\\A(" + ($words | join("|")) + ")\\z"; "i"));
 def acs_scalar: (type == "string" and length >= 4 and . != "[REDACTED]") or type == "number";
 def acs_placeholder: type == "string"
@@ -960,9 +1013,21 @@ def acs_held($secret):
 # (secret_lines). NUL bytes, which a shell variable cannot hold, are read as
 # blanks. The scan runs without pipefail: a grep -q that stops at a match
 # ends the printf feeding it, and with pipefail that would read as no match.
+# The credentials the layer holds itself count as registered values (§6.7:
+# a host recognises at least those): AUDIT_HMAC_KEY's value (secret_held
+# reads it) and the project's checkpoint key, <git dir>/acs/checkpoints/key
+# where git names the project's git directory (SECRET_HELD; a git that
+# cannot say where it is reads none, as the take hook could have drawn none
+# there).
 for entry in "${PERSIST_TOOLS[@]}"; do
   if [ "$tool_name" = "$entry" ]; then
     unread="R407 SAFETY_CHECK_FAILED: cannot read the data $tool_name would store, so the call is blocked."
+    SECRET_HELD=""
+    if git_dir_at "$project_dir" && git_dir_is_made "$GIT_DIR_FOUND" \
+      && [ -f "$GIT_DIR_FOUND/acs/checkpoints/key" ] && [ ! -L "$GIT_DIR_FOUND/acs/checkpoints/key" ]; then
+      SECRET_HELD=$(head -c 128 "$GIT_DIR_FOUND/acs/checkpoints/key" 2>/dev/null) || block "$unread"
+      [[ "$SECRET_HELD" =~ ^[0-9a-f]{64}$ ]] || SECRET_HELD=""
+    fi
     held=$(printf '%s' "$payload" | jq -r "$SECRET_MEMBER_JQ"' .tool_input | acs_held(false)' 2>/dev/null) || block "$unread"
     stored=$(printf '%s' "$payload" | jq -r '
       # join, in time linear in the text (the builtin join copies what it has built at each piece)

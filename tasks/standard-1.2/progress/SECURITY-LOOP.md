@@ -7224,3 +7224,237 @@ those), and a layer may hold a call it cannot attribute to stricter rules
   `binding.ts`, 2 of 3 package tests fail; against its `adapter.py`, both
   Python ask cases fail.
 - No CLI or nested agent was started; the scratch outputs were removed.
+
+### Batch 6: three reported defects
+
+Three defects, each reproduced by an independent verifier on 4d17c00, and
+reproduced again here on da18a8f before any change (a scratch probe of the
+Python redactor, the TypeScript package's built `redact.js` and the shell
+scan, under `timeout 120` and a 4 GB address-space limit): a session cookie
+in text (`Cookie: sessionid=<SID>`, `Set-Cookie: session=<SID>; Path=/`,
+`{"Cookie": "sessionid=<SID>"}` as text, a headers dictionary's repr,
+`curl -b 'sessionid=<SID>'` and `curl --cookie ...`) was neither redacted
+nor refused by any of the three, while the same cookie as a JSON member
+was; JSON text escaped by other encoders (`mysql:\/\/app:<pw>@db\/app` as
+PHP writes it, `{\u0022password\u0022:\u0022<pw>\u0022}` and an
+`Authorization` header the same way, as .NET writes JSON inside JSON) was
+neither, and a registered value holding `&`, `<`, `>`, `'`, `+` or `=` was
+kept as Go's `encoding/json`, Gson or .NET escape it; and a `.netrc`
+password, an Azure `AccountKey`, Stripe, Google, GitLab, npm, Vault and
+SendGrid tokens, a Slack webhook, `AUDIT_HMAC_KEY=`, `SIGNING_KEY:` and
+`credential=` were neither, and the plugin's scan let a todo holding
+`AUDIT_HMAC_KEY`'s value through. None was fixed by an earlier batch: round
+1 batch 6 #32 read a `Cookie` header only as a pair, a tuple or a member in
+data, and listed a `Cookie:` header line in text as not read; round 1 batch
+8 registered only the Python and JavaScript JSON forms and the
+percent-encoded ones; no scan registered a value of its own. Each fix has
+tests that fail on the code before it (below).
+
+#### 1. Session cookies in text were neither redacted nor refused (medium); siblings: a quoted `Authorization:` line before a run of blanks, the shell scan's tuples and pairs
+
+- Fix (`redaction.py`, `redact.ts`, identically): a `Cookie` or
+  `Set-Cookie` header's value is redacted whole, read as the
+  `Authorization` header's is: a quoted member (`"Cookie": "..."`, a
+  repr's `'Cookie': '...'`) and a header line quoted whole (`-H 'Cookie:
+  ...'`, a command's list of arguments) to the closing quote; a header line
+  from its first character that is not a blank to the end of its line (a
+  cookie string holds blanks: `a=1; sid=...`; a Set-Cookie line's
+  attributes go with it); after `=` or a quote that does not close on its
+  line, to a blank, `,` or `;`. curl's cookie option (`-b`, `--cookie`, as
+  its user option is read: glued, after `=`, blanks or as a list's next
+  item) is redacted when its value holds a cookie: a name and `=` within
+  its first 64 characters, so a cookie file's name (`-b cookies.txt`) and
+  another program's `-b` (`git checkout -b feature-2024`) stay.
+- The refusal rule (`holds_credential`, `holdsCredential`, the shell's
+  `secret_values`) reads the same values (a header's to the end of its line
+  or its closing quote; the option's quoted, to its closing quote, or to a
+  blank) and refuses one holding a cookie, `name=value` between `;`, `,`
+  and blanks, whose value is 8 or more token characters (with `%`)
+  mixing letters and digits, a Set-Cookie attribute (`Path`, `Domain`,
+  `Expires`, `Max-Age`, ...) aside. A piece with no `=` is not read: prose
+  after `Cookie:` passes (`Cookie: none are set before login 2`), and so do
+  `Set-Cookie: theme=dark; Path=/api/v2; Domain=app2.example.com`, a cookie
+  file's name and `git checkout -b release2024x`.
+- Sibling (found here): `_quoted_forms(r"(?<!\\)", "...authorization{_WS}*:
+  {_WS}*...")` let the value of a header line quoted whole start inside the
+  blanks after its colon, so `"Authorization:` and a run of blanks with no
+  closing quote read the run again from each blank: 3.9 s for 10 KB, 15.7 s
+  for 20 KB, 67 s for 40 KB in Python. The blanks there, and after one of
+  the five schemes (`_VALUE_SCHEME`, also inside a quoted member, a pair or
+  a tuple), are now read whole (`_BLANKS`: blanks then no blank, a
+  possessive run in both languages), and the Cookie forms are built the
+  same way.
+- Sibling: the shell scan's pair and tuple names allowed a backslash, which
+  the Python and TypeScript names no longer do (#2); the three agree.
+- Tests: vectors `cookie_header_line`, `set_cookie_header_line`,
+  `cookie_member_in_text`, `cookie_header_quoted_whole`,
+  `curl_cookie_option` (with the cookie file and `-b` branch controls) and
+  `authorization_quoted_blank_run` in `redact.json`; `cookie_header`,
+  `set_cookie_header`, `cookie_member_in_text`, `cookie_member_in_repr`,
+  `cookie_header_in_prose` (the reported todo), `curl_cookie_option`,
+  `curl_cookie_long_option`, and the controls `cookie_prose`,
+  `set_cookie_attributes`, `cookie_file_and_branch` in `credentials.json`
+  (Python, TypeScript, the shell under sh and bash, and the plugin's hook
+  against the adapter); `tests/test_runner_secrets.py`
+  `test_a_host_error_quoting_a_cookie_an_escaped_value_or_a_service_key_keeps_none_of_it`
+  (the reported `CalledProcessError`, a Set-Cookie line, a headers repr and
+  `{"Cookie": ...}` text, none of them in the message, trace, records or
+  snapshot); new 1 MB shapes (`cookie: a `, `set-cookie:`, `'cookie: a `,
+  `.-b`, `-b 'a `, `--cookie a`, `"Authorization:` then blanks, `'Cookie:`
+  then blanks, ...) in both SDKs' timing tests and in the shell scan's.
+
+#### 2. JSON escaped by other encoders defeated redaction and refusal, and registered values were not read in their HTML-safe forms (medium); siblings: Gson's `=`, a token after an escaped quote, the plugin hook's one JSON level
+
+- Fix, redaction in place (`redaction.py`, `redact.ts`): a quote may be
+  written as its JSON escape (`_QUOTE` takes `\\+u0022` and `\\+u0027`; a
+  quoted value opens and closes on either form of its quote, and a value
+  character stops at an escaped one); a member's name may open with one
+  (`_QUOTED_SECRET_NAME`, read after the escape's backslash; a name holds no
+  backslash now, so an attempt reads to the next quote, backslash or blank);
+  `=` may be written `\u003d` (`_SEP`, Gson); a URL's slashes may be
+  escaped (`:(?:\\*/){2}`, PHP); and a word that starts a token, a header or
+  an option may start right after an escaped quote (`_after`: the escape's
+  last character is a digit, so `\b` and the `(?<![...])` starts missed
+  `\u0022ghp_...`).
+- Fix, refusal (Python, TypeScript and `hooks/secret_scan.sh` alike): the
+  rule reads a text with the JSON escapes other encoders write for the
+  characters it reads decoded (`_decoded`, `decoded`, `secret_decoded`): a
+  quote's as an escaped quote (`\"`, `\'`: it stays a quote inside a JSON
+  string), `&`'s, `+`'s, `<`'s, `=`'s and `>`'s (either hex case) as the
+  character, and `\/` as `/`, in one pass (the shell's `sed` substitutions
+  produce nothing a later one reads, so they decode the same). The rules
+  themselves are unchanged, so the three agree by construction, and an
+  escaped prose value passes as prose does
+  (`{\u0022token\u0022: \u0022rotate monthly\u0022}`). The URL rule takes
+  escaped slashes in the shell too.
+- Fix, registered values (`encoded_forms`, `encodedForms`): the HTML-safe
+  JSON forms are added, by each of three encoders: Go's `encoding/json`
+  (`&<>`, the JSON of kubectl, docker, gh and terraform), Gson (`&<>='`,
+  the verifier's `=` sibling: base64 padding) and .NET's System.Text.Json
+  (`&<>'+"` and a backtick, every character past ASCII), each in lower-case
+  and upper-case hex, and each escaped again; the lists stay in the same
+  order in both languages (the pinned list gains .NET's four forms of its
+  `"` and `é`, a lone surrogate's list gains its upper-case escapes).
+- Sibling (verifier): the plugin hook's persist check decoded one JSON
+  level; the scan now decodes the escapes above itself, wherever it runs.
+- Tests: vectors `url_userinfo_escaped_slashes`, `quote_json_escapes` (an
+  assignment, an Authorization header and a HAR pair, all `\u0022`),
+  `equals_json_escape`, `token_after_quote_escape` and
+  `registered_value_html_safe` (Go, Gson and .NET forms) in `redact.json`;
+  `url_userinfo_escaped_slashes`, `quote_json_escape_assignment`,
+  `quote_json_escape_authorization`, `equals_json_escape`, the control
+  `quote_json_escape_prose` and `registered_value_html_safe` in
+  `credentials.json`; `test_a_registered_value_is_replaced_as_html_safe_encoders_write_it`
+  (Python, four forms) and the same four in `redact.test.ts`; the runner
+  test above (the PHP DSN and the .NET body) and
+  `test_a_registered_value_go_escaped_in_a_host_error_is_kept_nowhere`
+  (the verifier's terraform error, kept in no record); new 1 MB shapes
+  (`\u0022`, `password\u0022:\u0022a `, `[\u0022token\u0022, \u0022`,
+  `a:\/\/b:`, `token\u003d`, `\/`) in both SDKs and the shell scan.
+
+#### 3. Common credential formats and the plugin's own keys were not recognised (low); siblings: the audit skill's hook, the log hook's tool names, the project's checkpoint key
+
+- Fix (`redaction.py`, `redact.ts`, `secret_scan.sh`): service tokens by
+  their prefix are redacted and refused: Stripe's `sk_live_`/`rk_live_`
+  (and `_test_`), Google's `AIza`, GitLab's `glpat-`, npm's `npm_`,
+  Vault's `hvs.`/`hvb.`/`hvr.`, SendGrid's `SG.x.y`, and a Slack webhook's
+  path; a `.netrc` entry's password (`machine|login|account|default`, at
+  most one word, `password`, the value; refused at 8 or more characters
+  mixing letters and digits, so `login failed: password reset required`
+  passes); and `account`, `signing`, `encryption`, `hmac` and `master` keys
+  and `credential` join the credential names in the three and in
+  `hooks/secret_member.jq` (so `AccountKey=`, `AUDIT_HMAC_KEY=`,
+  `{"accountKey": ...}` and `{"credential": ...}` are read; `credentials`
+  is not a name: `{"credentials": "include"}` stays). A presigned URL's
+  `X-Amz-Credential=` value is now replaced whole, not its access key id
+  alone (`tests/test_idempotency.py` pins the new form).
+- Fix, the plugin's own keys (§6.7: a host SHOULD at least recognise the
+  credentials it holds itself): the shared scan's `secret_lines` (and so
+  `secret_in`) refuses a text holding `AUDIT_HMAC_KEY`'s value (4
+  characters or more, as written; `secret_held`), wherever the scan runs:
+  the pre-tool-use hook's persist check, the persist skill's hook, the
+  audit skill's `Bash` hook (the verifier's sibling: a record holding the
+  key was appended) and the log hook's tool and skill names (a name
+  holding it is written `[REDACTED]`). The pre-tool-use hook also sets
+  `SECRET_HELD` to the project's checkpoint key, `<git dir>/acs/checkpoints/key`
+  (64 hex digits, a regular file, in a git directory git made), for a
+  persist tool's data; where git cannot say where the project's git
+  directory is, none is read, as the take hook could have drawn none there.
+- Not read (stated in SECURITY.md §1.5 and both docstrings): npm's
+  `_auth=` and a Docker configuration's `auth` member (names too common to
+  read alone: `{"two_factor_auth": "enabled"}` would be refused), a name
+  ending in `_pass` (`{"pass": 12}` in a test report would be), other
+  vendors' formats, a value after `Cookie:` with no `name=` for the refusal
+  rule; a host registers such a credential it holds (`Redactor([...])`,
+  `configureLayer({ secrets })`).
+- Tests: vectors `netrc_password`, `service_tokens`,
+  `more_credential_names` and `more_credential_members` in `redact.json`;
+  `netrc_password`, the control `netrc_prose`, `account_key`,
+  `hmac_key_assignment`, `stripe_key`, `google_api_key`, `gitlab_token`,
+  `slack_webhook` and `credential_member` in `credentials.json`; the runner
+  test above (netrc, Azure, Stripe); `tests/test_pretooluse_hooks.py`
+  `test_the_audit_key_a_todo_would_store_is_refused` (three todos, F504,
+  the key not in the refusal; stored under another key) and
+  `test_the_checkpoint_key_a_todo_would_store_is_refused` (refused; another
+  64-hex value and a key file that is not one stored);
+  `tests/test_skill_hooks.py`
+  `TestAuditCommandHook::test_blocks_a_record_holding_the_audit_key` (sh
+  and bash); `tests/test_hooks_unit.py`
+  `test_a_tool_name_that_holds_the_audit_key_is_redacted`.
+
+#### Old code
+
+Against da18a8f's `redaction.py` (copied in place, then restored), 86
+Python tests fail: the new vectors, the refusal and layer cases built from
+them, the HTML-safe forms and the runner tests. Against its `redact.ts`, 57
+TypeScript tests fail (the timing tests left out: the old patterns read the
+new blank-run shapes in time growing with the square). Against its
+`secret_scan.sh`, pre-tool-use hook and audit skill, 47 shell and hook
+tests fail: 18 text vectors under sh and bash, the three audit-key todos,
+the checkpoint key, the hook-adapter agreement on the vectors and six
+audit-record cases; against its log hook, the tool-name case.
+
+#### Documentation
+
+SECURITY.md §1.5 (a bullet on cookies, other encoders' escapes, service
+tokens and the plugin's own keys, with what is not read; the timing bullet:
+the cookie name's bound and the blank runs); `hooks/README.md` (the
+pre-tool-use hook's held keys, the scan's `secret_decoded` and
+`secret_held`, the cookie name's bound); the redactors' docstrings; the
+package README's `redact` row and the Standard Agents guide's
+`encodedForms` line; CHANGELOG [Unreleased] Upgrading (one entry for the
+three SDK-facing changes, the broader redaction and the plugin's held
+keys). The Standard's text was not changed: §6.7 names a session cookie and
+a credential in a header among secrets, leaves the recogniser to the host,
+and asks a host to recognise at least the credentials it holds itself,
+which the plugin now does.
+
+#### Checks after batch 6
+
+- Python: `pytest tests/` file by file in runs of at most 150 tests (40 for
+  `test_skill_hooks.py` and `test_pretooluse_hooks.py`, 8 for
+  `test_redaction.py`, whose timing tests read 1 MB each), each under
+  `timeout 120` and a 4 GB address-space limit: 8221 passed, 19 skipped, 1
+  failed (`test_idempotency.py`'s pinned `X-Amz-Credential=` form, the
+  broader redaction of #3; updated, the file passes). ruff check and format
+  with CI's lists; mypy; every `tools/validate_*.py` of CLAUDE.md,
+  `validate_workflows.py --strict` and every domain catalog and example
+  `--strict`; `sync_skill_schemas.py --check` and the five generators'
+  `--check`; `scripts/run_conformance.py`.
+- Agreement: 4000 generated texts (fragments of cookies, quotes and their
+  escapes, schemes, options, tokens, non-ASCII) give the same redaction and
+  the same refusal, as text and as data, in Python and TypeScript, and the
+  same `encoded_forms`; 500 of them with no line break give the shell
+  scan's verdict the Python one.
+- Timing: the Python redactor is about 1.6 times slower on a megabyte than
+  before (more rules, and starts after an escaped quote); the slowest 1 MB
+  shape took 10.8 s of the test's 20 s here, under load, where the old
+  patterns took 6 s for the same test; every new shape is linear (50 and
+  100 KB timed). The shell scan decides 200 KB of each new shape in 0.4 s,
+  and finds a held key in 1 MB in 0.5 s.
+- Rust: no Rust source changed; not rebuilt.
+- TypeScript: the package's build, check and test (2169 passed); the
+  binding's check and test (293 passed, 2 skipped).
+- Old code: as listed above (86 Python, 57 TypeScript and 48 shell and hook
+  tests fail on da18a8f's files, copied in place, then restored).
+- No CLI or nested agent was started; the scratch outputs were removed.

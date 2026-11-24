@@ -1265,6 +1265,78 @@ class TestShellHookPersistSecrets:
                 "F504 CONSTRAINT_VIOLATED: TodoWrite (persist)"
             )
 
+    # Security round 5, batch 6: the plugin holds AUDIT_HMAC_KEY, which signs
+    # every audit line and head, and the project's checkpoint key, which
+    # signs the checkpoints it records; the scan registered neither, so a
+    # todo holding one was stored (§6.7: a host recognises at least the
+    # credentials it holds itself).
+    AUDIT_KEY = "9f8e7d6c5b4a39281706f5e4d3c2b1a0" * 2
+    CHECKPOINT_KEY = "0a1b2c3d4e5f60718293a4b5c6d7e8f9" * 2
+
+    def _todo(self, content: str) -> dict:
+        return _bypass(
+            {
+                "tool_name": "TodoWrite",
+                "tool_input": {"todos": [{"content": content, "status": "pending"}]},
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "audit key for CI: {key}",
+            "export the signing key {key} to the runner",
+            "{key}",
+        ],
+    )
+    def test_the_audit_key_a_todo_would_store_is_refused(
+        self, tmp_path: Path, content: str
+    ):
+        todo = self._todo(content.format(key=self.AUDIT_KEY))
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(tmp_path)
+        env["AUDIT_HMAC_KEY"] = self.AUDIT_KEY
+        result = subprocess.run(
+            ["bash", str(SHELL_HOOK)],
+            input=json.dumps(todo),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: TodoWrite")
+        # The key is not in the refusal either.
+        assert self.AUDIT_KEY not in result.stderr
+        # Control: with another key set, the same todo is stored.
+        env["AUDIT_HMAC_KEY"] = "another-key-of-the-person"
+        result = subprocess.run(
+            ["bash", str(SHELL_HOOK)],
+            input=json.dumps(todo),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_the_checkpoint_key_a_todo_would_store_is_refused(self, tmp_path: Path):
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+        records = tmp_path / ".git" / "acs" / "checkpoints"
+        records.mkdir(parents=True)
+        (records / "key").write_text(self.CHECKPOINT_KEY)
+        result = _gated_hook(self._todo(f"sign with {self.CHECKPOINT_KEY}"), tmp_path)
+        assert result.returncode == 2, result.stderr
+        assert result.stderr.startswith("F504 CONSTRAINT_VIOLATED: TodoWrite")
+        # Control: another value of the same shape is stored.
+        other = "1" * 64
+        assert _gated_hook(self._todo(f"sign with {other}"), tmp_path).returncode == 0
+        # A file the take hook would not have written (not 64 hex digits) is
+        # not read as a key.
+        (records / "key").write_text("short")
+        assert _gated_hook(self._todo("sign with short"), tmp_path).returncode == 0
+
     def test_a_large_input_is_decided_well_within_the_time_limit(self, tmp_path: Path):
         """The scan reads the input in time linear in its length: 1 MB of
         todos before an AWS key is refused in well under the hook's 30

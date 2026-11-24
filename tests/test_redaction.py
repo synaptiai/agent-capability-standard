@@ -106,7 +106,7 @@ def test_patterns_name_their_secret() -> None:
 # The forms of a registered value, in order; packages/acs-core's
 # test/redact.test.ts pins the same list for encodedForms.
 _FORMS_PINNED = json.loads(
-    r"""["p@ss/w~rd é!\"", "p@ss/w~rd é!\\\"", "p@ss/w~rd \\u00e9!\\\"", "p@ss\\/w~rd é!\\\"", "p@ss\\/w~rd \\u00e9!\\\"", "p@ss/w~rd é!\\\\\\\"", "p@ss/w~rd \\\\u00e9!\\\\\\\"", "p%40ss%2Fw~rd%20%C3%A9%21%22", "p%40ss/w~rd%20%C3%A9%21%22", "p%40ss%2Fw~rd%20%C3%A9!%22", "p%40ss%2Fw~rd+%C3%A9%21%22", "p%40ss%2Fw%7Erd+%C3%A9%21%22", "p%40ss%2fw~rd%20%c3%a9%21%22", "p%40ss/w~rd%20%c3%a9%21%22", "p%40ss%2fw~rd%20%c3%a9!%22", "p%40ss%2fw~rd+%c3%a9%21%22", "p%40ss%2fw%7erd+%c3%a9%21%22"]"""
+    r"""["p@ss/w~rd é!\"", "p@ss/w~rd é!\\\"", "p@ss/w~rd \\u00e9!\\\"", "p@ss\\/w~rd é!\\\"", "p@ss\\/w~rd \\u00e9!\\\"", "p@ss/w~rd é!\\\\\\\"", "p@ss/w~rd \\\\u00e9!\\\\\\\"", "p@ss/w~rd \\u00e9!\\u0022", "p@ss/w~rd \\u00E9!\\u0022", "p@ss/w~rd \\\\u00e9!\\\\u0022", "p@ss/w~rd \\\\u00E9!\\\\u0022", "p%40ss%2Fw~rd%20%C3%A9%21%22", "p%40ss/w~rd%20%C3%A9%21%22", "p%40ss%2Fw~rd%20%C3%A9!%22", "p%40ss%2Fw~rd+%C3%A9%21%22", "p%40ss%2Fw%7Erd+%C3%A9%21%22", "p%40ss%2fw~rd%20%c3%a9%21%22", "p%40ss/w~rd%20%c3%a9%21%22", "p%40ss%2fw~rd%20%c3%a9!%22", "p%40ss%2fw~rd+%c3%a9%21%22", "p%40ss%2fw%7erd+%c3%a9%21%22"]"""
 )
 
 
@@ -137,10 +137,52 @@ def test_registered_values_in_the_forms_text_carries_them() -> None:
         assert encoded in forms, encoded
         assert Redactor([value]).redact_text(f"x={encoded};") == (f"x={MARKER};", True)
         assert Redactor([value]).holds_credential({"note": f"x={encoded}"})
-    # A value with a lone surrogate has no UTF-8: its JSON forms only.
-    assert encoded_forms("ab\ud800cd") == ["ab\ud800cd", "ab\\ud800cd", "ab\\\\ud800cd"]
+    # A value with a lone surrogate has no UTF-8: its JSON forms only (.NET
+    # writes the escape in upper-case hex).
+    assert encoded_forms("ab\ud800cd") == [
+        "ab\ud800cd",
+        "ab\\ud800cd",
+        "ab\\\\ud800cd",
+        "ab\\uD800cd",
+        "ab\\\\uD800cd",
+    ]
     # A value of letters and digits has one form.
     assert encoded_forms("s3cr3tValue") == ["s3cr3tValue"]
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        # Go's encoding/json: & < > (kubectl, docker, gh, terraform).
+        "Zq8\\u0026mK\\u003c41\\u003epX'+w==",
+        # Gson: also = and '.
+        "Zq8\\u0026mK\\u003c41\\u003epX\\u0027+w\\u003d\\u003d",
+        # .NET's System.Text.Json: also ' and +, in upper-case hex.
+        "Zq8\\u0026mK\\u003C41\\u003EpX\\u0027\\u002Bw==",
+        # Go's form inside JSON text inside a JSON string.
+        "Zq8\\\\u0026mK\\\\u003c41\\\\u003epX'+w==",
+    ],
+    ids=["go", "gson", "dotnet", "go_twice"],
+)
+def test_a_registered_value_is_replaced_as_html_safe_encoders_write_it(
+    encoded: str,
+) -> None:
+    """A registered value is replaced, and refused, as encoders that keep
+    JSON safe inside HTML write it (security round 5, batch 6: the
+    registered value was kept whenever it held &, <, >, ', + or =, since
+    only the Python and JavaScript JSON forms were registered)."""
+    from grounded_agency.state.redaction import encoded_forms
+
+    value = "Zq8&mK<41>pX'+w=="
+    assert encoded in encoded_forms(value)
+    redactor = Redactor([value])
+    text = f'terraform output failed: {{"db_conn":{{"value":"{encoded}"}}}}'
+    assert redactor.redact_text(text) == (
+        'terraform output failed: {"db_conn":{"value":"[REDACTED]"}}',
+        True,
+    )
+    assert redactor.holds_credential({"note": text})
+    assert not Redactor().holds_credential({"note": text})
 
 
 def test_pointers_escape_and_tuples() -> None:
@@ -215,6 +257,29 @@ _LONG_RUNS = [
     '\\"authorization: ',
     'authorization: "a ',
     "['authorization', 'a ",
+    # Cookie headers, curl's cookie option, netrc entries, the JSON escapes
+    # of quotes and slashes, and words after a quote's escape (security
+    # round 5, batch 6): an attempt starts at a header's name, an option's
+    # dashes, a netrc keyword or a quote, and reads to the next quote, blank
+    # or line end.
+    "cookie: a ",
+    "set-cookie:",
+    '"cookie": "a ',
+    "'cookie: a ",
+    "cookie=a ",
+    ".-b",
+    "-b 'a ",
+    "--cookie a",
+    "-ba",
+    "login a ",
+    "machine password ",
+    "\\u0022",
+    "\\u0022a",
+    "password\\u0022:\\u0022a ",
+    "[\\u0022token\\u0022, \\u0022",
+    "a:\\/\\/b:",
+    "token\\u003d",
+    "\\/",
 ]
 
 
@@ -245,6 +310,16 @@ _UNCLOSED_QUOTES = [
     ('--password "', "x\\y "),
     ('"Authorization: ', "a "),
     ('Authorization: "', "a b "),
+    # A run of blanks after a quoted header line's colon, read once (security
+    # round 5, batch 6: 67 s for 40 KB, each blank read again to the run's
+    # end before), and a Cookie header's the same way.
+    ('"Authorization:', " "),
+    ('"Authorization: Basic', " "),
+    ("'Cookie:", " "),
+    ('"Cookie": "', "a; "),
+    ("Cookie: a", " "),
+    ("-b '", "a=b "),
+    ("password\\u0022: \\u0022", "a "),
 ]
 
 

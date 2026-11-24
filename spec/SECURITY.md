@@ -213,6 +213,42 @@ The reference implementations enforce this by code:
   no part of the key is kept. Not read: a password attached to a short
   option with no name (`mysql -p<secret>`), and a secret in base64 or
   another encoding unless the host registers that form too.
+- Session cookies, other encoders' escapes, service tokens and the layer's
+  own keys (security round 5). A `Cookie` or `Set-Cookie` header's value
+  in text is redacted whole: a header line to the end of its line (`Cookie:
+  a=1; sid=...`; a Set-Cookie line's attributes go with it), a header line
+  quoted whole (`-H 'Cookie: ...'`, a command's list of arguments) or a
+  quoted member (`{"Cookie": "..."}`, a headers dictionary's repr) to its
+  closing quote; so is curl's cookie option's value when it holds a cookie
+  (`-b 'sid=...'`, `--cookie sid=...`: a name and `=` within its first 64
+  characters, so a cookie file's name and another program's `-b` stay).
+  The refusal rule and the shell scan refuse such a value's cookie
+  (`name=value`, a Set-Cookie attribute aside) whose value is 8 or more
+  token characters mixing letters and digits; prose after `Cookie:`
+  passes. JSON text other encoders write is read in place by redaction: a
+  quote as its JSON escape (`\u0022`, `\u0027`, as .NET writes JSON text
+  inside a JSON string), `=` as `\u003d` (Gson), a URL's slashes as `\/`
+  (PHP), and a token right after an escaped quote; the refusal rule and the
+  shell scan read a text with those escapes decoded, and the escapes of
+  `&`, `<`, `>` and `+` too. A registered value is also replaced and refused as Go's
+  `encoding/json`, Gson and .NET's `System.Text.Json` escape it to keep JSON
+  safe inside HTML (`&`, `<`, `>`, `=`, `'`, `+`, `"` as `\u00XX`, in either
+  case). Service tokens are read by their prefix (Stripe's `sk_live_` and
+  `rk_live_`, Google's `AIza`, GitLab's `glpat-`, npm's `npm_`, Vault's
+  `hvs.`, SendGrid's `SG.`, a Slack webhook's path), and so is a `.netrc`
+  entry's password (`machine <host> login <user> password <secret>`); an
+  account, signing, encryption, HMAC or master key and `credential` join
+  the credential names (`AccountKey=`, `AUDIT_HMAC_KEY=`). The plugin's
+  scan also refuses the values the plugin holds itself, as §6.7 asks of a
+  host: `AUDIT_HMAC_KEY`'s value wherever the scan runs (a persist tool's
+  data, the persist and audit skills' checks, a logged tool's name), and,
+  in a persist tool's data, the project's checkpoint key
+  (`<git dir>/acs/checkpoints/key`, where git names the project's git
+  directory). Not read: a value after `Cookie:` with no `name=` (refused
+  only as any value is; redaction replaces it), npm's `_auth=` and a Docker
+  configuration's `auth` member, a name ending in `_pass`, other vendors'
+  token formats, and a JSON escape of any other character; a host
+  registers such a credential it holds.
 - The Python evidence store reads metadata nested too deep for it as JSON
   text redacted first, while its structure can still be read, and keeps it
   whole: a cut could keep part of a secret no redactor then recognises.
@@ -245,10 +281,14 @@ The reference implementations enforce this by code:
   each of its positions), so a megabyte of model-chosen text is scanned in
   about a second, and a layer's check cannot be held past its time by the
   data it checks. An attempt starts where no earlier attempt's run can
-  hold another: a URL's scheme is read from the start of its run, and a
+  hold another: a URL's scheme is read from the start of its run, a
   user option's name (`curl -u <name>:<password>`) for at most 256
   characters, since a run such as `.-u.-u.-u...` holds a start at each
-  third position (Python, TypeScript and the shell scan alike). The shell
+  third position, and a cookie option's cookie name for at most 64 (Python,
+  TypeScript and the shell scan alike). The blanks after a quoted header
+  line's colon are read whole, so a value that may hold blanks is not read
+  again from each of them (security round 5: `"Authorization:` and 40 KB
+  of blanks with no closing quote took 67 s in Python). The shell
   scan uses `grep -E`: GNU grep decides whether a line matches in linear
   time, but `grep -o`, which prints each match, looks for one from each
   position of a line that matches, so the same rule holds for its patterns

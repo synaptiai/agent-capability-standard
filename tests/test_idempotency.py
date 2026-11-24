@@ -157,9 +157,10 @@ def test_the_output_in_the_file_is_redacted(tmp_path: Path) -> None:
     again = IdempotencyLog(path).perform(action(), effect)
     assert effect.calls == 0
     anchors = again["value"]["evidence_anchors"]
+    # The whole credential is replaced: `credential` is a credential name
+    # (security round 5, batch 6), not the access key id alone.
     assert [a["ref"] for a in anchors] == [
-        "https://bucket.s3.amazonaws.com/r.json?X-Amz-Credential="
-        "[REDACTED]%2F20261123%2Fus-east-1%2Fs3%2Faws4_request",
+        "https://bucket.s3.amazonaws.com/r.json?X-Amz-Credential=[REDACTED]",
         "https://bot:[REDACTED]@status.example.com/msg/1",
         "file:report.txt",
     ]

@@ -10,7 +10,9 @@
  *
  * The values a host registers (`secrets`, four characters or more) are
  * replaced first, longest first, each also in the forms text carries it in
- * ({@link encodedForms}: JSON-escaped, once or twice, and percent-encoded);
+ * ({@link encodedForms}: JSON-escaped, once or twice, as JavaScript and
+ * Python write it and as encoders that keep JSON safe inside HTML write it,
+ * and percent-encoded);
  * then what the default patterns recognise. In a JSON value, a number whose
  * JSON text holds a registered value (a PIN, an account or card number given
  * as a number) is replaced whole, as the JSON text's redaction would replace
@@ -23,20 +25,32 @@
  * such as `ApiKey`, `SSWS` or `Bot`, or a credential with no scheme, that
  * word and the one after it on its line; a quoted value, or a header line
  * quoted whole, `-H "Authorization: ..."`, read to its closing quote),
- * `Bearer` tokens, a URL's userinfo
- * password (the user's name empty or not: `redis://:<secret>@`), an
- * assignment to a credential name (`password`, `passphrase`, `token`,
- * `secret_key`, `api_key`, ..., alone or ending a longer name) of four
+ * `Cookie` and `Set-Cookie` header values whole (a header line to the end
+ * of its line, a header line quoted whole or a quoted member to its closing
+ * quote, an unquoted member to a blank, `,` or `;`), curl's cookie option
+ * given a cookie (`-b 'sid=...'`, `--cookie sid=...`: a name and `=` within
+ * its first 64 characters), `Bearer` tokens, a URL's userinfo
+ * password (the user's name empty or not: `redis://:<secret>@`, the slashes
+ * escaped or not: `mysql:\/\/...`, as PHP writes a URL in JSON), a `.netrc`
+ * entry's password, an assignment to a credential name (`password`,
+ * `passphrase`, `token`, `secret_key`, `api_key`, `account_key`,
+ * `hmac_key`, `credential`, ..., alone or ending a longer name, with `=` or
+ * `:`, or `=` as its JSON escape `\u003d`) of four
  * characters or more, a command's user option (`curl -u user:<secret>`,
  * `--user`, `-U`, `--proxy-user`) and an option named for a credential
  * with its value after blanks (`--password <secret>`, not another option),
  * also as a list's items (`['-u', 'user:<secret>']`), PEM and OpenPGP
  * private key bodies (after a header with no end, an excerpt, the rest of the
- * text), AWS access key ids, GitHub and Slack tokens, `sk-` keys and JWTs,
+ * text), AWS access key ids, GitHub and Slack tokens, `sk-` keys, JWTs,
+ * service tokens by their prefix (Stripe's `sk_live_` and `rk_live_`,
+ * Google's `AIza`, GitLab's `glpat-`, npm's `npm_`, Vault's `hvs.`,
+ * SendGrid's `SG.`, a Slack webhook's path),
  * and a header or credential given as a name/value pair or a `[name, value]`
  * tuple in JSON or code text (`"name": "Authorization", "value": "Basic
  * ..."`, `('Cookie', 'sid=...')`); quotes around a name and a value may be
- * escaped (`{\"password\": \"...\"}`, JSON text inside a JSON string).
+ * escaped (`{\"password\": \"...\"}`, JSON text inside a JSON string), or
+ * written as their code point's JSON escape (`\u0022`, as .NET writes JSON
+ * text inside a JSON string), and a token may start right after one.
  * A quoted value (of an assignment, an option, a user option's password, a
  * pair or a tuple) is read to its closing quote on its line, whitespace and
  * all (`"passphrase": "correct horse battery staple"`, a `Cookie` header's
@@ -44,8 +58,10 @@
  * its line) to a blank or a quote (or `,` or `;` in a pair or tuple, and
  * `&`, `,` or `;` in an assignment).
  * Not read: a password given to a short option with no name attached
- * (`mysql -p<secret>`), and a secret in base64 or another encoding than
- * these, unless it is registered in that form too. In a JSON value, a member
+ * (`mysql -p<secret>`), npm's `_auth=` and a Docker configuration's `auth`
+ * member, a name ending in `_pass`, other vendors' token formats, and a
+ * secret in base64 or another encoding than these, unless it is registered
+ * in that form too. In a JSON value, a member
  * whose name ends in a credential name (in any case, after any prefix:
  * `accessToken`, `dbPassword`, `x-api-key`) or in `authorization`, `cookie`
  * or `cookies` (the structured `Authorization`, `Proxy-Authorization`,
@@ -58,7 +74,8 @@
  * more or a number, and when it is an array or an object, each such string
  * and number in it is. Booleans and null are kept. Not read as a pair: one
  * whose value comes before its name in text, a flat `[name, value, name,
- * value]` list (Node's `rawHeaders`), a `Cookie:` header line in text. A
+ * value]` list (Node's `rawHeaders`); a `Cookie:` header line in text is
+ * read by the header rule above. A
  * member name is redacted as any
  * string is: a name that holds a secret is replaced by its redacted text, and
  * one that would then repeat a name already in its object gets ` (2)`,
@@ -86,8 +103,14 @@
  * whitespace and 8 or more characters, or unquoted, 12 or more characters,
  * mixing letters and digits (quotes escaped or not), and such a
  * header's value of 8 or more token characters mixing letters and digits,
- * after any scheme or none, given as a pair or tuple in text; prose such as `token: rotate monthly`
- * passes. `tests/conformance/secrets/credentials.json`
+ * after any scheme or none, given as a pair or tuple in text, a cookie
+ * (`name=value`, a Set-Cookie attribute aside) in a `Cookie` or
+ * `Set-Cookie` header's value or curl's cookie option's whose value is 8 or
+ * more token characters mixing letters and digits, and a `.netrc` entry's
+ * password of 8 or more characters mixing letters and digits; prose such as
+ * `token: rotate monthly` passes. It reads a text with the JSON escapes
+ * other encoders write for the characters it reads decoded
+ * ({@link ESCAPED}). `tests/conformance/secrets/credentials.json`
  * pins the rule for the three. In JSON data, which is not prose, it also
  * recognises what redaction replaces in a secret member, unless the string
  * is a placeholder: data holding a secret the host recognises is refused.
@@ -101,45 +124,83 @@ export const MARKER = '[REDACTED]';
 export const MIN_SECRET_LENGTH = 4;
 
 const NAMES =
-  'password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key';
+  'password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key' +
+  '|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential';
 const WS = '[ \\t\\n\\r\\f\\v]';
 const NOT_WS = ' \\t\\n\\r\\f\\v';
 /** One character (code point) of a class: a unit that is not a surrogate, or a surrogate pair. */
 const char = (excluded: string): string => `(?:[^${excluded}\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])`;
 
 /**
+ * Where a word may start: after a character outside `chars` (a character
+ * class's contents), or after a quote's JSON escape (`\u0022sk-...`), whose
+ * last character is a digit.
+ */
+const after = (chars: string): string => `(?:(?<![${chars}])|(?<=\\\\u00(?:22|27)))`;
+
+/**
  * A URL's scheme: a run of scheme characters that holds a letter, read from
  * the run's start (not after a scheme character), so a long run that is not
  * followed by `://` is read once, not again from each letter in it.
  */
-const SCHEME = '(?<![A-Za-z0-9+.-])[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*';
+const SCHEME = `${after('A-Za-z0-9+.-')}[0-9+.-]*[A-Za-z][A-Za-z0-9+.-]*`;
 
 /**
  * A quote as JSON or code text writes it, or escaped (`\"`, as JSON text
- * inside a JSON string writes it, or escaped again: `\\\"`).
+ * inside a JSON string writes it, or escaped again: `\\\"`), or as the JSON
+ * escape of its code point (`\u0022`, `\u0027`, as .NET's encoder writes a
+ * quote inside a JSON string).
  */
-const QUOTE = `\\\\*["']`;
+const QUOTE = `(?:\\\\*["']|\\\\+u00(?:22|27))`;
+
+/** The JSON escape of each quote's code point. */
+const QUOTE_CODES: { readonly [quote: string]: string } = { '"': 'u0022', "'": 'u0027' };
+
+/** What separates a name from its value: `:` or `=`, or `=` as its JSON escape (`\u003d`, as Gson writes it). */
+const SEP = '(?:[:=]|\\\\+u003[dD])';
+
+/**
+ * A run of blanks, read whole: a value after it starts after the run, so a
+ * value that may hold blanks is not read again from each blank of the run.
+ */
+const BLANKS = `${WS}*(?!${WS})`;
 
 /**
  * One character (code point) of a value: not whitespace, a quote, a
  * backslash or one of `excluded`, or a run of backslashes that no quote
- * follows (an escaped quote ends the value, as a quote does).
+ * follows (an escaped quote, or a quote's JSON escape, ends the value, as a
+ * quote does).
  */
-const valueChar = (excluded = ''): string => `(?:${char(`${NOT_WS}"'\\\\${excluded}`)}|\\\\+(?![\\\\"']))`;
+const valueChar = (excluded = ''): string =>
+  `(?:${char(`${NOT_WS}"'\\\\${excluded}`)}|\\\\+(?![\\\\"']|u00(?:22|27)))`;
+
+/** `quote` as a value's opening quote: as written, escaped, or as its JSON escape (`\u0022`). */
+const openQuote = (quote: string): string => `(?:\\\\*${quote}|\\\\+${QUOTE_CODES[quote]})`;
 
 /**
  * A value in `quote` quotes, whitespace and all, of four characters or more,
- * read to its closing quote on its line (escaped or not), so a quoted
- * passphrase is replaced whole. A character (code point) is not that quote,
- * a backslash or a line break, or is a run of backslashes that no such quote
- * follows (read once). With no closing quote on the line nothing matches,
- * and the value is read as an unquoted one is.
+ * read to its closing quote on its line (escaped or not, or its JSON
+ * escape), so a quoted passphrase is replaced whole. A character (code point)
+ * is not that quote, a backslash or a line break, or is a run of backslashes
+ * that no such quote follows (read once). With no closing quote on the line
+ * nothing matches, and the value is read as an unquoted one is.
  */
-const quotedValue = (quote: string): string =>
-  `(?<secret>(?:${char(`${quote}\\\\\\n\\r`)}|\\\\+(?![\\\\${quote}])){4,})(?=\\\\*${quote})`;
+const quotedValue = (quote: string): string => {
+  const code = QUOTE_CODES[quote] ?? '';
+  return (
+    `(?<secret>(?:${char(`${quote}\\\\\\n\\r`)}|\\\\+(?![\\\\${quote}]|${code})){4,})` +
+    `(?=\\\\*${quote}|\\\\+${code})`
+  );
+};
 
-/** A secret member's name (see {@link SECRET_MEMBER}), quoted as JSON or code text quotes it. */
-const QUOTED_SECRET_NAME = `["'][^${NOT_WS}"']*(?:${NAMES}|authorization|cookies?)${QUOTE}`;
+/**
+ * A secret member's name (see {@link SECRET_MEMBER}), quoted as JSON or code
+ * text quotes it, the opening quote as written or as its JSON escape (read
+ * after the escape's backslash). A name holds no backslash, so an attempt
+ * reads to the next quote, backslash or blank.
+ */
+const QUOTED_SECRET_NAME =
+  `(?:["']|(?<=\\\\)u00(?:22|27))[^${NOT_WS}"'\\\\]*(?:${NAMES}|authorization|cookies?)${QUOTE}`;
 
 /**
  * The header schemes a redacted value keeps in view: what follows one is the
@@ -147,8 +208,8 @@ const QUOTED_SECRET_NAME = `["'][^${NOT_WS}"']*(?:${NAMES}|authorization|cookies
  */
 const SCHEMES = '(?:bearer|basic|token|digest|negotiate)';
 
-/** A header's scheme, which the value after it may start with. */
-const VALUE_SCHEME = `(?:${SCHEMES}${WS}+)?`;
+/** A header's scheme, which the value after it may start with (the blanks after it read whole). */
+const VALUE_SCHEME = `(?:${SCHEMES}${WS}+(?!${WS}))?`;
 
 /**
  * Any header scheme (`ApiKey`, `SSWS`, `Bot`, `AWS4-HMAC-SHA256`): a word and
@@ -161,7 +222,17 @@ const ANY_SCHEME = '[A-Za-z][A-Za-z0-9._-]* +';
  * An Authorization or Proxy-Authorization header, up to its value (a JSON
  * member's or a code's quote before the separator, and blanks).
  */
-const AUTHORIZATION = `(?<![A-Za-z0-9])(?:proxy-)?authorization(?:${QUOTE})?${WS}*[:=]${WS}*`;
+const AUTHORIZATION = `${after('A-Za-z0-9')}(?:proxy-)?authorization(?:${QUOTE})?${WS}*${SEP}${WS}*`;
+
+/** A Cookie or Set-Cookie header, up to its value, as the Authorization header above. */
+const COOKIE = `(?:set-)?cookie(?:${QUOTE})?${WS}*${SEP}${WS}*`;
+
+/**
+ * A character of a header line's value, which may hold blanks (`a=1;
+ * sid=...`): not a line break, a quote or a backslash, or a run of
+ * backslashes that no quote follows.
+ */
+const LINE_CHAR = `(?:${char(`\\n\\r"'\\\\`)}|\\\\+(?![\\\\"']|u00(?:22|27)))`;
 
 /**
  * A header or credential given as a `[name, value]` tuple in JSON or code
@@ -177,7 +248,7 @@ const TUPLE_TEXT = `${TUPLE_HEAD}${QUOTE}${VALUE_SCHEME}`;
  * to its value: `"Authorization", "value": "...`, as a HAR's `{"name": ...,
  * "value": ...}` reads. Each attempt starts at a quote.
  */
-const PAIR_HEAD = `${QUOTED_SECRET_NAME}${WS}*,${WS}*(?:${QUOTE})?value(?:${QUOTE})?${WS}*[:=]${WS}*`;
+const PAIR_HEAD = `${QUOTED_SECRET_NAME}${WS}*,${WS}*(?:${QUOTE})?value(?:${QUOTE})?${WS}*${SEP}${WS}*`;
 const PAIR_TEXT = `${PAIR_HEAD}${QUOTE}${VALUE_SCHEME}`;
 
 /**
@@ -196,12 +267,12 @@ const OPTION_SEPARATOR = `(?:${WS}+(?:${QUOTE})?|=(?:${QUOTE})?|(?:${QUOTE})?${W
  * was read again from each to the run's end.
  */
 const USER_OPTION =
-  `(?<![A-Za-z0-9_-])(?:-[uU]${OPTION_SEPARATOR}?|--(?:proxy-)?user${OPTION_SEPARATOR})` +
+  `${after('A-Za-z0-9_-')}(?:-[uU]${OPTION_SEPARATOR}?|--(?:proxy-)?user${OPTION_SEPARATOR})` +
   `[^${NOT_WS}:"'\\\\]{0,256}:`;
 /** ... and the same option up to the quote its value opens with. */
 const USER_OPTION_QUOTE_SEPARATOR = `(?:${WS}+|=|(?:${QUOTE})?${WS}*,${WS}*)`;
 const USER_OPTION_NAME =
-  `(?<![A-Za-z0-9_-])(?:-[uU]${USER_OPTION_QUOTE_SEPARATOR}?|--(?:proxy-)?user` +
+  `${after('A-Za-z0-9_-')}(?:-[uU]${USER_OPTION_QUOTE_SEPARATOR}?|--(?:proxy-)?user` +
   `${USER_OPTION_QUOTE_SEPARATOR})`;
 
 /**
@@ -209,21 +280,39 @@ const USER_OPTION_NAME =
  * `--db-token`), and what separates it from a value given after blanks or
  * as a list's next item; `--password=...` is an assignment.
  */
-const CREDENTIAL_OPTION_NAME = `(?<![A-Za-z0-9_-])--(?:[A-Za-z0-9]+[_-])*(?:${NAMES})`;
+const CREDENTIAL_OPTION_NAME = `${after('A-Za-z0-9_-')}--(?:[A-Za-z0-9]+[_-])*(?:${NAMES})`;
 const CREDENTIAL_OPTION_SEPARATOR = `(?:${WS}+|(?:${QUOTE})?${WS}*,${WS}*)`;
 /** ... up to its value, which is not another option. */
 const CREDENTIAL_OPTION = `${CREDENTIAL_OPTION_NAME}(?:${WS}+(?:${QUOTE})?|(?:${QUOTE})?${WS}*,${WS}*${QUOTE})(?!-)`;
 
 /** An assignment to a credential name, up to its value. */
-const ASSIGN = `(?:${NAMES})(?:${QUOTE})?${WS}*[:=]${WS}*`;
+const ASSIGN = `(?:${NAMES})(?:${QUOTE})?${WS}*${SEP}${WS}*`;
+
+/**
+ * curl's cookie option (`-b`, `--cookie`), up to the quote its value opens
+ * with, and up to its value, quoted or not, as the user option's.
+ */
+const COOKIE_OPTION_NAME =
+  `${after('A-Za-z0-9_-')}(?:-b${USER_OPTION_QUOTE_SEPARATOR}?|--cookie${USER_OPTION_QUOTE_SEPARATOR})`;
+const COOKIE_OPTION = `${after('A-Za-z0-9_-')}(?:-b${OPTION_SEPARATOR}?|--cookie${OPTION_SEPARATOR})`;
+
+/**
+ * A .netrc entry's password (`machine <host> login <user> password
+ * <secret>`, `default password <secret>`), up to its value: a netrc keyword,
+ * at most one word, `password` and blanks.
+ */
+const NETRC = `${after('A-Za-z0-9_-')}(?:machine|login|account|default)${WS}+(?:[^${NOT_WS}]+${WS}+)?password${WS}+`;
+
+/** Where a token starts: a word boundary (`\b` before a word character), or after a quote's JSON escape. */
+const WORD = after('A-Za-z0-9_');
 
 /**
  * The patterns of a value after `prefix` in double or single quotes (escaped
- * or not), `afterQuote` read first: the value is read to its closing quote,
- * whitespace and all (see {@link quotedValue}).
+ * or not, or as their JSON escapes), `afterQuote` read first: the value is
+ * read to its closing quote, whitespace and all (see {@link quotedValue}).
  */
 const quotedForms = (prefix: string, afterQuote = '', flags = 'dgi'): RegExp[] =>
-  ['"', "'"].map((quote) => new RegExp(`${prefix}\\\\*${quote}${afterQuote}${quotedValue(quote)}`, flags));
+  ['"', "'"].map((quote) => new RegExp(`${prefix}${openQuote(quote)}${afterQuote}${quotedValue(quote)}`, flags));
 
 /**
  * The default patterns; each marks the secret with the group `secret` (a
@@ -244,8 +333,10 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   ...quotedForms(AUTHORIZATION, VALUE_SCHEME),
   // ... and a header line quoted whole (`-H "Authorization: ..."`, its quotes
   // escaped or not) read to its closing quote, the same way; an attempt
-  // starts at the start of a run of backslashes, so a run is read once ...
-  ...quotedForms('(?<!\\\\)', `(?:proxy-)?authorization${WS}*:${WS}*${VALUE_SCHEME}`),
+  // starts at the start of a run of backslashes, so a run is read once, and
+  // the blanks after the colon are read whole, so the value is not read
+  // again from each of them ...
+  ...quotedForms('(?<!\\\\)', `(?:proxy-)?authorization${WS}*:${BLANKS}${VALUE_SCHEME}`),
   // ... or, unquoted: after any other first word (a scheme such as `ApiKey`,
   // `SSWS` or `Bot`, or a credential with no scheme), that word and the one
   // after it on its line, so the credential is replaced whether or not the
@@ -263,11 +354,33 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   ...quotedForms(`(?:${TUPLE_HEAD}|${PAIR_HEAD})`, VALUE_SCHEME),
   // ... or, with no closing quote on its line, to a blank, `,` or `;`.
   new RegExp(`(?:${TUPLE_TEXT}|${PAIR_TEXT})(?<secret>${valueChar(',;')}{4,})`, 'dgi'),
+  // Cookie and Set-Cookie header values: a quoted value (`"Cookie": "..."`,
+  // `{'Cookie': '...'}`) read to its closing quote, whitespace and all ...
+  ...quotedForms(COOKIE),
+  // ... a header line quoted whole (`-H 'Cookie: ...'`) read to its closing
+  // quote, the same way ...
+  ...quotedForms('(?<!\\\\)', `(?:set-)?cookie${WS}*:${BLANKS}`),
+  // ... a header line, from its first character that is not a blank to the
+  // end of its line (a cookie string holds blanks: `a=1; sid=...`; a
+  // Set-Cookie line's attributes go with it) ...
+  new RegExp(`(?:set-)?cookie${WS}*:${WS}*(?<secret>${valueChar()}${LINE_CHAR}{3,})`, 'dgi'),
+  // ... or, after `=` or a quote that does not close on its line, to a
+  // blank, `,` or `;`.
+  new RegExp(`${COOKIE}(?:${QUOTE})?(?<secret>${valueChar(',;')}{4,})`, 'dgi'),
+  // curl's cookie option given a cookie string (`-b 'sid=...'`, `--cookie
+  // sid=...`, not a cookie file's name: a name and `=` within its first 64
+  // characters), quoted ...
+  ...quotedForms(COOKIE_OPTION_NAME, `(?=[^\\n\\r"'\\\\=]{0,64}=)`, 'dg'),
+  // ... or not.
+  new RegExp(`${COOKIE_OPTION}(?=[^${NOT_WS}"'\\\\=]{0,64}=)(?<secret>${valueChar()}{4,})`, 'dg'),
   // Bearer tokens.
-  new RegExp(`(?<![A-Za-z0-9])bearer${WS}+(?<secret>[A-Za-z0-9._~+/=-]{8,})`, 'dgi'),
+  new RegExp(`${after('A-Za-z0-9')}bearer${WS}+(?<secret>[A-Za-z0-9._~+/=-]{8,})`, 'dgi'),
   // The password of a URL's userinfo, the user's name empty or not
-  // (`redis://:<secret>@`).
-  new RegExp(`${SCHEME}://[^${NOT_WS}/:@]*:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
+  // (`redis://:<secret>@`), its slashes escaped or not (`mysql:\/\/...`, as
+  // PHP's json_encode writes a URL).
+  new RegExp(`${SCHEME}:(?:\\\\*/){2}[^${NOT_WS}/:@]*:(?<secret>[^${NOT_WS}/@]+)@`, 'dg'),
+  // A .netrc entry's password (`machine <host> login <user> password <secret>`).
+  new RegExp(`${NETRC}(?<secret>${valueChar()}{4,})`, 'dg'),
   // Assignments to a credential name, alone or at the end of a longer name
   // (DB_PASSWORD, PGPASSWORD), in code, query strings and JSON text, its
   // quotes escaped or not (`{\"password\": \"...\"}`): a quoted value
@@ -287,18 +400,33 @@ export const DEFAULT_PATTERNS: readonly RegExp[] = [
   // ... or not.
   new RegExp(`${CREDENTIAL_OPTION}(?<secret>${valueChar()}{4,})`, 'dgi'),
   // AWS access key ids.
-  /\b(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})\b/dg,
+  new RegExp(`${WORD}(?<secret>(?:AKIA|ASIA)[A-Z0-9]{16})\\b`, 'dg'),
   // GitHub tokens.
-  /\b(?<secret>gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/dg,
+  new RegExp(`${WORD}(?<secret>gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})`, 'dg'),
   // Slack tokens.
-  /\b(?<secret>xox[abprs]-[A-Za-z0-9-]{10,})/dg,
+  new RegExp(`${WORD}(?<secret>xox[abprs]-[A-Za-z0-9-]{10,})`, 'dg'),
   // sk- keys.
-  /\b(?<secret>sk-[A-Za-z0-9_-]{20,})/dg,
+  new RegExp(`${WORD}(?<secret>sk-[A-Za-z0-9_-]{20,})`, 'dg'),
+  // Service tokens by their prefix: Stripe's secret and restricted keys,
+  // Google API keys, GitLab personal access tokens, npm tokens, Vault tokens
+  // and SendGrid keys ...
+  new RegExp(
+    `${WORD}(?<secret>[rs]k_(?:live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}` +
+      '|glpat-[0-9A-Za-z_-]{20,}|npm_[A-Za-z0-9]{36}|hv[sbr]\\.[A-Za-z0-9_-]{24,}' +
+      '|SG\\.[A-Za-z0-9_-]{16,}\\.[A-Za-z0-9_-]{16,})',
+    'dg',
+  ),
+  // ... and a Slack webhook's path.
+  /hooks\.slack\.com\/services\/(?<secret>T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]{16,})/dg,
   // JWTs: three base64url parts, the first a JSON object's encoding,
   // starting at a word boundary. Read from the start of a run of base64url
   // characters to its first `eyJ` at a word boundary (the run's start or
   // after `-`), so a run is read once, not again from each `eyJ` in it.
-  /(?<![A-Za-z0-9_-])(?:(?!eyJ)(?:[A-Za-z0-9_]|-(?!eyJ))*-)?(?<secret>eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/dg,
+  new RegExp(
+    `${after('A-Za-z0-9_-')}(?:(?!eyJ)(?:[A-Za-z0-9_]|-(?!eyJ))*-)?` +
+      '(?<secret>eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)',
+    'dg',
+  ),
 ];
 
 /** A member name that ends in a credential name, or names a header that carries one (or a HAR's cookies). */
@@ -357,21 +485,36 @@ const PERCENT_ENCODINGS: readonly (readonly [string, boolean])[] = [
 const hex4 = (n: number): string => n.toString(16).padStart(4, '0');
 
 /**
- * `value` as a JSON string's contents: `"`, `\` and control characters
- * escaped (`\n` and the other short forms, else `\u00XX`), and, when
- * `asciiOnly`, each character past ASCII as `\uXXXX` (a pair of them past
- * the Basic Multilingual Plane).
+ * The characters encoders escape as `\u00XX` so that JSON is safe inside
+ * HTML, and whether they write each character past ASCII as `\uXXXX` too:
+ * Go's encoding/json (the JSON of kubectl, docker, gh and terraform), Gson,
+ * and .NET's System.Text.Json (its quote `\u0022`, not `\"`).
  */
-function jsonEscaped(value: string, asciiOnly: boolean): string {
+const HTML_SAFE: readonly (readonly [string, boolean])[] = [
+  ['&<>', false],
+  ["&<>='", false],
+  ['&<>\'+"`', true],
+];
+
+/**
+ * `value` as a JSON string's contents: `"`, `\` and control characters
+ * escaped (`\n` and the other short forms, else `\u00XX`), each character
+ * of `html` as `\u00XX`, and, when `asciiOnly`, each character past ASCII
+ * as `\uXXXX` (a pair of them past the Basic Multilingual Plane); the hex
+ * digits in upper case when `upper`.
+ */
+function jsonEscaped(value: string, asciiOnly: boolean, html = '', upper = false): string {
+  const hex = (n: number): string => (upper ? hex4(n).toUpperCase() : hex4(n));
   let out = '';
   for (const ch of value) {
     const cp = ch.codePointAt(0) ?? 0;
     const short = JSON_SHORT_ESCAPES[ch];
-    if (short !== undefined) out += short;
-    else if (cp < 0x20 || (asciiOnly && cp > 0x7f && cp <= 0xffff)) out += `\\u${hex4(cp)}`;
+    if (html.includes(ch)) out += `\\u${hex(cp)}`;
+    else if (short !== undefined) out += short;
+    else if (cp < 0x20 || (asciiOnly && cp > 0x7f && cp <= 0xffff)) out += `\\u${hex(cp)}`;
     else if (asciiOnly && cp > 0xffff) {
       const v = cp - 0x10000;
-      out += `\\u${hex4(0xd800 + (v >> 10))}\\u${hex4(0xdc00 + (v & 0x3ff))}`;
+      out += `\\u${hex(0xd800 + (v >> 10))}\\u${hex(0xdc00 + (v & 0x3ff))}`;
     } else out += ch;
   }
   return out;
@@ -396,15 +539,20 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
  * `value` and the forms text carries it in, each once, in this order: as it
  * is; JSON-escaped (a JSON string's contents, non-ASCII as it is and as
  * `\uXXXX`, then each with `/` as `\/`, then each of the first two escaped
- * again, as JSON text inside a JSON string holds it); and percent-encoded
+ * again, as JSON text inside a JSON string holds it); HTML-safe JSON-escaped
+ * (by each encoder of {@link HTML_SAFE}, in lower-case hex, then in
+ * upper-case hex, then each of those escaped again); and percent-encoded
  * (UTF-8, by each of the encodings of {@link PERCENT_ENCODINGS}, in
- * upper-case hex, then in lower-case hex). A value with a lone surrogate has no UTF-8 and so no
- * percent-encoded form. The Python redactor's `encoded_forms` gives the
- * same forms in the same order.
+ * upper-case hex, then in lower-case hex). A value with a lone surrogate has
+ * no UTF-8 and so no percent-encoded form. The Python redactor's
+ * `encoded_forms` gives the same forms in the same order.
  */
 export function encodedForms(value: string): string[] {
   const once = jsonEscaped(value, false);
   const asciiOnce = jsonEscaped(value, true);
+  const html = [false, true].flatMap((upper) =>
+    HTML_SAFE.map(([chars, asciiOnly]) => jsonEscaped(value, asciiOnly, chars, upper)),
+  );
   const forms = [
     value,
     once,
@@ -413,6 +561,8 @@ export function encodedForms(value: string): string[] {
     asciiOnce.split('/').join('\\/'),
     jsonEscaped(once, false),
     jsonEscaped(asciiOnce, false),
+    ...html,
+    ...html.map((form) => jsonEscaped(form, false)),
   ];
   if (!LONE_SURROGATE.test(value)) {
     const data = new TextEncoder().encode(value);
@@ -591,6 +741,9 @@ const CREDENTIAL_SHAPES: readonly RegExp[] = [
   // Read from the start of a run to its first `eyJ` (whose first part is
   // the longest), so a run is read once.
   /(?<![A-Za-z0-9_-])(?:(?!eyJ)[A-Za-z0-9_-])*eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+  // Service tokens by their prefix (Stripe, Google, GitLab, npm, Vault,
+  // SendGrid) and a Slack webhook's path.
+  /[rs]k_(?:live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}|glpat-[0-9A-Za-z_-]{20,}|npm_[A-Za-z0-9]{36}|hv[sbr]\.[A-Za-z0-9_-]{24,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]{16,}/,
 ];
 // A quoted value with no whitespace, 8 or more characters (its quotes
 // escaped or not), after an assignment or a credential option.
@@ -612,7 +765,7 @@ const USER_OPTION_VALUE = new RegExp(`${USER_OPTION}(?<value>[^${NOT_WS}"'\\\\]{
 // The password of a URL's userinfo (`scheme://user:<value>@`, the user's
 // name empty or not), unless it is a placeholder (`password`, `<password>`,
 // `${DB_PASSWORD}`, `****`).
-const URL_PASSWORD = new RegExp(`${SCHEME}://[^${NOT_WS}/:@]*:(?<value>[^${NOT_WS}/@]+)@`, 'g');
+const URL_PASSWORD = new RegExp(`${SCHEME}:(?:\\\\*/){2}[^${NOT_WS}/:@]*:(?<value>[^${NOT_WS}/@]+)@`, 'g');
 const PLACEHOLDER = /^(?:[$<{*[].*|password|passwd|pwd|pass|secret|token)$/i;
 // An Authorization or Proxy-Authorization header's value, with no scheme or
 // after one of the five: 8 or more token characters with letters and digits
@@ -641,9 +794,80 @@ const TUPLE_SCHEME_VALUE_TEXT = new RegExp(
   'gi',
 );
 
+// A .netrc entry's password: 8 or more characters with letters and digits.
+const NETRC_VALUE = new RegExp(`${NETRC}(?<value>[^${NOT_WS}"']{8,})`, 'g');
+// A Cookie or Set-Cookie header's value, to the end of its line or its
+// closing quote (a control character, a quote or a backslash ends it) ...
+const COOKIE_VALUE = new RegExp(
+  `(?:set-)?cookie(?:${QUOTE})?${WS}*[:=]${WS}*(?:${QUOTE})?` +
+    `(?<value>${char(`${NOT_WS}"'\\\\`)}${char('\\x00-\\x1f\\x7f"\'\\\\')}*)`,
+  'gi',
+);
+// ... and the value of curl's cookie option holding a cookie (a name and `=`
+// within its first 64 characters), quoted, to its closing quote ...
+const COOKIE_OPTION_QUOTED = new RegExp(
+  `${COOKIE_OPTION_NAME}${QUOTE}` +
+    `(?<value>${char('\\x00-\\x1f\\x7f"\'\\\\=')}{0,64}=${char('\\x00-\\x1f\\x7f"\'\\\\')}*)`,
+  'g',
+);
+// ... or not, to a blank.
+const COOKIE_OPTION_VALUE = new RegExp(
+  `${COOKIE_OPTION}(?<value>${char(`${NOT_WS}"'\\\\=`)}{0,64}=${char(`${NOT_WS}"'\\\\`)}*)`,
+  'g',
+);
+// The cookies of such a value: its pieces between `;`, `,` and blanks.
+const COOKIE_PIECE = /[^;, ]+/g;
+// The attributes a Set-Cookie line gives after its cookie, which are not
+// cookies.
+const COOKIE_ATTRIBUTE = /^(?:path|domain|expires|max-age|samesite|secure|httponly|partitioned|priority)$/i;
+// A cookie's value a refusal relies on: 8 or more token characters (with
+// `%`, a URL-encoded value's) with letters and digits.
+const COOKIE_TOKEN = /^[A-Za-z0-9._~+/=%-]{8,}$/;
+// JSON escapes some encoders write for ASCII characters the rules read: the
+// HTML-safe escapes of Go's encoding/json, Gson and .NET's System.Text.Json
+// (`&`, `<`, `>`, `=`, `+` and the quotes as `\u00XX`), and PHP's `\/`. The
+// refusal rule reads a text with them decoded, a quote as an escaped quote
+// (it stays a quote inside a JSON string).
+const ESCAPED = /\\u00(?:22|27|26|2[bB]|3[cCdDeE])|\\\//g;
+const UNESCAPED: { readonly [code: string]: string } = {
+  '22': '\\"',
+  '27': "\\'",
+  '26': '&',
+  '2b': '+',
+  '3c': '<',
+  '3d': '=',
+  '3e': '>',
+};
+
+/** `text` with the JSON escapes of {@link ESCAPED} decoded, in one pass (hooks/secret_scan.sh decodes the same ones). */
+function decoded(text: string): string {
+  if (!text.includes('\\')) return text;
+  return text.replace(ESCAPED, (m) => (m === '\\/' ? '/' : (UNESCAPED[m.slice(4).toLowerCase()] ?? m)));
+}
+
 const lettersAndDigits = (v: string): boolean => /[0-9]/.test(v) && /[A-Za-z]/.test(v);
 
-function credentialText(text: string): boolean {
+/**
+ * Whether a cookie header's or option's value holds a cookie (`name=value`,
+ * a Set-Cookie attribute aside) whose value is credential-shaped
+ * ({@link COOKIE_TOKEN}). A piece with no `=` is not read: prose after
+ * `Cookie:` is not one.
+ */
+function cookieCredential(value: string): boolean {
+  for (const [piece] of value.matchAll(COOKIE_PIECE)) {
+    const at = piece.indexOf('=');
+    if (at < 0) continue;
+    const cookie = piece.slice(at + 1);
+    if (!COOKIE_ATTRIBUTE.test(piece.slice(0, at)) && COOKIE_TOKEN.test(cookie) && lettersAndDigits(cookie)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Whether `text` holds a credential-shaped value, read with the JSON escapes of {@link ESCAPED} decoded. */
+function credentialText(raw: string): boolean {
+  const text = decoded(raw);
   if (CREDENTIAL_SHAPES.some((p) => p.test(text))) return true;
   if (QUOTED_CREDENTIAL.test(text)) return true;
   for (const m of text.matchAll(URL_PASSWORD)) {
@@ -659,9 +883,15 @@ function credentialText(text: string): boolean {
     TUPLE_VALUE_TEXT,
     PAIR_SCHEME_VALUE_TEXT,
     TUPLE_SCHEME_VALUE_TEXT,
+    NETRC_VALUE,
   ]) {
     for (const m of text.matchAll(pattern)) {
       if (lettersAndDigits(m.groups?.['value'] ?? '')) return true;
+    }
+  }
+  for (const pattern of [COOKIE_VALUE, COOKIE_OPTION_QUOTED, COOKIE_OPTION_VALUE]) {
+    for (const m of text.matchAll(pattern)) {
+      if (cookieCredential(m.groups?.['value'] ?? '')) return true;
     }
   }
   return false;

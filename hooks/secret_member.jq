@@ -17,9 +17,9 @@
 # spellings, never the reverse; a placeholder is matched in ASCII only, so
 # no rare spelling hides a value. A copy sits in a single-quoted shell
 # string, so this text holds no single quote.
-def acs_names: ["password", "passwd", "passphrase", "pwd", "secret", "secret_key", "secret-key", "secretkey", "token", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "client_secret", "client-secret", "clientsecret", "private_key", "private-key", "privatekey", "authorization", "cookie", "cookies"];
+def acs_names: ["password", "passwd", "passphrase", "pwd", "secret", "secret_key", "secret-key", "secretkey", "token", "api_key", "api-key", "apikey", "access_key", "access-key", "accesskey", "client_secret", "client-secret", "clientsecret", "private_key", "private-key", "privatekey", "account_key", "account-key", "accountkey", "signing_key", "signing-key", "signingkey", "encryption_key", "encryption-key", "encryptionkey", "hmac_key", "hmac-key", "hmackey", "master_key", "master-key", "masterkey", "credential", "authorization", "cookie", "cookies"];
 def acs_name: (ascii_downcase as $n | any(acs_names[]; . as $s | $n | endswith($s)))
-  or (utf8bytelength != length and test("\\A[\\s\\S]*(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|authorization|cookies?)\\z"; "i"));
+  or (utf8bytelength != length and test("\\A[\\s\\S]*(password|passwd|passphrase|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|client[_-]?secret|private[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key|hmac[_-]?key|master[_-]?key|credential|authorization|cookies?)\\z"; "i"));
 def acs_is($words): (ascii_downcase | IN($words[])) or (utf8bytelength != length and test("\\A(" + ($words | join("|")) + ")\\z"; "i"));
 def acs_scalar: (type == "string" and length >= 4 and . != "[REDACTED]") or type == "number";
 def acs_placeholder: type == "string"

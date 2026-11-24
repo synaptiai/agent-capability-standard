@@ -542,6 +542,35 @@ here and marked so.
   key's opening line alone was stored). The plugin's scan runs its `grep`
   and `sed` with `LC_ALL=C`, reading bytes as the pre-tool-use hook does,
   in the persist and audit skills' hooks too.
+- Python SDK, TypeScript package and plugin, session cookies, other
+  encoders' escapes, service tokens and the plugin's own keys (§6.7;
+  security round 5, batch 6). A `Cookie` or `Set-Cookie` header in text is
+  redacted whole (a header line to the end of its line, with a Set-Cookie
+  line's attributes; a header line quoted whole or a quoted member to its
+  closing quote), and so is curl's `-b`/`--cookie` value when it holds a
+  cookie (a name and `=` in its first 64 characters); the refusal rule and
+  the plugin's scan refuse such a cookie whose value is 8 or more token
+  characters mixing letters and digits, where all three let it through as
+  text. Redaction reads a quote written as its JSON escape (`\u0022`,
+  `\u0027`, .NET), `=` as `\u003d` (Gson) and a URL's slashes as `\/`
+  (PHP) in place, and starts a token right after an escaped quote; the
+  refusal rule and the scan read a text with those escapes, and `&`'s,
+  `<`'s, `>`'s and `+`'s, decoded. `encoded_forms` and `encodedForms` add
+  the HTML-safe JSON forms of a registered value (Go's `encoding/json`,
+  Gson, .NET; both hex cases, also escaped again), so their lists of a
+  value holding `&<>'+="` or a backtick are longer. Stripe, Google, GitLab,
+  npm, Vault and SendGrid tokens, a Slack webhook's path and a `.netrc`
+  entry's password are redacted and refused, and an account, signing,
+  encryption, HMAC or master key and `credential` join the credential names
+  (in text and as JSON member names: `{"accountKey": ...}`,
+  `{"credential": ...}` are now secret members, redacted and refused). The
+  plugin's scan refuses `AUDIT_HMAC_KEY`'s value wherever it runs (a
+  persist tool's data, the persist and audit skills, a logged tool's name),
+  and the pre-tool-use hook the project's checkpoint key in a persist
+  tool's data; a `TodoWrite` holding either was stored. The blanks after a
+  quoted `Authorization:` header line's colon are read whole (40 KB of them
+  with no closing quote took 67 s in Python). Redaction is broader: a word
+  after `Cookie:` in prose is replaced to the end of its line.
 - Python SDK and Standard Agents binding, evidence anchors that held a
   secret (Standard 1.2.0 §6.7): an anchor whose `ref`, `excerpt` or
   metadata redaction changed is kept with no `digest` and no
